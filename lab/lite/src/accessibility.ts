@@ -10,6 +10,7 @@ import {
     onSceneDispose,
     removeFromScene,
     setAccessibilityTag,
+    setMeshVisible,
     setParent,
     updateSceneAccessibility,
 } from "babylon-lite";
@@ -26,6 +27,8 @@ const centerBox = createTransformNode("Center box");
 const leftBox = createTransformNode("Left box");
 const rightBox = createTransformNode("Right box");
 const status = createTransformNode("Scene status");
+const runtimeParent = createTransformNode("Runtime parent");
+const runtimeChild = createTransformNode("Runtime child");
 
 setAccessibilityTag(group, { name: "Box arrangement", role: "group" });
 setAccessibilityTag(centerBox, {
@@ -38,6 +41,7 @@ setAccessibilityTag(leftBox, {
 setAccessibilityTag(rightBox, {
     name: "Right box",
     description: "The last item in the box group",
+    hidden: true,
 });
 setAccessibilityTag(status, {
     name: "Loading box scene",
@@ -47,14 +51,24 @@ setAccessibilityTag(status, {
         "aria-atomic": true,
     },
 });
+const runtimeParentTag = {
+    name: "Runtime parent",
+    description: "Runtime-hidden parent description",
+    role: "img",
+    disabled: true,
+    aria: { "aria-roledescription": "model" },
+} as const;
+setAccessibilityTag(runtimeParent, runtimeParentTag);
+setAccessibilityTag(runtimeChild, { name: "Runtime child", role: "button" });
 setParent(centerBox, group);
 setParent(leftBox, group);
 setParent(rightBox, group);
-rightBox.visible = false;
+setParent(runtimeChild, runtimeParent);
 
 const twin = createSceneHtmlTwin(scene);
 addToScene(scene, group);
 addToScene(scene, status);
+addToScene(scene, runtimeParent);
 
 const secondScene = createCanvasScene(document.querySelector<HTMLCanvasElement>("#secondCanvas")!);
 const secondTwin = createSceneHtmlTwin(secondScene, { label: "Second scene" });
@@ -94,6 +108,16 @@ Object.assign(window, {
         },
         hide(hidden: boolean): void {
             centerBox.visible = !hidden;
+        },
+        hideRuntimeParent(): void {
+            setMeshVisible(runtimeParent, false);
+            setMeshVisible(runtimeChild, true);
+        },
+        authorHideRuntimeParent(hidden: boolean): void {
+            setAccessibilityTag(runtimeParent, hidden ? { ...runtimeParentTag, hidden: true } : runtimeParentTag);
+        },
+        showRuntimeParent(): void {
+            setMeshVisible(runtimeParent, true);
         },
         reparent(): void {
             setParent(centerBox, null);

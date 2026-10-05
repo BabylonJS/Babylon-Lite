@@ -5,6 +5,7 @@ import type { SceneChangeEvent, SceneChangeListener, SceneContext } from "./scen
 export interface SceneChangeState {
     listeners: Set<SceneChangeListener>;
     pending: SceneChangeEvent[];
+    members: WeakSet<object>;
     depth: number;
     dispatching: boolean;
 }
@@ -115,9 +116,49 @@ function installChanges(): void {
     installDisposal();
     _setSceneChangeHook({
         run: runSceneChange,
-        record: (scene, entity, type) => scene._sceneChanges?.pending.push({ type, entity }),
+        record: (scene, entity, type) => {
+            const state = scene._sceneChanges;
+            if (!state) {
+                return;
+            }
+            if (type === "added") {
+                if (state.members.has(entity)) {
+                    return;
+                }
+                state.members.add(entity);
+            } else {
+                if (!state.members.delete(entity)) {
+                    return;
+                }
+            }
+            state.pending.push({ type, entity });
+        },
         dispose: disposeSceneChanges,
     });
+}
+
+function currentMembers(scene: SceneContext): WeakSet<object> {
+    const members = new WeakSet<object>();
+    const visit = (entity: object): void => {
+        if (members.has(entity)) {
+            return;
+        }
+        members.add(entity);
+        if ("children" in entity && Array.isArray(entity.children)) {
+            for (const child of entity.children) {
+                if (typeof child === "object" && child !== null && (!("parent" in child) || child.parent === entity)) {
+                    visit(child);
+                }
+            }
+        }
+    };
+    for (const entity of [...scene.meshes, ...scene.lights, ...scene.shadowGenerators]) {
+        visit(entity);
+    }
+    if (scene.camera) {
+        visit(scene.camera);
+    }
+    return members;
 }
 
 /** Subscribe to committed scene-membership changes.
@@ -133,6 +174,7 @@ export function onSceneChange(scene: SceneContext, listener: SceneChangeListener
     const state = (scene._sceneChanges ??= {
         listeners: new Set(),
         pending: [],
+        members: currentMembers(scene),
         depth: 0,
         dispatching: false,
     });

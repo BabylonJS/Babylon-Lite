@@ -127,8 +127,9 @@ describe("scene accessibility", () => {
 
         child.visible = false;
         await Promise.resolve();
-        expect(childNode.hidden).toBe(true);
-        expect(childNode.tag?.aria?.["aria-hidden"]).toBe(true);
+        expect(childNode.hidden).toBe(false);
+        expect(childNode._selfHidden).toBe(true);
+        expect(childNode.tag?.aria?.["aria-hidden"]).toBe(false);
 
         child.visible = true;
         child.name = "Renamed";
@@ -136,6 +137,7 @@ describe("scene accessibility", () => {
         await Promise.resolve();
         expect(childNode).toMatchObject({
             hidden: false,
+            _selfHidden: false,
             tag: { description: "Updated description", role: "img" },
         });
 

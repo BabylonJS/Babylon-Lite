@@ -53,7 +53,7 @@ function itemFor(twin: HtmlTwin, node: AccessibilityNode): HtmlTwinItem {
 
 function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
     const { element, text } = item;
-    const tag = node.tag;
+    const tag = node._selfHidden ? null : node.tag;
     const name = tag?.name ?? tag?.description;
     const description = tag?.name ? tag.description : undefined;
     const attributes = new Map<string, string>();
@@ -66,7 +66,7 @@ function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
     if (description) {
         attributes.set("aria-description", description);
     }
-    if (node.disabled) {
+    if (!node._selfHidden && node.disabled) {
         attributes.set("aria-disabled", "true");
     }
     for (const [key, value] of Object.entries(tag?.aria ?? {})) {

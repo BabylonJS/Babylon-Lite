@@ -79,36 +79,21 @@ function sourceParent(source: SceneSource): SceneSource | null {
     return isSceneSource(parent) ? parent : null;
 }
 
-function projectRuntimeHidden(tag: AccessibilityTag | null, hidden: boolean): AccessibilityTag | null {
-    if (!tag || !hidden) {
-        return tag;
-    }
-    const hasAriaHidden = tag.aria ? "aria-hidden" in tag.aria : false;
-    if (tag.hidden !== false && (!hasAriaHidden || String(tag.aria?.["aria-hidden"]) === "true")) {
-        return tag;
-    }
-    return Object.freeze({
-        ...tag,
-        hidden: true,
-        aria: hasAriaHidden ? Object.freeze({ ...tag.aria, "aria-hidden": true }) : tag.aria,
-    });
-}
-
-function sourceState(source: SceneSource): Pick<AccessibilityNode, "tag" | "hidden" | "disabled"> {
+function sourceState(source: SceneSource): Pick<AccessibilityNode, "tag" | "hidden" | "disabled" | "_selfHidden"> {
     const authored = getAccessibilityTag(source);
-    const runtimeHidden = ("_disposed" in source && source._disposed === true) || ("visible" in source && source.visible === false);
-    const snapshot = authored
+    const disposed = "_disposed" in source && source._disposed === true;
+    const tag = authored
         ? Object.freeze({
               ...authored,
               name: authored.name ?? (authored.description === undefined ? source.name : undefined),
               aria: authored.aria ? Object.freeze({ ...authored.aria }) : undefined,
           })
         : null;
-    const tag = projectRuntimeHidden(snapshot, runtimeHidden);
     return {
         tag,
-        hidden: runtimeHidden || tag?.hidden === true || String(tag?.aria?.["aria-hidden"]) === "true",
+        hidden: disposed || tag?.hidden === true || String(tag?.aria?.["aria-hidden"]) === "true",
         disabled: tag?.disabled === true || String(tag?.aria?.["aria-disabled"]) === "true",
+        _selfHidden: !disposed && "visible" in source && source.visible === false,
     };
 }
 

@@ -7,6 +7,30 @@ import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { SceneChangeEvent } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+
+function createMesh(name: string): Mesh {
+    const buffer = () => ({ destroy: vi.fn() });
+    return {
+        name,
+        material: null,
+        children: [],
+        parent: null,
+        thinInstances: null,
+        skeleton: null,
+        vat: null,
+        morphTargets: null,
+        _gpu: {
+            positionBuffer: buffer(),
+            normalBuffer: buffer(),
+            uvBuffer: buffer(),
+            indexBuffer: buffer(),
+            tangentBuffer: null,
+            uv2Buffer: null,
+            colorBuffer: null,
+        },
+    } as unknown as Mesh;
+}
 
 describe("scene lifecycle", () => {
     it("allocates change state only while a scene has subscribers", () => {
@@ -80,6 +104,72 @@ describe("scene lifecycle", () => {
             { type: "removed", entity: container },
         ]);
         disposeScene(scene);
+    });
+
+    it("publishes removals only when meshes, transform nodes, and containers leave known membership", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const mesh = createMesh("Mesh");
+        const transform = createTransformNode("Transform");
+        const neverAdded = createTransformNode("Never added");
+        const containerChild = createTransformNode("Container child");
+        const container = { entities: [containerChild] } as AssetContainer;
+        const events: SceneChangeEvent[] = [];
+        onSceneChange(scene, (event) => events.push(event));
+
+        removeFromScene(scene, neverAdded);
+        addToScene(scene, mesh);
+        addToScene(scene, transform);
+        addToScene(scene, container);
+        events.length = 0;
+
+        removeFromScene(scene, mesh);
+        removeFromScene(scene, mesh);
+        removeFromScene(scene, transform);
+        removeFromScene(scene, transform);
+        removeFromScene(scene, container);
+        removeFromScene(scene, container);
+
+        expect(events).toEqual([
+            { type: "removed", entity: mesh },
+            { type: "removed", entity: transform },
+            { type: "removed", entity: containerChild },
+            { type: "removed", entity: container },
+        ]);
+        disposeScene(scene);
+    });
+
+    it("discovers retained membership at subscription time and keeps scene histories independent", () => {
+        const engine = createNullEngine();
+        const firstScene = createSceneContext(engine, { defaultRenderTask: false });
+        const secondScene = createSceneContext(engine, { defaultRenderTask: false });
+        const mesh = createMesh("Retained");
+        const transform = createTransformNode("Re-addable");
+        const firstEvents: SceneChangeEvent[] = [];
+        const secondEvents: SceneChangeEvent[] = [];
+
+        addToScene(firstScene, mesh);
+        onSceneChange(firstScene, (event) => firstEvents.push(event));
+        onSceneChange(secondScene, (event) => secondEvents.push(event));
+
+        removeFromScene(secondScene, mesh);
+        removeFromScene(firstScene, mesh);
+        removeFromScene(firstScene, mesh);
+        addToScene(firstScene, transform);
+        removeFromScene(firstScene, transform);
+        addToScene(firstScene, transform);
+        removeFromScene(firstScene, transform);
+
+        expect(firstEvents).toEqual([
+            { type: "removed", entity: mesh },
+            { type: "added", entity: transform },
+            { type: "removed", entity: transform },
+            { type: "added", entity: transform },
+            { type: "removed", entity: transform },
+        ]);
+        expect(secondEvents).toEqual([]);
+
+        disposeScene(firstScene);
+        disposeScene(secondScene);
     });
 
     it("finishes dispatch, honors unsubscription, and drains reentrant changes before surfacing failures", () => {

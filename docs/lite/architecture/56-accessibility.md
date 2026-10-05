@@ -196,6 +196,10 @@ export function onSceneDispose(scene: SceneContext, callback: () => void): () =>
 
 Scene change listeners run after the outermost add or remove operation completes. Reentrant mutations append more events to the same dispatch. Listener removal takes effect before the next callback or event. All remaining listeners run after a failure; one failure is rethrown directly, and multiple failures use `AggregateError`.
 
+The first scene-change subscription seeds a weak membership set from the scene's retained meshes, lights, shadow generators, active camera, and their current descendants. Later add and remove notifications update that set and publish only identity transitions into or out of membership. Repeated removal is therefore silent, while remove-and-re-add cycles publish each real transition. Each scene owns independent state, and the state is released when its last subscriber leaves.
+
+Transform-only roots and asset-container wrapper identities are not retained by the scene. A subscription created after one of those values was added cannot discover the earlier identity unless it remains reachable from a retained scene object. Removing that undiscoverable value performs the canonical cleanup but does not publish a removal event.
+
 Membership registration and disposal registration install separate optional core seams. A consumer that uses only `onSceneDispose` does not retain scene-change event creation, queues, or dispatch.
 
 The scene lifecycle interface contains no accessibility semantics. Other independent consumers can subscribe to the same scene without sharing feature state.
@@ -273,6 +277,7 @@ Each `AccessibilityNode` owns:
 - one immutable tag snapshot;
 - effective hidden and disabled values;
 - optional authored availability overrides;
+- an internal runtime self-visibility flag used only by scene projections;
 - an optional caller-owned target reference.
 
 Reparenting detaches the node from its old sibling array before insertion into the new array. Descendant removal clears child arrays, parents, tags, authored state, and target references before deleting membership.
@@ -307,11 +312,12 @@ The adapter reads the stored authored tag and creates a node-specific snapshot:
 
 1. If the tag has neither `name` nor `description`, the source's current `name` becomes the accessible name.
 2. If the tag has a `description` but no `name`, the description remains the name source for the HTML projection.
-3. A source with `_disposed === true` or `visible === false` becomes hidden.
-4. Runtime hiding publishes `hidden: true`. If the tag includes `aria-hidden`, the projected snapshot sets that attribute to `true`.
-5. Disabled state comes from the authored metadata.
+3. A source with `_disposed === true` becomes subtree-hidden.
+4. A source with `visible === false` becomes self-hidden. Its logical node stays as a structural container, but the HTML projection removes that node's own name, description, role, ARIA, text, and disabled state. Descendants keep their independent visibility and semantics.
+5. Authored `hidden` or `aria-hidden="true"` remains subtree-wide.
+6. Disabled state comes from the authored metadata and returns unchanged when a runtime-hidden source becomes visible again.
 
-`getAccessibilityTag` continues to return the authored snapshot. Runtime-derived names and visibility exist only on projected tree nodes.
+`getAccessibilityTag` continues to return the authored snapshot. Runtime-derived names and visibility exist only on projected tree nodes. Runtime hiding never mutates the stored authored tag, so showing the source restores the same metadata snapshot.
 
 ### Observation and coalescing
 
@@ -333,16 +339,17 @@ Each logical node maps to one `div` with `data-lite-accessibility-node` and one 
 
 On every update, the renderer compares generated attributes, text, parent, and sibling position with the desired state. It writes only changed values and moves an element only when its parent or order changed. Generic attribute cleanup excludes the reflected `hidden` attribute; the renderer updates visibility only through the existing `element.hidden` property comparison.
 
-| Source state                     | HTML result                                                       |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `tag.role`                       | `role`                                                            |
-| `tag.name`                       | `aria-label`                                                      |
-| Description with no name         | Description becomes `aria-label`                                  |
-| Name and description             | Name becomes `aria-label`; description becomes `aria-description` |
-| `node.hidden`                    | The element's `hidden` property                                   |
-| `node.disabled`                  | `aria-disabled="true"`                                            |
-| `tag.aria` entry                 | Attribute string value                                            |
-| `null` or `undefined` ARIA value | Attribute removal                                                 |
+| Source state                     | HTML result                                                        |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `tag.role`                       | `role`                                                             |
+| `tag.name`                       | `aria-label`                                                       |
+| Description with no name         | Description becomes `aria-label`                                   |
+| Name and description             | Name becomes `aria-label`; description becomes `aria-description`  |
+| `node.hidden`                    | The element's `hidden` property                                    |
+| `node.disabled`                  | `aria-disabled="true"`                                             |
+| `tag.aria` entry                 | Attribute string value                                             |
+| `null` or `undefined` ARIA value | Attribute removal                                                  |
+| Runtime self-hidden scene source | Non-hidden structural `div` with no own semantics or readable text |
 
 The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields.
 
@@ -456,7 +463,7 @@ The root package re-exports each public type and function from its single `"."` 
 - source-name fallback and metadata record-shape replacement without redundant semantic notification;
 - scene membership, camera, lights, explicit roots, and direct array reconciliation;
 - exclusion of detached children from explicit-root and active-camera traversal;
-- microtask updates for visibility, name, parentage, and tags;
+- microtask updates for self-visibility, subtree visibility, name, parentage, and tags;
 - stable source bindings;
 - semantic parent override, final-order reversal, restoration, removal, and cycle rejection;
 - scene cleanup when a tree observer throws;
@@ -478,6 +485,8 @@ The root package re-exports each public type and function from its single `"."` 
 - text escaping through `textContent`;
 - metadata replacement and attribute removal;
 - single-node updates without unrelated attribute, text, or move mutations, including unchanged hidden nodes;
+- runtime-hidden parents that preserve visible descendants without exposing the parent's own role, metadata, or readable text;
+- authored subtree hiding and restoration of the original runtime-hidden metadata and stable DOM elements;
 - no-op scene refreshes without tree notifications or DOM mutations;
 - visibility, reparenting, scene removal, and scene disposal;
 - owned HTML removal when scene disposal occurs inside a tree batch;
@@ -498,22 +507,22 @@ The root package re-exports each public type and function from its single `"."` 
 
 ## File Manifest
 
-| File                                                             | Responsibility                                                                                                                                  |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/babylon-lite/src/accessibility/accessibility-tree.ts`  | Public metadata contracts, logical tree ownership, validation, mutation, batching, and disposal                                                 |
-| `packages/babylon-lite/src/accessibility/html-twin.ts`           | Native DOM region creation, node-to-element mapping, synchronization, and disposal                                                              |
-| `packages/babylon-lite/src/accessibility/observe-property.ts`    | Reversible direct-property observation used by the scene adapter                                                                                |
-| `packages/babylon-lite/src/accessibility/scene-accessibility.ts` | Lazy object metadata, feature-owned scene binding state, logical projection, coalescing, semantic parent overrides, and lifecycle subscriptions |
-| `packages/babylon-lite/src/accessibility/scene-html-twin.ts`     | Default/custom host resolution and owned scene-plus-HTML convenience API                                                                        |
-| `packages/babylon-lite/src/scene/scene-change.ts`                | Separately installed generic scene change and disposal subscriptions, dispatch, unsubscription, state release, and error aggregation            |
-| `packages/babylon-lite/src/scene/scene-core.ts`                  | Canonical scene mutation and disposal plus separate optional generic lifecycle seams                                                            |
-| `packages/babylon-lite/src/scene/scene-remove.ts`                | Canonical removal plus generic committed scene-removal notifications                                                                            |
-| `packages/babylon-lite/src/index.ts`                             | Single root public exports                                                                                                                      |
-| `tests/lite/unit/accessibility-tree.test.ts`                     | Logical tree unit coverage                                                                                                                      |
-| `tests/lite/unit/scene-accessibility.test.ts`                    | Scene adapter and observation unit coverage                                                                                                     |
-| `tests/lite/plumbing/accessibility.spec.ts`                      | Browser DOM and lifecycle coverage                                                                                                              |
-| `tests/lite/build/accessibility-treeshake.test.ts`               | Declaration and tree-shaking coverage                                                                                                           |
-| `tests/lite/build/accessibility-core-boundary.test.ts`           | Core lifecycle tree-shaking and feature-boundary coverage                                                                                       |
-| `lab/lite/accessibility.html`                                    | Browser plumbing fixture page                                                                                                                   |
-| `lab/lite/src/accessibility.ts`                                  | Browser plumbing fixture behavior                                                                                                               |
-| `docs/lite/architecture/56-accessibility.md`                     | One-shot subsystem reference                                                                                                                    |
+| File                                                             | Responsibility                                                                                                                                                 |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/babylon-lite/src/accessibility/accessibility-tree.ts`  | Public metadata contracts, logical tree ownership, validation, mutation, batching, and disposal                                                                |
+| `packages/babylon-lite/src/accessibility/html-twin.ts`           | Native DOM region creation, node-to-element mapping, synchronization, and disposal                                                                             |
+| `packages/babylon-lite/src/accessibility/observe-property.ts`    | Reversible direct-property observation used by the scene adapter                                                                                               |
+| `packages/babylon-lite/src/accessibility/scene-accessibility.ts` | Lazy object metadata, feature-owned scene binding state, logical projection, coalescing, semantic parent overrides, and lifecycle subscriptions                |
+| `packages/babylon-lite/src/accessibility/scene-html-twin.ts`     | Default/custom host resolution and owned scene-plus-HTML convenience API                                                                                       |
+| `packages/babylon-lite/src/scene/scene-change.ts`                | Separately installed generic scene change and disposal subscriptions, weak membership tracking, dispatch, unsubscription, state release, and error aggregation |
+| `packages/babylon-lite/src/scene/scene-core.ts`                  | Canonical scene mutation and disposal plus separate optional generic lifecycle seams                                                                           |
+| `packages/babylon-lite/src/scene/scene-remove.ts`                | Canonical removal plus generic committed scene-removal notifications                                                                                           |
+| `packages/babylon-lite/src/index.ts`                             | Single root public exports                                                                                                                                     |
+| `tests/lite/unit/accessibility-tree.test.ts`                     | Logical tree unit coverage                                                                                                                                     |
+| `tests/lite/unit/scene-accessibility.test.ts`                    | Scene adapter and observation unit coverage                                                                                                                    |
+| `tests/lite/plumbing/accessibility.spec.ts`                      | Browser DOM and lifecycle coverage                                                                                                                             |
+| `tests/lite/build/accessibility-treeshake.test.ts`               | Declaration and tree-shaking coverage                                                                                                                          |
+| `tests/lite/build/accessibility-core-boundary.test.ts`           | Core lifecycle tree-shaking and feature-boundary coverage                                                                                                      |
+| `lab/lite/accessibility.html`                                    | Browser plumbing fixture page                                                                                                                                  |
+| `lab/lite/src/accessibility.ts`                                  | Browser plumbing fixture behavior                                                                                                                              |
+| `docs/lite/architecture/56-accessibility.md`                     | One-shot subsystem reference                                                                                                                                   |

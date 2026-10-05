@@ -20,6 +20,8 @@ export interface AccessibilityNodeOptions {
     disabled?: boolean;
     /** Application object represented by this node. Accessibility never disposes it. */
     target?: object;
+    /** @internal Hide this node's own semantics while preserving its descendants. */
+    _selfHidden?: boolean;
 }
 
 /** One object in an accessibility tree. Change it through {@link updateAccessibilityNode}. */
@@ -36,6 +38,8 @@ export interface AccessibilityNode {
     _authoredHidden?: boolean;
     /** @internal */
     _authoredDisabled?: boolean;
+    /** @internal */
+    _selfHidden: boolean;
 }
 
 /** Logical hierarchy independent of a DOM renderer. */
@@ -199,6 +203,7 @@ export function addAccessibilityNode(tree: AccessibilityTree, options: Accessibi
         _children: children,
         _authoredHidden: options.hidden,
         _authoredDisabled: options.disabled,
+        _selfHidden: options._selfHidden ?? false,
         hidden: stateValue(options.hidden, tag, "hidden"),
         disabled: stateValue(options.disabled, tag, "disabled"),
         target: options.target,
@@ -238,6 +243,7 @@ export function updateAccessibilityNode(tree: AccessibilityTree, node: Accessibi
         ("tag" in patch && !tagsEqual(tag, node.tag)) ||
         hidden !== node.hidden ||
         disabled !== node.disabled ||
+        (patch._selfHidden !== undefined && patch._selfHidden !== node._selfHidden) ||
         ("target" in patch && patch.target !== node.target) ||
         parent !== node.parent;
     if (parent !== node.parent) {
@@ -269,6 +275,9 @@ export function updateAccessibilityNode(tree: AccessibilityTree, node: Accessibi
     if ("target" in patch) {
         node.target = patch.target;
     }
+    if (patch._selfHidden !== undefined) {
+        node._selfHidden = patch._selfHidden;
+    }
     if (changed) {
         notify(tree);
     }
@@ -284,6 +293,7 @@ function release(tree: AccessibilityTree, node: AccessibilityNode): void {
     node.target = undefined;
     node._authoredHidden = undefined;
     node._authoredDisabled = undefined;
+    node._selfHidden = false;
     tree._nodes.delete(node);
 }
 

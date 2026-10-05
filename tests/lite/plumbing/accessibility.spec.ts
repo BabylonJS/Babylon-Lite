@@ -61,6 +61,67 @@ test.describe("scene accessibility HTML", () => {
         await expect(page.locator("#scene-host")).toHaveCount(1);
     });
 
+    test("keeps visible descendants accessible when only their scene ancestor is runtime-hidden", async ({ page }) => {
+        const region = page.locator("#scene-host").getByRole("region", { name: "Scene", exact: true });
+        const parent = region.getByRole("img", { name: "Runtime parent" });
+        const child = region.getByRole("button", { name: "Runtime child" });
+        const parentElement = await parent.elementHandle();
+        const childElement = await child.elementHandle();
+
+        expect(parentElement).not.toBeNull();
+        expect(childElement).not.toBeNull();
+        await parentElement!.evaluate((element) => Object.assign(window, { runtimeParentElement: element }));
+        await childElement!.evaluate((element) => Object.assign(window, { runtimeChildElement: element }));
+        await page.evaluate(() => (window as unknown as { accessibilityFixture: { hideRuntimeParent(): void } }).accessibilityFixture.hideRuntimeParent());
+
+        await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveCount(0);
+        await expect(child).toHaveCount(1);
+        await expect(child).toContainText("Runtime child");
+        expect(
+            await parentElement!.evaluate((element) => ({
+                hidden: (element as HTMLElement).hidden,
+                role: (element as HTMLElement).getAttribute("role"),
+                label: (element as HTMLElement).getAttribute("aria-label"),
+                description: (element as HTMLElement).getAttribute("aria-description"),
+                disabled: (element as HTMLElement).getAttribute("aria-disabled"),
+                roleDescription: (element as HTMLElement).getAttribute("aria-roledescription"),
+                ownText: element.firstElementChild?.textContent,
+            }))
+        ).toEqual({
+            hidden: false,
+            role: null,
+            label: null,
+            description: null,
+            disabled: null,
+            roleDescription: null,
+            ownText: "",
+        });
+
+        await page.evaluate(() =>
+            (window as unknown as { accessibilityFixture: { authorHideRuntimeParent(hidden: boolean): void } }).accessibilityFixture.authorHideRuntimeParent(true)
+        );
+        await expect(child).toHaveCount(0);
+        expect(await parentElement!.evaluate((element) => (element as HTMLElement).hidden)).toBe(true);
+
+        await page.evaluate(() =>
+            (window as unknown as { accessibilityFixture: { authorHideRuntimeParent(hidden: boolean): void } }).accessibilityFixture.authorHideRuntimeParent(false)
+        );
+        await expect(child).toHaveCount(1);
+        expect(await parentElement!.evaluate((element) => (element as HTMLElement).hidden)).toBe(false);
+
+        await page.evaluate(() => (window as unknown as { accessibilityFixture: { showRuntimeParent(): void } }).accessibilityFixture.showRuntimeParent());
+        await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveCount(1);
+        await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveAttribute("aria-description", "Runtime-hidden parent description");
+        await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveAttribute("aria-disabled", "true");
+        await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveAttribute("aria-roledescription", "model");
+        expect(
+            await region
+                .getByRole("img", { name: "Runtime parent" })
+                .evaluate((element) => element === (window as unknown as { runtimeParentElement: Element }).runtimeParentElement)
+        ).toBe(true);
+        expect(await child.evaluate((element) => element === (window as unknown as { runtimeChildElement: Element }).runtimeChildElement)).toBe(true);
+    });
+
     test("rejects an HTML twin after scene disposal without DOM or lifecycle registration", async ({ page }) => {
         const result = await page.evaluate(() =>
             (
