@@ -724,24 +724,8 @@ function isNonBreakingInterfaceSubstitution(removedType: string, addedType: stri
     return true;
 }
 
-function callableDeclaresTypeParameters(signature: CallableSignature): boolean {
-    const prefix = signature.prefix;
-    if (!prefix.endsWith(">")) {
-        return false;
-    }
-    let depth = 0;
-    for (let index = prefix.length - 1; index >= 0; index -= 1) {
-        const character = prefix[index]!;
-        if (character === ">") {
-            depth += 1;
-        } else if (character === "<") {
-            depth -= 1;
-            if (depth === 0) {
-                return true;
-            }
-        }
-    }
-    return false;
+function isPlainExportedFunctionPrefix(prefix: string): boolean {
+    return /^export (?:declare )?function [A-Za-z_$][\w$]*$/.test(prefix);
 }
 
 /**
@@ -773,7 +757,8 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
     if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
         return false;
     }
-    const canResolveReportTypes = !callableDeclaresTypeParameters(removedSignature);
+    const canResolveAlias = isPlainExportedFunctionPrefix(removedSignature.prefix);
+    const canResolveInterface = !removedSignature.prefix.includes("<");
     let widenedAtLeastOne = false;
     for (let index = 0; index < removedSignature.parameters.length; index += 1) {
         const removedParam = splitParameterType(removedSignature.parameters[index]!);
@@ -787,8 +772,8 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
         const addedMembers = new Set(splitUnionMembers(addedParam.type));
         if (
             !splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member)) &&
-            !(canResolveReportTypes && isEquivalentSimpleUnionAlias(removedParam.type, addedParam.type, aliases)) &&
-            !(canResolveReportTypes && isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations))
+            !(canResolveAlias && isEquivalentSimpleUnionAlias(removedParam.type, addedParam.type, aliases)) &&
+            !(canResolveInterface && isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations))
         ) {
             return false; // a member was dropped/replaced → genuine breaking type change
         }
@@ -805,7 +790,7 @@ function isNonBreakingVoidToUnsubscribe(removedLine: string, addedLine: string):
         !removedSignature ||
         !addedSignature ||
         removedSignature.prefix !== addedSignature.prefix ||
-        !/^export (?:declare )?function [A-Za-z_$][\w$]*$/.test(removedSignature.prefix) ||
+        !isPlainExportedFunctionPrefix(removedSignature.prefix) ||
         removedSignature.suffix !== ": void;" ||
         addedSignature.suffix !== ": () => void;" ||
         removedSignature.parameters.length !== addedSignature.parameters.length

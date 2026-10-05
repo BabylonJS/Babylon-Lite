@@ -402,9 +402,25 @@ describe("API report type-alias parameter classifier", () => {
         ).toEqual([]);
     });
 
+    it("does not resolve a callable type parameter when its constraint contains an arrow", () => {
+        const removed = "export declare function take<Choice extends string, T extends () => void>(value: string | number): void;";
+        const added = "export declare function take<Choice extends string, T extends () => void>(value: Choice): void;";
+        const report = apiReport("export type Choice = string | number;");
+
+        expect(breakingApiLines(apiDiff(removed, added), report)).toEqual([removed]);
+    });
+
     it("does not resolve a callable type parameter as a report-level alias", () => {
         const removed = "export declare function take<Choice extends string>(value: string | number): void;";
         const added = "export declare function take<Choice extends string>(value: Choice): void;";
+        const report = apiReport("export type Choice = string | number;");
+
+        expect(breakingApiLines(apiDiff(removed, added), report)).toEqual([removed]);
+    });
+
+    it("does not resolve a method parameter as a report-level alias", () => {
+        const removed = "take(value: string | number): void;";
+        const added = "take(value: Choice): void;";
         const report = apiReport("export type Choice = string | number;");
 
         expect(breakingApiLines(apiDiff(removed, added), report)).toEqual([removed]);
@@ -477,6 +493,22 @@ describe("API report interface-substitution classifier", () => {
         );
 
         expect(breakingApiLines(apiDiff(removed, added), report)).toEqual([]);
+    });
+
+    it("preserves interface substitution for non-generic methods", () => {
+        const report = apiReport(baseOptions, uploadOptions, "export interface TextureArrayFromUrlsOptions extends TextureArrayOptions, ArrayLayerUploadOptions {}");
+        const removedMethod = "configure(options?: TextureArrayOptions): void;";
+        const addedMethod = "configure(options?: TextureArrayFromUrlsOptions): void;";
+
+        expect(breakingApiLines(apiDiff(removedMethod, addedMethod), report)).toEqual([]);
+    });
+
+    it("does not resolve interface substitutions for generic callables", () => {
+        const report = apiReport(baseOptions, uploadOptions, "export interface TextureArrayFromUrlsOptions extends TextureArrayOptions, ArrayLayerUploadOptions {}");
+        const removedGeneric = "export declare function configure<Choice extends string, T extends () => void>(options?: TextureArrayOptions): void;";
+        const addedGeneric = "export declare function configure<Choice extends string, T extends () => void>(options?: TextureArrayFromUrlsOptions): void;";
+
+        expect(breakingApiLines(apiDiff(removedGeneric, addedGeneric), report)).toEqual([removedGeneric]);
     });
 
     it("flags a parameter interface that adds a required member as breaking", () => {
