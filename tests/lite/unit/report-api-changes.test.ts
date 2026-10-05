@@ -150,6 +150,29 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual([]);
     });
 
+    it("preserves an unchanged explicit this parameter when a void return becomes an unsubscribe callback", () => {
+        const diff = apiDiff(
+            "export declare function subscribe(this: object, cb: () => void): void;",
+            "export declare function subscribe(this: object, callback: () => void): () => void;"
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("flags an explicit this parameter becoming a positional parameter", () => {
+        const removed = "export declare function subscribe(this: object, cb: () => void): void;";
+        const diff = apiDiff(removed, "export declare function subscribe(context: object, cb: () => void): () => void;");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("does not hide an explicit this parameter change behind input widening", () => {
+        const removed = "export declare function subscribe(this: Mesh, cb: () => void): void;";
+        const diff = apiDiff(removed, "export declare function subscribe(context: Mesh | LightBase, cb: () => void): void;");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
     it("does not excuse changed inputs when a void return becomes an unsubscribe callback", () => {
         const removed = "export declare function onSceneDispose(scene: SceneContext, callback: () => void): void;";
         const diff = apiDiff(removed, "export declare function onSceneDispose(scene: Scene, callback: () => void): () => void;");
@@ -377,6 +400,14 @@ describe("API report type-alias parameter classifier", () => {
                 report
             )
         ).toEqual([]);
+    });
+
+    it("does not resolve a callable type parameter as a report-level alias", () => {
+        const removed = "export declare function take<Choice extends string>(value: string | number): void;";
+        const added = "export declare function take<Choice extends string>(value: Choice): void;";
+        const report = apiReport("export type Choice = string | number;");
+
+        expect(breakingApiLines(apiDiff(removed, added), report)).toEqual([removed]);
     });
 
     it("flags narrowed, unresolved, recursive, and generic aliases", () => {

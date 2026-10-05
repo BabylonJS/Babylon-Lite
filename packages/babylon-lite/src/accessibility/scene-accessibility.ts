@@ -147,17 +147,28 @@ function collectAncestors(source: SceneSource, desired: Set<SceneSource>): void 
     }
 }
 
-function collectSubtree(source: SceneSource, desired: Set<SceneSource>): void {
+function collectSubtree(source: SceneSource, desired: Set<SceneSource>, visiting: Set<SceneSource>, visited: Set<SceneSource>): void {
+    if (visiting.has(source)) {
+        throw new Error("Accessibility parent would create a cycle.");
+    }
+    if (visited.has(source)) {
+        return;
+    }
+    visiting.add(source);
     collectAncestors(source, desired);
     for (const child of source.children) {
         if (sourceParent(child) === source) {
-            collectSubtree(child, desired);
+            collectSubtree(child, desired, visiting, visited);
         }
     }
+    visiting.delete(source);
+    visited.add(source);
 }
 
 function desiredSources(adapter: SceneAccessibility): Set<SceneSource> {
     const desired = new Set<SceneSource>();
+    const visiting = new Set<SceneSource>();
+    const visited = new Set<SceneSource>();
     for (const source of [...adapter._scene.meshes, ...adapter._scene.lights]) {
         if (isSceneSource(source)) {
             collectAncestors(source, desired);
@@ -167,10 +178,10 @@ function desiredSources(adapter: SceneAccessibility): Set<SceneSource> {
         collectAncestors(source, desired);
     }
     for (const source of adapter._explicit) {
-        collectSubtree(source, desired);
+        collectSubtree(source, desired, visiting, visited);
     }
     if (adapter._scene.camera) {
-        collectSubtree(adapter._scene.camera, desired);
+        collectSubtree(adapter._scene.camera, desired, visiting, visited);
     }
     return desired;
 }

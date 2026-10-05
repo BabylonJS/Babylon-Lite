@@ -526,18 +526,19 @@ function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boo
     return removedMembers.every((member) => addedMembers.has(member));
 }
 
-/** Split a single parameter declaration into its optional flag and type, ignoring the
- *  parameter name. Returns `undefined` for rest params (`...x: T[]`) and anything that
- *  doesn't look like `name: Type` — those are left to other classifiers / stay breaking. */
-function splitParameterType(parameter: string): { optional: boolean; type: string } | undefined {
+/** Split a single parameter declaration into its optional flag, runtime position, and type.
+ *  Ordinary parameter names are not part of the call contract, but TypeScript's special `this`
+ *  parameter is not a runtime argument and must remain distinct. Returns `undefined` for rest
+ *  params (`...x: T[]`) and anything that doesn't look like `name: Type`. */
+function splitParameterType(parameter: string): { optional: boolean; thisParameter: boolean; type: string } | undefined {
     if (parameter.startsWith("...")) {
         return undefined;
     }
-    const match = /^[A-Za-z_$][\w$]*(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
+    const match = /^([A-Za-z_$][\w$]*)(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
     if (!match) {
         return undefined;
     }
-    return { optional: match[1] === "?", type: match[2]!.trim() };
+    return { optional: match[2] === "?", thisParameter: match[1] === "this", type: match[3]!.trim() };
 }
 
 interface InterfaceMember {
@@ -723,6 +724,26 @@ function isNonBreakingInterfaceSubstitution(removedType: string, addedType: stri
     return true;
 }
 
+function callableDeclaresTypeParameters(signature: CallableSignature): boolean {
+    const prefix = signature.prefix;
+    if (!prefix.endsWith(">")) {
+        return false;
+    }
+    let depth = 0;
+    for (let index = prefix.length - 1; index >= 0; index -= 1) {
+        const character = prefix[index]!;
+        if (character === ">") {
+            depth += 1;
+        } else if (character === "<") {
+            depth -= 1;
+            if (depth === 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /**
  * Treat a function/method whose only change is one or more parameters WIDENING their
  * type to a union superset — every previous top-level union member is still accepted —
@@ -752,11 +773,12 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
     if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
         return false;
     }
+    const canResolveReportTypes = !callableDeclaresTypeParameters(removedSignature);
     let widenedAtLeastOne = false;
     for (let index = 0; index < removedSignature.parameters.length; index += 1) {
         const removedParam = splitParameterType(removedSignature.parameters[index]!);
         const addedParam = splitParameterType(addedSignature.parameters[index]!);
-        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional) {
+        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional || removedParam.thisParameter !== addedParam.thisParameter) {
             return false;
         }
         if (removedParam.type === addedParam.type) {
@@ -765,8 +787,8 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
         const addedMembers = new Set(splitUnionMembers(addedParam.type));
         if (
             !splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member)) &&
-            !isEquivalentSimpleUnionAlias(removedParam.type, addedParam.type, aliases) &&
-            !isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations)
+            !(canResolveReportTypes && isEquivalentSimpleUnionAlias(removedParam.type, addedParam.type, aliases)) &&
+            !(canResolveReportTypes && isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations))
         ) {
             return false; // a member was dropped/replaced → genuine breaking type change
         }
@@ -794,7 +816,13 @@ function isNonBreakingVoidToUnsubscribe(removedLine: string, addedLine: string):
     return removedSignature.parameters.every((parameter, index) => {
         const removedParam = splitParameterType(parameter);
         const addedParam = splitParameterType(addedSignature.parameters[index]!);
-        return !!removedParam && !!addedParam && removedParam.optional === addedParam.optional && removedParam.type === addedParam.type;
+        return (
+            !!removedParam &&
+            !!addedParam &&
+            removedParam.optional === addedParam.optional &&
+            removedParam.thisParameter === addedParam.thisParameter &&
+            removedParam.type === addedParam.type
+        );
     });
 }
 

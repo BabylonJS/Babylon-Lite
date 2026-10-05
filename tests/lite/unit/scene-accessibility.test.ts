@@ -300,6 +300,40 @@ describe("scene accessibility", () => {
         disposeScene(scene);
     });
 
+    it("rejects cyclic explicit roots, cleans up, and allows retry after correction", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const disposablesBefore = scene._disposables.slice();
+        const first = createTransformNode("First");
+        const second = createTransformNode("Second");
+        const firstParentDescriptor = Object.getOwnPropertyDescriptor(first, "parent")!;
+        const secondParentDescriptor = Object.getOwnPropertyDescriptor(second, "parent")!;
+        Object.defineProperty(first, "parent", { configurable: true, enumerable: true, writable: true, value: second });
+        Object.defineProperty(second, "parent", { configurable: true, enumerable: true, writable: true, value: first });
+        first.children.push(second);
+        second.children.push(first);
+
+        expect(() => createSceneAccessibility(scene, { roots: [first] })).toThrow(/cycle/i);
+        expect(scene._sceneChanges).toBeUndefined();
+        expect(scene._disposables).toEqual(disposablesBefore);
+        expect(Object.getOwnPropertyDescriptor(first, "name")).toMatchObject({
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: "First",
+        });
+
+        Object.defineProperty(first, "parent", firstParentDescriptor);
+        Object.defineProperty(second, "parent", secondParentDescriptor);
+        first.children.length = 0;
+        second.children.length = 0;
+        setParent(second, first);
+        const accessibility = createSceneAccessibility(scene, { roots: [first] });
+
+        expect(getAccessibilityNode(accessibility, first)?.parent).toBeNull();
+        expect(getAccessibilityNode(accessibility, second)?.parent).toBe(getAccessibilityNode(accessibility, first));
+        disposeScene(scene);
+    });
+
     it("supports semantic grouping without changing transforms", async () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
         const group = createTransformNode("Semantic group");

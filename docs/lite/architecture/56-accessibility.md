@@ -149,7 +149,7 @@ export interface SceneAccessibility {
 
 `roots` supplies transform-only or otherwise unretained source objects that cannot be discovered from the scene's retained arrays. Each explicit root includes its complete descendant subtree and the ancestors needed to connect it.
 
-Subtree discovery follows only current parent links. A stale entry in a source's `children` array does not retain a child whose `parent` points elsewhere.
+Subtree discovery follows only current parent links. A stale entry in a source's `children` array does not retain a child whose `parent` points elsewhere. A cycle in an explicit-root or active-camera subtree rejects the projection before traversal descends into the same source twice.
 
 ### Scene projection functions
 
@@ -237,6 +237,7 @@ Accessibility metadata is validated before publication.
 - Parent and ordering references must belong to the same live tree.
 - `before` must identify a sibling under the selected parent.
 - A parent change must not create a cycle.
+- Explicit-root and active-camera child traversal must not contain a cycle.
 - Tree mutation functions reject disposed trees.
 - Scene semantic parent overrides reject cycles synchronously.
 
