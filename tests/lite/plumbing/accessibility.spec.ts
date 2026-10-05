@@ -122,6 +122,44 @@ test.describe("scene accessibility HTML", () => {
         expect(await child.evaluate((element) => element === (window as unknown as { runtimeChildElement: Element }).runtimeChildElement)).toBe(true);
     });
 
+    test("hides a disposed explicit-root subtree without changing authored visibility", async ({ page }) => {
+        const region = page.locator("#scene-host").getByRole("region", { name: "Scene", exact: true });
+        const parent = region.getByRole("group", { name: "Disposed parent" });
+        const child = region.getByRole("button", { name: "Disposed child" });
+        const parentElement = await parent.elementHandle();
+        const childElement = await child.elementHandle();
+
+        expect(parentElement).not.toBeNull();
+        expect(childElement).not.toBeNull();
+        const state = await page.evaluate(() =>
+            (
+                window as unknown as {
+                    accessibilityFixture: {
+                        disposeRetainedParent(): {
+                            nodeHidden: boolean | undefined;
+                            projectedHidden: boolean | undefined;
+                            projectedAriaHidden: string | number | boolean | null | undefined;
+                            authoredHidden: boolean | undefined;
+                            authoredAriaHidden: string | number | boolean | null | undefined;
+                        };
+                    };
+                }
+            ).accessibilityFixture.disposeRetainedParent()
+        );
+
+        expect(state).toEqual({
+            nodeHidden: true,
+            projectedHidden: true,
+            projectedAriaHidden: true,
+            authoredHidden: false,
+            authoredAriaHidden: false,
+        });
+        await expect(region.getByRole("group", { name: "Disposed parent" })).toHaveCount(0);
+        await expect(region.getByRole("button", { name: "Disposed child" })).toHaveCount(0);
+        expect(await parentElement!.evaluate((element) => (element as HTMLElement).hidden)).toBe(true);
+        expect(await childElement!.evaluate((element) => element.isConnected && (element.parentElement as HTMLElement).hidden)).toBe(true);
+    });
+
     test("rejects an HTML twin after scene disposal without DOM or lifecycle registration", async ({ page }) => {
         const result = await page.evaluate(() =>
             (

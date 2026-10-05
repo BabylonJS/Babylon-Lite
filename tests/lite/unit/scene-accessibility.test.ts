@@ -153,6 +153,29 @@ describe("scene accessibility", () => {
         expect(accessibility.tree.disposed).toBe(true);
     });
 
+    it("projects disposed explicit roots as subtree-hidden without changing authored metadata", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const parent = Object.assign(createTransformNode("Disposed parent"), { _disposed: false });
+        const child = createTransformNode("Disposed child");
+        setAccessibilityTag(parent, { name: "Disposed parent", hidden: false, aria: { "aria-hidden": false } });
+        setAccessibilityTag(child, { name: "Disposed child", role: "button" });
+        setParent(child, parent);
+        const accessibility = createSceneAccessibility(scene, { roots: [parent] });
+        const authored = getAccessibilityTag(parent);
+
+        parent._disposed = true;
+
+        expect(() => updateSceneAccessibility(accessibility)).not.toThrow();
+        expect(getAccessibilityNode(accessibility, parent)).toMatchObject({
+            hidden: true,
+            tag: { hidden: true, aria: { "aria-hidden": true } },
+        });
+        expect(getAccessibilityNode(accessibility, child)?.parent).toBe(getAccessibilityNode(accessibility, parent));
+        expect(getAccessibilityTag(parent)).toBe(authored);
+        expect(authored).toEqual({ name: "Disposed parent", hidden: false, aria: { "aria-hidden": false } });
+        disposeScene(scene);
+    });
+
     it("includes lights that were added before the binding", () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
         const light = createHemisphericLight();

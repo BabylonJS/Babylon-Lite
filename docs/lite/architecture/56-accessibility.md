@@ -192,13 +192,13 @@ export function onSceneChange(scene: SceneContext, listener: (event: SceneChange
 export function onSceneDispose(scene: SceneContext, callback: () => void): () => void;
 ```
 
-`SceneEntity` is the same union accepted by `addToScene` and `removeFromScene`. Notifications describe committed membership changes, including recursive hierarchy members, asset-container contents, and transform-only nodes. Each subscription has its own registration identity, so duplicate callbacks can be removed independently. The returned callbacks remove their registrations and are idempotent.
+`SceneEntity` is the same union accepted by `addToScene` and `removeFromScene`. Notifications describe observable committed membership changes for recursive hierarchy members, asset-container contents, and transform-only nodes. Each subscription has its own registration identity, so duplicate callbacks can be removed independently. The returned callbacks remove their registrations and are idempotent.
 
 Scene change listeners run after the outermost add or remove operation completes. Reentrant mutations append more events to the same dispatch. Listener removal takes effect before the next callback or event. All remaining listeners run after a failure; one failure is rethrown directly, and multiple failures use `AggregateError`.
 
-The first scene-change subscription seeds a weak membership set from the scene's retained meshes, lights, shadow generators, active camera, and their current descendants. Later add and remove notifications update that set and publish only identity transitions into or out of membership. Repeated removal is therefore silent, while remove-and-re-add cycles publish each real transition. Each scene owns independent state, and the state is released when its last subscriber leaves.
+The first scene-change subscription seeds a weak membership set from the scene's retained meshes, lights, shadow generators, active camera, and their current descendants reached through matching child-to-parent links. It does not walk ancestors. Later add and remove notifications update that set and publish only observed identity transitions into or out of membership. Repeated removal is therefore silent, while remove-and-re-add cycles publish each observed transition. Each scene owns independent state, and the state is released when its last subscriber leaves.
 
-Transform-only roots and asset-container wrapper identities are not retained by the scene. A subscription created after one of those values was added cannot discover the earlier identity unless it remains reachable from a retained scene object. Removing that undiscoverable value performs the canonical cleanup but does not publish a removal event.
+Transform-only roots and asset-container wrapper identities are not retained by the scene. A subscription created after one of those values was added cannot discover the earlier identity unless that identity is itself retained or is a current descendant of a retained object. An unretained transform root is not discovered merely because it is an ancestor of a retained mesh. Removing an undiscoverable value performs the canonical cleanup but does not publish a removal event.
 
 Membership registration and disposal registration install separate optional core seams. A consumer that uses only `onSceneDispose` does not retain scene-change event creation, queues, or dispatch.
 
@@ -317,7 +317,7 @@ The adapter reads the stored authored tag and creates a node-specific snapshot:
 5. Authored `hidden` or `aria-hidden="true"` remains subtree-wide.
 6. Disabled state comes from the authored metadata and returns unchanged when a runtime-hidden source becomes visible again.
 
-`getAccessibilityTag` continues to return the authored snapshot. Runtime-derived names and visibility exist only on projected tree nodes. Runtime hiding never mutates the stored authored tag, so showing the source restores the same metadata snapshot.
+For disposal only, the projected snapshot normalizes authored `hidden: false` or `aria-hidden="false"` values to `true` so the logical tree accepts the runtime subtree-hidden state. `getAccessibilityTag` continues to return the authored snapshot. Runtime-derived names and visibility exist only on projected tree nodes. Runtime hiding never mutates the stored authored tag, so showing the source restores the same metadata snapshot.
 
 ### Observation and coalescing
 

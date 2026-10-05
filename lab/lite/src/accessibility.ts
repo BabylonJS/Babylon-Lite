@@ -6,6 +6,8 @@ import {
     createSceneHtmlTwin,
     createTransformNode,
     disposeScene,
+    getAccessibilityNode,
+    getAccessibilityTag,
     onAccessibilityTreeChanged,
     onSceneDispose,
     removeFromScene,
@@ -29,6 +31,8 @@ const rightBox = createTransformNode("Right box");
 const status = createTransformNode("Scene status");
 const runtimeParent = createTransformNode("Runtime parent");
 const runtimeChild = createTransformNode("Runtime child");
+const disposedParent = Object.assign(createTransformNode("Disposed parent"), { _disposed: false });
+const disposedChild = createTransformNode("Disposed child");
 
 setAccessibilityTag(group, { name: "Box arrangement", role: "group" });
 setAccessibilityTag(centerBox, {
@@ -60,12 +64,16 @@ const runtimeParentTag = {
 } as const;
 setAccessibilityTag(runtimeParent, runtimeParentTag);
 setAccessibilityTag(runtimeChild, { name: "Runtime child", role: "button" });
+const disposedParentTag = { name: "Disposed parent", role: "group", hidden: false, aria: { "aria-hidden": false } } as const;
+setAccessibilityTag(disposedParent, disposedParentTag);
+setAccessibilityTag(disposedChild, { name: "Disposed child", role: "button" });
 setParent(centerBox, group);
 setParent(leftBox, group);
 setParent(rightBox, group);
 setParent(runtimeChild, runtimeParent);
+setParent(disposedChild, disposedParent);
 
-const twin = createSceneHtmlTwin(scene);
+const twin = createSceneHtmlTwin(scene, { roots: [disposedParent] });
 addToScene(scene, group);
 addToScene(scene, status);
 addToScene(scene, runtimeParent);
@@ -118,6 +126,25 @@ Object.assign(window, {
         },
         showRuntimeParent(): void {
             setMeshVisible(runtimeParent, true);
+        },
+        disposeRetainedParent(): {
+            nodeHidden: boolean | undefined;
+            projectedHidden: boolean | undefined;
+            projectedAriaHidden: string | number | boolean | null | undefined;
+            authoredHidden: boolean | undefined;
+            authoredAriaHidden: string | number | boolean | null | undefined;
+        } {
+            disposedParent._disposed = true;
+            updateSceneAccessibility(twin.accessibility);
+            const node = getAccessibilityNode(twin.accessibility, disposedParent);
+            const authored = getAccessibilityTag(disposedParent);
+            return {
+                nodeHidden: node?.hidden,
+                projectedHidden: node?.tag?.hidden,
+                projectedAriaHidden: node?.tag?.aria?.["aria-hidden"],
+                authoredHidden: authored?.hidden,
+                authoredAriaHidden: authored?.aria?.["aria-hidden"],
+            };
         },
         reparent(): void {
             setParent(centerBox, null);

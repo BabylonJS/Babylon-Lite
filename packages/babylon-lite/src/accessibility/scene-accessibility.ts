@@ -79,16 +79,32 @@ function sourceParent(source: SceneSource): SceneSource | null {
     return isSceneSource(parent) ? parent : null;
 }
 
+function projectDisposedHidden(tag: AccessibilityTag | null, disposed: boolean): AccessibilityTag | null {
+    if (!tag || !disposed) {
+        return tag;
+    }
+    const hasAriaHidden = tag.aria ? "aria-hidden" in tag.aria : false;
+    if (tag.hidden !== false && (!hasAriaHidden || String(tag.aria?.["aria-hidden"]) === "true")) {
+        return tag;
+    }
+    return Object.freeze({
+        ...tag,
+        hidden: true,
+        aria: hasAriaHidden ? Object.freeze({ ...tag.aria, "aria-hidden": true }) : tag.aria,
+    });
+}
+
 function sourceState(source: SceneSource): Pick<AccessibilityNode, "tag" | "hidden" | "disabled" | "_selfHidden"> {
     const authored = getAccessibilityTag(source);
     const disposed = "_disposed" in source && source._disposed === true;
-    const tag = authored
+    const snapshot = authored
         ? Object.freeze({
               ...authored,
               name: authored.name ?? (authored.description === undefined ? source.name : undefined),
               aria: authored.aria ? Object.freeze({ ...authored.aria }) : undefined,
           })
         : null;
+    const tag = projectDisposedHidden(snapshot, disposed);
     return {
         tag,
         hidden: disposed || tag?.hidden === true || String(tag?.aria?.["aria-hidden"]) === "true",
