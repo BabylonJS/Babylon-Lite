@@ -1946,6 +1946,7 @@ packages/babylon-lite-gl/
         render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation
         effect.ts           createEffect/createEffectWrapper/applyEffectWrapper, cached uniform setters, sampler finalize
+        effect-ready.ts     opt-in waitForEffect polling, cancellation, lifecycle rejection and frame/listener cleanup
         texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose
         html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture/GLSamplingMode
         blend.ts            GLBlendMode preset + setBlendMode (cached, Babylon setAlphaMode parity)

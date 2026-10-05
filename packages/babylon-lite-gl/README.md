@@ -95,7 +95,9 @@ Already ready effects resolve without scheduling a frame; consumers that only
 use manual polling ship none of the helper's scheduling code.
 
 **Migration:** shader syntax errors no longer throw synchronously from
-`createEffect`. Use the public error accessor or catch `waitForEffect` instead.
+`createEffect` or `createEffectWrapper`. Poll `isEffectReady` and inspect
+`getEffectCompilationError`, or catch a rejected `waitForEffect` promise instead.
+For wrappers, pass `wrapper.effect` to these readiness/error APIs.
 Shader/program allocation failures still throw synchronously.
 
 ## Entry points
