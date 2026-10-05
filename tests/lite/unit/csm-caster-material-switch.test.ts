@@ -52,6 +52,8 @@ vi.mock("../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js", 
 /** Fresh copies of the modules under test, so the no-colour view factories a case imports never leak into another one. */
 async function importLite() {
     vi.resetModules();
+    // Finish the async partial mock before parallel imports can enter its real dependency graph.
+    await import("../../../packages/babylon-lite/src/frame-graph/render-task");
     const [inputs, override, rebuild, registry, swaps, shadowTask, csm, cache] = await Promise.all([
         import("../../../packages/babylon-lite/src/frame-graph/shadow-inputs"),
         import("../../../packages/babylon-lite/src/material/set-shadow-caster-material"),

@@ -25,7 +25,9 @@ nodeOptions: '--max-old-space-size=8192'
 # Enforced natively by pnpm >= 10.16 during resolution.
 minimumReleaseAge: 10080
 
-# Minimum fix for high-severity GHSA-ch52-4w7c-c8xp, published 2026-10-04.
+# Fix for CVE-2026-93750 / GHSA-f27v-pv5m-c5g6 (CVSS 4.0: 8.2 High), published 2026-10-04.
+# 4.3.0 fixes Vary wildcard matching; upstream patch: kornelski/http-cache-semantics@9fb520b.
+# This is not a fix for the disputed max-stale advisory GHSA-ch52-4w7c-c8xp.
 # Exempt only this exact version; all other releases retain the seven-day quarantine.
 minimumReleaseAgeExclude:
   - 'http-cache-semantics@4.3.0'
