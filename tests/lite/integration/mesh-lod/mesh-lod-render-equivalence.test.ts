@@ -42,6 +42,7 @@ import { meshLoDDebugModeCode } from "../../../../packages/babylon-lite/src/mate
 import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 import { AcesToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/pbr-aces-wgsl.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
 import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
@@ -189,6 +190,15 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
 });
 
 describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it("rejects gamma-albedo opt-in introduced after scene registration", async () => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const material = createPbrMaterial();
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        setPbrGammaAlbedo(material);
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "gamma-albedo decoding" });
+    });
+
     it.each(["cpu", "gpu"] as const)("refreshes the shared dirty material UBO and preserves debug mode (%s)", async (selectionMode) => {
         const mock = createMockEngine();
         engine = mock.engine;

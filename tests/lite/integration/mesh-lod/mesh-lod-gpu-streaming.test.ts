@@ -30,6 +30,7 @@ import {
     PAGE_FLAG_RESIDENT,
     PAGE_STATE_WORDS,
     applyMeshLoDGpuReadback,
+    meshLoDPageDemandBitsOffset,
     meshLoDPageUseOffset,
     packClusters,
     packGroupPageRefs,
@@ -153,6 +154,9 @@ function syntheticControl(
     control[CONTROL_TRIANGLE_WORD] = diag.triangles;
     control[CONTROL_FALLBACK_WORD] = diag.fallback;
     control[CONTROL_PAGE_DEMAND_OFFSET + finePageId] = benefit;
+    if (benefit > 0) {
+        control[meshLoDPageDemandBitsOffset(state.pageCount) + (finePageId >>> 5)]! |= 1 << (finePageId & 31);
+    }
     return control;
 }
 
@@ -225,7 +229,8 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         const state = harness.batchState();
         expect(state.selectedCapacity).toBeGreaterThan(1_000_000);
         const pages = harness.runtime.pageRecords.length;
-        const expectedBytes = (CONTROL_PAGE_DEMAND_OFFSET + pages + Math.ceil(pages / 32)) * 4;
+        const expectedBytes = (CONTROL_PAGE_DEMAND_OFFSET + pages + 2 * Math.ceil(pages / 32)) * 4;
+        expect(state.paramsU32[55]).toBe(meshLoDPageDemandBitsOffset(pages));
         const copies = harness.encoder.copies.filter((copy) => copy.dst.label === "mesh-lod-readback");
         expect(copies).toHaveLength(1);
         expect(copies[0]!.size).toBe(expectedBytes);

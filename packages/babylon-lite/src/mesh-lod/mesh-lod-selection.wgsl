@@ -20,7 +20,7 @@ struct Params {
   layout0: vec4<u32>,          // wordsPerInstance, selectedCapacity, pageCount, levelCount
   offsets: vec4<u32>,          // nodeWordOffset, groupWordOffset, clusterWordOffset, pageRefWordOffset
   control: vec4<u32>,          // diagWordOffset, pageDemandWordOffset, drawCapacity, coneCull
-  execution: vec4<u32>,        // debug mode, max workgroups/dimension, page-use offset, reserved
+  execution: vec4<u32>,        // debug mode, max workgroups/dimension, page-use offset, page-demand bitset offset
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -291,6 +291,7 @@ fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_wor
   for (var i = 0u; i < pageRefCount; i = i + 1u) {
     let pageId = metaBuf[params.offsets.w + firstPageRef + i];
     if (!pageResident(pageId)) {
+      atomicOr(&control[params.execution.w + (pageId >> 5u)], 1u << (pageId & 31u));
       atomicAdd(&control[demandBase + pageId], u32(pageShare * FIXED_SCALE));
     }
   }

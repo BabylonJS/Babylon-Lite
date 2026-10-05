@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { decodeMeshLoDPage } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
-import { crc32c } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
+import { crc32c, PAGE_MAX_BYTES } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import type { MeshLoDPageRecord } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
@@ -129,6 +129,21 @@ describe("decodeMeshLoDPage", () => {
         const { decoder, calls } = mockDecoder();
         expectCode(() => decodeMeshLoDPage(storedPage, page, decoder), "MLOD_PAGE_INTEGRITY");
         expect(calls).toHaveLength(0);
+    });
+
+    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, PAGE_MAX_BYTES + 1])("rejects invalid decoded allocation %s without invoking the codec", (decodedBytes) => {
+        const storedPage = buildStoredPage();
+        const { decoder, calls } = mockDecoder();
+        expectCode(() => decodeMeshLoDPage(storedPage, { ...pageFor(storedPage), decodedBytes }, decoder), "MLOD_PAGE_INTEGRITY");
+        expect(calls).toHaveLength(0);
+    });
+
+    it("accepts the maximum decoded allocation without expanding the codec streams", () => {
+        const storedPage = buildStoredPage();
+        const { decoder, calls } = mockDecoder();
+        const result = decodeMeshLoDPage(storedPage, { ...pageFor(storedPage), decodedBytes: PAGE_MAX_BYTES }, decoder);
+        expect(result.decoded.length).toBe(PAGE_MAX_BYTES);
+        expect(calls.map((call) => call.targetLength)).toEqual([DEC_VERTEX_BYTES, DEC_INDEX_BYTES]);
     });
 
     it("rejects a bad magic before invoking the decoder", () => {

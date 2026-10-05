@@ -209,7 +209,7 @@ export interface MeshLoDGpuInstanceInput {
 }
 
 /** Write one 128-byte instance record: world matrix, cofactor normal matrix as three
- *  padded `vec4` rows, maximum world scale, visibility flag, and stable instance ID.
+ *  padded `vec4` rows, conservative world scale, visibility flag, and stable instance ID.
  *  The cofactor matrix `(c1×c2, c2×c0, c0×c1)` is the inverse-transpose up to
  *  determinant sign — correct after the shader's `normalize()`. Singular or
  *  non-finite transforms reject instead of emitting undefined shading normals. */
@@ -383,7 +383,7 @@ export function runMeshLoDGpuSelection(input: MeshLoDGpuSelectionModelInput): Me
         for (let i = 0; i < 16; i++) {
             world[i] = input.instances[iBase + i]!;
         }
-        const worldScale = input.instances[iBase + 28]!; // precomputed max column scale
+        const worldScale = input.instances[iBase + 28]!; // precomputed conservative world scale
         const threshold = input.instances[iBase + 19]! > 0 ? input.instances[iBase + 19]! : params.screenSpaceError;
         const refineBoundary = Math.fround(threshold * refineMultiplier);
         const coarsenBoundary = Math.fround(threshold * coarsenMultiplier);
@@ -976,7 +976,7 @@ export function disposeMeshLoDGpuInstanceState(state: MeshLoDGpuInstanceState): 
 
 // ─── Compute orchestration: pipelines, params, transient buffers, batch ──
 
-/** Params UBO byte size (13 × vec4, architecture §12; allocated at 256 for margin). */
+/** Params UBO byte size (14 × vec4, architecture §12; allocated at 256 for margin). */
 const PARAMS_BYTES = 224;
 const PARAMS_ALLOC = 256;
 /** control[0] = selected count; control[1..3] = indirect dispatch XYZ. */
@@ -988,6 +988,9 @@ const CONTROL_DIAG_WORDS = 6;
 export const CONTROL_PAGE_DEMAND_OFFSET = CONTROL_DIAG_OFFSET + CONTROL_DIAG_WORDS;
 export function meshLoDPageUseOffset(pageCount: number): number {
     return CONTROL_PAGE_DEMAND_OFFSET + Math.max(pageCount, 1);
+}
+export function meshLoDPageDemandBitsOffset(pageCount: number): number {
+    return meshLoDPageUseOffset(pageCount) + Math.ceil(pageCount / 32);
 }
 const SELECTION_WORKGROUP = 64;
 
@@ -1019,16 +1022,18 @@ export interface MeshLoDGpuReadback {
     readonly overflow: boolean;
 }
 
-/** Decode a copied selection control buffer into streaming demand + diagnostics. Each
+/** Decode a copied selection control buffer into streaming demand + diagnostics.
+ *  A separate bitset records demand presence even when benefit is zero. Each
  *  per-page word holds accumulated benefit (pageShare × {@link DEMAND_FIXED_SCALE});
  *  dividing by the page's stored bytes reproduces the CPU oracle's benefit/cost priority
  *  (§11.1). Pure over the control words + a stored-bytes accessor so Node fixtures can
  *  compare it against the deterministic selection model. */
 export function decodeMeshLoDGpuReadback(control: ArrayLike<number>, pageCount: number, storedBytesOf: (pageId: number) => number): MeshLoDGpuReadback {
     const demand: MeshLoDPageDemand[] = [];
+    const demandBitsOffset = meshLoDPageDemandBitsOffset(pageCount);
     for (let pageId = 0; pageId < pageCount; pageId++) {
-        const benefit = control[CONTROL_PAGE_DEMAND_OFFSET + pageId] ?? 0;
-        if (benefit > 0) {
+        if (((control[demandBitsOffset + (pageId >>> 5)] ?? 0) & (1 << (pageId & 31))) !== 0) {
+            const benefit = control[CONTROL_PAGE_DEMAND_OFFSET + pageId] ?? 0;
             const stored = storedBytesOf(pageId) || 1;
             demand.push({ pageId, priority: benefit / DEMAND_FIXED_SCALE / stored });
         }
@@ -1229,7 +1234,7 @@ function ensureMeshLoDBatchBuffers(
     state.clusterCount = assetBuffers.clusterCount;
     state.nodeCount = assetBuffers.nodeCount;
     state.pageCount = assetBuffers.pageCount;
-    const controlWords = meshLoDPageUseOffset(assetBuffers.pageCount) + Math.ceil(assetBuffers.pageCount / 32);
+    const controlWords = meshLoDPageDemandBitsOffset(assetBuffers.pageCount) + Math.ceil(assetBuffers.pageCount / 32);
     if (!state.controlBuffer) {
         state.controlBuffer = device.createBuffer({ label: "mesh-lod-control", size: controlWords * 4, usage: BU.STORAGE | BU.INDIRECT | BU.COPY_DST | BU.COPY_SRC });
         state.controlWords = controlWords;
@@ -1548,6 +1553,7 @@ function writeSelectionParams(
     u[52] = frame.debugMode ?? 0;
     u[53] = state.device!.limits.maxComputeWorkgroupsPerDimension;
     u[54] = meshLoDPageUseOffset(assetBuffers.pageCount);
+    u[55] = meshLoDPageDemandBitsOffset(assetBuffers.pageCount);
 }
 
 /** Bounded XYZ dispatch without dropping invocations. Padded workgroups are guarded in WGSL. */

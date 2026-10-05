@@ -14,7 +14,7 @@
 
 import type { MeshLoDPageRecord } from "./mesh-lod-runtime.js";
 import type { MeshoptDecoderModule } from "../loader-gltf/meshopt-decode.js";
-import { crc32c, DECODED_VERTEX_STRIDE, LOCAL_INDEX_STRIDE, STORED_PAGE_HEADER_SIZE, STORED_PAGE_MAGIC, STORED_PAGE_MAJOR } from "./mesh-lod-format.js";
+import { crc32c, DECODED_VERTEX_STRIDE, LOCAL_INDEX_STRIDE, PAGE_MAX_BYTES, STORED_PAGE_HEADER_SIZE, STORED_PAGE_MAGIC, STORED_PAGE_MAJOR } from "./mesh-lod-format.js";
 import { createMeshLoDError } from "./mesh-lod-errors.js";
 
 const SP = {
@@ -89,6 +89,12 @@ export function decodeMeshLoDPage(storedPage: Uint8Array, page: MeshLoDPageRecor
     }
     if (storedPage.length < STORED_PAGE_HEADER_SIZE) {
         throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "truncated stored page header");
+    }
+    if (!Number.isInteger(page.decodedBytes) || page.decodedBytes <= 0 || page.decodedBytes > PAGE_MAX_BYTES) {
+        throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "decoded page allocation is outside the format limits", {
+            expected: `1-${PAGE_MAX_BYTES} bytes`,
+            actual: page.decodedBytes,
+        });
     }
     const view = new DataView(storedPage.buffer, storedPage.byteOffset, storedPage.byteLength);
     const u16 = (o: number): number => view.getUint16(o, true);

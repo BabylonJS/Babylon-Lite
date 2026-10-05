@@ -680,6 +680,7 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
         const base = pageTable.offset + p * PAGE_TABLE_RECORD_SIZE;
         const offset = reader.u64(base + PT.offset);
         const storedBytes = reader.u32(base + PT.storedBytes);
+        const decodedBytes = reader.u32(base + PT.decodedBytes);
         const crc = reader.u32(base + PT.crc);
         const flags = reader.u32(base + PT.flags);
         const firstCluster = reader.u32(base + PT.firstCluster);
@@ -687,6 +688,14 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
 
         if (offset % PAGE_ALIGNMENT !== 0 || storedBytes % PAGE_ALIGNMENT !== 0 || storedBytes < PAGE_ALIGNMENT || storedBytes > PAGE_MAX_BYTES) {
             throw fail("MLOD_INVALID_LAYOUT", "page violates 64-256 KiB alignment", { pageId: p, byteOffset: base });
+        }
+        if (decodedBytes === 0 || decodedBytes > PAGE_MAX_BYTES) {
+            throw fail("MLOD_INVALID_LAYOUT", "decoded page allocation is outside the format limits", {
+                pageId: p,
+                byteOffset: base + PT.decodedBytes,
+                expected: `1-${PAGE_MAX_BYTES} bytes`,
+                actual: decodedBytes,
+            });
         }
         if (!rangeWithin(offset, storedBytes, size) || offset !== previousPageEnd) {
             throw fail("MLOD_INVALID_LAYOUT", "page data is not contiguous", { pageId: p, byteOffset: offset });
@@ -722,7 +731,7 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
             offset,
             storedBytes,
             meaningfulBytes: reader.u32(base + PT.meaningfulBytes),
-            decodedBytes: reader.u32(base + PT.decodedBytes),
+            decodedBytes,
             crc,
             vertexCount: reader.u32(base + PT.vertexCount),
             localIndexCount: reader.u32(base + PT.localIndexCount),

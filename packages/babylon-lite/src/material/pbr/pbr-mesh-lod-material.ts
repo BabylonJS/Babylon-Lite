@@ -13,6 +13,9 @@ export function validateMeshLoDMaterial(material: PbrMaterialProps): void {
     if (material._alphaCutOff !== undefined) {
         reject("alpha masking");
     }
+    if (material._gammaAlbedo) {
+        reject("gamma-albedo decoding");
+    }
     if (material._transmissive) {
         reject("transmission");
     }

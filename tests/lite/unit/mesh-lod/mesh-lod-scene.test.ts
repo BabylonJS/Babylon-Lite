@@ -14,6 +14,7 @@ import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/s
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { createMockEngine } from "./fixtures/gpu-mock.js";
@@ -162,6 +163,13 @@ describe("MeshLoD scene registry — one-way ownership", () => {
 });
 
 describe("MeshLoD scene registry — material gate", () => {
+    it("rejects the public gamma-albedo opt-in with an explicit unsupported-material error", () => {
+        const material = createPbrMaterial();
+        setPbrGammaAlbedo(material);
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "gamma-albedo decoding" })
+        );
+    });
     it("rejects material-side V-flips instead of sampling an inverted texture", () => {
         const { engine } = createMockEngine();
         const texture = createSolidTexture2D(engine, 1, 1, 1);

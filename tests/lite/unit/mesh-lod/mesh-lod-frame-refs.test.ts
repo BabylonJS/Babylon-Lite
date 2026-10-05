@@ -18,6 +18,7 @@ import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/me
 import {
     CONTROL_COUNT_WORD,
     CONTROL_PAGE_DEMAND_OFFSET,
+    meshLoDPageDemandBitsOffset,
     CONTROL_TRIANGLE_WORD,
     applyMeshLoDGpuReadback,
     createMeshLoDGpuBatchState,
@@ -118,8 +119,10 @@ describe("MeshLoD frame references (§14.1)", () => {
         engine._finishOptionalFrame?.(true);
         expect(runtime.frameIndex).toBe(1);
         const control = (pageId: number): Uint32Array => {
-            const words = new Uint32Array(CONTROL_PAGE_DEMAND_OFFSET + runtime.pageRecords.length);
+            const offset = meshLoDPageDemandBitsOffset(runtime.pageRecords.length);
+            const words = new Uint32Array(offset + Math.ceil(runtime.pageRecords.length / 32));
             words[CONTROL_PAGE_DEMAND_OFFSET + pageId] = 4096;
+            words[offset + (pageId >>> 5)]! |= 1 << (pageId & 31);
             return words;
         };
         for (let i = 0; i < 2; i++) {

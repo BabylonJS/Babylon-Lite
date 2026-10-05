@@ -19,7 +19,7 @@ do not import the feature.
 The material-owned renderer supports opaque PBR metallic-roughness (including
 unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
-clearcoat, sheen, UV2, per-texture UV transforms (including material-side V-flips),
+clearcoat, sheen, UV2, gamma-albedo decoding, per-texture UV transforms (including material-side V-flips),
 material plugins, and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
@@ -156,6 +156,10 @@ the device.
 Visible groups accumulate missing-page demand using screen-space benefit
 relative to transfer size. The scheduler sorts by descending priority,
 then page ID to break ties, rather than fetching every missing page.
+Demand presence is independent of priority: a fine-required group in the
+lower hysteresis band still renews its missing-page requests when its
+quality-pressure priority is zero. GPU control readback carries a separate
+per-page demand bitset alongside benefit accumulators and selected-page use.
 
 ### 11.2 Request scheduling
 
@@ -190,7 +194,11 @@ owns decoding and residency commits.
 ### 11.4 GPU arena
 
 The immutable allocation has a default 128 MiB capacity and budget.
-Decoded page data occupies rounded 64 KiB slots. Pinned coarse pages
+Decoded page data occupies rounded 64 KiB slots. Every page must declare
+a positive decoded allocation no larger than
+256 KiB. Metadata validation rejects larger declarations even when the
+fine-page bytes have not been fetched, and the decoder rechecks the bound
+before allocating staging memory or invoking the codec. Pinned coarse pages
 cannot be evicted. Fine pages follow age/priority eviction after the
 120-frame hold, but pages referenced by an in-flight frame cannot be
 reclaimed. Protection is acquired while recording GPU selection (before
@@ -263,8 +271,14 @@ page demand, a page-use bitset, and counters drives subsequent
 streaming, actual page-use aging, and diagnostics without blocking the
 current draw. Readback completion is an observation of its source
 selection, not an additional rendered frame.
-Readback copies only the control header, one demand word per page, and
-`ceil(pageCount / 32)` use words, independent of selected-list capacity.
+Readback copies only the control header, one benefit word per page, and
+two `ceil(pageCount / 32)` bitsets, independent of selected-list capacity.
+The selected-page-use bitset precedes the missing-page-demand bitset;
+`Params.execution.z` and `.w` contain their word offsets. A demand bit
+remains set even when its accumulated benefit is zero. The nonvisual
+`mesh-lod-demand.spec.ts` plumbing test runs the production WGSL and
+readback decoder, moves a pending refinement request from 2.4 to 1.9 px,
+and verifies that only genuinely withdrawn demand cancels the request.
 The selected list has a count header. Indirect expansion uses bounded XYZ
 dimensions based on `maxComputeWorkgroupsPerDimension`; the shader flattens
 workgroup IDs and skips padding beyond the count. Direct selection kernels

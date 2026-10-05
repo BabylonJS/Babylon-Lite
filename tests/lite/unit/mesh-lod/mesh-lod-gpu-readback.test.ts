@@ -17,20 +17,24 @@ import {
     CONTROL_UNMET_ERROR_WORD,
     CONTROL_VISIBLE_GROUP_WORD,
     decodeMeshLoDGpuReadback,
+    meshLoDPageDemandBitsOffset,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 
 const FIXED_SCALE = 256;
 
 /** Build a control buffer for `pageCount` pages, then set diagnostics + per-page benefit. */
 function control(pageCount: number, diag: Partial<Record<"count" | "visible" | "triangles" | "overflow" | "fallback", number>>, benefit: Record<number, number>): Uint32Array {
-    const words = new Uint32Array(CONTROL_PAGE_DEMAND_OFFSET + pageCount);
+    const demandBitsOffset = meshLoDPageDemandBitsOffset(pageCount);
+    const words = new Uint32Array(demandBitsOffset + Math.ceil(pageCount / 32));
     words[CONTROL_COUNT_WORD] = diag.count ?? 0;
     words[CONTROL_VISIBLE_GROUP_WORD] = diag.visible ?? 0;
     words[CONTROL_TRIANGLE_WORD] = diag.triangles ?? 0;
     words[CONTROL_OVERFLOW_WORD] = diag.overflow ?? 0;
     words[CONTROL_FALLBACK_WORD] = diag.fallback ?? 0;
     for (const [pageId, value] of Object.entries(benefit)) {
-        words[CONTROL_PAGE_DEMAND_OFFSET + Number(pageId)] = value;
+        const id = Number(pageId);
+        words[CONTROL_PAGE_DEMAND_OFFSET + id] = value;
+        words[demandBitsOffset + (id >>> 5)]! |= 1 << (id & 31);
     }
     return words;
 }
@@ -47,9 +51,14 @@ describe("decodeMeshLoDGpuReadback", () => {
         expect(byId.get(5)).toBeCloseTo(0.25, 6);
     });
 
-    it("omits pages with zero benefit and reports an empty demand list", () => {
+    it("omits undemanded pages and reports an empty demand list", () => {
         const decoded = decodeMeshLoDGpuReadback(control(4, {}, {}), 4, () => 1);
         expect(decoded.demand).toEqual([]);
+    });
+
+    it("preserves demanded pages with zero priority across bitset word boundaries", () => {
+        const decoded = decodeMeshLoDGpuReadback(control(70, {}, { 0: 0, 31: 0, 32: 0, 63: 0, 69: 0 }), 70, () => 65536);
+        expect(decoded.demand).toEqual([0, 31, 32, 63, 69].map((pageId) => ({ pageId, priority: 0 })));
     });
 
     it("sorts demand by descending priority then ascending page id", () => {

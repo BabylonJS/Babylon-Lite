@@ -11,7 +11,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseMeshLoDContainer, toMeshLoDMetadata } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
+import {
+    PAGE_MAX_BYTES,
+    PAGE_TABLE_RECORD_SIZE,
+    SECTION_PAGE_TABLE,
+    parseMeshLoDContainer,
+    toMeshLoDMetadata,
+} from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import { isMeshLoDError, type MeshLoDErrorCode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import { buildMinimalContainer, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
 
@@ -224,6 +230,34 @@ describe("parseMeshLoDContainer — mutation matrix", () => {
             dv(b).setUint32(layout.pageTableOffset + 8, 32768, true);
             resealContainer(b);
         }, "MLOD_INVALID_LAYOUT"));
+
+    it.each([0, PAGE_MAX_BYTES + 1, 1024 * 1024 * 1024])("rejects CRC-correct decoded page allocation %i before decoding", (decodedBytes) =>
+        expectParseError((bytes, layout) => {
+            dv(bytes).setUint32(layout.pageTableOffset + 16, decodedBytes, true);
+            resealContainer(bytes);
+        }, "MLOD_INVALID_LAYOUT")
+    );
+
+    it("accepts the maximum decoded page allocation", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        dv(bytes).setUint32(layout.pageTableOffset + 16, PAGE_MAX_BYTES, true);
+        resealContainer(bytes);
+        expect(parseMeshLoDContainer(bytes).pageRecords[0]!.decodedBytes).toBe(PAGE_MAX_BYTES);
+    });
+
+    it("rejects an oversized fine-page declaration from a CRC-correct coarse bootstrap without fetching or decoding that page", () => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const parsed = parseMeshLoDContainer(bytes);
+        const finePageId = parsed.pageRecords.findIndex((page) => !page.pinned);
+        expect(finePageId).toBeGreaterThanOrEqual(0);
+        const tableOffset = parsed.sections[SECTION_PAGE_TABLE - 1]!.offset;
+        dv(bytes).setUint32(tableOffset + finePageId * PAGE_TABLE_RECORD_SIZE + 16, 1024 * 1024 * 1024, true);
+        resealContainer(bytes);
+        const bootstrap = bytes.subarray(0, parsed.header.bootstrapBytes);
+        expect(bootstrap.length).toBeLessThan(parsed.pageRecords[finePageId]!.offset + parsed.pageRecords[finePageId]!.storedBytes);
+        expect(() => parseMeshLoDContainer(bootstrap)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", pageId: finePageId, actual: 1024 * 1024 * 1024 }));
+    });
 
     it("cluster owning group out of range", () =>
         expectParseError((b, layout) => {
