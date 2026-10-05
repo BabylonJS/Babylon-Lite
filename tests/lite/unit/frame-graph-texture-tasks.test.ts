@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { disposeGpuResourceRetirements, waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { createMipMappedRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target-mipmaps";
 import { createClearTextureTask } from "../../../packages/babylon-lite/src/frame-graph/clear-texture-task";
 import { createCopyToTextureTask } from "../../../packages/babylon-lite/src/frame-graph/copy-to-texture-task";
@@ -51,7 +51,7 @@ function mockGpu(features: GPUFeatureName[] = []) {
         createRenderPipeline: vi.fn(() => ({}) as GPURenderPipeline),
         createBindGroup: vi.fn((_descriptor: GPUBindGroupDescriptor) => ({}) as GPUBindGroup),
         createCommandEncoder: vi.fn(() => encoder),
-        queue: { submit: vi.fn() },
+        queue: { submit: vi.fn(), onSubmittedWorkDone: vi.fn(() => Promise.resolve()) },
     };
     const engine = {
         _device: device,
@@ -93,7 +93,7 @@ function graphFor(task: Task) {
 }
 
 describe("ClearTextureTask", () => {
-    it("keeps a color wrapper compatible with live depth after a real surface RTT resize", () => {
+    it("keeps a color wrapper compatible with live depth after a real surface RTT resize", async () => {
         const { engine, encoder } = mockGpu();
         const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
         const facade = result.texture;
@@ -121,6 +121,7 @@ describe("ClearTextureTask", () => {
             disposeRenderTarget(wrapper);
             disposeRenderTargetTexture(result);
             disposeGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
         }
     });
 
