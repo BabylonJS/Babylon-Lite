@@ -199,6 +199,10 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const bindings = [scene._renderables[0]!.bind(engine, { ...SIG }), scene._renderables[0]!.bind(engine, { ...SIG })];
         setMeshLoDDebugView(asset, "lod-depth");
         bindings.forEach(flush);
+        const pass = createMockRenderPass();
+        for (const binding of bindings) {
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        }
         const ubo = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-material")!;
         expect(mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-material")).toHaveLength(1);
         const initialWrites = mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80).length;
