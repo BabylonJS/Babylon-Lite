@@ -2,6 +2,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, _resolveRenderTargetSize } from "../engine/render-target.js";
 import type { Task } from "../frame-graph/task.js";
+import { createTextureTaskPass } from "../frame-graph/texture-task-pass.js";
 import { _ensureComputeBindingGroups } from "../compute/compute-bindings.js";
 import type { ComputeBindingSet } from "../compute/compute-bindings.js";
 import { _getStorageBufferHandle } from "../resource/storage-buffer.js";
@@ -108,9 +109,11 @@ export function createRenderDrawTask(engine: EngineContext, config: RenderDrawTa
             if (task._disposed) {
                 throw new Error(`RenderDrawTask "${task.name}" has been disposed.`);
             }
+            task._passes.length = 0;
             const target = task._target;
             prepareTarget(target, engine);
             buildAttachments(task);
+            createTextureTaskPass(task, initialize, () => task.execute!(), reset);
         },
         execute(): number {
             let active = false;
@@ -203,12 +206,29 @@ export function createRenderDrawTask(engine: EngineContext, config: RenderDrawTa
             return drawCalls;
         },
         dispose(): void {
+            for (const pass of task._passes) {
+                pass._dispose();
+            }
+            task._passes.length = 0;
             task._draws.length = 0;
-            task._colorAttachment = null;
-            task._depthAttachment = null;
+            reset();
             task._disposed = true;
         },
     } as unknown as RenderDrawTask;
+
+    function initialize(): void {
+        const target = task._target;
+        if (target._eager) {
+            target._syncEager?.(engine);
+            buildAttachments(task);
+        }
+    }
+
+    function reset(): void {
+        task._colorAttachment = null;
+        task._depthAttachment = null;
+    }
+
     task._target = (task as { target: RenderTarget }).target = config.target;
     buildAttachments(task);
     return task;

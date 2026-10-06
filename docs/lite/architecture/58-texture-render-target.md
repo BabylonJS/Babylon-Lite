@@ -71,6 +71,12 @@ initialization, after every task has finished recording and before validating
 or caching attachments. Its record phase may have prepared the borrowing wrapper
 before preparing the source RTT. Initialization refreshes that earlier wrapper
 without allocating another ordinary render target.
+`RenderDrawTask` likewise registers a phase-2 initializer while retaining direct execution.
+The initializer synchronizes the task's current eager target, including a target changed
+by the setter during recording, then refreshes its cached attachments. Ordinary targets
+retain their record-time allocation and cache. This does not refresh views already captured
+in another task's bind group or copy command; those consumers must prepare their own
+resources after the source allocation is current.
 
 ## Pipeline Configuration
 
@@ -126,6 +132,14 @@ allocation task later in record order and verify that pass initialization and
 actual render-pass attachments use the replacement allocation. Ordinary borrowed
 targets must retain their allocations during initialization and unchanged-size
 rebuilds.
+Render-draw attachment regressions use the same real surface RTT with color and sampled-depth
+wrappers in both producer orders. Resize followed by synchronous `graph.build()` alone must
+refresh the wrapper and actual render-pass view, allocate each source attachment once,
+preserve format/sample signatures and cached pipelines, and remain correct after retirement
+and an unchanged rebuild. Enabled draws exercise pipeline lookup and draw encoding with GPU
+mocks, without claiming native pixel validation. Disabled execution must not suppress
+initialization, and disposing the draw task must leave its borrowed target alive. Ordinary
+targets must not allocate again in phase 2.
 
 `tests/lite/unit/copy-to-texture-task.test.ts` integrates the array factory, wrapper, and copy
 task. A 128x64 `rgba16float` source copied into layer 5, mip 1 of a 256x128 array must issue an

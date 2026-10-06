@@ -70,6 +70,14 @@ export interface FrameGraph {
 
 `_currentProcessedTask` is `null` outside of phase 1; calling `addRenderPass(...)` outside `record()` throws.
 
+`RenderDrawTask` retains direct execution but records one internal texture-task pass for phase-2 initialization.
+After all tasks have recorded, its initializer synchronizes the current eager target through a member-bound
+`_syncEager` call and refreshes its cached attachments. It never rebuilds ordinary targets. A borrowing wrapper
+can therefore observe a surface RTT replacement even when the source allocation task records later. Both phases
+remain synchronous. `buildFrameGraphTask()` initializes only its selected task, not other producers. Execute
+order and content dependencies remain the caller's responsibility. Re-recording replaces the initializer pass;
+task disposal clears it without releasing the borrowed target.
+
 ### `Task`
 
 ```typescript

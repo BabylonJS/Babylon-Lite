@@ -80,9 +80,13 @@ export function setRenderDrawTaskTarget(task: RenderDrawTask, target: RenderTarg
   across concurrent calls, including different targets with the same signature. Settlement removes
   only the matching in-flight promise. Success publishes only while the program remains live on its
   owning device; failure leaves the signature retryable and propagates to every waiting caller.
-- `RenderDrawTask` uses the `execute()` fast path (no `Pass` objects). Its `GPURenderPassDescriptor` and
-  attachments are built in `record()` (and when `setRenderDrawTaskTarget` changes the attachment set);
-  per frame only `view`, `loadOp` and `clearValue` are patched.
+- `RenderDrawTask` uses the direct `execute()` fast path and records one internal texture-task pass
+  solely to participate in frame-graph phase-2 initialization. Its `GPURenderPassDescriptor` and
+  attachments are built in `record()` (and when `setRenderDrawTaskTarget` changes the attachment set).
+  After every task has recorded, its initializer reads the current `_target`, synchronizes an eager
+  target through a member-bound `_syncEager` call and rebuilds the cached attachments. Ordinary targets
+  retain their record-time allocation and descriptor. Per frame only `view`, `loadOp` and `clearValue`
+  are patched; the frame graph calls direct `execute()` instead of executing the initializer pass.
 - Depth/stencil attachments include operations only for present aspects. `"stencil8"` omits all depth
   operations; `"depth24plus-stencil8"` and `"depth32float-stencil8"` include both depth and stencil.
   Clear/load changes apply to each present aspect, using the target's depth clear default and stencil
@@ -122,6 +126,15 @@ no material lighting or UV conversion.
   in the very next draw without another graph build. Size-only changes reuse the cached pipeline
   and, on target selection, the pass descriptor; execution reads the new attachment views.
   Switching a disposed task is rejected before synchronizing or allocating a target.
+- Phase-2 eager synchronization also runs for execution-disabled tasks. A surface RTT producer may
+  record after a borrowing draw task: resize followed by synchronous `graph.build()` must refresh the
+  draw's views and selected-mip dimensions before any execution. The initializer observes target
+  selection performed during another task's recording and propagates disposed-wrapper errors.
+  Re-recording replaces the single initializer pass. Pass disposal clears attachment caches without
+  disposing the task or target; task disposal clears its passes and draws without releasing borrowed
+  allocations. `buildFrameGraphTask()` initializes only its selected task and cannot prepare an
+  unrecorded producer. Execution order, content dependencies and other consumers' captured bind-group
+  views or copy endpoints remain the caller's responsibility.
 - When no draw is enabled and `clear` is false, the task opens no pass.
 - Disposal clears completed and in-flight pipeline caches. An outstanding compilation cannot
   repopulate a disposed shader, and its waiting preparation rejects instead of reporting success.
@@ -134,7 +147,7 @@ tasks. Lite shares compute's binding core while retaining a single frame encoder
 ## Dependencies
 
 `compute/compute-shader.ts`, `compute/compute-bindings.ts` (binding core), `engine/render-target.ts`,
-`resource/storage-buffer.ts`. Nothing imports this module except the root re-exports, so scenes that do not
+`resource/storage-buffer.ts`, `frame-graph/texture-task-pass.ts`. Nothing imports this module except the root re-exports, so scenes that do not
 use it carry zero bytes of it.
 
 ## Test Specification
@@ -155,6 +168,15 @@ the pass descriptor while refreshing its attachment view. A mutable descriptor o
 target owner exercises depth-format rebuilds by selecting the same target without another record,
 under both clear/load modes. Returning to depth-only removes stencil operations and reuses the
 original cached pipeline.
+
+`tests/lite/unit/frame-graph-texture-tasks.test.ts` covers real surface RTT color and sampled-depth
+wrappers with the producer first and last. Resize followed by `graph.build()` alone refreshes the
+wrapper and encoded attachment, preserves signatures and cached pipelines, allocates each source
+attachment once, and remains valid after retirement and unchanged rebuilds. Enabled draws exercise
+the actual shader/pipeline lookup and encoding path; these are mocked-GPU attachment tests, not pixel
+validation. Disabled execution still initializes. Additional cases cover target selection during
+recording, synchronous disposed-wrapper errors, one initializer per record, borrowed lifetime on
+disposal, and no extra ordinary-target allocation in phase 2.
 
 ## File Manifest
 

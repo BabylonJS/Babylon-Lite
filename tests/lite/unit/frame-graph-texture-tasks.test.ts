@@ -12,6 +12,9 @@ import { addTask } from "../../../packages/babylon-lite/src/frame-graph/frame-gr
 import { createGenerateMipMapsTask } from "../../../packages/babylon-lite/src/frame-graph/generate-mipmaps-task";
 import { createPostProcessTask } from "../../../packages/babylon-lite/src/frame-graph/post-process-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
+import { createRenderDraw } from "../../../packages/babylon-lite/src/render-shader/render-draw";
+import { addRenderDraw, createRenderDrawTask, setRenderDrawTaskTarget } from "../../../packages/babylon-lite/src/render-shader/render-draw-task";
+import { createRenderBindingSet, createRenderShader, disposeRenderBindingSet, disposeRenderShader } from "../../../packages/babylon-lite/src/render-shader/render-shader";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
@@ -49,7 +52,7 @@ function mockGpu(features: GPUFeatureName[] = []) {
         createSampler: vi.fn(() => ({}) as GPUSampler),
         createBindGroupLayout: vi.fn(() => ({}) as GPUBindGroupLayout),
         createPipelineLayout: vi.fn(() => ({}) as GPUPipelineLayout),
-        createRenderPipeline: vi.fn(() => ({}) as GPURenderPipeline),
+        createRenderPipeline: vi.fn((_descriptor: GPURenderPipelineDescriptor) => ({}) as GPURenderPipeline),
         createBindGroup: vi.fn((_descriptor: GPUBindGroupDescriptor) => ({}) as GPUBindGroup),
         createCommandEncoder: vi.fn(() => encoder),
         queue: { submit: vi.fn(), onSubmittedWorkDone: vi.fn(() => Promise.resolve()) },
@@ -92,6 +95,195 @@ function graphFor(task: Task) {
     graph.build();
     return graph;
 }
+
+describe("RenderDrawTask resize ordering", () => {
+    it.each([
+        ["color", false],
+        ["depth", false],
+        ["color", true],
+        ["depth", true],
+    ] as const)("refreshes a %s wrapper with producer-first=%s", async (attachment, producerFirst) => {
+        const { engine, device, encoder, pass } = mockGpu();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+        const facade = attachment === "color" ? result.texture : result.depthTexture!;
+        const wrapper = createTextureRenderTarget(engine, facade);
+        const shader = createRenderShader(engine, {
+            renderSource:
+                "@vertex fn vertexMain() -> @builtin(position) vec4f { return vec4f(0.0, 0.0, 0.0, 1.0); }\n" +
+                (attachment === "color" ? "@fragment fn fragmentMain() -> @location(0) vec4f { return vec4f(1.0); }" : "@fragment fn fragmentMain() {}"),
+        });
+        const bindings = createRenderBindingSet(shader, {});
+        const task = createRenderDrawTask(engine, { target: wrapper, clear: true });
+        addRenderDraw(task, createRenderDraw(shader, bindings, { vertexCount: 3 }));
+        const sourceTask = createClearTextureTask({ targetTexture: result.rt, clearColor: false }, engine);
+        const graph = createFrameGraph(engine);
+        addTask(graph, producerFirst ? sourceTask : task);
+        addTask(graph, producerFirst ? task : sourceTask);
+        try {
+            graph.build();
+            expect(graph.execute()).toBe(1);
+            expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+            encoder.beginRenderPass.mockClear();
+            pass.draw.mockClear();
+            pass.setPipeline.mockClear();
+            const previous = facade.texture;
+            const originalView = wrapper._colorView ?? wrapper._depthView;
+            const signature = [wrapper._descriptor.format, wrapper._descriptor.dFormat, wrapper._descriptor.samples];
+            const allocations = device.createTexture.mock.calls.length;
+            task.executionEnabled = false;
+            engine.canvas.width = 79;
+            engine.canvas.height = 41;
+
+            expect(graph.build()).toBeUndefined();
+            const current = facade.texture;
+            const currentView = wrapper._colorView ?? wrapper._depthView;
+            expect(current).not.toBe(previous);
+            expect(wrapper._colorTexture ?? wrapper._depthTexture).toBe(current);
+            expect(currentView).not.toBe(originalView);
+            expect(current.createView).toHaveBeenLastCalledWith({ dimension: "2d", baseArrayLayer: 0, arrayLayerCount: 1, baseMipLevel: 0, mipLevelCount: 1 });
+            expect([wrapper._width, wrapper._height]).toEqual([79, 41]);
+            expect(wrapper._descriptor.size).toEqual({ width: 79, height: 41 });
+            expect([wrapper._descriptor.format, wrapper._descriptor.dFormat, wrapper._descriptor.samples]).toEqual(signature);
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations + 2);
+            expect(previous.destroy).not.toHaveBeenCalled();
+            expect(graph.execute()).toBe(0);
+            expect(encoder.beginRenderPass).not.toHaveBeenCalled();
+            task.executionEnabled = true;
+            expect(graph.execute()).toBe(1);
+            expect(encoder.beginRenderPass).toHaveBeenCalledOnce();
+            expect(pass.draw).toHaveBeenCalledOnce();
+            expect(pass.draw).toHaveBeenLastCalledWith(3, 1, 0, 0);
+            expect(pass.setPipeline).toHaveBeenCalledOnce();
+            expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+            const descriptor = encoder.beginRenderPass.mock.calls[0]![0];
+            if (attachment === "color") {
+                expect(Array.from(descriptor.colorAttachments)[0]).toMatchObject({ view: currentView, loadOp: "clear" });
+            } else {
+                expect(descriptor.depthStencilAttachment).toMatchObject({ view: currentView, depthLoadOp: "clear" });
+                expect(descriptor.depthStencilAttachment).not.toHaveProperty("stencilLoadOp");
+            }
+            await waitForGpuResourceRetirements(engine);
+            expect(previous.destroy).toHaveBeenCalledOnce();
+            expect(current.destroy).not.toHaveBeenCalled();
+            expect(graph.execute()).toBe(1);
+            expect(encoder.beginRenderPass).toHaveBeenCalledTimes(2);
+            const laterDescriptor = encoder.beginRenderPass.mock.calls[1]![0];
+            const laterView = Array.from(laterDescriptor.colorAttachments)[0]?.view ?? laterDescriptor.depthStencilAttachment?.view;
+            expect(laterView).toBe(currentView);
+            graph.build();
+            expect(task._passes).toHaveLength(1);
+            expect(facade.texture).toBe(current);
+            expect(wrapper._colorView ?? wrapper._depthView).toBe(currentView);
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations + 2);
+            graph.dispose();
+            expect(task._passes).toHaveLength(0);
+            expect(wrapper._colorTexture ?? wrapper._depthTexture).toBe(current);
+            expect(current.destroy).not.toHaveBeenCalled();
+        } finally {
+            task.dispose();
+            sourceTask.dispose();
+            disposeRenderBindingSet(bindings);
+            disposeRenderShader(shader);
+            disposeRenderTarget(wrapper);
+            disposeRenderTargetTexture(result);
+            disposeGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+
+    it("does not reallocate ordinary targets during initialization or unchanged rebuilds", () => {
+        const { engine, device, encoder } = mockGpu();
+        const rt = target(engine, { size: engine });
+        const task = createRenderDrawTask(engine, { target: rt, clear: true });
+        try {
+            const allocations = device.createTexture.mock.calls.length;
+            const graph = graphFor(task);
+            task.record();
+            task.record();
+            expect(task._passes).toHaveLength(1);
+            graph.build();
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations);
+            engine.canvas.width = 79;
+            engine.canvas.height = 41;
+            graph.build();
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations + 1);
+            const view = rt._colorView;
+            graph.build();
+            expect(rt._colorView).toBe(view);
+            expect(task._passes).toHaveLength(1);
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations + 1);
+            graph.execute();
+            expect(encoder.beginRenderPass).toHaveBeenCalledOnce();
+        } finally {
+            task.dispose();
+            disposeRenderTarget(rt);
+        }
+    });
+
+    it("initializes the target selected during a later producer's record", async () => {
+        const { engine, encoder } = mockGpu();
+        const first = target(engine);
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const wrapper = createTextureRenderTarget(engine, result.texture);
+        const task = createRenderDrawTask(engine, { target: first, clear: true });
+        const sourceTask = createClearTextureTask({ targetTexture: result.rt, clearColor: false }, engine);
+        const record = sourceTask.record;
+        sourceTask.record = () => {
+            setRenderDrawTaskTarget(task, wrapper);
+            record();
+        };
+        const graph = createFrameGraph(engine);
+        addTask(graph, task);
+        addTask(graph, sourceTask);
+        try {
+            graph.build();
+            const originalView = wrapper._colorView;
+            setRenderDrawTaskTarget(task, first);
+            engine.canvas.width = 79;
+            engine.canvas.height = 41;
+            graph.build();
+            expect(task.target).toBe(wrapper);
+            expect(wrapper._colorTexture).toBe(result.texture.texture);
+            expect(wrapper._colorView).not.toBe(originalView);
+            expect([wrapper._width, wrapper._height]).toEqual([79, 41]);
+            graph.execute();
+            expect(encoder.beginRenderPass).toHaveBeenCalledOnce();
+            expect(Array.from(encoder.beginRenderPass.mock.calls[0]![0].colorAttachments)[0]?.view).toBe(wrapper._colorView);
+        } finally {
+            graph.dispose();
+            disposeRenderTarget(first);
+            disposeRenderTarget(wrapper);
+            disposeRenderTargetTexture(result);
+            disposeGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+
+    it("propagates wrapper disposal during recording synchronously", async () => {
+        const { engine } = mockGpu();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const wrapper = createTextureRenderTarget(engine, result.texture);
+        const task = createRenderDrawTask(engine, { target: wrapper });
+        const graph = createFrameGraph(engine);
+        addTask(graph, task);
+        addTask(graph, {
+            name: "dispose-wrapper",
+            engine,
+            _passes: [],
+            record: () => disposeRenderTarget(wrapper),
+            dispose: vi.fn(),
+        });
+        try {
+            expect(() => graph.build()).toThrow("Texture render target has been disposed.");
+        } finally {
+            graph.dispose();
+            disposeRenderTarget(wrapper);
+            disposeRenderTargetTexture(result);
+            disposeGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+});
 
 describe("ClearTextureTask", () => {
     it("keeps a color wrapper compatible with live depth after a real surface RTT resize", async () => {
