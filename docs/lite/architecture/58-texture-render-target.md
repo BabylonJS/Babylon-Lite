@@ -66,6 +66,11 @@ from the new allocation at the selected mip, using the same one-pixel minimum.
 This applies to color and depth/stencil wrappers. A real surface-sized RTT may
 replace its facade allocation before the borrowing wrapper is synchronized;
 the wrapper then exposes the live dimensions to attachment compatibility checks.
+`ClearTextureTask` invokes the eager synchronization hook again during pass
+initialization, after every task has finished recording and before validating
+or caching attachments. Its record phase may have prepared the borrowing wrapper
+before preparing the source RTT. Initialization refreshes that earlier wrapper
+without allocating another ordinary render target.
 
 ## Pipeline Configuration
 
@@ -112,8 +117,15 @@ Replacement cases cover changed dimensions at mip zero and a nonzero selected
 mip, including depth/stencil attachments. A real
 `createSurfaceRenderTargetTexture` resize regression in
 `tests/lite/unit/frame-graph-texture-tasks.test.ts` rebuilds a clear task using
-the color wrapper with the original RTT's depth attachment. Both live dimensions
-and attachment views must be refreshed without a compatibility error.
+the color wrapper with the original RTT's depth attachment using only
+`graph.build()`, without manually building the source RTT after resize.
+Both live dimensions and attachment views must be refreshed without a
+compatibility error, and the source's color and depth allocations must each be
+replaced only once. Additional color and depth wrapper cases place the source's
+allocation task later in record order and verify that pass initialization and
+actual render-pass attachments use the replacement allocation. Ordinary borrowed
+targets must retain their allocations during initialization and unchanged-size
+rebuilds.
 
 `tests/lite/unit/copy-to-texture-task.test.ts` integrates the array factory, wrapper, and copy
 task. A 128x64 `rgba16float` source copied into layer 5, mip 1 of a 256x128 array must issue an

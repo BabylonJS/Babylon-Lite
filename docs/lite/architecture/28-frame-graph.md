@@ -498,8 +498,12 @@ synchronizes eager targets, allocates missing ordinary attachments, and rebuilds
 ordinary attachments when their resolved dimensions change. Allocation remains
 caller-owned; disposing the clear task never destroys its borrowed targets.
 The record phase then creates one pass with dependencies on all referenced targets.
-Its phase-2 initializer validates and caches the final attachment views after
-all producer records, including an owning render task that may replace an allocation.
+Its phase-2 initializer synchronizes each color and depth target's `_syncEager`
+hook before validating and caching the final attachment views after all producer
+records, including an owning render task that may replace an allocation.
+This refreshes borrowing texture wrappers even when their source was resized
+later in the same record or by a later task. Ordinary targets are not rebuilt
+again during initialization; their allocation remains in the record phase.
 Standalone clear-to-copy chains therefore work on their first build and resize
 without a separate allocation task or manual target build.
 Execution patches live attachment views and scalar clear settings, begins and ends

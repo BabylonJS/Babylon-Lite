@@ -17,6 +17,7 @@ import { setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surfac
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { createTextureRenderTarget } from "../../../packages/babylon-lite/src/texture/texture-render-target";
+import { withSampledDepthTexture } from "../../../packages/babylon-lite/src/texture/rtt-depth";
 import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
 import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
@@ -94,7 +95,7 @@ function graphFor(task: Task) {
 
 describe("ClearTextureTask", () => {
     it("keeps a color wrapper compatible with live depth after a real surface RTT resize", async () => {
-        const { engine, encoder } = mockGpu();
+        const { engine, device, encoder } = mockGpu();
         const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
         const facade = result.texture;
         const wrapper = createTextureRenderTarget(engine, facade);
@@ -102,11 +103,12 @@ describe("ClearTextureTask", () => {
         const task = createClearTextureTask({ targetTexture: wrapper, depthTexture: result.rt, clearDepth: true }, engine);
         try {
             const graph = graphFor(task);
+            const allocationsBeforeResize = device.createTexture.mock.calls.length;
             engine.canvas.width = 79;
             engine.canvas.height = 41;
-            buildRenderTarget(result.rt, engine);
 
             expect(() => graph.build()).not.toThrow();
+            expect(device.createTexture).toHaveBeenCalledTimes(allocationsBeforeResize + 2);
             expect(result.texture).toBe(facade);
             expect(wrapper._colorTexture).toBe(facade.texture);
             expect(wrapper._colorView).not.toBe(originalView);
@@ -125,8 +127,48 @@ describe("ClearTextureTask", () => {
         }
     });
 
+    it.each(["color", "depth"] as const)("refreshes a %s wrapper after a later task records its resized source", async (attachment) => {
+        const { engine, device, encoder } = mockGpu();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+        const facade = attachment === "color" ? result.texture : result.depthTexture!;
+        const wrapper = createTextureRenderTarget(engine, facade);
+        const originalView = attachment === "color" ? wrapper._colorView : wrapper._depthView;
+        const task = createClearTextureTask(attachment === "color" ? { targetTexture: wrapper } : { depthTexture: wrapper, clearDepth: true }, engine);
+        const sourceTask = createClearTextureTask({ targetTexture: result.rt, depthTexture: result.rt }, engine);
+        try {
+            const graph = createFrameGraph(engine);
+            addTask(graph, task);
+            addTask(graph, sourceTask);
+            graph.build();
+            const allocationsBeforeResize = device.createTexture.mock.calls.length;
+            engine.canvas.width = 79;
+            engine.canvas.height = 41;
+
+            expect(() => graph.build()).not.toThrow();
+            expect(device.createTexture).toHaveBeenCalledTimes(allocationsBeforeResize + 2);
+            expect(wrapper._colorTexture ?? wrapper._depthTexture).toBe(facade.texture);
+            expect(attachment === "color" ? wrapper._colorView : wrapper._depthView).not.toBe(originalView);
+            expect([wrapper._width, wrapper._height]).toEqual([79, 41]);
+            expect(wrapper._descriptor.size).toEqual({ width: 79, height: 41 });
+            expect(graph.execute()).toBe(0);
+            const descriptor = encoder.beginRenderPass.mock.calls[0]![0];
+            if (attachment === "color") {
+                expect(Array.from(descriptor.colorAttachments)[0]).toMatchObject({ view: wrapper._colorView });
+            } else {
+                expect(descriptor.depthStencilAttachment).toMatchObject({ view: wrapper._depthView, depthLoadOp: "clear" });
+            }
+        } finally {
+            task.dispose();
+            sourceTask.dispose();
+            disposeRenderTarget(wrapper);
+            disposeRenderTargetTexture(result);
+            disposeGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+
     it("matches Babylon.js defaults and aliases borrowed color/depth outputs", () => {
-        const { engine, encoder, pass } = mockGpu();
+        const { engine, device, encoder, pass } = mockGpu();
         const color = target(engine, { dFormat: "depth24plus-stencil8" });
         const depth = target(engine, { format: undefined, dFormat: "depth32float" });
         const task = createClearTextureTask({ targetTexture: color, depthTexture: depth }, engine);
@@ -135,7 +177,10 @@ describe("ClearTextureTask", () => {
         expect(task.outputTexture).toBe(color);
         expect(task.outputDepthTexture).toBe(depth);
 
+        const allocationsBeforeBuild = device.createTexture.mock.calls.length;
         const graph = graphFor(task);
+        graph.build();
+        expect(device.createTexture).toHaveBeenCalledTimes(allocationsBeforeBuild);
         expect(graph.execute()).toBe(0);
         const descriptor = encoder.beginRenderPass.mock.calls[0]![0] as GPURenderPassDescriptor;
         expect(Array.from(descriptor.colorAttachments)).toEqual([{ view: color._colorView, loadOp: "clear", storeOp: "store", clearValue: task.color }]);

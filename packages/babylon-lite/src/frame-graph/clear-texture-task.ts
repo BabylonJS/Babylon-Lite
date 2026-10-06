@@ -120,6 +120,7 @@ export function createClearTextureTask(config: ClearTextureTaskConfig, engine: E
         const first = targets[0] ?? depthTarget!;
         const colorTextures = new Set<GPUTexture>();
         for (const target of targets) {
+            target._syncEager?.(engine);
             if (!target._descriptor.format) {
                 throw new Error(`ClearTextureTask "${task.name}": targetTexture must have a color attachment.`);
             }
@@ -135,6 +136,7 @@ export function createClearTextureTask(config: ClearTextureTaskConfig, engine: E
             }
         }
         if (depthTarget) {
+            depthTarget._syncEager?.(engine);
             const format = depthTarget._descriptor.dFormat;
             if (!format) {
                 throw new Error(`ClearTextureTask "${task.name}": depthTexture must have a depth/stencil attachment.`);
