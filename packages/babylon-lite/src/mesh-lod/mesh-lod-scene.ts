@@ -110,9 +110,9 @@ async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneC
         const rebuild = (): Renderable | null => {
             recoverMeshLoDAssets(engine, scene);
             const next = pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
+            batch.renderable = next ?? undefined;
             if (next) {
                 next._rebuild = rebuild;
-                batch.renderable = next;
             }
             return next;
         };
@@ -183,7 +183,7 @@ export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoD
     if (scene._built && !existingBatch?.renderable) {
         throw createMeshLoDError(
             "MLOD_INVALID_OPTION",
-            "Add MeshLoD asset/material batches before registering the scene; only instances of existing batches can be added afterward"
+            "Add MeshLoD asset/material batches before registering the scene; only instances of batches with a live renderable can be added afterward"
         );
     }
     const registry = getOrCreateRegistry(scene);

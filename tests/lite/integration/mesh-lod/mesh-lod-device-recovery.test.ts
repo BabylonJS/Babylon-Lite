@@ -17,7 +17,7 @@ import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../..
 import { rebuildRenderables } from "../../../../packages/babylon-lite/src/engine/recovery-rebuild.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { clearMeshLoDCpuPageCache } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
-import type { MeshLoDAsset, MeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAsset, MeshLoDInstance, MeshLoDSelectionMode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -62,15 +62,16 @@ interface Harness {
     scene: SceneContext;
 }
 
-async function setup(): Promise<Harness> {
+async function setup(selectionMode: MeshLoDSelectionMode = "gpu"): Promise<Harness> {
     const engine = createMockEngine().engine;
-    const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
+    const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
     const scene = fakeScene(engine);
     const instance = createMeshLoDInstance(asset, {} as PbrMaterialProps);
     addMeshLoDInstanceToScene(scene, instance);
-    for (const builder of scene._deferredBuilders) {
+    for (const builder of scene._deferredBuilders.splice(0)) {
         await builder();
     }
+    scene._built = true;
     scene._renderables[0]!.bind(engine, SIG).update!(CONTEXT); // one live frame on device A
     return { engine, asset, instance, scene };
 }
@@ -148,13 +149,45 @@ describe("MeshLoD device recovery", () => {
         expect(scene._renderables).toHaveLength(0); // the failed asset's batch is skipped
     });
 
-    it("does not resurrect a batch whose last instance was removed", async () => {
-        const { engine, asset, instance, scene } = await setup();
+    it.each(["cpu", "gpu"] as const)("rejects reactivation of an empty batch dropped during recovery (%s)", async (selectionMode) => {
+        const { engine, asset, instance, scene } = await setup(selectionMode);
+        const registry = scene._meshLoDRegistry!;
+        const batch = registry.batches[0]!;
+        expect(batch.renderable).toBe(scene._renderables[0]);
+        expect(scene._deferredBuilders).toHaveLength(0);
         removeMeshLoDInstanceFromScene(scene, instance);
 
         await recover(engine, scene);
 
         expect(scene._renderables).toHaveLength(0);
+        expect(batch.renderable).toBeUndefined();
         expect(asset._runtime.gpuDevice).toBe(engine._device);
+        expect(() => addMeshLoDInstanceToScene(scene, instance)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+        expect(batch.instances).toHaveLength(0);
+        expect(batch.priorFineRequired.size).toBe(0);
+        expect(scene._meshLoDRegistry).toBe(registry);
+        expect(registry.batches).toEqual([batch]);
+        expect(registry.byAsset.get(asset)?.get(instance.material)).toBe(batch);
+        expect(registry.builderRegistered).toBe(true);
+        expect(scene._deferredBuilders).toHaveLength(0);
+        expect(scene._renderables).toHaveLength(0);
+    });
+
+    it.each(["cpu", "gpu"] as const)("retains remove/re-add support while the recovered batch has a live renderable (%s)", async (selectionMode) => {
+        const { engine, instance, scene } = await setup(selectionMode);
+        const batch = scene._meshLoDRegistry!.batches[0]!;
+        const oldRenderable = batch.renderable;
+        await recover(engine, scene);
+        expect(batch.renderable).toBe(scene._renderables[0]);
+        expect(batch.renderable).not.toBe(oldRenderable);
+        removeMeshLoDInstanceFromScene(scene, instance);
+        addMeshLoDInstanceToScene(scene, instance);
+        expect(batch.instances).toEqual([instance]);
+        expect(scene._deferredBuilders).toHaveLength(0);
+
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        binding.update!(CONTEXT);
+        const pass = createMockRenderPass();
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
     });
 });

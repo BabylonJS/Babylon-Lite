@@ -400,6 +400,13 @@ Renderable rebuild thunks recreate material packets and GPU selection
 state on the new device. Retained pinned bytes are decoded/uploaded again;
 fine pages can stream again on demand. A missing pinned page fails recovery
 explicitly instead of displaying incomplete coarse geometry.
+Each successful rebuild synchronizes the batch's `renderable` marker with its
+result, including clearing it when an empty batch returns `null` and recovery
+omits that batch from the scene's renderables. After registration, instance
+additions require an existing batch with a live renderable. Reactivating a batch
+dropped during recovery rejects with `MLOD_INVALID_OPTION` before changing its
+instances or registering deferred work; the one-time scene builder is not replayed.
+An empty batch that still has a live renderable can accept an instance again.
 
 ## 15. Demo
 
@@ -435,6 +442,9 @@ span. Shared ordinary-PBR/MeshLoD texture tests cover both selection modes,
 target retirement, instance-buffer growth, and fenced, idempotent batch teardown.
 Registration/build gates cover public lightmap and dielectric-reflectance
 setters, plus translated-camera floating-origin configurations in both modes.
+Recovery tests drain the initial builder, remove the last instance, recover,
+and verify that reactivation rejects without changing registration in both
+selection modes. Live recovered batches retain their remove/re-add behavior.
 Alpha-only rejection covers omitted and false blend flags at registration,
 deferred build, and dirty updates in both selection modes. Static instance SSE
 overrides are compared in float32, matching their cached/uploaded representation;
