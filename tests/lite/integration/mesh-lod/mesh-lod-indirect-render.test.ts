@@ -16,7 +16,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
-import { PAGE_STATE_WORDS, VERTEX_WORDS, packClusters, runMeshLoDGpuExpansion } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
+import {
+    INSTANCE_WORDS,
+    PAGE_STATE_WORDS,
+    VERTEX_WORDS,
+    packClusters,
+    packInstanceRecord,
+    runMeshLoDGpuExpansion,
+} from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDCluster } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
@@ -51,7 +58,7 @@ function cluster(over: Partial<MeshLoDCluster> = {}): MeshLoDCluster {
 describe("MeshLoD GPU expansion model", () => {
     // One page: 3 vertices (24 B each = 72 B) then 3 u16 indices [0,1,2] at byte 72.
     function tinyArena(indices: number[]): Uint32Array {
-        const arena = new Uint32Array(20);
+        const arena = new Uint32Array(Math.ceil((72 + indices.length * 2) / 4));
         for (let i = 0; i < indices.length; i++) {
             const byte = 72 + i * 2;
             arena[byte >>> 2]! |= (indices[i]! & 0xffff) << ((byte & 2) * 8);
@@ -67,12 +74,21 @@ describe("MeshLoD GPU expansion model", () => {
         return ps;
     }
 
+    function instances(signs: number[]): Float32Array {
+        const data = new Float32Array(signs.length * INSTANCE_WORDS);
+        signs.forEach((sign, slot) =>
+            packInstanceRecord(data, new Uint32Array(data.buffer), slot * INSTANCE_WORDS, [sign, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], true, slot)
+        );
+        return data;
+    }
+
     it("expands one cluster into exact absolute arena vertex-word offsets", () => {
         const result = runMeshLoDGpuExpansion({
             selected: [{ clusterId: 0, instanceId: 0 }],
             clusters: packClusters([cluster({ indexOffset: 0, triangleCount: 1 })]),
             pageState: pageState(),
             arena: tinyArena([0, 1, 2]),
+            instances: instances([-1]),
             drawVertexCapacity: 16,
         });
         expect(result.vertexCount).toBe(3);
@@ -81,15 +97,36 @@ describe("MeshLoD GPU expansion model", () => {
         expect(Array.from(result.drawVertices.slice(0, 12))).toEqual([0 * VERTEX_WORDS, 0, 0, 0, 1 * VERTEX_WORDS, 0, 0, 0, 2 * VERTEX_WORDS, 0, 0, 0]);
     });
 
-    it("honors the cluster index winding order", () => {
+    it("retains RH-to-LH cluster winding order", () => {
         const result = runMeshLoDGpuExpansion({
             selected: [{ clusterId: 0, instanceId: 2 }],
             clusters: packClusters([cluster()]),
             pageState: pageState(),
             arena: tinyArena([2, 0, 1]),
+            instances: instances([-1, -1, -1]),
             drawVertexCapacity: 16,
         });
         expect(Array.from(result.drawVertices.slice(0, 12))).toEqual([2 * VERTEX_WORDS, 0, 2, 0, 0 * VERTEX_WORDS, 0, 2, 0, 1 * VERTEX_WORDS, 0, 2, 0]);
+    });
+
+    it("normalizes opposite determinant signs in one draw and updates a runtime reflection", () => {
+        const data = instances([-1, 1]);
+        const expand = () =>
+            runMeshLoDGpuExpansion({
+                selected: [
+                    { clusterId: 0, instanceId: 0 },
+                    { clusterId: 0, instanceId: 1 },
+                ],
+                clusters: packClusters([cluster({ triangleCount: 2 })]),
+                pageState: pageState(),
+                arena: tinyArena([0, 1, 2, 2, 1, 0]),
+                instances: data,
+                drawVertexCapacity: 12,
+            });
+        const offsets = (vertices: Uint32Array) => Array.from(vertices).filter((_, word) => word % 4 === 0);
+        expect(offsets(expand().drawVertices)).toEqual([0, 6, 12, 12, 6, 0, 0, 12, 6, 12, 0, 6]);
+        data.set(instances([1]), 0);
+        expect(offsets(expand().drawVertices)).toEqual([0, 12, 6, 12, 0, 6, 0, 12, 6, 12, 0, 6]);
     });
 
     it("scales expanded vertices with selected meshlet count", () => {
@@ -102,6 +139,7 @@ describe("MeshLoD GPU expansion model", () => {
             clusters: packClusters([cluster()]),
             pageState: pageState(),
             arena: tinyArena([0, 1, 2]),
+            instances: instances([-1, -1]),
             drawVertexCapacity: 64,
         });
         expect(result.vertexCount).toBe(9); // 3 meshlets × 3 indices
@@ -113,6 +151,7 @@ describe("MeshLoD GPU expansion model", () => {
             clusters: packClusters([cluster()]),
             pageState: pageState(),
             arena: tinyArena([0, 1, 2]),
+            instances: instances([-1]),
             drawVertexCapacity: 2,
         });
         expect(result.overflow).toBe(true);

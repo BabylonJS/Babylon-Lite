@@ -43,6 +43,7 @@ import {
     disposeMeshLoDGpuBatchState,
     disposeMeshLoDGpuInstanceState,
     getMeshLoDUpdateBatch,
+    meshLoDTriangleIndex,
     packInstanceRecord,
     queueMeshLoDGpuSelection,
 } from "../../mesh-lod/mesh-lod-selection-gpu.js";
@@ -394,6 +395,7 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
             selection.instance.screenSpaceError
         );
         instanceIndex++;
+        const handedness = inst[localInstance * INSTANCE_WORDS + 23]!;
         for (const clusterId of selection.result.selectedClusterIds) {
             const cluster = runtime.clusters[clusterId]!;
             const page = runtime.gpu.pages[cluster.pageId];
@@ -424,7 +426,7 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
             const count = cluster.triangleCount * 3;
             selectedMeshlets++;
             for (let k = 0; k < count; k++) {
-                const localVertex = indices[start + k]!;
+                const localVertex = indices[start + meshLoDTriangleIndex(k, handedness)]!;
                 const o = vertexCount * 4;
                 draw[o] = arenaWordBase + localVertex * VERTEX_WORDS;
                 draw[o + 1] = clusterId;

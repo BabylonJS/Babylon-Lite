@@ -86,9 +86,10 @@ export function meshLoDConeCullMargin(
     const n2x = fsub(fmul(m[1]!, m[6]!), fmul(m[2]!, m[5]!));
     const n2y = fsub(fmul(m[2]!, m[4]!), fmul(m[0]!, m[6]!));
     const n2z = fsub(fmul(m[0]!, m[5]!), fmul(m[1]!, m[4]!));
-    let ax = fadd(fadd(fmul(n0x, normalCone[0]), fmul(n1x, normalCone[1])), fmul(n2x, normalCone[2]));
-    let ay = fadd(fadd(fmul(n0y, normalCone[0]), fmul(n1y, normalCone[1])), fmul(n2y, normalCone[2]));
-    let az = fadd(fadd(fmul(n0z, normalCone[0]), fmul(n1z, normalCone[1])), fmul(n2z, normalCone[2]));
+    const sign = fadd(fadd(fmul(m[0]!, n0x), fmul(m[1]!, n0y)), fmul(m[2]!, n0z)) < 0 ? -1 : 1;
+    let ax = fmul(sign, fadd(fadd(fmul(n0x, normalCone[0]), fmul(n1x, normalCone[1])), fmul(n2x, normalCone[2])));
+    let ay = fmul(sign, fadd(fadd(fmul(n0y, normalCone[0]), fmul(n1y, normalCone[1])), fmul(n2y, normalCone[2])));
+    let az = fmul(sign, fadd(fadd(fmul(n0z, normalCone[0]), fmul(n1z, normalCone[1])), fmul(n2z, normalCone[2])));
     const axisLength = fsqrt(fadd(fadd(fmul(ax, ax), fmul(ay, ay)), fmul(az, az)));
     if (!(axisLength > 1e-8)) {
         return Number.POSITIVE_INFINITY;

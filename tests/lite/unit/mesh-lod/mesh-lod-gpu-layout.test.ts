@@ -164,6 +164,7 @@ describe("MeshLoD GPU metadata layout", () => {
             clusters: packClusters([makeCluster({ pageId: 0, triangleCount: 1, indexOffset: 0 })]),
             pageState: new Uint32Array(PAGE_STATE_WORDS),
             arena: new Uint32Array(2),
+            instances: new Float32Array(INSTANCE_WORDS),
             drawVertexCapacity: count * 3,
         });
         expect(result.vertexCount).toBe(count * 3);

@@ -571,7 +571,7 @@ export interface MeshLoDGpuExpansionInput {
     readonly drawVertexCapacity: number;
     readonly debugMode?: number;
     readonly groups?: Uint32Array;
-    readonly instances?: Float32Array;
+    readonly instances: Float32Array;
     readonly cameraPos?: readonly [number, number, number];
     readonly coneCull?: boolean;
 }
@@ -587,6 +587,13 @@ function readArenaU16(arena: Uint32Array, byteOffset: number): number {
     const word = arena[byteOffset >>> 2]!;
     const shift = (byteOffset & 2) * 8;
     return (word >>> shift) & 0xffff;
+}
+
+/** MLOD v1 preserves glTF RH/CCW triangles: positive determinants need a corner
+ *  swap for the shared CCW pipeline in Lite's LH camera convention. */
+export function meshLoDTriangleIndex(index: number, handedness: number): number {
+    const corner = index % 3;
+    return handedness > 0 && corner !== 0 ? index + 3 - 2 * corner : index;
 }
 
 /** Run the deterministic GPU expansion model — the exact TS mirror of the WGSL
@@ -609,6 +616,7 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
         const groupId = input.clusters[cBase + 5]!;
         const pageFlags = input.pageState[psBase]!;
         const mode = input.debugMode ?? 0;
+        const handedness = input.instances[instanceId * INSTANCE_WORDS + 23]!;
         let debug = meshLoDClusterDebugAttr(
             mode,
             groupId,
@@ -623,7 +631,7 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
             const packed = input.clusters[cBase + 13]!;
             const snorm = (shift: number): number => ((packed << (24 - shift)) >> 24) / 127;
             const margin =
-                input.instances && input.cameraPos && input.coneCull !== false
+                input.cameraPos && input.coneCull !== false
                     ? meshLoDConeCullMargin(
                           input.instances.subarray(instanceId * INSTANCE_WORDS, instanceId * INSTANCE_WORDS + 16),
                           input.cameraPos,
@@ -641,7 +649,7 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
                 overflow = true;
                 continue;
             }
-            const localVertex = readArenaU16(input.arena, arenaIndexByte + (clusterIndexOffset + k) * 2);
+            const localVertex = readArenaU16(input.arena, arenaIndexByte + (clusterIndexOffset + meshLoDTriangleIndex(k, handedness)) * 2);
             const o = dst * 4;
             draw[o] = arenaVertexWord + localVertex * VERTEX_WORDS;
             draw[o + 1] = clusterId;

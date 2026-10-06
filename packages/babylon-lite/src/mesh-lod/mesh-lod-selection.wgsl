@@ -121,7 +121,7 @@ fn coneCullMargin(iBase: u32, cBase: u32) -> f32 {
   let n0 = vec3<f32>(instances[iBase + 16u], instances[iBase + 17u], instances[iBase + 18u]);
   let n1 = vec3<f32>(instances[iBase + 20u], instances[iBase + 21u], instances[iBase + 22u]);
   let n2 = vec3<f32>(instances[iBase + 24u], instances[iBase + 25u], instances[iBase + 26u]);
-  let axis = normalize((n0 * localAxis.x + n1 * localAxis.y + n2 * localAxis.z) * instances[iBase + 23u]);
+  let axis = normalize(n0 * localAxis.x + n1 * localAxis.y + n2 * localAxis.z);
   let center = vec3<f32>(metaF32(cBase), metaF32(cBase + 1u), metaF32(cBase + 2u));
   let p = projectSphere(iBase, instances[iBase + 28u], center, metaF32(cBase + 3u), 0.0);
   let view = p.worldCenter - params.cameraPos.xyz;
@@ -359,6 +359,8 @@ fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocati
   let psBase = pageId * PAGE_STATE_WORDS;
   let arenaVertexWord = pageState[psBase + 2u] >> 2u; // absolute vertex byte -> word
   let arenaIndexByte = pageState[psBase + 3u];
+  // RH/CCW source triangles need swapping for positive determinants in Lite's LH view.
+  let reverseWinding = instances[slot * INSTANCE_WORDS + 23u] > 0.0;
   let drawCapacity = params.control.z;
   let groupId = metaBuf[cBase + 5u];
   let gBase = params.offsets.y + groupId * GROUP_WORDS;
@@ -381,7 +383,9 @@ fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocati
   for (var k = lid.x; k < indexCount; k = k + 64u) {
     let dst = base + k;
     if (dst >= drawCapacity) { continue; } // capacity guard: never write OOB
-    let localVertex = readLocalIndex(arenaIndexByte + (clusterIndexOffset + k) * 2u);
+    let corner = k % 3u;
+    let sourceIndex = select(k, k + 3u - 2u * corner, reverseWinding && corner != 0u);
+    let localVertex = readLocalIndex(arenaIndexByte + (clusterIndexOffset + sourceIndex) * 2u);
     let o = dst * 4u;
     drawVertices[o] = arenaVertexWord + localVertex * VERTEX_WORDS;
     drawVertices[o + 1u] = clusterId;

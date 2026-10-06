@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { expect, test } from "../parity/parity-fixtures";
 import type * as Probe from "./fixtures/mesh-lod-pbr.js";
+import type * as Winding from "./fixtures/mesh-lod-winding.js";
 
 test("production MeshLoD and ordinary PBR agree on metallic lighting and roughness/AA float outputs", async ({ page }) => {
     await page.goto("/");
@@ -50,3 +51,49 @@ test("production MeshLoD and ordinary PBR agree on metallic lighting and roughne
     expect(result[0]!.ordinary[0]).not.toBeCloseTo(result[1]!.ordinary[0]!, 4);
     expect(result[4]!.ordinary[0]).not.toBeCloseTo(result[5]!.ordinary[0]!, 3);
 });
+
+for (const [doubleSided, cone] of [
+    [false, false],
+    [false, true],
+    [true, true],
+] as const) {
+    test(`production MeshLoD preserves mixed-handed winding and runtime reflections (double-sided=${doubleSided}, cone=${cone})`, async ({ page }) => {
+        await page.goto("/");
+        const outputs = await page.evaluate(
+            async ({ url, doubleSided, cone }) => {
+                const { createMeshLoDWindingProbe } = (await import(url)) as typeof Winding;
+                const canvas = document.createElement("canvas");
+                canvas.width = 64;
+                canvas.height = 32;
+                const probe = await createMeshLoDWindingProbe(canvas, doubleSided, cone);
+                try {
+                    const results = [];
+                    for (const mode of ["cpu", "gpu"] as const) {
+                        for (const flipped of [false, true, false]) {
+                            results.push(await probe.read(mode, flipped));
+                            results.push(await probe.read(mode, flipped, true));
+                        }
+                    }
+                    return results;
+                } finally {
+                    await probe.dispose();
+                }
+            },
+            { url: `/@fs/${resolve(__dirname, "fixtures", "mesh-lod-winding.ts").replaceAll("\\", "/")}`, doubleSided, cone }
+        );
+        outputs.forEach((output, index) => {
+            if (index % 2 === 0 || doubleSided || !cone) {
+                expect(output.draws).toBe(1);
+            }
+            for (const sample of output.samples) {
+                if (index % 2 === 0) {
+                    expect(sample[0]).toBeGreaterThan(0.8);
+                    expect(sample[3]).toBe(1);
+                } else {
+                    expect(sample[0]).toBeLessThan(0.01);
+                    expect(sample[3]).toBe(doubleSided ? 1 : 0);
+                }
+            }
+        });
+    });
+}

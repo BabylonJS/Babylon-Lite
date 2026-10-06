@@ -353,6 +353,26 @@ describe("MeshLoD selection equivalence — frustum boundary + incomplete reside
             expect(Array.from(oracle.selectedClusterIds)).toEqual([3]);
             expect(sortedUnique(model.selected)).toEqual([3]);
         });
+
+        it.each([
+            [-1, 1, 1, 3],
+            [1, 1, 1, 3],
+            [1, 1, -1, 2],
+        ])("preserves authored cone exteriors for scale (%i, %i, %i)", (x, y, z, expected) => {
+            const scenario: Scenario = {
+                camera: { position: [0, 0, -5], verticalFov: 1.0, near: 0.1, targetWidth: 1000, targetHeight: 1000 },
+                frustumPlanes: [],
+                resident: [0, 1],
+                wasFineRequired: [0, 0],
+                screenSpaceError: 2.0,
+                lodHysteresis: 0.15,
+                world: [x, 0, 0, 0, 0, y, 0, 0, 0, 0, z, 0, 0, 0, 0, 1],
+            };
+            const oracle = selectMeshLoDCpu(oracleInput(h, scenario));
+            const model = runMeshLoDGpuSelection(modelInput(h, scenario, new Uint32Array(1)));
+            expect(Array.from(oracle.selectedClusterIds)).toEqual([expected]);
+            expect(sortedUnique(model.selected)).toEqual([expected]);
+        });
     });
 
     it("keeps every cluster in a visible selected group when cluster bounds disagree", () => {

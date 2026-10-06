@@ -243,10 +243,22 @@ the immutable packed geometry arena. A 128-byte instance record contains
 the world and normal transforms, scale, flags, and stable instance ID.
 These typed layouts are packed by `mesh-lod-selection-gpu.ts`.
 Both render paths use the same instance packer. Shading normals use the
-cofactor matrix multiplied by the determinant sign, then normalize in WGSL;
-cone culling retains geometric winding by undoing that sign. Non-finite
+cofactor matrix multiplied by the determinant sign, then normalize in WGSL.
+Cone axes use the same inverse-transpose orientation: they describe the
+authored exterior, not the uncorrected winding of a reflected triangle. Non-finite
 or singular world matrices reject with `MLOD_INVALID_OPTION` rather than
 producing undefined lighting. The sign occupies normal-column padding word 23.
+MLOD v1 retains glTF's right-handed, counter-clockwise local triangle order.
+In Lite's left-handed camera convention, its ordinary RH-to-LH instances
+have a negative determinant and need no index swap. Both CPU expansion and
+GPU `expandClusters` normalize positive-determinant instances to the batch's
+CCW rasterizer by swapping corners 1 and 2 of each triangle. The CPU path and
+deterministic GPU model share `meshLoDTriangleIndex(index, handedness)`; WGSL
+uses the same corner permutation and packed sign. Each update uses the current
+world transform, so a runtime reflection changes winding without rebuilding
+the batch or splitting its indirect draw. This also preserves the fragment
+shader's `front_facing` classification for double-sided normal correction.
+Cone rejection must follow that normalized exterior on both selection paths.
 
 ### 12.2 Per-binding resources
 
@@ -430,4 +442,9 @@ nonexact values such as `0.1` do not trigger repeated uploads, while changes and
 removal still do. A nonvisual GPU plumbing regression compares float readbacks
 from the actual ordinary-PBR and storage-fetch MeshLoD shaders on the same packed
 triangle, with hemispheric-only metallic lighting, zero/sub-0.045 roughness,
-and varying normals with AA enabled/disabled. PR CI includes this regression.
+and varying normals with AA enabled/disabled. The same PR-gated spec exercises
+actual CPU/GPU selection, expansion, and indirect rasterization with opposite
+determinant signs in one batch, repeated runtime sign changes, front/back views,
+cone rejection enabled/disabled, and lit double-sided front-facing correction.
+Float readbacks require both exteriors to render and both backfaces to retain
+the appropriate culling/lighting; every nonempty batch remains one indirect draw.

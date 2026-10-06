@@ -674,6 +674,7 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
                 groups: packGroups(runtime.groups),
                 pageState,
                 arena: new Uint32Array(cluster.indexOffset + cluster.triangleCount * 3),
+                instances: new Float32Array(INSTANCE_WORDS),
                 drawVertexCapacity: cluster.triangleCount * 3,
                 debugMode: mode,
                 coneCull: false,
