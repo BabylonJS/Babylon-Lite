@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as CsmShadowTaskHooks from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
+
 const taskMocks = vi.hoisted(() => ({
     record: vi.fn(),
     dispose: vi.fn(),
@@ -21,7 +23,8 @@ vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
         camera.viewProjection = viewProjection;
     },
 }));
-vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof CsmShadowTaskHooks>()),
     csmCameraAspect: () => 1,
     csmWorldBiasClipOffset: () => 0,
     _biasViewProjection: () => {},
@@ -54,6 +57,10 @@ vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => (
         record: taskMocks.record,
         execute: vi.fn(() => 0),
         dispose: taskMocks.dispose,
+        _renderables: [],
+        _opaqueBindings: [],
+        _directBindings: [],
+        _transparentBindings: [],
         _lastVersion: -1,
         _ob: [],
     }),
@@ -175,7 +182,7 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
             expect(taskMocks.record).toHaveBeenCalledTimes(2);
         });
 
-        it("clears reused dynamic bundles when a caster-list generation changes", () => {
+        it("clears reused dynamic bundles when the caster list changes, not for a new array of the same casters", () => {
             const engine = {
                 _device: {
                     createTexture: vi.fn(() => ({ createView: vi.fn(), destroy: vi.fn() })),
@@ -187,10 +194,15 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
                 _csmCache: { a: 0.1, i: 0 },
             };
             const config = { _numCascades: 1, _mapSize: 4 };
-            const firstCasters: never[] = [];
-            const state = ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, firstCasters, null) as any;
+            const caster = { worldMatrixVersion: 1, thinInstances: null };
+            const state = ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [caster] as any, null) as any;
             state._tasks[0]._ob.push({});
             state._tasks[0]._lastVersion = 1;
+
+            ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [caster] as any, state);
+
+            expect(state._tasks[0]._lastVersion).toBe(1);
+            expect(state._tasks[0]._ob).toHaveLength(1);
 
             ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [], state);
 

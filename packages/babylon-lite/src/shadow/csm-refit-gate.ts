@@ -54,7 +54,8 @@ export interface CsmRefitGate<M extends CsmRefitCaster> {
      *  members does not invalidate the cache. */
     syncCasters(casters: readonly M[]): void;
     /** Force a known caster into the dynamic set (bookkeeping only; the caller owns task
-     *  membership). Used when a caster is re-registered into the dynamic overlay tasks. */
+     *  membership). The engine's static cache no longer calls it (a re-capped caster, or one
+     *  requeued for a material change, keeps its class); it is kept for external users of the gate. */
     markDynamic(caster: M): void;
     /** Current classification, for callers that build task membership from a carried gate. */
     isDynamic(caster: M): boolean;

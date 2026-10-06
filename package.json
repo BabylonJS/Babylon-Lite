@@ -4,7 +4,7 @@
     "license": "Apache-2.0",
     "packageManager": "pnpm@11.23.0",
     "engines": {
-        "node": "^20.19.0 || ^22.13.0 || >=24"
+        "node": "^22.13.0 || ^24.0.0 || >=26.0.0"
     },
     "scripts": {
         "dev": "pnpm --filter @babylon-lite/lab dev",
@@ -72,13 +72,13 @@
         "@eslint/js": "^10.0.1",
         "@microsoft/api-extractor": "^7.59.2",
         "@playwright/test": "^1.63.0",
-        "@types/node": "^26.6.2",
+        "@types/node": "^26.6.3",
         "@types/pngjs": "^6.0.5",
         "@types/webxr": "^0.5.24",
         "@webgpu/types": "^0.1.74",
-        "browserstack-local": "^1.5.14",
-        "browserstack-node-sdk": "^1.70.3",
-        "dotenv": "^18.0.3",
+        "browserstack-local": "^1.5.15",
+        "browserstack-node-sdk": "^1.71.0",
+        "dotenv": "^18.0.4",
         "esbuild": "^0.28.2",
         "eslint": "^10.11.0",
         "eslint-config-prettier": "^10.1.8",
@@ -90,15 +90,15 @@
         "miniray": "^0.3.1",
         "node-web-audio-api": "^2.2.0",
         "pngjs": "^7.0.0",
-        "rollup": "^4.63.4",
+        "rollup": "^4.63.5",
         "rollup-plugin-visualizer": "^7.1.1",
         "terser": "5.51.2",
         "tsx": "^4.23.15",
         "typedoc": "^0.28.20",
         "typescript": "^6.0.3",
         "typescript-eslint": "^8.70.1",
-        "vite": "^8.3.0",
-        "vitest": "^4.1.11",
+        "vite": "^8.3.1",
+        "vitest": "^5.0.2",
         "webpack": "^5.111.1"
     },
     "dependencies": {

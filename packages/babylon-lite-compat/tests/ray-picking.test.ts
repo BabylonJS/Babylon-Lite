@@ -3,7 +3,7 @@ import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMe
 
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../babylon-lite/src/math/_matrix-allocator";
 import { allocateF64Mat4 } from "../../babylon-lite/src/math/_mat4-storage-f64";
-import { ArcRotateCamera, LiteCompatError, Matrix, MeshBuilder, NullEngine, Ray, Scene, Vector3, Viewport } from "../src/index";
+import { ArcRotateCamera, Matrix, MeshBuilder, NullEngine, Ray, Scene, Vector2, Vector3, Viewport } from "../src/index";
 
 function createPickScene(): { engine: NullEngine; scene: Scene; box: ReturnType<typeof MeshBuilder.CreateBox> } {
     const engine = new NullEngine();
@@ -61,7 +61,7 @@ describe("Scene.pick", () => {
 
         expect(scene.pick(10, 20, predicate, undefined, explicit)).toBe(expected);
         expect(createPickingRay).toHaveBeenCalledWith(10, 20, null, explicit);
-        expect(pickWithRay).toHaveBeenCalledWith(ray, predicate);
+        expect(pickWithRay).toHaveBeenCalledWith(ray, predicate, false, undefined);
     });
 
     it("uses the active and pointer camera fallbacks", () => {
@@ -89,11 +89,16 @@ describe("Scene.pick", () => {
         expect(pickWithRay).not.toHaveBeenCalled();
     });
 
-    it("rejects unsupported picking modes explicitly", () => {
+    it("forwards precise picking modes", () => {
         const { scene } = createRayScene();
+        const ray = new Ray(new Vector3(0, 0, -2), new Vector3(0, 0, 1));
+        vi.spyOn(scene, "createPickingRay").mockReturnValue(ray);
+        const result = scene.pickWithRay(ray);
+        const pickWithRay = vi.spyOn(scene, "pickWithRay").mockReturnValue(result);
+        const trianglePredicate = vi.fn(() => true);
 
-        expect(() => scene.pick(10, 20, undefined, true)).toThrow(LiteCompatError);
-        expect(() => scene.pick(10, 20, undefined, false, null, () => true)).toThrow(LiteCompatError);
+        expect(scene.pick(10, 20, undefined, true, null, trianglePredicate)).toBe(result);
+        expect(pickWithRay).toHaveBeenCalledWith(ray, undefined, true, trianglePredicate);
     });
 });
 
@@ -221,13 +226,24 @@ describe("Scene.pickWithRay", () => {
         expect(hit.ray).toBe(ray);
     });
 
-    it("forwards predicates and rejects unsupported picking modes", () => {
+    it("forwards mesh and triangle predicates with Babylon.js argument shapes", () => {
         const { scene } = createPickScene();
         const ray = new Ray(new Vector3(0, 0, -5), new Vector3(0, 0, 1));
+        const meshPredicate = vi.fn(() => true);
+        const trianglePredicate = vi.fn(() => true);
 
         expect(scene.pickWithRay(ray, () => false).hit).toBe(false);
-        expect(() => scene.pickWithRay(ray, undefined, true)).toThrow(LiteCompatError);
-        expect(() => scene.pickWithRay(ray, undefined, false, () => true)).toThrow(LiteCompatError);
+        expect(scene.pickWithRay(ray, meshPredicate, false, trianglePredicate).hit).toBe(true);
+        expect(meshPredicate).toHaveBeenCalledWith(expect.anything(), -1);
+        expect(trianglePredicate).toHaveBeenCalledWith(
+            expect.any(Vector3),
+            expect.any(Vector3),
+            expect.any(Vector3),
+            expect.any(Ray),
+            expect.any(Number),
+            expect.any(Number),
+            expect.any(Number)
+        );
     });
 
     it("honors default visibility, enabled, and pickable eligibility", () => {
@@ -286,12 +302,17 @@ describe("Scene.pickWithRay", () => {
         expect(scene.meshes).toContain(hit.pickedMesh);
     });
 
-    it("throws for unavailable UV and thin-instance picking", () => {
+    it("returns UV detail and picks thin instances", () => {
         const { scene, box } = createPickScene();
         const ray = new Ray(new Vector3(0, 0, -5), new Vector3(0, 0, 1));
 
-        expect(() => scene.pickWithRay(ray).getTextureCoordinates()).toThrow(LiteCompatError);
-        box.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 16);
-        expect(() => scene.pickWithRay(ray)).toThrow(LiteCompatError);
+        const uv = scene.pickWithRay(ray).getTextureCoordinates();
+        expect(uv).toBeInstanceOf(Vector2);
+        expect(uv?.asArray()).toEqual([0.5, 0.5]);
+        box.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 3, 0, 0, 1]), 16);
+        const thinHit = scene.pickWithRay(new Ray(new Vector3(3, 0, -5), new Vector3(0, 0, 1)));
+        expect(thinHit.pickedMesh).toBe(box);
+        expect(thinHit.thinInstanceIndex).toBe(0);
+        expect(thinHit.pickedPoint?.asArray()).toEqual([3, 0, -1]);
     });
 });

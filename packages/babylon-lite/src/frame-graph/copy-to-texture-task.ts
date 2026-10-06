@@ -410,7 +410,7 @@ function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, ta
     const entries: GPUBindGroupEntry[] = multisampledSource
         ? [{ binding: 0, resource: source._colorView! }]
         : [
-              { binding: 0, resource: source._colorView! },
+              { binding: 0, resource: source._colorSamplingView ?? source._colorView! },
               { binding: 1, resource: task.lodLevel > 0 ? getTrilinearSampler(engine) : getBilinearSampler(engine) },
           ];
     const bindGroup = engine._device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });

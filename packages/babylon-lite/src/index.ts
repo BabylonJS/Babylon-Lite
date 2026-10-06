@@ -104,6 +104,10 @@ export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, Mes
 export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
 export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
+export { createClearTextureTask } from "./frame-graph/clear-texture-task.js";
+export type { ClearTextureTask, ClearTextureTaskConfig } from "./frame-graph/clear-texture-task.js";
+export { createGenerateMipMapsTask } from "./frame-graph/generate-mipmaps-task.js";
+export type { GenerateMipMapsTask, GenerateMipMapsTaskConfig } from "./frame-graph/generate-mipmaps-task.js";
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
 export type { DepthResolveTaskConfig } from "./frame-graph/depth-resolve-task.js";
 export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
@@ -112,6 +116,7 @@ export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor, RenderTargetSurfaceSize } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
+export { createMipMappedRenderTarget } from "./engine/render-target-mipmaps.js";
 export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
 export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
 export { withSampledDepthTexture } from "./texture/rtt-depth.js";
@@ -414,6 +419,8 @@ export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { enableKtx2WorkerDecoding } from "./texture/ktx2-worker-decoder.js";
+export type { Ktx2WorkerDecodingOptions } from "./texture/ktx2-worker-decoder.js";
 export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
 export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
@@ -1009,6 +1016,8 @@ export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 export { pickWithRay, pickMeshesWithRay } from "./picking/ray-pick.js";
 export type { RayPickOptions } from "./picking/ray-pick.js";
+export { pickWithRayPrecise, pickMeshesWithRayPrecise } from "./picking/precise-ray-pick.js";
+export type { PreciseRayPickOptions, TrianglePickingPredicate } from "./picking/precise-ray-pick.js";
 export { createPickingRay } from "./picking/ray.js";
 export type { Ray } from "./picking/ray.js";
 export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
