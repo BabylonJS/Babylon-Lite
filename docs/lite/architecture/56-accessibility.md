@@ -313,9 +313,9 @@ The adapter reads the stored authored tag and creates a node-specific snapshot:
 1. If the tag has neither `name` nor `description`, the source's current `name` becomes the accessible name.
 2. If the tag has a `description` but no `name`, the description remains the name source for the HTML projection.
 3. A source with `_disposed === true` becomes subtree-hidden.
-4. A source with `visible === false` becomes self-hidden. Its logical node stays as a structural container, but the HTML projection removes that node's own name, description, role, ARIA, text, and disabled state. Descendants keep their independent visibility and semantics.
+4. A source with `visible === false` becomes self-hidden. Its logical node stays as a structural container, but the HTML projection suppresses that node's own name, description, role, descriptive ARIA, and readable text while retaining the structural container and authored disabled state for descendants.
 5. Authored `hidden` or `aria-hidden="true"` remains subtree-wide.
-6. Disabled state comes from the authored metadata and returns unchanged when a runtime-hidden source becomes visible again.
+6. Disabled state comes from the authored metadata and is independent of runtime self-visibility.
 
 For disposal only, the projected snapshot normalizes authored `hidden: false` or `aria-hidden="false"` values to `true` so the logical tree accepts the runtime subtree-hidden state. `getAccessibilityTag` continues to return the authored snapshot. Runtime-derived names and visibility exist only on projected tree nodes. Runtime hiding never mutates the stored authored tag, so showing the source restores the same metadata snapshot.
 
@@ -339,19 +339,19 @@ Each logical node maps to one `div` with `data-lite-accessibility-node` and one 
 
 On every update, the renderer compares generated attributes, text, parent, and sibling position with the desired state. It writes only changed values and moves an element only when its parent or order changed. Generic attribute cleanup excludes the reflected `hidden` attribute; the renderer updates visibility only through the existing `element.hidden` property comparison.
 
-| Source state                     | HTML result                                                        |
-| -------------------------------- | ------------------------------------------------------------------ |
-| `tag.role`                       | `role`                                                             |
-| `tag.name`                       | `aria-label`                                                       |
-| Description with no name         | Description becomes `aria-label`                                   |
-| Name and description             | Name becomes `aria-label`; description becomes `aria-description`  |
-| `node.hidden`                    | The element's `hidden` property                                    |
-| `node.disabled`                  | `aria-disabled="true"`                                             |
-| `tag.aria` entry                 | Attribute string value                                             |
-| `null` or `undefined` ARIA value | Attribute removal                                                  |
-| Runtime self-hidden scene source | Structural `div`; semantics/text suppressed; disability retained   |
+| Source state                     | HTML result                                                          |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `tag.role`                       | `role`                                                               |
+| `tag.name`                       | `aria-label`                                                         |
+| Description with no name         | Description becomes `aria-label`                                     |
+| Name and description             | Name becomes `aria-label`; description becomes `aria-description`    |
+| `node.hidden`                    | The element's `hidden` property                                      |
+| `node.disabled`                  | `aria-disabled="true"`                                               |
+| `tag.aria` entry                 | Attribute string value                                               |
+| `null` or `undefined` ARIA value | Attribute removal                                                    |
+| Runtime self-hidden scene source | Structural `div`; semantics/text suppressed; disabled state retained |
 
-The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields. A runtime self-hidden node retains `aria-disabled="true"` on its structural container so exposed descendants remain unavailable. The renderer still suppresses the node's own role, name, description, role description, and readable text.
+The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields. When a runtime self-hidden node is disabled, it retains `aria-disabled="true"` on its structural container so exposed descendants remain unavailable. The renderer still suppresses the node's own role, name, description, role description, and readable text.
 
 Readable text is assigned through `textContent`. Name and description are joined with `". "` when both are present. Text such as `<three>` remains text rather than markup.
 
