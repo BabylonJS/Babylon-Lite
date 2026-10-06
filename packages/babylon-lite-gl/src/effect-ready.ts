@@ -4,7 +4,7 @@ import { getEffectCompilationError, type GLEffect } from "./effect.js";
 /** Options for the opt-in `waitForEffect` readiness scheduler. */
 export interface GLEffectWaitOptions {
     /** Cancels only this wait. Error reasons are preserved; other reasons are
-     *  the cause of an AbortError. Does not dispose or cancel the effect. */
+     *  the cause of a native AbortError DOMException. Does not dispose or cancel the effect. */
     signal?: AbortSignal;
 }
 
@@ -47,9 +47,7 @@ export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options
             if (reason instanceof Error) {
                 fail(reason);
             } else {
-                const error = new Error(`lite-gl: ${effect.name} compilation wait aborted`, { cause: reason });
-                error.name = "AbortError";
-                fail(error);
+                fail(Object.assign(new DOMException(`lite-gl: ${effect.name} compilation wait aborted`, "AbortError"), { cause: reason }));
             }
         };
         const poll = (): void => {
@@ -58,10 +56,12 @@ export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options
                 return;
             }
             try {
+                // Registering an abort listener does not replay a prior abort.
                 if (signal?.aborted) {
                     abort();
                     return;
                 }
+                // Disposal has no callback; these guards also cover already-disposed/lost inputs.
                 if (engine._disposed || effect._disposed) {
                     fail(new Error(`lite-gl: ${effect.name} disposed while waiting for compilation`));
                     return;
@@ -71,10 +71,11 @@ export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options
                     return;
                 }
                 const error = getEffectCompilationError(engine, effect);
-                // Finalization callbacks may dispose the effect or lose the context.
+                // Abort/loss callbacks set settled synchronously during finalization.
                 if (settled) {
                     return;
                 }
+                // Finalization callbacks can dispose without any notification.
                 if (engine._disposed || effect._disposed) {
                     fail(new Error(`lite-gl: ${effect.name} disposed while waiting for compilation`));
                 } else if (error !== null) {

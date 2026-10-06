@@ -1276,7 +1276,7 @@ and otherwise polls once per animation frame independently of the render
 loop. It rejects with a labelled error on compile/link/restore failure,
 context loss, or disposal (disposal is observed on the next poll), and with
 the signal's Error reason on cancellation (other reasons become the `cause`
-of an `AbortError`). Context loss and abort events
+of a native `DOMException` named `AbortError`). Context loss and abort events
 reject immediately, even while animation frames are suspended. Every exit
 removes the loss/abort listeners and cancels any scheduled frame; an already
 ready/failed/disposed/aborted effect schedules no frame. Polling exceptions
@@ -1284,6 +1284,13 @@ also reject and clean up. Multiple waiters are independent; cancelling one
 does not dispose the shared effect or stop another waiter. No callbacks are
 added to `_onCompiled`, and importing only the manual APIs retains no promise,
 abort-listener or animation-frame scheduling code from this helper.
+
+The initial signal/lifecycle guards cover calls with an already-aborted,
+disposed, or lost input: registering listeners does not replay past events.
+Disposal has no notification, so it must also be checked on every poll and
+after finalization callbacks. Abort and context-loss listeners instead reject
+synchronously and set `settled`; the post-finalization settlement guard covers
+both, without duplicate abort/loss checks.
 
 ### 4.7 Context lost / restored protocol
 

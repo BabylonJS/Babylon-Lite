@@ -184,11 +184,23 @@ describe("lite-gl: opt-in effect waiting", () => {
     });
 
     it("rejects an already disposed or lost effect without scheduling", async () => {
-        const { canvas, engine, effect } = setup();
+        const { mock, canvas, engine, effect } = setup();
+        const queries = mock.count("getProgramParameter");
         fireLost(canvas);
         await expect(waitForEffect(engine, effect)).rejects.toThrow("context lost");
         disposeEffect(engine, effect);
         await expect(waitForEffect(engine, effect)).rejects.toThrow("disposed");
+        expect(requestAnimationFrame).not.toHaveBeenCalled();
+        expect(engine._onLost).toHaveLength(0);
+        expect(mock.count("getProgramParameter")).toBe(queries);
+    });
+
+    it("rejects an already disposed engine without polling or scheduling", async () => {
+        const { mock, engine, effect } = setup();
+        const queries = mock.count("getProgramParameter");
+        disposeGLEngine(engine);
+        await expect(waitForEffect(engine, effect)).rejects.toThrow("wait-test disposed");
+        expect(mock.count("getProgramParameter")).toBe(queries);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
     });
@@ -203,12 +215,27 @@ describe("lite-gl: opt-in effect waiting", () => {
         expect(engine._onLost).toHaveLength(0);
     });
 
-    it("wraps a non-Error abort reason without losing it", async () => {
+    it("wraps a non-Error abort reason in a native AbortError without losing it", async () => {
         const { engine, effect } = setup();
         const controller = new AbortController();
         controller.abort("user cancelled");
-        await expect(waitForEffect(engine, effect, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError", cause: "user cancelled" });
+        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        await expect(promise).rejects.toBeInstanceOf(DOMException);
+        await expect(promise).rejects.toMatchObject({ name: "AbortError", code: DOMException.ABORT_ERR, cause: "user cancelled" });
         expect(engine._onLost).toHaveLength(0);
+    });
+
+    it("rejects synchronously delivered custom aborts and cancels the pending frame", async () => {
+        const { engine, effect } = setup();
+        const controller = new AbortController();
+        const reason = new Error("cancelled while waiting");
+        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        const rejected = expect(promise).rejects.toBe(reason);
+        controller.abort(reason);
+        expect(frames.size).toBe(0);
+        expect(engine._onLost).toHaveLength(0);
+        await rejected;
+        expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
     });
 
     it("cancels one waiter without disposing the shared effect or cancelling another", async () => {
@@ -231,12 +258,14 @@ describe("lite-gl: opt-in effect waiting", () => {
         expect(effect._onCompiled).toHaveLength(0);
     });
 
-    it.each(["dispose", "lose", "abort"] as const)("rejects when a ready callback triggers %s instead of resolving", async (action) => {
+    it.each(["dispose", "dispose-engine", "lose", "abort"] as const)("rejects when a ready callback triggers %s instead of resolving", async (action) => {
         const { mock, canvas, engine, effect } = setup();
         const controller = new AbortController();
         executeWhenCompiled(engine, effect, () => {
             if (action === "dispose") {
                 disposeEffect(engine, effect);
+            } else if (action === "dispose-engine") {
+                disposeGLEngine(engine);
             } else if (action === "lose") {
                 fireLost(canvas);
             } else {
@@ -244,12 +273,19 @@ describe("lite-gl: opt-in effect waiting", () => {
             }
         });
         const promise = waitForEffect(engine, effect, { signal: controller.signal });
-        const rejected = action === "abort" ? expect(promise).rejects.toMatchObject({ name: "AbortError" }) : expect(promise).rejects.toThrow();
+        const rejected =
+            action === "abort"
+                ? expect(promise).rejects.toMatchObject({ name: "AbortError" })
+                : expect(promise).rejects.toThrow(action === "lose" ? "wait-test context lost" : "wait-test disposed");
         mock.setParallelComplete(true);
         advanceFrame();
         await rejected;
+        if (action === "abort") {
+            await expect(promise).rejects.toBe(controller.signal.reason);
+        }
         expect(frames.size).toBe(0);
         expect(engine._onLost).toHaveLength(0);
+        expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
     });
 
     it("rejects polling exceptions and removes listeners", async () => {
