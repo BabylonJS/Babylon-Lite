@@ -349,9 +349,9 @@ On every update, the renderer compares generated attributes, text, parent, and s
 | `node.disabled`                  | `aria-disabled="true"`                                             |
 | `tag.aria` entry                 | Attribute string value                                             |
 | `null` or `undefined` ARIA value | Attribute removal                                                  |
-| Runtime self-hidden scene source | Non-hidden structural `div` with no own semantics or readable text |
+| Runtime self-hidden scene source | Structural `div`; semantics/text suppressed; disability retained   |
 
-The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields.
+The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields. A runtime self-hidden node retains `aria-disabled="true"` on its structural container so exposed descendants remain unavailable. The renderer still suppresses the node's own role, name, description, role description, and readable text.
 
 Readable text is assigned through `textContent`. Name and description are joined with `". "` when both are present. Text such as `<three>` remains text rather than markup.
 
@@ -485,7 +485,7 @@ The root package re-exports each public type and function from its single `"."` 
 - text escaping through `textContent`;
 - metadata replacement and attribute removal;
 - single-node updates without unrelated attribute, text, or move mutations, including unchanged hidden nodes;
-- runtime-hidden parents that preserve visible descendants without exposing the parent's own role, metadata, or readable text;
+- runtime-hidden parents that preserve authored subtree disability for visible descendants without exposing the parent's own role, descriptive metadata, or readable text;
 - authored subtree hiding and restoration of the original runtime-hidden metadata and stable DOM elements;
 - no-op scene refreshes without tree notifications or DOM mutations;
 - visibility, reparenting, scene removal, and scene disposal;

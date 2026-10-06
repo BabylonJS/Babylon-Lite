@@ -76,6 +76,7 @@ test.describe("scene accessibility HTML", () => {
 
         await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveCount(0);
         await expect(child).toHaveCount(1);
+        await expect(child).toBeDisabled();
         await expect(child).toContainText("Runtime child");
         expect(
             await parentElement!.evaluate((element) => ({
@@ -92,10 +93,22 @@ test.describe("scene accessibility HTML", () => {
             role: null,
             label: null,
             description: null,
-            disabled: null,
+            disabled: "true",
             roleDescription: null,
             ownText: "",
         });
+
+        await page.evaluate(() =>
+            (window as unknown as { accessibilityFixture: { disableRuntimeParent(disabled: boolean): void } }).accessibilityFixture.disableRuntimeParent(false)
+        );
+        await expect(child).toBeEnabled();
+        expect(await parentElement!.evaluate((element) => element.getAttribute("aria-disabled"))).toBeNull();
+
+        await page.evaluate(() =>
+            (window as unknown as { accessibilityFixture: { disableRuntimeParent(disabled: boolean): void } }).accessibilityFixture.disableRuntimeParent(true)
+        );
+        await expect(child).toBeDisabled();
+        expect(await parentElement!.evaluate((element) => element.getAttribute("aria-disabled"))).toBe("true");
 
         await page.evaluate(() =>
             (window as unknown as { accessibilityFixture: { authorHideRuntimeParent(hidden: boolean): void } }).accessibilityFixture.authorHideRuntimeParent(true)
@@ -107,6 +120,7 @@ test.describe("scene accessibility HTML", () => {
             (window as unknown as { accessibilityFixture: { authorHideRuntimeParent(hidden: boolean): void } }).accessibilityFixture.authorHideRuntimeParent(false)
         );
         await expect(child).toHaveCount(1);
+        await expect(child).toBeDisabled();
         expect(await parentElement!.evaluate((element) => (element as HTMLElement).hidden)).toBe(false);
 
         await page.evaluate(() => (window as unknown as { accessibilityFixture: { showRuntimeParent(): void } }).accessibilityFixture.showRuntimeParent());

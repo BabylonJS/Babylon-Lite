@@ -121,6 +121,9 @@ Object.assign(window, {
             setMeshVisible(runtimeParent, false);
             setMeshVisible(runtimeChild, true);
         },
+        disableRuntimeParent(disabled: boolean): void {
+            setAccessibilityTag(runtimeParent, { ...runtimeParentTag, disabled });
+        },
         authorHideRuntimeParent(hidden: boolean): void {
             setAccessibilityTag(runtimeParent, hidden ? { ...runtimeParentTag, hidden: true } : runtimeParentTag);
         },

@@ -66,7 +66,7 @@ function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
     if (description) {
         attributes.set("aria-description", description);
     }
-    if (!node._selfHidden && node.disabled) {
+    if (node.disabled) {
         attributes.set("aria-disabled", "true");
     }
     for (const [key, value] of Object.entries(tag?.aria ?? {})) {
