@@ -66,15 +66,15 @@ function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
     if (description) {
         attributes.set("aria-description", description);
     }
-    if (node.disabled) {
-        attributes.set("aria-disabled", "true");
-    }
     for (const [key, value] of Object.entries(tag?.aria ?? {})) {
         if (value == null) {
             attributes.delete(key);
         } else {
             attributes.set(key, String(value));
         }
+    }
+    if (node.disabled) {
+        attributes.set("aria-disabled", "true");
     }
     for (const attribute of [...element.attributes]) {
         if (attribute.name !== "data-lite-accessibility-node" && attribute.name !== "hidden" && !attributes.has(attribute.name)) {

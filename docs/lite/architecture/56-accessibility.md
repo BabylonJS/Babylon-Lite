@@ -351,7 +351,7 @@ On every update, the renderer compares generated attributes, text, parent, and s
 | `null` or `undefined` ARIA value | Attribute removal                                                    |
 | Runtime self-hidden scene source | Structural `div`; semantics/text suppressed; disabled state retained |
 
-The authored ARIA record is applied after derived attributes. Validation keeps `aria-hidden` and `aria-disabled` consistent with the authored availability fields. When a runtime self-hidden node is disabled, it retains `aria-disabled="true"` on its structural container so exposed descendants remain unavailable. The renderer still suppresses the node's own role, name, description, role description, and readable text.
+The authored ARIA record is applied after derived descriptive ARIA attributes, so generic authoring can override or remove those values. The renderer then enforces `node.disabled` as `aria-disabled="true"`, making the logical disabled state authoritative even when the authored record contains a nullish `aria-disabled` value. Validation keeps boolean `aria-hidden` and `aria-disabled` values consistent with the authored availability fields. When a runtime self-hidden node is disabled, it retains `aria-disabled="true"` on its structural container so exposed descendants remain unavailable. The renderer still suppresses the node's own role, name, description, role description, and readable text.
 
 Readable text is assigned through `textContent`. Name and description are joined with `". "` when both are present. Text such as `<three>` remains text rather than markup.
 

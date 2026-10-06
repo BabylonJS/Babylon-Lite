@@ -124,6 +124,13 @@ Object.assign(window, {
         disableRuntimeParent(disabled: boolean): void {
             setAccessibilityTag(runtimeParent, { ...runtimeParentTag, disabled });
         },
+        setRuntimeParentAriaDisabled(value: null | undefined): string | number | boolean | null | undefined {
+            setAccessibilityTag(runtimeParent, {
+                ...runtimeParentTag,
+                aria: { ...runtimeParentTag.aria, "aria-disabled": value },
+            });
+            return getAccessibilityTag(runtimeParent)?.aria?.["aria-disabled"];
+        },
         authorHideRuntimeParent(hidden: boolean): void {
             setAccessibilityTag(runtimeParent, hidden ? { ...runtimeParentTag, hidden: true } : runtimeParentTag);
         },

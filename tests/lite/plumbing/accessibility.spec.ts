@@ -72,6 +72,33 @@ test.describe("scene accessibility HTML", () => {
         expect(childElement).not.toBeNull();
         await parentElement!.evaluate((element) => Object.assign(window, { runtimeParentElement: element }));
         await childElement!.evaluate((element) => Object.assign(window, { runtimeChildElement: element }));
+        expect(
+            await page.evaluate(() =>
+                (
+                    window as unknown as {
+                        accessibilityFixture: {
+                            setRuntimeParentAriaDisabled(value: null | undefined): string | number | boolean | null | undefined;
+                        };
+                    }
+                ).accessibilityFixture.setRuntimeParentAriaDisabled(null)
+            )
+        ).toBeNull();
+        await expect(parent).toHaveAttribute("aria-disabled", "true");
+        await expect(child).toBeDisabled();
+        expect(
+            await page.evaluate(() =>
+                (
+                    window as unknown as {
+                        accessibilityFixture: {
+                            setRuntimeParentAriaDisabled(value: null | undefined): string | number | boolean | null | undefined;
+                        };
+                    }
+                ).accessibilityFixture.setRuntimeParentAriaDisabled(undefined)
+            )
+        ).toBeUndefined();
+        await expect(parent).toHaveAttribute("aria-disabled", "true");
+        await expect(child).toBeDisabled();
+
         await page.evaluate(() => (window as unknown as { accessibilityFixture: { hideRuntimeParent(): void } }).accessibilityFixture.hideRuntimeParent());
 
         await expect(region.getByRole("img", { name: "Runtime parent" })).toHaveCount(0);
