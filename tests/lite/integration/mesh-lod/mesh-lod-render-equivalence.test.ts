@@ -228,6 +228,61 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: feature });
     });
 
+    it.each([undefined, false])("rejects alpha-only blending before deferred material allocation (alphaBlend: %s)", async (alphaBlend) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const material = createPbrMaterial({ alpha: 1, alphaBlend });
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        material.alpha = 0.5;
+        const allocations = mock.device.buffers.length;
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" });
+        expect(mock.device.buffers).toHaveLength(allocations);
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects dirty alpha-only blending without a material upload (%s)", async (selectionMode) => {
+        for (const alphaBlend of [undefined, false]) {
+            const mock = createMockEngine();
+            engine = mock.engine;
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+            const material = createPbrMaterial({ alpha: 1, alphaBlend });
+            const scene = await build(asset, material, 1);
+            const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+            flush(binding);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            material.alpha = 0.5;
+            markMaterialUboDirty(material);
+            const uploads = mock.device.writes.length;
+            expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" }));
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("uses and refreshes AA pipeline variants on every existing target (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const createShader = vi.spyOn(mock.device, "createShaderModule");
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial({ enableSpecularAA: true });
+        const scene = await build(asset, material, 1);
+        const bindings = [scene._renderables[0]!.bind(engine, { ...SIG }), scene._renderables[0]!.bind(engine, { ...SIG })];
+        bindings.forEach(flush);
+        const withAA = bindings.map((binding) => binding.pipeline);
+        expect(createShader.mock.calls.some(([descriptor]) => descriptor.code.includes("nDfdx_AA=dpdx(N)"))).toBe(true);
+        const unchanged = createShader.mock.calls.length;
+        bindings.forEach(flush);
+        expect(createShader).toHaveBeenCalledTimes(unchanged);
+        material.enableSpecularAA = false;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        bindings.forEach((binding, index) => expect(binding.pipeline).not.toBe(withAA[index]));
+        material.enableSpecularAA = true;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        bindings.forEach((binding, index) => expect(binding.pipeline).toBe(withAA[index]));
+    });
+
     it.each(["cpu", "gpu"] as const)("rejects floating-origin configuration before deferred draw allocation (%s)", async (selectionMode) => {
         const mock = createMockEngine();
         engine = mock.engine;

@@ -234,6 +234,16 @@ describe("MeshLoD scene registry — material gate", () => {
         expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).not.toThrow();
     });
 
+    it.each([undefined, false])("rejects alpha-only transparency even when alphaBlend is %s", (alphaBlend) => {
+        const material = createPbrMaterial({ alpha: 0.5, alphaBlend });
+        const scene = fakeScene();
+        expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" })
+        );
+        expect(scene._meshLoDRegistry).toBeUndefined();
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), createPbrMaterial({ alpha: 1, alphaBlend })))).not.toThrow();
+    });
+
     it.each([
         ["clearcoat", { _clearCoat: { isEnabled: true } }],
         ["alpha blending", { alphaBlend: true }],

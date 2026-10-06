@@ -14,32 +14,11 @@ import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
 import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
+import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "./pbr-brdf-wgsl.js";
 
 type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
 
 const STAGE_FRAGMENT = 0x2;
-
-// ── BRDF functions (always present in PBR) ──────────────────────
-
-const BRDF_FUNCTIONS = wgsl`
-const PI:f32=3.14159265358979323846;
-fn distributionGGX(NdotH:f32,alphaG:f32)->f32{
-let a2=alphaG*alphaG;
-let d=NdotH*NdotH*(a2-1.0)+1.0;
-return a2/(PI*d*d);
-}
-fn geometrySmithGGX(NdotL:f32,NdotV:f32,alphaG:f32)->f32{
-let a2=alphaG*alphaG;
-let gl=NdotL*sqrt(NdotV*(NdotV-a2*NdotV)+a2);
-let gv=NdotV*sqrt(NdotL*(NdotL-a2*NdotL)+a2);
-return 0.5/(gl+gv);
-}
-fn fresnelSchlick(cosTheta:f32,F0:vec3<f32>,F90:vec3<f32>)->vec3<f32>{
-let t=1.0-cosTheta;
-let t2=t*t;
-return F0+(F90-F0)*(t2*t2*t);
-}
-`;
 
 export interface PbrTemplateConfig {
     /** When true, generates a non-looping single-light direct block + lights UBO binding. */
@@ -394,17 +373,7 @@ var surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
     // which clamps info.roughness upward). AA_factor_y is the IBL/alphaG additive bump.
     // Emitted unconditionally as vars so sheen/other fragments can reference them
     // without needing a define; when SPECULARAA is disabled they remain zero.
-    const specularAABlock = wgsl`var AA_factor_x=0.0;
-var AA_factor_y=0.0;${
-        _hasSpecularAA
-            ? wgsl`{let nDfdx_AA=dpdx(N);
-let nDfdy_AA=dpdy(N);
-let slopeSquare_AA=max(dot(nDfdx_AA,nDfdx_AA),dot(nDfdy_AA,nDfdy_AA));
-AA_factor_x=pow(saturate(slopeSquare_AA),0.333);
-AA_factor_y=sqrt(slopeSquare_AA)*0.75;
-alphaG+=AA_factor_y;}`
-            : ""
-    }`;
+    const specularAABlock = _hasSpecularAA ? PBR_SPECULAR_AA_WGSL : "";
 
     // Direct lighting block — use the compact non-looping shader for one non-shadow light,
     // and the generic multi-light loop for multiple lights or shadow receivers.
@@ -477,7 +446,7 @@ ${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, dep
 /*HF*/
 /*FB*/
 /*FI*/
-${BRDF_FUNCTIONS}
+${PBR_BRDF_WGSL}
 ${toneMappingHelpersBlock}
 ${fogHelper}
 ${anisoBrdfBlock}
@@ -510,7 +479,7 @@ var NdotVUnclamped=dot(N,V);
 var NdotV=abs(NdotVUnclamped)+0.0000001;
 ${f0Default}
 /*MF*/
-var alphaG=roughness*roughness+0.0005;
+${PBR_ROUGHNESS_WGSL}
 ${specularAABlock}
 ${directLightBlock}
 var color=directDiffuse+directSpecular+emissive;

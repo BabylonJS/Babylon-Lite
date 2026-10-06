@@ -14,19 +14,21 @@ import { MULTI_LIGHT_STRUCTS, COMPUTE_PBR_LIGHT } from "./fragments/multilight-w
 import { MAX_LIGHTS } from "../../light/types.js";
 import type { ToneMapping } from "./tone-mapping.js";
 import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
+import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "./pbr-brdf-wgsl.js";
 
 /** Detected features for the guaranteed opaque metallic-roughness subset. */
 export interface MeshLoDShaderFeatures {
     readonly hasNormalMap: boolean;
     readonly hasEmissiveTexture: boolean;
     readonly hasIbl: boolean;
+    readonly hasSpecularAA: boolean;
     readonly doubleSided: boolean;
     readonly unlit: boolean;
 }
 
 /** Stable pipeline cache key for a feature set. */
 export function meshLoDShaderKey(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
-    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}:${toneMapping?.id ?? "off"}`;
+    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.hasSpecularAA ? "a" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}:${toneMapping?.id ?? "off"}`;
 }
 
 const IBL_DECLS = `@group(1) @binding(12) var brdfLUT: texture_2d<f32>;
@@ -144,24 +146,7 @@ return vec4<f32>(mix(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), visibil
 return vec4<f32>(0.0, 0.0, 0.0, -1.0);
 }`;
 
-const PBR_HELPERS = `const PI: f32 = 3.14159265358979323846;
-fn distributionGGX(NdotH: f32, alphaG: f32) -> f32 {
-let a2 = alphaG * alphaG;
-let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-return a2 / (PI * d * d);
-}
-fn geometrySmithGGX(NdotL: f32, NdotV: f32, alphaG: f32) -> f32 {
-let a2 = alphaG * alphaG;
-let gl = NdotL * sqrt(NdotV * (NdotV - a2 * NdotV) + a2);
-let gv = NdotV * sqrt(NdotL * (NdotL - a2 * NdotL) + a2);
-return 0.5 / (gl + gv + 1e-7);
-}
-fn fresnelSchlick(cosTheta: f32, F0: vec3<f32>, F90: vec3<f32>) -> vec3<f32> {
-let t = 1.0 - cosTheta;
-let t2 = t * t;
-return F0 + (F90 - F0) * (t2 * t2 * t);
-}
-fn rotateY(v: vec3<f32>, angle: f32) -> vec3<f32> {
+const PBR_HELPERS = `fn rotateY(v: vec3<f32>, angle: f32) -> vec3<f32> {
 let c = cos(angle);
 let s = sin(angle);
 return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
@@ -235,14 +220,17 @@ let V = normalize(scene.vEyePosition.xyz - input.worldPos);
 let NdotVUnclamped = dot(N, V);
 let NdotV = abs(NdotVUnclamped) + 1e-7;
 let orm = textureSample(ormTexture, ormSampler, input.uv);
-let roughness = clamp(orm.g * material.mrp.y, 0.045, 1.0);
+let roughness = clamp(orm.g * material.mrp.y, 0.0, 1.0);
 let metallic = clamp(orm.b * material.mrp.x, 0.0, 1.0);
 let occlusion = 1.0 + material.mrp.w * (orm.r - 1.0);
 let reflectance = material.lighting.z;
 let colorF0 = mix(vec3<f32>(reflectance), albedo, metallic);
 let colorF90 = vec3<f32>(1.0);
 let surfaceAlbedo = albedo * (1.0 - reflectance) * (1.0 - metallic);
-let alphaG = roughness * roughness + 0.0005;
+${PBR_ROUGHNESS_WGSL}
+${f.hasSpecularAA ? PBR_SPECULAR_AA_WGSL : ""}
+let directRoughness = max(roughness, AA_factor_x);
+let directAlphaG = directRoughness * directRoughness + 0.0005;
 var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 let lightCount = min(lights.count, ${MAX_LIGHTS}u);
@@ -252,15 +240,15 @@ if (pl.isHemi) {
 directDiffuse = directDiffuse + pl.color * surfaceAlbedo * material.lighting.y;
 } else {
 directDiffuse = directDiffuse + surfaceAlbedo * (1.0 / PI) * pl.NdotL * pl.color * pl.atten * material.lighting.y;
+}
 if (pl.NdotL > 0.0 && pl.atten > 0.0) {
 let H = normalize(V + pl.L);
 let NdotH = clamp(dot(N, H), 1e-7, 1.0);
 let VdotH = saturate(dot(V, H));
-let D = distributionGGX(NdotH, alphaG);
-let G = geometrySmithGGX(pl.NdotL, NdotV, alphaG);
+let D = distributionGGX(NdotH, directAlphaG);
+let G = geometrySmithGGX(pl.NdotL, NdotV, directAlphaG);
 let Fr = fresnelSchlick(VdotH, colorF0, colorF90);
 directSpecular = directSpecular + Fr * D * G * pl.NdotL * pl.specColor * pl.atten * material.lighting.y;
-}
 }
 }
 var emissive = material.emissive.rgb;
@@ -295,7 +283,7 @@ export function composeMeshLoDWgsl(f: MeshLoDShaderFeatures, toneMapping?: ToneM
     if (f.unlit) {
         parts.push(unlitFragment(toneMapping));
     } else {
-        parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_HELPERS);
+        parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_BRDF_WGSL, PBR_HELPERS);
         if (f.hasIbl) {
             parts.push(IBL_DECLS);
         }

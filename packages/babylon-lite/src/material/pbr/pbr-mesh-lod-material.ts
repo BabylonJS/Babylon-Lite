@@ -8,7 +8,7 @@ export function validateMeshLoDMaterial(material: PbrMaterialProps): void {
     const reject = (feature: string): never => {
         throw createMeshLoDError("MLOD_UNSUPPORTED_MATERIAL", `MeshLoD v1 does not support ${feature}`, { expected: "opaque metallic-roughness", actual: feature });
     };
-    if (material.alphaBlend === true) {
+    if (material.alphaBlend === true || ((material._alphaCutOff ?? 0) <= 0 && material.alpha! < 1)) {
         reject("alpha blending");
     }
     if (material._alphaCutOff !== undefined) {

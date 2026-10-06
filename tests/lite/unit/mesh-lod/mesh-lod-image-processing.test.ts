@@ -13,6 +13,7 @@ const features: MeshLoDShaderFeatures = {
     hasNormalMap: false,
     hasEmissiveTexture: false,
     hasIbl: false,
+    hasSpecularAA: false,
     doubleSided: false,
     unlit: false,
 };

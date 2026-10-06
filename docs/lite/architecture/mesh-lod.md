@@ -25,6 +25,10 @@ material plugins, and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
 in `.mlod`.
+The blending gate uses ordinary PBR's effective state: `alphaBlend === true`,
+or `alpha < 1` when the alpha cutoff is absent/nonpositive. Explicitly setting
+`alphaBlend: false` does not make an alpha-only transparent material opaque.
+Registration, deferred build, and dirty-material updates all enforce this gate.
 
 MeshLoD v1 does not support engines created with `useFloatingOrigin: true`.
 Scene registration and material build reject that configuration with
@@ -316,6 +320,17 @@ the enabled scene tone-mapping algorithm, display gamma, then contrast.
 Bindings refresh their shader/pipeline keys before drawing when tone mapping
 is enabled, disabled, or its algorithm changes; exposure/contrast remain live
 scene UBO values and require no shader rebuild.
+Hemispheric and other lights differ only in diffuse evaluation; both contribute
+GGX specular using the shared light result's direction, attenuation, and unmixed
+specular color. Metallic-roughness clamps roughness to `[0, 1]`, without a smooth
+material floor. Ordinary PBR and MeshLoD share the BRDF and alpha-G/AA WGSL:
+base `alphaG = roughness * roughness + 0.0005`. When `enableSpecularAA` is true,
+normal derivatives give `slopeSquare = max(dot(dpdx(N), dpdx(N)),
+dot(dpdy(N), dpdy(N)))`, `AA_factor_x = pow(saturate(slopeSquare), 0.333)`,
+and `AA_factor_y = sqrt(slopeSquare) * 0.75`. IBL adds `AA_factor_y` to alpha-G;
+direct lights instead square `max(roughness, AA_factor_x)` and add `0.0005`.
+The AA flag participates in every target's shader/pipeline key, including
+changes on existing bindings.
 
 ### 13.2 Bind groups
 
@@ -408,3 +423,11 @@ span. Shared ordinary-PBR/MeshLoD texture tests cover both selection modes,
 target retirement, instance-buffer growth, and fenced, idempotent batch teardown.
 Registration/build gates cover public lightmap and dielectric-reflectance
 setters, plus translated-camera floating-origin configurations in both modes.
+Alpha-only rejection covers omitted and false blend flags at registration,
+deferred build, and dirty updates in both selection modes. Static instance SSE
+overrides are compared in float32, matching their cached/uploaded representation;
+nonexact values such as `0.1` do not trigger repeated uploads, while changes and
+removal still do. A nonvisual GPU plumbing regression compares float readbacks
+from the actual ordinary-PBR and storage-fetch MeshLoD shaders on the same packed
+triangle, with hemispheric-only metallic lighting, zero/sub-0.045 roughness,
+and varying normals with AA enabled/disabled. PR CI includes this regression.

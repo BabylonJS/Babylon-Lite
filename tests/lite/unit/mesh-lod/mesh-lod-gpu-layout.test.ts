@@ -431,6 +431,30 @@ describe("MeshLoD GPU instance state", () => {
         expect(device.writes.filter((w) => w.buffer === instBuffer)).toHaveLength(before + 1);
     });
 
+    it("does not repeatedly upload non-float32-exact SSE overrides, but uploads changes and removal", () => {
+        const { engine, device } = createMockEngine();
+        const state = createMeshLoDGpuInstanceState(8);
+        const original = inst(0, 1);
+        uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: 0.1 }]);
+        const instBuffer = state.instanceBuffer! as unknown as MockBuffer;
+        const before = device.writes.filter((write) => write.buffer === instBuffer).length;
+        expect(state.scratchF32[19]).toBe(Math.fround(0.1));
+        for (let frame = 0; frame < 32; frame++) {
+            uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: 0.1 }]);
+        }
+        expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before);
+        uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: 0.2 }]);
+        expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 1);
+        expect(state.scratchF32[19]).toBe(Math.fround(0.2));
+        uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: Math.fround(0.2) }]);
+        expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 1);
+        uploadMeshLoDInstances(engine, state, [original]);
+        expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 2);
+        expect(state.scratchF32[19]).toBe(0);
+        uploadMeshLoDInstances(engine, state, [original]);
+        expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 2);
+    });
+
     it("grows make-before-break, copying prior-state bits and retiring old buffers", () => {
         const { engine, encoder } = createMockEngine();
         const state = createMeshLoDGpuInstanceState(40);

@@ -91,6 +91,7 @@ function detectFeatures(material: PbrMaterialProps, hasEnvironment: boolean): Me
         hasNormalMap: !!material.normalTexture,
         hasEmissiveTexture: !!material.emissiveTexture,
         hasIbl: hasEnvironment && material._unlit !== true,
+        hasSpecularAA: material.enableSpecularAA === true && material._unlit !== true,
         doubleSided: material.doubleSided === true,
         unlit: material._unlit === true,
     };
@@ -137,7 +138,7 @@ interface MeshLoDMaterialTextures {
 }
 
 interface MeshLoDBatchPacket {
-    readonly features: MeshLoDShaderFeatures;
+    features: MeshLoDShaderFeatures;
     readonly textures: MeshLoDMaterialTextures;
     readonly environment: EnvironmentTextures | null;
     shaderModule: GPUShaderModule;
@@ -244,7 +245,11 @@ function meshLoDBindGroupLayout(engine: EngineContext, hasIbl: boolean): GPUBind
     });
 }
 
-function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: RenderTargetSignature, scene: SceneContext): GPURenderPipeline {
+function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: RenderTargetSignature, scene: SceneContext, material: PbrMaterialProps): GPURenderPipeline {
+    const hasSpecularAA = material.enableSpecularAA === true && !packet.features.unlit;
+    if (packet.features.hasSpecularAA !== hasSpecularAA) {
+        packet.features = { ...packet.features, hasSpecularAA };
+    }
     const toneMapping = scene.imageProcessing?.toneMappingEnabled ? (scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
     const shaderKey = meshLoDShaderKey(packet.features, toneMapping);
     if (packet.shaderKey !== shaderKey) {
@@ -672,7 +677,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                 bindingPackets.set(ownedPacket, release);
             }
             const passPacket = drawPacket;
-            let pipeline = getPipeline(eng, passPacket, sig, _scene);
+            let pipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
             return {
                 renderable,
                 get pipeline() {
@@ -682,7 +687,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                     if (passPacket.disposed || updateBatch._retired) {
                         return;
                     }
-                    const nextPipeline = getPipeline(eng, passPacket, sig, _scene);
+                    const nextPipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
                     if (pipeline !== nextPipeline) {
                         pipeline = nextPipeline;
                         invalidateRenderBundles(eng);

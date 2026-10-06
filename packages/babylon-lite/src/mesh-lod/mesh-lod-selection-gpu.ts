@@ -941,7 +941,7 @@ export function uploadMeshLoDInstances(engine: EngineContext, state: MeshLoDGpuI
     for (let i = 0; i < instances.length; i++) {
         const inst = instances[i]!;
         const visible = inst.visible ? 1 : 0;
-        const threshold = inst.screenSpaceError ?? 0;
+        const threshold = Math.fround(inst.screenSpaceError ?? 0);
         const dirty =
             state.slotVersion[i] !== inst.worldMatrixVersion || state.slotId[i] !== inst._instanceId || state.slotVisible[i] !== visible || state.slotThreshold[i] !== threshold;
         if (dirty) {

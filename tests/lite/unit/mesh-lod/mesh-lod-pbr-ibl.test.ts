@@ -1,15 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { composeMeshLoDWgsl, meshLoDShaderKey, type MeshLoDShaderFeatures } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-compose";
+import { createPbrTemplate } from "../../../../packages/babylon-lite/src/material/pbr/pbr-template.js";
+import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "../../../../packages/babylon-lite/src/material/pbr/pbr-brdf-wgsl.js";
 
 const lit: MeshLoDShaderFeatures = {
     hasNormalMap: false,
     hasEmissiveTexture: false,
     hasIbl: false,
+    hasSpecularAA: false,
     doubleSided: false,
     unlit: false,
 };
 
 describe("MeshLoD material IBL", () => {
+    it.each([false, true])("shares ordinary PBR's BRDF and flag-gated roughness/AA math (AA: %s)", (hasSpecularAA) => {
+        const shader = composeMeshLoDWgsl({ ...lit, hasSpecularAA, hasIbl: true });
+        const ordinary = createPbrTemplate({ _hasSpecularAA: hasSpecularAA })._fragmentTemplate;
+        for (const source of [ordinary, shader]) {
+            expect(source).toContain(PBR_BRDF_WGSL);
+            expect(source).toContain(PBR_ROUGHNESS_WGSL);
+            expect(source.includes(PBR_SPECULAR_AA_WGSL)).toBe(hasSpecularAA);
+        }
+        expect(shader).toContain("clamp(orm.g * material.mrp.y, 0.0, 1.0)");
+        expect(shader).not.toContain("0.045");
+        expect(shader).toContain("max(roughness, AA_factor_x)");
+        expect(shader).toContain("distributionGGX(NdotH, directAlphaG)");
+        expect(shader).toContain("geometrySmithGGX(pl.NdotL, NdotV, directAlphaG)");
+        expect(shader).toContain("textureDimensions(iblTexture).x) * alphaG");
+        expect(meshLoDShaderKey({ ...lit, hasSpecularAA: true })).not.toBe(meshLoDShaderKey(lit));
+    });
+
     it("binds the environment LUT and prefiltered cubemap only for the lit environment variant", () => {
         const withEnvironment = composeMeshLoDWgsl({ ...lit, hasIbl: true });
         const withoutEnvironment = composeMeshLoDWgsl(lit);
