@@ -49,6 +49,8 @@ import { setPbrLightmap } from "../../../../packages/babylon-lite/src/material/p
 import { setPbrMetallicReflectance } from "../../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance.js";
 import { buildPbrRenderables } from "../../../../packages/babylon-lite/src/material/pbr/pbr-renderable.js";
 import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
+import { enableMaterialStencil } from "../../../../packages/babylon-lite/src/material/enable-material-stencil.js";
+import type { StencilState } from "../../../../packages/babylon-lite/src/material/material.js";
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { createRenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target.js";
@@ -85,6 +87,7 @@ function fakeCamera(positionX = 0): Camera {
 
 const SIG: RenderTargetSignature = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 };
 const CONTEXT = { targetWidth: 800, targetHeight: 600, _camera: fakeCamera() };
+const STENCIL_CASES: readonly StencilState[] = [{ compare: "equal" }, { compare: "always", passOp: "increment-clamp" }];
 
 let engine: EngineContext;
 
@@ -197,6 +200,78 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
 });
 
 describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it.each(["cpu", "gpu"] as const)("rejects enabled stencil writers/testers before scene registration (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const scene = fakeScene(engine);
+            const material = createPbrMaterial({ stencil });
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" })
+            );
+            expect(scene._meshLoDRegistry).toBeUndefined();
+            expect(scene._deferredBuilders).toHaveLength(0);
+            expect(scene._renderables).toHaveLength(0);
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects enabled stencil writers/testers before deferred batch allocation (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const scene = fakeScene(engine);
+            const texture = createSolidTexture2D(engine, 1, 1, 1);
+            const first = createPbrMaterial({ baseColorTexture: texture });
+            const second = createPbrMaterial();
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+            second.stencil = stencil;
+            const createTexture = vi.spyOn(mock.device, "createTexture");
+            const createPipeline = vi.spyOn(mock.device, "createRenderPipeline");
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" });
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+            expect(createTexture).not.toHaveBeenCalled();
+            expect(createPipeline).not.toHaveBeenCalled();
+            expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+            expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined && batch.renderable === undefined)).toBe(true);
+            expect(scene._renderables).toHaveLength(0);
+            createTexture.mockRestore();
+            createPipeline.mockRestore();
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects dirty enabled stencil writers/testers before allocation or upload (%s)", async (selectionMode) => {
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const mock = createMockEngine();
+            engine = mock.engine;
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+            const material = createPbrMaterial();
+            const scene = await build(asset, material, 1);
+            const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+            flush(binding);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            material.stencil = stencil;
+            markMaterialUboDirty(material);
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" }));
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
     it("validates every active batch before allocating or acquiring textures for earlier batches", async () => {
         const mock = createMockEngine();
         engine = mock.engine;

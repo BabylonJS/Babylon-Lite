@@ -12,6 +12,7 @@ import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/m
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import type { StencilState } from "../../../../packages/babylon-lite/src/material/material.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
@@ -166,6 +167,19 @@ describe("MeshLoD scene registry — one-way ownership", () => {
 });
 
 describe("MeshLoD scene registry — material gate", () => {
+    it.each<StencilState>([{ compare: "equal" }, { compare: "always", passOp: "increment-clamp" }, {}])(
+        "rejects any assigned stencil state before installing a scene batch (%j)",
+        (stencil) => {
+            const scene = fakeScene();
+            const material = createPbrMaterial({ stencil });
+            expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" })
+            );
+            expect(scene._meshLoDRegistry).toBeUndefined();
+            expect(scene._deferredBuilders).toHaveLength(0);
+        }
+    );
+
     it("rejects floating-origin engines before installing a scene batch", () => {
         const scene = fakeScene();
         scene.surface.engine.useFloatingOrigin = true;

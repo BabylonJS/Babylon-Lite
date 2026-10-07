@@ -21,7 +21,7 @@ unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
 clearcoat, sheen, UV2, gamma-albedo decoding, lightmaps, dielectric-reflectance
 extensions, per-texture UV transforms (including material-side V-flips),
-material plugins, and other unsupported extensions
+material stencil state, material plugins, and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
 in `.mlod`.
@@ -29,6 +29,12 @@ The blending gate uses ordinary PBR's effective state: `alphaBlend === true`,
 or `alpha < 1` when the alpha cutoff is absent/nonpositive. Explicitly setting
 `alphaBlend: false` does not make an alpha-only transparent material opaque.
 Registration, deferred build, and dirty-material updates all enforce this gate.
+Any assigned `stencil` object is unsupported, including writer, tester, and
+default state, regardless of the ordinary-material `enableMaterialStencil()`
+opt-in. Registration rejects before installing scene batches; deferred build
+validates every active batch before allocating material/draw resources or
+acquiring textures. Dirty-material updates reject before GPU uploads. MeshLoD
+must not silently ignore a mask test or omit stencil writes that affect later draws.
 
 MeshLoD v1 does not support engines created with `useFloatingOrigin: true`.
 Scene registration and material build reject that configuration with
@@ -458,3 +464,7 @@ determinant signs in one batch, repeated runtime sign changes, front/back views,
 cone rejection enabled/disabled, and lit double-sided front-facing correction.
 Float readbacks require both exteriors to render and both backfaces to retain
 the appropriate culling/lighting; every nonempty batch remains one indirect draw.
+Stencil writer/tester regressions explicitly enable ordinary material stencil
+and require `MLOD_UNSUPPORTED_MATERIAL` at registration, deferred build, and
+dirty updates in both selection modes, without scene mutation or GPU allocation/
+upload. Unit coverage also rejects a default/empty stencil object.
