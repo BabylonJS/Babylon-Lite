@@ -38,7 +38,15 @@ export function enableShaderPipelineCache(engine: EngineContext, meshes: readonl
  *  material views created after the first scene build. Materials whose generated WGSL, layout and pipeline
  *  state are equal then compile once per device instead of once per material instance. */
 export function enableShaderMaterialPipelineSharing(): void {
-    _setSharedShaderPipelineCache(getDeviceCache);
+    _setSharedShaderPipelineCache((device, material) => {
+        // Resolve against the CURRENT device on every lookup: a material first prepared on another GPU (device
+        // loss, a second engine) must not keep that device's layouts. Same device = same cache object, no change.
+        const current = getDeviceCache(device);
+        const state = material as CacheMaterial;
+        if (state._shaderPipelineCache !== current) {
+            state._shaderPipelineCache = current;
+        }
+    });
 }
 
 /** Clear all shared ShaderMaterial layouts, modules, and pipelines. */
