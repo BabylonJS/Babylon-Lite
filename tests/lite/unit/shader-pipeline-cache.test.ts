@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -8,8 +8,9 @@ import { getShaderExternalTexture } from "../../../packages/babylon-lite/src/mat
 import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
 import { createShaderNormalMaterialView } from "../../../packages/babylon-lite/src/material/shader/normal-view";
 import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
-import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
-import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
+import { clearShaderPipelineCache, enableShaderMaterialPipelineSharing, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
+import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
+import { _setSharedShaderPipelineCache, getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
 import { _enableShaderVb, setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { wgsl, type WgslSource } from "../../../packages/babylon-lite/src/shader/wgsl";
@@ -465,5 +466,104 @@ ${hasColor ? `@location(${baseLocation + 4}) instanceColor: vec4<f32>,\n` : ""}`
             expect(positionLayout.arrayStride).toBe(16);
             expect(positionLayout.attributes[0]!.format).toBe("float32x4");
         }
+    });
+});
+
+describe("ShaderMaterial pipeline sharing (enableShaderMaterialPipelineSharing)", () => {
+    afterEach(() => {
+        _setSharedShaderPipelineCache(null);
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+    });
+
+    const prepare = (engine: EngineContext, material: ShaderMaterial, layouts?: readonly GPUVertexBufferLayout[]) => {
+        const bindings = getOrCreateShaderPipelineBindings(engine, material);
+        return { bindings, pipeline: getOrCreateShaderPipeline(engine, signature, material, bindings, "", layouts ?? bindings.vertexBuffers) };
+    };
+
+    it("leaves late materials uncached unless the application opts in", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        const { engine, createRenderPipeline } = makeEngine();
+        const first = prepare(engine, makeMaterial());
+        const second = prepare(engine, makeMaterial());
+        expect(second.bindings).not.toBe(first.bindings);
+        expect(createRenderPipeline).toHaveBeenCalledTimes(2);
+    });
+
+    it("shares a late material and a derived view with an equivalent material, without a group build", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const { engine, createBindGroupLayout, createShaderModule, createRenderPipeline } = makeEngine();
+        const first = prepare(engine, makeMaterial());
+        const counts = [createBindGroupLayout.mock.calls.length, createShaderModule.mock.calls.length, createRenderPipeline.mock.calls.length];
+        const late = prepare(engine, makeMaterial());
+        const view = createMaterialView(makeMaterial(), { features: 0 }) as unknown as ShaderMaterial;
+        const viewed = prepare(engine, view);
+        expect(late.bindings).toBe(first.bindings);
+        expect(late.pipeline).toBe(first.pipeline);
+        expect(viewed.pipeline).toBe(first.pipeline);
+        expect([createBindGroupLayout.mock.calls.length, createShaderModule.mock.calls.length, createRenderPipeline.mock.calls.length]).toEqual(counts);
+        // Repeated lookups on the same device stay stable and allocate nothing.
+        expect(prepare(engine, makeMaterial()).pipeline).toBe(first.pipeline);
+        expect(createRenderPipeline.mock.calls.length).toBe(counts[2]);
+    });
+
+    it("keeps code, layout and pipeline state separate", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const { engine } = makeEngine();
+        const base = prepare(engine, makeMaterial());
+        const otherCode = prepare(engine, makeMaterial(wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0.5); }`));
+        const otherBlend = prepare(engine, makeMaterial(undefined, { color: { srcFactor: "one", dstFactor: "one" }, alpha: { srcFactor: "one", dstFactor: "one" } }));
+        expect(otherCode.pipeline).not.toBe(base.pipeline);
+        expect(otherBlend.pipeline).not.toBe(base.pipeline);
+    });
+
+    it("resolves the cache against the current device, so a second GPU builds its own layouts and pipelines", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const a = makeEngine();
+        const b = makeEngine();
+        const material = makeMaterial();
+        const view = createMaterialView(material, { features: 0 }) as unknown as ShaderMaterial;
+        const onA = prepare(a.engine, material);
+        const viewOnA = prepare(a.engine, view);
+        const onB = prepare(b.engine, material);
+        const viewOnB = prepare(b.engine, view);
+        expect(onB.bindings).not.toBe(onA.bindings);
+        expect(onB.pipeline).not.toBe(onA.pipeline);
+        expect(viewOnB.pipeline).toBe(onB.pipeline);
+        expect(viewOnA.pipeline).toBe(onA.pipeline);
+        expect(b.createBindGroupLayout).toHaveBeenCalled();
+        expect(b.createRenderPipeline).toHaveBeenCalledTimes(1);
+        // Back on A: its own cached bindings and pipeline, nothing rebuilt.
+        const pipelinesOnA = a.createRenderPipeline.mock.calls.length;
+        const again = prepare(a.engine, material);
+        expect(again.bindings).toBe(onA.bindings);
+        expect(again.pipeline).toBe(onA.pipeline);
+        expect(a.createRenderPipeline).toHaveBeenCalledTimes(pipelinesOnA);
+    });
+
+    it("keys distinct vertex layouts apart and reuses a stable layout array", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const { engine, createRenderPipeline } = makeEngine();
+        const material = makeMaterial();
+        const bindings = getOrCreateShaderPipelineBindings(engine, material);
+        const packed: GPUVertexBufferLayout[] = [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] }];
+        const shifted: GPUVertexBufferLayout[] = [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 12, format: "float32x3" }] }];
+        const p1 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", packed);
+        const p2 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", shifted);
+        const p3 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", packed);
+        const p4 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", [{ ...shifted[0]! }]);
+        expect(p2).not.toBe(p1);
+        expect(p3).toBe(p1);
+        expect(p4).toBe(p2);
+        expect(createRenderPipeline).toHaveBeenCalledTimes(2);
     });
 });

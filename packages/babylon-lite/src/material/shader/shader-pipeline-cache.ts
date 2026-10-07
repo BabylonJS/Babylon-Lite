@@ -4,6 +4,7 @@ import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
 import { _getShaderVbSupport } from "./shader-vb-support.js";
+import { _setSharedShaderPipelineCache } from "./shader-pipeline.js";
 
 interface ShaderModuleEntry {
     readonly id: number;
@@ -31,6 +32,13 @@ export function enableShaderPipelineCache(engine: EngineContext, meshes: readonl
     for (const mesh of meshes) {
         (mesh.material as CacheMaterial)._shaderPipelineCache = cache;
     }
+}
+
+/** Share layouts, shader modules and pipelines between every ShaderMaterial, including materials and
+ *  material views created after the first scene build. Materials whose generated WGSL, layout and pipeline
+ *  state are equal then compile once per device instead of once per material instance. */
+export function enableShaderMaterialPipelineSharing(): void {
+    _setSharedShaderPipelineCache(getDeviceCache);
 }
 
 /** Clear all shared ShaderMaterial layouts, modules, and pipelines. */
@@ -102,11 +110,7 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 variantKey,
                 vertexModuleId,
                 fragmentModuleId,
-                vertexBuffers.map((layout) => [
-                    layout.arrayStride,
-                    layout.stepMode ?? "vertex",
-                    Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
-                ]),
+                vertexBuffersKey(vertexBuffers),
                 material.needAlphaBlending,
                 material.blendMode,
                 // The explicit blend override participates in the cross-material key: two materials
@@ -124,6 +128,25 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
     };
     _deviceCaches.set(device, cache);
     return cache;
+}
+
+// Pipeline lookups run for every bound draw; the vertex layout arrays are stable objects (per bindings or per
+// packed mesh layout), so their serialization is computed once instead of on every lookup.
+let _vertexBuffersKeys: WeakMap<readonly GPUVertexBufferLayout[], string> | null = null;
+function vertexBuffersKey(vertexBuffers: readonly GPUVertexBufferLayout[]): string {
+    _vertexBuffersKeys ??= new WeakMap();
+    let key = _vertexBuffersKeys.get(vertexBuffers);
+    if (key === undefined) {
+        key = JSON.stringify(
+            vertexBuffers.map((layout) => [
+                layout.arrayStride,
+                layout.stepMode ?? "vertex",
+                Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
+            ])
+        );
+        _vertexBuffersKeys.set(vertexBuffers, key);
+    }
+    return key;
 }
 
 function refresh(cache: DeviceCache): void {

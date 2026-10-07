@@ -44,6 +44,12 @@ interface ShaderExternalTexturePipelineResolver {
 }
 
 let _externalTextureResolver: ShaderExternalTexturePipelineResolver | null = null;
+let _sharedPipelineCache: ((device: GPUDevice) => ShaderPipelineCache) | null = null;
+
+/** @internal Installed by enableShaderMaterialPipelineSharing. */
+export function _setSharedShaderPipelineCache(resolver: ((device: GPUDevice) => ShaderPipelineCache) | null): void {
+    _sharedPipelineCache = resolver;
+}
 
 /** @internal Install the external-texture pipeline operations on explicit binding API use. */
 export function _installShaderExternalTexturePipelineResolver(resolver: ShaderExternalTexturePipelineResolver): void {
@@ -102,6 +108,14 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         throw new Error("ShaderMaterial external textures require setShaderExternalTexture before pipeline preparation.");
     }
     const state = material as ShaderMaterialPipelineState;
+    if (_sharedPipelineCache) {
+        // Resolve against the CURRENT device on every lookup: a material first prepared on another GPU (device
+        // loss, a second engine) must not keep that device's layouts. Same device = same cache object, no change.
+        const current = _sharedPipelineCache(engine._device);
+        if (state._shaderPipelineCache !== current) {
+            state._shaderPipelineCache = current;
+        }
+    }
     const cache = state._shaderPipelineCache;
     if (state._shaderBindings && state._shaderDevice === engine._device && state._shaderCacheGeneration === cache?.generation) {
         return state._shaderBindings;

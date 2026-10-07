@@ -540,6 +540,7 @@ export { enableShaderUniformRangeUpdates } from "./material/shader/shader-unifor
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
 export { enableShaderMaterialFinalColor } from "./material/shader/enable-shader-material-final-color.js";
+export { enableShaderMaterialPipelineSharing } from "./material/shader/shader-pipeline-cache.js";
 export {
     enableAsyncShaderPipelineCompilation,
     prepareShaderMaterialPipeline,
