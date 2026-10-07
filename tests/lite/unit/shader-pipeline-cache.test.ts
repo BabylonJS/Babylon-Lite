@@ -474,6 +474,7 @@ describe("ShaderMaterial pipeline sharing (enableShaderMaterialPipelineSharing)"
         _setSharedShaderPipelineCache(null);
         clearShaderPipelineCache();
         clearSceneBGLCache();
+        vi.restoreAllMocks();
     });
 
     const prepare = (engine: EngineContext, material: ShaderMaterial, layouts?: readonly GPUVertexBufferLayout[]) => {
@@ -548,7 +549,29 @@ describe("ShaderMaterial pipeline sharing (enableShaderMaterialPipelineSharing)"
         expect(a.createRenderPipeline).toHaveBeenCalledTimes(pipelinesOnA);
     });
 
-    it("keys distinct vertex layouts apart and reuses a stable layout array", () => {
+    it("retargets a material with an existing shared cache when its engine's real device changes", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const initial = makeEngine();
+        const recovered = makeEngine();
+        const material = makeMaterial();
+        const before = prepare(initial.engine, material);
+
+        initial.engine._device = recovered.engine._device;
+        const after = prepare(initial.engine, material);
+        const late = prepare(initial.engine, makeMaterial());
+
+        expect(after.bindings).not.toBe(before.bindings);
+        expect(after.pipeline).not.toBe(before.pipeline);
+        expect(late.bindings).toBe(after.bindings);
+        expect(late.pipeline).toBe(after.pipeline);
+        expect(initial.createRenderPipeline).toHaveBeenCalledTimes(1);
+        expect(recovered.createShaderModule).toHaveBeenCalledTimes(2);
+        expect(recovered.createRenderPipeline).toHaveBeenCalledTimes(1);
+    });
+
+    it("keys distinct vertex layouts apart, traverses each identity once, and shares equal replacements", () => {
         clearShaderPipelineCache();
         clearSceneBGLCache();
         enableShaderMaterialPipelineSharing();
@@ -557,13 +580,47 @@ describe("ShaderMaterial pipeline sharing (enableShaderMaterialPipelineSharing)"
         const bindings = getOrCreateShaderPipelineBindings(engine, material);
         const packed: GPUVertexBufferLayout[] = [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] }];
         const shifted: GPUVertexBufferLayout[] = [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 12, format: "float32x3" }] }];
+        const replacement: GPUVertexBufferLayout[] = shifted.map((layout) => ({ ...layout, attributes: Array.from(layout.attributes) }));
+        const packedMap = vi.spyOn(packed, "map");
+        const shiftedMap = vi.spyOn(shifted, "map");
+        const replacementMap = vi.spyOn(replacement, "map");
         const p1 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", packed);
         const p2 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", shifted);
         const p3 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", packed);
-        const p4 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", [{ ...shifted[0]! }]);
+        const p4 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", replacement);
+        const p5 = getOrCreateShaderPipeline(engine, signature, material, bindings, "", replacement);
         expect(p2).not.toBe(p1);
         expect(p3).toBe(p1);
         expect(p4).toBe(p2);
+        expect(p5).toBe(p2);
+        expect(packedMap).toHaveBeenCalledTimes(1);
+        expect(shiftedMap).toHaveBeenCalledTimes(1);
+        expect(replacementMap).toHaveBeenCalledTimes(1);
+        expect(createRenderPipeline).toHaveBeenCalledTimes(2);
+    });
+
+    it("renews bindings, modules, and pipelines after clear without disabling sharing or retraversing immutable layouts", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        enableShaderMaterialPipelineSharing();
+        const { engine, createShaderModule, createRenderPipeline } = makeEngine();
+        const material = makeMaterial();
+        const firstBindings = getOrCreateShaderPipelineBindings(engine, material);
+        const layouts = firstBindings.vertexBuffers;
+        const layoutMap = vi.spyOn(layouts, "map");
+        const firstPipeline = getOrCreateShaderPipeline(engine, signature, material, firstBindings);
+
+        clearShaderPipelineCache();
+        const nextBindings = getOrCreateShaderPipelineBindings(engine, material);
+        const nextPipeline = getOrCreateShaderPipeline(engine, signature, material, nextBindings, "", layouts);
+        const late = prepare(engine, makeMaterial(), layouts);
+
+        expect(nextBindings).not.toBe(firstBindings);
+        expect(nextPipeline).not.toBe(firstPipeline);
+        expect(late.bindings).toBe(nextBindings);
+        expect(late.pipeline).toBe(nextPipeline);
+        expect(layoutMap).toHaveBeenCalledTimes(1);
+        expect(createShaderModule).toHaveBeenCalledTimes(4);
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
     });
 });

@@ -706,6 +706,55 @@ void options;
         }
     });
 
+    it("exposes the root zero-argument pipeline-sharing enabler without its internal setter or cache type", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("declare function enableShaderMaterialPipelineSharing(): void;");
+        expect(dts).not.toContain("declare function _setSharedShaderPipelineCache");
+        expect(dts).not.toContain("interface ShaderPipelineCache");
+
+        const probePath = resolve(BUILD_DIR, "shader-pipeline-sharing.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { enableShaderMaterialPipelineSharing } from "./index.js";
+enableShaderMaterialPipelineSharing();
+// @ts-expect-error The public enabler does not accept an engine, cache, or options.
+enableShaderMaterialPipelineSharing({});
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes external video textures without exposing WebGPU handles", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
