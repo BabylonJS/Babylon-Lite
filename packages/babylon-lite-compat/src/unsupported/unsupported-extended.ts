@@ -11,10 +11,13 @@
 
 import { unsupported } from "../error.js";
 import type { AbstractMesh, TransformNode } from "../meshes/meshes.js";
+import type { AbstractEngine } from "../engine/engine.js";
 import type { Matrix } from "../math/matrix.js";
 import type { Vector3 } from "../math/vector.js";
+import type { ShaderLanguage } from "../misc/engine-constants.js";
 import type { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+import type { BaseTexture } from "../textures/textures.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
 
@@ -68,6 +71,110 @@ export class PostProcess {
             "Babylon Lite uses frame-graph post-process tasks rather than camera-attached PostProcess objects. Use the native `create*PostProcessTask` APIs."
         );
     }
+}
+
+export class Effect {
+    public constructor() {
+        unsupported(
+            "Effect",
+            "Babylon.js Effect owns shader-store lookup, preprocessing, compilation, reflection, and binding; Lite exposes explicit typed WGSL material/render-shader APIs instead."
+        );
+    }
+
+    public isReady(): never {
+        return unsupported("Effect.isReady", "Lite has no Babylon.js Effect compilation lifecycle.");
+    }
+
+    public getEngine(): never {
+        return unsupported("Effect.getEngine", "Lite has no Babylon.js Effect object associated with a compat engine.");
+    }
+
+    public getCompilationError(): never {
+        return unsupported("Effect.getCompilationError", "Lite has no Babylon.js Effect compilation lifecycle or error store.");
+    }
+
+    public setTexture(_channel: string, _texture: BaseTexture): never {
+        return unsupported("Effect.setTexture", "Lite binds textures through typed material/render-shader APIs, not an Effect binding table.");
+    }
+
+    public setFloat(_uniformName: string, _value: number): never {
+        return unsupported("Effect.setFloat", "Lite binds uniforms through typed material/render-shader APIs, not an Effect binding table.");
+    }
+}
+
+export type EffectWrapperCustomShaderCodeProcessing = {
+    processCodeAfterIncludes?: (postProcessName: string, shaderType: string, code: string) => string;
+    processFinalCode?: (postProcessName: string, shaderType: string, code: string) => string;
+    defineCustomBindings?: (postProcessName: string, defines: string | null, uniforms: string[], samplers: string[]) => string | null;
+    bindCustomBindings?: (postProcessName: string, effect: Effect) => void;
+};
+
+export interface EffectWrapperCreationOptions {
+    engine?: AbstractEngine;
+    fragmentShader?: string;
+    useShaderStore?: boolean;
+    vertexShader?: string;
+    vertexUrl?: string;
+    attributeNames?: string[];
+    uniformNames?: string[];
+    uniforms?: string[] | null;
+    samplerNames?: string[];
+    samplers?: string[] | null;
+    uniformBuffers?: string[] | null;
+    defines?: string | string[] | null;
+    indexParameters?: any;
+    blockCompilation?: boolean;
+    onCompiled?: ((effect: Effect) => void) | null;
+    onError?: (effect: Effect, errors: string) => void;
+    name?: string;
+    shaderLanguage?: ShaderLanguage;
+    extraInitializations?: (useWebGPU: boolean, list: Promise<any>[]) => void;
+    extraInitializationsAsync?: () => Promise<void>;
+    useAsPostProcess?: boolean;
+    allowEmptySourceTexture?: boolean;
+}
+
+export class EffectWrapper {
+    public static ForceGLSL = false;
+
+    public static RegisterShaderCodeProcessing(
+        _effectWrapperName: string | null,
+        _customShaderCodeProcessing?: EffectWrapperCustomShaderCodeProcessing
+    ): never {
+        return unsupported(
+            "EffectWrapper.RegisterShaderCodeProcessing",
+            "Lite has no Babylon.js Effect shader-store/preprocessor registry to receive custom code-processing hooks."
+        );
+    }
+
+    public constructor(_options: EffectWrapperCreationOptions) {
+        unsupported(
+            "EffectWrapper",
+            "Babylon.js EffectWrapper compiles GLSL/WGSL through the Effect shader-store and preprocessor lifecycle; Lite exposes only explicit WGSL render shaders and has no Effect object to adapt."
+        );
+    }
+}
+
+const FRAME_GRAPH_MODEL_BLOCKER =
+    "Lite exposes standalone frame-graph task factories, but not Babylon.js's FrameGraph handles, task base classes, texture manager, or node-render-graph object model required by this API.";
+
+/** Babylon.js 9.29 frame-graph min/max reduction task. */
+export class FrameGraphMinMaxReducerTask {
+    public constructor(..._args: unknown[]) {
+        unsupported("FrameGraphMinMaxReducerTask", FRAME_GRAPH_MODEL_BLOCKER);
+    }
+}
+
+/** Babylon.js 9.29 node-render-graph min/max reduction block. */
+export class NodeRenderGraphMinMaxReducerBlock {
+    public constructor(..._args: unknown[]) {
+        unsupported("NodeRenderGraphMinMaxReducerBlock", FRAME_GRAPH_MODEL_BLOCKER);
+    }
+}
+
+/** Babylon.js 9.29 node-render-graph registration function. */
+export function RegisterMinMaxReducerBlock(): never {
+    return unsupported("RegisterMinMaxReducerBlock", FRAME_GRAPH_MODEL_BLOCKER);
 }
 
 function postProcessStub(name: string, nativeTask: string): { new (): never } {

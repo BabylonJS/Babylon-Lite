@@ -43,7 +43,6 @@ import {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
-    GaussianSplattingStream,
     AddGaussianSplattingStreamPart,
     AddGaussianSplattingStreamPartAsync,
     Sound,
@@ -285,18 +284,15 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
     });
 });
 
-describe("Gaussian Splatting LOD streaming stubs throw", () => {
-    it("GaussianSplattingStream throws on construction", () => {
-        expect(() => new GaussianSplattingStream()).toThrow(LiteCompatError);
-        expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
+describe("Gaussian Splatting compound streaming stubs throw", () => {
+    it("AddGaussianSplattingStreamPart names its structural blocker", () => {
+        expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(LiteCompatError);
+        expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(/compound-mesh atlas/);
     });
 
-    it.each([
-        ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
-        ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
-    ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
-        expect(call).toThrow(LiteCompatError);
-        expect(call).toThrow(new RegExp(name));
+    it("AddGaussianSplattingStreamPartAsync names its structural blocker", async () => {
+        await expect(AddGaussianSplattingStreamPartAsync({} as never, "part", {} as never, "/")).rejects.toThrow(LiteCompatError);
+        await expect(AddGaussianSplattingStreamPartAsync({} as never, "part", {} as never, "/")).rejects.toThrow(/compound-mesh atlas/);
     });
 });
 

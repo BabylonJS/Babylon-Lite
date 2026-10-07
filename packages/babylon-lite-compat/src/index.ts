@@ -36,6 +36,7 @@ export { PickingInfo } from "./culling/picking-info.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
+export type { WebGPUEngineOptions } from "./engine/engine.js";
 
 // ─── Compute and buffers ─────────────────────────────────────────────
 export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
@@ -137,6 +138,7 @@ export {
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, HtmlTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export { ExternalTexture } from "./textures/external-texture.js";
 export type { IHtmlTextureOptions } from "./textures/textures.js";
 export {
     RawTexture2DArray,
@@ -354,9 +356,6 @@ export {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
-    GaussianSplattingStream,
-    AddGaussianSplattingStreamPart,
-    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -394,11 +393,6 @@ export type {
     IHtmlRaycastInteractionManagerOptions,
     IHtmlInCanvasPolyfillModule,
     IInstallHtmlInCanvasPolyfillOptions,
-    GaussianSplattingStreamDebugLodSource,
-    GaussianSplattingStreamLod0SplatCount,
-    IGaussianSplattingStreamOptions,
-    ISOGLODMetadata,
-    IGaussianSplattingStreamingPart,
     DitheredTileFadeSupportedMaterial,
     DitheredTileFadeMesh,
     IDitheredTileFadeBounds,
@@ -407,6 +401,19 @@ export type {
     IRootMotionClipOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
+    GaussianSplattingStream,
+    GaussianSplattingPartProxyMesh,
+    AddGaussianSplattingStreamPart,
+    AddGaussianSplattingStreamPartAsync,
+} from "./meshes/gaussian-splatting-stream.js";
+export type {
+    GaussianSplattingStreamDebugLodSource,
+    GaussianSplattingStreamLod0SplatCount,
+    IGaussianSplattingStreamOptions,
+    ISOGLODMetadata,
+    IGaussianSplattingStreamingPart,
+} from "./meshes/gaussian-splatting-stream.js";
+export {
     ReflectionProbe,
     Layer,
     EffectLayer,
@@ -414,6 +421,11 @@ export {
     GeometryBufferRenderer,
     BoundingBoxRenderer,
     PostProcess,
+    Effect,
+    EffectWrapper,
+    FrameGraphMinMaxReducerTask,
+    NodeRenderGraphMinMaxReducerBlock,
+    RegisterMinMaxReducerBlock,
     BlackAndWhitePostProcess,
     BlurPostProcess,
     BloomEffect,
@@ -445,6 +457,8 @@ export {
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
 export type {
+    EffectWrapperCustomShaderCodeProcessing,
+    EffectWrapperCreationOptions,
     GeometryRenderingObjectIdProvider,
     FBXNormalMapCoordinateSystem,
     FBXLoaderWarning,

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, enableMirroredMeshesMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, enableMirroredMeshesMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
     createEngineMock: vi.fn(),
     enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+    onEngineDeviceLostMock: vi.fn(),
     registerSceneMock: vi.fn<() => Promise<void>>(),
     startEngineMock: vi.fn<() => Promise<void>>(),
 }));
@@ -13,6 +14,7 @@ vi.mock("babylon-lite", async (importActual) => {
         ...actual,
         createEngine: createEngineMock,
         enableMirroredMeshes: enableMirroredMeshesMock,
+        onEngineDeviceLost: onEngineDeviceLostMock,
         registerScene: registerSceneMock,
         startEngine: startEngineMock,
     };
@@ -54,6 +56,8 @@ describe("compat engine startup ordering", () => {
         createEngineMock.mockResolvedValue({});
         enableMirroredMeshesMock.mockReset();
         enableMirroredMeshesMock.mockResolvedValue();
+        onEngineDeviceLostMock.mockReset();
+        onEngineDeviceLostMock.mockReturnValue(() => undefined);
         registerSceneMock.mockReset();
         registerSceneMock.mockResolvedValue();
         startEngineMock.mockReset();
@@ -81,6 +85,25 @@ describe("compat engine startup ordering", () => {
         const configuredEngine = new Engine(canvas, { antialias: true, msaaSamples: 1 });
         await configuredEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("forwards Lite device loss to the BJS context-loss observable", async () => {
+        const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
+        const observer = vi.fn();
+        engine.onContextLostObservable.add(observer);
+        await engine.initAsync();
+
+        const callback = onEngineDeviceLostMock.mock.calls[0]![1] as () => void;
+        callback();
+
+        expect(observer).toHaveBeenCalledWith(engine);
+    });
+
+    it("rejects BJS canvas presentation options that require Lite's hot surface path", () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        expect(() => new WebGPUEngine(canvas, { canvasToneMapping: { mode: "extended" } })).toThrow(/surface configuration hot path/);
+        expect(() => new WebGPUEngine(canvas, { canvasColorSpace: "display-p3" })).toThrow(/surface configuration hot path/);
     });
 
     it("starts the main engine before awaiting utility-layer work", async () => {
