@@ -137,10 +137,7 @@ export interface EffectWrapperCreationOptions {
 export class EffectWrapper {
     public static ForceGLSL = false;
 
-    public static RegisterShaderCodeProcessing(
-        _effectWrapperName: string | null,
-        _customShaderCodeProcessing?: EffectWrapperCustomShaderCodeProcessing
-    ): never {
+    public static RegisterShaderCodeProcessing(_effectWrapperName: string | null, _customShaderCodeProcessing?: EffectWrapperCustomShaderCodeProcessing): never {
         return unsupported(
             "EffectWrapper.RegisterShaderCodeProcessing",
             "Lite has no Babylon.js Effect shader-store/preprocessor registry to receive custom code-processing hooks."

@@ -31,7 +31,7 @@ describe("GaussianSplattingStream structural stubs", () => {
 
     it("names the parsed-metadata, budget, transform, and lifecycle blocker", () => {
         expect(() => new GaussianSplattingStream("stream", metadata, "https://assets.example/", {} as Scene)).toThrow(LiteCompatError);
-        expect(() => new GaussianSplattingStream("stream", metadata, "https://assets.example/", {} as Scene)).toThrow(/HTTP\\(S\\) manifest URL/);
+        expect(() => new GaussianSplattingStream("stream", metadata, "https://assets.example/", {} as Scene)).toThrow(/HTTP\(S\) manifest URL/);
     });
 
     it("keeps compound-stream surfaces importable with a named structural blocker", async () => {

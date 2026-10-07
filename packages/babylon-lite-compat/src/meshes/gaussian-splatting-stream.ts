@@ -84,8 +84,11 @@ export interface IGaussianSplattingStreamingPart {
 const STREAM_BLOCKER =
     "Lite's native streamer accepts only an HTTP(S) manifest URL and combines selection capacity with a mandatory render cap. Babylon.js constructs synchronously from parsed metadata, applies a distinct SOG coordinate transform, and independently controls render budget, residency, compound hosting, and cancellation. Bridging those lifecycle/policy differences requires a new Lite stream-construction contract.";
 
-const COMPOUND_BLOCKER =
-    "Lite streams one independently rendered scene node and has no compound-mesh atlas reservation/proxy lifecycle to adapt.";
+const COMPOUND_BLOCKER = "Lite streams one independently rendered scene node and has no compound-mesh atlas reservation/proxy lifecycle to adapt.";
+
+function unsupportedProxyConstruction(_name: string): never {
+    return unsupported("GaussianSplattingPartProxyMesh", COMPOUND_BLOCKER);
+}
 
 export class GaussianSplattingPartProxyMesh extends Mesh {
     public readonly compoundSplatMesh: GaussianSplattingMesh;
@@ -108,13 +111,12 @@ export class GaussianSplattingPartProxyMesh extends Mesh {
         splatsDataOffset: number,
         shDataOffset = splatsDataOffset
     ) {
-        super(name);
+        super(unsupportedProxyConstruction(name));
         this.compoundSplatMesh = compoundSplatMesh;
         this._partIndex = partIndex;
         this._vertexCount = vertexCount;
         this._splatsDataOffset = splatsDataOffset;
         this._shDataOffset = shDataOffset;
-        unsupported("GaussianSplattingPartProxyMesh", COMPOUND_BLOCKER);
     }
 
     public get partIndex(): number {

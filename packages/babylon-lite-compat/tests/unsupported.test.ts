@@ -43,8 +43,6 @@ import {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
-    AddGaussianSplattingStreamPart,
-    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -70,6 +68,7 @@ import {
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
+import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync } from "../src/meshes/gaussian-splatting-stream";
 import {
     GLTF1,
     GLTF2,

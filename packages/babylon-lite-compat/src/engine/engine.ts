@@ -150,8 +150,7 @@ export abstract class AbstractEngine {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts: WebGPUEngineOptions | undefined =
-            typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
         if (opts) {
             if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
                 unsupported(
