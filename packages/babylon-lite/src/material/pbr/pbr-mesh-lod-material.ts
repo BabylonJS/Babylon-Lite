@@ -2,6 +2,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { hasTextureTransform } from "../../texture/texture-metadata.js";
 import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
 import { getPbrMetallicReflectance } from "./pbr-material-accessors.js";
+import { _getPbrLocalEnvironment } from "./pbr-local-cubemap-state.js";
 
 /** Reject unsupported features at both scene registration and material build. */
 export function validateMeshLoDMaterial(material: PbrMaterialProps): void {
@@ -16,6 +17,9 @@ export function validateMeshLoDMaterial(material: PbrMaterialProps): void {
     }
     if (material.stencil !== undefined) {
         reject("material stencil state");
+    }
+    if (_getPbrLocalEnvironment(material) !== undefined) {
+        reject("per-material environments or local probes");
     }
     if (material._gammaAlbedo) {
         reject("gamma-albedo decoding");

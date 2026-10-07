@@ -95,9 +95,13 @@ describe("MeshLoD is opt-in and tree-shakable", () => {
         }
     }, 180_000);
 
-    it("positive control: importing loadMeshLoD DOES emit the MeshLoD runtime chunk somewhere", async () => {
+    it("emits MeshLoD validation without retaining the local-cubemap renderer", async () => {
         const code = allCode(await bundleChunks(`import { loadMeshLoD } from ${JSON.stringify(SRC_ENTRY)};\nconsole.log(loadMeshLoD);\n`));
         // Guards against the boundary test passing because nothing was emitted at all.
         expect(code).toContain("MLOD_INVALID_OPTION");
+        expect(code).toContain("per-material environments or local probes");
+        for (const sentinel of ["localSingleReflectionDirection", "pbr-local-probes", "setPbrEnvironment"]) {
+            expect(code, `MeshLoD retained the local-cubemap renderer (${sentinel})`).not.toContain(sentinel);
+        }
     }, 180_000);
 });

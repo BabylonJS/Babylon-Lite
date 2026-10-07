@@ -51,6 +51,15 @@ import { buildPbrRenderables } from "../../../../packages/babylon-lite/src/mater
 import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
 import { enableMaterialStencil } from "../../../../packages/babylon-lite/src/material/enable-material-stencil.js";
 import type { StencilState } from "../../../../packages/babylon-lite/src/material/material.js";
+import {
+    clearPbrLocalEnvironment,
+    enablePbrLocalCubemap,
+    setPbrEnvironment,
+    setPbrLocalEnvironment,
+    setPbrLocalEnvironmentProbeSet,
+} from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-local-cubemap.js";
+import type { PbrLocalEnvironmentProbeSet } from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-local-cubemap.js";
+import type { EnvironmentTextures } from "../../../../packages/babylon-lite/src/loader-env/load-env.js";
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { createRenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target.js";
@@ -88,6 +97,63 @@ function fakeCamera(positionX = 0): Camera {
 const SIG: RenderTargetSignature = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 };
 const CONTEXT = { targetWidth: 800, targetHeight: 600, _camera: fakeCamera() };
 const STENCIL_CASES: readonly StencilState[] = [{ compare: "equal" }, { compare: "always", passOp: "increment-clamp" }];
+const LOCAL_ENVIRONMENT_CASES = ["override", "box", "sphere", "probes"] as const;
+
+function fakeEnvironment(): EnvironmentTextures {
+    return {
+        brdfLut: {} as GPUTexture,
+        brdfLutView: {} as GPUTextureView,
+        brdfSampler: {} as GPUSampler,
+        specularCube: {} as GPUTexture,
+        specularCubeView: {} as GPUTextureView,
+        cubeSampler: {} as GPUSampler,
+        irradianceSH: new Float32Array(36),
+        sphericalHarmonics: new Float32Array(36),
+        lodGenerationScale: 0.8,
+    };
+}
+
+function assignMaterialEnvironment(material: PbrMaterialProps, kind: (typeof LOCAL_ENVIRONMENT_CASES)[number]): void {
+    const environment = fakeEnvironment();
+    if (kind === "override") {
+        setPbrEnvironment(material, environment);
+    } else if (kind === "box") {
+        setPbrLocalEnvironment(material, environment, { projectionPosition: [0, 0, 0], projectionSize: [4, 4, 4] });
+    } else if (kind === "sphere") {
+        setPbrLocalEnvironment(material, environment, { shape: "sphere", projectionPosition: [0, 0, 0], projectionRadius: 2 });
+    } else {
+        const data = new Float32Array(32);
+        const set: PbrLocalEnvironmentProbeSet = {
+            probes: [
+                {
+                    environment,
+                    capturePosition: [0, 0, 0],
+                    projectionPosition: [0, 0, 0],
+                    projectionSize: [4, 4, 4],
+                    influencePosition: [0, 0, 0],
+                    influenceInnerSize: [2, 2, 2],
+                    influenceOuterSize: [6, 6, 6],
+                },
+            ],
+            _uniformBuffer: {} as GPUBuffer,
+            _uniformData: data,
+            _uniformU32: new Uint32Array(data.buffer),
+            _texture: environment.specularCube,
+            _textureView: environment.specularCubeView,
+            _sampler: environment.cubeSampler,
+            _gridBuffer: {} as GPUBuffer,
+            _gridData: new Uint32Array(0),
+            _gridMinimum: [0, 0, 0],
+            _gridCellSize: 1,
+            _gridDimensions: [1, 1, 1],
+            _gridStride: 1,
+            _engine: engine,
+            _device: engine._device,
+            _ensureDevice: vi.fn(),
+        };
+        setPbrLocalEnvironmentProbeSet(material, set);
+    }
+}
 
 let engine: EngineContext;
 
@@ -196,6 +262,99 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
         const cpuScene = await build(await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" }), {} as PbrMaterialProps, 1);
         cpuScene._renderables[0]!.bind(engine, SIG).update!(CONTEXT);
         expect(cpuScene._meshLoDRegistry!.batches[0]!.asset.diagnostics.renderedTriangleCount).toBe(cpuTris);
+    });
+});
+
+describe.each(["cpu", "gpu"] as const)("MeshLoD render equivalence — per-material environments (%s)", (selectionMode) => {
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects %s assignments before scene registration with or without a global environment", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        for (const globalEnvironment of [undefined, fakeEnvironment()]) {
+            const scene = fakeScene(engine);
+            scene._envTextures = globalEnvironment;
+            const material = createPbrMaterial();
+            assignMaterialEnvironment(material, kind);
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "per-material environments or local probes" })
+            );
+            expect(scene._meshLoDRegistry).toBeUndefined();
+            expect(scene._deferredBuilders).toHaveLength(0);
+            expect(scene._renderables).toHaveLength(0);
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects %s assignments before deferred allocation for any batch", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        for (const globalEnvironment of [undefined, fakeEnvironment()]) {
+            const scene = fakeScene(engine);
+            scene._envTextures = globalEnvironment;
+            const texture = createSolidTexture2D(engine, 1, 1, 1);
+            const first = createPbrMaterial({ baseColorTexture: texture });
+            const second = createPbrMaterial();
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+            assignMaterialEnvironment(second, kind);
+            const createTexture = vi.spyOn(mock.device, "createTexture");
+            const createPipeline = vi.spyOn(mock.device, "createRenderPipeline");
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({
+                code: "MLOD_UNSUPPORTED_MATERIAL",
+                actual: "per-material environments or local probes",
+            });
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+            expect(createTexture).not.toHaveBeenCalled();
+            expect(createPipeline).not.toHaveBeenCalled();
+            expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+            expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined && batch.renderable === undefined)).toBe(true);
+            expect(scene._renderables).toHaveLength(0);
+            createTexture.mockRestore();
+            createPipeline.mockRestore();
+        }
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects dirty %s assignments before allocation or upload", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        const scene = await build(asset, material, 1);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        assignMaterialEnvironment(material, kind);
+        markMaterialUboDirty(material);
+        const allocations = mock.device.buffers.length;
+        const uploads = mock.device.writes.length;
+        expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "per-material environments or local probes" }));
+        expect(mock.device.buffers).toHaveLength(allocations);
+        expect(mock.device.writes).toHaveLength(uploads);
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("allows cleared %s assignments and the global environment after enabling local cubemaps", async (kind) => {
+        await enablePbrLocalCubemap();
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        assignMaterialEnvironment(material, kind);
+        clearPbrLocalEnvironment(material);
+        const scene = fakeScene(engine);
+        scene._envTextures = fakeEnvironment();
+        await build(asset, material, 1, scene);
+        expect(scene._renderables).toHaveLength(1);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
     });
 });
 

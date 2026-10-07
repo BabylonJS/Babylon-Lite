@@ -21,7 +21,8 @@ unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
 clearcoat, sheen, UV2, gamma-albedo decoding, lightmaps, dielectric-reflectance
 extensions, per-texture UV transforms (including material-side V-flips),
-material stencil state, material plugins, and other unsupported extensions
+per-material environments/local probes, material stencil state, material plugins,
+and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
 in `.mlod`.
@@ -35,6 +36,18 @@ opt-in. Registration rejects before installing scene batches; deferred build
 validates every active batch before allocating material/draw resources or
 acquiring textures. Dirty-material updates reject before GPU uploads. MeshLoD
 must not silently ignore a mask test or omit stencil writes that affect later draws.
+
+Only the scene's global environment is supported. Assignments through
+`setPbrEnvironment`, `setPbrLocalEnvironment` (box or sphere), or
+`setPbrLocalEnvironmentProbeSet` fail with `MLOD_UNSUPPORTED_MATERIAL`, whose
+`actual` is `"per-material environments or local probes"`, even when there is a
+global environment or `enablePbrLocalCubemap()` has not been called.
+The shared validator checks `_getPbrLocalEnvironment(material) !== undefined`
+using the lightweight state module, without importing the local-cubemap renderer.
+Registration, deferred build, and dirty-material updates enforce this restriction
+before scene mutation, draw allocation/texture acquisition, and uploads respectively.
+`clearPbrLocalEnvironment(material)` removes the assignment and restores eligibility;
+enabling local cubemaps alone does not make otherwise supported materials invalid.
 
 MeshLoD v1 does not support engines created with `useFloatingOrigin: true`.
 Scene registration and material build reject that configuration with
@@ -468,3 +481,9 @@ Stencil writer/tester regressions explicitly enable ordinary material stencil
 and require `MLOD_UNSUPPORTED_MATERIAL` at registration, deferred build, and
 dirty updates in both selection modes, without scene mutation or GPU allocation/
 upload. Unit coverage also rejects a default/empty stencil object.
+Per-material environment regressions enable local cubemaps and use the public
+override, box/sphere projection, and probe-set setters. Both selection modes
+reject registration, deferred builds (including an earlier valid batch), and
+dirty updates without scene mutation or new material/draw resources. Cleared
+assignments still build and draw with the global environment. The MeshLoD-only
+build regression also requires the local-cubemap renderer to remain absent.
