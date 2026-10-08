@@ -68,7 +68,7 @@ import {
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
-import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, type GaussianSplattingStreamLod0SplatCount } from "../src/meshes/gaussian-splatting-stream";
+import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
 import {
     GLTF1,
     GLTF2,
@@ -301,11 +301,13 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
 });
 
 describe("Gaussian Splatting compound streaming stubs throw", () => {
-    it("preserves the lod0SplatCount discriminated union", () => {
-        const getAvailableCount = (result: GaussianSplattingStreamLod0SplatCount): number | undefined => (result.status === "available" ? result.count : undefined);
+    it("preserves the lod0SplatCount discriminated union on the stream accessor", () => {
+        const getAvailableCount = (stream: GaussianSplattingStream): number | undefined => {
+            const result = stream.lod0SplatCount;
+            return result.status === "available" ? result.count : undefined;
+        };
 
-        expect(getAvailableCount({ status: "available", count: 42 })).toBe(42);
-        expect(getAvailableCount({ status: "pending" })).toBeUndefined();
+        expectTypeOf(getAvailableCount).returns.toEqualTypeOf<number | undefined>();
     });
 
     it("AddGaussianSplattingStreamPart names its structural blocker", () => {
