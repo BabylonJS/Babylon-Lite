@@ -72,7 +72,6 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderDevice?: GPUDevice;
     _shaderBindings?: ShaderPipelineBindings;
     _shaderCacheGeneration?: number;
-    _shaderPipelineCache?: { readonly generation: number };
     _shaderCustomSpec?: UboSpec | null;
 }
 

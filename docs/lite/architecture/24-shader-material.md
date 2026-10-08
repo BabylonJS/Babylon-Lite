@@ -423,6 +423,7 @@ packages/babylon-lite/src/material/shader/
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
   shader-pipeline-cache.ts Lazy cross-material bindings, modules, and pipeline cache.
+  enable-shader-material-pipeline-sharing.ts  Opt-in global cache attachment and layout-identity memo.
   enable-async-shader-pipeline-compilation.ts  Real-device async descriptor preparation.
   shader-vb-support.ts     Tiny opt-in seam and canonical attribute layouts.
   shader-vb.ts             Declared formats, per-mesh packing, grouping, bounded defaults.
@@ -466,19 +467,32 @@ and multi-material build groups may still install a scoped shared cache with
 `enableShaderPipelineCache(engine, meshes)`. The global enabler reuses the same cache implementation.
 `shader-pipeline.ts` owns only a nullable `(device, material) => void` seam and invokes it once,
 with optional chaining, at the start of `getOrCreateShaderPipelineBindings`. The seam implementation
-in `shader-pipeline-cache.ts` selects the current device cache and assigns it only when the material's
+in `enable-shader-material-pipeline-sharing.ts` selects the current device cache and assigns it only when the material's
 current cache differs. This keeps all opt-in semantics behind the enabler while ensuring an already
 prepared material retargets when its engine's real `GPUDevice` changes.
+The cache owner has no runtime import of the pipeline owner or global enabler; its pipeline protocol
+dependencies are type-only. The root entry re-exports the public enabler from its separate extension,
+never through the scoped cache module.
 
 ```typescript
 /** @internal */
 export function _setSharedShaderPipelineCache(seam: ((device: GPUDevice, material: ShaderMaterial) => void) | null): void;
 /** @internal */
 export function retargetShaderPipelineCache(material: ShaderMaterial, device: GPUDevice): void;
+/** @internal */
+export function _getShaderDeviceCache(device: GPUDevice): ShaderPipelineCache;
+/** @internal */
+export function _setShaderVertexBuffersKey(resolve: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null): void;
+/** @internal */
+export function _serializeShaderVertexBuffers(layouts: readonly GPUVertexBufferLayout[]): string;
 ```
 
-The internal setter is stripped from the emitted declarations. `retargetShaderPipelineCache` moves
+The internal setters, cache accessor, serializer and cache protocol are stripped from the emitted declarations. `retargetShaderPipelineCache` moves
 only a material that already has a shared cache; it does not opt an independent material into sharing.
+`ShaderMaterial` carries its shared-cache reference and exact-material/bindings module memo as typed
+`@internal` state, without a public/internal companion interface.
+Renderer and pipeline state extensions inherit that cache field; they must not redeclare it with
+a narrower protocol containing only the cache generation.
 
 Device caches are stored in a lazily allocated `WeakMap<GPUDevice, DeviceCache>`. Each device cache
 owns bindings, shader-module and pipeline maps. Bindings are keyed by attribute names and declared
@@ -501,7 +515,9 @@ instance attributes. Consequently normal/no-color views, color/depth-only target
 layouts and thin-instance color variants share only when their complete generated code and
 pipeline state are equal.
 
-Vertex-buffer layout serialization has a separate lazily allocated
+Ordinary scoped caches use the pure `_serializeShaderVertexBuffers` serializer, with no layout-identity
+memo. The global enabler installs a resolver through `_setShaderVertexBuffersKey`; the cache owner
+only calls that optional resolver or falls back to the pure serializer. The extension owns a lazily allocated
 `WeakMap<readonly GPUVertexBufferLayout[], string>` keyed by layout-array identity. The serialized
 form is `[arrayStride, stepMode ?? "vertex", attributes]`, with each attribute represented by
 `[shaderLocation, offset, format]`. Repeated lookups of the same array traverse it once; a different
@@ -510,6 +526,12 @@ array, every descriptor and every reusable attribute collection are immutable af
 first lookup. Builders may finish or replace layouts before lookup, but later changes require a new
 array rather than in-place mutation. The packed-mesh and thin-instance paths complete their
 stride/offset, matrix and optional color layouts before the array is captured.
+
+Both paths return exactly the same serialized string, embedded as a string in the outer pipeline-key
+JSON. Enabling after a scoped cache has compiled pipelines or started async compilation must not change
+the key representation, replace the device cache or bindings, clear modules/pipelines/pending maps,
+or advance the cache generation. An equivalent late material joins that same device cache. Repeated
+enabling replaces the installed callbacks without wrapping them or resetting the layout memo.
 
 `clearShaderPipelineCache()` drops the device-cache weak map and increments the global generation.
 Existing scoped caches lazily clear their bindings/modules when next used; globally enabled materials
@@ -762,6 +784,7 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 - `shader/scene-uniforms.ts` for shared scene UBO WGSL.
 - `shader/ubo-layout.ts` for typed UBO packing.
 - `material/shader/shader-pipeline-cache.ts` for lazy device-keyed shared bindings, modules and pipelines.
+- `material/shader/enable-shader-material-pipeline-sharing.ts` for opt-in global attachment and layout memoization.
 - `material/shader/enable-async-shader-pipeline-compilation.ts` for real-device pending compilation and descriptor capture.
 - `texture/texture-2d.ts` for public texture resources.
 - `texture/external-texture.ts` for caller-owned video external-texture state.
@@ -791,6 +814,9 @@ Focused pipeline-sharing unit coverage uses inert GPU spies and real material/vi
 - current-device retargeting for materials that already hold another device cache;
 - cache-generation renewal, including source-first material views;
 - one traversal per immutable layout-array identity and sharing by equal replacement descriptors;
+- scoped opt-out without memoization and exact key continuity across late/repeated enabling;
+- already compiled scoped-cache reuse without renewed bindings, modules or pipelines;
+- late enabling while a scoped async compilation is pending, including all three instance variants;
 - pending async deduplication and completed synchronous reuse for plain, thin-instance and instance-color layouts;
 - emitted root-only zero-argument API exposure without the internal setter or cache interface.
 

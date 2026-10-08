@@ -4,7 +4,6 @@ import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
 import { _getShaderVbSupport } from "./shader-vb-support.js";
-import { _setSharedShaderPipelineCache } from "./shader-pipeline.js";
 
 interface ShaderModuleEntry {
     readonly id: number;
@@ -18,35 +17,21 @@ interface DeviceCache extends ShaderPipelineCache {
     nextModuleId: number;
 }
 
-interface CacheMaterial extends ShaderMaterial {
-    _shaderPipelineCache?: ShaderPipelineCache;
-    _shaderModuleMemo?: readonly [ShaderMaterial, ShaderPipelineBindings, Map<string, readonly [ShaderModuleEntry, ShaderModuleEntry | null]>];
-}
-
 let _deviceCaches: WeakMap<GPUDevice, DeviceCache> | null = null;
 let _generation = 0;
+let _vertexBuffersKey: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null = null;
+
+/** @internal Install the optional vertex-layout key resolver. */
+export function _setShaderVertexBuffersKey(resolve: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null): void {
+    _vertexBuffersKey = resolve;
+}
 
 /** @internal Enable cross-material ShaderMaterial caches for one multi-material build group. */
 export function enableShaderPipelineCache(engine: EngineContext, meshes: readonly Pick<Mesh, "material">[]): void {
-    const cache = getDeviceCache(engine._device);
+    const cache = _getShaderDeviceCache(engine._device);
     for (const mesh of meshes) {
-        (mesh.material as CacheMaterial)._shaderPipelineCache = cache;
+        (mesh.material as ShaderMaterial)._shaderPipelineCache = cache;
     }
-}
-
-/** Share layouts, shader modules and pipelines between every ShaderMaterial, including materials and
- *  material views created after the first scene build. Materials whose generated WGSL, layout and pipeline
- *  state are equal then compile once per device instead of once per material instance. */
-export function enableShaderMaterialPipelineSharing(): void {
-    _setSharedShaderPipelineCache((device, material) => {
-        // Resolve against the CURRENT device on every lookup: a material first prepared on another GPU (device
-        // loss, a second engine) must not keep that device's layouts. Same device = same cache object, no change.
-        const current = getDeviceCache(device);
-        const state = material as CacheMaterial;
-        if (state._shaderPipelineCache !== current) {
-            state._shaderPipelineCache = current;
-        }
-    });
 }
 
 /** Clear all shared ShaderMaterial layouts, modules, and pipelines. */
@@ -57,13 +42,13 @@ export function clearShaderPipelineCache(): void {
 
 /** @internal Move an installed cross-material cache to the current GPU device before async preparation. */
 export function retargetShaderPipelineCache(material: ShaderMaterial, device: GPUDevice): void {
-    const state = material as CacheMaterial;
-    if (state._shaderPipelineCache) {
-        state._shaderPipelineCache = getDeviceCache(device);
+    if (material._shaderPipelineCache) {
+        material._shaderPipelineCache = _getShaderDeviceCache(device);
     }
 }
 
-function getDeviceCache(device: GPUDevice): DeviceCache {
+/** @internal Resolve the shared cache for the current real GPU device. */
+export function _getShaderDeviceCache(device: GPUDevice): ShaderPipelineCache {
     _deviceCaches ??= new WeakMap();
     let cache = _deviceCaches.get(device);
     if (cache) {
@@ -97,10 +82,9 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
             return entry;
         },
         _getModules(gpu, material, currentBindings, key, label, createCodes) {
-            const state = material as CacheMaterial;
-            let memo = state._shaderModuleMemo;
+            let memo = material._shaderModuleMemo;
             if (!memo || memo[0] !== material || memo[1] !== currentBindings) {
-                state._shaderModuleMemo = memo = [material, currentBindings, new Map()];
+                material._shaderModuleMemo = memo = [material, currentBindings, new Map()];
             }
             let resolved = memo[2].get(key);
             if (!resolved) {
@@ -118,7 +102,7 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 variantKey,
                 vertexModuleId,
                 fragmentModuleId,
-                vertexBuffersKey(vertexBuffers),
+                _vertexBuffersKey?.(vertexBuffers) ?? _serializeShaderVertexBuffers(vertexBuffers),
                 material.needAlphaBlending,
                 material.blendMode,
                 // The explicit blend override participates in the cross-material key: two materials
@@ -138,23 +122,15 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
     return cache;
 }
 
-// Pipeline lookups run for every bound draw; the vertex layout arrays are stable objects (per bindings or per
-// packed mesh layout), so their serialization is computed once instead of on every lookup.
-let _vertexBuffersKeys: WeakMap<readonly GPUVertexBufferLayout[], string> | null = null;
-function vertexBuffersKey(vertexBuffers: readonly GPUVertexBufferLayout[]): string {
-    _vertexBuffersKeys ??= new WeakMap();
-    let key = _vertexBuffersKeys.get(vertexBuffers);
-    if (key === undefined) {
-        key = JSON.stringify(
-            vertexBuffers.map((layout) => [
-                layout.arrayStride,
-                layout.stepMode ?? "vertex",
-                Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
-            ])
-        );
-        _vertexBuffersKeys.set(vertexBuffers, key);
-    }
-    return key;
+/** @internal Canonical vertex-layout representation, unchanged by global sharing enablement. */
+export function _serializeShaderVertexBuffers(vertexBuffers: readonly GPUVertexBufferLayout[]): string {
+    return JSON.stringify(
+        vertexBuffers.map((layout) => [
+            layout.arrayStride,
+            layout.stepMode ?? "vertex",
+            Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
+        ])
+    );
 }
 
 function refresh(cache: DeviceCache): void {

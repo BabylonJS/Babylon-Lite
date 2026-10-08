@@ -7,6 +7,7 @@ import type { WgslSource } from "../../shader/wgsl.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
 import type { ExternalTexture } from "../../texture/external-texture.js";
+import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
@@ -220,6 +221,10 @@ export interface ShaderMaterial extends Material {
     _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
     /** @internal Uniform version last written to the private custom UBO. */
     _shaderCustomVersion?: number;
+    /** @internal Device-local shared layouts, modules and pipelines. */
+    _shaderPipelineCache?: ShaderPipelineCache;
+    /** @internal Resolved modules for this exact material/view and bindings identity. */
+    _shaderModuleMemo?: readonly [ShaderMaterial, ShaderPipelineBindings, Map<string, ReturnType<ShaderPipelineCache["_getModules"]>>];
 }
 
 function isIdentifier(name: string): boolean {

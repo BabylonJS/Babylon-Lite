@@ -100,7 +100,6 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderBindings?: ShaderPipelineBindings;
     _shaderCustomSpec?: UboSpec | null;
     _shaderCacheGeneration?: number;
-    _shaderPipelineCache?: ShaderPipelineCache;
 }
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {

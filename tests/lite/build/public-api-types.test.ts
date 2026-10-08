@@ -712,6 +712,11 @@ void options;
         expect(dts).toContain("declare function enableShaderMaterialPipelineSharing(): void;");
         expect(dts).not.toContain("declare function _setSharedShaderPipelineCache");
         expect(dts).not.toContain("interface ShaderPipelineCache");
+        expect(dts).not.toContain("declare function _getShaderDeviceCache");
+        expect(dts).not.toContain("declare function _setShaderVertexBuffersKey");
+        expect(dts).not.toContain("declare function _serializeShaderVertexBuffers");
+        expect(dts).not.toContain("_shaderPipelineCache");
+        expect(dts).not.toContain("_shaderModuleMemo");
 
         const probePath = resolve(BUILD_DIR, "shader-pipeline-sharing.probe.ts");
         try {
