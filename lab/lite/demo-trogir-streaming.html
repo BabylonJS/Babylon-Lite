@@ -124,6 +124,10 @@
                 text-align: right;
                 font-variant-numeric: tabular-nums;
             }
+            .control select {
+                grid-column: 2 / 4;
+                min-width: 0;
+            }
             .camera-pose {
                 margin-top: 10px;
                 padding-top: 9px;
@@ -198,6 +202,7 @@
                 <div class="spinner" aria-hidden="true"></div>
                 <h1 id="loadingTitle">Preparing coarse Trogir view…</h1>
                 <p id="loadingDetail">Streaming the public Trogir hierarchy and its broadest shared representation. Fine detail follows after this view is drawable.</p>
+                <a id="lowerQuality" hidden>Retry with lower memory</a>
             </div>
         </div>
         <aside id="hud" class="glass" aria-label="Streaming controls and statistics">
@@ -207,15 +212,24 @@
                 ><output id="selectedSplats">0</output> <span>Visible / covered leaves</span><output id="leaves">0 / 0</output> <span>Resident / allocated GPU</span
                 ><output id="gpuBytes">0 / 0 MB</output> <span>Resident files / requests</span><output id="requests">0 / 0</output>
             </div>
+            <label class="control" for="quality">
+                <span>Quality</span>
+                <select id="quality" aria-describedby="qualityHint">
+                    <option value="low">Lower memory · 1M splats</option>
+                    <option value="high">High detail · 4M splats</option>
+                </select>
+            </label>
+            <div id="qualityHint" class="hint">Changing quality reloads the scene.</div>
             <label class="control" for="screenError"
                 ><span>Detail error</span><input id="screenError" type="range" min="0.5" max="8" value="2" step="0.25" /><output id="screenErrorValue">2.00 px</output></label
             >
             <label class="control" for="splatBudget"
-                ><span>Splat budget</span><input id="splatBudget" type="range" min="10000" max="4000000" value="1200000" step="10000" /><output id="splatBudgetValue"
-                    >1200k</output
+                ><span>Splat budget</span><input id="splatBudget" type="range" min="10000" max="1000000" value="1000000" step="10000" /><output id="splatBudgetValue"
+                    >1000k</output
                 ></label
             >
             <div class="hint">Drag to look · WASD or arrows to move · Space / Shift to rise or lower</div>
+            <div id="navigationStatus" class="hint" role="status">Loading collision data for navigation…</div>
             <details id="cameraPose" class="camera-pose">
                 <summary>Camera pose</summary>
                 <div class="camera-pose-grid">

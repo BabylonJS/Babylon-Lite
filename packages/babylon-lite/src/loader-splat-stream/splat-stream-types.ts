@@ -78,6 +78,7 @@ export interface StreamBindingSelection {
     frame: number;
     readonly plan: StreamSelectionPlan;
     readonly inputValues: readonly number[];
+    readonly cameraPosition: readonly [number, number, number];
 }
 
 /** @internal Exact shared-solve cache. */

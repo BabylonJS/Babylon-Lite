@@ -6,6 +6,7 @@ import {
     disposeGaussianSplatStream,
     disposeScene,
     loadGaussianSplatStream,
+    loadSplatVoxelCollision,
     onBeforeRender,
     registerScene,
     startEngine,
@@ -15,30 +16,12 @@ import { attachTrogirCameraControls, createTrogirCamera } from "./trogir-camera"
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 import { acquireTrogirStartupResource, finishTrogirStartup, observeTrogirStartupReadiness } from "./trogir-streaming-lifecycle";
+import { resolveTrogirAssets } from "./trogir-assets";
+import { attachTrogirCollision } from "./trogir-collision";
+import { resolveTrogirQuality } from "./trogir-quality";
 
-const DEFAULT_METADATA_URL = "https://assets.babylonjs.com/splats/Trogir/lod-meta.json";
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
 const MB = 1024 * 1024;
-const MAX_FOREGROUND_SPLATS = 4_000_000;
-const STREAM_CAPACITY = MAX_FOREGROUND_SPLATS + 10_000;
-
-function metadataUrl(): string {
-    const configured = new URLSearchParams(location.search).get("assetRoot");
-    if (!configured) {
-        return DEFAULT_METADATA_URL;
-    }
-    const root = new URL(configured, location.href);
-    if (root.protocol !== "http:" && root.protocol !== "https:") {
-        throw new Error("assetRoot must resolve to an HTTP(S) URL.");
-    }
-    if (root.pathname.endsWith("/lod-meta.json")) {
-        return root.href;
-    }
-    if (!root.pathname.endsWith("/")) {
-        root.pathname += "/";
-    }
-    return new URL("lod-meta.json", root).href;
-}
 
 function formatCount(value: number): string {
     return new Intl.NumberFormat("en-US").format(value);
@@ -58,6 +41,8 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const screenError = document.getElementById("screenError") as HTMLInputElement;
     const screenErrorValue = output("screenErrorValue");
     const splatBudget = document.getElementById("splatBudget") as HTMLInputElement;
+    splatBudget.max = String(stream.maxSplats);
+    splatBudget.value = String(stream.maxSplats);
     const splatBudgetValue = output("splatBudgetValue");
     const cameraPose = document.getElementById("cameraPose") as HTMLDetailsElement;
     const cameraX = output("cameraX");
@@ -152,13 +137,33 @@ function showError(reason: unknown, canvas: HTMLCanvasElement): void {
     if (detail) {
         detail.textContent = `${message}\n\nThe public Trogir stream could not be loaded. To use a local dataset, run:\n${LOCAL_SETUP}\n\nThen open this demo with ?assetRoot=/local-gs/trogir/. You can also provide any hosted dataset root with ?assetRoot=https://host/path/to/dataset/.`;
     }
+    const retry = document.getElementById("lowerQuality") as HTMLAnchorElement;
+    const url = new URL(location.href);
+    if (url.searchParams.get("quality") === "high") {
+        url.searchParams.set("quality", "low");
+        retry.href = url.href;
+        retry.hidden = false;
+    }
 }
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const quality = resolveTrogirQuality(location.href);
+    const qualitySelect = document.getElementById("quality") as HTMLSelectElement;
+    qualitySelect.value = quality.name;
+    const changeQuality = (): void => {
+        const url = new URL(location.href);
+        url.searchParams.set("quality", qualitySelect.value);
+        location.assign(url.href);
+    };
+    qualitySelect.addEventListener("change", changeQuality);
+    // Keep this available after startup failure so a lower tier can be selected.
+    window.addEventListener("pagehide", () => qualitySelect.removeEventListener("change", changeQuality), { once: true });
     let engine: EngineContext | null = null;
     let scene: SceneContext | null = null;
     let stream: GaussianSplatStream | null = null;
+    const abort = new AbortController();
+    let disposeCollision: (() => void) | null = null;
     let disposeCameraControls: (() => void) | null = null;
     let disposeHud: (() => void) | null = null;
     let disposed = false;
@@ -167,6 +172,8 @@ async function main(): Promise<void> {
             return;
         }
         disposed = true;
+        abort.abort();
+        disposeCollision?.();
         disposeHud?.();
         disposeCameraControls?.();
         if (scene && stream) {
@@ -184,12 +191,14 @@ async function main(): Promise<void> {
     window.addEventListener("pagehide", dispose, { once: true });
 
     try {
+        const assets = resolveTrogirAssets(location.href);
+        const collisionReady = loadSplatVoxelCollision(assets.collisionUrl, abort.signal).then(
+            (collision) => ({ collision, error: null }),
+            (reason: unknown) => ({ collision: null, error: reason instanceof Error ? reason.message : String(reason) })
+        );
         const createdEngine = await acquireTrogirStartupResource(
             createEngine(canvas, {
-                requiredLimits: {
-                    maxBufferSize: STREAM_CAPACITY * 64,
-                    maxStorageBufferBindingSize: STREAM_CAPACITY * 64,
-                },
+                requiredLimits: quality.requiredLimits,
             }),
             () => disposed,
             disposeEngine
@@ -200,13 +209,10 @@ async function main(): Promise<void> {
         engine = createdEngine;
         scene = createSceneContext(engine);
         const loadedStream = await acquireTrogirStartupResource(
-            loadGaussianSplatStream(engine, metadataUrl(), {
-                maxSplats: 1_200_000,
-                maxCapacitySplats: STREAM_CAPACITY,
-                maxGpuBytes: 1024 * MB,
-                maxCpuBytes: 96 * MB,
+            loadGaussianSplatStream(engine, assets.metadataUrl, {
+                ...quality.streamOptions,
                 screenError: 2,
-                lodCooldownMs: 250,
+                signal: abort.signal,
             }).then((candidate) => {
                 observeTrogirStartupReadiness(candidate.firstFrameReady);
                 return candidate;
@@ -221,7 +227,28 @@ async function main(): Promise<void> {
         placeTrogirStream(stream);
         const camera = createTrogirCamera();
         scene.camera = camera;
-        disposeCameraControls = attachTrogirCameraControls(camera, canvas, scene);
+        void collisionReady
+            .then(({ collision, error }) => {
+                if (disposed) {
+                    return;
+                }
+                const status = document.getElementById("navigationStatus")!;
+                if (!collision) {
+                    status.textContent = `Navigation unavailable: ${error}`;
+                    canvas.dataset.collisionReady = "false";
+                    return;
+                }
+                disposeCameraControls = attachTrogirCameraControls(camera, canvas, scene!);
+                disposeCollision = attachTrogirCollision(camera, scene!, collision);
+                status.textContent = "Collisions enabled";
+                canvas.dataset.collisionReady = "true";
+            })
+            .catch((reason: unknown) => {
+                if (!disposed) {
+                    dispose();
+                    showError(reason, canvas);
+                }
+            });
 
         attachGaussianSplatStream(scene, stream);
         disposeHud = installHud(scene, stream, canvas);
