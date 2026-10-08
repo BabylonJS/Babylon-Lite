@@ -28,6 +28,7 @@ export interface MockGL {
     /** Set whether the next compile/link should succeed. */
     setCompileSuccess(ok: boolean): void;
     setLinkSuccess(ok: boolean): void;
+    setProgramAllocationSuccess(ok: boolean): void;
     /** Mock parallel-shader-compile completion gate. Returns false until
      *  flipped via `setParallelComplete(true)`. */
     setParallelComplete(ok: boolean): void;
@@ -44,6 +45,7 @@ interface Internal {
     parallelComplete: boolean;
     compileSuccess: boolean;
     linkSuccess: boolean;
+    programAllocationSuccess: boolean;
     sampleCount: number;
     extensions: Record<string, boolean>;
 }
@@ -56,6 +58,7 @@ export function createMockGL(): MockGL {
         parallelComplete: true,
         compileSuccess: true,
         linkSuccess: true,
+        programAllocationSuccess: true,
         sampleCount: 0,
         // Default: all color-buffer-float extensions present so render-target
         // float caps report true. Toggle with `setExtensionAvailable`.
@@ -212,20 +215,27 @@ export function createMockGL(): MockGL {
         compileShader: (s: object): void => {
             rec("compileShader", s);
         },
-        getShaderParameter: (_s: object, p: number): boolean => {
+        getShaderParameter: (s: object, p: number): boolean => {
+            rec("getShaderParameter", s, p);
             if (p === ENUMS.COMPILE_STATUS) {
                 return state.compileSuccess;
             }
             return false;
         },
-        getShaderInfoLog: (): string => "mock compile error",
+        getShaderInfoLog: (s: object): string => {
+            rec("getShaderInfoLog", s);
+            return "mock compile error";
+        },
         deleteShader: (s: object): void => {
             rec("deleteShader", s);
         },
-        createProgram: (): object => {
+        createProgram: (): object | null => {
+            rec("createProgram");
+            if (!state.programAllocationSuccess) {
+                return null;
+            }
             const p = handle("program");
             programs.push({ compileStatus: true, linkStatus: state.linkSuccess, infoLog: "mock link error" });
-            rec("createProgram");
             return p;
         },
         attachShader: (p: object, s: object): void => {
@@ -237,16 +247,20 @@ export function createMockGL(): MockGL {
         linkProgram: (p: object): void => {
             rec("linkProgram", p);
         },
-        getProgramParameter: (_p: object, q: number): boolean | number => {
+        getProgramParameter: (p: object, q: number): boolean | number => {
+            rec("getProgramParameter", p, q);
             if (q === ENUMS.LINK_STATUS) {
-                return state.linkSuccess;
+                return state.linkSuccess && state.compileSuccess;
             }
             if (q === PARALLEL_EXT.COMPLETION_STATUS_KHR) {
                 return state.parallelComplete;
             }
             return 0;
         },
-        getProgramInfoLog: (): string => "mock link error",
+        getProgramInfoLog: (p: object): string => {
+            rec("getProgramInfoLog", p);
+            return "mock link error";
+        },
         deleteProgram: (p: object): void => {
             rec("deleteProgram", p);
         },
@@ -471,6 +485,9 @@ export function createMockGL(): MockGL {
         },
         setLinkSuccess: (ok) => {
             state.linkSuccess = ok;
+        },
+        setProgramAllocationSuccess: (ok) => {
+            state.programAllocationSuccess = ok;
         },
         setParallelComplete: (ok) => {
             state.parallelComplete = ok;

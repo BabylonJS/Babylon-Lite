@@ -10,6 +10,7 @@ import type { GpuFrameTimer } from "./gpu-timer.js";
 import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
+import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
@@ -133,6 +134,10 @@ export interface EngineContext extends SurfaceContext {
      *  before rebuilding PBR groups so the resolver recreates it on the replacement
      *  device. */
     _pbrFallbackTex?: Texture2D;
+    /** @internal GPU error / device-lost listeners, installed by the first `onEngineGpuError` / `onEngineDeviceLost`. */
+    _gpuEvents?: EngineGpuEvents;
+    /** @internal Seam device-lost recovery calls after replacing `_device`, so listeners follow the new device. */
+    _attachGpuEvents?: (engine: EngineContext) => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
@@ -275,7 +280,7 @@ interface DeviceLostRecoveryCapture {
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
     p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;
     r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void;
-    w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
+    w(tex: Texture2D, data: ArrayBufferView, x: number, y: number, width: number, height: number, dataOffset?: number, bytesPerRow?: number): void;
     m(
         mesh: Mesh,
         uv2s: Float32Array | null | undefined,

@@ -34,6 +34,7 @@ import {
     createNullEngine,
     stepScene,
     uploadImageToArrayLayer,
+    onEngineDeviceLost,
     VERSION,
 } from "babylon-lite";
 import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
@@ -42,6 +43,15 @@ import { LiteCompatError, unsupported } from "../error.js";
 import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
+
+/** Babylon.js `WebGPUEngineOptions` subset accepted by the compat engine. */
+export interface WebGPUEngineOptions extends EngineOptions {
+    antialias?: boolean;
+    adaptToDeviceRatio?: boolean;
+    useLargeWorldRendering?: boolean;
+    canvasToneMapping?: GPUCanvasToneMapping;
+    canvasColorSpace?: PredefinedColorSpace;
+}
 
 /**
  * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
@@ -107,6 +117,12 @@ export abstract class AbstractEngine {
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-loss signal, forwarded from Lite's device-loss subscription. */
+    public readonly onContextLostObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-restored signal. Lite does not expose a completed-recovery event, so this remains shape-only. */
+    public readonly onContextRestoredObservable = new Observable<AbstractEngine>();
+    /** @internal Device-loss unsubscriber installed by `initAsync`. */
+    private _unsubscribeDeviceLost: (() => void) | null = null;
 
     /** @internal Babylon.js hardware-scaling level. Babylon Lite manages device-pixel-ratio itself; stored for parity. */
     private _hardwareScalingLevel = 1;
@@ -130,15 +146,22 @@ export abstract class AbstractEngine {
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
 
-    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | boolean) {
+    public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | undefined =
-            typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
         if (opts) {
+            if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
+                unsupported(
+                    "WebGPUEngineOptions.canvasToneMapping/canvasColorSpace",
+                    "Supporting WebGPU canvas presentation options requires changing Lite's existing surface configuration hot path; it cannot be added as an independently tree-shakeable compat capability."
+                );
+            }
             const antialias = opts.antialias;
             delete opts.antialias;
+            delete opts.canvasToneMapping;
+            delete opts.canvasColorSpace;
             if (antialias === false) {
                 opts.msaaSamples = 1;
             }
@@ -161,6 +184,7 @@ export abstract class AbstractEngine {
             return;
         }
         this._lite = await createEngine(this._canvas, this._options);
+        this._unsubscribeDeviceLost = onEngineDeviceLost(this._lite, () => this.onContextLostObservable.notifyObservers(this));
         this._initialized = true;
     }
 
@@ -374,6 +398,8 @@ export abstract class AbstractEngine {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
         }
+        this._unsubscribeDeviceLost?.();
+        this._unsubscribeDeviceLost = null;
         if (this._initialized) {
             disposeEngine(this._lite);
         }

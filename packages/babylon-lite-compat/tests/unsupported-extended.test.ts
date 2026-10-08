@@ -11,6 +11,11 @@ import {
     GeometryBufferRenderer,
     BoundingBoxRenderer,
     PostProcess,
+    Effect,
+    EffectWrapper,
+    FrameGraphMinMaxReducerTask,
+    NodeRenderGraphMinMaxReducerBlock,
+    RegisterMinMaxReducerBlock,
     BlackAndWhitePostProcess,
     BlurPostProcess,
     BloomEffect,
@@ -53,6 +58,10 @@ describe("Extended unsupported stubs throw on construction", () => {
         ["GeometryBufferRenderer", () => new GeometryBufferRenderer()],
         ["BoundingBoxRenderer", () => new BoundingBoxRenderer()],
         ["PostProcess", () => new PostProcess()],
+        ["Effect", () => new Effect()],
+        ["EffectWrapper", () => new EffectWrapper({ onError: () => undefined })],
+        ["FrameGraphMinMaxReducerTask", () => new FrameGraphMinMaxReducerTask()],
+        ["NodeRenderGraphMinMaxReducerBlock", () => new NodeRenderGraphMinMaxReducerBlock()],
         ["BlackAndWhitePostProcess", () => new BlackAndWhitePostProcess()],
         ["BlurPostProcess", () => new BlurPostProcess()],
         ["BloomEffect", () => new BloomEffect()],
@@ -117,5 +126,14 @@ describe("Extended unsupported stubs throw on construction", () => {
         expect(FBXFileLoaderMetadata).toEqual({ name: "fbx", extensions: { ".fbx": { isBinary: true } } });
         expect(() => FBXConstraintSolver.Get({} as never)).toThrow(LiteCompatError);
         expect(() => FBXConstraintSolver.Get({} as never)).toThrow(/FBXConstraintSolver\.Get/);
+    });
+
+    it("exports the min/max node registration stub with its structural blocker", () => {
+        expect(() => RegisterMinMaxReducerBlock()).toThrow(LiteCompatError);
+        expect(() => RegisterMinMaxReducerBlock()).toThrow(/FrameGraph handles/);
+    });
+
+    it("keeps Effect callbacks structurally usable before construction throws", () => {
+        expect(() => new EffectWrapper({ onError: (effect) => effect.getCompilationError(), onCompiled: null })).toThrow(LiteCompatError);
     });
 });

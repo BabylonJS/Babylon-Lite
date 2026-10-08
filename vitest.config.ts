@@ -9,6 +9,8 @@ export default defineConfig({
     },
     test: {
         environment: "node",
+        // Preserve Vitest 4's mock lifecycle; individual suites own their cleanup.
+        clearMocks: false,
         setupFiles: ["./tests/lite/unit/setup-webgpu-globals.ts"],
         reporters: process.env.CI ? ["default", "junit"] : ["default"],
         outputFile: {

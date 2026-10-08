@@ -9,10 +9,10 @@
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
  *       * Source and target have the same format and are single-sampled.
- *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
+ *       * View-relative source mip dimensions match the target attachment's dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
- *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Source and target expose color GPU textures and any selected subresources.
  *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
@@ -65,8 +65,9 @@ export interface CopyToTextureTaskConfig {
      *  the whole target is overwritten and the encoder-copy fast path becomes
      *  available. When set, the blit path is used. */
     viewport?: NormalizedViewport | null;
-    /** Source mip level to copy from. Default 0. The fast path uses this as
-     *  the source `mipLevel`; the blit path samples with `textureSampleLevel`. */
+    /** View-relative source mip level. Default 0. A texture-backed wrapper exposes
+     *  one mip, so LOD clamps to zero and both paths read its selected physical mip.
+     *  Ordinary sources use this as their source `mipLevel` or `textureSampleLevel` LOD. */
     lodLevel?: number;
     /** Optional single-sample texture that receives a hardware MSAA-resolve of
      *  the task's MSAA color attachment at end-of-pass. Two modes:
@@ -383,8 +384,11 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcSamples !== 1 || dstSamples !== 1) {
         return false;
     }
-    const lod = task.lodLevel;
-    if (lod >= sourceTexture.mipLevelCount) {
+    const sourceSubresource = source._colorSubresource;
+    // A wrapper's sampling view exposes one mip, so its view-relative LOD always clamps to zero.
+    const lod = sourceSubresource ? 0 : task.lodLevel;
+    const sourceMipLevel = sourceSubresource?.mipLevel ?? lod;
+    if (sourceMipLevel >= sourceTexture.mipLevelCount) {
         return false;
     }
     const srcMipW = Math.max(1, source._width >> lod);
@@ -392,9 +396,12 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcMipW !== target._width || srcMipH !== target._height) {
         return false;
     }
+    const subresource = target._colorSubresource;
     task._fast = {
-        _source: { texture: sourceTexture, mipLevel: lod },
-        _target: { texture: targetTexture },
+        _source: sourceSubresource
+            ? { texture: sourceTexture, mipLevel: sourceMipLevel, origin: { x: 0, y: 0, z: sourceSubresource.layer } }
+            : { texture: sourceTexture, mipLevel: sourceMipLevel },
+        _target: subresource ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } } : { texture: targetTexture },
         _size: { width: srcMipW, height: srcMipH },
     };
     return true;

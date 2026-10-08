@@ -43,9 +43,6 @@ import {
     IsHtmlInCanvasSupportedNatively,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
-    GaussianSplattingStream,
-    AddGaussianSplattingStreamPart,
-    AddGaussianSplattingStreamPartAsync,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -71,6 +68,7 @@ import {
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
+import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
 import {
     GLTF1,
     GLTF2,
@@ -97,6 +95,7 @@ import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
+import type { EffectWrapperCreationOptions } from "../src/unsupported/unsupported-extended";
 
 describe("LiteCompatError", () => {
     it("formats a message with the API name", () => {
@@ -113,6 +112,22 @@ describe("LiteCompatError", () => {
 
     it("unsupported() throws a LiteCompatError and never returns", () => {
         expect(() => unsupported("X")).toThrow(LiteCompatError);
+    });
+});
+
+describe("Effect callback types", () => {
+    it("preserves callback-usable engine and compilation error return types", () => {
+        const options: EffectWrapperCreationOptions = {
+            onCompiled: (effect) => {
+                effect.getEngine().getRenderingCanvas();
+            },
+            onError: (effect, errors) => {
+                effect.getCompilationError().includes(errors);
+            },
+        };
+
+        expect(options.onCompiled).toBeTypeOf("function");
+        expect(options.onError).toBeTypeOf("function");
     });
 });
 
@@ -285,18 +300,24 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
     });
 });
 
-describe("Gaussian Splatting LOD streaming stubs throw", () => {
-    it("GaussianSplattingStream throws on construction", () => {
-        expect(() => new GaussianSplattingStream()).toThrow(LiteCompatError);
-        expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
+describe("Gaussian Splatting compound streaming stubs throw", () => {
+    it("preserves the lod0SplatCount discriminated union on the stream accessor", () => {
+        const getAvailableCount = (stream: GaussianSplattingStream): number | undefined => {
+            const result = stream.lod0SplatCount;
+            return result.status === "available" ? result.count : undefined;
+        };
+
+        expectTypeOf(getAvailableCount).returns.toEqualTypeOf<number | undefined>();
     });
 
-    it.each([
-        ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
-        ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
-    ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
-        expect(call).toThrow(LiteCompatError);
-        expect(call).toThrow(new RegExp(name));
+    it("AddGaussianSplattingStreamPart names its structural blocker", () => {
+        expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(LiteCompatError);
+        expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(/compound-mesh atlas/);
+    });
+
+    it("AddGaussianSplattingStreamPartAsync names its structural blocker", async () => {
+        await expect(AddGaussianSplattingStreamPartAsync({} as never, "part", {} as never, "/")).rejects.toThrow(LiteCompatError);
+        await expect(AddGaussianSplattingStreamPartAsync({} as never, "part", {} as never, "/")).rejects.toThrow(/compound-mesh atlas/);
     });
 });
 

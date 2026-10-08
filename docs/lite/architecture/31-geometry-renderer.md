@@ -203,6 +203,22 @@ work. Shared Standard/Node view resources are retained by each renderable and de
 when the last owner releases; an old callback cannot evict a replacement cache entry. There is
 no implicit view lease or scene auxiliary-disposer map.
 
+Shader modules are not generation-owned. Standard and PBR geometry resolve them through a private
+per-family memo keyed weakly by device and by the exact composed WGSL, so a re-record, a
+renderable-version rebuild, a republished forward PBR context, and materials with identical
+composition reuse one module per code string instead of compiling it again. Each memo entry counts
+the renderables drawing with it: a renderable acquires its vertex and fragment entries when built
+and releases them in its idempotent per-mesh lifetime packet, so a candidate generation, built
+before the old one retires, still hits, and an entry leaves the memo with its last holder (a
+superseded plugin or material variant, a removed mesh, a rolled-back candidate, a disposed task).
+A renderable records only the acquisitions that succeeded, and a release never compiles or creates
+an entry, so a candidate whose vertex or fragment compile throws rolls back exactly what it holds
+and still destroys its mesh UBO.
+A `GPUShaderModule` has no `destroy()`, so dropping an entry never invalidates a module that older
+pipelines still reference. Composition, BGLs, pipeline layouts, and pipelines stay per view
+resource. A device replaced by device-lost recovery compiles its own modules. Node geometry
+already shares modules through its code-keyed pipeline cache.
+
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
 off-scene inputs and allows a mesh to rejoin after it is added back to the scene.
@@ -313,10 +329,12 @@ emitColor (owned by the view)
 
 `meshFeatures` includes morph, skeleton, 8-bone skeleton, vertex color, UV2,
 thin instances, and instance color. The resource stored under that key owns
-the composed shader, mesh BGL, shader modules, and its per-render-target
-pipeline map. The pipeline map remains keyed by the complete MRT target
-signature. A fog and non-fog scene sharing one device cannot reuse the same
-Standard geometry color shader when `targetTexture` requests lit color.
+the composed shader, mesh BGL, and its per-render-target pipeline map; its
+shader modules come from the per-device memo keyed by exact WGSL (see
+"Resource ownership and failed rebuilds"), so equal code shares one module.
+The pipeline map remains keyed by the complete MRT target signature. A fog
+and non-fog scene sharing one device cannot reuse the same Standard geometry
+color shader when `targetTexture` requests lit color.
 
 #### Standard geometry binding and draw order
 
@@ -400,11 +418,20 @@ execution paths chosen in `record()`:
 
 - **Fast path** — `GPUCommandEncoder.copyTextureToTexture`. Eligible when
   there is no viewport, source and target are single-sampled and share a
-  format, the source mip dimensions match the target's mip-0 dimensions, the
+  format, the source mip dimensions match the target attachment's dimensions, the
   target is not the swapchain, and the source/target textures were created
   with `COPY_SRC`/`COPY_DST`. Frame-graph render targets carry both copy usages
   by default; external/eager textures without the required usage fall back to
-  the blit path.
+  the blit path. Texture-backed color wrappers retain `_colorSubresource` so
+  encoder-copy destinations use the attachment's selected `mipLevel` and layer
+  (`origin.z`) rather than the whole allocation's default mip/layer. Targets
+  without this metadata retain the ordinary mip-zero, layer-zero destination.
+  A source wrapper likewise supplies the physical source mip and `origin.z`.
+  Its view exposes exactly one mip: `lodLevel` is view-relative and clamps to
+  zero, so the copy uses its selected-mip dimensions without another shift.
+  Ordinary sources retain their existing source-LOD selection. If the selected
+  source dimensions differ from the target dimensions, the blit path samples
+  the wrapper's selected view instead.
 
 - **Blit path** — full-screen triangle samples the source. MSAA sources
   resolve per-sample with `textureLoad`. Lod level is applied via
@@ -461,6 +488,19 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 - Standard geometry composition with vertex color modulates albedo and alpha
   before discard/write masking and binds the color buffer.
 - Morph/skeleton/vertex-color bits participate in the geometry resource key.
+- Re-recording the task, a renderable-version rebuild, and a forward PBR
+  rebuild that republishes an equivalent context compile no new Standard or
+  PBR geometry shader modules; materials that compose identical WGSL share
+  one module pair; a task writing a different attachment compiles only its
+  new fragment module and shares the identical vertex module; and a replaced
+  device compiles its own.
+- Retired PBR plugin variants and Standard material variants leave the memo
+  while the live variant stays shared; a disposed task releases only the
+  modules no other task draws with, and its last holder empties the entry.
+- A candidate whose vertex or fragment module fails to compile releases only
+  the modules it acquired, creates no entry, takes no count from a stage a
+  live generation holds, and destroys its mesh UBO; a retry compiles the
+  missing stages once.
 
 ## Future extensions
 

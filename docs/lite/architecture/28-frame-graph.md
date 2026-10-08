@@ -70,6 +70,14 @@ export interface FrameGraph {
 
 `_currentProcessedTask` is `null` outside of phase 1; calling `addRenderPass(...)` outside `record()` throws.
 
+`RenderDrawTask` retains direct execution but records one internal texture-task pass for phase-2 initialization.
+After all tasks have recorded, its initializer synchronizes the current eager target through a member-bound
+`_syncEager` call and refreshes its cached attachments. It never rebuilds ordinary targets. A borrowing wrapper
+can therefore observe a surface RTT replacement even when the source allocation task records later. Both phases
+remain synchronous. `buildFrameGraphTask()` initializes only its selected task, not other producers. Execute
+order and content dependencies remain the caller's responsibility. Re-recording replaces the initializer pass;
+task disposal clears it without releasing the borrowed target.
+
 ### `Task`
 
 ```typescript
@@ -498,8 +506,12 @@ synchronizes eager targets, allocates missing ordinary attachments, and rebuilds
 ordinary attachments when their resolved dimensions change. Allocation remains
 caller-owned; disposing the clear task never destroys its borrowed targets.
 The record phase then creates one pass with dependencies on all referenced targets.
-Its phase-2 initializer validates and caches the final attachment views after
-all producer records, including an owning render task that may replace an allocation.
+Its phase-2 initializer synchronizes each color and depth target's `_syncEager`
+hook before validating and caching the final attachment views after all producer
+records, including an owning render task that may replace an allocation.
+This refreshes borrowing texture wrappers even when their source was resized
+later in the same record or by a later task. Ordinary targets are not rebuilt
+again during initialization; their allocation remains in the record phase.
 Standalone clear-to-copy chains therefore work on their first build and resize
 without a separate allocation task or manual target build.
 Execution patches live attachment views and scalar clear settings, begins and ends

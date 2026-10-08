@@ -78,6 +78,10 @@ export interface TextureArrayOptions {
     /** Use sRGB format (rgba8unorm-srgb) so the hardware converts to linear on
      *  sample. Use for color/albedo layers in PBR workflows. Default false. */
     srgb?: boolean;
+    /** Texel format, for data arrays such as `rgba16float` tile pages. Overrides `srgb`. Default
+     *  `rgba8unorm`. Image uploads need a format `copyExternalImageToTexture` accepts; fill other
+     *  formats with `updateTextureRegion` or render into a layer through `createTextureRenderTarget`. */
+    format?: GPUTextureFormat;
     /** Address mode U. Default 'repeat'. */
     addressModeU?: GPUAddressMode;
     /** Address mode V. Default 'repeat'. */
@@ -100,7 +104,7 @@ export interface ArrayLayerUploadOptions {
 export interface TextureArrayFromUrlsOptions extends TextureArrayOptions, ArrayLayerUploadOptions {}
 
 /**
- * Create an empty 2D texture array of `layers` same-size RGBA8 layers, ready to
+ * Create an empty 2D texture array of `layers` same-size layers (RGBA8 unless `options.format` says otherwise), ready to
  * be filled with `uploadImageToArrayLayer()` / `loadImageToArrayLayer()`.
  *
  * The texture is created with `TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT`
@@ -121,7 +125,7 @@ export function createTexture2DArray(engine: EngineContext, width: number, heigh
 
     const device = engine._device;
     const mipMaps = options.mipMaps ?? true;
-    const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
+    const format: GPUTextureFormat = options.format ?? (options.srgb ? "rgba8unorm-srgb" : "rgba8unorm");
 
     const texture = device.createTexture({
         size: { width, height, depthOrArrayLayers: layers },
@@ -285,9 +289,16 @@ export function createTexture2DArrayFromPixels(
     layers: number,
     options: TextureArrayOptions = {}
 ): Texture2DArray {
+    assertRgba8ArrayFormat(options.format ?? "rgba8unorm");
     const tex = createTexture2DArray(engine, width, height, layers, options);
     updateTexture2DArrayFromPixels(engine, tex, data);
     return tex;
+}
+
+function assertRgba8ArrayFormat(format: GPUTextureFormat): void {
+    if (format !== "rgba8unorm" && format !== "rgba8unorm-srgb") {
+        throw new Error(`Texture array pixel uploads require rgba8unorm or rgba8unorm-srgb, received ${format}.`);
+    }
 }
 
 /**
@@ -305,6 +316,7 @@ export function createTexture2DArrayFromPixels(
  * @param mipLevel - Destination mip level (default 0). Level dimensions are `max(1, size >> mipLevel)`.
  */
 export function updateTexture2DArrayFromPixels(engine: EngineContext, tex: Texture2DArray, data: Uint8Array, mipLevel = 0): void {
+    assertRgba8ArrayFormat(tex.texture.format);
     if (mipLevel < 0 || mipLevel >= tex.texture.mipLevelCount || (mipLevel | 0) !== mipLevel) {
         throw new Error(`updateTexture2DArrayFromPixels: mipLevel must be an integer in [0, ${tex.texture.mipLevelCount}) (got ${mipLevel})`);
     }

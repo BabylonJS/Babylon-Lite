@@ -62,6 +62,7 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
             requiredLimits: { ...engine._options?.requiredLimits, ...storageRecovery?.getCpuStorageRecoveryLimits(engine) },
         })
     );
+    engine._attachGpuEvents?.(engine);
     await runRecoveryStep("rebuilding engine storage buffers", async () => {
         const recovery = storageRecovery ?? (engine._storageBuffers?.size ? await loadCpuStorageRecovery() : undefined);
         recovery?.rebuildCpuStorageBuffers(engine);

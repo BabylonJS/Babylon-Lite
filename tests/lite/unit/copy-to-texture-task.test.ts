@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget, disposeRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createCopyToTextureTask } from "../../../packages/babylon-lite/src/frame-graph/copy-to-texture-task";
+import { releaseTexture } from "../../../packages/babylon-lite/src/resource/texture-release";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { createTexture2DArray } from "../../../packages/babylon-lite/src/texture/texture-array";
+import { createTextureRenderTarget } from "../../../packages/babylon-lite/src/texture/texture-render-target";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -51,16 +54,23 @@ function makeMockEngine(capture: BeginPassCapture): EngineContext {
         createShaderModule: (d: GPUShaderModuleDescriptor) => d as unknown as GPUShaderModule,
         createSampler: (d: GPUSamplerDescriptor) => d as unknown as GPUSampler,
         createBuffer: (d: GPUBufferDescriptor) => ({ descriptor: d, destroy: () => undefined }) as unknown as GPUBuffer,
-        createTexture: (d: GPUTextureDescriptor) =>
-            ({
+        createTexture: (d: GPUTextureDescriptor) => {
+            const size = d.size as GPUExtent3DDict;
+            return {
                 descriptor: d,
+                label: d.label ?? "",
+                width: size.width,
+                height: size.height ?? 1,
+                depthOrArrayLayers: size.depthOrArrayLayers ?? 1,
+                dimension: d.dimension ?? "2d",
                 format: d.format,
                 sampleCount: d.sampleCount ?? 1,
                 mipLevelCount: d.mipLevelCount ?? 1,
                 usage: d.usage,
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
-            }) as unknown as GPUTexture,
+            } as unknown as GPUTexture;
+        },
         queue: { writeBuffer: () => undefined },
     } as unknown as GPUDevice;
     const eng = {
@@ -146,10 +156,132 @@ describe("CopyToTextureTask", () => {
         expect(capture.copies).toHaveLength(1);
         expect(capture.copies[0]!.source.texture).toBe(source._colorTexture);
         expect(capture.copies[0]!.source.mipLevel).toBe(0);
-        expect(capture.copies[0]!.target.texture).toBe(target._colorTexture);
+        expect(capture.copies[0]!.target).toEqual({ texture: target._colorTexture });
         expect(capture.copies[0]!.size).toEqual({ width: 64, height: 32 });
         expect(capture.descriptors).toHaveLength(0);
         expect(capture.draws).toBe(0);
+    });
+
+    it.each([
+        { layer: 5, mipLevel: 1, lodLevel: 0 },
+        { layer: 5, mipLevel: 0, lodLevel: 0 },
+        { layer: 0, mipLevel: 1, lodLevel: 0 },
+        { layer: 0, mipLevel: 0, lodLevel: 0 },
+        { layer: 5, mipLevel: 1, lodLevel: 2 },
+    ])("copies into wrapper layer $layer mip $mipLevel from source LOD $lodLevel", ({ layer, mipLevel, lodLevel }) => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine);
+        const width = 256 >> mipLevel;
+        const height = 128 >> mipLevel;
+        const source = makeOffscreenRT("rgba16float", width << lodLevel, height << lodLevel);
+        buildColor(source, engine, lodLevel + 1);
+        const tiles = createTexture2DArray(engine, 256, 128, 8, { format: "rgba16float" });
+        const target = createTextureRenderTarget(engine, tiles, { layer, mipLevel });
+        const view = target._colorView;
+        const destroy = vi.spyOn(tiles.texture, "destroy");
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target, lodLevel }, engine, scene);
+
+        for (let record = 0; record < 2; record++) {
+            task.record();
+            expect(task.execute!()).toBe(0);
+            expect(capture.copies[record]).toEqual({
+                source: { texture: source._colorTexture, mipLevel: lodLevel },
+                target: { texture: tiles.texture, mipLevel, origin: { x: 0, y: 0, z: layer } },
+                size: { width, height },
+            });
+        }
+        expect(capture.copies).toHaveLength(2);
+        expect(capture.descriptors).toHaveLength(0);
+        expect(capture.pipelines).toHaveLength(0);
+        expect(capture.draws).toBe(0);
+        task.dispose();
+        expect(target._colorTexture).toBe(tiles.texture);
+        expect(target._colorView).toBe(view);
+        expect(destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(tiles)).toBe(false);
+        disposeRenderTarget(target);
+        disposeRenderTarget(target);
+        expect(destroy).toHaveBeenCalledTimes(1);
+        disposeRenderTarget(source);
+    });
+
+    it.each([
+        { layer: 5, mipLevel: 1, lodLevel: 0 },
+        { layer: 5, mipLevel: 0, lodLevel: 0 },
+        { layer: 0, mipLevel: 1, lodLevel: 0 },
+        { layer: 0, mipLevel: 0, lodLevel: 0 },
+        { layer: 5, mipLevel: 1, lodLevel: 2 },
+        { layer: 5, mipLevel: 1, lodLevel: 99 },
+    ])("copies from wrapper layer $layer mip $mipLevel at view-relative LOD $lodLevel", ({ layer, mipLevel, lodLevel }) => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine);
+        // The array factory does not request COPY_SRC; model a copy-capable source allocation.
+        const createTexture = engine._device.createTexture.bind(engine._device);
+        const copySource = vi
+            .spyOn(engine._device, "createTexture")
+            .mockImplementation((descriptor) => createTexture({ ...descriptor, usage: descriptor.usage | GPUTextureUsage.COPY_SRC }));
+        const tiles = createTexture2DArray(engine, 256, 128, 8, { format: "rgba16float" });
+        copySource.mockRestore();
+        const createView = vi.spyOn(tiles.texture, "createView");
+        const source = createTextureRenderTarget(engine, tiles, { layer, mipLevel });
+        const width = 256 >> mipLevel;
+        const height = 128 >> mipLevel;
+        const target = makeOffscreenRT("rgba16float", width, height);
+        buildColor(target, engine);
+        const view = source._colorView;
+        const destroy = vi.spyOn(tiles.texture, "destroy");
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target, lodLevel }, engine, scene);
+        try {
+            expect(createView).toHaveBeenLastCalledWith({ dimension: "2d", baseArrayLayer: layer, arrayLayerCount: 1, baseMipLevel: mipLevel, mipLevelCount: 1 });
+            for (let record = 0; record < 2; record++) {
+                task.record();
+                expect(task.execute!()).toBe(0);
+                expect(capture.copies[record]).toEqual({
+                    source: { texture: tiles.texture, mipLevel, origin: { x: 0, y: 0, z: layer } },
+                    target: { texture: target._colorTexture },
+                    size: { width, height },
+                });
+            }
+            expect(capture.descriptors).toHaveLength(0);
+            expect(capture.pipelines).toHaveLength(0);
+            expect(capture.draws).toBe(0);
+            task.dispose();
+            expect(source._colorView).toBe(view);
+            expect(source._colorSubresource).toEqual({ layer, mipLevel });
+            expect(destroy).not.toHaveBeenCalled();
+        } finally {
+            task.dispose();
+            disposeRenderTarget(source);
+            releaseTexture(tiles);
+            disposeRenderTarget(target);
+        }
+        expect(destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("samples the selected source wrapper view when its dimensions require a blit", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine);
+        const tiles = createTexture2DArray(engine, 256, 128, 8, { format: "rgba16float" });
+        const source = createTextureRenderTarget(engine, tiles, { layer: 5, mipLevel: 1 });
+        const target = makeOffscreenRT("rgba16float", 64, 32);
+        buildColor(target, engine);
+        const createBindGroup = vi.spyOn(engine._device, "createBindGroup");
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target, lodLevel: 1 }, engine, scene);
+        try {
+            task.record();
+            expect(task.execute!()).toBe(1);
+            expect(capture.copies).toHaveLength(0);
+            const entries = Array.from(createBindGroup.mock.calls[0]![0].entries);
+            expect(entries.find((entry) => entry.binding === 0)!.resource).toBe(source._colorView);
+        } finally {
+            task.dispose();
+            disposeRenderTarget(source);
+            releaseTexture(tiles);
+            disposeRenderTarget(target);
+        }
     });
 
     it("synchronizes sampled eager source and target textures before recording", () => {
