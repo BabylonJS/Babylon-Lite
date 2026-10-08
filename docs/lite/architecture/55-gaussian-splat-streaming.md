@@ -629,11 +629,27 @@ Selection errors own only the error object they publish. They do not replace an 
 
 ### Collision navigation
 
-`lab/lite/src/demos/splat-voxel-collision.ts` loads the original scene's `scene.voxel.json` and sibling `scene.voxel.bin`. It accepts voxel format 1.1 only: finite increasing grid bounds, positive resolution, four-voxel leaves, depth 1..20, and exact little-endian node/mask counts within a 128 MiB binary limit. Every child range, mixed-leaf index, depth and unique parent is checked before navigation. A word `0xff000000` is solid; a zero high byte indexes a pair of 32-bit occupancy masks; other words encode an eight-bit child mask and a 24-bit first-child index. Child order is X/Y/Z Morton order; mixed mask bits use `x + 4*y + 16*z`.
+`packages/babylon-lite/src/collision/splat-voxel-collision.ts` provides optional collision queries through the package root:
+
+```typescript
+interface SplatVoxelCollision {
+    readonly min: [number, number, number];
+    readonly max: [number, number, number];
+    readonly resolution: number;
+    readonly depth: number;
+    readonly nodes: Uint32Array;
+    readonly masks: Uint32Array;
+}
+function parseSplatVoxelCollision(metadata: unknown, buffer: ArrayBuffer): SplatVoxelCollision;
+function loadSplatVoxelCollision(metadataUrl: string, signal?: AbortSignal): Promise<SplatVoxelCollision>;
+function moveSplatVoxelCamera(collision: SplatVoxelCollision, from: [number, number, number], to: [number, number, number], radius?: number): [number, number, number];
+```
+
+The loader accepts an HTTP(S) `.voxel.json` URL and derives its sibling `.voxel.bin` by replacing the pathname suffix, preserving the query. Metadata is bounded to 64 KiB and the decoded binary to 128 MiB. Parsing accepts voxel format 1.1 only: finite increasing grid bounds, positive resolution, four-voxel leaves, depth 1..20, and exact little-endian node/mask counts. Every child range, mixed-leaf index, depth and unique parent is checked before navigation. A word `0xff000000` is solid; a zero high byte indexes a pair of 32-bit occupancy masks; other words encode an eight-bit child mask and a 24-bit first-child index. Child order is X/Y/Z Morton order; mixed mask bits use `x + 4*y + 16*z`. Queries use the dataset's coordinate frame, require a clear starting position, block the grid boundary, and provide wall sliding without gravity. The module has no renderer or GPU dependency and is removed when its exports are unused.
 
 The voxel grid is already in the original viewer's world frame. Trogir collision queries convert Lite world positions with `(x,y,-z)` only. Camera motion sweeps a 0.15-unit half-extent box through occupied octree volumes using segment/slab intersections, then removes the blocked normal component and repeats for up to three sliding contacts. A small contact offset prevents repeated boundary intersections. Outside-grid motion is blocked. Continuous sweeps prevent tunnelling even on long frames; no geometry is inferred from partially loaded splats.
 
-Collision fetching starts alongside scene initialization. Controls stay unattached until collision data is ready; the coarse scene can appear while navigation is loading. Failures leave navigation disabled with an explicit HUD error. Page disposal aborts the collision request and prevents late control attachment. The default collision URL is the source publisher's CloudFront asset, since Babylon's copy contains only splat assets. An asset-root override uses its sibling voxel files and preserves its query parameters for both voxel requests. A nonempty `?collisionUrl=` selects a separate HTTP(S) voxel metadata URL with its own query parameters; an empty override uses the asset-root default. The collision correction runs after free-camera input and before rendering, translating position and target together and removing its callback on detach.
+Collision fetching starts alongside scene initialization. Controls stay unattached until collision data is ready; the coarse scene can appear while navigation is loading. Failures leave navigation disabled with an explicit HUD error. Page disposal aborts the collision request and prevents late control attachment. The default collision URL is the source publisher's CloudFront asset, since Babylon's CDN does not serve the voxel pair. Explicitly selecting the same Babylon manifest or directory also uses that source, without forwarding Babylon query parameters to CloudFront. Other asset roots use sibling voxel files and preserve their query parameters for both voxel requests. A nonempty `?collisionUrl=` selects a separate HTTP(S) voxel metadata URL with its own query parameters; an empty override uses the asset-root default. Dataset URLs and the Trogir coordinate adapter remain in the demo. The collision correction runs after free-camera input and before rendering, translating position and target together and removing its callback on detach.
 
 Files:
 
@@ -669,7 +685,18 @@ http://localhost:5174/demo-trogir-streaming.html?assetRoot=/local-gs/trogir/
 
 An `assetRoot` ending in `/lod-meta.json` is used as the manifest URL directly; other values retain directory-root behavior and have `lod-meta.json` appended. If the selected source cannot be loaded, the page reports the error and shows both the local setup and hosted override forms instead of hanging.
 
-The demo provides detail error and splat-budget controls, first-person mouse/keyboard controls, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. Its viewport permits browser zoom, and reduced-motion preference disables the loading-spinner animation rather than merely slowing it. The splat-budget slider starts at its maximum of 4,000,000 foreground splats. The demo therefore requests a 4,010,000-splat immutable capacity (reserving 10,000 slots for the 9,237-splat environment), a 1 GiB GPU stream ledger, a 192 MiB CPU admission budget, and the corresponding 256,640,000-byte WebGPU storage-buffer limits at device creation. This allocates the large working set up front even at the default target; an adapter that cannot expose those limits fails explicitly during startup. The camera starts at world eye `(-33.03, 0.24, -65.76)` with HUD yaw `27.70°`, up-positive pitch `6.62°`, roll `0.00°`, near `0.1`, and far `1500`. Camera speed is `0.8` with inertia `0.6`. Startup creates that `FreeCamera` pose directly and attaches first-person controls exactly once after collision data loads; there is no orbit camera, camera-mode state, or camera-mode UI.
+Root query preservation covers the manifest and the demo's sibling voxel pair only. Stream chunk metadata and WebP references use normal relative-URL resolution: they retain their own query strings and do not inherit the declaring document's query. Private datasets must authorize every relative resource reference independently (or use suitable host authentication); a signed `assetRoot` alone does not authorize the entire dataset. Voxel hosts must accept the same query on both members of the pair.
+
+The demo provides quality, detail error and splat-budget controls, first-person mouse/keyboard controls, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. Its viewport permits browser zoom, and reduced-motion preference disables the loading-spinner animation. Quality is selected before device creation by `?quality=low|high`; absent or unknown values select lower memory. Changing the quality selector reloads the page, retaining asset overrides, so immutable allocations are recreated. The splat-budget slider is initialized and capped at that tier's foreground target; moving it alone does not shrink fixed buffers.
+
+| Tier                   | Foreground splats | Immutable capacity | GPU ledger | CPU admission | Required buffer size |
+| ---------------------- | ----------------: | -----------------: | ---------: | ------------: | -------------------: |
+| Lower memory (default) |         1,000,000 |          1,010,000 |    256 MiB |        64 MiB |     64,640,000 bytes |
+| High detail            |         4,000,000 |          4,010,000 |      1 GiB |       192 MiB |    256,640,000 bytes |
+
+Each tier reserves 10,000 slots for the 9,237-splat environment and requests its buffer size for both `maxBufferSize` and `maxStorageBufferBindingSize`. Fixed stream/pass storage is approximately 147 MiB in lower memory and 583 MiB in high detail; source residency is additional and bounded by the GPU ledger. Collision data sits outside the CPU admission budget: the Trogir pair retains 18,275,664 bytes (17.4 MiB), with approximately 37.2 MiB needed during parsing. Engine targets, browser decoding and driver allocations are also outside those ledgers. An adapter that cannot expose a selected tier's limits fails explicitly during startup.
+
+The camera starts at world eye `(-33.03, 0.24, -65.76)` with HUD yaw `27.70°`, up-positive pitch `6.62°`, roll `0.00°`, near `0.1`, and far `1500`. Camera speed is `0.8` with inertia `0.6`. Startup creates that `FreeCamera` pose directly and attaches first-person controls exactly once after collision data loads; there is no orbit camera, camera-mode state, or camera-mode UI.
 
 The page owns engine, scene, stream, controls, HUD callbacks, and asynchronous startup as one idempotent lifecycle. `pagehide` or any failure during engine creation, stream load, scene registration, engine start, or first-frame readiness disposes every resource already acquired before showing an error. As soon as a stream result becomes owned, the page installs a rejection observer on its original readiness promise; later awaiting that original promise still reports a genuine readiness failure, while registration/start failure or pagehide can dispose the stream without producing a second unhandled readiness rejection. Each awaited completion checks whether disposal already fired; a late engine or stream result is observed and immediately disposed instead of escaping ownership. Success-only readiness flags and overlay removal cannot run after disposal.
 
@@ -754,7 +781,8 @@ lab/lite/demo-trogir-streaming.html
 lab/lite/src/demos/trogir-camera.ts
 lab/lite/src/demos/trogir-assets.ts
 lab/lite/src/demos/trogir-collision.ts
-lab/lite/src/demos/splat-voxel-collision.ts
+packages/babylon-lite/src/collision/splat-voxel-collision.ts
+lab/lite/src/demos/trogir-quality.ts
 lab/lite/src/demos/trogir-camera-pose.ts
 lab/lite/src/demos/trogir-streaming-placement.ts
 lab/lite/src/demos/trogir-streaming.ts
@@ -766,6 +794,9 @@ tests/lite/unit/splat-stream-requests.test.ts
 tests/lite/unit/splat-stream-cache.test.ts
 tests/lite/unit/splat-stream-orchestration.test.ts
 tests/lite/unit/trogir-camera.test.ts
+tests/lite/unit/trogir-quality.test.ts
 tests/lite/unit/splat-voxel-collision.test.ts
 tests/lite/unit/trogir-streaming-placement.test.ts
+tests/lite/build/public-api-types.test.ts
+tests/lite/build/splat-voxel-treeshake.test.ts
 ```

@@ -1,5 +1,6 @@
 type Point = [number, number, number];
 
+/** Validated voxel octree in the dataset's coordinate frame. Treat its arrays as read-only. */
 export interface SplatVoxelCollision {
     readonly min: Point;
     readonly max: Point;
@@ -70,6 +71,7 @@ function bits(value: number): number {
     return count;
 }
 
+/** Validate voxel format 1.1 metadata and copy its little-endian binary into owned storage. */
 export function parseSplatVoxelCollision(metadata: unknown, buffer: ArrayBuffer): SplatVoxelCollision {
     const h = header(metadata);
     if (buffer.byteLength !== h.bytes) {
@@ -151,6 +153,7 @@ async function readBounded(url: URL, limit: number, signal?: AbortSignal): Promi
     return bytes.subarray(0, offset);
 }
 
+/** Load a bounded HTTP(S) .voxel.json/.voxel.bin pair, preserving the URL query on both requests. */
 export async function loadSplatVoxelCollision(metadataUrl: string, signal?: AbortSignal): Promise<SplatVoxelCollision> {
     const url = new URL(metadataUrl);
     if (!/^https?:$/.test(url.protocol) || !url.pathname.endsWith(".voxel.json")) {
@@ -166,7 +169,7 @@ export async function loadSplatVoxelCollision(metadataUrl: string, signal?: Abor
     return parseSplatVoxelCollision(metadata, bytes.buffer);
 }
 
-/** Continuous box sweep in the voxel dataset's coordinate frame, with wall sliding. */
+/** Sweep a box of the given half-extent from a clear starting point, with wall sliding and blocked grid boundaries. */
 export function moveSplatVoxelCamera(collision: SplatVoxelCollision, from: Point, to: Point, radius = 0.15): Point {
     if (![...from, ...to, radius].every(Number.isFinite) || radius <= 0) {
         throw new RangeError("Collision motion and radius must be finite; radius must be positive.");

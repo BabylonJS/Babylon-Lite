@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadSplatVoxelCollision, moveSplatVoxelCamera, parseSplatVoxelCollision } from "../../../lab/lite/src/demos/splat-voxel-collision";
+import { loadSplatVoxelCollision, moveSplatVoxelCamera, parseSplatVoxelCollision } from "../../../packages/babylon-lite/src/collision/splat-voxel-collision";
 import { resolveTrogirAssets } from "../../../lab/lite/src/demos/trogir-assets";
 import { attachTrogirCollision } from "../../../lab/lite/src/demos/trogir-collision";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
@@ -81,7 +81,7 @@ describe("splat voxel navigation", () => {
         expect(() => resolveTrogirAssets("https://example.test/demo.html?assetRoot=file:///data/")).toThrow();
     });
 
-    it.each(["https://cdn.test/data/", "https://cdn.test/data/lod-meta.json"])("preserves signed and versioned asset queries from %s", (root) => {
+    it.each(["https://cdn.test/data/", "https://cdn.test/data/lod-meta.json"])("preserves root queries on the manifest and voxel pair from %s", (root) => {
         const query = "?sig=a%2Fb%2Bc&v=7";
         const page = new URL("https://example.test/demo.html");
         page.searchParams.set("assetRoot", root + query);
@@ -93,6 +93,20 @@ describe("splat voxel navigation", () => {
         page.searchParams.set("collisionUrl", "");
         expect(resolveTrogirAssets(page.href)).toEqual(expected);
     });
+
+    it.each(["https://assets.babylonjs.com/splats/Trogir/", "https://assets.babylonjs.com/splats/Trogir/lod-meta.json"])(
+        "uses the public collision pair for the explicit default root %s without forwarding queries across hosts",
+        (root) => {
+            const page = new URL("https://example.test/demo.html");
+            page.searchParams.set("assetRoot", root + "?v=7");
+            expect(resolveTrogirAssets(page.href)).toEqual({
+                metadataUrl: "https://assets.babylonjs.com/splats/Trogir/lod-meta.json?v=7",
+                collisionUrl: "https://d28zzqy0iyovbz.cloudfront.net/14bac5b2/v1/scene.voxel.json",
+            });
+            page.searchParams.set("collisionUrl", "/nav/custom.voxel.json?sig=other");
+            expect(resolveTrogirAssets(page.href).collisionUrl).toBe("https://example.test/nav/custom.voxel.json?sig=other");
+        }
+    );
 
     it.each([
         ["/nav/custom.voxel.json", "https://example.test/nav/custom.voxel.json"],

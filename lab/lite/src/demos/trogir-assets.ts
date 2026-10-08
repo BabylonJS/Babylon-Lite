@@ -15,8 +15,9 @@ export function resolveTrogirAssets(pageUrl: string): { metadataUrl: string; col
         root.pathname += "lod-meta.json";
     }
     const collisionOverride = page.searchParams.get("collisionUrl");
-    const collision = new URL(collisionOverride || (configured ? "scene.voxel.json" : COLLISION_URL), collisionOverride ? page : root);
-    if (configured && !collisionOverride) {
+    const isPublicDataset = root.origin + root.pathname === METADATA_URL;
+    const collision = new URL(collisionOverride || (isPublicDataset ? COLLISION_URL : "scene.voxel.json"), collisionOverride ? page : root);
+    if (!isPublicDataset && !collisionOverride) {
         collision.search = root.search;
     }
     if (!/^https?:$/.test(collision.protocol) || !collision.pathname.endsWith(".voxel.json")) {

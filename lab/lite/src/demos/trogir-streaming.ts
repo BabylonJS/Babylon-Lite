@@ -6,6 +6,7 @@ import {
     disposeGaussianSplatStream,
     disposeScene,
     loadGaussianSplatStream,
+    loadSplatVoxelCollision,
     onBeforeRender,
     registerScene,
     startEngine,
@@ -16,13 +17,11 @@ import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 import { acquireTrogirStartupResource, finishTrogirStartup, observeTrogirStartupReadiness } from "./trogir-streaming-lifecycle";
 import { resolveTrogirAssets } from "./trogir-assets";
-import { loadSplatVoxelCollision } from "./splat-voxel-collision";
 import { attachTrogirCollision } from "./trogir-collision";
+import { resolveTrogirQuality } from "./trogir-quality";
 
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
 const MB = 1024 * 1024;
-const MAX_FOREGROUND_SPLATS = 4_000_000;
-const STREAM_CAPACITY = MAX_FOREGROUND_SPLATS + 10_000;
 
 function formatCount(value: number): string {
     return new Intl.NumberFormat("en-US").format(value);
@@ -42,6 +41,8 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const screenError = document.getElementById("screenError") as HTMLInputElement;
     const screenErrorValue = output("screenErrorValue");
     const splatBudget = document.getElementById("splatBudget") as HTMLInputElement;
+    splatBudget.max = String(stream.maxSplats);
+    splatBudget.value = String(stream.maxSplats);
     const splatBudgetValue = output("splatBudgetValue");
     const cameraPose = document.getElementById("cameraPose") as HTMLDetailsElement;
     const cameraX = output("cameraX");
@@ -136,10 +137,28 @@ function showError(reason: unknown, canvas: HTMLCanvasElement): void {
     if (detail) {
         detail.textContent = `${message}\n\nThe public Trogir stream could not be loaded. To use a local dataset, run:\n${LOCAL_SETUP}\n\nThen open this demo with ?assetRoot=/local-gs/trogir/. You can also provide any hosted dataset root with ?assetRoot=https://host/path/to/dataset/.`;
     }
+    const retry = document.getElementById("lowerQuality") as HTMLAnchorElement;
+    const url = new URL(location.href);
+    if (url.searchParams.get("quality") === "high") {
+        url.searchParams.set("quality", "low");
+        retry.href = url.href;
+        retry.hidden = false;
+    }
 }
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const quality = resolveTrogirQuality(location.href);
+    const qualitySelect = document.getElementById("quality") as HTMLSelectElement;
+    qualitySelect.value = quality.name;
+    const changeQuality = (): void => {
+        const url = new URL(location.href);
+        url.searchParams.set("quality", qualitySelect.value);
+        location.assign(url.href);
+    };
+    qualitySelect.addEventListener("change", changeQuality);
+    // Keep this available after startup failure so a lower tier can be selected.
+    window.addEventListener("pagehide", () => qualitySelect.removeEventListener("change", changeQuality), { once: true });
     let engine: EngineContext | null = null;
     let scene: SceneContext | null = null;
     let stream: GaussianSplatStream | null = null;
@@ -179,10 +198,7 @@ async function main(): Promise<void> {
         );
         const createdEngine = await acquireTrogirStartupResource(
             createEngine(canvas, {
-                requiredLimits: {
-                    maxBufferSize: STREAM_CAPACITY * 64,
-                    maxStorageBufferBindingSize: STREAM_CAPACITY * 64,
-                },
+                requiredLimits: quality.requiredLimits,
             }),
             () => disposed,
             disposeEngine
@@ -194,10 +210,7 @@ async function main(): Promise<void> {
         scene = createSceneContext(engine);
         const loadedStream = await acquireTrogirStartupResource(
             loadGaussianSplatStream(engine, assets.metadataUrl, {
-                maxSplats: MAX_FOREGROUND_SPLATS,
-                maxCapacitySplats: STREAM_CAPACITY,
-                maxGpuBytes: 1024 * MB,
-                maxCpuBytes: 192 * MB,
+                ...quality.streamOptions,
                 screenError: 2,
                 signal: abort.signal,
             }).then((candidate) => {

@@ -1,6 +1,5 @@
-import type { FreeCamera, SceneContext } from "babylon-lite";
-import { moveSplatVoxelCamera } from "./splat-voxel-collision";
-import type { SplatVoxelCollision } from "./splat-voxel-collision";
+import type { FreeCamera, SceneContext, SplatVoxelCollision } from "babylon-lite";
+import { moveSplatVoxelCamera } from "babylon-lite";
 
 /** Install after camera controls so every proposed displacement is swept before rendering. */
 export function attachTrogirCollision(camera: FreeCamera, scene: SceneContext, collision: SplatVoxelCollision): () => void {
