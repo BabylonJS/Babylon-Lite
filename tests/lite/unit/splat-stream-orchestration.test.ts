@@ -509,7 +509,7 @@ describe("Gaussian splat stream orchestration", () => {
     it.each([-2, 2])("evicts the farther off-screen source using the current camera at x=%s", async (x) => {
         const h = harness();
         const mutableCamera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
-        mutableCamera.worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        mutableCamera.worldMatrix = new Float32Array(IDENTITY);
         const stream = await attachAndBuild(h);
         for (const call of h.calls.slice(1)) {
             call.gate.resolve(prepared(call.source, call.generation));
@@ -545,7 +545,7 @@ describe("Gaussian splat stream orchestration", () => {
     it("measures shared off-screen bounds in world space against every active camera and expires old views", async () => {
         const h = harness(twoCoolingLeavesManifest());
         const mutableCamera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
-        mutableCamera.worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        mutableCamera.worldMatrix = new Float32Array(IDENTITY);
         const stream = await attachAndBuild(h);
         stream.position.x = 10;
         stream.scaling.set(2, 1, -1);

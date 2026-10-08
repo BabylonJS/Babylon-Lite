@@ -109,6 +109,15 @@ interface CpuWaiter {
     readonly signal: AbortSignal;
 }
 
+function hasJobFlag(jobs: ReadonlySet<RequestJob>, flag: "exclusive" | "preemptRequested"): boolean {
+    for (const job of jobs) {
+        if (job[flag]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function abortError(): DOMException {
     return new DOMException("The operation was aborted", "AbortError");
 }
@@ -230,7 +239,6 @@ export function createSplatStreamRequestManager(
     const decodeWaiters: Waiter[] = [];
     const cpuWaiters: CpuWaiter[] = [];
     let sequence = 0;
-    let activePreparations = 0;
     const activeJobs = new Set<RequestJob>();
     let activeHttp = 0;
     let activeDecodes = 0;
@@ -583,12 +591,12 @@ export function createSplatStreamRequestManager(
             return;
         }
         queue.sort((a, b) => a.request.priority - b.request.priority || (a.request.distance ?? Infinity) - (b.request.distance ?? Infinity) || a.sequence - b.sequence);
-        while (activePreparations < maxConcurrentRequests && queue.length > 0) {
-            if ([...activeJobs].some((job) => job.exclusive)) {
+        while (activeJobs.size < maxConcurrentRequests && queue.length > 0) {
+            if (hasJobFlag(activeJobs, "exclusive")) {
                 break;
             }
             const index = queue.findIndex((candidate) => !activeUrls.has(candidate.request.url));
-            if (index < 0 || (queue[index]!.exclusive && activePreparations > 0)) {
+            if (index < 0 || (queue[index]!.exclusive && activeJobs.size > 0)) {
                 break;
             }
             const job = queue.splice(index, 1)[0]!;
@@ -598,7 +606,6 @@ export function createSplatStreamRequestManager(
             job.state = "active";
             activeJobs.add(job);
             activeUrls.add(job.request.url);
-            activePreparations++;
             let requeue = false;
             void prepare(job, job.attemptController.signal, job.exclusive ? maxCpuBytes : Math.floor(maxCpuBytes / maxConcurrentRequests))
                 .then((source) => {
@@ -631,7 +638,6 @@ export function createSplatStreamRequestManager(
                 .finally(() => {
                     activeUrls.delete(job.request.url);
                     activeJobs.delete(job);
-                    activePreparations--;
                     if (requeue && jobs.get(job.request.url) === job && !job.cancelled && !disposed) {
                         job.state = "queued";
                         job.preemptRequested = false;
@@ -648,8 +654,8 @@ export function createSplatStreamRequestManager(
         const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
         if (
             next &&
-            (activePreparations >= maxConcurrentRequests || next.exclusive || [...activeJobs].some((job) => job.exclusive)) &&
-            (next.exclusive || ![...activeJobs].some((job) => job.preemptRequested))
+            (activeJobs.size >= maxConcurrentRequests || next.exclusive || hasJobFlag(activeJobs, "exclusive")) &&
+            (next.exclusive || !hasJobFlag(activeJobs, "preemptRequested"))
         ) {
             for (const job of [...activeJobs].sort((a, b) => b.request.priority - a.request.priority || b.sequence - a.sequence)) {
                 if (next.request.priority < job.request.priority && !job.preemptRequested) {

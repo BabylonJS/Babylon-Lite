@@ -5,10 +5,10 @@ import { moveSplatVoxelCamera } from "babylon-lite";
 export function attachTrogirCollision(camera: FreeCamera, scene: SceneContext, collision: SplatVoxelCollision): () => void {
     let previous: [number, number, number] = [camera.position.x, camera.position.y, -camera.position.z];
     const correct = (): void => {
-        const requested: [number, number, number] = [camera.position.x, camera.position.y, -camera.position.z];
-        if (previous.every((value, axis) => value === requested[axis])) {
+        if (camera.position.x === previous[0] && camera.position.y === previous[1] && -camera.position.z === previous[2]) {
             return;
         }
+        const requested: [number, number, number] = [camera.position.x, camera.position.y, -camera.position.z];
         const position = moveSplatVoxelCamera(collision, previous, requested);
         camera.target.set(camera.target.x + position[0] - camera.position.x, camera.target.y + position[1] - camera.position.y, camera.target.z - position[2] - camera.position.z);
         camera.position.set(position[0], position[1], -position[2]);
