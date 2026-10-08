@@ -583,22 +583,6 @@ export function createSplatStreamRequestManager(
             return;
         }
         queue.sort((a, b) => a.request.priority - b.request.priority || (a.request.distance ?? Infinity) - (b.request.distance ?? Infinity) || a.sequence - b.sequence);
-        const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
-        if (
-            next &&
-            (activePreparations >= maxConcurrentRequests || next.exclusive || [...activeJobs].some((job) => job.exclusive)) &&
-            (next.exclusive || ![...activeJobs].some((job) => job.preemptRequested))
-        ) {
-            for (const job of [...activeJobs].sort((a, b) => b.request.priority - a.request.priority || b.sequence - a.sequence)) {
-                if (next.request.priority < job.request.priority && !job.preemptRequested) {
-                    job.preemptRequested = true;
-                    job.attemptController.abort(new PreparationPreemptedError());
-                    if (!next.exclusive) {
-                        break;
-                    }
-                }
-            }
-        }
         while (activePreparations < maxConcurrentRequests && queue.length > 0) {
             if ([...activeJobs].some((job) => job.exclusive)) {
                 break;
@@ -659,6 +643,23 @@ export function createSplatStreamRequestManager(
                     }
                     pump();
                 });
+        }
+        // Reclaim the next needed slot after admission, including when preemption cleanup refills the pool.
+        const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
+        if (
+            next &&
+            (activePreparations >= maxConcurrentRequests || next.exclusive || [...activeJobs].some((job) => job.exclusive)) &&
+            (next.exclusive || ![...activeJobs].some((job) => job.preemptRequested))
+        ) {
+            for (const job of [...activeJobs].sort((a, b) => b.request.priority - a.request.priority || b.sequence - a.sequence)) {
+                if (next.request.priority < job.request.priority && !job.preemptRequested) {
+                    job.preemptRequested = true;
+                    job.attemptController.abort(new PreparationPreemptedError());
+                    if (!next.exclusive) {
+                        break;
+                    }
+                }
+            }
         }
     };
 

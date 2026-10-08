@@ -419,6 +419,44 @@ describe("splat stream transport", () => {
         expect(manager.cpuBytes).toBe(0);
     });
 
+    it.each([2, 7])("reclaims slots for %i queued uncovered requests while all surviving preparations stay pending", async (uncoveredCount) => {
+        const signals = new Map<string, AbortSignal>();
+        const settled = vi.fn();
+        let peakRequests = 0;
+        const manager = createSplatStreamRequestManager(6, 1, 60_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn((input: string | URL | Request, init?: RequestInit) => {
+                const signal = init!.signal!;
+                signals.set(String(input), signal);
+                peakRequests = Math.max(peakRequests, manager.pendingRequests);
+                // Every request stays pending until aborted, including admitted uncovered work.
+                return new Promise<Response>((_resolve, reject) => {
+                    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                });
+            }) as unknown as typeof fetch,
+            decode: async () => bitmap(),
+        });
+        const upgrades = Array.from({ length: 6 }, (_, index) => request(`https://a.test/upgrade-${index}/meta.json`, index));
+        const uncovered = Array.from({ length: uncoveredCount }, (_, index) => request(`https://a.test/uncovered-${index}/meta.json`, index + 6, SplatRequestPriority.Uncovered));
+        const jobs = upgrades.map((source) => manager.request(source).then(settled, settled));
+        try {
+            await vi.waitFor(() => expect(signals.size).toBe(6));
+            jobs.push(...uncovered.map((source) => manager.request(source).then(settled, settled)));
+            const admitted = Math.min(6, uncoveredCount);
+            await vi.waitFor(() => expect(uncovered.filter((source) => signals.has(source.url))).toHaveLength(admitted));
+            expect(uncovered.filter((source) => signals.has(source.url))).toEqual(uncovered.slice(0, admitted));
+            expect(upgrades.filter((source) => signals.get(source.url)!.aborted)).toHaveLength(admitted);
+            expect(uncovered.some((source) => signals.get(source.url)?.aborted)).toBe(false);
+            expect(manager.pendingRequests).toBe(6);
+            expect(peakRequests).toBe(6);
+            expect(manager.queuedFiles).toBe(uncoveredCount);
+            expect(settled).not.toHaveBeenCalled();
+        } finally {
+            manager.dispose();
+            await Promise.all(jobs);
+        }
+    });
+
     it("waits for a nonabortable decode to settle before preemption cleanup or late upload", async () => {
         const fakeGpu = gpu();
         const decodeGate = deferred<ImageBitmap>();
