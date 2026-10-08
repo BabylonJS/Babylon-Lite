@@ -223,7 +223,7 @@ export class GaussianSplattingStream extends GaussianSplattingMesh {
         return unsupported("GaussianSplattingStream.minimumResidentSplats", STREAM_BLOCKER);
     }
 
-    public get lod0SplatCount(): never {
+    public get lod0SplatCount(): GaussianSplattingStreamLod0SplatCount {
         return unsupported("GaussianSplattingStream.lod0SplatCount", STREAM_BLOCKER);
     }
 

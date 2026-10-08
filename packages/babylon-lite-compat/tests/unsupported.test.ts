@@ -68,7 +68,7 @@ import {
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
-import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync } from "../src/meshes/gaussian-splatting-stream";
+import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, type GaussianSplattingStreamLod0SplatCount } from "../src/meshes/gaussian-splatting-stream";
 import {
     GLTF1,
     GLTF2,
@@ -301,6 +301,13 @@ describe("GreasedLine builder/tool function stubs throw on call", () => {
 });
 
 describe("Gaussian Splatting compound streaming stubs throw", () => {
+    it("preserves the lod0SplatCount discriminated union", () => {
+        const getAvailableCount = (result: GaussianSplattingStreamLod0SplatCount): number | undefined => (result.status === "available" ? result.count : undefined);
+
+        expect(getAvailableCount({ status: "available", count: 42 })).toBe(42);
+        expect(getAvailableCount({ status: "pending" })).toBeUndefined();
+    });
+
     it("AddGaussianSplattingStreamPart names its structural blocker", () => {
         expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(LiteCompatError);
         expect(() => AddGaussianSplattingStreamPart({} as never, "part", {} as never, "/")).toThrow(/compound-mesh atlas/);
