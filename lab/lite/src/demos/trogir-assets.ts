@@ -1,5 +1,4 @@
 const METADATA_URL = "https://assets.babylonjs.com/splats/Trogir/lod-meta.json";
-const COLLISION_URL = "https://d28zzqy0iyovbz.cloudfront.net/14bac5b2/v1/scene.voxel.json";
 
 export function resolveTrogirAssets(pageUrl: string): { metadataUrl: string; collisionUrl: string } {
     const page = new URL(pageUrl);
@@ -15,9 +14,8 @@ export function resolveTrogirAssets(pageUrl: string): { metadataUrl: string; col
         root.pathname += "lod-meta.json";
     }
     const collisionOverride = page.searchParams.get("collisionUrl");
-    const isPublicDataset = root.origin + root.pathname === METADATA_URL;
-    const collision = new URL(collisionOverride || (isPublicDataset ? COLLISION_URL : "scene.voxel.json"), collisionOverride ? page : root);
-    if (!isPublicDataset && !collisionOverride) {
+    const collision = new URL(collisionOverride || "scene.voxel.json", collisionOverride ? page : root);
+    if (!collisionOverride) {
         collision.search = root.search;
     }
     if (!/^https?:$/.test(collision.protocol) || !collision.pathname.endsWith(".voxel.json")) {

@@ -71,7 +71,7 @@ describe("splat voxel navigation", () => {
     it("resolves public, alternate-root and explicit collision assets without mixing datasets", () => {
         const publicAssets = resolveTrogirAssets("https://example.test/demo.html");
         expect(publicAssets.metadataUrl).toContain("assets.babylonjs.com/splats/Trogir/");
-        expect(publicAssets.collisionUrl).toContain("14bac5b2/v1/scene.voxel.json");
+        expect(publicAssets.collisionUrl).toBe("https://assets.babylonjs.com/splats/Trogir/scene.voxel.json");
         const custom = resolveTrogirAssets("https://example.test/demo.html?assetRoot=/local-gs/other/");
         expect(custom).toEqual({ metadataUrl: "https://example.test/local-gs/other/lod-meta.json", collisionUrl: "https://example.test/local-gs/other/scene.voxel.json" });
         expect(resolveTrogirAssets("https://example.test/demo.html?assetRoot=/data/lod-meta.json&collisionUrl=/nav/custom.voxel.json").collisionUrl).toBe(
@@ -95,13 +95,13 @@ describe("splat voxel navigation", () => {
     });
 
     it.each(["https://assets.babylonjs.com/splats/Trogir/", "https://assets.babylonjs.com/splats/Trogir/lod-meta.json"])(
-        "uses the public collision pair for the explicit default root %s without forwarding queries across hosts",
+        "preserves queries on the sibling collision pair for the explicit default root %s",
         (root) => {
             const page = new URL("https://example.test/demo.html");
             page.searchParams.set("assetRoot", root + "?v=7");
             expect(resolveTrogirAssets(page.href)).toEqual({
                 metadataUrl: "https://assets.babylonjs.com/splats/Trogir/lod-meta.json?v=7",
-                collisionUrl: "https://d28zzqy0iyovbz.cloudfront.net/14bac5b2/v1/scene.voxel.json",
+                collisionUrl: "https://assets.babylonjs.com/splats/Trogir/scene.voxel.json?v=7",
             });
             page.searchParams.set("collisionUrl", "/nav/custom.voxel.json?sig=other");
             expect(resolveTrogirAssets(page.href).collisionUrl).toBe("https://example.test/nav/custom.voxel.json?sig=other");
