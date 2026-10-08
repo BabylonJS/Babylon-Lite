@@ -365,6 +365,9 @@ describe("splat stream transport", () => {
         const far = manager.request({ ...request("https://a.test/far/meta.json", 1), distance: 20 });
         const near = manager.request({ ...request("https://a.test/near/meta.json", 2), distance: 40 });
         expect(manager.promote("https://a.test/near/meta.json", 1, SplatRequestPriority.Upgrade, 2)).toBe(true);
+        await Promise.resolve();
+        // Distance changes must not preempt the active preparation.
+        expect(order.filter((url) => url.endsWith("meta.json"))).toEqual(["https://a.test/first/meta.json"]);
         first.resolve(response(metadata()));
         await Promise.all([active, far, near]);
         expect(order.filter((url) => url.endsWith("meta.json"))).toEqual(["https://a.test/first/meta.json", "https://a.test/near/meta.json", "https://a.test/far/meta.json"]);
@@ -372,11 +375,13 @@ describe("splat stream transport", () => {
 
     it("promotes an existing queued job so uncovered coverage preempts abortable fine transport", async () => {
         const order: string[] = [];
+        let fineSignal: AbortSignal | null | undefined;
         let fineAttempts = 0;
         const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
             const url = String(input);
             order.push(url);
             if (url.endsWith("/active-fine/meta.json") && fineAttempts++ === 0) {
+                fineSignal = init?.signal;
                 return new Promise<Response>((_resolve, reject) => {
                     init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
                 });
@@ -393,7 +398,19 @@ describe("splat stream transport", () => {
         const shared = manager.request(request("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade));
         expect(manager.promote("https://a.test/shared/meta.json", 2, SplatRequestPriority.Uncovered)).toBe(false);
         expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade)).toBe(false);
-        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Uncovered)).toBe(true);
+        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade, 2)).toBe(true);
+        const sort = vi.spyOn(Array.prototype, "sort");
+        try {
+            expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Uncovered)).toBe(true);
+            expect(fineSignal?.aborted).toBe(true);
+            const immediatePasses = sort.mock.calls.length;
+            expect(immediatePasses).toBeGreaterThan(0);
+            // The strict-priority pass already consumed the pending distance update.
+            await Promise.resolve();
+            expect(sort).toHaveBeenCalledTimes(immediatePasses);
+        } finally {
+            sort.mockRestore();
+        }
         await expect(shared).resolves.toMatchObject({ fileId: 1, generation: 1 });
         await expect(fine).resolves.toMatchObject({ fileId: 0 });
         expect(order.filter((url) => url.endsWith("/active-fine/meta.json"))).toHaveLength(2);

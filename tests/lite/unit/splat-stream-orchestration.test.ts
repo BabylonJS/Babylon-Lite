@@ -14,6 +14,7 @@ import {
     loadGaussianSplatStream,
 } from "../../../packages/babylon-lite/src/loader-splat-stream/load-gaussian-splat-stream";
 import {
+    createSplatStreamRequestManager,
     SplatGpuBudgetPressureError,
     SplatRequestPriority,
     type PreparedSplatSource,
@@ -412,6 +413,99 @@ async function attachAndBuild(h: ReturnType<typeof harness>, environment = false
 }
 
 describe("Gaussian splat stream orchestration", () => {
+    it("batches distance-only scheduling when a moving camera updates many queued sources", async () => {
+        const leafCount = 64;
+        const h = harness(
+            {
+                version: 1,
+                lodLevels: 2,
+                lodErrors: true,
+                filenames: ["broad/meta.json", ...Array.from({ length: leafCount }, (_, i) => `fine-${i}/meta.json`)],
+                tree: {
+                    bound: { min: [-0.3, -0.1, -0.8], max: [0.3, 0.1, -0.6] },
+                    children: Array.from({ length: leafCount }, (_, i) => ({
+                        bound: { min: [-0.24 + i * 0.0075, -0.05, -0.8], max: [-0.235 + i * 0.0075, 0.05, -0.6] },
+                        lods: { "0": { file: 0, offset: i, count: 1 }, "1": { file: i + 1, offset: 0, count: 2 } },
+                        errors: [1, 0],
+                    })),
+                },
+            },
+            leafCount * 2
+        );
+        const signals: AbortSignal[] = [];
+        const manager = createSplatStreamRequestManager(1, 1, 64 * 1024, 0, {
+            device: h.engine._device,
+            fetch: (_input, init) =>
+                new Promise<Response>((_resolve, reject) => {
+                    const signal = init!.signal!;
+                    signals.push(signal);
+                    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                }),
+        });
+        const bootstrap = deferred<PreparedSplatSource>();
+        const requestSource = manager.request.bind(manager);
+        const request = vi.spyOn(manager, "request").mockImplementation((value) => (value.priority === SplatRequestPriority.Bootstrap ? bootstrap.promise : requestSource(value)));
+        const promote = vi.spyOn(manager, "promote");
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: leafCount * 2,
+            screenError: 0.001,
+            _runtime: {
+                fetch: h.fetch,
+                requestManager: manager,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        void stream.firstFrameReady.catch(() => undefined);
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        const first = request.mock.calls[0]![0];
+        bootstrap.resolve(prepared(stream._sourceStates[first.fileId]!.source, first.generation, leafCount));
+        await vi.waitFor(() => expect(stream.stats.coveredLeaves).toBe(leafCount));
+        const camera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
+        camera.worldMatrix = new Float32Array(IDENTITY);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        h.getDraw()();
+        await vi.waitFor(() => expect(manager.queuedFiles).toBe(leafCount - 1));
+        expect(signals).toHaveLength(1);
+        const pending = stream._sourceStates.slice(1).map((state) => state.request);
+        const sort = vi.spyOn(Array.prototype, "sort");
+        // Distinguish the request queue from the selection planner's own sorted arrays.
+        const queuePasses = () =>
+            sort.mock.contexts.filter(
+                (items) =>
+                    Array.isArray(items) && items.length === leafCount - 1 && items.some((item: unknown) => !!item && typeof item === "object" && "attemptController" in item)
+            ).length;
+        try {
+            for (const x of [-0.1, 0.1, -0.05]) {
+                sort.mockClear();
+                promote.mockClear();
+                camera.worldMatrix[12] = x;
+                camera.worldMatrixVersion++;
+                h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+                expect(stream.stats.visibleLeaves).toBe(leafCount);
+                expect(promote).toHaveBeenCalledTimes(leafCount);
+                expect(queuePasses()).toBe(0);
+                await Promise.resolve();
+                expect(queuePasses()).toBe(1);
+                expect(manager.queuedFiles).toBe(leafCount - 1);
+                expect(signals[0]!.aborted).toBe(false);
+                expect(stream._sourceStates.slice(1).map((state) => state.request)).toEqual(pending);
+            }
+            sort.mockClear();
+            const firstQueued = stream._sourceStates[2]!;
+            expect(manager.promote(firstQueued.source.url, firstQueued.generation, SplatRequestPriority.Upgrade, 0)).toBe(true);
+            disposeGaussianSplatStream(h.scene, stream);
+            await Promise.resolve();
+            expect(queuePasses()).toBe(0);
+            expect(signals[0]!.aborted).toBe(true);
+        } finally {
+            sort.mockRestore();
+            disposeGaussianSplatStream(h.scene, stream);
+        }
+    });
+
     it.each([-2, 2])("evicts the farther off-screen source using the current camera at x=%s", async (x) => {
         const h = harness();
         const mutableCamera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };

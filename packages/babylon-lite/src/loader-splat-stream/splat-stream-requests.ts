@@ -237,6 +237,7 @@ export function createSplatStreamRequestManager(
     let cpuBytes = 0;
     let fetchedBytes = 0;
     let disposed = false;
+    let distancePumpPending = false;
 
     const runLimited = <T>(limit: number, kind: "http" | "decode", signal: AbortSignal, operation: () => Promise<T>): Promise<T> =>
         new Promise<T>((resolve, reject) => {
@@ -577,6 +578,7 @@ export function createSplatStreamRequestManager(
     };
 
     const pump = (): void => {
+        distancePumpPending = false;
         if (disposed) {
             return;
         }
@@ -769,8 +771,19 @@ export function createSplatStreamRequestManager(
             ) {
                 return false;
             }
+            const priorityChanged = priority < job.request.priority;
             job.request = { ...job.request, priority: Math.min(priority, job.request.priority), distance: distance ?? job.request.distance };
-            pump();
+            if (priorityChanged) {
+                pump();
+            } else if (!distancePumpPending) {
+                // One pass consumes all distance changes from the current camera update.
+                distancePumpPending = true;
+                queueMicrotask(() => {
+                    if (distancePumpPending) {
+                        pump();
+                    }
+                });
+            }
             return true;
         },
         cancel(rawUrl) {
