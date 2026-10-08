@@ -125,6 +125,7 @@ use.
 - **Fullscreen renderer** — `createEffectWrapper`, `applyEffectWrapper`,
   `drawEffect`, `setViewport`, `disposeEffectWrapper`.
 - **Textures** — `createRawTexture` (typed-array upload, LDR byte formats),
+  `createTextureFromSource` (single upload from already-decoded bitmaps/canvases/images),
   `createTexture3DFromPixels` + `setEffectTexture3D` (optional native RGBA8
   LUT volumes with trilinear sampling and zero 2D-only bundle cost),
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
@@ -145,6 +146,38 @@ use.
   `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.
 - **Blend** — `setBlendMode` + `GLBlendMode` (`DISABLE` / `ADD` / `ALPHA` /
   `PREMULTIPLIED`), matching Babylon's `setAlphaMode` parameters.
+
+### Already-decoded textures
+
+```ts
+import { createTextureFromSource, disposeTexture } from "@babylonjs/lite-gl";
+
+const texture = createTextureFromSource(engine, bitmap);
+// One texImage2D upload, linear filtering and clamp-to-edge by default.
+// Later, release the GPU resource:
+disposeTexture(engine, texture);
+```
+
+The factory accepts `TexImageSource` (including `ImageBitmap`, `ImageData`,
+canvas/offscreen canvas, decoded images, video and video frames), derives the
+intrinsic size, and performs no placeholder or blank allocation first.
+`GLTextureSourceOptions` configures filtering/wrapping and unpack flags.
+For `ImageBitmap`, WebGL ignores unpack flip/premultiplication; choose those
+settings during decoding instead. Convert SVG or density-selected (`srcset`)
+images to an `ImageBitmap` first, since WebGL may upload them at a size other
+than their natural size.
+
+Sources are retained for automatic context restoration by default, so keep
+retained bitmaps/frames open while their texture is live. Pass
+`{ retainSource: false }` when your application owns recovery: the source
+reference is dropped after upload and can be closed, but context restoration
+produces a ready, transparent-black texture at the original size. Recreate
+the texture after restore (for example from `onContextRestored`) to recover its
+content. Mutable retained sources replay their current pixels and intrinsic
+size. If a retained source was closed anyway, restore logs an error and falls
+back to transparent black for that texture only. Mipmaps generated with
+`generateTextureMipMaps` are not replayed; regenerate them after restore. No
+source is closed by lite-gl.
 
 ## Demos
 
