@@ -245,7 +245,7 @@ export function createSplatStreamRequestManager(
     let cpuBytes = 0;
     let fetchedBytes = 0;
     let disposed = false;
-    let distancePumpPending = false;
+    let pumpPending = false;
 
     const runLimited = <T>(limit: number, kind: "http" | "decode", signal: AbortSignal, operation: () => Promise<T>): Promise<T> =>
         new Promise<T>((resolve, reject) => {
@@ -586,7 +586,7 @@ export function createSplatStreamRequestManager(
     };
 
     const pump = (): void => {
-        distancePumpPending = false;
+        pumpPending = false;
         if (disposed) {
             return;
         }
@@ -666,6 +666,18 @@ export function createSplatStreamRequestManager(
                     }
                 }
             }
+        }
+    };
+
+    const schedulePump = (): void => {
+        if (!pumpPending) {
+            // Coalesce queue removals and distance changes from the same camera update.
+            pumpPending = true;
+            queueMicrotask(() => {
+                if (pumpPending) {
+                    pump();
+                }
+            });
         }
     };
 
@@ -752,6 +764,7 @@ export function createSplatStreamRequestManager(
                         jobs.delete(url);
                         job.detachSignal?.();
                         job.reject(abortError());
+                        schedulePump();
                     }
                 };
                 request.signal.addEventListener("abort", abort, { once: true });
@@ -782,14 +795,8 @@ export function createSplatStreamRequestManager(
             job.request = { ...job.request, priority: Math.min(priority, job.request.priority), distance: distance ?? job.request.distance };
             if (priorityChanged) {
                 pump();
-            } else if (!distancePumpPending) {
-                // One pass consumes all distance changes from the current camera update.
-                distancePumpPending = true;
-                queueMicrotask(() => {
-                    if (distancePumpPending) {
-                        pump();
-                    }
-                });
+            } else {
+                schedulePump();
             }
             return true;
         },
@@ -811,6 +818,7 @@ export function createSplatStreamRequestManager(
                 jobs.delete(url);
                 job.detachSignal?.();
                 job.reject(abortError());
+                schedulePump();
             }
         },
         dispose() {

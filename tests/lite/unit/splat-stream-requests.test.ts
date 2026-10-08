@@ -315,6 +315,60 @@ describe("splat stream transport", () => {
         expect(manager.cpuBytes).toBe(0);
     });
 
+    it.each(["cancel", "signal"])("resumes admission after queued exclusive %s while active transport stays stalled", async (cancellation) => {
+        const activeUrl = "https://a.test/active/meta.json";
+        const exclusiveUrl = "https://a.test/exclusive/meta.json";
+        const smallUrl = "https://a.test/small/meta.json";
+        const signals = new Map<string, AbortSignal>();
+        const settled = vi.fn();
+        const controller = new AbortController();
+        const manager = createSplatStreamRequestManager(2, 1, 20_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn((input: string | URL | Request, init?: RequestInit) => {
+                const url = String(input);
+                const signal = init!.signal!;
+                signals.set(url, signal);
+                if (url === activeUrl || url === smallUrl) {
+                    return new Promise<Response>((_resolve, reject) => {
+                        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                    });
+                }
+                // The decoded source fits the full CPU budget, but exceeds its 10,000-byte shared allowance.
+                return Promise.resolve(url.endsWith("meta.json") ? response(metadata("image", 24 * 24)) : response(webp(24, 24), 200, "image/webp"));
+            }) as unknown as typeof fetch,
+            decode: async () => bitmap(24, 24),
+        });
+        const active = manager.request(request(activeUrl, 0)).then(settled, settled);
+        const exclusive = manager.request({ ...request(exclusiveUrl, 1), signal: controller.signal }).catch((error: unknown) => error);
+        const jobs = [active, exclusive];
+        try {
+            await vi.waitFor(() => expect(manager.queuedFiles).toBe(1));
+            expect(manager.pendingRequests).toBe(1);
+            expect(manager.cpuBytes).toBe(0);
+            jobs.push(manager.request(request(smallUrl, 2)).then(settled, settled));
+            expect(manager.queuedFiles).toBe(2);
+            expect(signals.has(smallUrl)).toBe(false);
+
+            if (cancellation === "cancel") {
+                manager.cancel(exclusiveUrl);
+            } else {
+                controller.abort();
+            }
+            // A rotation-only update leaves surviving priorities and distances unchanged.
+            expect(manager.promote(smallUrl, 1, SplatRequestPriority.Upgrade)).toBe(false);
+            await Promise.resolve();
+            expect(signals.has(smallUrl)).toBe(true);
+            expect(signals.get(activeUrl)!.aborted).toBe(false);
+            expect(manager.pendingRequests).toBe(2);
+            expect(manager.queuedFiles).toBe(0);
+            expect(settled).not.toHaveBeenCalled();
+            await expect(exclusive).resolves.toMatchObject({ name: "AbortError" });
+        } finally {
+            manager.dispose();
+            await Promise.all(jobs);
+        }
+    });
+
     it("orders queued files by priority while bounding active chunk preparations", async () => {
         const gates = new Map<string, ReturnType<typeof deferred<Response>>>();
         const order: string[] = [];
