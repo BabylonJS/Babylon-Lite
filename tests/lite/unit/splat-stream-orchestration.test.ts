@@ -5,7 +5,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { disposeScene } from "../../../packages/babylon-lite/src/scene/scene-core";
-import { admitSplatSource, evictSplatSource } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-cache";
+import { admitSplatSource, evictSplatSource, reserveSplatSourceGpuBytes } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-cache";
 import {
     attachGaussianSplatStream,
     commitSplatStreamPendingRepresentations,
@@ -412,6 +412,79 @@ async function attachAndBuild(h: ReturnType<typeof harness>, environment = false
 }
 
 describe("Gaussian splat stream orchestration", () => {
+    it.each([-2, 2])("evicts the farther off-screen source using the current camera at x=%s", async (x) => {
+        const h = harness();
+        const mutableCamera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
+        mutableCamera.worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const stream = await attachAndBuild(h);
+        for (const call of h.calls.slice(1)) {
+            call.gate.resolve(prepared(call.source, call.generation));
+        }
+        await vi.waitFor(() => expect(stream.stats.residentFiles).toBe(3));
+        mutableCamera.worldMatrix[12] = x;
+        mutableCamera.worldMatrixVersion++;
+        h.camera.fov = 0.25;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.visibleLeaves).toBe(0);
+        const farId = x > 0 ? 2 : 1;
+        const nearId = x > 0 ? 1 : 2;
+        const far = stream._sourceStates[farId]!;
+        const near = stream._sourceStates[nearId]!;
+        stream._cache.entries.get(near.source.url)!.lastUsedFrame = 0;
+        stream._cache.entries.get(far.source.url)!.lastUsedFrame = 100;
+        const ledger = stream._gpu.ledger;
+        expect(ledger.tryReserve(ledger.maxBytes - ledger.allocatedBytes - ledger.heldBytes)).toBe(true);
+        const evicted: string[] = [];
+        expect(
+            reserveSplatSourceGpuBytes(stream._cache, 22, (source) => {
+                evicted.push(source.url);
+                forgetEvictedSplatStreamSource(stream, source.url);
+            })
+        ).toBe(false);
+        expect(evicted).toEqual([far.source.url]);
+        expect(far.state).toBe("unrequested");
+        expect(near.state).toBe("resident");
+        expect(stream._cache.entries.has(stream._sourceStates[stream._bootstrapSourceId]!.source.url)).toBe(true);
+        disposeGaussianSplatStream(h.scene, stream);
+    });
+
+    it("measures shared off-screen bounds in world space against every active camera and expires old views", async () => {
+        const h = harness(twoCoolingLeavesManifest());
+        const mutableCamera = h.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
+        mutableCamera.worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const stream = await attachAndBuild(h);
+        stream.position.x = 10;
+        stream.scaling.set(2, 1, -1);
+        h.scene._beforeRender[0]!(16);
+        h.scene._beforeRender[0]!(16);
+        const firstBinding = {};
+        const secondBinding = {};
+        const update = (x: number, binding: object): void => {
+            mutableCamera.worldMatrix[12] = x;
+            mutableCamera.worldMatrixVersion++;
+            h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera }, binding);
+        };
+        const shared = stream._sourceStates[2]!.source.url;
+        const broad = stream._sourceStates[0]!.source.url;
+        const distance = stream._cache.getDistanceToCamera!;
+        update(12, firstBinding);
+        expect(stream.stats.visibleLeaves).toBe(0);
+        expect(distance(shared)).toBeCloseTo(Math.hypot(0.4, 0.1), 5);
+        expect(distance(broad)).toBeCloseTo(Math.hypot(2.4, 0.1), 5);
+        update(9, secondBinding);
+        expect(distance(shared)).toBeCloseTo(0.1, 5);
+        update(12, firstBinding);
+        expect(distance(shared)).toBeCloseTo(0.1, 5);
+        for (let frame = 0; frame < 2; frame++) {
+            h.scene._beforeRender[0]!(16);
+            update(12, firstBinding);
+        }
+        expect(distance(shared)).toBeCloseTo(Math.hypot(0.4, 0.1), 5);
+        stream.position.x = 9;
+        expect(distance(shared)).toBeCloseTo(Math.hypot(1.4, 0.1), 5);
+        disposeGaussianSplatStream(h.scene, stream);
+    });
+
     it("keeps shared-source fine data behind the coarse draw barrier and starts cooldown only after refinement publishes", async () => {
         const h = harness(sharedSourceLodsManifest());
         h.setNow(10);
@@ -491,7 +564,7 @@ describe("Gaussian splat stream orchestration", () => {
             gates.set(value.url, gate);
             return gate.promise;
         });
-        const promote = vi.fn(() => true);
+        const promote = vi.fn<SplatStreamRequestManager["promote"]>(() => true);
         const requestManager: SplatStreamRequestManager = {
             cpuBytes: 0,
             fetchedBytes: 0,
@@ -537,7 +610,8 @@ describe("Gaussian splat stream orchestration", () => {
         mutableCamera.worldMatrix[12] = 0.5;
         mutableCamera.worldMatrixVersion++;
         h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
-        expect(promote).toHaveBeenCalledWith(sharedRequest.url, generation, SplatRequestPriority.Uncovered);
+        expect(promote).toHaveBeenCalledWith(sharedRequest.url, generation, SplatRequestPriority.Uncovered, expect.any(Number));
+        expect(Number.isFinite(promote.mock.calls[0]![3])).toBe(true);
         expect(request.mock.calls.filter(([value]) => value.url === sharedRequest.url)).toHaveLength(1);
         expect(sharedState.generation).toBe(generation);
         expect(sharedState.request).toBe(preparation);
