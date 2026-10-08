@@ -99,6 +99,30 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect(output).not.toContain("Float64Array(52)");
     });
 
+    it("keeps opt-in readiness scheduling out of manual effect bundles", async () => {
+        const bundle = async (exports: string) =>
+            (
+                await build({
+                    stdin: { contents: `export { ${exports} } from "babylon-lite-gl";`, resolveDir: repoRoot, sourcefile: "effect-entry.ts" },
+                    bundle: true,
+                    minify: true,
+                    treeShaking: true,
+                    format: "esm",
+                    target: "esnext",
+                    platform: "browser",
+                    legalComments: "none",
+                    alias: liteGlAlias,
+                    write: false,
+                })
+            ).outputFiles[0]!.text;
+        const manual = await bundle("createEffect, isEffectReady, getEffectCompilationError, executeWhenCompiled");
+        expect(manual).not.toMatch(/requestAnimationFrame|cancelAnimationFrame|new Promise|addEventListener/);
+        const waiting = await bundle("waitForEffect");
+        expect(waiting).toContain("requestAnimationFrame");
+        expect(waiting).toContain("cancelAnimationFrame");
+        expect(waiting).toContain("new Promise");
+    });
+
     for (const scene of scenes) {
         it(`scene${scene.id} (${scene.slug}) ≤ ${scene.maxRawKB} KB raw`, async () => {
             const { rawKB, gzipKB } = await measureSceneBundle(scene.id);

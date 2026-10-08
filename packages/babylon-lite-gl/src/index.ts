@@ -41,6 +41,7 @@ export {
     createEffect,
     useEffect,
     isEffectReady,
+    getEffectCompilationError,
     executeWhenCompiled,
     disposeEffect,
     setEffectFloat,
@@ -60,6 +61,8 @@ export {
     setEffectIntArray,
 } from "./effect.js";
 export type { GLEffectOptions, GLEffect } from "./effect.js";
+export { waitForEffect } from "./effect-ready.js";
+export type { GLEffectWaitOptions } from "./effect-ready.js";
 
 // ─── Effect renderer (fullscreen quad) ───────────────────────────────
 export { createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, disposeEffectWrapper } from "./effect-renderer.js";
