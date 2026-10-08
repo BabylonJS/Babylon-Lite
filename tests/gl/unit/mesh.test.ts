@@ -184,6 +184,39 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         expect(engine._state.instanceLocations).toHaveLength(0);
     });
 
+    it("does not track per-vertex locations, so rebinding every frame cannot grow state", () => {
+        const { mock, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(8));
+        for (let frame = 0; frame < 3; frame++) {
+            bindAttributes(engine, vb, [{ index: 0, size: 2, offset: 0, divisor: 0 }], eff);
+        }
+        expect(engine._state.instanceLocations).toEqual([]);
+        mock.clear();
+        unbindInstanceAttributes(engine);
+        expect(callsNamed(mock, "vertexAttribDivisor")).toHaveLength(0);
+    });
+
+    it("records each instanced location once across repeated binds without an unbind", () => {
+        const { mock, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array(16));
+        const descriptors: GLAttributeDescriptor[] = [
+            { index: 5, size: 4, offset: 0 },
+            { index: 6, size: 4, offset: 16, divisor: 2 },
+            { index: 7, size: 2, offset: 0, divisor: 0 },
+        ];
+        bindAttributes(engine, vb, descriptors, eff);
+        bindAttributes(engine, vb, descriptors, eff);
+        expect(engine._state.instanceLocations).toEqual([5, 6]);
+        mock.clear();
+        unbindInstanceAttributes(engine);
+        expect(callsNamed(mock, "vertexAttribDivisor").map((c) => c.args)).toEqual([
+            [5, 0],
+            [6, 0],
+        ]);
+    });
+
     it("skips a descriptor whose resolved location is < 0", () => {
         const { mock, engine } = makeEngine();
         const eff = makeReadyEffect(engine);
