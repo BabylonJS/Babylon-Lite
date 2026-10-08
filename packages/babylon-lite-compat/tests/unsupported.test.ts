@@ -95,6 +95,7 @@ import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
+import type { EffectWrapperCreationOptions } from "../src/unsupported/unsupported-extended";
 
 describe("LiteCompatError", () => {
     it("formats a message with the API name", () => {
@@ -111,6 +112,22 @@ describe("LiteCompatError", () => {
 
     it("unsupported() throws a LiteCompatError and never returns", () => {
         expect(() => unsupported("X")).toThrow(LiteCompatError);
+    });
+});
+
+describe("Effect callback types", () => {
+    it("preserves callback-usable engine and compilation error return types", () => {
+        const options: EffectWrapperCreationOptions = {
+            onCompiled: (effect) => {
+                effect.getEngine().getRenderingCanvas();
+            },
+            onError: (effect, errors) => {
+                effect.getCompilationError().includes(errors);
+            },
+        };
+
+        expect(options.onCompiled).toBeTypeOf("function");
+        expect(options.onError).toBeTypeOf("function");
     });
 });
 

@@ -85,11 +85,11 @@ export class Effect {
         return unsupported("Effect.isReady", "Lite has no Babylon.js Effect compilation lifecycle.");
     }
 
-    public getEngine(): never {
+    public getEngine(): AbstractEngine {
         return unsupported("Effect.getEngine", "Lite has no Babylon.js Effect object associated with a compat engine.");
     }
 
-    public getCompilationError(): never {
+    public getCompilationError(): string {
         return unsupported("Effect.getCompilationError", "Lite has no Babylon.js Effect compilation lifecycle or error store.");
     }
 
