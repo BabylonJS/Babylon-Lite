@@ -14,7 +14,11 @@ export function resolveTrogirAssets(pageUrl: string): { metadataUrl: string; col
         }
         root.pathname += "lod-meta.json";
     }
-    const collision = new URL(page.searchParams.get("collisionUrl") || (configured ? "scene.voxel.json" : COLLISION_URL), page.searchParams.has("collisionUrl") ? page : root);
+    const collisionOverride = page.searchParams.get("collisionUrl");
+    const collision = new URL(collisionOverride || (configured ? "scene.voxel.json" : COLLISION_URL), collisionOverride ? page : root);
+    if (configured && !collisionOverride) {
+        collision.search = root.search;
+    }
     if (!/^https?:$/.test(collision.protocol) || !collision.pathname.endsWith(".voxel.json")) {
         throw new Error("collisionUrl must resolve to an HTTP(S) .voxel.json URL.");
     }

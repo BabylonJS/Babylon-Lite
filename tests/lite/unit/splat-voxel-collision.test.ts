@@ -81,6 +81,33 @@ describe("splat voxel navigation", () => {
         expect(() => resolveTrogirAssets("https://example.test/demo.html?assetRoot=file:///data/")).toThrow();
     });
 
+    it.each(["https://cdn.test/data/", "https://cdn.test/data/lod-meta.json"])("preserves signed and versioned asset queries from %s", (root) => {
+        const query = "?sig=a%2Fb%2Bc&v=7";
+        const page = new URL("https://example.test/demo.html");
+        page.searchParams.set("assetRoot", root + query);
+        const expected = {
+            metadataUrl: "https://cdn.test/data/lod-meta.json" + query,
+            collisionUrl: "https://cdn.test/data/scene.voxel.json" + query,
+        };
+        expect(resolveTrogirAssets(page.href)).toEqual(expected);
+        page.searchParams.set("collisionUrl", "");
+        expect(resolveTrogirAssets(page.href)).toEqual(expected);
+    });
+
+    it.each([
+        ["/nav/custom.voxel.json", "https://example.test/nav/custom.voxel.json"],
+        ["/nav/custom.voxel.json?v=2", "https://example.test/nav/custom.voxel.json?v=2"],
+        ["https://nav.test/custom.voxel.json?sig=other", "https://nav.test/custom.voxel.json?sig=other"],
+    ])("keeps an explicit collision URL's query independent: %s", (override, expected) => {
+        const page = new URL("https://example.test/demo.html");
+        page.searchParams.set("assetRoot", "https://cdn.test/data/?sig=abc&v=7");
+        page.searchParams.set("collisionUrl", override!);
+        expect(resolveTrogirAssets(page.href)).toEqual({
+            metadataUrl: "https://cdn.test/data/lod-meta.json?sig=abc&v=7",
+            collisionUrl: expected,
+        });
+    });
+
     it("loads bounded sibling assets with cancellation and rejects incomplete binary data", async () => {
         const signal = new AbortController().signal;
         const urls: string[] = [];
