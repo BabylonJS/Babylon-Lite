@@ -160,7 +160,7 @@ function buildLineRenderable(scene: SceneContext, mesh: Mesh, materialOverride?:
                     pass.setVertexBuffer(0, gpu.positionBuffer);
                     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
                     pass.setBindGroup(1, bindGroup);
-                    pass.drawIndexed(gpu.indexCount);
+                    pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
                     return 1;
                 },
             };

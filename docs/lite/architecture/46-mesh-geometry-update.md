@@ -16,6 +16,61 @@ grow-only capacity and keeps the inactive index tail degenerate so live procedur
 
 ## Public API Surface
 
+### Exact active draw ranges (opt-in)
+
+```ts
+export interface MeshDrawRange {
+    readonly vertices: MeshGeometryRange;
+    readonly indices: MeshGeometryRange;
+}
+export function setMeshDrawRange(engine: EngineContext, mesh: Mesh, range: MeshDrawRange): void;
+```
+
+`setMeshDrawRange` selects initialized, retained geometry within owned, unshared, tightly-packed
+uint32 buffers. It does not upload, allocate, retire, or replace GPU buffers. Offsets and counts are
+elements, not bytes: `indices.offset` is WebGPU `firstIndex`, `indices.count` is the exact
+`drawIndexed` count, and `vertices.offset` is `baseVertex`. Selected indices must be relative to the
+selected vertex window (`0 <= index < vertices.count`). Both ranges are explicit, finite,
+nonnegative integers within retained source lengths and physical capacity; baseVertex must fit int32.
+Zero counts are valid; nonempty indices require nonempty vertices. Counts need not be multiples of
+three, so point-list and line-list materials can use the same API. Mesh geometry is always indexed,
+including point lists; this API does not introduce non-indexed meshes. Non-indexed procedural draws
+remain the separate RenderDraw API.
+
+CPU snapshots and detailed picking use views of only the selected vertices and indices, with local
+index numbering. Bounds cover the selected vertex window, never the inactive source tail. An empty
+index range has no bounds and is excluded from CPU ray picking. `pickWithRay` remains an AABB test,
+not a triangle/point intersection test. Triangle-precise picking retains its triangle-only contract;
+point/line materials can use AABB picking or caller predicates instead. Changing a range refreshes the CPU position-array identity,
+marks caster bounds dirty, and invalidates main/depth/shadow render bundles without changing the
+world transform. Repeating the same selection is a no-op. GPU picking, material geometry passes,
+thin-instance direct draws and engine-managed indexed-indirect arguments use the same exact range.
+
+The complete source arrays are retained independently of the selected CPU views, allowing regrowth
+without re-uploading. Device-loss recovery restores the full initialized source and the selected range;
+unused reserved capacity may collapse as with existing capacity updates. Cloning shares the selected
+geometry and forbids subsequent range mutation until geometry is unshared. Geometry replacement
+(`updateMeshGeometry`, capacity updates, or resize) clears the selection and restores that API's
+existing full-geometry contract and invalidates commands that captured the selection.
+`updateMeshGeometry` requires the complete initialized source lengths, not a selected snapshot;
+capacity updates and resize can replace that complete source with different lengths.
+GPU-only attribute writes do not refresh CPU geometry, as before.
+Skeleton, morph and VAT meshes are rejected: their deformation/picking buffers have a separate
+vertex-addressing contract.
+
+Example (one initial upload, exact subsequent submissions):
+
+```ts
+const mesh = createMeshFromData(engine, "card", positions, normals, indices);
+setMeshDrawRange(engine, mesh, { vertices: { offset: 0, count: 3 }, indices: { offset: 0, count: 3 } });
+setMeshDrawRange(engine, mesh, { vertices: { offset: 0, count: 4 }, indices: { offset: 0, count: 6 } });
+setMeshDrawRange(engine, mesh, { vertices: { offset: 0, count: 0 }, indices: { offset: 0, count: 0 } });
+```
+
+Legacy `updateMeshGeometryCapacity` callers retain their padded triangle-list behavior unless they
+explicitly select an exact range afterward. Range selection is bounded by initialized CPU source
+lengths, not merely spare allocation: uninitialized reservation tails cannot be made visible.
+
 ```ts
 export function updateMeshGeometry(
     engine: EngineContext,
