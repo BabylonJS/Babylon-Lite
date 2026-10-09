@@ -90,6 +90,15 @@ export function setMeshDrawRange(engine: EngineContext, mesh: Mesh, range: MeshD
             colors: mesh._cpuColors ?? undefined,
         };
     }
+    const sourceVertexCount = source.positions.length / 3;
+    if (
+        !matchesGeometryAttribute(source.uvs, gpu.hasUv, sourceVertexCount * 2) ||
+        !matchesGeometryAttribute(source.uvs2, gpu.hasUv2, sourceVertexCount * 2) ||
+        !matchesGeometryAttribute(source.tangents, gpu.hasTangent, sourceVertexCount * 4) ||
+        !matchesGeometryAttribute(source.colors, gpu.hasColor, sourceVertexCount * 4)
+    ) {
+        throw new Error("setMeshDrawRange requires coherent retained CPU geometry");
+    }
     const { offset: vertexOffset, count: vertexCount } = range.vertices;
     const { offset: indexOffset, count: indexCount } = range.indices;
     validateGeometryRange(range.vertices, source.positions.length / 3);
@@ -216,6 +225,10 @@ function retainMeshGeometry(
     engine._dlr?.m(mesh, mesh._cpuUv2s, mesh._cpuTangents, mesh._cpuColors, indices, "uint32");
 }
 
+function matchesGeometryAttribute(values: Float32Array | undefined, present: boolean | undefined, length: number): boolean {
+    return !!values?.length === !!present && (!present || values?.length === length);
+}
+
 function validateCapacityGeometry(
     mesh: Mesh,
     positions: Float32Array,
@@ -234,19 +247,11 @@ function validateCapacityGeometry(
     if (!Number.isInteger(vertexCount) || normals.length !== positions.length || indices.length % 3 !== 0 || gpu.indexFormat !== "uint32") {
         throw new Error("updateMeshGeometryCapacity requires coherent triangle-list geometry with uint32 indices");
     }
-    const hasUvs = !!uvs && uvs.length > 0;
-    const hasUv2s = !!uvs2 && uvs2.length > 0;
-    const hasTangents = !!tangents && tangents.length > 0;
-    const hasColors = !!colors && colors.length > 0;
     if (
-        hasUvs !== !!gpu.hasUv ||
-        (hasUvs && uvs!.length !== vertexCount * 2) ||
-        hasUv2s !== !!gpu.hasUv2 ||
-        (hasUv2s && uvs2!.length !== vertexCount * 2) ||
-        hasTangents !== !!gpu.hasTangent ||
-        (hasTangents && tangents!.length !== vertexCount * 4) ||
-        hasColors !== !!gpu.hasColor ||
-        (hasColors && colors!.length !== vertexCount * 4)
+        !matchesGeometryAttribute(uvs, gpu.hasUv, vertexCount * 2) ||
+        !matchesGeometryAttribute(uvs2, gpu.hasUv2, vertexCount * 2) ||
+        !matchesGeometryAttribute(tangents, gpu.hasTangent, vertexCount * 4) ||
+        !matchesGeometryAttribute(colors, gpu.hasColor, vertexCount * 4)
     ) {
         throw new Error("updateMeshGeometryCapacity requires unchanged optional-attribute layout");
     }

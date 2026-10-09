@@ -58,6 +58,36 @@ describe("setMeshDrawRange", () => {
         expect(f.mesh._gpu.indexCount).toBe(6);
     });
 
+    it.each([
+        { attribute: "uvs", property: "_cpuUvs", components: 2, missing: false },
+        { attribute: "uvs2", property: "_cpuUv2s", components: 2, missing: false },
+        { attribute: "tangents", property: "_cpuTangents", components: 4, missing: false },
+        { attribute: "colors", property: "_cpuColors", components: 4, missing: false },
+        { attribute: "uvs", property: "_cpuUvs", components: 2, missing: true },
+        { attribute: "uvs2", property: "_cpuUv2s", components: 2, missing: true },
+        { attribute: "tangents", property: "_cpuTangents", components: 4, missing: true },
+        { attribute: "colors", property: "_cpuColors", components: 4, missing: true },
+    ] as const)("rejects incoherent retained $attribute before mutation (missing: $missing)", ({ attribute, property, components, missing }) => {
+        const f = fixture();
+        const data = new Float32Array(4 * components - (missing ? 0 : 1));
+        const attributes = { [attribute]: data };
+        const mesh = createMeshFromData(f.engine, "attributes", f.positions, f.normals, f.indices, attributes.uvs, attributes.uvs2, attributes.tangents, attributes.colors);
+        if (missing) {
+            delete mesh[property];
+        }
+        f.createBuffer.mockClear();
+        f.writeBuffer.mockClear();
+        const gpu = mesh._gpu;
+        const version = f.scene._renderableVersion;
+        expect(() => setMeshDrawRange(f.engine, mesh, { vertices: { offset: 1, count: 3 }, indices: { offset: 0, count: 3 } })).toThrow("coherent retained CPU geometry");
+        expect(gpu.indexCount).toBe(6);
+        expect(gpu._drawRangeSource).toBeUndefined();
+        expect(mesh._cpuPositions).toBe(f.positions);
+        expect(f.scene._renderableVersion).toBe(version);
+        expect(f.createBuffer).not.toHaveBeenCalled();
+        expect(f.writeBuffer).not.toHaveBeenCalled();
+    });
+
     it("submits exact active counts without uploads or allocation and preserves legacy capacity behavior", () => {
         const f = fixture();
         updateMeshGeometryCapacity(f.engine, f.mesh, f.positions.subarray(0, 9), f.normals.subarray(0, 9), f.indices.subarray(0, 3), undefined, undefined, undefined, undefined, 1);

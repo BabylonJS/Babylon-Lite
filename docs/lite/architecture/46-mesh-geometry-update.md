@@ -179,7 +179,8 @@ falling back to the original reserved count when a complete geometry update clea
 Ordinary geometry retains its original numeric count property and does not install the accessor.
 First-index and base-vertex offsets are stored separately from physical buffer capacities.
 
-Selection validates both ranges, WebGPU limits, ownership, deformation, and every selected index before
+Selection validates both ranges, WebGPU limits, ownership, deformation, every uploaded optional attribute's
+retained presence/full-source length, and every selected index before
 changing state. It creates attribute/index subarray views, recomputes bounds from selected positions,
 marks the owning mesh's world revision dirty, and invalidates cached bundles without GPU writes or allocation.
 An empty index range has no AABB and cannot be ray-picked. CPU snapshots copy the selected views;
@@ -257,6 +258,7 @@ with explicit first-index and base-vertex offsets rather than padded or degenera
 - Confirm exact selections submit zero, three, six, and odd point counts with independent vertex/index offsets.
 - Reject fractional, negative, non-finite, overflowing, and out-of-source ranges and out-of-window index values before mutation.
 - Reject borrowed, disposed, interleaved, shared, non-uint32, deformed, or missing retained geometry.
+- Reject missing or undersized retained UV, UV2, tangent, or color arrays before CPU/GPU state or bundle versions change.
 - Confirm range changes do not allocate/upload GPU geometry and preserve buffer identity.
 - Confirm selected CPU snapshots are independent copies, all optional attributes are selected, inactive triangles cannot be picked,
   selected vertex windows determine bounds, and empty index ranges have no bounds.
