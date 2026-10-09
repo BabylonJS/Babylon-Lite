@@ -300,7 +300,99 @@ async function run(): Promise<void> {
     canvas.dataset.ready = "true";
 }
 
-void run().catch((error: unknown) => {
+async function runPendingAdvanced(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) {
+        throw new Error("Missing test canvas");
+    }
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const mesh = createPlane(engine, { size: 2 });
+    mesh.name = "retiring";
+    addToScene(scene, mesh);
+    const lease = retainMeshResources(engine, mesh);
+    await registerScene(scene);
+    const picker = createGpuPicker(scene);
+    const oldBuffers = new Set([mesh._gpu.positionBuffer, mesh._gpu.normalBuffer, mesh._gpu.uvBuffer, mesh._gpu.indexBuffer]);
+    let oldGeometryUses = 0;
+    let retiredBuffers = 0;
+    const drawCounts: number[] = [];
+    for (const buffer of oldBuffers) {
+        const destroy = buffer.destroy.bind(buffer);
+        buffer.destroy = () => {
+            retiredBuffers++;
+            destroy();
+        };
+    }
+    const createEncoder = engine._device.createCommandEncoder.bind(engine._device);
+    engine._device.createCommandEncoder = (descriptor) => {
+        const encoder = createEncoder(descriptor);
+        if (descriptor?.label === "pick") {
+            const begin = encoder.beginRenderPass.bind(encoder);
+            encoder.beginRenderPass = (passDescriptor) => {
+                const pass = begin(passDescriptor);
+                const vertex = pass.setVertexBuffer.bind(pass);
+                const index = pass.setIndexBuffer.bind(pass);
+                const draw = pass.drawIndexed.bind(pass);
+                pass.setVertexBuffer = (slot, buffer, offset, size) => {
+                    if (buffer && oldBuffers.has(buffer)) {
+                        oldGeometryUses++;
+                    }
+                    vertex(slot, buffer, offset, size);
+                };
+                pass.setIndexBuffer = (buffer, format, offset, size) => {
+                    if (oldBuffers.has(buffer)) {
+                        oldGeometryUses++;
+                    }
+                    index(buffer, format, offset, size);
+                };
+                pass.drawIndexed = (count, instances, firstIndex, baseVertex, firstInstance) => {
+                    drawCounts.push(count);
+                    draw(count, instances, firstIndex, baseVertex, firstInstance);
+                };
+                return pass;
+            };
+        }
+        return encoder;
+    };
+    const options = {
+        discard: {
+            key: "native-pending-membership",
+            vertexData: "normal" as const,
+            wgsl: wgsl`fn shouldDiscardPick(input: PickDiscardInput) -> bool { return false; }`,
+        },
+    };
+    Object.assign(window, {
+        pendingAdvancedTest: {
+            ready: true,
+            pick: async () => (await pickAsync(picker, canvas.clientWidth / 2, canvas.clientHeight / 2, options)).pickedMesh?.name ?? null,
+            mutate: async () => {
+                detachMeshFromScene(scene, mesh);
+                releaseMeshResources(lease);
+                await waitForGpuResourceRetirements(engine);
+                const cpuHit = pickWithRay(scene, { origin: [0, 0, -2], direction: [0, 0, 1], length: 10 }).hit;
+                const fresh = createPlane(engine, { size: 2 });
+                fresh.name = "fresh";
+                fresh.material = createStandardMaterial();
+                addToScene(scene, fresh);
+                return { retiredBuffers, cpuHit };
+            },
+            finish: async () => {
+                disposePicker(picker);
+                disposeScene(scene);
+                await waitForGpuResourceRetirements(engine);
+                disposeEngine(engine);
+                return { oldGeometryUses, drawCounts, gpuErrors };
+            },
+        },
+    });
+}
+
+const runFixture = new URLSearchParams(location.search).has("pendingAdvanced") ? runPendingAdvanced : run;
+void runFixture().catch((error: unknown) => {
     results.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
     console.error(error);
 });

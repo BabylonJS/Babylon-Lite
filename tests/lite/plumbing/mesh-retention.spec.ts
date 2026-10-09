@@ -1,6 +1,36 @@
 import { test, expect } from "@playwright/test";
 import type { RetentionResults } from "../../../lab/lite/src/mesh-retention-test.js";
 
+test("advanced lazy pick preparation never records retired mesh buffers and admits the fresh mesh for queued picks", async ({ page }) => {
+    let imported!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => (imported = resolve));
+    const release = new Promise<void>((resolve) => (resume = resolve));
+    await page.route("**/picking-advanced-draw.ts*", async (route) => {
+        imported();
+        await release;
+        await route.continue();
+    });
+    await page.goto("/lite/mesh-retention-test.html?pendingAdvanced=1");
+    await page.waitForFunction("window.pendingAdvancedTest?.ready || window.meshRetentionTest?.error");
+    const pending = page.evaluate<string | null>("window.pendingAdvancedTest.pick()");
+    const queued = page.evaluate<string | null>("window.pendingAdvancedTest.pick()");
+    try {
+        await entered;
+        const mutation = await page.evaluate<{ retiredBuffers: number; cpuHit: boolean }>("window.pendingAdvancedTest.mutate()");
+        expect(mutation.retiredBuffers).toBe(4);
+        expect(mutation.cpuHit).toBe(false);
+    } finally {
+        resume();
+    }
+    expect(await pending).toBe("fresh");
+    expect(await queued).toBe("fresh");
+    const result = await page.evaluate<{ oldGeometryUses: number; drawCounts: number[]; gpuErrors: string[] }>("window.pendingAdvancedTest.finish()");
+    expect(result.oldGeometryUses).toBe(0);
+    expect(result.drawCounts).toEqual([6, 6]);
+    expect(result.gpuErrors).toEqual([]);
+});
+
 test("retained mesh detach/reinsert uses fresh render order, excludes picks and reuses geometry for 1000 activations", async ({ page }) => {
     test.setTimeout(180_000);
     await page.goto("/lite/mesh-retention-test.html");

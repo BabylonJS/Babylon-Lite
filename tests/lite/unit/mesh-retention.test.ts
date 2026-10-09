@@ -67,6 +67,26 @@ function fixture() {
 }
 
 describe("retained mesh scene membership", () => {
+    it("installs admission only on each opted-in engine and removes it independently with its final lease", () => {
+        const first = fixture();
+        const second = fixture();
+        const firstLease = retainMeshResources(first.engine, first.mesh);
+        expect(first.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
+        expect(second.engine).not.toHaveProperty("_admitSceneEntity");
+        addToScene(second.scene, second.mesh);
+        addToScene(second.scene, second.mesh);
+        expect(second.scene.meshes).toHaveLength(2);
+        const secondLease = retainMeshResources(second.engine, second.mesh);
+        expect(second.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
+        releaseMeshResources(firstLease);
+        expect(first.engine).not.toHaveProperty("_admitSceneEntity");
+        expect(second.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
+        addToScene(second.scene, second.mesh);
+        expect(second.scene.meshes).toHaveLength(2);
+        releaseMeshResources(secondLease);
+        expect(second.engine).not.toHaveProperty("_admitSceneEntity");
+    });
+
     it("keeps the same geometry through 1000 detached retirement fences and fresh admissions", async () => {
         const { engine, scene, mesh, createBuffer } = fixture();
         addToScene(scene, mesh);
