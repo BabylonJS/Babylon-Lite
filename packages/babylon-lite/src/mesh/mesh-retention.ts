@@ -115,17 +115,6 @@ export function retainMeshResources(engine: EngineContext, mesh: Mesh): MeshReso
                 }
             }
         );
-        installSceneAdmission((scene, entity) => {
-            if (!scene.surface.engine._retainedMeshes?.size) {
-                return true;
-            }
-            if ("_gpu" in entity && "material" in entity) {
-                const candidate = entity as Mesh;
-                // Force disposal must remain an explicit add error, not a duplicate no-op.
-                return !!candidate._disposed || !hasMeshScene(scene, candidate);
-            }
-            return !("lightType" in entity) || !scene.lights.includes(entity as LightBase);
-        });
         state = { mesh, engine, leases: new Set(), textures: new Map() };
         captureTextures(state, mesh.material);
         retentions.set(mesh, state);
@@ -142,6 +131,14 @@ export function retainMeshResources(engine: EngineContext, mesh: Mesh): MeshReso
             });
         }
         engine._retainedMeshes.add(mesh);
+        installSceneAdmission(engine, (scene, entity) => {
+            if ("_gpu" in entity && "material" in entity) {
+                const candidate = entity as Mesh;
+                // Force disposal must remain an explicit add error, not a duplicate no-op.
+                return !!candidate._disposed || !hasMeshScene(scene, candidate);
+            }
+            return !("lightType" in entity) || !scene.lights.includes(entity as LightBase);
+        });
     }
     observeMeshMaterial(mesh);
     const lease: MeshResourceLease = Object.freeze({ mesh });
@@ -158,6 +155,9 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     state.leases.clear();
     retentions!.delete(mesh);
     state.engine._retainedMeshes!.delete(mesh);
+    if (!state.engine._retainedMeshes!.size) {
+        installSceneAdmission(state.engine, undefined);
+    }
     const textures = [...state.textures.values()];
     state.textures.clear();
     const release = (): void => {

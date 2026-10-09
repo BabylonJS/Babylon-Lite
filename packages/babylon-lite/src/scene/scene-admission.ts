@@ -1,9 +1,10 @@
-import type { SceneContext } from "./scene-core.js";
-
-/** @internal Opt-in scene membership admission seam. */
-export let sceneAdmission: ((scene: SceneContext, entity: object) => boolean) | undefined;
+import type { EngineContext } from "../engine/engine.js";
 
 /** @internal Install an opt-in membership admission policy. */
-export function installSceneAdmission(policy: NonNullable<typeof sceneAdmission>): void {
-    sceneAdmission = policy;
+export function installSceneAdmission(engine: EngineContext, policy: EngineContext["_admitSceneEntity"]): void {
+    if (policy) {
+        engine._admitSceneEntity = policy;
+    } else {
+        delete engine._admitSceneEntity;
+    }
 }

@@ -10,6 +10,10 @@ The Scene module defines `SceneContext` — the central, flat data container for
 
 ### Retained mesh membership
 
+Module specifications: [mesh retention](60-mesh-retention.md),
+[shared geometry recovery](61-shared-mesh-recovery.md), and
+[per-engine admission](62-scene-admission.md).
+
 `retainMeshResources(engine, mesh): MeshResourceLease` creates an explicit,
 independent ownership lease. `releaseMeshResources(lease): void` releases it
 idempotently. A lease is pure state with a readonly `mesh` identity, not an

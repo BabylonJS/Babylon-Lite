@@ -92,12 +92,10 @@ function installMaterialSetter(mesh: Mesh): void {
             if (v !== _mat) {
                 _retainMaterial?.(mesh, v);
                 _mat = v;
-                const scenes = _meshScenes?.get(mesh);
-                if (scenes) {
-                    for (const scene of scenes) {
-                        enqueueMaterialSwap(scene, mesh);
-                        scene._meshMaterialChange?.(mesh, v);
-                    }
+                // Registration creates the record before this setter; live mesh records are never deleted.
+                for (const scene of _meshScenes!.get(mesh)!) {
+                    enqueueMaterialSwap(scene, mesh);
+                    scene._meshMaterialChange?.(mesh, v);
                 }
             }
         },
@@ -127,7 +125,7 @@ export function observeMeshMaterial(mesh: Mesh): Set<SceneContext> {
  *  are silent corruption, so the failure is made loud here. */
 export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
     if (mesh._disposed) {
-        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
+        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed. Create a new mesh instead.`);
     }
     _meshRetained?.(mesh, scene.surface.engine);
     _retainMaterial?.(mesh, mesh.material);

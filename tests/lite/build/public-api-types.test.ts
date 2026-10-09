@@ -82,6 +82,8 @@ lease.dispose();
             expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
             const dts = readFileSync(DTS_PATH, "utf8");
             expect(dts).not.toContain("_retainedMeshes");
+            expect(dts).not.toContain("_admitSceneEntity");
+            expect(dts).not.toContain("installSceneAdmission");
             expect(dts).not.toContain("installMeshRetention");
             expect(dts).not.toContain("removeMeshFromScene");
         } finally {
