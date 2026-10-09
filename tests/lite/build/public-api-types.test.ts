@@ -309,7 +309,7 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
     createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
     prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
-    type MeshDrawRange, type MeshGeometryRange,
+    type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -374,6 +374,11 @@ const range: MeshDrawRange = { vertices, indices: { offset: 3, count: 3 } };
 setMeshDrawRange(engine, mesh, range);
 // @ts-expect-error Draw ranges are immutable inputs, not mesh-owned mutable state.
 range.vertices.count = 4;
+declare const geometry: MeshGPU;
+const activeIndexCount: number = geometry.indexCount;
+void activeIndexCount;
+// @ts-expect-error Geometry counts remain readonly public observations.
+geometry.indexCount = 3;
 `
             );
             const result = spawnSync(

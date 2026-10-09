@@ -29,6 +29,35 @@ function fixture(indices = new Uint32Array([0, 1, 2, 0, 2, 3])) {
 const triangle = { vertices: { offset: 0, count: 3 }, indices: { offset: 0, count: 3 } } as const;
 
 describe("setMeshDrawRange", () => {
+    it("exposes active counts through a readonly accessor without replacing geometry", () => {
+        const f = fixture();
+        const gpu = f.mesh._gpu;
+        setMeshDrawRange(f.engine, f.mesh, triangle);
+        const descriptor = Object.getOwnPropertyDescriptor(gpu, "indexCount");
+        expect(typeof descriptor?.get).toBe("function");
+        expect(descriptor?.set).toBeUndefined();
+        expect(descriptor?.writable).toBeUndefined();
+        expect(gpu.indexCount).toBe(3);
+        updateMeshGeometry(f.engine, f.mesh, f.positions, f.normals, f.indices);
+        expect(gpu.indexCount).toBe(6);
+        expect(f.mesh._gpu).toBe(gpu);
+    });
+
+    it("keeps independently recovered clone selections isolated", async () => {
+        const f = fixture();
+        setMeshDrawRange(f.engine, f.mesh, triangle);
+        const clone = cloneTransformNode(f.mesh) as typeof f.mesh;
+        f.scene.meshes.push(clone);
+        await _rebuildMeshes(f.engine, f.scene);
+        expect(clone._gpu).not.toBe(f.mesh._gpu);
+        setMeshDrawRange(f.engine, f.mesh, { vertices: { offset: 0, count: 4 }, indices: { offset: 0, count: 6 } });
+        expect(f.mesh._gpu.indexCount).toBe(6);
+        expect(clone._gpu.indexCount).toBe(3);
+        setMeshDrawRange(f.engine, clone, { vertices: { offset: 0, count: 0 }, indices: { offset: 0, count: 0 } });
+        expect(clone._gpu.indexCount).toBe(0);
+        expect(f.mesh._gpu.indexCount).toBe(6);
+    });
+
     it("submits exact active counts without uploads or allocation and preserves legacy capacity behavior", () => {
         const f = fixture();
         updateMeshGeometryCapacity(f.engine, f.mesh, f.positions.subarray(0, 9), f.normals.subarray(0, 9), f.indices.subarray(0, 3), undefined, undefined, undefined, undefined, 1);

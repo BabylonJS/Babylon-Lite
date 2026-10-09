@@ -10,6 +10,7 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { release, retain } from "../resource/ref-count.js";
 import type { Mesh } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
+import { setMeshDrawRangeSource } from "./mesh-draw-range-state.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
@@ -79,6 +80,7 @@ export function setMeshDrawRange(engine: EngineContext, mesh: Mesh, range: MeshD
             throw new Error("setMeshDrawRange requires coherent retained CPU geometry");
         }
         source = {
+            indexCount: gpu.indexCount,
             positions,
             normals,
             indices,
@@ -132,10 +134,12 @@ export function setMeshDrawRange(engine: EngineContext, mesh: Mesh, range: MeshD
         source.colors?.subarray(vertexOffset * 4, (vertexOffset + vertexCount) * 4),
         true
     );
-    gpu._drawRangeSource = source;
+    if (!gpu._drawRangeSource) {
+        setMeshDrawRangeSource(gpu, source);
+    }
     gpu._baseVertex = vertexOffset;
     gpu._firstIndex = indexOffset;
-    gpu.indexCount = indexCount;
+    source.indexCount = indexCount;
     if (indexCount === 0) {
         mesh.boundMin = mesh.boundMax = undefined;
     }
@@ -195,7 +199,6 @@ function retainMeshGeometry(
     if (gpu._drawRangeSource && !preserveDrawRange) {
         gpu._drawRangeSource = undefined;
         gpu._firstIndex = gpu._baseVertex = undefined;
-        gpu.indexCount = gpu._indexCapacity ?? indices.length;
         invalidateRenderBundles(engine);
     }
     const [min, max] = computeAabb(positions);
@@ -280,7 +283,7 @@ export function createMeshFromData(
         _cpuIndices: indices,
     });
 
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    engine._dlr?.m(mesh, uvs2, tangents, colors, indices, "uint32");
 
     return mesh;
 }

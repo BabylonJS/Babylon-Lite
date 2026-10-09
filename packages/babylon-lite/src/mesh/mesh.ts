@@ -52,12 +52,13 @@ export interface MeshGPU {
     readonly hasTangent?: boolean;
     readonly hasColor?: boolean;
     readonly indexBuffer: GPUBuffer;
-    indexCount: number;
+    readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
     /** @internal First index element for exact active draw ranges. Undefined means zero. */
     _firstIndex?: number;
     /** @internal Complete initialized geometry retained independently of active CPU views. */
     _drawRangeSource?: {
+        indexCount: number;
         positions: Float32Array;
         normals: Float32Array;
         indices: Uint32Array;

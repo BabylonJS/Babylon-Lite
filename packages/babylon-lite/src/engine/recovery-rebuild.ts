@@ -4,6 +4,7 @@ import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { uploadMeshToGPU } from "../mesh/mesh.js";
+import { setMeshDrawRangeSource } from "../mesh/mesh-draw-range-state.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -202,10 +203,9 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     const source = old._drawRangeSource;
     if (source) {
         const gpu = uploadMeshToGPU(engine, source.positions, source.normals, source.indices, source.uvs, source.uvs2, source.tangents, source.colors);
-        gpu._drawRangeSource = source;
+        setMeshDrawRangeSource(gpu, { ...source });
         gpu._firstIndex = old._firstIndex;
         gpu._baseVertex = old._baseVertex;
-        gpu.indexCount = old.indexCount;
         gpu._vertexCapacity = source.positions.length / 3;
         gpu._indexCapacity = source.indices.length;
         return gpu;

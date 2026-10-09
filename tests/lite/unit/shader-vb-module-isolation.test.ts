@@ -21,11 +21,11 @@ describe("ShaderMaterial vertex support module isolation", () => {
     it("imports split mesh operations directly from the thin-instance path", () => {
         const thin = source("packages/babylon-lite/src/material/shader/shader-thin-instance.ts");
         expect(thin).not.toContain('from "../../mesh/mesh-indexed-draw.js"');
-        expect(thin).toContain("pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex)");
+        expect(thin).toContain("pass.drawIndexed(gpu.indexCount, ti.count, gpu._firstIndex ?? 0, gpu._baseVertex)");
         expect(thin).not.toContain('from "../../mesh/mesh-vertex-buffer-layout.js"');
         expect(thin).not.toContain('from "../../mesh/mesh-vertex-layout.js"');
         const renderable = source("packages/babylon-lite/src/material/shader/shader-renderable.ts");
-        expect(renderable).toContain("pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex)");
+        expect(renderable).toContain("pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex)");
         expect(renderable).toContain("engine._getVertexDefaultBuffer?.(gpu)");
         expect(thin).toContain("vertexLayout?._vbs ?? bindings.vertexBuffers");
     });

@@ -17,18 +17,24 @@ const DIRECT_SITES = [
     "packages/babylon-lite/src/material/shader/shader-thin-instance.ts",
 ];
 
-describe("baseVertex reaches every indexed draw path", () => {
-    it.each(DIRECT_SITES)("%s passes mesh baseVertex directly to WebGPU", async (file) => {
+describe("indexed offsets reach every draw path", () => {
+    it.each(DIRECT_SITES)("%s forwards the active count, firstIndex and baseVertex from the same geometry", async (file) => {
         const { readFileSync } = await import("node:fs");
         const { resolve } = await import("node:path");
         const source = readFileSync(resolve(process.cwd(), file), "utf8");
-        expect(source).toMatch(/pass\.drawIndexed\([^;\n]*,\s*0,\s*(?:g|gpu)\._baseVertex\)/);
+        const draws = source.match(/pass\.drawIndexed\(/g);
+        const forwarded = source.match(/pass\.drawIndexed\((g|gpu)\.indexCount,\s*[^,;\n]+,\s*\1\._firstIndex\s*\?\?\s*0,\s*\1\._baseVertex\)/g);
+        expect(draws).toHaveLength(1);
+        expect(forwarded).toHaveLength(draws!.length);
     });
 
-    it("writes baseVertex into indexed-indirect word 3", () => {
+    it.each([
+        { firstIndex: undefined, baseVertex: 24, expected: [6, 7, 0, 24, 0] },
+        { firstIndex: 3, baseVertex: -24, expected: [6, 7, 3, 0xffffffe8, 0] },
+    ])("writes firstIndex $firstIndex and signed baseVertex $baseVertex into the indirect ABI", ({ firstIndex, baseVertex, expected }) => {
         const args = new Uint32Array(5);
-        writeMeshIndexedIndirectArgs(args, { indexCount: 6, _baseVertex: 24 } as unknown as MeshGPU, 7);
-        expect([...args]).toEqual([6, 7, 0, 24, 0]);
+        writeMeshIndexedIndirectArgs(args, { indexCount: 6, _firstIndex: firstIndex, _baseVertex: baseVertex } as unknown as MeshGPU, 7);
+        expect([...args]).toEqual(expected);
     });
 
     it("keeps stable thin-instance indirect arguments synchronized with the mesh slot", () => {
