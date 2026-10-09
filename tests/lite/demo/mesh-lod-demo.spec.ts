@@ -124,6 +124,44 @@ test.describe("MeshLoD demo workflow", () => {
         expect(await metric(page, "selection")).toBe("GPU");
     });
 
+    test("cache budget bounds and rejected inputs preserve the accepted effective value", async () => {
+        const budget = page.locator("#mlod-budget");
+        await expect(budget).toHaveAttribute("min", "32");
+        await expect(budget).toHaveAttribute("max", "128");
+        const instanceCount = await page.$eval("#renderCanvas", (el) => Number((el as HTMLCanvasElement).dataset.instanceCount));
+        for (const requested of [32, 64, 128, 256]) {
+            await budget.evaluate((el: HTMLInputElement, value) => {
+                el.value = String(value);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+            }, requested);
+            const accepted = Math.min(requested, 128);
+            await expect(budget).toHaveValue(String(accepted));
+            await expect(page.locator("#mlod-budget-value")).toHaveText(`${accepted} MiB`);
+            await expect.poll(async () => (await metric(page, "gpuCache")).split(" / ")[1]).toBe(`${(accepted * instanceCount).toFixed(1)} MiB`);
+            await expect(page.locator(".hud-status")).toBeEmpty();
+        }
+
+        // Bypass the DOM bound to exercise the runtime setter's rejection path.
+        await budget.evaluate((el: HTMLInputElement) => {
+            el.max = "256";
+            el.value = "256";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.max = "128";
+        });
+        await expect(budget).toHaveValue("128");
+        await expect(page.locator("#mlod-budget-value")).toHaveText("128 MiB");
+        await expect(page.locator(".hud-status")).toContainText("cacheBudgetBytes must be <= cacheCapacityBytes");
+        expect((await metric(page, "gpuCache")).split(" / ")[1]).toBe(`${(128 * instanceCount).toFixed(1)} MiB`);
+
+        await budget.evaluate((el: HTMLInputElement) => {
+            el.value = "64";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await expect(page.locator("#mlod-budget-value")).toHaveText("64 MiB");
+        await expect.poll(async () => (await metric(page, "gpuCache")).split(" / ")[1]).toBe(`${(64 * instanceCount).toFixed(1)} MiB`);
+        await expect(page.locator(".hud-status")).toBeEmpty();
+    });
+
     test("short desktop viewport keeps the debug selector clear of the legend", async () => {
         const viewport = page.viewportSize()!;
         try {

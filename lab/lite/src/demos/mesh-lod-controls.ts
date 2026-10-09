@@ -3,7 +3,15 @@
 // Builds the accessible viewer controls around public runtime setters and the
 // network-simulator seam. Setter validation errors appear in the status line.
 
-import { setMeshLoDCacheBudget, setMeshLoDDebugView, setMeshLoDScreenSpaceError, setMeshLoDStreamingPaused, type MeshLoDAsset, type MeshLoDDebugView } from "babylon-lite";
+import {
+    getMeshLoDDiagnostics,
+    setMeshLoDCacheBudget,
+    setMeshLoDDebugView,
+    setMeshLoDScreenSpaceError,
+    setMeshLoDStreamingPaused,
+    type MeshLoDAsset,
+    type MeshLoDDebugView,
+} from "babylon-lite";
 import type { MeshLoDNetworkSimulator } from "./mesh-lod-network-simulator.js";
 
 const MIB = 1024 * 1024;
@@ -65,6 +73,7 @@ export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
     };
 
     const makeSlider = (spec: SliderSpec): HTMLElement => {
+        let acceptedValue = spec.value;
         const value = el("span", { className: "hud-value", id: `${spec.id}-value`, textContent: spec.format(spec.value) });
         const input = el("input", {
             type: "range",
@@ -78,8 +87,12 @@ export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
         input.style.width = "100%";
         input.addEventListener("input", () => {
             const v = Number(input.value);
-            value.textContent = spec.format(v);
-            runValidated(() => spec.onInput(v));
+            runValidated(() => {
+                spec.onInput(v);
+                acceptedValue = v;
+                value.textContent = spec.format(v);
+            });
+            input.value = String(acceptedValue);
         });
         const label = el("label", { htmlFor: spec.id }, [spec.label, value]);
         return el("div", { className: "hud-row" }, [label, input]);
@@ -97,14 +110,14 @@ export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
         onInput: (v) => forEachAsset((a) => setMeshLoDScreenSpaceError(a, v)),
     });
 
-    // Effective GPU cache budget: 32–256 MiB, default 128.
+    // The shared control must fit every asset's immutable arena capacity.
     const budgetRow = makeSlider({
         id: "mlod-budget",
         label: "Cache budget",
         min: 32,
-        max: 256,
+        max: Math.min(...assets.map((a) => getMeshLoDDiagnostics(a).gpuCacheCapacityBytes / MIB)),
         step: 1,
-        value: 128,
+        value: Math.min(...assets.map((a) => getMeshLoDDiagnostics(a).gpuCacheBudgetBytes / MIB)),
         format: (v) => v.toFixed(0) + " MiB",
         onInput: (v) => forEachAsset((a) => setMeshLoDCacheBudget(a, v * MIB)),
     });

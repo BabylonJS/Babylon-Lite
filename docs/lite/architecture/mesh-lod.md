@@ -447,6 +447,13 @@ in this repository or copied into the standalone demo bundle.
 The inspector adjusts selection error, GPU budget, network bandwidth/
 latency, pause, and the shipped debug views. Its network simulation wraps
 only `.mlod` requests (initially 8 MiB/s and 100 ms), not the remote GLB.
+The cache-budget slider is per asset and uses the smallest immutable capacity
+reported by the loaded assets as its maximum: the shipped statue's default
+arenas permit 32-128 MiB, not 256 MiB. Its initial value comes from the current
+budget diagnostics. Slider labels update only after their setters succeed;
+a rejected change preserves the last accepted label and restores the slider
+thumb while surfacing the validation error. The diagnostics panel sums the
+three assets' budgets, so 128 MiB per asset appears as 384 MiB there.
 The normal camera is interactive; `?pathTime=` samples deterministic
 frozen poses for workflow verification. The source model is credited to
 Alexandre Tokovinine under CC BY 4.0.
@@ -487,3 +494,7 @@ reject registration, deferred builds (including an earlier valid batch), and
 dirty updates without scene mutation or new material/draw resources. Cleared
 assignments still build and draw with the global environment. The MeshLoD-only
 build regression also requires the local-cubemap renderer to remain absent.
+The demo workflow verifies the cache slider's lower/upper bounds, clamping
+above the advertised maximum, and agreement between the label and aggregate
+effective budget. A forced out-of-capacity input verifies that rejection leaves
+the accepted value intact and reports an error; a subsequent valid input clears it.
