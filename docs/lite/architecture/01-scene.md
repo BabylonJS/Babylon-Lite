@@ -35,7 +35,9 @@ standalone-renderable references, rather than leaving an inactive mesh pickable.
 
 Reinsert with `addToScene(scene, mesh)`. While the engine has live leases,
 admission of an already attached mesh or light is idempotent, including
-children visited during reinsertion. Engines with no live leases keep legacy
+children visited during reinsertion. Duplicate parent admission still traverses
+its descendants and admits any missing children in normal depth-first order.
+Engines with no live leases keep legacy
 admission behavior. Reinsertion appends to the mesh list and material group and builds
 fresh scene-local renderables, giving equal-order/depth ties the same admission
 order as a newly added mesh. Mesh identity and owned geometry buffers survive

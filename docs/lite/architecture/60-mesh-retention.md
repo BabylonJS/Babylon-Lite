@@ -66,6 +66,8 @@ Reinsertion builds ordinary fresh scene-local renderables and appends normal
 admission order. Explicit render order still takes precedence over stable depth
 ties. Scene-local uniforms, bindings, and wrappers may allocate again; the
 reuse guarantee concerns owned geometry, not all GPU or JavaScript allocations.
+Repeated parent admission skips only already-present membership/build work:
+descendants are still traversed, so detached or newly added children are admitted.
 
 ## Shader Logic
 
@@ -132,6 +134,9 @@ implementation or asset is copied.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
   fresh identity/order, filter selection, disposal cancellation, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.
+- `scene-retained-admission.test.ts` and `scene-retained-admission.spec.ts`:
+  duplicate parents still admit missing descendants, preserve source parent
+  links and per-scene ownership, and reuse geometry with fresh rendering/picking.
 - `mesh-retention.spec.ts`: native public rendering, CPU/GPU picking, 1,000 complete
   activations, transparent tie reference, geometry-count stability, final disposal,
   device loss, and network-controlled advanced preparation with actual buffer binding.
@@ -153,6 +158,10 @@ is inferred from geometry reuse.
 - `tests/lite/unit/mesh-retention.test.ts`
 - `tests/lite/unit/gpu-picker-membership.test.ts`
 - `tests/lite/unit/gpu-picker-retry.test.ts`
+- `tests/lite/unit/scene-retained-admission.test.ts`
+- `tests/lite/plumbing/scene-retained-admission.spec.ts`
+- `lab/lite/scene-retained-admission-test.html`
+- `lab/lite/src/scene-retained-admission-test.ts`
 - `tests/lite/build/public-api-types.test.ts`
 - `tests/lite/plumbing/mesh-retention.spec.ts`
 - `lab/lite/mesh-retention-test.html`

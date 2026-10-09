@@ -30,7 +30,8 @@ does nothing and allocates no caches. It is reached only from the optional
 retention enabler/teardown.
 
 Ordinary `addToScene` contains one optional-chained engine seam call before its
-existing category dispatch. Only an explicit `false` skips admission; an absent
+existing category dispatch. Only an explicit `false` skips the entity's own
+insertion/build work; descendant traversal and parent linking still run. An absent
 hook leaves the existing path unchanged. It has no static admission-module
 import and no retention-specific condition or ownership lookup.
 
@@ -40,6 +41,11 @@ mesh membership uses the existing external registry's scene set; light membershi
 uses that scene's light array. Disposed meshes deliberately continue to normal
 registration, which throws rather than silently accepting a duplicate.
 Other supported categories retain ordinary dispatch and hierarchy recursion.
+An attached parent still admits detached or newly added descendants in normal
+depth-first order, without duplicating existing siblings. Shared descendants
+retain the source traversal's last-parent-link semantics; membership remains
+independent per scene. Cyclic inputs retain the source parent-setter failure,
+not a silently truncated traversal or a new graph-repair contract.
 
 Policies are stored independently on each engine. Enabling or releasing ownership
 on one engine never installs, replaces, or clears another engine's field. Callback
@@ -47,8 +53,9 @@ arguments are transient; no mesh or light acquires a stored scene reference.
 
 ## Pipeline Configuration
 
-No pipeline or binding is created. A duplicate no-op avoids unnecessary scene
-array/group changes and preserves scene version. A fresh mesh admission follows
+No pipeline or binding is created. Skipping duplicate own insertion avoids
+unnecessary parent array/group changes. Missing descendant admission uses normal
+membership/cache invalidation. A fresh mesh admission follows
 normal group, build, shadow, and render-order machinery.
 
 ## Shader Logic
@@ -90,9 +97,14 @@ not a new default behavior for all scenes or a mesh-attached method.
   opt-in, hook installation, engine-local final cleanup, duplicate reinsertion,
   preserved child light membership, disposed/cross-engine admission errors.
 - `remove-from-scene.test.ts`: legacy owning removal remains intact.
+- `scene-retained-admission.test.ts`: duplicate mesh/light parents, detached and
+  fresh descendants, nested transforms, camera roots, containers, shared nodes,
+  multiple scenes, geometry claims, and source cyclic-input failure.
 - `public-api-types.test.ts`: internal hook/installer absent from public declarations.
 - `mesh-retention.spec.ts`: real reinsertion order, merged-group output bounds,
   picking exclusion, and geometry reuse.
+- `scene-retained-admission.spec.ts`: native hierarchy reinsertion, CPU/GPU picking,
+  transparent tie pixels versus fresh admission, and stable geometry allocation.
 - Scoped runtime bundle measurement: ordinary scenes retain unchanged ceilings;
   inspect emitted modules to ensure the optional installer/retention code is not
   fetched by unopted scenes. Never alter ceilings or published baselines to hide cost.
@@ -106,5 +118,9 @@ not a new default behavior for all scenes or a mesh-attached method.
 - `packages/babylon-lite/src/scene/mesh-scene-registry.ts`
 - `tests/lite/unit/mesh-retention.test.ts`
 - `tests/lite/unit/remove-from-scene.test.ts`
+- `tests/lite/unit/scene-retained-admission.test.ts`
 - `tests/lite/build/public-api-types.test.ts`
 - `tests/lite/plumbing/mesh-retention.spec.ts`
+- `tests/lite/plumbing/scene-retained-admission.spec.ts`
+- `lab/lite/scene-retained-admission-test.html`
+- `lab/lite/src/scene-retained-admission-test.ts`

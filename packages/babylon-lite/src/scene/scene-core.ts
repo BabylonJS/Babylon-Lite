@@ -423,76 +423,75 @@ export function addDeferredSceneRenderables(
  * offending mesh stay added.
  */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
-    if (scene.surface.engine._admitSceneEntity?.(scene, entity) === false) {
-        return;
-    }
-    // AssetContainer from loadGltf / loadBabylon — process each field present
-    if ("entities" in entity) {
-        const result = entity as AssetContainer;
-        for (const e of result.entities) {
-            addToScene(scene, e);
+    if (scene.surface.engine._admitSceneEntity?.(scene, entity) !== false) {
+        // AssetContainer from loadGltf / loadBabylon — process each field present
+        if ("entities" in entity) {
+            const result = entity as AssetContainer;
+            for (const e of result.entities) {
+                addToScene(scene, e);
+            }
+            if (result.clearColor) {
+                scene.clearColor = result.clearColor;
+            }
+            if (result.camera && !scene.camera) {
+                scene.camera = result.camera;
+            }
+            if (result.animationGroups?.length) {
+                const engine = scene.surface.engine;
+                const groups = result.animationGroups;
+                scene.animationGroups.push(...groups);
+                const hook = (deltaMs: number): void => {
+                    for (const g of groups) {
+                        tickAnimation(g, deltaMs, engine);
+                    }
+                };
+                result._beforeRenderHook = hook;
+                scene._beforeRender.push(hook);
+            }
+            // Feature-owned scene wiring runs synchronously before registerScene() builds
+            // renderables. Lazy features also own any cleanup registration they require.
+            result._sceneSetup?.(scene, result);
+            return;
         }
-        if (result.clearColor) {
-            scene.clearColor = result.clearColor;
-        }
-        if (result.camera && !scene.camera) {
-            scene.camera = result.camera;
-        }
-        if (result.animationGroups?.length) {
-            const engine = scene.surface.engine;
-            const groups = result.animationGroups;
-            scene.animationGroups.push(...groups);
-            const hook = (deltaMs: number): void => {
-                for (const g of groups) {
-                    tickAnimation(g, deltaMs, engine);
+        if ("_gpu" in entity && "material" in entity) {
+            const mesh = entity as unknown as Mesh;
+            // Register BEFORE mutating scene state: registering a disposed mesh throws, and the
+            // scene must be left untouched when it does.
+            registerMeshScene(scene, mesh);
+            scene.meshes.push(mesh);
+            const build = (mesh.material as Mesh["material"] & { _buildGroup?: MeshGroupBuilder })?._buildGroup;
+            if (build) {
+                let group = scene._groups.get(build);
+                if (!group) {
+                    group = [] as SceneMeshGroup;
+                    scene._groups.set(build, group);
+                    if (!scene._built) {
+                        scene._deferredBuilders.push(async () => {
+                            const result = await build(scene, group!);
+                            scene._renderables.push(...result.renderables);
+                            group!.o = result.renderables;
+                            if (result.updater) {
+                                scene._uniformUpdaters.push(result.updater);
+                            }
+                            group!.r = result.rebuildSingle;
+                        });
+                    }
                 }
-            };
-            result._beforeRenderHook = hook;
-            scene._beforeRender.push(hook);
-        }
-        // Feature-owned scene wiring runs synchronously before registerScene() builds
-        // renderables. Lazy features also own any cleanup registration they require.
-        result._sceneSetup?.(scene, result);
-        return;
-    }
-    if ("_gpu" in entity && "material" in entity) {
-        const mesh = entity as unknown as Mesh;
-        // Register BEFORE mutating scene state: registering a disposed mesh throws, and the
-        // scene must be left untouched when it does.
-        registerMeshScene(scene, mesh);
-        scene.meshes.push(mesh);
-        const build = (mesh.material as Mesh["material"] & { _buildGroup?: MeshGroupBuilder })?._buildGroup;
-        if (build) {
-            let group = scene._groups.get(build);
-            if (!group) {
-                group = [] as SceneMeshGroup;
-                scene._groups.set(build, group);
-                if (!scene._built) {
-                    scene._deferredBuilders.push(async () => {
-                        const result = await build(scene, group!);
-                        scene._renderables.push(...result.renderables);
-                        group!.o = result.renderables;
-                        if (result.updater) {
-                            scene._uniformUpdaters.push(result.updater);
-                        }
-                        group!.r = result.rebuildSingle;
-                    });
+                group.push(mesh);
+                // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
+                // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
+                // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
+                // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
+                // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
+                // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
+                if (scene._built || group.r) {
+                    enqueueMaterialSwap(scene, mesh);
                 }
             }
-            group.push(mesh);
-            // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
-            // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-            // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
-            // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
-            // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
-            // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (scene._built || group.r) {
-                enqueueMaterialSwap(scene, mesh);
-            }
+            scene._meshMaterialChange?.(mesh, mesh.material);
+        } else if ("lightType" in entity) {
+            scene.lights.push(entity as LightBase);
         }
-        scene._meshMaterialChange?.(mesh, mesh.material);
-    } else if ("lightType" in entity) {
-        scene.lights.push(entity as LightBase);
     }
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
