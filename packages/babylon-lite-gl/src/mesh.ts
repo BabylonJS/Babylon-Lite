@@ -271,9 +271,10 @@ export function bindIndexBuffer(engine: GLEngineContext, ib: GLIndexBuffer): voi
  * Configure vertex attributes from `vb`, reproducing Babylon's
  * `bindInstancesBuffer` exactly. For each descriptor: resolves the location
  * (explicit `index` or via the effect), enables the attribute array, issues
- * `vertexAttribPointer`, and sets the vertex divisor (`undefined → 1`). Every
- * touched location is tracked so {@link unbindInstanceAttributes} can reset its
- * divisor afterwards.
+ * `vertexAttribPointer`, and sets the vertex divisor (`undefined → 1`). Each
+ * instanced location (divisor ≠ 0) is tracked once so {@link unbindInstanceAttributes}
+ * can reset its divisor afterwards; per-vertex locations already have divisor 0 and are
+ * not tracked, so callers that never instance can rebind every frame without growth.
  *
  * `computeStride` controls the GL stride passed to `vertexAttribPointer`:
  * - `false` (default) → stride `0`: each attribute is independently tightly
@@ -317,8 +318,11 @@ export function bindAttributes(engine: GLEngineContext, vb: GLVertexBuffer, desc
             s.enabledAttribs[loc] = true;
         }
         gl.vertexAttribPointer(loc, d.size, d.type ?? FLOAT, d.normalized ?? false, stride, d.offset ?? 0);
-        gl.vertexAttribDivisor(loc, d.divisor === undefined ? 1 : d.divisor);
-        s.instanceLocations.push(loc);
+        const divisor = d.divisor ?? 1;
+        gl.vertexAttribDivisor(loc, divisor);
+        if (divisor !== 0 && !s.instanceLocations.includes(loc)) {
+            s.instanceLocations.push(loc);
+        }
     }
 }
 

@@ -35,6 +35,64 @@ function entry(url: string, gpuBytes: number, cpuBytes: number, frame: number): 
 }
 
 describe("splat source cache", () => {
+    it("retires the farthest eligible source before older nearby data, measuring only under pressure", () => {
+        const retired: Array<() => void> = [];
+        const distances = new Map([
+            ["https://a/near", 1],
+            ["https://a/far", 100],
+            ["https://a/protected", 1000],
+        ]);
+        const distance = vi.fn((url: string) => distances.get(url)!);
+        const cache = createSplatSourceCache(100, 100, (dispose) => retired.push(dispose), undefined, distance);
+        expect(cache.ledger.tryReserve(40)).toBe(true);
+        const near = entry("https://a/near", 20, 1, 1);
+        const far = entry("https://a/far", 20, 1, 10);
+        const protectedEntry = entry("https://a/protected", 20, 1, 0);
+        for (const source of [near, far, protectedEntry]) {
+            expect(admitSplatSource(cache, source)).toBe(true);
+        }
+        setSplatSourceProtection(cache, protectedEntry.url, { activeRefs: 1 });
+        expect(distance).not.toHaveBeenCalled();
+        const evicted = vi.fn();
+        expect(reserveSplatSourceGpuBytes(cache, 20, evicted)).toBe(false);
+        expect(evicted).toHaveBeenCalledExactlyOnceWith(far);
+        expect(distance).toHaveBeenCalledTimes(2);
+        expect(distance).not.toHaveBeenCalledWith(protectedEntry.url);
+        expect(cache.entries.has(near.url)).toBe(true);
+        expect(cache.ledger.allocatedBytes).toBe(100);
+        expect(far.destroyed.every((destroy) => destroy.mock.calls.length === 0)).toBe(true);
+        expect(reserveSplatSourceGpuBytes(cache, 20, evicted)).toBe(false);
+        expect(distance).toHaveBeenCalledTimes(2);
+        expect(retired).toHaveLength(1);
+        retired[0]!();
+        expect(far.destroyed.every((destroy) => destroy.mock.calls.length === 1)).toBe(true);
+        expect(reserveSplatSourceGpuBytes(cache, 20, evicted)).toBe(true);
+    });
+
+    it("also evicts farthest first for CPU cache admission", () => {
+        const cache = createSplatSourceCache(100, 2, undefined, undefined, (url) => (url.endsWith("far") ? 100 : 1));
+        const near = entry("https://a/near", 10, 1, 1);
+        const far = entry("https://a/far", 10, 1, 10);
+        expect(admitSplatSource(cache, near)).toBe(true);
+        expect(admitSplatSource(cache, far)).toBe(true);
+        expect(admitSplatSource(cache, entry("https://a/incoming", 10, 1, 11))).toBe(true);
+        expect([...cache.entries.keys()]).toEqual([near.url, "https://a/incoming"]);
+        expect(cache.residentCpuBytes).toBe(2);
+        expect(far.destroyed.every((destroy) => destroy.mock.calls.length === 1)).toBe(true);
+    });
+
+    it.each([42, Infinity])("uses recency to break equal distance %s ties", (distance) => {
+        const cache = createSplatSourceCache(100, 100, undefined, undefined, () => distance);
+        const oldest = entry("https://a/old", 30, 1, 1);
+        const newer = entry("https://a/new", 30, 1, 2);
+        expect(admitSplatSource(cache, newer)).toBe(true);
+        expect(admitSplatSource(cache, oldest)).toBe(true);
+        const evicted = vi.fn();
+        expect(reserveSplatSourceGpuBytes(cache, 50, evicted)).toBe(true);
+        expect(evicted).toHaveBeenCalledExactlyOnceWith(oldest);
+        expect(cache.entries.has(newer.url)).toBe(true);
+    });
+
     it("does not double-grant retirement-pending GPU bytes", () => {
         const retired: Array<() => void> = [];
         const cache = createSplatSourceCache(100, 50, (dispose) => retired.push(dispose));

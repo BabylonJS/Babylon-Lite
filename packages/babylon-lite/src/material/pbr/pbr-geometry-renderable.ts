@@ -8,9 +8,11 @@
  *  multi-color-attachment one built from the geometry-output shader.
  *
  *  Per-(view, mesh-feature-variant) shared state — composed shader, mesh
- *  BGL, pipeline cache — is cached on `view._geometry` keyed by the
- *  shader-relevant mesh-feature bits + (features, features2, sceneFeatures,
- *  lightMode, singleLightType, pluginIndex). Per-mesh state (UBOs, bind group, sort
+ *  BGL, pipeline cache — is cached on `view._geometry`: one set per forward
+ *  PBR context the view composed against (the context supplies the composer,
+ *  sceneFeatures and shadow layout), keyed within it by the shader-relevant
+ *  mesh-feature bits + (lightMode, singleLightType, pluginIndex, vertex layout).
+ *  The view's features are fixed for its lifetime. Per-mesh state (UBOs, bind group, sort
  *  centre) lives in the closure returned by {@link buildPbrGeometryRenderable}.
  *
  *  This module is imported only by {@link createPbrGeometryMaterialView} —
@@ -434,10 +436,20 @@ function _ensureViewResources(
     meshVertexLayout: Mesh["_gpu"]["_vbLayout"],
     meshVertexKey: string
 ): PbrGeometryViewResources {
-    let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
+    // One variant set per forward PBR context: the composer, the scene features and the shadow layout all
+    // come from the context, while env / shadow textures are bound per entry from the mesh's own context, so
+    // a variant is never shared across contexts. Several contexts can be live for one view at once: a mesh
+    // runtime-built into an already-built group keeps its own context until the next full PBR rebuild, and
+    // a full rebuild publishes a new scene context while the geometry task keeps its views. Each set lives
+    // as long as its context (weakly keyed), so meshes on different contexts never evict each other's set.
+    let sets = view._geometry as WeakMap<_PbrGeometryContext, Map<string, PbrGeometryViewResources>> | undefined;
+    if (!sets) {
+        sets = new WeakMap();
+        Object.defineProperty(view, "_geometry", { value: sets, enumerable: false, configurable: true });
+    }
+    let cache = sets.get(ctx);
     if (!cache) {
-        cache = new Map();
-        Object.defineProperty(view, "_geometry", { value: cache, enumerable: false, configurable: true });
+        sets.set(ctx, (cache = new Map()));
     }
     const cached = cache.get(variantKey);
     if (cached) {

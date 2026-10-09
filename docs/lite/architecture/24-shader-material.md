@@ -24,10 +24,21 @@ The design follows the Lite material contract:
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial;
 export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
 export function enableShaderMaterialFinalColor(material: ShaderMaterial): void;
+export function enableShaderMaterialPipelineSharing(): void;
 export function setShaderAttributeFormats(material: ShaderMaterial, formats: ShaderAttributeFormats): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
+
+`enableShaderMaterialPipelineSharing()` is the zero-argument, package-wide opt-in for sharing
+equivalent ShaderMaterial layouts, modules and pipelines. Call it before pipeline preparation.
+It installs one optional feeder call in the pipeline-bindings path and allocates no cache until
+the first enabled lookup. Materials and views created later participate automatically. Equivalent
+materials on the same `GPUDevice` share GPU pipeline state while retaining independent uniform
+values, textures, custom UBOs and bind groups. Repeated enable calls replace the seam with the
+same behavior and are safe. Applications that do not call it retain the existing per-material
+behavior; explicit multi-material build-group sharing through `enableShaderPipelineCache` is
+unchanged.
 
 ```typescript
 export interface ShaderMaterialOptions {
@@ -412,6 +423,8 @@ packages/babylon-lite/src/material/shader/
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
   shader-pipeline-cache.ts Lazy cross-material bindings, modules, and pipeline cache.
+  enable-shader-material-pipeline-sharing.ts  Opt-in global cache attachment and layout-identity memo.
+  enable-async-shader-pipeline-compilation.ts  Real-device async descriptor preparation.
   shader-vb-support.ts     Tiny opt-in seam and canonical attribute layouts.
   shader-vb.ts             Declared formats, per-mesh packing, grouping, bounded defaults.
 ```
@@ -449,21 +462,95 @@ A merged opaque renderable has no single source mesh for the frame graph to visi
 
 ### Pipeline cache
 
-Cache scope is per material instance, not module-level. Cross-material pipeline sharing is a non-goal for phase 1 because module-level `Map` allocations violate Lite's tree-shaking guidance. A future device-owned cache may be added if profiling proves it necessary.
+Without the global enabler, isolated materials retain their per-material bindings/modules/pipelines,
+and multi-material build groups may still install a scoped shared cache with
+`enableShaderPipelineCache(engine, meshes)`. The global enabler reuses the same cache implementation.
+`shader-pipeline.ts` owns only a nullable `(device, material) => void` seam and invokes it once,
+with optional chaining, at the start of `getOrCreateShaderPipelineBindings`. The seam implementation
+in `enable-shader-material-pipeline-sharing.ts` selects the current device cache and assigns it only when the material's
+current cache differs. This keeps all opt-in semantics behind the enabler while ensuring an already
+prepared material retargets when its engine's real `GPUDevice` changes.
+The cache owner has no runtime import of the pipeline owner or global enabler; its pipeline protocol
+dependencies are type-only. The root entry re-exports the public enabler from its separate extension,
+never through the scoped cache module.
 
-The cache key includes:
+```typescript
+/** @internal */
+export function _setSharedShaderPipelineCache(seam: ((device: GPUDevice, material: ShaderMaterial) => void) | null): void;
+/** @internal */
+export function retargetShaderPipelineCache(material: ShaderMaterial, device: GPUDevice): void;
+/** @internal */
+export function _getShaderDeviceCache(device: GPUDevice): ShaderPipelineCache;
+/** @internal */
+export function _setShaderVertexBuffersKey(resolve: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null): void;
+/** @internal */
+export function _serializeShaderVertexBuffers(layouts: readonly GPUVertexBufferLayout[]): string;
+```
 
-- Vertex WGSL source.
-- Fragment WGSL source.
-- Generated prelude key.
-- Attribute list/order.
-- Uniform layout.
-- Sampler layout.
-- External texture layout.
-- Define set.
-- Alpha/depth/cull state.
-- Render target signature: color format, depth/stencil format, sample count, flipY.
-- Thin-instance variant: matrix stream present and whether this material consumes the optional color stream.
+The internal setters, cache accessor, serializer and cache protocol are stripped from the emitted declarations. `retargetShaderPipelineCache` moves
+only a material that already has a shared cache; it does not opt an independent material into sharing.
+`ShaderMaterial` carries its shared-cache reference and exact-material/bindings module memo as typed
+`@internal` state, without a public/internal companion interface.
+Renderer and pipeline state extensions inherit that cache field; they must not redeclare it with
+a narrower protocol containing only the cache generation.
+
+Device caches are stored in a lazily allocated `WeakMap<GPUDevice, DeviceCache>`. Each device cache
+owns bindings, shader-module and pipeline maps. Bindings are keyed by attribute names and declared
+formats, typed uniform declarations, sampler declarations, external-texture declarations and
+storage-buffer declarations. Equal generated WGSL strings share device-local modules identified by
+device-cache-local numeric IDs. A per-material module memo is valid only for the exact material/view
+identity and exact bindings object, so an inheriting material view cannot accidentally reuse its
+source's generated fragment code.
+
+The complete shared pipeline key JSON-encodes:
+
+- target signature (color/depth formats, depth comparison and sample count);
+- logical variant key, including alpha-to-coverage specialization;
+- vertex and fragment module IDs;
+- the serialized vertex-buffer layouts;
+- alpha/blend, depth write/compare/bias, culling, topology and stencil state.
+
+Generated modules already capture source WGSL, generated preludes, defines, declarations and
+instance attributes. Consequently normal/no-color views, color/depth-only targets, packed mesh
+layouts and thin-instance color variants share only when their complete generated code and
+pipeline state are equal.
+
+Ordinary scoped caches use the pure `_serializeShaderVertexBuffers` serializer, with no layout-identity
+memo. The global enabler installs a resolver through `_setShaderVertexBuffersKey`; the cache owner
+only calls that optional resolver or falls back to the pure serializer. The extension owns a lazily allocated
+`WeakMap<readonly GPUVertexBufferLayout[], string>` keyed by layout-array identity. The serialized
+form is `[arrayStride, stepMode ?? "vertex", attributes]`, with each attribute represented by
+`[shaderLocation, offset, format]`. Repeated lookups of the same array traverse it once; a different
+array with equal descriptors produces the same string and therefore shares the pipeline. The layout
+array, every descriptor and every reusable attribute collection are immutable after the array's
+first lookup. Builders may finish or replace layouts before lookup, but later changes require a new
+array rather than in-place mutation. The packed-mesh and thin-instance paths complete their
+stride/offset, matrix and optional color layouts before the array is captured.
+
+Both paths return exactly the same serialized string, embedded as a string in the outer pipeline-key
+JSON. Enabling after a scoped cache has compiled pipelines or started async compilation must not change
+the key representation, replace the device cache or bindings, clear modules/pipelines/pending maps,
+or advance the cache generation. An equivalent late material joins that same device cache. Repeated
+enabling replaces the installed callbacks without wrapping them or resetting the layout memo.
+
+`clearShaderPipelineCache()` drops the device-cache weak map and increments the global generation.
+Existing scoped caches lazily clear their bindings/modules when next used; globally enabled materials
+are reassigned to a fresh cache for the current device. Existing material bindings then renew because
+their recorded cache generation or device no longer matches, and source-first view renewal still
+invalidates each view's module memo through the new bindings identity. Clearing does not disable the
+global seam. The immutable vertex-layout identity memo intentionally survives cache generations:
+its serialized descriptor value is device-independent and remains valid under the immutability
+contract.
+
+Async preparation must resolve bindings against the real device before descriptor capture. It calls
+`retargetShaderPipelineCache(material, engine._device)`, then performs the normal bindings lookup.
+Only pipeline creation runs through the synthetic capture device; the optional sharing seam is not
+called there. Pending compilation therefore stays in the real device's shared bindings store,
+deduplicates equivalent materials (including plain, thin-instance and thin-instance-color variants),
+and the completed pipeline is reused by the synchronous first bind.
+
+No `Map`, `WeakMap` or `Set` is allocated at module import time. The non-opted-in pipeline path does
+not import the cache owner and pays only for the nullable optional call.
 
 ### Bind group layout
 
@@ -626,13 +713,14 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 3. User assigns the material to meshes and adds them to the scene.
 4. `registerScene` runs deferred builders; `shaderGroupBuilder` dynamically imports `shader-renderable.ts`.
 5. Renderable builder groups meshes by material instance.
-6. For each material, `shader-pipeline.ts` builds a generated prelude, shader module, group-1 BGL, and render pipeline for the active target signature.
-7. For each mesh, the renderable prepares the CPU system-uniform image, uses `createUniformBuffer` to allocate and upload it transactionally, then registers packet cleanup before creating group 1. The allocation label is preserved, and a failed initial upload destroys the unpublished buffer.
-8. Each frame, `DrawBinding.update(context)` refreshes system UBOs when world/camera/target data changes and custom UBOs when `_uboVersion` changes.
-9. Draw binds vertex buffers in material attribute order, sets index buffer and group 1, then issues an indexed draw with the mesh's optional storage-allocation `_baseVertex`.
-10. If `setShaderTexture` changes a texture, the next update recreates group 1 for affected mesh packets and updates acquired/released texture references.
-11. If external textures are declared, every packet update reimports the current video frames and recreates group 1 without changing ordinary texture leases.
-12. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
+6. If global sharing was enabled, the bindings lookup selects the lazy cache for the engine's current device; otherwise the material keeps its existing scoped or private state.
+7. For each material, `shader-pipeline.ts` builds or reuses a generated prelude, shader module, group-1 BGL, and render pipeline for the active target signature.
+8. For each mesh, the renderable prepares the CPU system-uniform image, uses `createUniformBuffer` to allocate and upload it transactionally, then registers packet cleanup before creating group 1. The allocation label is preserved, and a failed initial upload destroys the unpublished buffer.
+9. Each frame, `DrawBinding.update(context)` refreshes system UBOs when world/camera/target data changes and custom UBOs when `_uboVersion` changes.
+10. Draw binds vertex buffers in material attribute order, sets index buffer and group 1, then issues an indexed draw with the mesh's optional storage-allocation `_baseVertex`.
+11. If `setShaderTexture` changes a texture, the next update recreates group 1 for affected mesh packets and updates acquired/released texture references.
+12. If external textures are declared, every packet update reimports the current video frames and recreates group 1 without changing ordinary texture leases.
+13. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
 
 Auxiliary rebuilds receive an explicit `MeshRebuildResources` lifetime sink instead of registering
 their packet in scene-owned disposer maps. Storage-buffer allocations remain owned by their
@@ -650,6 +738,9 @@ modules, source uniforms, textures and storage buffers are untouched.
 
 Pipeline context renewal also retires a view's previous owned custom UBO before replacing its state.
 Source-material cleanup is outside this view-abandonment API.
+Shared pipeline-cache lifetime is independent from packet and view-UBO lifetime. Device renewal
+resolves bindings on the new device before packets are rebuilt; dropping cache references is not a
+replacement for the existing device-recovery rebuild of other packet-owned GPU resources.
 The allocation records its engine, so renewal on another engine retires through the old engine's
 queue. Packet updates recreate a missing custom UBO and compare the actually bound buffer with
 the current one, in addition to resource revision, before drawing. Plain, transparent and
@@ -692,6 +783,9 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 - `render/scene-helpers.ts` for scene bind group layout and default pipeline descriptor.
 - `shader/scene-uniforms.ts` for shared scene UBO WGSL.
 - `shader/ubo-layout.ts` for typed UBO packing.
+- `material/shader/shader-pipeline-cache.ts` for lazy device-keyed shared bindings, modules and pipelines.
+- `material/shader/enable-shader-material-pipeline-sharing.ts` for opt-in global attachment and layout memoization.
+- `material/shader/enable-async-shader-pipeline-compilation.ts` for real-device pending compilation and descriptor capture.
 - `texture/texture-2d.ts` for public texture resources.
 - `texture/external-texture.ts` for caller-owned video external-texture state.
 - `resource/gpu-pool.ts` for texture acquire/release and sampler reuse where appropriate.
@@ -713,14 +807,33 @@ Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite sour
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 
-Final agent-allowed validation for implementation:
+Focused pipeline-sharing unit coverage uses inert GPU spies and real material/view factories:
+
+- default opt-out and enabled sharing for independently created materials;
+- preservation of distinct code, declarations, vertex layouts and render state;
+- current-device retargeting for materials that already hold another device cache;
+- cache-generation renewal, including source-first material views;
+- one traversal per immutable layout-array identity and sharing by equal replacement descriptors;
+- scoped opt-out without memoization and exact key continuity across late/repeated enabling;
+- already compiled scoped-cache reuse without renewed bindings, modules or pipelines;
+- late enabling while a scoped async compilation is pending, including all three instance variants;
+- pending async deduplication and completed synchronous reuse for plain, thin-instance and instance-color layouts;
+- emitted root-only zero-argument API exposure without the internal setter or cache interface.
+
+These tests validate CPU-side ownership and cache contracts only. They do not claim rendered pixels,
+WGSL validation on a real GPU, VRAM reduction, bundle-size movement or performance improvement.
+
+Focused validation, only when execution is authorized:
 
 ```powershell
 pnpm run lint:fix
 pnpm run lint
-pnpm test
+pnpm exec vitest run tests/lite/unit/shader-pipeline-cache.test.ts tests/lite/unit/shader-pipeline-module-memo.test.ts tests/lite/unit/async-shader-pipeline-compilation.test.ts
+pnpm exec vitest run tests/lite/build/public-api-types.test.ts -t "pipeline-sharing enabler"
 git diff tests/lite/parity/bundle-size.spec.ts
 git diff reference/lite/
 ```
 
-Do not run `pnpm test:perf`.
+The emitted API test requires a fresh package build. CI owns visual parity and repository-wide scene
+coverage. Do not run `pnpm test`, full parity, unfiltered scene bundles or `pnpm test:perf` from an
+agent session.

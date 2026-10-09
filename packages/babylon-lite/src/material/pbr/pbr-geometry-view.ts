@@ -71,10 +71,11 @@ export interface PbrGeometryMaterialView extends MaterialView {
     readonly _camera: Camera | null;
     /** @internal Shared per-view resources cache populated lazily by the renderable
      *  factory. Opaque to callers. PBR's cached per-variant resources are composed
-     *  WGSL, bind-group layouts, pipeline layouts and pipelines — all GC-reclaimed
-     *  when the owning geometry tasks drop this view. Per-mesh mesh/material UBOs and
-     *  references on the shared shader modules are retained directly by each
-     *  task-owned renderable. */
+     *  WGSL, bind-group layouts, pipeline layouts and pipelines, one set per forward
+     *  PBR context (weakly keyed; the view outlives scene PBR rebuilds) — all
+     *  GC-reclaimed when the owning geometry tasks drop this view or the context goes
+     *  away. Per-mesh mesh/material UBOs and references on the shared shader modules
+     *  are retained directly by each task-owned renderable. */
     _geometry?: unknown;
 }
 

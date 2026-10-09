@@ -44,6 +44,12 @@ interface ShaderExternalTexturePipelineResolver {
 }
 
 let _externalTextureResolver: ShaderExternalTexturePipelineResolver | null = null;
+let _sharedPipelineCache: ((device: GPUDevice, material: ShaderMaterial) => void) | null = null;
+
+/** @internal Seam installed by enableShaderMaterialPipelineSharing; all sharing semantics live in the seam. */
+export function _setSharedShaderPipelineCache(seam: ((device: GPUDevice, material: ShaderMaterial) => void) | null): void {
+    _sharedPipelineCache = seam;
+}
 
 /** @internal Install the external-texture pipeline operations on explicit binding API use. */
 export function _installShaderExternalTexturePipelineResolver(resolver: ShaderExternalTexturePipelineResolver): void {
@@ -94,7 +100,6 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderBindings?: ShaderPipelineBindings;
     _shaderCustomSpec?: UboSpec | null;
     _shaderCacheGeneration?: number;
-    _shaderPipelineCache?: ShaderPipelineCache;
 }
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
@@ -102,6 +107,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         throw new Error("ShaderMaterial external textures require setShaderExternalTexture before pipeline preparation.");
     }
     const state = material as ShaderMaterialPipelineState;
+    _sharedPipelineCache?.(engine._device, material);
     const cache = state._shaderPipelineCache;
     if (state._shaderBindings && state._shaderDevice === engine._device && state._shaderCacheGeneration === cache?.generation) {
         return state._shaderBindings;

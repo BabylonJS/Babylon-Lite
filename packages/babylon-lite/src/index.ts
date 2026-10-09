@@ -540,6 +540,7 @@ export { enableShaderUniformRangeUpdates } from "./material/shader/shader-unifor
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
 export { enableShaderMaterialFinalColor } from "./material/shader/enable-shader-material-final-color.js";
+export { enableShaderMaterialPipelineSharing } from "./material/shader/enable-shader-material-pipeline-sharing.js";
 export {
     enableAsyncShaderPipelineCompilation,
     prepareShaderMaterialPipeline,
@@ -744,6 +745,8 @@ export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
 export { loadSPZ } from "./loader-splat/load-spz.js";
 export { loadGaussianSplatStream, attachGaussianSplatStream, disposeGaussianSplatStream } from "./loader-splat-stream/load-gaussian-splat-stream.js";
+export { loadSplatVoxelCollision, parseSplatVoxelCollision, moveSplatVoxelCamera } from "./collision/splat-voxel-collision.js";
+export type { SplatVoxelCollision } from "./collision/splat-voxel-collision.js";
 export type { GaussianSplatStream, GaussianSplatStreamOptions, GaussianSplatStreamPhase, GaussianSplatStreamStats } from "./loader-splat-stream/splat-stream-types.js";
 export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";

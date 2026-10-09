@@ -96,6 +96,41 @@ function standardFetch(calls: string[]): typeof fetch {
 }
 
 describe("splat stream transport", () => {
+    it("fills the HTTP slots across sources while respecting decode and memory limits", async () => {
+        const imageGate = deferred<void>();
+        const decodeGate = deferred<void>();
+        let decodes = 0;
+        const fetched: string[] = [];
+        const manager = createSplatStreamRequestManager(6, 2, 120_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn(async (input: string | URL | Request) => {
+                const url = String(input);
+                fetched.push(url);
+                if (url.endsWith("meta.json")) {
+                    return response(metadata());
+                }
+                await imageGate.promise;
+                return response(webp(), 200, "image/webp");
+            }) as unknown as typeof fetch,
+            decode: async () => {
+                decodes++;
+                expect(manager.cpuBytes).toBeLessThanOrEqual(120_000);
+                await decodeGate.promise;
+                return bitmap();
+            },
+        });
+        const jobs = Array.from({ length: 7 }, (_, fileId) => manager.request(request(`https://a.test/${fileId}/meta.json`, fileId)));
+        await vi.waitFor(() => expect(manager.pendingRequests).toBe(6));
+        await vi.waitFor(() => expect(fetched.filter((url) => url.endsWith(".webp"))).toHaveLength(6));
+        expect(fetched).not.toContain("https://a.test/6/meta.json");
+        imageGate.resolve();
+        await vi.waitFor(() => expect(decodes).toBe(2));
+        decodeGate.resolve();
+        await expect(Promise.all(jobs)).resolves.toHaveLength(7);
+        expect(decodes).toBe(35);
+        expect(manager.cpuBytes).toBe(0);
+    });
+
     it("rejects when retained decoded images plus encoded payload and the next bitmap exceed the real CPU peak", async () => {
         const fakeGpu = gpu();
         const encoded = new Uint8Array(768 * 1024);
@@ -175,11 +210,11 @@ describe("splat stream transport", () => {
         const a = manager.request(request("https://a.test/a/meta.json", 0));
         const b = manager.request(request("https://a.test/b/meta.json", 1));
         await vi.waitFor(() => expect(decodeCount).toBe(1));
-        expect(payloadFetches.some((url) => url.includes("/b/"))).toBe(false);
+        expect(manager.cpuBytes).toBeLessThanOrEqual(6 * 1024 * 1024);
         firstDecode.resolve();
         await expect(Promise.race([Promise.all([a, b]), new Promise((_, reject) => setTimeout(() => reject(new Error("preparations stalled")), 2000))])).resolves.toHaveLength(2);
-        expect(payloadFetches.filter((url) => url.includes("/a/"))).toHaveLength(5);
-        expect(payloadFetches.filter((url) => url.includes("/b/"))).toHaveLength(5);
+        expect(payloadFetches.filter((url) => url.includes("/a/"))).toHaveLength(6);
+        expect(payloadFetches.filter((url) => url.includes("/b/"))).toHaveLength(6);
         expect(manager.cpuBytes).toBe(0);
     });
 
@@ -280,6 +315,60 @@ describe("splat stream transport", () => {
         expect(manager.cpuBytes).toBe(0);
     });
 
+    it.each(["cancel", "signal"])("resumes admission after queued exclusive %s while active transport stays stalled", async (cancellation) => {
+        const activeUrl = "https://a.test/active/meta.json";
+        const exclusiveUrl = "https://a.test/exclusive/meta.json";
+        const smallUrl = "https://a.test/small/meta.json";
+        const signals = new Map<string, AbortSignal>();
+        const settled = vi.fn();
+        const controller = new AbortController();
+        const manager = createSplatStreamRequestManager(2, 1, 20_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn((input: string | URL | Request, init?: RequestInit) => {
+                const url = String(input);
+                const signal = init!.signal!;
+                signals.set(url, signal);
+                if (url === activeUrl || url === smallUrl) {
+                    return new Promise<Response>((_resolve, reject) => {
+                        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                    });
+                }
+                // The decoded source fits the full CPU budget, but exceeds its 10,000-byte shared allowance.
+                return Promise.resolve(url.endsWith("meta.json") ? response(metadata("image", 24 * 24)) : response(webp(24, 24), 200, "image/webp"));
+            }) as unknown as typeof fetch,
+            decode: async () => bitmap(24, 24),
+        });
+        const active = manager.request(request(activeUrl, 0)).then(settled, settled);
+        const exclusive = manager.request({ ...request(exclusiveUrl, 1), signal: controller.signal }).catch((error: unknown) => error);
+        const jobs = [active, exclusive];
+        try {
+            await vi.waitFor(() => expect(manager.queuedFiles).toBe(1));
+            expect(manager.pendingRequests).toBe(1);
+            expect(manager.cpuBytes).toBe(0);
+            jobs.push(manager.request(request(smallUrl, 2)).then(settled, settled));
+            expect(manager.queuedFiles).toBe(2);
+            expect(signals.has(smallUrl)).toBe(false);
+
+            if (cancellation === "cancel") {
+                manager.cancel(exclusiveUrl);
+            } else {
+                controller.abort();
+            }
+            // A rotation-only update leaves surviving priorities and distances unchanged.
+            expect(manager.promote(smallUrl, 1, SplatRequestPriority.Upgrade)).toBe(false);
+            await Promise.resolve();
+            expect(signals.has(smallUrl)).toBe(true);
+            expect(signals.get(activeUrl)!.aborted).toBe(false);
+            expect(manager.pendingRequests).toBe(2);
+            expect(manager.queuedFiles).toBe(0);
+            expect(settled).not.toHaveBeenCalled();
+            await expect(exclusive).resolves.toMatchObject({ name: "AbortError" });
+        } finally {
+            manager.dispose();
+            await Promise.all(jobs);
+        }
+    });
+
     it("orders queued files by priority while bounding active chunk preparations", async () => {
         const gates = new Map<string, ReturnType<typeof deferred<Response>>>();
         const order: string[] = [];
@@ -293,7 +382,7 @@ describe("splat stream transport", () => {
             }
             return Promise.resolve(response(webp(), 200, "image/webp"));
         }) as unknown as typeof fetch;
-        const manager = createSplatStreamRequestManager(8, 1, 10_000, 0, { device: gpu().device, fetch: fetchMock, decode: async () => bitmap() });
+        const manager = createSplatStreamRequestManager(1, 1, 10_000, 0, { device: gpu().device, fetch: fetchMock, decode: async () => bitmap() });
         const a = manager.request(request("https://a.test/a/meta.json", 0, SplatRequestPriority.Bootstrap));
         const b = manager.request(request("https://a.test/b/meta.json", 1));
         const low = manager.request(request("https://a.test/low/meta.json", 2, SplatRequestPriority.Prefetch));
@@ -311,13 +400,42 @@ describe("splat stream transport", () => {
         manager.dispose();
     });
 
+    it("reprioritizes nearby queued detail without restarting the active source", async () => {
+        const first = deferred<Response>();
+        const order: string[] = [];
+        const manager = createSplatStreamRequestManager(1, 1, 10_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn(async (input: string | URL | Request) => {
+                const url = String(input);
+                order.push(url);
+                if (url.endsWith("/first/meta.json")) {
+                    return first.promise;
+                }
+                return url.endsWith("meta.json") ? response(metadata()) : response(webp(), 200, "image/webp");
+            }) as unknown as typeof fetch,
+            decode: async () => bitmap(),
+        });
+        const active = manager.request(request("https://a.test/first/meta.json", 0));
+        const far = manager.request({ ...request("https://a.test/far/meta.json", 1), distance: 20 });
+        const near = manager.request({ ...request("https://a.test/near/meta.json", 2), distance: 40 });
+        expect(manager.promote("https://a.test/near/meta.json", 1, SplatRequestPriority.Upgrade, 2)).toBe(true);
+        await Promise.resolve();
+        // Distance changes must not preempt the active preparation.
+        expect(order.filter((url) => url.endsWith("meta.json"))).toEqual(["https://a.test/first/meta.json"]);
+        first.resolve(response(metadata()));
+        await Promise.all([active, far, near]);
+        expect(order.filter((url) => url.endsWith("meta.json"))).toEqual(["https://a.test/first/meta.json", "https://a.test/near/meta.json", "https://a.test/far/meta.json"]);
+    });
+
     it("promotes an existing queued job so uncovered coverage preempts abortable fine transport", async () => {
         const order: string[] = [];
+        let fineSignal: AbortSignal | null | undefined;
         let fineAttempts = 0;
         const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
             const url = String(input);
             order.push(url);
             if (url.endsWith("/active-fine/meta.json") && fineAttempts++ === 0) {
+                fineSignal = init?.signal;
                 return new Promise<Response>((_resolve, reject) => {
                     init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
                 });
@@ -334,13 +452,63 @@ describe("splat stream transport", () => {
         const shared = manager.request(request("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade));
         expect(manager.promote("https://a.test/shared/meta.json", 2, SplatRequestPriority.Uncovered)).toBe(false);
         expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade)).toBe(false);
-        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Uncovered)).toBe(true);
+        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade, 2)).toBe(true);
+        const sort = vi.spyOn(Array.prototype, "sort");
+        try {
+            expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Uncovered)).toBe(true);
+            expect(fineSignal?.aborted).toBe(true);
+            const immediatePasses = sort.mock.calls.length;
+            expect(immediatePasses).toBeGreaterThan(0);
+            // The strict-priority pass already consumed the pending distance update.
+            await Promise.resolve();
+            expect(sort).toHaveBeenCalledTimes(immediatePasses);
+        } finally {
+            sort.mockRestore();
+        }
         await expect(shared).resolves.toMatchObject({ fileId: 1, generation: 1 });
         await expect(fine).resolves.toMatchObject({ fileId: 0 });
         expect(order.filter((url) => url.endsWith("/active-fine/meta.json"))).toHaveLength(2);
         expect(order.filter((url) => url.endsWith("/shared/meta.json"))).toHaveLength(1);
         expect(order.indexOf("https://a.test/shared/meta.json")).toBeLessThan(order.lastIndexOf("https://a.test/active-fine/meta.json"));
         expect(manager.cpuBytes).toBe(0);
+    });
+
+    it.each([2, 7])("reclaims slots for %i queued uncovered requests while all surviving preparations stay pending", async (uncoveredCount) => {
+        const signals = new Map<string, AbortSignal>();
+        const settled = vi.fn();
+        let peakRequests = 0;
+        const manager = createSplatStreamRequestManager(6, 1, 60_000, 0, {
+            device: gpu().device,
+            fetch: vi.fn((input: string | URL | Request, init?: RequestInit) => {
+                const signal = init!.signal!;
+                signals.set(String(input), signal);
+                peakRequests = Math.max(peakRequests, manager.pendingRequests);
+                // Every request stays pending until aborted, including admitted uncovered work.
+                return new Promise<Response>((_resolve, reject) => {
+                    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                });
+            }) as unknown as typeof fetch,
+            decode: async () => bitmap(),
+        });
+        const upgrades = Array.from({ length: 6 }, (_, index) => request(`https://a.test/upgrade-${index}/meta.json`, index));
+        const uncovered = Array.from({ length: uncoveredCount }, (_, index) => request(`https://a.test/uncovered-${index}/meta.json`, index + 6, SplatRequestPriority.Uncovered));
+        const jobs = upgrades.map((source) => manager.request(source).then(settled, settled));
+        try {
+            await vi.waitFor(() => expect(signals.size).toBe(6));
+            jobs.push(...uncovered.map((source) => manager.request(source).then(settled, settled)));
+            const admitted = Math.min(6, uncoveredCount);
+            await vi.waitFor(() => expect(uncovered.filter((source) => signals.has(source.url))).toHaveLength(admitted));
+            expect(uncovered.filter((source) => signals.has(source.url))).toEqual(uncovered.slice(0, admitted));
+            expect(upgrades.filter((source) => signals.get(source.url)!.aborted)).toHaveLength(admitted);
+            expect(uncovered.some((source) => signals.get(source.url)?.aborted)).toBe(false);
+            expect(manager.pendingRequests).toBe(6);
+            expect(peakRequests).toBe(6);
+            expect(manager.queuedFiles).toBe(uncoveredCount);
+            expect(settled).not.toHaveBeenCalled();
+        } finally {
+            manager.dispose();
+            await Promise.all(jobs);
+        }
     });
 
     it("waits for a nonabortable decode to settle before preemption cleanup or late upload", async () => {

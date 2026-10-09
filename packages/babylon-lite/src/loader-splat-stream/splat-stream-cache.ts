@@ -40,6 +40,7 @@ export interface SplatSourceCache {
     admissionVersion: number;
     disposed: boolean;
     readonly retire: (dispose: () => void) => void;
+    readonly getDistanceToCamera?: (url: string) => number;
 }
 
 function destroyResources(resources: SplatSourceGpuResources): void {
@@ -54,7 +55,8 @@ export function createSplatSourceCache(
     maxGpuBytes: number,
     maxCpuBytes: number,
     retire: (dispose: () => void) => void = (dispose) => dispose(),
-    sharedLedger?: SplatStreamGpuLedger
+    sharedLedger?: SplatStreamGpuLedger,
+    getDistanceToCamera?: (url: string) => number
 ): SplatSourceCache {
     if (!Number.isSafeInteger(maxGpuBytes) || maxGpuBytes <= 0 || !Number.isSafeInteger(maxCpuBytes) || maxCpuBytes <= 0) {
         throw new RangeError("[GaussianSplatStream] cache budgets must be positive safe integers");
@@ -71,6 +73,7 @@ export function createSplatSourceCache(
         admissionVersion: 0,
         disposed: false,
         retire,
+        getDistanceToCamera,
     };
 }
 
@@ -81,6 +84,14 @@ export function createSplatSourceRetirement(engine: EngineContext): (dispose: ()
 
 function isProtected(entry: SplatSourceCacheEntry): boolean {
     return entry.pinCount > 0 || entry.displayedRefs > 0 || entry.pendingRefs > 0 || entry.activeRefs > 0;
+}
+
+function evictionCandidates(cache: SplatSourceCache, excluded?: SplatSourceCacheEntry): SplatSourceCacheEntry[] {
+    return [...cache.entries.values()]
+        .filter((entry) => entry !== excluded && !isProtected(entry))
+        .map((entry) => ({ entry, distance: cache.getDistanceToCamera?.(entry.url) ?? Infinity }))
+        .sort((a, b) => b.distance - a.distance || a.entry.lastUsedFrame - b.entry.lastUsedFrame || b.entry.gpuBytes - a.entry.gpuBytes || a.entry.url.localeCompare(b.entry.url))
+        .map(({ entry }) => entry);
 }
 
 function retireEntry(cache: SplatSourceCache, entry: SplatSourceCacheEntry): void {
@@ -125,7 +136,7 @@ export function canReserveSplatSourceGpuBytes(cache: SplatSourceCache, bytes: nu
     return false;
 }
 
-/** @internal Reserves source bytes against the shared ledger after scheduling the minimum protected-aware LRU retirement. */
+/** @internal Reserves source bytes after scheduling the minimum unprotected farthest-first retirement. */
 export function reserveSplatSourceGpuBytes(cache: SplatSourceCache, bytes: number, onEvict: (entry: SplatSourceCacheEntry) => void): boolean {
     if (cache.disposed || !Number.isSafeInteger(bytes) || bytes < 0 || bytes > cache.maxGpuBytes) {
         return false;
@@ -137,9 +148,7 @@ export function reserveSplatSourceGpuBytes(cache: SplatSourceCache, bytes: numbe
     if (required === 0) {
         return false;
     }
-    const candidates = [...cache.entries.values()]
-        .filter((entry) => !isProtected(entry))
-        .sort((a, b) => a.lastUsedFrame - b.lastUsedFrame || b.gpuBytes - a.gpuBytes || a.url.localeCompare(b.url));
+    const candidates = evictionCandidates(cache);
     const victims: SplatSourceCacheEntry[] = [];
     let reclaimable = 0;
     for (const candidate of candidates) {
@@ -159,7 +168,7 @@ export function reserveSplatSourceGpuBytes(cache: SplatSourceCache, bytes: numbe
     return cache.ledger.tryReserve(bytes);
 }
 
-/** @internal Returns true after admitting the entry, evicting only unprotected byte-aware LRU candidates. */
+/** @internal Returns true after admitting the entry, evicting only unprotected farthest-first candidates. */
 export function admitSplatSource(cache: SplatSourceCache, entry: SplatSourceCacheEntry): boolean {
     if (cache.disposed) {
         destroyResources(entry.resources);
@@ -185,11 +194,9 @@ export function admitSplatSource(cache: SplatSourceCache, entry: SplatSourceCach
     }
     const excludedGpu = existing?.gpuBytes ?? 0;
     const excludedCpu = existing?.cpuBytes ?? 0;
-    const candidates = [...cache.entries.values()]
-        .filter((candidate) => candidate !== existing && !isProtected(candidate))
-        .sort((a, b) => a.lastUsedFrame - b.lastUsedFrame || b.gpuBytes - a.gpuBytes || a.url.localeCompare(b.url));
     let gpu = cache.residentGpuBytes - excludedGpu + entry.gpuBytes;
     let cpu = cache.residentCpuBytes - excludedCpu + entry.cpuBytes;
+    const candidates = gpu > cache.maxGpuBytes || cpu > cache.maxCpuBytes ? evictionCandidates(cache, existing) : [];
     const victims: SplatSourceCacheEntry[] = [];
     for (const candidate of candidates) {
         if (gpu <= cache.maxGpuBytes && cpu <= cache.maxCpuBytes) {

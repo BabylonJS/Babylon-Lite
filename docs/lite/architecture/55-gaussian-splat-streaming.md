@@ -86,7 +86,7 @@ Defaults:
 | `lodCooldownMs`         |      0 ms | finite and nonnegative                       |
 | `maxRetries`            |         2 | safe integer in 0..8                         |
 
-The Trogir streaming demo explicitly sets `lodCooldownMs` to `250` ms while the library default remains zero for compatibility.
+The Trogir streaming demo uses the zero-ms cooldown default; error hysteresis stabilizes detail selection without delaying new demand.
 
 The load promise resolves after the manifest is validated and stream state is initialized. It does not wait for a chunk. `attachGaussianSplatStream` is explicit, idempotence-guarded, and must run before or during scene registration. `firstFrameReady` resolves only after a nonempty coarse indirect draw has been submitted and `queue.onSubmittedWorkDone()` confirms completion. It rejects on bootstrap failure or disposal before that draw. Refinement failures remain visible through `stats.error` without rejecting an already-resolved readiness promise.
 
@@ -372,7 +372,7 @@ File request priorities are:
 
 1. primary bootstrap source;
 2. visible uncovered leaves with no displayed representation;
-3. visible upgrades by descending current projected screen error, deduplicated by file;
+3. visible upgrades by nearest requesting leaf distance, deduplicated by file;
 4. environment;
 5. optional adjacent prefetch only when all higher classes are admitted.
 
@@ -382,11 +382,13 @@ Bootstrap source selection aggregates each leaf's cheapest representation by fil
 
 A priority queue is keyed by file URL and generation. At most one file preparation exists per URL. Demand from several leaves increments shared ownership and never duplicates fetch/decode/upload.
 
-`maxConcurrentRequests` is a global HTTP-response semaphore across manifest metadata and image requests, not a file count. `maxConcurrentDecodes` separately limits active `createImageBitmap` calls. One source preparation at a time owns the payload-admission lane before it acquires any metadata HTTP response and retains that lane through release of all decoded bitmap reservations. No metadata or image body may hold an HTTP slot while waiting to enter a lane whose owner may need that slot. This atomic preparation admission prevents valid known- or unknown-length preparations from retaining complementary byte sets or transport slots while each waits for the other to release.
+`maxConcurrentRequests` bounds both concurrent source preparations and the global HTTP-response semaphore. `maxConcurrentDecodes` separately limits active `createImageBitmap` calls. Concurrent preparations each receive a fixed admission allowance of `floor(maxCpuBytes / maxConcurrentRequests)` before fetching metadata. Actual encoded and decoded bytes remain charged to the global ledger. Each source fetches and decodes its images in order while other sources progress independently. The sum of allowances cannot exceed the CPU budget, preventing circular waits between retained payloads.
 
-The payload owner is cooperatively preemptible only by queued strictly higher-priority work, including an existing job promoted when its demand changes. A source whose demand changes from refinement to uncovered coverage promotes its existing same-generation scheduler job in place: the promise, generation, FIFO sequence, request ownership, and preparation handlers remain unchanged. Promotion reruns scheduling so that strict-priority preemption can begin; equal or lower priority is a no-op. Runtime-provided preparation hooks retain their own ownership and are never invoked again merely to promote priority.
+A preparation whose peak exceeds its shared allowance releases its resources and requeues once for exclusive admission with the full CPU budget. An exclusive job at the head of the priority queue waits for active preparations to drain and prevents lower-ranked jobs from starting. Valid large sources retain access to the entire budget. Exceeding the full budget is terminal. Admission retries preserve the original priority and FIFO sequence; disposal, cancellation and generation replacement never restart a job.
 
-Preemption aborts interruptible metadata/image transport promptly. `createImageBitmap` is not assumed abortable: preemption latches during an active decode and changes owners only after that decode actually settles, its late bitmap is closed, and all counters and reservations are released. The lower-priority attempt's `finally` cleanup releases every body, bitmap, CPU reservation, and lane before the same unresolved job is requeued with its original FIFO sequence. External abort, generation replacement, disposal, retry exhaustion, and terminal errors never requeue. Equal priorities cannot preempt. This gives newly visible coarse coverage bounded progress ahead of stalled abortable fine transport without partitioning the CPU budget, weakening whole-preparation peak accounting, duplicating ownership, or creating retry churn; a nonabortable stalled platform decode remains an unavoidable safe-boundary limit.
+When the active slots are full or an exclusive preparation blocks admission, queued strictly higher-priority work cooperatively preempts lower-priority active preparations. Each scheduling pass fills available slots before evaluating preemption for the remaining queue, so cleanup of one preempted attempt can admit urgent work and reclaim the next needed slot without a demand change or another request completing. A source whose demand changes from refinement to uncovered coverage promotes its existing same-generation scheduler job in place: the promise, generation, FIFO sequence, request ownership, and preparation handlers remain unchanged. Within a priority class, sources are ordered by the nearest requesting leaf distance, then FIFO sequence. Camera distance changes and queued cancellations share one deferred scheduling pass per synchronous batch. Cancelling a queued exclusive job directly or through its signal lets eligible work use spare slots on the next microtask without waiting for active preparations to finish. Equal-class updates never abort active work. Strict-priority promotions schedule immediately. Any immediate scheduling pass consumes pending updates and suppresses the redundant deferred pass. Runtime-provided preparation hooks retain their own ownership and are never invoked again merely to promote priority.
+
+Preemption aborts interruptible metadata/image transport promptly. `createImageBitmap` is not assumed abortable: preemption latches during an active decode and changes owners only after that decode actually settles, its late bitmap is closed, and all counters and reservations are released. The lower-priority attempt's `finally` cleanup releases every body, bitmap, CPU reservation and preparation slot before the same unresolved job is requeued with its original FIFO sequence. External abort, generation replacement, disposal, retry exhaustion, and terminal errors never requeue. Equal priorities cannot preempt. This gives newly visible coarse coverage bounded progress ahead of stalled abortable fine transport while preserving whole-preparation peak accounting and unique ownership; a nonabortable stalled platform decode remains an unavoidable safe-boundary limit.
 
 `Content-Length`, when present, is parsed as a canonical safe integer and reserved before the body reader is acquired. An over-budget declared body is rejected without application-side buffering. Unknown-length bodies are consumed from `ReadableStream` chunks; each retained chunk is admitted before retention. The transport never calls `response.blob()` on an unaccounted whole body.
 
@@ -410,11 +412,11 @@ Each resident source owns:
 - a 2,048-byte metadata/codebook storage buffer: 256 scale `f32` plus 256 SH0 `f32`;
 - dimensions, count, validated intervals, generation, pin/ref counts, and last-used frame.
 
-Source texture bytes are `5 * width * height * 4`. GPU accounting uses one stream-wide ledger and includes active canonical atlas, projected records, two key/index arrays, both indirect buffers, radix histograms/scans, uniforms, source metadata, pending replacement generation, and resources queued for retirement. `residentGpuBytes` is the exact byte total of currently useful allocated buffers/textures; `allocatedGpuBytes` additionally retains retirement-pending bytes until their fence disposer runs. Admission holds (which own budget but are not yet allocations) are not reported as allocated bytes. Before source textures are created, global-ledger admission computes the byte shortfall after crediting source bytes already queued for retirement, selects only enough additional protected-aware source LRU victims to make that reservation possible after retirement, and retires them. Their allocated bytes remain charged until the submission fence disposer runs, so an attempt waits rather than evicting extra sources while prior victims are still retiring. Source upload reserves once and transfers that reservation to the cache; cache admission never grants it again.
+Source texture bytes are `5 * width * height * 4`. GPU accounting uses one stream-wide ledger and includes active canonical atlas, projected records, two key/index arrays, both indirect buffers, radix histograms/scans, uniforms, source metadata, pending replacement generation, and resources queued for retirement. `residentGpuBytes` is the exact byte total of currently useful allocated buffers/textures; `allocatedGpuBytes` additionally retains retirement-pending bytes until their fence disposer runs. Admission holds (which own budget but are not yet allocations) are not reported as allocated bytes. Before source textures are created, global-ledger admission computes the byte shortfall after crediting source bytes already queued for retirement, selects only enough additional unprotected farthest-first source victims to make that reservation possible after retirement, and retires them. Their allocated bytes remain charged until the submission fence disposer runs, so an attempt waits rather than evicting extra sources while prior victims are still retiring. Source upload reserves once and transfers that reservation to the cache; cache admission never grants it again.
 
 Canonical capacity is bounded by device limits and by at most 75% of `maxGpuBytes` for one canonical plus one pass-local working generation, leaving source headroom. `maxCapacitySplats` separates this immutable allocation ceiling from the mutable `maxSplats` selection target. Environment residency subtracts from the current foreground planning allowance but does not make an unchanged legal `maxSplats` value invalid; only mutating `maxSplats` above the immutable capacity is an error. If device limits or the working budget cannot admit the requested capacity exactly, load fails with the requested and admitted capacities instead of silently clamping and failing later during display. The exact first pass-local allocation is held before source requests can consume its budget, then converted to allocated bytes when the binding is built. Additional target bindings require independent admission. One 256-byte gather descriptor per manifest leaf plus an optional environment descriptor is protected before any source request. Failure to reserve that initial hold retires the just-created canonical state and releases every ledger charge before load rejects. Recording converts only the needed protected hold into an allocated, stats-visible submission-local buffer; retirement atomically restores the hold, so source admission cannot steal the headroom between generations. A changed generation waits with the prior display intact while an earlier gather descriptor submission remains in flight. Replacement is make-before-break, and old generations remain charged until `retireGpuResources` runs.
 
-Eviction is byte-aware LRU among resident sources with zero displayed refs, zero pending refs, zero active-interval refs, and no bootstrap pin. Active descriptors, including the environment interval, pending replacements, and submitted generations protect resources. The stream maintains per-source displayed, pending, and active counts incrementally when leaf visibility/references or the published interval generation changes. A dirty generation applies those counts to resident cache entries in one source pass; unchanged frames do not rescan the leaf hierarchy or resident interval list. Active sources alone receive a cheap per-frame recency touch. `lastUsedFrame` therefore advances only when a source participates in the active interval generation; merely remaining warm does not refresh it.
+Eviction considers only resident sources with zero displayed refs, zero pending refs, zero active-interval refs, and no bootstrap pin. Under memory pressure, eligible sources are ordered by descending distance to the nearest active camera, then oldest use, largest GPU allocation, and URL. Source distance is the minimum camera-to-world-AABB distance over every leaf using that file, including off-screen leaves and shared files. Each binding retains its latest camera-position snapshot; bindings older than the existing one-frame grace period do not influence eviction. Distances are evaluated once per candidate when admission needs victims, using the current stream world transform, rather than rescanning bounds on unchanged frames. With no active camera or leaf bounds, infinite distances fall back to recency ordering. Active descriptors, including the environment interval, pending replacements, and submitted generations protect resources. The stream maintains per-source displayed, pending, and active counts incrementally when leaf visibility/references or the published interval generation changes. A dirty generation applies those counts to resident cache entries in one source pass; unchanged frames do not rescan the leaf hierarchy or resident interval list. Active sources alone receive a cheap per-frame recency touch. `lastUsedFrame` therefore advances only when a source participates in the active interval generation; merely remaining warm does not refresh it.
 
 Eviction removes the cache entry and synchronously clears its source runtime plus every matching displayed and pending leaf reference before retirement, so no stale descriptor can falsely satisfy target equality or coverage. If that leaf becomes visible again, the best already-resident alternative at or below its target is displayed immediately while the unchanged target source is requested again. The main bootstrap fallback remains pinned. Sparse-leaf fallback intervals may be copied into canonical active storage without pinning their entire otherwise-unused large source after a later replacement is displayed.
 
@@ -495,7 +497,7 @@ dispatch[1 + levelCount + childLevel] = { x: ceil(childCount / 256), y: 16, z: 1
 
 `levelCount` starts at `ceil(survivorCount / 256)` and recursively applies `ceil(n / 256)`. Scan dispatches use at least one workgroup so zero survivors overwrite every root total with zero; histogram, add, and scatter dispatch zero work when their GPU-derived count is zero. The runtime/dispatch buffer has `STORAGE | INDIRECT | COPY_SRC | COPY_DST` usage and is pass-local; `COPY_DST` permits an explicit pre-projection reset so an empty active pool cannot reuse prior-frame counts. Production never maps or reads survivor counts.
 
-Compaction adds exactly two `u32` arrays per admitted pass capacity: one validity flag and one exclusive prefix, or 8 bytes per capacity entry (32,080,000 bytes at the demo's 4,010,000-splat capacity). A 128-byte survivor/dispatch buffer and one 64-byte nonaliasing binding placeholder complete the added fixed allocation. The hierarchical compaction scan reuses radix scratch before histogram overwrites it. All 32,080,192 added bytes participate in initial pass hold, allocation admission, partial-failure unwind, and fenced retirement. The separate mandatory 16-byte bootstrap readback hold is also admitted before source residency; the existing 1 GiB demo ledger still admits the unchanged 4,010,000 capacity while its mutable startup target is 1,200,000.
+Compaction adds exactly two `u32` arrays per admitted pass capacity: one validity flag and one exclusive prefix, or 8 bytes per capacity entry (32,080,000 bytes at the demo's 4,010,000-splat capacity). A 128-byte survivor/dispatch buffer and one 64-byte nonaliasing binding placeholder complete the added fixed allocation. The hierarchical compaction scan reuses radix scratch before histogram overwrites it. All 32,080,192 added bytes participate in initial pass hold, allocation admission, partial-failure unwind, and fenced retirement. The separate mandatory 16-byte bootstrap readback hold is also admitted before source residency; the existing 1 GiB demo ledger still admits the unchanged 4,010,000 capacity with a mutable startup target of 4,000,000.
 
 ## Compute Pipelines
 
@@ -625,6 +627,30 @@ Selection errors own only the error object they publish. They do not replace an 
 
 ## Trogir Demo
 
+### Collision navigation
+
+`packages/babylon-lite/src/collision/splat-voxel-collision.ts` provides optional collision queries through the package root:
+
+```typescript
+interface SplatVoxelCollision {
+    readonly min: [number, number, number];
+    readonly max: [number, number, number];
+    readonly resolution: number;
+    readonly depth: number;
+    readonly nodes: Uint32Array;
+    readonly masks: Uint32Array;
+}
+function parseSplatVoxelCollision(metadata: unknown, buffer: ArrayBuffer): SplatVoxelCollision;
+function loadSplatVoxelCollision(metadataUrl: string, signal?: AbortSignal): Promise<SplatVoxelCollision>;
+function moveSplatVoxelCamera(collision: SplatVoxelCollision, from: [number, number, number], to: [number, number, number], radius?: number): [number, number, number];
+```
+
+The loader accepts an HTTP(S) `.voxel.json` URL and derives its sibling `.voxel.bin` by replacing the pathname suffix, preserving the query. Metadata is bounded to 64 KiB and the decoded binary to 128 MiB. Parsing accepts voxel format 1.1 only: finite increasing grid bounds, positive resolution, four-voxel leaves, depth 1..20, and exact little-endian node/mask counts. Every child range, mixed-leaf index, depth and unique parent is checked before navigation. A word `0xff000000` is solid; a zero high byte indexes a pair of 32-bit occupancy masks; other words encode an eight-bit child mask and a 24-bit first-child index. Child order is X/Y/Z Morton order; mixed mask bits use `x + 4*y + 16*z`. Queries use the dataset's coordinate frame, require a clear starting position, block the grid boundary, and provide wall sliding without gravity. The module has no renderer or GPU dependency and is removed when its exports are unused.
+
+The voxel grid is already in the original viewer's world frame. Trogir collision queries convert Lite world positions with `(x,y,-z)` only. Camera motion sweeps a 0.15-unit half-extent box through occupied octree volumes using segment/slab intersections, then removes the blocked normal component and repeats for up to three sliding contacts. A small contact offset prevents repeated boundary intersections. Outside-grid motion is blocked. Continuous sweeps prevent tunnelling even on long frames; no geometry is inferred from partially loaded splats.
+
+Collision fetching starts alongside scene initialization. Controls stay unattached until collision data is ready; the coarse scene can appear while navigation is loading. Failures leave navigation disabled with an explicit HUD error. Page disposal aborts the collision request and prevents late control attachment. The default manifest and voxel pair are hosted under `https://assets.babylonjs.com/splats/Trogir/`. All asset roots use sibling voxel files and preserve their query parameters for both voxel requests. A nonempty `?collisionUrl=` selects a separate HTTP(S) voxel metadata URL with its own query parameters; an empty override uses the asset-root default. Dataset URLs and the Trogir coordinate adapter remain in the demo. The collision correction runs after free-camera input and before rendering, translating position and target together and removing its callback on detach.
+
 Files:
 
 - `lab/lite/demo-trogir-streaming.html`;
@@ -659,7 +685,18 @@ http://localhost:5174/demo-trogir-streaming.html?assetRoot=/local-gs/trogir/
 
 An `assetRoot` ending in `/lod-meta.json` is used as the manifest URL directly; other values retain directory-root behavior and have `lod-meta.json` appended. If the selected source cannot be loaded, the page reports the error and shows both the local setup and hosted override forms instead of hanging.
 
-The demo provides detail error and splat-budget controls, first-person mouse/keyboard controls, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. Its viewport permits browser zoom, and reduced-motion preference disables the loading-spinner animation rather than merely slowing it. The splat-budget slider starts at 1,200,000 and reaches 4,000,000 foreground splats. The demo therefore requests a 4,010,000-splat immutable capacity (reserving 10,000 slots for the 9,237-splat environment), a 1 GiB stream ledger, and the corresponding 256,640,000-byte WebGPU storage-buffer limits at device creation. This allocates the large working set up front even at the default target; an adapter that cannot expose those limits fails explicitly during startup. The camera starts at world eye `(-33.03, 0.24, -65.76)` with HUD yaw `27.70°`, up-positive pitch `6.62°`, roll `0.00°`, near `0.1`, and far `1500`. Startup creates that `FreeCamera` pose directly and attaches first-person controls exactly once; there is no orbit camera, camera-mode state, or camera-mode UI.
+Root query preservation covers the manifest and the demo's sibling voxel pair only. Stream chunk metadata and WebP references use normal relative-URL resolution: they retain their own query strings and do not inherit the declaring document's query. Private datasets must authorize every relative resource reference independently (or use suitable host authentication); a signed `assetRoot` alone does not authorize the entire dataset. Voxel hosts must accept the same query on both members of the pair.
+
+The demo provides quality, detail error and splat-budget controls, first-person mouse/keyboard controls, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. Its viewport permits browser zoom, and reduced-motion preference disables the loading-spinner animation. Quality is selected before device creation by `?quality=low|high`; absent or unknown values select lower memory. Changing the quality selector reloads the page, retaining asset overrides, so immutable allocations are recreated. The splat-budget slider is initialized and capped at that tier's foreground target; moving it alone does not shrink fixed buffers.
+
+| Tier                   | Foreground splats | Immutable capacity | GPU ledger | CPU admission | Required buffer size |
+| ---------------------- | ----------------: | -----------------: | ---------: | ------------: | -------------------: |
+| Lower memory (default) |         1,000,000 |          1,010,000 |    256 MiB |        64 MiB |     64,640,000 bytes |
+| High detail            |         4,000,000 |          4,010,000 |      1 GiB |       192 MiB |    256,640,000 bytes |
+
+Each tier reserves 10,000 slots for the 9,237-splat environment and requests its buffer size for both `maxBufferSize` and `maxStorageBufferBindingSize`. Fixed stream/pass storage is approximately 147 MiB in lower memory and 583 MiB in high detail; source residency is additional and bounded by the GPU ledger. Collision data sits outside the CPU admission budget: the Trogir pair retains 18,275,664 bytes (17.4 MiB), with approximately 37.2 MiB needed during parsing. Engine targets, browser decoding and driver allocations are also outside those ledgers. An adapter that cannot expose a selected tier's limits fails explicitly during startup.
+
+The camera starts at world eye `(-33.03, 0.24, -65.76)` with HUD yaw `27.70°`, up-positive pitch `6.62°`, roll `0.00°`, near `0.1`, and far `1500`. Camera speed is `0.8` with inertia `0.6`. Startup creates that `FreeCamera` pose directly and attaches first-person controls exactly once after collision data loads; there is no orbit camera, camera-mode state, or camera-mode UI.
 
 The page owns engine, scene, stream, controls, HUD callbacks, and asynchronous startup as one idempotent lifecycle. `pagehide` or any failure during engine creation, stream load, scene registration, engine start, or first-frame readiness disposes every resource already acquired before showing an error. As soon as a stream result becomes owned, the page installs a rejection observer on its original readiness promise; later awaiting that original promise still reports a genuine readiness failure, while registration/start failure or pagehide can dispose the stream without producing a second unhandled readiness rejection. Each awaited completion checks whether disposal already fired; a late engine or stream result is observed and immediately disposed instead of escaping ownership. Success-only readiness flags and overlay removal cannot run after disposal.
 
@@ -698,7 +735,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - Trogir's actual demo placement helper, asymmetric public bounds, and a non-diagonal covariance transformed by the same scene-node rotation;
 - the exact Trogir first-person startup formats as the specified six-field HUD pose, retains its FOV/near/far settings, attaches first-person controls exactly once, and detaches them idempotently;
 - bootstrap file chosen by broad coverage before fine requests;
-- request deduplication, HTTP semaphore, whole-preparation CPU/decode admission including the single-slot metadata/image cycle, cancellation, bounded retry, out-of-order stale generations, and disposal;
+- request deduplication, concurrent HTTP/decode limits, memory allowances and exclusive large-source fallback, nearby-file queue ordering, cancellation, bounded retry, out-of-order stale generations, and disposal;
 - strict-priority preparation preemption proves stalled fine work fully unwinds, newly visible coarse coverage completes, then the original job resumes without exceeding HTTP/decode/CPU caps;
 - aliased and nonaliased environment sources share or own exactly one runtime/cache allocation respectively, preserve combined leaf/environment demand, foreground allowance, publication, eviction/reload, and disposal;
 - pre-bootstrap orthographic selection rejects readiness and prevents late callbacks; mutable selection errors recover on valid cached and recomputed inputs without masking source failures;
@@ -706,7 +743,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - displayed fallback retained across delayed/failed/cancelled replacements, progressively cheaper resident admission, and below-capacity resident-target pressure;
 - fake-clock per-leaf cooldown covering immediate initial coverage/refinement, below/exact deadline transitions, oscillation, async arrival, shared views, pressure/budget bypass, missing coverage, disposal, zero compatibility, and option validation;
 - exact-input cache reuse and planner counters covering mutable matrix/camera/viewport/world changes plus every source, admission, binding, pressure, publication, environment, and cooldown-expiry invalidation while lifecycle scheduling continues;
-- cache accounting, pin/ref protections, LRU admission, partial upload cleanup, and retirement.
+- cache accounting, pin/ref protections, farthest-first admission with deterministic recency ties, moving/multiple cameras, transformed and shared-source bounds, partial upload cleanup, and retirement.
 
 ### Numerical/GPU behavior
 
@@ -742,6 +779,10 @@ packages/babylon-lite/src/index.ts
 docs/lite/architecture/55-gaussian-splat-streaming.md
 lab/lite/demo-trogir-streaming.html
 lab/lite/src/demos/trogir-camera.ts
+lab/lite/src/demos/trogir-assets.ts
+lab/lite/src/demos/trogir-collision.ts
+packages/babylon-lite/src/collision/splat-voxel-collision.ts
+lab/lite/src/demos/trogir-quality.ts
 lab/lite/src/demos/trogir-camera-pose.ts
 lab/lite/src/demos/trogir-streaming-placement.ts
 lab/lite/src/demos/trogir-streaming.ts
@@ -753,5 +794,9 @@ tests/lite/unit/splat-stream-requests.test.ts
 tests/lite/unit/splat-stream-cache.test.ts
 tests/lite/unit/splat-stream-orchestration.test.ts
 tests/lite/unit/trogir-camera.test.ts
+tests/lite/unit/trogir-quality.test.ts
+tests/lite/unit/splat-voxel-collision.test.ts
 tests/lite/unit/trogir-streaming-placement.test.ts
+tests/lite/build/public-api-types.test.ts
+tests/lite/build/splat-voxel-treeshake.test.ts
 ```

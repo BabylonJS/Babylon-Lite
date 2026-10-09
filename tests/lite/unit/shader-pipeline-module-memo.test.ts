@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
 import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
-import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
-import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
+import { enableShaderMaterialPipelineSharing } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-pipeline-sharing";
+import { _setShaderVertexBuffersKey, clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
+import { _setSharedShaderPipelineCache, getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
@@ -36,22 +37,31 @@ const fragment = (tint: string) => wgsl`
 const colorSig = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus", _sampleCount: 1 } as unknown as RenderTargetSignature;
 const depthOnlySig = { _depthStencilFormat: "depth24plus", _sampleCount: 1 } as unknown as RenderTargetSignature;
 
-type CacheMaterial = ShaderMaterial & {
-    _shaderPipelineCache?: { getModule: (...args: unknown[]) => unknown };
-};
-
-function prepare(materials: ShaderMaterial[]) {
+function prepare(materials: ShaderMaterial[], globalSharing = false) {
     clearShaderPipelineCache();
     clearSceneBGLCache();
     const { engine } = makeEngine();
-    enableShaderPipelineCache(
-        engine,
-        materials.map((material) => ({ material }))
-    );
-    const cache = (materials[0] as CacheMaterial)._shaderPipelineCache!;
+    if (globalSharing) {
+        enableShaderMaterialPipelineSharing();
+        getOrCreateShaderPipelineBindings(engine, materials[0]!);
+    } else {
+        enableShaderPipelineCache(
+            engine,
+            materials.map((material) => ({ material }))
+        );
+    }
+    const cache = materials[0]!._shaderPipelineCache!;
     const getModule = vi.spyOn(cache, "getModule");
     return { engine, getModule };
 }
+
+afterEach(() => {
+    _setSharedShaderPipelineCache(null);
+    _setShaderVertexBuffersKey(null);
+    clearShaderPipelineCache();
+    clearSceneBGLCache();
+    vi.restoreAllMocks();
+});
 
 describe("ShaderMaterial module memo (rebinds do not recompose or look up resolved modules)", () => {
     it("resolves a color pass with two getModule calls, then none on an identical rebind", () => {
@@ -111,31 +121,42 @@ describe("ShaderMaterial module memo (rebinds do not recompose or look up resolv
         expect(getModule).toHaveBeenCalledTimes(4);
     });
 
-    it.each(["generation", "device", "generation-and-device"])(
-        "resolves a view again after a source-first renewal (%s changed), even though the view inherits current pipeline state",
-        (change) => {
-            const source = createShaderMaterial({ vertexSource: vertex, fragmentSource: fragment("0.2, 0.2, 0.2"), attributes: ["position"] });
-            const { engine } = prepare([source]);
-            getOrCreateShaderPipeline(engine, colorSig, source, getOrCreateShaderPipelineBindings(engine, source));
-            const view = createMaterialView(source, { features: 0 }) as unknown as ShaderMaterial;
-            Object.defineProperty(view, "fragmentSource", { value: fragment("0.9, 0.9, 0.9"), configurable: true });
-            const oldViewPipeline = getOrCreateShaderPipeline(engine, colorSig, view, getOrCreateShaderPipelineBindings(engine, view));
-            expect(Object.prototype.hasOwnProperty.call(view, "_shaderBindings")).toBe(false); // the view inherits the source's bindings state
-            if (change !== "device") clearShaderPipelineCache();
-            const nextEngine = change === "generation" ? engine : makeEngine().engine;
-            enableShaderPipelineCache(nextEngine, [{ material: source }]);
-            const lookups = vi.spyOn((source as CacheMaterial)._shaderPipelineCache!, "getModule");
-            getOrCreateShaderPipeline(nextEngine, colorSig, source, getOrCreateShaderPipelineBindings(nextEngine, source)); // source first: the view now inherits up-to-date fields
-            expect(lookups).toHaveBeenCalledTimes(2);
-            const newViewPipeline = getOrCreateShaderPipeline(nextEngine, colorSig, view, getOrCreateShaderPipelineBindings(nextEngine, view));
-            expect(lookups).toHaveBeenCalledTimes(4); // the view's own stale memo is discarded: its fragment is resolved again
-            const viewCodes = lookups.mock.calls.slice(2).map((call) => call[1] as string);
-            expect(viewCodes.some((code) => code.includes("0.9, 0.9, 0.9"))).toBe(true);
-            expect(newViewPipeline).not.toBe(oldViewPipeline);
-            getOrCreateShaderPipeline(nextEngine, colorSig, view, getOrCreateShaderPipelineBindings(nextEngine, view));
-            expect(lookups).toHaveBeenCalledTimes(4);
+    it.each(
+        (["generation", "device", "generation-and-device"] as const).flatMap((change) => [
+            { change, globalSharing: false, lateSharing: false },
+            { change, globalSharing: true, lateSharing: false },
+            { change, globalSharing: false, lateSharing: true },
+        ])
+    )("resolves an inherited view after source-first $change renewal (global: $globalSharing, late: $lateSharing)", ({ change, globalSharing, lateSharing }) => {
+        const source = createShaderMaterial({ vertexSource: vertex, fragmentSource: fragment("0.2, 0.2, 0.2"), attributes: ["position"] });
+        const { engine } = prepare([source], globalSharing);
+        getOrCreateShaderPipeline(engine, colorSig, source, getOrCreateShaderPipelineBindings(engine, source));
+        const view = createMaterialView(source, { features: 0 }) as unknown as ShaderMaterial;
+        Object.defineProperty(view, "fragmentSource", { value: fragment("0.9, 0.9, 0.9"), configurable: true });
+        const oldViewPipeline = getOrCreateShaderPipeline(engine, colorSig, view, getOrCreateShaderPipelineBindings(engine, view));
+        expect(Object.prototype.hasOwnProperty.call(view, "_shaderBindings")).toBe(false); // the view inherits the source's bindings state
+        if (lateSharing) {
+            enableShaderMaterialPipelineSharing();
         }
-    );
+        if (change !== "device") {
+            clearShaderPipelineCache();
+        }
+        const nextEngine = change === "generation" ? engine : makeEngine().engine;
+        if (!globalSharing && !lateSharing) {
+            enableShaderPipelineCache(nextEngine, [{ material: source }]);
+        }
+        const nextBindings = getOrCreateShaderPipelineBindings(nextEngine, source);
+        const lookups = vi.spyOn(source._shaderPipelineCache!, "getModule");
+        getOrCreateShaderPipeline(nextEngine, colorSig, source, nextBindings); // source first: the view now inherits up-to-date fields
+        expect(lookups).toHaveBeenCalledTimes(2);
+        const newViewPipeline = getOrCreateShaderPipeline(nextEngine, colorSig, view, getOrCreateShaderPipelineBindings(nextEngine, view));
+        expect(lookups).toHaveBeenCalledTimes(4); // the view's own stale memo is discarded: its fragment is resolved again
+        const viewCodes = lookups.mock.calls.slice(2).map((call) => call[1] as string);
+        expect(viewCodes.some((code) => code.includes("0.9, 0.9, 0.9"))).toBe(true);
+        expect(newViewPipeline).not.toBe(oldViewPipeline);
+        getOrCreateShaderPipeline(nextEngine, colorSig, view, getOrCreateShaderPipelineBindings(nextEngine, view));
+        expect(lookups).toHaveBeenCalledTimes(4);
+    });
 
     it("memoizes the instance-colour variants of a getFinalColor material separately, with the cache enabled", () => {
         const source = createShaderMaterial({
@@ -181,7 +202,7 @@ describe("ShaderMaterial module memo (rebinds do not recompose or look up resolv
         clearShaderPipelineCache();
         const { engine: nextEngine } = makeEngine();
         enableShaderPipelineCache(nextEngine, [{ material }]);
-        const nextCache = (material as CacheMaterial)._shaderPipelineCache!;
+        const nextCache = material._shaderPipelineCache!;
         const nextGetModule = vi.spyOn(nextCache, "getModule");
         getOrCreateShaderPipeline(nextEngine, colorSig, material, getOrCreateShaderPipelineBindings(nextEngine, material));
         expect(nextGetModule).toHaveBeenCalledTimes(2);
