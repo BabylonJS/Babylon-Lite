@@ -6,6 +6,7 @@ import {
     createTextureFromSource,
     disposeGLEngine,
     disposeTexture,
+    onContextRestored,
     type GLTextureSourceOptions,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -125,7 +126,7 @@ describe("lite-gl createTextureFromSource", () => {
         ["canvas", { width: 80, height: 40, getContext: () => null }],
         ["image data", { width: 80, height: 40, data: new Uint8ClampedArray(80 * 40 * 4) }],
         ["image", { width: 10, height: 5, naturalWidth: 80, naturalHeight: 40 }],
-        ["video", { width: 10, height: 5, videoWidth: 80, videoHeight: 40 }],
+        ["video", { width: 10, height: 5, videoWidth: 80, videoHeight: 40, readyState: 2 }],
         ["video frame", { codedWidth: 100, codedHeight: 60, displayWidth: 80, displayHeight: 40 }],
     ])("reads intrinsic dimensions for %s without DOM constructor globals", (_name, source) => {
         const { engine } = setup();
@@ -155,6 +156,34 @@ describe("lite-gl createTextureFromSource", () => {
         const image = { width: 80, height: 40, naturalWidth: 0, naturalHeight: 0 } as HTMLImageElement;
         expect(() => createTextureFromSource(engine, image)).toThrow("source texture dimensions");
         expect(mock.log).toEqual([]);
+    });
+
+    it.each([0, 1])("rejects a video without a current frame at readyState %s before any GL call", (readyState) => {
+        const { mock, engine } = setup();
+        const source = { videoWidth: 80, videoHeight: 40, readyState } as HTMLVideoElement;
+        expect(() => createTextureFromSource(engine, source)).toThrow("source video has no decoded current frame");
+        expect(mock.log).toEqual([]);
+        expect(engine._textures.size).toBe(0);
+    });
+
+    it.each([2, 3, 4])("uploads a video with a current frame at readyState %s exactly once", (readyState) => {
+        const { mock, engine, gl } = setup();
+        const source = { videoWidth: 80, videoHeight: 40, readyState } as HTMLVideoElement;
+        const tex = createTextureFromSource(engine, source);
+        expect(tex).toMatchObject({ width: 80, height: 40, isReady: true });
+        expect(Array.from(engine._textures)).toEqual([tex]);
+        expect(mock.log).toEqual([
+            { name: "createTexture", args: [] },
+            { name: "pixelStorei", args: [gl.UNPACK_FLIP_Y_WEBGL, 0] },
+            { name: "pixelStorei", args: [gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0] },
+            { name: "pixelStorei", args: [gl.UNPACK_ALIGNMENT, 4] },
+            { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+            { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source] },
+            { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR] },
+            { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR] },
+            { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE] },
+            { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE] },
+        ]);
     });
 
     it.each([0, 3, NaN])("rejects invalid unpack alignment %s before allocating", (unpackAlignment) => {
@@ -265,6 +294,48 @@ describe("lite-gl createTextureFromSource", () => {
         fireRestored(canvas);
         expect([tex.width, tex.height]).toEqual([128, 16]);
         expect(mock.log.find((call) => call.name === "texImage2D")?.args[5]).toBe(source);
+    });
+
+    it("restores a retained metadata-only video as blank and drops the source", () => {
+        const { mock, canvas, engine, gl } = setup();
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        const restored = vi.fn();
+        onContextRestored(engine, restored);
+        const source = { videoWidth: 80, videoHeight: 40, readyState: 2 };
+        const tex = createTextureFromSource(engine, source as HTMLVideoElement);
+        source.readyState = 1;
+        for (let cycle = 0; cycle < 2; cycle++) {
+            const oldHandle = tex.handle;
+            fireLost(canvas);
+            expect(tex.isReady).toBe(false);
+            mock.clear();
+            fireRestored(canvas);
+            expect(tex.handle).not.toBe(oldHandle);
+            expect(tex).toMatchObject({ width: 80, height: 40, isReady: true });
+            expect(engine._isLost).toBe(false);
+            expect(restored).toHaveBeenCalledTimes(cycle + 1);
+            expect(errors).toHaveBeenCalledExactlyOnceWith(
+                "lite-gl: retained texture source unusable on restore; restored blank",
+                new Error("lite-gl: source video has no decoded current frame")
+            );
+            expect(mock.log).toEqual([
+                { name: "createTexture", args: [] },
+                { name: "pixelStorei", args: [gl.UNPACK_FLIP_Y_WEBGL, 0] },
+                { name: "pixelStorei", args: [gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0] },
+                { name: "pixelStorei", args: [gl.UNPACK_ALIGNMENT, 4] },
+                { name: "bindTexture", args: [gl.TEXTURE_2D, tex.handle] },
+                { name: "texImage2D", args: [gl.TEXTURE_2D, 0, gl.RGBA8, 80, 40, 0, gl.RGBA, gl.UNSIGNED_BYTE, null] },
+                { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR] },
+                { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR] },
+                { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE] },
+                { name: "texParameteri", args: [gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE] },
+            ]);
+            Object.defineProperty(source, "readyState", {
+                get: () => {
+                    throw new Error("dropped video source read");
+                },
+            });
+        }
     });
 
     it("uploads once without retention and restores blank at the original dimensions", () => {

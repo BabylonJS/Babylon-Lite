@@ -466,7 +466,13 @@ integers within `engine.caps.maxTextureSize`. Invalid dimensions, invalid
 `unpackAlignment` (anything other than 1/2/4/8), a lost/disposed engine or a
 null texture allocation throw explicitly. An `ImageData` whose buffer was
 transferred (empty `data`) is also rejected up front, because WebGL would only
-raise `INVALID_VALUE` without throwing. SVG and density-selected (`srcset`)
+raise `INVALID_VALUE` without throwing. Video elements must have a decoded
+current frame (`readyState >= 2`, `HAVE_CURRENT_DATA`); positive dimensions at
+`HAVE_METADATA` alone are insufficient. The shared validation rejects videos
+without a current frame before any GL call during creation and routes them
+through the logged blank fallback during restoration. This check uses the
+numeric readiness value without referencing DOM constructors.
+SVG and density-selected (`srcset`)
 image elements can upload at a size other than their natural size; convert
 them to an `ImageBitmap` first. No DOM constructor globals are
 needed, so bitmap/offscreen uploads also work in workers.
@@ -488,7 +494,7 @@ pixels and intrinsic size, not a creation-time snapshot. The standard restore
 protocol installs a new handle, replays one upload and invokes
 `_initializeParameters` to apply the four creation-time sampling parameters.
 If the retained source is unusable at restore time (closed bitmap, zero-size
-video, upload exception), the closure logs the error, drops the source and
+video, video without a current frame, upload exception), the closure logs the error, drops the source and
 allocates transparent-black RGBA8 storage at the last uploaded size instead.
 The failure stays local to that texture: it never aborts the engine-wide
 restore replay, so later textures, render targets and buffers still rebuild
@@ -508,7 +514,8 @@ exported from the root barrel (no new package subpath). Non-users ship none of
 its source sizing, validation or retention logic. Unit tests assert the exact
 single-upload GL stream, repeated-upload state elision, nonzero active-unit
 transitions, source dimensions, validation, disposal, both restore modes and
-the unusable-retained-source fallback.
+the unusable-retained-source fallback, including metadata-only video creation
+and restoration.
 
 #### 3.4.1 Native 3D pixel textures (optional)
 

@@ -161,6 +161,10 @@ disposeTexture(engine, texture);
 The factory accepts `TexImageSource` (including `ImageBitmap`, `ImageData`,
 canvas/offscreen canvas, decoded images, video and video frames), derives the
 intrinsic size, and performs no placeholder or blank allocation first.
+Video elements must have a decoded current frame (`readyState >= 2`,
+`HAVE_CURRENT_DATA`), not just metadata with positive dimensions. A retained
+video that loses its current frame restores as transparent black with a logged
+error, like other unusable retained sources.
 `GLTextureSourceOptions` configures filtering/wrapping and unpack flags.
 For `ImageBitmap`, WebGL ignores unpack flip/premultiplication; choose those
 settings during decoding instead. Convert SVG or density-selected (`srcset`)

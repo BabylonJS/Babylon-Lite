@@ -46,16 +46,19 @@ export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internal
  * images and density-selected (`srcset` / `x` descriptor) images, WebGL may
  * upload a different pixel size, so the reported and restored dimensions can
  * be wrong; convert those to an `ImageBitmap` (`createImageBitmap`) first.
+ * Video elements must have a decoded current frame (`readyState >= 2`,
+ * `HAVE_CURRENT_DATA`); positive metadata dimensions alone are insufficient.
  *
  * @param engine - The live engine that will own the texture.
  * @param source - An ImageBitmap, ImageData (with an attached buffer), canvas,
- * OffscreenCanvas, decoded raster image, video or VideoFrame with positive
- * intrinsic dimensions.
+ * OffscreenCanvas, decoded raster image, video with a decoded current frame,
+ * or VideoFrame with positive intrinsic dimensions.
  * @param options - Unpack and sampling overrides; defaults are invertY false,
  * premultiplyAlpha false, unpackAlignment 4 and retainSource true.
  * @returns A managed texture disposed with {@link disposeTexture}.
  * @throws If the engine is lost/disposed, dimensions exceed the texture limit
- * or are not positive integers, unpack alignment is invalid, or allocation fails.
+ * or are not positive integers, the source is detached or has no decoded
+ * current frame, unpack alignment is invalid, or allocation fails.
  */
 export function createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options: GLTextureSourceOptions = {}): GLTexture {
     if (engine._isLost || engine._disposed) {
@@ -137,12 +140,16 @@ export function createTextureFromSource(engine: GLEngineContext, source: TexImag
 
 /** Use intrinsic upload dimensions without depending on DOM constructor globals.
  *  Also rejects sources WebGL would fail on without throwing (a detached
- *  `ImageData` buffer only raises `INVALID_VALUE`), so creation throws and
+ *  `ImageData` buffer or video without a current frame raises `INVALID_VALUE`), so creation throws and
  *  restore takes the blank fallback instead of marking empty storage ready. */
 function sourceSize(engine: GLEngineContext, source: TexImageSource): [number, number] {
     let width: number;
     let height: number;
     if ("videoWidth" in source) {
+        // HAVE_CURRENT_DATA: dimensions alone do not guarantee a decoded frame.
+        if (source.readyState < 2) {
+            throw new Error("lite-gl: source video has no decoded current frame");
+        }
         width = source.videoWidth;
         height = source.videoHeight;
     } else if ("naturalWidth" in source) {
