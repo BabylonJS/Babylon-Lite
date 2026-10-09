@@ -279,6 +279,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     }
 
     let needsDeformation = false;
+    const membershipVersion = scene._renderableVersion;
     let needsAdvancedPipeline = !!pickDiscard?.worldAdjustWgsl || !!pickDiscard?.vertexData || !!pickDiscard?.storage?.some((storage) => storage.vertex);
     let candidates: { readonly mesh: Mesh; readonly ignore: PickIgnore | null }[];
     if (ignored) {
@@ -307,6 +308,10 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const pipelineApi = advancedDraw ? null : detailed ? await import("./picking-detailed-pipeline.js") : await import("./picking-pipeline.js");
     if (engine._device !== device) {
         return pickAsyncImpl(picker, x, y, options);
+    }
+    // Lazy pipeline loading may yield across a scene removal; never submit stale candidates.
+    if (scene._renderableVersion !== membershipVersion) {
+        candidates = candidates.filter(({ mesh }) => !mesh._disposed && scene.meshes.includes(mesh));
     }
 
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
@@ -530,7 +535,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             }
         }
     }
-    if (!hitMesh && !hitContributor) {
+    if ((hitMesh && (hitMesh._disposed || !scene.meshes.includes(hitMesh))) || (!hitMesh && !hitContributor)) {
         if (debug) {
             debug.tracePick(debugLabel!, debugInput!, pickRay, pickId, depth, false, true);
         }

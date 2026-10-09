@@ -35,6 +35,60 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes retained mesh membership and pure-state leases without WebGPU types", () => {
+        const probePath = resolve(BUILD_DIR, "mesh-retention.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    retainMeshResources, releaseMeshResources, detachMeshFromScene, addToScene,
+    type MeshResourceLease, type Mesh, type SceneContext, type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const mesh: Mesh;
+const lease: MeshResourceLease = retainMeshResources(engine, mesh);
+const identity: Mesh = lease.mesh;
+detachMeshFromScene(scene, identity);
+addToScene(scene, identity);
+releaseMeshResources(lease);
+// @ts-expect-error Mesh-only API: transform-only roots and asset containers are not supported.
+detachMeshFromScene(scene, {});
+// @ts-expect-error Leases are pure state, not objects with attached disposal methods.
+lease.dispose();
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+            const dts = readFileSync(DTS_PATH, "utf8");
+            expect(dts).not.toContain("_retainedMeshes");
+            expect(dts).not.toContain("installMeshRetention");
+            expect(dts).not.toContain("removeMeshFromScene");
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes voxel collision through the root API without GPU types", () => {
         const probePath = resolve(BUILD_DIR, "voxel-collision.probe.ts");
         try {
