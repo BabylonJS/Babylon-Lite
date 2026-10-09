@@ -1,0 +1,993 @@
+/** MeshLoD CPU/GPU render equivalence (Task 5.4) — REQ-RENDER-2, REQ-RENDER-3.
+ *
+ *  Node-hosted checks against a mock device that the material-owned render path is
+ *  batch-scaled, not meshlet-scaled, and that GPU selection over the REAL statue
+ *  hierarchy (312 groups / 2491 clusters / 363 nodes / 12 levels) picks the exact same
+ *  clusters — hence the same expanded geometry — as the CPU oracle. Exactly one
+ *  `drawIndirect` is issued per exact asset+material+target key regardless of selected
+ *  meshlet or instance count. Real WebGPU confirms the rendered pixels are identical to
+ *  the CPU reference (MAD 0.0), recorded on the Task 5.3 board entry; goldens unchanged. */
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
+import { selectMeshLoDCpu } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
+import {
+    INSTANCE_WORDS,
+    PAGE_FLAG_RESIDENT,
+    PAGE_STATE_WORDS,
+    buildPageStateData,
+    packClusters,
+    packGroupPageRefs,
+    packGroups,
+    packHierarchyNodes,
+    packInstanceRecord,
+    runMeshLoDGpuSelection,
+    runMeshLoDGpuExpansion,
+} from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
+import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
+import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
+import { createSceneContext, disposeScene } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
+import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh.js";
+import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
+import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
+import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
+import type { DrawUpdateBatch } from "../../../../packages/babylon-lite/src/render/renderable.js";
+import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
+import { getProjectionMatrix } from "../../../../packages/babylon-lite/src/camera/camera.js";
+import { meshLoDDebugModeCode } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-debug.js";
+import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { AcesToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/pbr-aces-wgsl.js";
+import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
+import { setPbrLightmap } from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-lightmap.js";
+import { setPbrMetallicReflectance } from "../../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance.js";
+import { buildPbrRenderables } from "../../../../packages/babylon-lite/src/material/pbr/pbr-renderable.js";
+import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
+import { enableMaterialStencil } from "../../../../packages/babylon-lite/src/material/enable-material-stencil.js";
+import type { StencilState } from "../../../../packages/babylon-lite/src/material/material.js";
+import {
+    clearPbrLocalEnvironment,
+    enablePbrLocalCubemap,
+    setPbrEnvironment,
+    setPbrLocalEnvironment,
+    setPbrLocalEnvironmentProbeSet,
+} from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-local-cubemap.js";
+import type { PbrLocalEnvironmentProbeSet } from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-local-cubemap.js";
+import type { EnvironmentTextures } from "../../../../packages/babylon-lite/src/loader-env/load-env.js";
+import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
+import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { createRenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target.js";
+import { _createAutomaticRenderTask } from "../../../../packages/babylon-lite/src/frame-graph/render-task-base.js";
+import { flushGpuResourceRetirements, waitForGpuResourceRetirements } from "../../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
+import { releaseTexture } from "../../../../packages/babylon-lite/src/resource/texture-release.js";
+import { getTextureReferenceStore } from "../../../../packages/babylon-lite/src/resource/texture-reference-store.js";
+
+const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
+
+function fakeScene(engine: EngineContext): SceneContext {
+    return { _deferredBuilders: [], _renderables: [], _disposables: [], surface: { engine } } as unknown as SceneContext;
+}
+
+function fakeCamera(positionX = 0): Camera {
+    return {
+        fov: 0.8,
+        nearPlane: 0.1,
+        farPlane: 100,
+        worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, positionX, 0, -10, 1]),
+        worldMatrixVersion: 1,
+        _viewCache: new Float32Array(16),
+        _projCache: new Float32Array(16),
+        _vpCache: new Float32Array(16),
+        _viewVer: -1,
+        _projVer: -1,
+        _projAspect: -1,
+        _vpVer: -1,
+        _vpAspect: -1,
+        _useFloatingOrigin: false,
+    } as unknown as Camera;
+}
+
+const SIG: RenderTargetSignature = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 };
+const CONTEXT = { targetWidth: 800, targetHeight: 600, _camera: fakeCamera() };
+const STENCIL_CASES: readonly StencilState[] = [{ compare: "equal" }, { compare: "always", passOp: "increment-clamp" }];
+const LOCAL_ENVIRONMENT_CASES = ["override", "box", "sphere", "probes"] as const;
+
+function fakeEnvironment(): EnvironmentTextures {
+    return {
+        brdfLut: {} as GPUTexture,
+        brdfLutView: {} as GPUTextureView,
+        brdfSampler: {} as GPUSampler,
+        specularCube: {} as GPUTexture,
+        specularCubeView: {} as GPUTextureView,
+        cubeSampler: {} as GPUSampler,
+        irradianceSH: new Float32Array(36),
+        sphericalHarmonics: new Float32Array(36),
+        lodGenerationScale: 0.8,
+    };
+}
+
+function assignMaterialEnvironment(material: PbrMaterialProps, kind: (typeof LOCAL_ENVIRONMENT_CASES)[number]): void {
+    const environment = fakeEnvironment();
+    if (kind === "override") {
+        setPbrEnvironment(material, environment);
+    } else if (kind === "box") {
+        setPbrLocalEnvironment(material, environment, { projectionPosition: [0, 0, 0], projectionSize: [4, 4, 4] });
+    } else if (kind === "sphere") {
+        setPbrLocalEnvironment(material, environment, { shape: "sphere", projectionPosition: [0, 0, 0], projectionRadius: 2 });
+    } else {
+        const data = new Float32Array(32);
+        const set: PbrLocalEnvironmentProbeSet = {
+            probes: [
+                {
+                    environment,
+                    capturePosition: [0, 0, 0],
+                    projectionPosition: [0, 0, 0],
+                    projectionSize: [4, 4, 4],
+                    influencePosition: [0, 0, 0],
+                    influenceInnerSize: [2, 2, 2],
+                    influenceOuterSize: [6, 6, 6],
+                },
+            ],
+            _uniformBuffer: {} as GPUBuffer,
+            _uniformData: data,
+            _uniformU32: new Uint32Array(data.buffer),
+            _texture: environment.specularCube,
+            _textureView: environment.specularCubeView,
+            _sampler: environment.cubeSampler,
+            _gridBuffer: {} as GPUBuffer,
+            _gridData: new Uint32Array(0),
+            _gridMinimum: [0, 0, 0],
+            _gridCellSize: 1,
+            _gridDimensions: [1, 1, 1],
+            _gridStride: 1,
+            _engine: engine,
+            _device: engine._device,
+            _ensureDevice: vi.fn(),
+        };
+        setPbrLocalEnvironmentProbeSet(material, set);
+    }
+}
+
+let engine: EngineContext;
+
+beforeEach(() => {
+    _setMeshLoDPageDecoder(createFillDecoder().decoder);
+    engine = createMockEngine().engine;
+});
+afterEach(() => {
+    _setMeshLoDPageDecoder(null);
+});
+
+async function build(asset: MeshLoDAsset, material: PbrMaterialProps, instanceCount: number, scene = fakeScene(engine)): Promise<SceneContext> {
+    for (let i = 0; i < instanceCount; i++) {
+        const instance = createMeshLoDInstance(asset, material);
+        instance.position.set(i * 2, 0, 0);
+        addMeshLoDInstanceToScene(scene, instance);
+    }
+    for (const builder of scene._deferredBuilders) {
+        await builder();
+    }
+    return scene;
+}
+
+function flush(binding: { update?: (c: typeof CONTEXT) => void; _updateBatches?: readonly DrawUpdateBatch[] }): void {
+    const batch = binding._updateBatches?.[0];
+    batch?.reset();
+    binding.update!(CONTEXT);
+    batch?.flush(engine);
+}
+
+/** Run the GPU selection model over a loaded runtime's real packed hierarchy. */
+function gpuSelectStatue(runtime: MeshLoDAssetRuntime): number[] {
+    const resident = new Set<number>();
+    runtime.gpu.pages.forEach((p, id) => {
+        if (p.state === "gpu-resident" && p.arenaOffset >= 0) {
+            resident.add(id);
+        }
+    });
+    const pageState = new Uint32Array(runtime.gpu.pages.length * PAGE_STATE_WORDS);
+    resident.forEach((id) => (pageState[id * PAGE_STATE_WORDS] = PAGE_FLAG_RESIDENT));
+    const wordsPerInstance = Math.max(Math.ceil(runtime.groups.length / 32), 1);
+    const instances = new Float32Array(INSTANCE_WORDS);
+    const instancesU32 = new Uint32Array(instances.buffer);
+    packInstanceRecord(instances, instancesU32, 0, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], true, 0);
+    const model = runMeshLoDGpuSelection({
+        nodes: packHierarchyNodes(runtime.hierarchyNodes),
+        groups: packGroups(runtime.groups),
+        clusters: packClusters(runtime.clusters),
+        groupPageRefs: packGroupPageRefs(runtime.groupPageRefs),
+        pageState,
+        pageStoredBytes: runtime.pageRecords.map((r) => r.storedBytes),
+        instances,
+        instancesU32,
+        priorState: new Uint32Array(wordsPerInstance),
+        instanceCount: 1,
+        nodeCount: runtime.hierarchyNodes.length,
+        groupCount: runtime.groups.length,
+        clusterCount: runtime.clusters.length,
+        pageCount: runtime.gpu.pages.length,
+        wordsPerInstance,
+        params: {
+            cameraPos: [0, 0, 5],
+            verticalFov: 1.0,
+            near: 0.1,
+            targetWidth: 1000,
+            targetHeight: 1000,
+            frustumPlanes: [],
+            screenSpaceError: runtime.settings.screenSpaceError,
+            lodHysteresis: runtime.settings.lodHysteresis,
+            levelCount: runtime.header.levelCount,
+        },
+    });
+    return [...new Set(model.selected.map((p) => p.clusterId))].sort((a, b) => a - b);
+}
+
+function cpuSelectStatue(runtime: MeshLoDAssetRuntime): number[] {
+    const result = selectMeshLoDCpu({
+        groups: runtime.groups,
+        clusters: runtime.clusters,
+        nodes: runtime.hierarchyNodes,
+        pageRecords: runtime.pageRecords,
+        groupPageRefs: runtime.groupPageRefs,
+        levelCount: runtime.header.levelCount,
+        worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        camera: { position: [0, 0, 5], verticalFov: 1.0, near: 0.1, targetWidth: 1000, targetHeight: 1000 },
+        frustumPlanes: [],
+        screenSpaceError: runtime.settings.screenSpaceError,
+        lodHysteresis: runtime.settings.lodHysteresis,
+        isPageResident: (id) => runtime.gpu.pages[id]?.state === "gpu-resident",
+        wasFineRequired: new Uint8Array(runtime.groups.length),
+    });
+    return Array.from(result.selectedClusterIds);
+}
+
+describe("MeshLoD render equivalence — GPU selection over the real statue hierarchy", () => {
+    it("GPU model selects the same clusters as the CPU oracle", async () => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const runtime = asset._runtime;
+        const gpu = gpuSelectStatue(runtime);
+        const cpu = cpuSelectStatue(runtime);
+        expect(gpu).toEqual(cpu);
+        expect(gpu.length).toBeGreaterThan(0); // the coarse terminal cut
+
+        // The selected clusters expand to the same triangle count the CPU render reports.
+        const cpuTris = gpu.reduce((sum, c) => sum + runtime.clusters[c]!.triangleCount, 0);
+        const cpuScene = await build(await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" }), {} as PbrMaterialProps, 1);
+        cpuScene._renderables[0]!.bind(engine, SIG).update!(CONTEXT);
+        expect(cpuScene._meshLoDRegistry!.batches[0]!.asset.diagnostics.renderedTriangleCount).toBe(cpuTris);
+    });
+});
+
+describe.each(["cpu", "gpu"] as const)("MeshLoD render equivalence — per-material environments (%s)", (selectionMode) => {
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects %s assignments before scene registration with or without a global environment", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        for (const globalEnvironment of [undefined, fakeEnvironment()]) {
+            const scene = fakeScene(engine);
+            scene._envTextures = globalEnvironment;
+            const material = createPbrMaterial();
+            assignMaterialEnvironment(material, kind);
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "per-material environments or local probes" })
+            );
+            expect(scene._meshLoDRegistry).toBeUndefined();
+            expect(scene._deferredBuilders).toHaveLength(0);
+            expect(scene._renderables).toHaveLength(0);
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects %s assignments before deferred allocation for any batch", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        for (const globalEnvironment of [undefined, fakeEnvironment()]) {
+            const scene = fakeScene(engine);
+            scene._envTextures = globalEnvironment;
+            const texture = createSolidTexture2D(engine, 1, 1, 1);
+            const first = createPbrMaterial({ baseColorTexture: texture });
+            const second = createPbrMaterial();
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+            assignMaterialEnvironment(second, kind);
+            const createTexture = vi.spyOn(mock.device, "createTexture");
+            const createPipeline = vi.spyOn(mock.device, "createRenderPipeline");
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({
+                code: "MLOD_UNSUPPORTED_MATERIAL",
+                actual: "per-material environments or local probes",
+            });
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+            expect(createTexture).not.toHaveBeenCalled();
+            expect(createPipeline).not.toHaveBeenCalled();
+            expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+            expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined && batch.renderable === undefined)).toBe(true);
+            expect(scene._renderables).toHaveLength(0);
+            createTexture.mockRestore();
+            createPipeline.mockRestore();
+        }
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("rejects dirty %s assignments before allocation or upload", async (kind) => {
+        await enablePbrLocalCubemap();
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        const scene = await build(asset, material, 1);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        assignMaterialEnvironment(material, kind);
+        markMaterialUboDirty(material);
+        const allocations = mock.device.buffers.length;
+        const uploads = mock.device.writes.length;
+        expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "per-material environments or local probes" }));
+        expect(mock.device.buffers).toHaveLength(allocations);
+        expect(mock.device.writes).toHaveLength(uploads);
+    });
+
+    it.each(LOCAL_ENVIRONMENT_CASES)("allows cleared %s assignments and the global environment after enabling local cubemaps", async (kind) => {
+        await enablePbrLocalCubemap();
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        assignMaterialEnvironment(material, kind);
+        clearPbrLocalEnvironment(material);
+        const scene = fakeScene(engine);
+        scene._envTextures = fakeEnvironment();
+        await build(asset, material, 1, scene);
+        expect(scene._renderables).toHaveLength(1);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+    });
+});
+
+describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it.each(["cpu", "gpu"] as const)("rejects enabled stencil writers/testers before scene registration (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const scene = fakeScene(engine);
+            const material = createPbrMaterial({ stencil });
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" })
+            );
+            expect(scene._meshLoDRegistry).toBeUndefined();
+            expect(scene._deferredBuilders).toHaveLength(0);
+            expect(scene._renderables).toHaveLength(0);
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects enabled stencil writers/testers before deferred batch allocation (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const scene = fakeScene(engine);
+            const texture = createSolidTexture2D(engine, 1, 1, 1);
+            const first = createPbrMaterial({ baseColorTexture: texture });
+            const second = createPbrMaterial();
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+            second.stencil = stencil;
+            const createTexture = vi.spyOn(mock.device, "createTexture");
+            const createPipeline = vi.spyOn(mock.device, "createRenderPipeline");
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" });
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+            expect(createTexture).not.toHaveBeenCalled();
+            expect(createPipeline).not.toHaveBeenCalled();
+            expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+            expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined && batch.renderable === undefined)).toBe(true);
+            expect(scene._renderables).toHaveLength(0);
+            createTexture.mockRestore();
+            createPipeline.mockRestore();
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects dirty enabled stencil writers/testers before allocation or upload (%s)", async (selectionMode) => {
+        enableMaterialStencil();
+        for (const stencil of STENCIL_CASES) {
+            const mock = createMockEngine();
+            engine = mock.engine;
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+            const material = createPbrMaterial();
+            const scene = await build(asset, material, 1);
+            const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+            flush(binding);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            material.stencil = stencil;
+            markMaterialUboDirty(material);
+            const allocations = mock.device.buffers.length;
+            const uploads = mock.device.writes.length;
+            expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "material stencil state" }));
+            expect(mock.device.buffers).toHaveLength(allocations);
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it("validates every active batch before allocating or acquiring textures for earlier batches", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = fakeScene(engine);
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        const first = createPbrMaterial({ baseColorTexture: texture });
+        const second = createPbrMaterial();
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+        setPbrMetallicReflectance(second, { f0Factor: 0 });
+        const allocations = mock.device.buffers.length;
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL" });
+        expect(mock.device.buffers).toHaveLength(allocations);
+        expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+        expect(scene._meshLoDRegistry!.batches.every((batch) => batch._packet === undefined)).toBe(true);
+    });
+
+    it.each(["lightmaps", "dielectric-reflectance extensions"] as const)("rejects %s opt-in introduced after registration", async (feature) => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const material = createPbrMaterial();
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        if (feature === "lightmaps") {
+            setPbrLightmap(material, createSolidTexture2D(engine, 1, 1, 1), { coordIndex: 0 });
+        } else {
+            setPbrMetallicReflectance(material, { f0Factor: 0 });
+        }
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: feature });
+    });
+
+    it.each([undefined, false])("rejects alpha-only blending before deferred material allocation (alphaBlend: %s)", async (alphaBlend) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const material = createPbrMaterial({ alpha: 1, alphaBlend });
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        material.alpha = 0.5;
+        const allocations = mock.device.buffers.length;
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" });
+        expect(mock.device.buffers).toHaveLength(allocations);
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects dirty alpha-only blending without a material upload (%s)", async (selectionMode) => {
+        for (const alphaBlend of [undefined, false]) {
+            const mock = createMockEngine();
+            engine = mock.engine;
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+            const material = createPbrMaterial({ alpha: 1, alphaBlend });
+            const scene = await build(asset, material, 1);
+            const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+            flush(binding);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            material.alpha = 0.5;
+            markMaterialUboDirty(material);
+            const uploads = mock.device.writes.length;
+            expect(() => flush(binding)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "alpha blending" }));
+            expect(mock.device.writes).toHaveLength(uploads);
+        }
+    });
+
+    it.each(["cpu", "gpu"] as const)("uses and refreshes AA pipeline variants on every existing target (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const createShader = vi.spyOn(mock.device, "createShaderModule");
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial({ enableSpecularAA: true });
+        const scene = await build(asset, material, 1);
+        const bindings = [scene._renderables[0]!.bind(engine, { ...SIG }), scene._renderables[0]!.bind(engine, { ...SIG })];
+        bindings.forEach(flush);
+        const withAA = bindings.map((binding) => binding.pipeline);
+        expect(createShader.mock.calls.some(([descriptor]) => descriptor.code.includes("nDfdx_AA=dpdx(N)"))).toBe(true);
+        const unchanged = createShader.mock.calls.length;
+        bindings.forEach(flush);
+        expect(createShader).toHaveBeenCalledTimes(unchanged);
+        material.enableSpecularAA = false;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        bindings.forEach((binding, index) => expect(binding.pipeline).not.toBe(withAA[index]));
+        material.enableSpecularAA = true;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        bindings.forEach((binding, index) => expect(binding.pipeline).toBe(withAA[index]));
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects floating-origin configuration before deferred draw allocation (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = fakeScene(engine);
+        const instance = createMeshLoDInstance(asset, createPbrMaterial());
+        instance.position.set(1e7 + 2, 0, 0);
+        addMeshLoDInstanceToScene(scene, instance);
+        scene.camera = fakeCamera(1e7);
+        scene.camera._useFloatingOrigin = true;
+        engine.useFloatingOrigin = true;
+        const allocations = mock.device.buffers.length;
+        const uploads = mock.device.writes.length;
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_INVALID_OPTION", actual: "useFloatingOrigin: true" });
+        expect(mock.device.buffers).toHaveLength(allocations);
+        expect(mock.device.writes).toHaveLength(uploads);
+    });
+
+    it.each(["cpu", "gpu"] as const)("rejects enabling floating origin on an existing translated-camera binding (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, createPbrMaterial(), 1);
+        const renderable = scene._renderables[0]!;
+        const binding = renderable.bind(engine, { ...SIG });
+        const camera = fakeCamera(1e7);
+        camera._useFloatingOrigin = true;
+        scene._meshLoDRegistry!.batches[0]!.instances[0]!.position.set(1e7 + 2, 0, 0);
+        engine.useFloatingOrigin = true;
+        const uploads = mock.device.writes.length;
+        expect(() => binding.update!({ ...CONTEXT, _camera: camera })).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION", actual: "useFloatingOrigin: true" }));
+        expect(mock.device.writes).toHaveLength(uploads);
+        expect(() => renderable.bind(engine, { ...SIG })).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+    });
+
+    it.each(["cpu", "gpu"] as const)("retains ordinary-PBR shared textures once across targets and buffer growth until fenced batch teardown (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        Object.assign(engine, { engine, _disposables: [] });
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: () => Promise.resolve() });
+        const textures = Array.from({ length: 4 }, () => createSolidTexture2D(engine, 1, 1, 1));
+        const destroys = textures.map((texture) => vi.spyOn(texture.texture, "destroy"));
+        const material = createPbrMaterial({ baseColorTexture: textures[0], normalTexture: textures[1], ormTexture: textures[2], emissiveTexture: textures[3] });
+        const ordinary = createSceneContext(engine, { defaultRenderTask: false });
+        const mesh = {
+            material,
+            receiveShadows: false,
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            worldMatrixVersion: 1,
+            _gpu: {},
+        } as unknown as Mesh;
+        ordinary._groups.set(material._buildGroup, [mesh]);
+        ordinary._renderables.push(...(await buildPbrRenderables(ordinary, [mesh], undefined)).renderables);
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, material, 1);
+        // Drop the factory reference so only the two scene consumers own the textures.
+        for (const texture of textures) {
+            expect(releaseTexture(texture)).toBe(false);
+            expect(getTextureReferenceStore().get(texture.texture)).toBe(2);
+        }
+        const renderable = scene._renderables[0]!;
+        const main = renderable.bind(engine, { ...SIG });
+        flush(main);
+        disposeScene(ordinary);
+        destroys.forEach((destroy) => expect(destroy).not.toHaveBeenCalled());
+        for (let i = 0; i < 5; i++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+            const target = { ...SIG };
+            const binding = renderable.bind(engine, target);
+            flush(binding);
+            flush(main);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            target._collectBatches!(undefined, binding)!._release(engine);
+            await waitForGpuResourceRetirements(engine);
+            destroys.forEach((destroy) => expect(destroy).not.toHaveBeenCalled());
+            textures.forEach((texture) => expect(getTextureReferenceStore().get(texture.texture)).toBe(1));
+        }
+        let finishFence!: () => void;
+        const fence = new Promise<void>((resolve) => (finishFence = resolve));
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: () => fence });
+        scene._disposables.forEach((dispose) => {
+            dispose();
+            dispose();
+        });
+        const ubo = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-material")!;
+        flushGpuResourceRetirements(engine);
+        await Promise.resolve();
+        destroys.forEach((destroy) => expect(destroy).not.toHaveBeenCalled());
+        expect(ubo.destroyed).toBe(false);
+        finishFence();
+        await waitForGpuResourceRetirements(engine);
+        destroys.forEach((destroy) => expect(destroy).toHaveBeenCalledTimes(1));
+        expect(ubo.destroyed).toBe(true);
+    });
+
+    it("rejects gamma-albedo opt-in introduced after scene registration", async () => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const material = createPbrMaterial();
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        setPbrGammaAlbedo(material);
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "gamma-albedo decoding" });
+    });
+
+    it.each(["cpu", "gpu"] as const)("refreshes the shared dirty material UBO and preserves debug mode (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const writeBuffer = vi.spyOn(mock.device.queue, "writeBuffer");
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        const scene = await build(asset, material, 1);
+        const bindings = [scene._renderables[0]!.bind(engine, { ...SIG }), scene._renderables[0]!.bind(engine, { ...SIG })];
+        setMeshLoDDebugView(asset, "lod-depth");
+        bindings.forEach(flush);
+        const pass = createMockRenderPass();
+        for (const binding of bindings) {
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        }
+        const ubo = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-material")!;
+        expect(mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-material")).toHaveLength(1);
+        const initialWrites = mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80).length;
+        material.baseColorFactor = [0.2, 0.3, 0.4, 1];
+        material.roughnessFactor = 0.15;
+        material.directIntensity = 0.7;
+        material._emissiveColor = [0.8, 0.6, 0.4];
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        const values = new Float32Array(ubo.data.buffer);
+        expect(values[0]).toBeCloseTo(0.2);
+        expect(values[4]).toBeCloseTo(0.8);
+        expect(values[9]).toBeCloseTo(0.15);
+        expect(values[13]).toBeCloseTo(0.7);
+        expect(values[17]).toBe(meshLoDDebugModeCode("lod-depth"));
+        expect(mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80)).toHaveLength(initialWrites + 1);
+        bindings.forEach(flush);
+        expect(mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80)).toHaveLength(initialWrites + 1);
+        setMeshLoDDebugView(asset, "none");
+        material.roughnessFactor = 0.9;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        expect(new Float32Array(ubo.data.buffer)[9]).toBeCloseTo(0.9);
+        expect(new Float32Array(ubo.data.buffer)[17]).toBe(0);
+        const fullUploads = writeBuffer.mock.calls.filter(([buffer, offset]) => buffer === ubo && offset === 0);
+        expect(fullUploads).toHaveLength(3);
+        expect(fullUploads.every((call) => call[2] === fullUploads[0]![2])).toBe(true);
+    });
+
+    it.each(["baseColorTexture", "normalTexture"] as const)("rejects %s transforms introduced after scene registration", async (channel) => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        const material = createPbrMaterial({ [channel]: texture });
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        material[channel] = cloneTexture2D(texture, { uOffset: 0.25 });
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL" });
+    });
+
+    it.each(["cpu", "gpu"] as const)("releases repeated offscreen and stereo target packets behind their task fence (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, createPbrMaterial(), 1);
+        const renderable = scene._renderables[0]!;
+        const main = renderable.bind(engine, { ...SIG });
+        flush(main);
+        const liveBuffers = () => mock.device.buffers.filter((buffer) => !buffer.destroyed).length;
+        const baseline = liveBuffers();
+        for (let cycle = 0; cycle < 6; cycle++) {
+            const tasks = Array.from({ length: cycle % 2 === 0 ? 1 : 2 }, (_, eye) => {
+                const rt = createRenderTarget({ format: "rgba8unorm", dFormat: "depth24plus-stencil8", samples: 1, size: { width: 800, height: 600 } });
+                const task = _createAutomaticRenderTask({ name: `pass-${cycle}-${eye}`, rt }, engine, scene);
+                const binding = renderable.bind(engine, task._targetSignature);
+                task._batchState = task._targetSignature._collectBatches!(undefined, binding);
+                flush(binding);
+                expect(renderable.bind(engine, task._targetSignature)._updateBatches![0]).toBe(binding._updateBatches![0]);
+                return task;
+            });
+            const beforeRetirement = liveBuffers();
+            tasks.forEach((task) => task.dispose());
+            expect(liveBuffers()).toBe(beforeRetirement);
+            let finishFence!: () => void;
+            const fence = new Promise<void>((resolve) => (finishFence = resolve));
+            Object.assign(mock.device.queue, { onSubmittedWorkDone: () => fence });
+            flushGpuResourceRetirements(engine);
+            await Promise.resolve();
+            expect(liveBuffers()).toBe(beforeRetirement);
+            finishFence();
+            await waitForGpuResourceRetirements(engine);
+            expect(liveBuffers()).toBe(baseline);
+            const pass = createMockRenderPass();
+            expect(main.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        }
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it("keeps a replacement packet alive when the same target is rebound before an older fence drains", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, createPbrMaterial(), 1);
+        const renderable = scene._renderables[0]!;
+        const target = { ...SIG };
+        const first = renderable.bind(engine, target);
+        const firstState = target._collectBatches!(undefined, first)!;
+        flush(first);
+        firstState._release(engine);
+        const replacement = renderable.bind(engine, target);
+        flush(replacement);
+        expect(replacement._updateBatches![0]).not.toBe(first._updateBatches![0]);
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: () => Promise.resolve() });
+        await waitForGpuResourceRetirements(engine);
+        expect(renderable.bind(engine, target)._updateBatches![0]).toBe(replacement._updateBatches![0]);
+        const pass = createMockRenderPass();
+        expect(replacement.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(pass.indirectDraws[0]!.buffer.destroyed).toBe(false);
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it("refreshes each binding's output pipeline when tone mapping is enabled, changed, or disabled", async () => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = fakeScene(engine);
+        scene.imageProcessing = { exposure: 0.8, contrast: 1.2, toneMappingEnabled: false };
+        await build(asset, {} as PbrMaterialProps, 1, scene);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        const disabled = binding.pipeline;
+        scene.imageProcessing.toneMappingEnabled = true;
+        binding.update!(CONTEXT);
+        const standard = binding.pipeline;
+        expect(standard).not.toBe(disabled);
+        scene.imageProcessing.toneMapping = AcesToneMapping;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).not.toBe(standard);
+        scene.imageProcessing.toneMappingEnabled = false;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).toBe(disabled);
+        scene.imageProcessing.exposure = 2;
+        scene.imageProcessing.contrast = 0.7;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).toBe(disabled);
+    });
+
+    it.each(["cpu", "gpu"] as const)("reuses each target's buffers when render tasks rebind (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, {} as PbrMaterialProps, 1);
+        scene._renderableVersion = 0;
+        engine._renderingContexts.push(scene);
+        const renderable = scene._renderables[0]!;
+        const targets = [{ ...SIG }, { ...SIG }];
+        const drawBuffers = targets.map((target) => {
+            const binding = renderable.bind(engine, target);
+            flush(binding);
+            const pass = createMockRenderPass();
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            return pass.indirectDraws[0]!.buffer;
+        });
+        expect(drawBuffers[0]).not.toBe(drawBuffers[1]);
+        const persistentBufferCount = () => mock.device.buffers.filter((buffer) => buffer.label !== "mesh-lod-readback").length;
+        const bufferCount = persistentBufferCount();
+        const version = scene._renderableVersion;
+        for (let rebind = 0; rebind < 3; rebind++) {
+            targets.forEach((target, index) => {
+                const binding = renderable.bind(engine, target);
+                flush(binding);
+                const pass = createMockRenderPass();
+                expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+                expect(pass.indirectDraws[0]!.buffer).toBe(drawBuffers[index]);
+            });
+        }
+        expect(persistentBufferCount()).toBe(bufferCount);
+        expect(scene._renderableVersion).toBe(version);
+    });
+
+    it.each([false, true])("isolates two disjoint camera cuts recorded before one submission (XR=%s)", async (xr) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, { doubleSided: true } as PbrMaterialProps, 2);
+        const instances = scene._meshLoDRegistry!.batches[0]!.instances;
+        instances[0]!.position.set(-1000, 0, 0);
+        instances[1]!.position.set(1000, 0, 0);
+        const cameras = [-1000, 1000].map((x, eye) => {
+            const camera = fakeCamera();
+            const world = new Float32Array(camera.worldMatrix);
+            world[12] = x;
+            Object.assign(camera, { worldMatrix: world });
+            if (!xr) {
+                return camera;
+            }
+            const xrCamera = createXrCamera(eye === 0 ? "left" : "right");
+            const pose = new Float32Array(world);
+            pose[14] = 10; // XR's right-handed eye pose.
+            const projection = new Float32Array(getProjectionMatrix(camera, 800 / 600));
+            // Undo LH/reverse-Z so updateXrCameraForView applies the real XR boundary.
+            for (let column = 0; column < 4; column++) {
+                const row2 = column * 4 + 2;
+                projection[row2] = projection[column * 4 + 3]! - projection[row2]!;
+            }
+            for (let row = 0; row < 4; row++) {
+                projection[8 + row] = -projection[8 + row]!;
+            }
+            updateXrCameraForView(xrCamera, { transform: { matrix: pose }, projectionMatrix: projection } as unknown as XRView, 800, 600, { x: 0, y: 0, width: 1, height: 1 });
+            return xrCamera;
+        });
+        const bindings = cameras.map(() => scene._renderables[0]!.bind(engine, { ...SIG }));
+        for (let eye = 0; eye < 2; eye++) {
+            const binding = bindings[eye]!;
+            binding._updateBatches![0]!.reset();
+            binding.update!({ targetWidth: 800, targetHeight: 600, _camera: cameras[eye]! });
+            binding._updateBatches![0]!.flush(engine);
+        }
+        const params = mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-params");
+        expect(params).toHaveLength(2);
+        const transforms = mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-instances" && buffer.data.length > 0);
+        const runtime = asset._runtime;
+        const selectedSlots = params.map((buffer, eye) => {
+            const f = new Float32Array(buffer.data.buffer);
+            const u = new Uint32Array(buffer.data.buffer);
+            expect(f[24]).toBe(eye === 0 ? -1000 : 1000);
+            const records = new Float32Array(transforms[eye]!.data.buffer);
+            const model = runMeshLoDGpuSelection({
+                nodes: packHierarchyNodes(runtime.hierarchyNodes),
+                groups: packGroups(runtime.groups),
+                clusters: packClusters(runtime.clusters),
+                groupPageRefs: packGroupPageRefs(runtime.groupPageRefs),
+                pageState: buildPageStateData(runtime.gpu.pages, runtime.pageRecords, runtime.generation),
+                pageStoredBytes: runtime.pageRecords.map((record) => record.storedBytes),
+                instances: records,
+                instancesU32: new Uint32Array(records.buffer),
+                priorState: new Uint32Array(u[40]! * 2),
+                instanceCount: 2,
+                nodeCount: runtime.hierarchyNodes.length,
+                groupCount: runtime.groups.length,
+                clusterCount: runtime.clusters.length,
+                pageCount: runtime.pageRecords.length,
+                wordsPerInstance: u[40]!,
+                params: {
+                    cameraPos: [f[24]!, f[25]!, f[26]!],
+                    verticalFov: cameras[eye]!.fov,
+                    near: f[27]!,
+                    targetWidth: f[28]!,
+                    targetHeight: f[29]!,
+                    screenSpaceError: f[32]!,
+                    lodHysteresis: runtime.settings.lodHysteresis,
+                    levelCount: runtime.header.levelCount,
+                    frustumPlanes: Array.from({ length: 6 }, (_, plane) => [f[plane * 4]!, f[plane * 4 + 1]!, f[plane * 4 + 2]!, f[plane * 4 + 3]!] as const),
+                    coneCull: false,
+                },
+            });
+            return [...new Set(model.selected.map((pair) => pair.instanceId))];
+        });
+        expect(selectedSlots).toEqual([[0], [1]]);
+        const draws = bindings.map((binding) => {
+            const pass = createMockRenderPass();
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            return pass.indirectDraws[0]!.buffer;
+        });
+        expect(draws[0]).not.toBe(draws[1]);
+        scene._disposables.forEach((dispose) => dispose());
+        expect(params.every((buffer) => buffer.destroyed)).toBe(true);
+    });
+
+    it("populates public debug views without leaving default GPU selection", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, { doubleSided: true } as PbrMaterialProps, 1);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        const runtime = asset._runtime;
+        const clusterId = runtime.clusters.findIndex((cluster) => runtime.pageRecords[cluster.pageId]!.pinned);
+        const cluster = runtime.clusters[clusterId]!;
+        const group = runtime.groups[cluster.groupId]!;
+        // Minimal decoded geometry is enough to inspect the reserved diagnostic word.
+        const pageState = buildPageStateData(runtime.gpu.pages, runtime.pageRecords, runtime.generation);
+        pageState[cluster.pageId * PAGE_STATE_WORDS + 2] = 0;
+        pageState[cluster.pageId * PAGE_STATE_WORDS + 3] = 0;
+        const modes = ["none", "meshlet-id", "lod-depth", "selected-group", "page-residency", "requested-pages", "meshlet-cone"] as const;
+        for (const view of modes) {
+            setMeshLoDDebugView(asset, view);
+            flush(binding);
+            const params = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-params")!;
+            const mode = new Uint32Array(params.data.buffer)[52]!;
+            expect(mode).toBe(meshLoDDebugModeCode(view));
+            expect(asset.diagnostics.selectionMode).toBe("gpu");
+            const result = runMeshLoDGpuExpansion({
+                selected: [{ clusterId, instanceId: 0 }],
+                clusters: packClusters(runtime.clusters),
+                groups: packGroups(runtime.groups),
+                pageState,
+                arena: new Uint32Array(cluster.indexOffset + cluster.triangleCount * 3),
+                instances: new Float32Array(INSTANCE_WORDS),
+                drawVertexCapacity: cluster.triangleCount * 3,
+                debugMode: mode,
+                coneCull: false,
+            });
+            const expected =
+                view === "lod-depth" ? group.depth : view === "selected-group" ? cluster.groupId : view === "page-residency" ? 2 : view === "meshlet-cone" ? 0x3f800000 : 0;
+            expect(result.drawVertices[3]).toBe(expected);
+        }
+        setMeshLoDDebugView(asset, "none");
+        flush(binding);
+        expect(asset.diagnostics.selectionMode).toBe("gpu");
+    });
+
+    it.each(["gpu", "cpu"] as const)("re-records the cached draw when switching from %s and back", async (initialMode) => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: initialMode });
+        const scene = await build(asset, {} as PbrMaterialProps, 1);
+        scene._renderableVersion = 0;
+        engine._renderingContexts.push(scene);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        expect(binding._updateBatches).toHaveLength(1);
+
+        flush(binding);
+        const firstPass = createMockRenderPass();
+        expect(binding.draw(firstPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        const firstVersion = scene._renderableVersion;
+
+        setMeshLoDSelectionMode(asset, initialMode === "gpu" ? "cpu" : "gpu");
+        flush(binding);
+        const secondPass = createMockRenderPass();
+        expect(binding.draw(secondPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(scene._renderableVersion).toBeGreaterThan(firstVersion);
+        expect(secondPass.indirectDraws[0]!.buffer).not.toBe(firstPass.indirectDraws[0]!.buffer);
+        const secondVersion = scene._renderableVersion;
+
+        setMeshLoDSelectionMode(asset, initialMode);
+        flush(binding);
+        const thirdPass = createMockRenderPass();
+        expect(binding.draw(thirdPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(scene._renderableVersion).toBeGreaterThan(secondVersion);
+        expect(thirdPass.indirectDraws[0]!.buffer).toBe(firstPass.indirectDraws[0]!.buffer);
+    });
+
+    it("issues exactly one indirect draw per distinct material key (GPU mode)", async () => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
+        const scene = fakeScene(engine);
+        const matA = { doubleSided: true } as PbrMaterialProps;
+        const matB = { _unlit: true } as PbrMaterialProps;
+        for (let i = 0; i < 2; i++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, matA));
+        }
+        for (let i = 0; i < 3; i++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, matB));
+        }
+        // Drain the single deferred builder once (what registerScene does).
+        for (const builder of scene._deferredBuilders) {
+            await builder();
+        }
+        // Two distinct material keys → two batches → two renderables.
+        expect(scene._meshLoDRegistry!.batches).toHaveLength(2);
+        expect(scene._renderables).toHaveLength(2);
+
+        let draws = 0;
+        for (const renderable of scene._renderables) {
+            const binding = renderable.bind(engine, SIG);
+            flush(binding);
+            const pass = createMockRenderPass();
+            draws += binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+        }
+        expect(draws).toBe(2); // batch-scaled: one indirect draw per key, not per meshlet/instance
+    });
+
+    it("keeps a single indirect draw as instances grow within one key (GPU mode)", async () => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
+        const scene = await build(asset, {} as PbrMaterialProps, 5);
+        expect(scene._meshLoDRegistry!.batches).toHaveLength(1);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        flush(binding);
+        const pass = createMockRenderPass();
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(pass.indirectDraws).toHaveLength(1);
+    });
+});

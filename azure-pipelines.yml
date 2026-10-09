@@ -134,8 +134,8 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
-                - script: npx vitest run --project unit --project gl-unit --project no-webgpu
-                  displayName: "Run vitest unit tests"
+                - script: npx vitest run --project unit --project gl-unit --project no-webgpu --project lite-integration
+                  displayName: "Run vitest unit and Lite integration tests"
                   env:
                       CI: "true"
 
@@ -185,6 +185,8 @@ stages:
                           tests/lite/plumbing/compute-lifecycle.spec.ts \
                           tests/lite/plumbing/dispose.spec.ts \
                           tests/lite/plumbing/material-swap.spec.ts \
+                          tests/lite/plumbing/mesh-lod-demand.spec.ts \
+                          tests/lite/plumbing/mesh-lod-pbr.spec.ts \
                           tests/lite/plumbing/memory-leak.spec.ts \
                           tests/lite/plumbing/picking.spec.ts
                   displayName: "Run plumbing tests"

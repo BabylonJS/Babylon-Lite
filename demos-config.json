@@ -131,6 +131,13 @@
         "mobile": true
     },
     {
+        "slug": "mesh-lod",
+        "name": "MeshLoD Statue",
+        "description": "Experimental MeshLoD streaming: a 311k-triangle photogrammetry statue served as three range-addressable .mlod primitives through Babylon Lite's opt-in MeshLoD path. GPU compute selects meshlets by screen-space error and streams only the pages the current view needs, refining from a tiny always-resident coarse fallback up to full detail. Live diagnostics, debug views, and simulated bandwidth/latency let you watch selection, streaming, residency, and coarse fallback react to the camera. \"Harvard-Yenching Institute statue\" by Alexandre Tokovinine (https://sketchfab.com/tokovinin3d), CC BY 4.0.",
+        "tags": ["gltf", "streaming", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "sandblox",
         "name": "Sandblox",
         "description": "Build-and-play sandbox for small block worlds. Drop blocks into a starter scene, reshape them with move, clone, resize, paint, and delete tools, then run your character through what you built.",

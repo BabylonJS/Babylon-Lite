@@ -25,6 +25,16 @@ export default defineConfig({
                 },
             },
             {
+                // Node-hosted integration tests (deterministic fake transports/clocks,
+                // no browser/WebGPU). Longer timeout for multi-step protocol flows.
+                extends: true,
+                test: {
+                    name: "lite-integration",
+                    include: ["tests/lite/integration/**/*.test.ts"],
+                    testTimeout: 120_000,
+                },
+            },
+            {
                 extends: true,
                 test: {
                     name: "build",

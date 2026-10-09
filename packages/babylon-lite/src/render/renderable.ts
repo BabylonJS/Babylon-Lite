@@ -97,15 +97,15 @@ export interface Renderable {
      *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
      *  loaders that build renderables, and keeps those loaders free of recovery-specific code.
      *
-     *  Only for renderables that no retained structure owns — currently the loader-built
-     *  backgrounds, which their loaders push here and then discard the values they were built
-     *  from. Renderables produced by a material group builder must NOT set this: recovery already
+     *  Only for renderables that no retained material group owns, such as loader-built
+     *  backgrounds and scene-hosted MeshLoD batches. A removed batch may return null.
+     *  Renderables produced by a material group builder must NOT set this: recovery already
      *  rebuilds them by re-running the build through `scene._groups`, which one call at a time
      *  also restores that group's `rebuildSingle` closure, its `o` output list, and its uniform
      *  updater — none of which a `Renderable`-returning thunk can express, and a group can emit
      *  several renderables or merge its meshes into one. Setting both would rebuild them twice
      *  and leave duplicates in `scene._renderables`. */
-    _rebuild?: () => Renderable | Promise<Renderable>;
+    _rebuild?: () => Renderable | null | Promise<Renderable | null>;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
      * `draw` closure captures that state. Called by the render pass task at build/insert
