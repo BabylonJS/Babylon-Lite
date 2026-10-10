@@ -1,6 +1,21 @@
 import { test, expect } from "@playwright/test";
 import type { RetentionResults } from "../../../lab/lite/src/mesh-retention-test.js";
 
+test("detaching during a merged same-material async build evicts draws before preparation resumes", async ({ page }) => {
+    await page.goto("/lite/mesh-retention-test.html?pendingBuild=1");
+    await page.waitForFunction("window.pendingBuildTest?.ready || window.meshRetentionTest?.error");
+    const result = await page.evaluate<{ merged: boolean; held: number; initial: number[]; detached: number[]; retired: number[]; settled: number[]; gpuErrors: string[] }>(
+        "window.pendingBuildTest"
+    );
+    expect(result.merged).toBe(true);
+    expect(result.held).toBeGreaterThan(0);
+    expect(result.initial).toEqual([0, 255, 0, 255]);
+    expect(result.detached).toEqual([0, 0, 0, 255]);
+    expect(result.retired).toEqual([0, 0, 0, 255]);
+    expect(result.settled).toEqual([0, 0, 0, 255]);
+    expect(result.gpuErrors).toEqual([]);
+});
+
 test("advanced lazy pick preparation never records retired mesh buffers and admits the fresh mesh for queued picks", async ({ page }) => {
     let imported!: () => void;
     let resume!: () => void;

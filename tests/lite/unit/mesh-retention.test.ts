@@ -17,6 +17,8 @@ import { createShaderMaterial, setShaderTexture } from "../../../packages/babylo
 import { updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
 import { createHemisphericLight } from "../../../packages/babylon-lite/src/light/hemispheric.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
+import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js";
+import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
 
 function stub<T extends object>(value: Partial<T>): T {
     return value as T;
@@ -67,6 +69,57 @@ function fixture() {
 }
 
 describe("retained mesh scene membership", () => {
+    it("evicts pending merged packets synchronously without taking their async teardown ownership", async () => {
+        const { engine, scene, mesh } = fixture();
+        let entered!: () => void;
+        let resume!: () => void;
+        const waiting = new Promise<void>((resolve) => {
+            entered = resolve;
+        });
+        const gate = new Promise<void>((resolve) => {
+            resume = resolve;
+        });
+        const builder: MeshGroupBuilder = async () => {
+            entered();
+            await gate;
+            return {
+                renderables: [],
+                rebuildSingle: () => {
+                    throw new Error("Cancelled fixture build must not be installed");
+                },
+            };
+        };
+        Object.defineProperty(mesh.material, "_buildGroup", { value: builder });
+        addToScene(scene, mesh);
+        const lease = retainMeshResources(engine, mesh);
+        const empty = vi.fn();
+        const packet: { _disposed: boolean; _owner?: (typeof packet)[]; _onOwnerEmpty?: () => void } = { _disposed: false, _onOwnerEmpty: empty };
+        const owner = [packet];
+        packet._owner = owner;
+        const dispose = Object.assign(vi.fn(), { p: packet });
+        scene._meshDisposables.set(mesh, [dispose]);
+        scene._disposables.push(dispose);
+        const pending = buildRuntimeMesh(scene, builder, mesh);
+        await waiting;
+        expect(scene._meshDisposables.has(mesh)).toBe(false);
+        expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toEqual([dispose]);
+        detachMeshFromScene(scene, mesh);
+        expect(packet._disposed).toBe(true);
+        expect(owner).toEqual([]);
+        expect(empty).toHaveBeenCalledTimes(1);
+        expect(dispose).not.toHaveBeenCalled();
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        expect(mesh._disposed).toBe(true);
+        expect(dispose).not.toHaveBeenCalled();
+        resume();
+        await pending;
+        await waitForGpuResourceRetirements(engine);
+        expect(dispose).toHaveBeenCalledTimes(1);
+        expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toBeUndefined();
+        disposeScene(scene);
+        expect(dispose).toHaveBeenCalledTimes(1);
+    });
     it("installs admission only on each opted-in engine and removes it independently with its final lease", () => {
         const first = fixture();
         const second = fixture();

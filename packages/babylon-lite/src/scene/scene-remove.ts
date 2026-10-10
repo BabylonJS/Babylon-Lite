@@ -116,7 +116,7 @@ interface DetachablePacket {
 }
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
-/** Retire a mesh's GPU teardown, but take its DRAW-VISIBILITY bookkeeping out synchronously first.
+/** Take a mesh's DRAW-VISIBILITY bookkeeping out synchronously, without taking GPU teardown ownership.
  *
  *  A renderable that merges several meshes sharing one material has `mesh: undefined`, so the
  *  synchronous `_renderables` sweep in `removeMeshFromScene` cannot find it. Its packet keeps being
@@ -124,7 +124,7 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
  *  visible until the retirement fence resolves — a frame or more later. Marking the packet disposed
  *  and unlinking it from its owner list is pure CPU bookkeeping and safe to do mid-frame; only the
  *  actual GPU destruction has to wait. Twin of the detach in `scene-runtime-mesh-build.ts`. */
-function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
+function evictMeshPackets(scene: SceneContext, teardown: (() => void)[]): void {
     for (const dispose of teardown) {
         spliceOut(scene._disposables, dispose);
         const packet = (dispose as DetachableDisposer).p;
@@ -148,6 +148,10 @@ function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void
             }
         }
     }
+}
+
+function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
+    evictMeshPackets(scene, teardown);
     retireSceneGpu(scene, () => {
         for (const fn of teardown) {
             fn();
@@ -316,6 +320,12 @@ export function removeMeshFromScene(scene: SceneContext, mesh: Mesh, preservePar
         didMutate = true;
         teardown.push(...fns);
         scene._meshDisposables.delete(mesh);
+    }
+    const pending = scene._runtimeBuilds?.pendingDisposers(mesh);
+    if (pending && pending !== fns) {
+        // The in-flight build still owns exactly-once GPU teardown; remove only its live packets now.
+        evictMeshPackets(scene, pending);
+        didMutate = true;
     }
     for (let i = scene.meshes.length; i-- > 0;) {
         if (scene.meshes[i] === mesh) {

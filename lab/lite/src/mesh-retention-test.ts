@@ -30,7 +30,10 @@ import {
     createShaderMaterial,
     wgsl,
     type Mesh,
+    renderFrame,
 } from "babylon-lite";
+import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js";
+import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
 
 export interface RetentionResults {
     ready: boolean;
@@ -391,7 +394,89 @@ async function runPendingAdvanced(): Promise<void> {
     });
 }
 
-const runFixture = new URLSearchParams(location.search).has("pendingAdvanced") ? runPendingAdvanced : run;
+async function runPendingBuild(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) throw new Error("Missing test canvas");
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    const material = createShaderMaterial({
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position.xy, 0.5, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0, 1, 0, 1); }`,
+        attributes: ["position"],
+        backFaceCulling: false,
+    });
+    const original = material._buildGroup;
+    let gated = false;
+    let entered!: () => void;
+    let resume!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+    });
+    const builder: MeshGroupBuilder = Object.assign(
+        async (...args: Parameters<MeshGroupBuilder>) => {
+            if (gated) {
+                entered();
+                await gate;
+            }
+            return original(...args);
+        },
+        { _materialFamily: original._materialFamily }
+    );
+    Object.defineProperty(material, "_buildGroup", { value: builder });
+    const card = (left: number, right: number): Mesh => {
+        const mesh = createMeshFromData(
+            engine,
+            "pending-card",
+            new Float32Array([left, -0.5, 0, right, -0.5, 0, right, 0.5, 0, left, 0.5, 0]),
+            new Float32Array(12),
+            new Uint32Array([0, 1, 2, 0, 2, 3])
+        );
+        mesh.material = material;
+        addToScene(scene, mesh);
+        return mesh;
+    };
+    const left = card(-0.9, -0.1);
+    card(0.1, 0.9);
+    const lease = retainMeshResources(engine, left);
+    await registerScene(scene);
+    await startEngine(engine);
+    const merged = scene._renderables.some((renderable) => !renderable.mesh);
+    const pixel = async (): Promise<number[]> => {
+        renderFrame(engine, 0);
+        const shot = await captureScreenshot(engine);
+        const offset = (Math.floor(shot.height / 2) * shot.width + Math.floor(shot.width / 4)) * 4;
+        return Array.from(shot.data.slice(offset, offset + 4));
+    };
+    const initial = await pixel();
+    gated = true;
+    const pending = buildRuntimeMesh(scene, builder, left);
+    await waiting;
+    const held = scene._runtimeBuilds?.pendingDisposers(left)?.length ?? 0;
+    detachMeshFromScene(scene, left);
+    const detached = await pixel();
+    releaseMeshResources(lease);
+    await waitForGpuResourceRetirements(engine);
+    const retired = await pixel();
+    resume();
+    await pending;
+    await waitForGpuResourceRetirements(engine);
+    const settled = await pixel();
+    stopEngine(engine);
+    disposeScene(scene);
+    await waitForGpuResourceRetirements(engine);
+    disposeEngine(engine);
+    Object.assign(window, { pendingBuildTest: { ready: true, merged, held, initial, detached, retired, settled, gpuErrors } });
+}
+
+const query = new URLSearchParams(location.search);
+const runFixture = query.has("pendingBuild") ? runPendingBuild : query.has("pendingAdvanced") ? runPendingAdvanced : run;
 void runFixture().catch((error: unknown) => {
     results.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
     console.error(error);

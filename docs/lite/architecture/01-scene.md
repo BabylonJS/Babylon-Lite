@@ -33,6 +33,13 @@ each mesh; hierarchy and animation ownership remain the caller's responsibility.
 Eviction removes all legacy duplicate mesh slots, including material-group and
 standalone-renderable references, rather than leaving an inactive mesh pickable.
 
+Synchronous eviction includes merged packets whose disposers have temporarily
+moved from `_meshDisposables` into an in-flight runtime build's pending ownership.
+Removal marks and unlinks those CPU packets immediately, before another frame or
+last-lease retirement. It does not schedule their GPU teardown again: the async
+build retains its pending disposer list and releases it exactly once when its
+invalidated preparation settles.
+
 Reinsert with `addToScene(scene, mesh)`. While the engine has live leases,
 admission of an already attached mesh or light is idempotent, including
 children visited during reinsertion. Duplicate parent admission still traverses
