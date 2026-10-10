@@ -7,7 +7,14 @@ import {
     createSceneContext,
     createShaderMaterial,
     createStandardMaterial,
+    createGpuPicker,
+    enableDetailedPicking,
+    getPickedNormal,
+    getPickedUV,
+    pickAsync,
+    setThinInstances,
     disposeEngine,
+    disposePicker,
     getMeshGeometry,
     registerScene,
     renderFrame,
@@ -23,6 +30,7 @@ export interface MeshDrawRangeTest {
     restoreCard(capacity: boolean): void;
     render(): void;
     geometry(): ReturnType<typeof getMeshGeometry>;
+    pick(): Promise<{ detailed: boolean; hit: boolean; faceId: number; bu: number; bv: number; normal: number[] | null; uv: number[] | null }>;
     dispose(): void;
 }
 
@@ -41,8 +49,13 @@ async function main(): Promise<void> {
     const cardPositions = positions.subarray(0, 12);
     const cardNormals = new Float32Array(12);
     const cardIndices = new Uint32Array([0, 1, 2, 0, 2, 3]);
-    const card = createMeshFromData(engine, "card", cardPositions, cardNormals, cardIndices);
+    const cardUvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+    const card = createMeshFromData(engine, "card", cardPositions, cardNormals, cardIndices, cardUvs);
+    if (new URLSearchParams(location.search).has("advanced")) {
+        setThinInstances(card, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 1);
+    }
     const points = createMeshFromData(engine, "points", positions, new Float32Array(15), new Uint32Array([0, 1, 2, 3, 4]));
+    points.pickable = false;
     const material = new URLSearchParams(location.search).get("material");
     for (const mesh of [card, points]) {
         if (mesh === card && material === "standard") {
@@ -63,6 +76,8 @@ async function main(): Promise<void> {
     points.visible = false;
     await registerScene(scene);
     let active = card;
+    const picker = createGpuPicker(scene);
+    enableDetailedPicking(picker);
     window.meshDrawRangeTest = {
         select(kind, range): void {
             active = kind === "card" ? card : points;
@@ -75,9 +90,9 @@ async function main(): Promise<void> {
             card.visible = true;
             points.visible = false;
             if (capacity) {
-                updateMeshGeometryCapacity(engine, card, cardPositions, cardNormals, cardIndices);
+                updateMeshGeometryCapacity(engine, card, cardPositions, cardNormals, cardIndices, cardUvs);
             } else {
-                updateMeshGeometry(engine, card, cardPositions, cardNormals, cardIndices);
+                updateMeshGeometry(engine, card, cardPositions, cardNormals, cardIndices, cardUvs);
             }
         },
         render(): void {
@@ -86,7 +101,12 @@ async function main(): Promise<void> {
         geometry(): ReturnType<typeof getMeshGeometry> {
             return getMeshGeometry(active);
         },
+        async pick() {
+            const info = await pickAsync(picker, canvas.clientWidth * 0.505, canvas.clientHeight * 0.505);
+            return { detailed: picker._detailedPicking, hit: info.hit, faceId: info.faceId, bu: info.bu, bv: info.bv, normal: getPickedNormal(info), uv: getPickedUV(info) };
+        },
         dispose(): void {
+            disposePicker(picker);
             disposeEngine(engine);
         },
     };

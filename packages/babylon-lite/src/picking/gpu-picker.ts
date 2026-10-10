@@ -381,6 +381,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const tempBuffers: GPUBuffer[] = [];
     const detailedPositions = detailed ? new Map<Mesh, Float32Array>() : null;
     const detailedNormals = detailed ? new Map<Mesh, Float32Array>() : null;
+    // Active-range changes replace these CPU views. Validate both draw paths after readback
+    // rather than combine an old GPU primitive with the new active indices/UVs.
+    const detailedGeometry = detailed
+        ? new Map(candidates.map(({ mesh }) => [mesh, [mesh._cpuPositions, mesh._cpuNormals, mesh._cpuIndices, mesh._cpuUvs, mesh._cpuUv2s] as const]))
+        : null;
     // Capture deformation poses now, while the draw is still being recorded. The depth readback below
     // resolves a frame or two later, by which point the animation tick has advanced `boneMatrices` and
     // morph weights in place — deriving the hit triangle's face normal from those live mirrors would
@@ -535,6 +540,18 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             debug.tracePick(debugLabel!, debugInput!, pickRay, pickId, depth, false, true);
         }
         return createEmptyPickingInfo();
+    }
+    if (hitMesh && detailedGeometry) {
+        const geometry = detailedGeometry.get(hitMesh)!;
+        if (
+            geometry[0] !== hitMesh._cpuPositions ||
+            geometry[1] !== hitMesh._cpuNormals ||
+            geometry[2] !== hitMesh._cpuIndices ||
+            geometry[3] !== hitMesh._cpuUvs ||
+            geometry[4] !== hitMesh._cpuUv2s
+        ) {
+            return createEmptyPickingInfo();
+        }
     }
 
     const info = createEmptyPickingInfo();

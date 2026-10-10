@@ -46,6 +46,11 @@ marks caster bounds dirty, and invalidates main/depth/shadow render bundles with
 world transform. Repeating the same selection is a no-op. GPU picking, material geometry passes,
 thin-instance direct draws and engine-managed indexed-indirect arguments use the same exact range.
 
+Detailed GPU picks validate their draw-time CPU geometry views after asynchronous readback, in
+both regular and advanced paths. Changing the active range while a detailed pick is pending
+invalidates that result (an empty pick), rather than combining the old primitive with new indices
+or UVs. A subsequent pick uses the new range; no automatic retry or geometry copy is required.
+
 The complete source arrays are retained independently of the selected CPU views, allowing regrowth
 without re-uploading. Device-loss recovery restores the full initialized source and the selected range;
 unused reserved capacity may collapse as with existing capacity updates. Cloning shares the selected
