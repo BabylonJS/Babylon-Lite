@@ -306,9 +306,10 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
     createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
-    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
     prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
+    type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -368,6 +369,16 @@ void rangedReadback;
 // @ts-expect-error GPU allocation handles remain internal.
 storage._buffer;
 resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+const vertices: MeshGeometryRange = { offset: 1, count: 3 };
+const range: MeshDrawRange = { vertices, indices: { offset: 3, count: 3 } };
+setMeshDrawRange(engine, mesh, range);
+// @ts-expect-error Draw ranges are immutable inputs, not mesh-owned mutable state.
+range.vertices.count = 4;
+declare const geometry: MeshGPU;
+const activeIndexCount: number = geometry.indexCount;
+void activeIndexCount;
+// @ts-expect-error Geometry counts remain readonly public observations.
+geometry.indexCount = 3;
 `
             );
             const result = spawnSync(

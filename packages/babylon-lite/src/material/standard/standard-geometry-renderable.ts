@@ -361,7 +361,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount, ti?.count ?? 1, 0, g._baseVertex);
+            pass.drawIndexed(g.indexCount, ti?.count ?? 1, g._firstIndex ?? 0, g._baseVertex);
         }
         return 1;
     };

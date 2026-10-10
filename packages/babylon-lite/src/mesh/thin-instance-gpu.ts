@@ -126,7 +126,7 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
     }
     const args = ti._drawArgsData!;
     const baseVertex = gpu._baseVertex ?? 0;
-    if (args[0] !== gpu.indexCount || (args[3]! | 0) !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
+    if (args[0] !== gpu.indexCount || args[2] !== (gpu._firstIndex ?? 0) || (args[3]! | 0) !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
         writeMeshIndexedIndirectArgs(args, gpu, ti.count);
         // A failed upload must retry even though the CPU words already contain the requested geometry.
         ti._drawArgsInstanceCount = -1;

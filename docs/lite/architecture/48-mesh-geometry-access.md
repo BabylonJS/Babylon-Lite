@@ -27,6 +27,11 @@ them is not retained on the CPU. UV, UV2, tangent, and color arrays are included
 already retains them. A zero-length tangent source is treated as absent, matching factory geometry
 that omitted tangents. The helper does not cause loaders or factories to retain additional data.
 
+After an explicit `setMeshDrawRange`, these copies contain only the selected vertex window and
+index range, with indices relative to that window. Inactive initialized source data and reserved
+GPU capacity are not exposed. Complete geometry updates clear the selection. See
+[exact active draw ranges](46-mesh-geometry-update.md#exact-active-draw-ranges-opt-in).
+
 ## Internal Architecture
 
 The helper reads the mesh's internal CPU arrays once and copies each available array with typed-array

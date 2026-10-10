@@ -515,7 +515,7 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup!);
-    pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
+    pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
 }
 
 function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {
