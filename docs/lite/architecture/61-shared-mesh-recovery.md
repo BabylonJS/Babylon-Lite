@@ -67,6 +67,11 @@ This callback is invoked only for valid live owners during recovery, not as a
 general API to revive a disposed allocation. Untracked, unleased loose meshes
 retain their existing caller-owned recovery responsibility.
 
+Recovery callers bypass sharing for opt-in mesh-local draw-range source windows.
+Clones of those meshes require independent replacement allocations so changing
+one active selection cannot alter another. The ordinary shared-geometry path and
+its exactly-once ownership accounting are unchanged.
+
 ## Babylon.js Equivalence Map
 
 Models shared geometry ownership across device replacement without changing the

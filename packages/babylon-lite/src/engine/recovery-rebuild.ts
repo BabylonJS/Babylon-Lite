@@ -183,14 +183,14 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
         }
         seen.add(mesh);
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
-            if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared) {
+            if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared && !hasMeshLocalDrawRange(mesh._gpu)) {
                 const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
                 if (mesh._disposed) {
                     continue;
                 }
                 installSharedMeshRecovery(mesh._gpu);
             }
-            const recoverShared = mesh._gpu._recoverShared;
+            const recoverShared = hasMeshLocalDrawRange(mesh._gpu) ? undefined : mesh._gpu._recoverShared;
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
         }
         if (mesh.skeleton) {
@@ -211,6 +211,11 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             Object.assign(old as MutableMorphTargets, rebuilt);
         }
     }
+}
+
+function hasMeshLocalDrawRange(gpu: MeshGPU): boolean {
+    // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
+    return "_drawRangeSource" in gpu && gpu._drawRangeSource !== undefined;
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {

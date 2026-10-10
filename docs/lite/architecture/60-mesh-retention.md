@@ -108,6 +108,9 @@ is expected and is not part of the detach/reinsert allocation-reuse measurement.
 Recovery rechecks disposal after loading shared recovery support, before installing
 or uploading a replacement. A lease retired during that await cannot acquire a
 phantom replacement ownership claim.
+Meshes with opt-in mesh-local draw-range source windows recover independently,
+even when a clone initially shares their allocation. Reusing a replacement handle
+would couple mutable active selections; ordinary shared geometry still recovers once.
 
 Forgotten leases remain explicit ownership until engine teardown. Independently
 owned storage/render-target/external/cube resources, producer controllers, and
@@ -136,7 +139,8 @@ implementation or asset is copied.
 - `mesh-retention.test.ts`: 1,000 fenced cycles, mesh-only parenting/visibility,
   multiple scenes/leases, clones/refcounts, unique/shared updates, duplicate slots,
   engine/scene teardown, queued-release reacquisition, cross-engine errors,
-  detached recovery, material/texture swaps, reentrancy, and independent engine hooks.
+  detached recovery, independent mesh-local draw selection recovery,
+  material/texture swaps, reentrancy, and independent engine hooks.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,

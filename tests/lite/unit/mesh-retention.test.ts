@@ -345,6 +345,35 @@ describe("retained mesh scene membership", () => {
         releaseMeshResources(lease);
     });
 
+    it("recovers mesh-local draw selections independently instead of sharing their replacement", async () => {
+        const { engine, scene, mesh } = fixture();
+        Object.assign(mesh._gpu, {
+            _drawRangeSource: {
+                positions: mesh._cpuPositions,
+                normals: mesh._cpuNormals,
+                indices: mesh._cpuIndices,
+                indexCount: 3,
+            },
+        });
+        const clone = cloneTransformNode(mesh) as typeof mesh;
+        addToScene(scene, mesh);
+        addToScene(scene, clone);
+        await _rebuildMeshes(engine, scene);
+        expect(clone._gpu).not.toBe(mesh._gpu);
+        expect(clone._gpu.positionBuffer).not.toBe(mesh._gpu.positionBuffer);
+        expect(mesh._gpu._refCount).toBeUndefined();
+        expect(clone._gpu._refCount).toBeUndefined();
+        const originalGpu = mesh._gpu;
+        const cloneGpu = clone._gpu;
+        removeFromScene(scene, mesh);
+        await waitForGpuResourceRetirements(engine);
+        expect(originalGpu.positionBuffer.destroy).toHaveBeenCalledOnce();
+        expect(cloneGpu.positionBuffer.destroy).not.toHaveBeenCalled();
+        removeFromScene(scene, clone);
+        await waitForGpuResourceRetirements(engine);
+        expect(cloneGpu.positionBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
     it("recovers detached geometry once and keeps a clone sharing its replacement", async () => {
         const { engine, scene, mesh } = fixture();
         const clone = cloneTransformNode(mesh) as typeof mesh;
