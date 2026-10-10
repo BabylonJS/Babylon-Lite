@@ -185,6 +185,9 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
             if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared) {
                 const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
+                if (mesh._disposed) {
+                    continue;
+                }
                 installSharedMeshRecovery(mesh._gpu);
             }
             const recoverShared = mesh._gpu._recoverShared;

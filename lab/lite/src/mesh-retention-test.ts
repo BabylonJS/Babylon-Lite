@@ -31,6 +31,9 @@ import {
     wgsl,
     type Mesh,
     renderFrame,
+    createPbrMaterial,
+    setPbrUnlit,
+    rebuildMaterial,
 } from "babylon-lite";
 import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js";
 import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
@@ -475,8 +478,107 @@ async function runPendingBuild(): Promise<void> {
     Object.assign(window, { pendingBuildTest: { ready: true, merged, held, initial, detached, retired, settled, gpuErrors } });
 }
 
+async function runPendingAdmissionOrder(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) throw new Error("Missing test canvas");
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const firstMaterial = createPbrMaterial({ baseColorFactor: [1, 0, 0, 1], alpha: 0.5, alphaBlend: true, doubleSided: true });
+    const secondMaterial = createPbrMaterial({ baseColorFactor: [0, 0, 1, 1], alpha: 0.5, alphaBlend: true, doubleSided: true });
+    setPbrUnlit(firstMaterial);
+    setPbrUnlit(secondMaterial);
+    const original = firstMaterial._buildGroup;
+    let entered!: () => void;
+    let resume!: () => void;
+    let finishFollowUp!: () => void;
+    const waiting = new Promise<void>((resolve) => (entered = resolve));
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const followUpGate = new Promise<void>((resolve) => (finishFollowUp = resolve));
+    let gated = false;
+    let settled = false;
+    let blockedOnce = false;
+    const builder: MeshGroupBuilder = Object.assign(
+        async (...args: Parameters<MeshGroupBuilder>) => {
+            if (settled) {
+                await followUpGate;
+            } else if (gated && !blockedOnce) {
+                blockedOnce = true;
+                entered();
+                await gate;
+            }
+            return original(...args);
+        },
+        { _materialFamily: original._materialFamily }
+    );
+    Object.defineProperty(firstMaterial, "_buildGroup", { value: builder });
+    Object.defineProperty(secondMaterial, "_buildGroup", { value: builder });
+    const first = createPlane(engine, { size: 2 });
+    const second = createPlane(engine, { size: 2 });
+    first.name = "A";
+    second.name = "B";
+    first.material = firstMaterial;
+    second.material = secondMaterial;
+    addToScene(scene, first);
+    addToScene(scene, second);
+    const lease = retainMeshResources(engine, first);
+    await registerScene(scene);
+    await startEngine(engine);
+    const pixel = async (): Promise<number[]> => {
+        renderFrame(engine, 0);
+        const shot = await captureScreenshot(engine);
+        const offset = (Math.floor(shot.height / 2) * shot.width + Math.floor(shot.width / 2)) * 4;
+        return Array.from(shot.data.slice(offset, offset + 4));
+    };
+    const initial = await pixel();
+    stopEngine(engine);
+    gated = true;
+    const pending = rebuildMaterial(scene, firstMaterial);
+    await waiting;
+    detachMeshFromScene(scene, first);
+    addToScene(scene, first);
+    resume();
+    await pending;
+    settled = true;
+    const order = scene._renderables.filter((draw) => draw.mesh).map((draw) => draw.mesh!.name);
+    await startEngine(engine);
+    const firstFrame = await pixel();
+    finishFollowUp();
+    await scene._runtimeBuilds?.all();
+    const freshScene = createSceneContext(engine);
+    freshScene.clearColor = scene.clearColor;
+    freshScene.camera = scene.camera;
+    for (const [name, material] of [
+        ["B", secondMaterial],
+        ["A", firstMaterial],
+    ] as const) {
+        const mesh = createPlane(engine, { size: 2 });
+        mesh.name = name;
+        mesh.material = material;
+        addToScene(freshScene, mesh);
+    }
+    await registerScene(freshScene);
+    disposeScene(scene);
+    releaseMeshResources(lease);
+    const fresh = await pixel();
+    stopEngine(engine);
+    disposeScene(freshScene);
+    await waitForGpuResourceRetirements(engine);
+    disposeEngine(engine);
+    Object.assign(window, { pendingAdmissionOrderTest: { ready: true, order, initial, firstFrame, fresh, gpuErrors } });
+}
+
 const query = new URLSearchParams(location.search);
-const runFixture = query.has("pendingBuild") ? runPendingBuild : query.has("pendingAdvanced") ? runPendingAdvanced : run;
+const runFixture = query.has("pendingAdmissionOrder")
+    ? runPendingAdmissionOrder
+    : query.has("pendingBuild")
+      ? runPendingBuild
+      : query.has("pendingAdvanced")
+        ? runPendingAdvanced
+        : run;
 void runFixture().catch((error: unknown) => {
     results.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
     console.error(error);

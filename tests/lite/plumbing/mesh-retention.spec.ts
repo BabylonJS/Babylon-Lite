@@ -1,6 +1,17 @@
 import { test, expect } from "@playwright/test";
 import type { RetentionResults } from "../../../lab/lite/src/mesh-retention-test.js";
 
+test("the first frame after an awaited PBR rebuild uses fresh retained admission order before its queued follow-up", async ({ page }) => {
+    await page.goto("/lite/mesh-retention-test.html?pendingAdmissionOrder=1");
+    await page.waitForFunction("window.pendingAdmissionOrderTest?.ready || window.meshRetentionTest?.error");
+    const result = await page.evaluate<{ order: string[]; initial: number[]; firstFrame: number[]; fresh: number[]; gpuErrors: string[] }>("window.pendingAdmissionOrderTest");
+    expect(result.order).toEqual(["B", "A"]);
+    expect(result.firstFrame).not.toEqual(result.initial);
+    expect(result.firstFrame).toEqual(result.fresh);
+    expect(result.firstFrame[0]).toBeGreaterThan(result.firstFrame[2]!);
+    expect(result.gpuErrors).toEqual([]);
+});
+
 test("detaching during a merged same-material async build evicts draws before preparation resumes", async ({ page }) => {
     await page.goto("/lite/mesh-retention-test.html?pendingBuild=1");
     await page.waitForFunction("window.pendingBuildTest?.ready || window.meshRetentionTest?.error");

@@ -66,6 +66,9 @@ Reinsertion builds ordinary fresh scene-local renderables and appends normal
 admission order. Explicit render order still takes precedence over stable depth
 ties. Scene-local uniforms, bindings, and wrappers may allocate again; the
 reuse guarantee concerns owned geometry, not all GPU or JavaScript allocations.
+An awaited group rebuild reconciles surviving members' current admission order
+before publication. Detach/reinsert races retry within the existing bounded rebuild
+transaction, so the first settled frame does not wait for a queued follow-up.
 Repeated parent admission skips only already-present membership/build work:
 descendants are still traversed, so detached or newly added children are admitted.
 
@@ -102,6 +105,9 @@ set, preserving detached buffers on the replacement device and avoiding duplicat
 identity rebuilds. Shared allocation replacement uses
 [shared mesh recovery](61-shared-mesh-recovery.md). Replacement-device allocation
 is expected and is not part of the detach/reinsert allocation-reuse measurement.
+Recovery rechecks disposal after loading shared recovery support, before installing
+or uploading a replacement. A lease retired during that await cannot acquire a
+phantom replacement ownership claim.
 
 Forgotten leases remain explicit ownership until engine teardown. Independently
 owned storage/render-target/external/cube resources, producer controllers, and
@@ -131,6 +137,8 @@ implementation or asset is copied.
   multiple scenes/leases, clones/refcounts, unique/shared updates, duplicate slots,
   engine/scene teardown, queued-release reacquisition, cross-engine errors,
   detached recovery, material/texture swaps, reentrancy, and independent engine hooks.
+- `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
+  retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
   fresh identity/order, filter selection, disposal cancellation, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.
@@ -140,6 +148,8 @@ implementation or asset is copied.
 - `mesh-retention.spec.ts`: native public rendering, CPU/GPU picking, 1,000 complete
   activations, transparent tie reference, geometry-count stability, final disposal,
   device loss, and network-controlled advanced preparation with actual buffer binding.
+  Also compares the first settled PBR transparent frame to fresh admission while
+  the queued follow-up remains blocked.
 - `public-api-types.test.ts`: pure-state lease, supported roots, readonly public
   declarations, and absence of internal retention/admission helpers.
 

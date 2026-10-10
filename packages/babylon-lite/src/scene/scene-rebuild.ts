@@ -280,12 +280,17 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                         (mesh) => ctx.meshes.includes(mesh) && mesh.material === materials.get(mesh) && mesh.material?._buildGroup === builder && meshes.includes(mesh)
                     )
                 );
+                // A detach/reinsert can preserve identities but change transparent tie order. Retry that
+                // build before publication rather than let the queued follow-up correct a stale first frame.
                 // A MERGED renderable (no `mesh` back-reference) draws every mesh the builder was handed, so it
                 // cannot be committed when the group changed during the await: a mesh removed or re-materialed
                 // meanwhile is excluded from `liveMeshes` and its GPU buffers are freed, yet the merged draw
                 // would still reference them. Discard this build; the caller retries against the settled
                 // membership, and gives up (dropping the group's output) if it keeps racing.
-                if (liveMeshes.size !== groupMeshes.length && result.renderables.some((renderable) => !renderable.mesh)) {
+                const currentMeshes = meshes.filter((mesh) => liveMeshes.has(mesh));
+                const capturedMeshes = groupMeshes.filter((mesh) => liveMeshes.has(mesh));
+                const reordered = currentMeshes.some((mesh, index) => mesh !== capturedMeshes[index]);
+                if (reordered || (liveMeshes.size !== groupMeshes.length && result.renderables.some((renderable) => !renderable.mesh))) {
                     for (const mesh of groupMeshes) {
                         const built = ctx._meshDisposables.get(mesh);
                         const previous = oldByMesh.get(mesh);
