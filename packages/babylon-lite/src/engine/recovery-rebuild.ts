@@ -53,6 +53,8 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
     // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
     engine._pbrFallbackTex = undefined;
+    const seen = new WeakSet<Mesh>();
+    await rebuildMeshResources(engine, engine._retainedMeshes ?? [], seen);
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             if (ctx._kind !== "scene") {
@@ -62,12 +64,12 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
             if (!isRenderingContextRegistered(surface, scene) || scene._z) {
                 continue;
             }
-            await rebuildSceneGpu(engine, scene);
+            await rebuildSceneGpu(engine, scene, seen);
         }
     }
 }
 
-async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
+async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen: WeakSet<Mesh>): Promise<void> {
     // The environment and shadow rebuild logic each live in their own module, reached only
     // through these lazy imports so recovery-enabled scenes that use neither carry neither.
     if (scene._envTextures) {
@@ -76,7 +78,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     await runRecoveryStep("rebuilding material textures", () => rebuildSceneTextures(engine, scene));
-    await runRecoveryStep("rebuilding meshes", () => _rebuildMeshes(engine, scene));
+    await runRecoveryStep("rebuilding meshes", () => rebuildMeshResources(engine, scene.meshes, seen));
     if (scene._z) {
         return;
     }
@@ -170,12 +172,27 @@ function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void 
 
 /** @internal Rebuild retained mesh resources after a device loss. */
 export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext): Promise<void> {
+    await rebuildMeshResources(engine, scene.meshes, new WeakSet());
+}
+
+async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh>, seen: WeakSet<Mesh>): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
 
-    for (const mesh of scene.meshes) {
+    for (const mesh of meshes) {
+        if (seen.has(mesh) || mesh._disposed) {
+            continue;
+        }
+        seen.add(mesh);
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
-            const recoverShared = mesh._gpu._recoverShared;
+            if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared && !hasMeshLocalDrawRange(mesh._gpu)) {
+                const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
+                if (mesh._disposed) {
+                    continue;
+                }
+                installSharedMeshRecovery(mesh._gpu);
+            }
+            const recoverShared = hasMeshLocalDrawRange(mesh._gpu) ? undefined : mesh._gpu._recoverShared;
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
         }
         if (mesh.skeleton) {
@@ -196,6 +213,11 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
             Object.assign(old as MutableMorphTargets, rebuilt);
         }
     }
+}
+
+function hasMeshLocalDrawRange(gpu: MeshGPU): boolean {
+    // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
+    return "_drawRangeSource" in gpu && gpu._drawRangeSource !== undefined;
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {

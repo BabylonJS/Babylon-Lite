@@ -1,0 +1,585 @@
+import {
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createPlane,
+    createStandardMaterial,
+    addToScene,
+    registerScene,
+    startEngine,
+    stopEngine,
+    captureScreenshot,
+    retainMeshResources,
+    releaseMeshResources,
+    detachMeshFromScene,
+    removeFromScene,
+    waitForGpuResourceRetirements,
+    createGpuPicker,
+    pickAsync,
+    pickWithRay,
+    disposePicker,
+    disposeScene,
+    disposeEngine,
+    onEngineGpuError,
+    createTransformNode,
+    updateMeshGeometryCapacity,
+    enableDeviceLostSceneRecovery,
+    forceWebGpuDeviceLossForTesting,
+    type DeviceLostRecoveryHandle,
+    createMeshFromData,
+    createShaderMaterial,
+    wgsl,
+    type Mesh,
+    renderFrame,
+    createPbrMaterial,
+    setPbrUnlit,
+    rebuildMaterial,
+} from "babylon-lite";
+import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js";
+import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
+
+export interface RetentionResults {
+    ready: boolean;
+    error: string | null;
+    gpuErrors: string[];
+    pixels: Record<string, number[]>;
+    geometryAllocations: number[];
+    totalAllocations: number[];
+    retainedDestroys: number;
+    finalDestroys: number;
+    cycleCount: number;
+    cpuDetachedHit: boolean;
+    gpuDetachedHit: boolean;
+    pendingGpuHit: boolean;
+    queuedGpuHit: boolean;
+    gpuRestoredName: string | null;
+    legacyReaddRejected: boolean;
+    finalReaddRejected: boolean;
+    identityPreserved: boolean;
+    uniqueDetachedUpdate: boolean;
+    maxGroupOutputs: number;
+    recoveredDetached: boolean;
+    recoveredPickName: string | null;
+    detachedBoundsUpdated: boolean;
+    detachedMaterialSwap: boolean;
+}
+
+const results: RetentionResults = {
+    ready: false,
+    error: null,
+    gpuErrors: [],
+    pixels: {},
+    geometryAllocations: [],
+    totalAllocations: [],
+    retainedDestroys: 0,
+    finalDestroys: 0,
+    cycleCount: 0,
+    cpuDetachedHit: true,
+    gpuDetachedHit: true,
+    pendingGpuHit: true,
+    queuedGpuHit: true,
+    gpuRestoredName: null,
+    legacyReaddRejected: false,
+    finalReaddRejected: false,
+    identityPreserved: false,
+    uniqueDetachedUpdate: false,
+    maxGroupOutputs: 0,
+    recoveredDetached: false,
+    recoveredPickName: null,
+    detachedBoundsUpdated: false,
+    detachedMaterialSwap: false,
+};
+Object.assign(window, { meshRetentionTest: results });
+
+async function run(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) {
+        throw new Error("Missing test canvas");
+    }
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    let recovery!: DeviceLostRecoveryHandle;
+    const recovered = new Promise<void>((resolve, reject) => {
+        recovery = enableDeviceLostSceneRecovery(engine, {
+            onRecovered: resolve,
+            onRecoveryFailed: reject,
+        });
+    });
+    onEngineGpuError(engine, (error) => results.gpuErrors.push(error.message));
+    let geometryAllocations = 0;
+    let totalAllocations = 0;
+    let geometryDestroys = 0;
+    let onPickReadback: (() => void) | undefined;
+    // Native allocation instrumentation is local to this test's own device.
+    const createBuffer = engine._device.createBuffer.bind(engine._device);
+    engine._device.createBuffer = (descriptor) => {
+        totalAllocations++;
+        const buffer = createBuffer(descriptor);
+        if (descriptor.label === "pick-color-staging") {
+            const mapAsync = buffer.mapAsync.bind(buffer);
+            buffer.mapAsync = (mode, offset, size) => {
+                const mapping = mapAsync(mode, offset, size);
+                const mutate = onPickReadback;
+                onPickReadback = undefined;
+                mutate?.();
+                return mapping;
+            };
+        }
+        if (descriptor.usage & (GPUBufferUsage.VERTEX | GPUBufferUsage.INDEX)) {
+            geometryAllocations++;
+            const destroy = buffer.destroy.bind(buffer);
+            buffer.destroy = () => {
+                geometryDestroys++;
+                destroy();
+            };
+        }
+        return buffer;
+    };
+    const scene = createSceneContext(engine);
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const card = (name: string, color: [number, number, number]): Mesh => {
+        const mesh = createPlane(engine, { size: 2 });
+        mesh.name = name;
+        const material = createStandardMaterial();
+        material.disableLighting = true;
+        material.emissiveColor = color;
+        material.diffuseColor = [1, 1, 1];
+        material.alpha = 0.5;
+        material.backFaceCulling = false;
+        mesh.material = material;
+        return mesh;
+    };
+    const red = card("red", [1, 0, 0]);
+    const blue = card("blue", [0, 0, 1]);
+    const shaderMaterial = createShaderMaterial({
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position.xy, 0.5, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0, 1, 0, 1); }`,
+        attributes: ["position"],
+        backFaceCulling: false,
+    });
+    const shaderCard = (name: string, left: number, right: number): Mesh => {
+        const mesh = createMeshFromData(
+            engine,
+            name,
+            new Float32Array([left, -0.95, 0, right, -0.95, 0, right, -0.65, 0, left, -0.65, 0]),
+            new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            new Uint32Array([0, 1, 2, 0, 2, 3])
+        );
+        mesh.material = shaderMaterial;
+        return mesh;
+    };
+    const shaderLeft = shaderCard("shader-left", -0.95, -0.65);
+    const shaderRight = shaderCard("shader-right", 0.65, 0.95);
+    red.id = "retained-card";
+    red.metadata = { retained: true };
+    const parent = createTransformNode("parent");
+    red.parent = parent;
+    addToScene(scene, red);
+    addToScene(scene, blue);
+    addToScene(scene, shaderLeft);
+    addToScene(scene, shaderRight);
+    const lease = retainMeshResources(engine, red);
+    const shaderLease = retainMeshResources(engine, shaderLeft);
+    const originalGpu = red._gpu;
+    await registerScene(scene);
+    await startEngine(engine);
+    const pixel = async (name: string, x?: number, y?: number): Promise<void> => {
+        const shot = await captureScreenshot(engine);
+        const offset = ((y ?? Math.floor(shot.height / 2)) * shot.width + (x ?? Math.floor(shot.width / 2))) * 4;
+        results.pixels[name] = Array.from(shot.data.slice(offset, offset + 4));
+    };
+    await pixel("initial");
+    await pixel("shaderInitial", 10, 118);
+    const picker = createGpuPicker(scene);
+    await pickAsync(picker, 64, 64);
+    onPickReadback = () => detachMeshFromScene(scene, red);
+    results.pendingGpuHit = (await pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red })).hit;
+    detachMeshFromScene(scene, red);
+    detachMeshFromScene(scene, shaderLeft);
+    const queued = [pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red }), pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red })];
+    results.queuedGpuHit = (await Promise.all(queued)).some((info) => info.hit);
+    await waitForGpuResourceRetirements(engine);
+    await pixel("detached");
+    await pixel("shaderDetached", 10, 118);
+    results.cpuDetachedHit = pickWithRay(scene, { origin: [0, 0, -5], direction: [0, 0, 1], length: 10 }, { predicate: (mesh) => mesh === red }).hit;
+    results.gpuDetachedHit = (await pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red })).hit;
+    const originalMaterial = red.material;
+    const swappedMaterial = createStandardMaterial();
+    swappedMaterial.disableLighting = true;
+    swappedMaterial.emissiveColor = [0, 1, 0];
+    swappedMaterial.alpha = 0.5;
+    swappedMaterial.backFaceCulling = false;
+    red.material = swappedMaterial;
+    addToScene(scene, red);
+    addToScene(scene, shaderLeft);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await pixel("swapped");
+    await pixel("shaderReinserted", 10, 118);
+    results.detachedMaterialSwap = red.material === swappedMaterial;
+    detachMeshFromScene(scene, red);
+    detachMeshFromScene(scene, shaderLeft);
+    red.material = originalMaterial;
+    addToScene(scene, red);
+    addToScene(scene, shaderLeft);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await pixel("reinserted");
+    results.gpuRestoredName = (await pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red })).pickedMesh?.name ?? null;
+    results.identityPreserved = red._gpu === originalGpu && red.parent === parent && red.id === "retained-card" && red.metadata?.retained === true;
+    results.geometryAllocations.push(geometryAllocations);
+    results.totalAllocations.push(totalAllocations);
+    const destroysBeforeCycles = geometryDestroys;
+    for (let i = 0; i < 1000; i++) {
+        detachMeshFromScene(scene, red);
+        detachMeshFromScene(scene, shaderLeft);
+        await waitForGpuResourceRetirements(engine);
+        addToScene(scene, red);
+        addToScene(scene, shaderLeft);
+        // Submit the public scene render pipeline on every complete activation.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        results.cycleCount++;
+        for (const group of scene._groups.values()) {
+            results.maxGroupOutputs = Math.max(results.maxGroupOutputs, group.o?.length ?? 0);
+        }
+    }
+    results.geometryAllocations.push(geometryAllocations);
+    results.totalAllocations.push(totalAllocations);
+    results.retainedDestroys = geometryDestroys - destroysBeforeCycles;
+    await pixel("cycled");
+    await pixel("shaderCycled", 10, 118);
+    detachMeshFromScene(scene, red);
+    const fresh = card("fresh-red", [1, 0, 0]);
+    addToScene(scene, fresh);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await pixel("fresh");
+    removeFromScene(scene, fresh);
+    await waitForGpuResourceRetirements(engine);
+    try {
+        addToScene(scene, fresh);
+    } catch (error) {
+        results.legacyReaddRejected = error instanceof Error && error.message.includes("disposed");
+    }
+    const positions = red._cpuPositions?.slice();
+    const normals = red._cpuNormals;
+    const indices = red._cpuIndices;
+    if (!positions || !normals || !indices) {
+        throw new Error("Plane must retain public-factory geometry for update validation");
+    }
+    for (let i = 0; i < positions.length; i++) {
+        positions[i] = positions[i]! * 0.5;
+    }
+    const update = updateMeshGeometryCapacity(engine, red, positions, normals, indices, red._cpuUvs);
+    results.uniqueDetachedUpdate = update.stable && red._gpu === originalGpu;
+    results.detachedBoundsUpdated = red.boundMin?.[0] === -0.5 && red.boundMax?.[0] === 0.5;
+    forceWebGpuDeviceLossForTesting(engine);
+    await recovered;
+    results.recoveredDetached = red._gpu !== originalGpu && !scene.meshes.includes(red);
+    addToScene(scene, red);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    results.recoveredPickName = (await pickAsync(picker, 64, 64, { filter: (mesh) => mesh === red })).pickedMesh?.name ?? null;
+    await pixel("recovered");
+    detachMeshFromScene(scene, red);
+    for (const buffer of [red._gpu.positionBuffer, red._gpu.normalBuffer, red._gpu.uvBuffer, red._gpu.indexBuffer]) {
+        const destroy = buffer.destroy.bind(buffer);
+        buffer.destroy = () => {
+            geometryDestroys++;
+            destroy();
+        };
+    }
+    const beforeRelease = geometryDestroys;
+    releaseMeshResources(lease);
+    releaseMeshResources(lease);
+    await waitForGpuResourceRetirements(engine);
+    results.finalDestroys = geometryDestroys - beforeRelease;
+    try {
+        addToScene(scene, red);
+    } catch (error) {
+        results.finalReaddRejected = error instanceof Error && error.message.includes("disposed");
+    }
+    disposePicker(picker);
+    releaseMeshResources(shaderLease);
+    stopEngine(engine);
+    disposeScene(scene);
+    await waitForGpuResourceRetirements(engine);
+    recovery.disable();
+    disposeEngine(engine);
+    results.ready = true;
+    canvas.dataset.ready = "true";
+}
+
+async function runPendingAdvanced(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) {
+        throw new Error("Missing test canvas");
+    }
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const mesh = createPlane(engine, { size: 2 });
+    mesh.name = "retiring";
+    addToScene(scene, mesh);
+    const lease = retainMeshResources(engine, mesh);
+    await registerScene(scene);
+    const picker = createGpuPicker(scene);
+    const oldBuffers = new Set([mesh._gpu.positionBuffer, mesh._gpu.normalBuffer, mesh._gpu.uvBuffer, mesh._gpu.indexBuffer]);
+    let oldGeometryUses = 0;
+    let retiredBuffers = 0;
+    const drawCounts: number[] = [];
+    for (const buffer of oldBuffers) {
+        const destroy = buffer.destroy.bind(buffer);
+        buffer.destroy = () => {
+            retiredBuffers++;
+            destroy();
+        };
+    }
+    const createEncoder = engine._device.createCommandEncoder.bind(engine._device);
+    engine._device.createCommandEncoder = (descriptor) => {
+        const encoder = createEncoder(descriptor);
+        if (descriptor?.label === "pick") {
+            const begin = encoder.beginRenderPass.bind(encoder);
+            encoder.beginRenderPass = (passDescriptor) => {
+                const pass = begin(passDescriptor);
+                const vertex = pass.setVertexBuffer.bind(pass);
+                const index = pass.setIndexBuffer.bind(pass);
+                const draw = pass.drawIndexed.bind(pass);
+                pass.setVertexBuffer = (slot, buffer, offset, size) => {
+                    if (buffer && oldBuffers.has(buffer)) {
+                        oldGeometryUses++;
+                    }
+                    vertex(slot, buffer, offset, size);
+                };
+                pass.setIndexBuffer = (buffer, format, offset, size) => {
+                    if (oldBuffers.has(buffer)) {
+                        oldGeometryUses++;
+                    }
+                    index(buffer, format, offset, size);
+                };
+                pass.drawIndexed = (count, instances, firstIndex, baseVertex, firstInstance) => {
+                    drawCounts.push(count);
+                    draw(count, instances, firstIndex, baseVertex, firstInstance);
+                };
+                return pass;
+            };
+        }
+        return encoder;
+    };
+    const options = {
+        discard: {
+            key: "native-pending-membership",
+            vertexData: "normal" as const,
+            wgsl: wgsl`fn shouldDiscardPick(input: PickDiscardInput) -> bool { return false; }`,
+        },
+    };
+    Object.assign(window, {
+        pendingAdvancedTest: {
+            ready: true,
+            pick: async () => (await pickAsync(picker, canvas.clientWidth / 2, canvas.clientHeight / 2, options)).pickedMesh?.name ?? null,
+            mutate: async () => {
+                detachMeshFromScene(scene, mesh);
+                releaseMeshResources(lease);
+                await waitForGpuResourceRetirements(engine);
+                const cpuHit = pickWithRay(scene, { origin: [0, 0, -2], direction: [0, 0, 1], length: 10 }).hit;
+                const fresh = createPlane(engine, { size: 2 });
+                fresh.name = "fresh";
+                fresh.material = createStandardMaterial();
+                addToScene(scene, fresh);
+                return { retiredBuffers, cpuHit };
+            },
+            finish: async () => {
+                disposePicker(picker);
+                disposeScene(scene);
+                await waitForGpuResourceRetirements(engine);
+                disposeEngine(engine);
+                return { oldGeometryUses, drawCounts, gpuErrors };
+            },
+        },
+    });
+}
+
+async function runPendingBuild(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) throw new Error("Missing test canvas");
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    const material = createShaderMaterial({
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position.xy, 0.5, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0, 1, 0, 1); }`,
+        attributes: ["position"],
+        backFaceCulling: false,
+    });
+    const original = material._buildGroup;
+    let gated = false;
+    let entered!: () => void;
+    let resume!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+    });
+    const builder: MeshGroupBuilder = Object.assign(
+        async (...args: Parameters<MeshGroupBuilder>) => {
+            if (gated) {
+                entered();
+                await gate;
+            }
+            return original(...args);
+        },
+        { _materialFamily: original._materialFamily }
+    );
+    Object.defineProperty(material, "_buildGroup", { value: builder });
+    const card = (left: number, right: number): Mesh => {
+        const mesh = createMeshFromData(
+            engine,
+            "pending-card",
+            new Float32Array([left, -0.5, 0, right, -0.5, 0, right, 0.5, 0, left, 0.5, 0]),
+            new Float32Array(12),
+            new Uint32Array([0, 1, 2, 0, 2, 3])
+        );
+        mesh.material = material;
+        addToScene(scene, mesh);
+        return mesh;
+    };
+    const left = card(-0.9, -0.1);
+    card(0.1, 0.9);
+    const lease = retainMeshResources(engine, left);
+    await registerScene(scene);
+    await startEngine(engine);
+    const merged = scene._renderables.some((renderable) => !renderable.mesh);
+    const pixel = async (): Promise<number[]> => {
+        renderFrame(engine, 0);
+        const shot = await captureScreenshot(engine);
+        const offset = (Math.floor(shot.height / 2) * shot.width + Math.floor(shot.width / 4)) * 4;
+        return Array.from(shot.data.slice(offset, offset + 4));
+    };
+    const initial = await pixel();
+    gated = true;
+    const pending = buildRuntimeMesh(scene, builder, left);
+    await waiting;
+    const held = scene._runtimeBuilds?.pendingDisposers(left)?.length ?? 0;
+    detachMeshFromScene(scene, left);
+    const detached = await pixel();
+    releaseMeshResources(lease);
+    await waitForGpuResourceRetirements(engine);
+    const retired = await pixel();
+    resume();
+    await pending;
+    await waitForGpuResourceRetirements(engine);
+    const settled = await pixel();
+    stopEngine(engine);
+    disposeScene(scene);
+    await waitForGpuResourceRetirements(engine);
+    disposeEngine(engine);
+    Object.assign(window, { pendingBuildTest: { ready: true, merged, held, initial, detached, retired, settled, gpuErrors } });
+}
+
+async function runPendingAdmissionOrder(): Promise<void> {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) throw new Error("Missing test canvas");
+    const engine = await createEngine(canvas, { msaaSamples: 1 });
+    const gpuErrors: string[] = [];
+    onEngineGpuError(engine, (error) => gpuErrors.push(error.message));
+    const scene = createSceneContext(engine);
+    scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const firstMaterial = createPbrMaterial({ baseColorFactor: [1, 0, 0, 1], alpha: 0.5, alphaBlend: true, doubleSided: true });
+    const secondMaterial = createPbrMaterial({ baseColorFactor: [0, 0, 1, 1], alpha: 0.5, alphaBlend: true, doubleSided: true });
+    setPbrUnlit(firstMaterial);
+    setPbrUnlit(secondMaterial);
+    const original = firstMaterial._buildGroup;
+    let entered!: () => void;
+    let resume!: () => void;
+    let finishFollowUp!: () => void;
+    const waiting = new Promise<void>((resolve) => (entered = resolve));
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const followUpGate = new Promise<void>((resolve) => (finishFollowUp = resolve));
+    let gated = false;
+    let settled = false;
+    let blockedOnce = false;
+    const builder: MeshGroupBuilder = Object.assign(
+        async (...args: Parameters<MeshGroupBuilder>) => {
+            if (settled) {
+                await followUpGate;
+            } else if (gated && !blockedOnce) {
+                blockedOnce = true;
+                entered();
+                await gate;
+            }
+            return original(...args);
+        },
+        { _materialFamily: original._materialFamily }
+    );
+    Object.defineProperty(firstMaterial, "_buildGroup", { value: builder });
+    Object.defineProperty(secondMaterial, "_buildGroup", { value: builder });
+    const first = createPlane(engine, { size: 2 });
+    const second = createPlane(engine, { size: 2 });
+    first.name = "A";
+    second.name = "B";
+    first.material = firstMaterial;
+    second.material = secondMaterial;
+    addToScene(scene, first);
+    addToScene(scene, second);
+    const lease = retainMeshResources(engine, first);
+    await registerScene(scene);
+    await startEngine(engine);
+    const pixel = async (): Promise<number[]> => {
+        renderFrame(engine, 0);
+        const shot = await captureScreenshot(engine);
+        const offset = (Math.floor(shot.height / 2) * shot.width + Math.floor(shot.width / 2)) * 4;
+        return Array.from(shot.data.slice(offset, offset + 4));
+    };
+    const initial = await pixel();
+    stopEngine(engine);
+    gated = true;
+    const pending = rebuildMaterial(scene, firstMaterial);
+    await waiting;
+    detachMeshFromScene(scene, first);
+    addToScene(scene, first);
+    resume();
+    await pending;
+    settled = true;
+    const order = scene._renderables.filter((draw) => draw.mesh).map((draw) => draw.mesh!.name);
+    await startEngine(engine);
+    const firstFrame = await pixel();
+    finishFollowUp();
+    await scene._runtimeBuilds?.all();
+    const freshScene = createSceneContext(engine);
+    freshScene.clearColor = scene.clearColor;
+    freshScene.camera = scene.camera;
+    for (const [name, material] of [
+        ["B", secondMaterial],
+        ["A", firstMaterial],
+    ] as const) {
+        const mesh = createPlane(engine, { size: 2 });
+        mesh.name = name;
+        mesh.material = material;
+        addToScene(freshScene, mesh);
+    }
+    await registerScene(freshScene);
+    disposeScene(scene);
+    releaseMeshResources(lease);
+    const fresh = await pixel();
+    stopEngine(engine);
+    disposeScene(freshScene);
+    await waitForGpuResourceRetirements(engine);
+    disposeEngine(engine);
+    Object.assign(window, { pendingAdmissionOrderTest: { ready: true, order, initial, firstFrame, fresh, gpuErrors } });
+}
+
+const query = new URLSearchParams(location.search);
+const runFixture = query.has("pendingAdmissionOrder")
+    ? runPendingAdmissionOrder
+    : query.has("pendingBuild")
+      ? runPendingBuild
+      : query.has("pendingAdvanced")
+        ? runPendingAdvanced
+        : run;
+void runFixture().catch((error: unknown) => {
+    results.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    console.error(error);
+});

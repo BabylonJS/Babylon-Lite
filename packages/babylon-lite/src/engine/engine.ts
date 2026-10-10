@@ -121,6 +121,10 @@ export interface EngineContext extends SurfaceContext {
     _managedResourceDisposers?: Array<() => void>;
     /** @internal Installed only while independent managed resource families are live. */
     _disposeManagedResources?: () => void;
+    /** @internal Explicitly leased mesh identities, including meshes with no scene membership. */
+    _retainedMeshes?: Set<Mesh>;
+    /** @internal Admission policy installed only while this engine has live mesh leases. */
+    _admitSceneEntity?: (scene: SceneContext, entity: object) => boolean;
     /** @internal Constant missing-attribute buffer, installed only by storage-backed geometry. */
     _getVertexDefaultBuffer?: (gpu: MeshGPU) => GPUBuffer | null;
     /** @internal Bumped when a managed resource handle is destroyed or replaced. */

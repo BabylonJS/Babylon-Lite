@@ -461,10 +461,18 @@ struct FsOut {
 1. **Create**: `createGpuPicker(scene)` → pure state; render targets allocated on the first pick.
 2. **Enable detail** (optional): `enableDetailedPicking(picker)` → sets `_detailedPicking` only when the created device has `"primitive-index"`.
 3. **Pick**: `pickAsync(picker, x, y, options?)` →
+    - serializes requests per picker; a failed request rejects without poisoning the next queued request
+    - resolves lazy contributors, candidate selection, deformation/detail/debug modules, and advanced draw closures before encoding
+    - snapshots the scene renderable version before preparation; a version or engine-device change restarts the entire preparation, not just the candidate array
+    - rejects after 16 consecutive unstable preparations; disposal during preparation returns an empty hit without recreating targets
     - snapshots mesh ID ranges and draws meshes, then `scene._pickSources`, into the shared 1×1 pass
     - reads ID + depth (+ exact detail when active), resolves from the snapshot, and reconstructs the pixel-center world point
     - for a detailed mesh hit, derives barycentrics/normals from the exact GPU primitive/local point
 4. **Dispose**: `disposePicker(picker)` → destroys ID/depth/detail targets, staging buffers, scene UBO, and per-contributor GPU state.
+
+Controlled-await regression coverage is in `gpu-picker-membership.test.ts`,
+`gpu-picker-retry.test.ts`, and the native `mesh-retention.spec.ts`; see
+[mesh retention](60-mesh-retention.md) for detached ownership and retirement.
 
 ## Babylon.js Equivalence Map
 

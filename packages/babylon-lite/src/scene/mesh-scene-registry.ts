@@ -15,6 +15,41 @@ import type { SceneContext } from "./scene-core.js";
  *  `scene-remove` reaching back into `scene-core`. (This is organizational only — the package
  *  is side-effect-free, so symbol-level tree-shaking applies regardless of file boundaries.) */
 let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
+let _meshRetained: ((mesh: Mesh, engine?: SceneContext["surface"]["engine"]) => boolean) | undefined;
+let _retainMaterial: ((mesh: Mesh, material: Mesh["material"]) => void) | undefined;
+
+/** @internal Opt-in ownership seam; absent when mesh retention is tree-shaken. */
+export function installMeshRetention(retained: NonNullable<typeof _meshRetained>, material: NonNullable<typeof _retainMaterial>): void {
+    _meshRetained = retained;
+    _retainMaterial = material;
+}
+
+/** @internal Whether no scene or explicit retention owns this mesh. */
+export function isMeshUnowned(mesh: Mesh): boolean {
+    return !_meshScenes?.get(mesh)?.size && !_meshRetained?.(mesh);
+}
+
+/** @internal Whether an explicit owner still pins the mesh's resource claim. */
+export function hasMeshRetention(mesh: Mesh): boolean {
+    return !!_meshRetained?.(mesh);
+}
+
+/** @internal Constant-time per-scene mesh membership. */
+export function hasMeshScene(scene: SceneContext, mesh: Mesh): boolean {
+    return !!_meshScenes?.get(mesh)?.has(scene);
+}
+
+/** @internal Existing scene engine, for retention ownership validation. */
+export function meshSceneEngine(mesh: Mesh): SceneContext["surface"]["engine"] | undefined {
+    let engine: SceneContext["surface"]["engine"] | undefined;
+    for (const scene of _meshScenes?.get(mesh) ?? []) {
+        if (engine && engine !== scene.surface.engine) {
+            throw new Error(`Mesh "${mesh.name}" belongs to scenes on different engines and cannot be retained.`);
+        }
+        engine = scene.surface.engine;
+    }
+    return engine;
+}
 
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
@@ -55,19 +90,29 @@ function installMaterialSetter(mesh: Mesh): void {
         },
         set(v) {
             if (v !== _mat) {
+                _retainMaterial?.(mesh, v);
                 _mat = v;
-                const scenes = _meshScenes?.get(mesh);
-                if (scenes) {
-                    for (const scene of scenes) {
-                        enqueueMaterialSwap(scene, mesh);
-                        scene._meshMaterialChange?.(mesh, v);
-                    }
+                // Registration creates the record before this setter; live mesh records are never deleted.
+                for (const scene of _meshScenes!.get(mesh)!) {
+                    enqueueMaterialSwap(scene, mesh);
+                    scene._meshMaterialChange?.(mesh, v);
                 }
             }
         },
         configurable: true,
         enumerable: true,
     });
+}
+
+/** @internal Observe material reassignment even before the first scene admission. */
+export function observeMeshMaterial(mesh: Mesh): Set<SceneContext> {
+    const map = (_meshScenes ??= new WeakMap());
+    let scenes = map.get(mesh);
+    if (!scenes) {
+        map.set(mesh, (scenes = new Set()));
+        installMaterialSetter(mesh);
+    }
+    return scenes;
 }
 
 /** @internal Register `scene` as an owner of `mesh`. Installs the material setter on the mesh's
@@ -80,8 +125,11 @@ function installMaterialSetter(mesh: Mesh): void {
  *  are silent corruption, so the failure is made loud here. */
 export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
     if (mesh._disposed) {
-        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
+        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed. Create a new mesh instead.`);
     }
+    _meshRetained?.(mesh, scene.surface.engine);
+    _retainMaterial?.(mesh, mesh.material);
+    // Keep ordinary admission inline so optional pre-admission observation adds no bundle cost.
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {
@@ -97,8 +145,8 @@ export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
 export function unregisterMeshScene(scene: SceneContext, mesh: Mesh): boolean {
     const scenes = _meshScenes?.get(mesh);
     if (!scenes) {
-        return true;
+        return !_meshRetained?.(mesh);
     }
     scenes.delete(scene);
-    return scenes.size === 0;
+    return scenes.size === 0 && !_meshRetained?.(mesh);
 }
