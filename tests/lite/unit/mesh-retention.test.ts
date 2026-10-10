@@ -19,6 +19,7 @@ import { createHemisphericLight } from "../../../packages/babylon-lite/src/light
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build.js";
 import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
+import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild.js";
 
 function stub<T extends object>(value: Partial<T>): T {
     return value as T;
@@ -69,6 +70,44 @@ function fixture() {
 }
 
 describe("retained mesh scene membership", () => {
+    it("commits current admission order when detach/reinsert races an awaited PBR material rebuild", async () => {
+        const { engine, scene, mesh: first } = fixture();
+        const second = cloneTransformNode(first) as typeof first;
+        let entered!: () => void;
+        let resume!: () => void;
+        const waiting = new Promise<void>((resolve) => (entered = resolve));
+        const gate = new Promise<void>((resolve) => (resume = resolve));
+        let calls = 0;
+        const builder: MeshGroupBuilder = async (_scene, meshes) => {
+            if (++calls === 1) {
+                entered();
+                await gate;
+            }
+            return {
+                renderables: meshes.map((mesh) => ({ order: 1, mesh }) as never),
+                rebuildSingle: (mesh) => ({ order: 1, mesh }) as never,
+            };
+        };
+        builder._materialFamily = "pbr";
+        Object.defineProperty(first.material, "_buildGroup", { value: builder });
+        addToScene(scene, first);
+        addToScene(scene, second);
+        scene._built = true;
+        scene._frameGraph.build = vi.fn();
+        const lease = retainMeshResources(engine, first);
+        const pending = rebuildMaterial(scene, first.material);
+        await waiting;
+        detachMeshFromScene(scene, first);
+        addToScene(scene, first);
+        expect(scene.meshes).toEqual([second, first]);
+        resume();
+        await pending;
+        expect(scene._renderables.map((draw) => draw.mesh)).toEqual([second, first]);
+        expect(scene._materialSwapQueue).toContain(first);
+        disposeScene(scene);
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+    });
     it("evicts pending merged packets synchronously without taking their async teardown ownership", async () => {
         const { engine, scene, mesh } = fixture();
         let entered!: () => void;
