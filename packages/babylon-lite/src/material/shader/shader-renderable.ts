@@ -406,7 +406,7 @@ function createShaderBinding(
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
-    if (material._deferPacketUpdate?.(packet.mesh.visible)) {
+    if (material._deferPacketUpdate?.(packet.mesh)) {
         return;
     }
     const engine = scene.surface.engine;

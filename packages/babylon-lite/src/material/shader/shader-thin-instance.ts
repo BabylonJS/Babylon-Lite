@@ -153,7 +153,7 @@ export function buildShaderRenderablesWithInstancing(
             for (let i = 0; i < material.attributes.length; i++) {
                 pass.setVertexBuffer(slot++, getAttrBuffer(engine, mesh, material.attributes[i]!, material));
             }
-            slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
+            syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             pass.setBindGroup(1, packet._bindGroup!);
             if (cullBinding) {

@@ -33,9 +33,9 @@ export function setShaderAttributeFormats(material: ShaderMaterial, formats: Sha
 
 `enableShaderMaterialVisiblePacketUpdates(material)` opts one material into deferring hidden
 packet system-uniform evaluation/uploads and resource bind-group refreshes. Default behavior
-is unchanged. The helper installs an internal material-owned predicate on a scalar visibility
-value; the common packet updater calls that seam before reading any camera, world version,
-target, alpha-cutoff or resource revision. The predicate returns true only for `visible === false`.
+is unchanged. The helper installs an internal material-owned predicate on the packet's mesh;
+the common packet updater calls that seam before reading any camera, world version,
+target, alpha-cutoff or resource revision. The predicate returns true only for `mesh.visible === false`.
 Repeated enabling is safe, including after bindings have been built. No import-time registration
 or visibility mutation occurs. Unused policy code is tree-shaken.
 
@@ -50,7 +50,9 @@ The normal updater therefore observes every accumulated change before the first 
 using the current pass's `DrawUpdateContext._camera` (or the scene camera), dimensions and material
 state. Resource acquisition/release stays transactional. Existing disposed/material-mismatch guards
 run first; rebuilds and material overrides use their owning material's predicate. Material views
-inherit source policy through the existing prototype chain unless enabled on the view itself.
+(`createShaderNormalMaterialView`, `createShaderNoColorMaterialView`) inherit the source material's
+policy through the existing prototype chain; enable the policy on the source material, because the
+public view factories return `MaterialView` rather than `ShaderMaterial`.
 Use public `setMeshVisible(mesh, visible)` for both hiding and restoring: it invalidates cached
 opaque bundles. Render-task updates and batch flushes still precede recording/replaying bundles
 and transparent sorting. No task, camera, bundle or draw ordering changes are introduced.
@@ -65,7 +67,8 @@ inside their existing asynchronous module boundaries rather than introducing cro
 Regression tests in `tests/lite/unit/shader-visible-packet-updates.test.ts` assert zero hidden
 world-version reads, system writes/copies and bind-group rebuilds, one visible copy in a two-member
 group, shared custom uploads, restoration of all changed inputs, alternate cameras, transparent
-sorting, disposal, replacement and override rebuilds.
+sorting, disposal, replacement and override rebuilds, and a thin-instanced mesh whose instance
+uploads continue while hidden and whose packet refreshes before its restored draw.
 
 `enableShaderMaterialPipelineSharing()` is the zero-argument, package-wide opt-in for sharing
 equivalent ShaderMaterial layouts, modules and pipelines. Call it before pipeline preparation.
@@ -456,6 +459,7 @@ packages/babylon-lite/src/material/shader/
   shader-material-view-gpu.ts  Terminal private view-UBO retirement.
   enable-shader-material-instance-world.ts  Opt-in regular/thin-instance final-world helper.
   enable-shader-material-final-color.ts  Opt-in effective vertex/instance color helper.
+  enable-shader-material-visible-packet-updates.ts  Opt-in hidden-packet deferral; owns the visibility predicate.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
