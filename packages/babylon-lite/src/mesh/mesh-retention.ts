@@ -165,13 +165,26 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
             disposeMeshGpu(mesh);
         }
         for (const texture of textures) {
-            releaseTexture(texture);
+            releaseRetainedTexture(state.engine, texture);
         }
     };
     if (force) {
         release();
     } else {
         retireGpuResources(state.engine, release);
+    }
+}
+
+/** Device recovery replaces texture handles before scene handlers run but restores their pre-loss
+ *  ownership only after every handler finishes. A retention claim released inside that window is
+ *  still part of the pending count, so transfer it out there instead of releasing the replacement,
+ *  which would destroy it before surviving owners regain their claims. */
+function releaseRetainedTexture(engine: EngineContext, texture: Texture2D): void {
+    const pending = engine._deviceLostRecovery?._pendingOwnership?.find(([candidate, owners]) => owners > 0 && candidate.texture === texture.texture);
+    if (pending) {
+        pending[1]--;
+    } else {
+        releaseTexture(texture);
     }
 }
 

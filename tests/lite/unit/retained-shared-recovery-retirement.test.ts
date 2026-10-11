@@ -8,6 +8,12 @@ import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import type { DeviceLostRecoveryState } from "../../../packages/babylon-lite/src/engine/device-lost-recovery.js";
+import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material.js";
+import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/texture-references.js";
+import { _textureOwners } from "../../../packages/babylon-lite/src/resource/texture-owner-state.js";
+import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { settleRebuiltTextureOwnership } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
 
 const environment = vi.hoisted(() => ({ rebuild: vi.fn<() => Promise<void>>() }));
 vi.mock("../../../packages/babylon-lite/src/loader-env/environment-recovery.js", () => ({
@@ -62,6 +68,18 @@ function fixture() {
     Object.defineProperty(scene, "_kind", { value: "scene" });
     surface._renderingContexts.push(scene);
     return { engine, scene, mesh, clone, createBuffer };
+}
+
+function gateEnvironment(): { entered: Promise<void>; resume: () => void } {
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => (enter = resolve));
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    environment.rebuild.mockImplementationOnce(async () => {
+        enter();
+        await gate;
+    });
+    return { entered, resume };
 }
 
 describe("shared replacement retirement during registered scene recovery", () => {
@@ -157,5 +175,81 @@ describe("shared replacement retirement during registered scene recovery", () =>
                 expect(buffer.destroy).toHaveBeenCalledTimes(1);
             }
         }
+    });
+
+    it("counts a clone of the recovered source once when the scene sweep reaches it", async () => {
+        const { engine, scene, mesh, clone, createBuffer } = fixture();
+        const lease = retainMeshResources(engine, mesh);
+        const { entered, resume } = gateEnvironment();
+        const recovery = rebuildRegisteredScenes(engine);
+        await entered;
+        const replacement = mesh._gpu;
+        let late!: Mesh;
+        try {
+            late = cloneTransformNode(mesh) as Mesh;
+            scene.meshes.push(late);
+            expect(replacement._refCount).toBe(2);
+        } finally {
+            resume();
+        }
+        await recovery;
+        expect(createBuffer).toHaveBeenCalledTimes(4);
+        expect(clone._gpu).toBe(replacement);
+        expect(late._gpu).toBe(replacement);
+        expect(replacement._refCount).toBe(3);
+        disposeMeshGpu(clone);
+        disposeMeshGpu(late);
+        for (const buffer of buffers(replacement)) {
+            expect(buffer.destroy).not.toHaveBeenCalled();
+        }
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        for (const buffer of buffers(replacement)) {
+            expect(buffer.destroy).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it("keeps a shared texture alive when one lease is released before recovered ownership settles", async () => {
+        const { engine } = fixture();
+        const gpuTexture = (): GPUTexture => stub<GPUTexture>({ destroy: vi.fn() });
+        const shared: Texture2D = { texture: gpuTexture(), view: stub<GPUTextureView>({}), sampler: stub<GPUSampler>({}), width: 1, height: 1 };
+        acquireTexture(shared);
+        const retained = (name: string): Mesh => {
+            const material = createStandardMaterial();
+            material.diffuseTexture = shared;
+            const { mesh } = fixture();
+            mesh.name = name;
+            mesh.material = material;
+            return mesh;
+        };
+        const first = retained("first");
+        const second = retained("second");
+        const firstLease = retainMeshResources(engine, first);
+        const secondLease = retainMeshResources(engine, second);
+        expect(_textureOwners(shared)).toBe(3);
+        // Mirror texture recovery: replace the handle before handlers, queue its pre-loss ownership.
+        const state = stub<DeviceLostRecoveryState>({ _pendingOwnership: [[shared, _textureOwners(shared)]] });
+        shared.texture = gpuTexture();
+        engine._deviceLostRecovery = state;
+        const { entered, resume } = gateEnvironment();
+        const recovery = rebuildRegisteredScenes(engine);
+        await entered;
+        try {
+            releaseMeshResources(firstLease);
+            await waitForGpuResourceRetirements(engine);
+            expect(first._disposed).toBe(true);
+            expect(shared.texture.destroy).not.toHaveBeenCalled();
+        } finally {
+            resume();
+        }
+        await recovery;
+        settleRebuiltTextureOwnership(state);
+        expect(_textureOwners(shared)).toBe(2);
+        releaseMeshResources(secondLease);
+        await waitForGpuResourceRetirements(engine);
+        expect(second._disposed).toBe(true);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
     });
 });

@@ -95,7 +95,11 @@ preparation produces an empty result and does not recreate its targets.
 6. Final release removes the retention and engine mesh entry, clears the admission
    hook when that engine has no remaining leased meshes, and schedules fenced
    teardown. The callback rechecks all current scene/retention ownership before
-   disposing geometry, then releases the captured texture claims.
+   disposing geometry, then releases the captured texture claims. While device
+   recovery still has a pending ownership top-up for a replaced texture, the
+   claim is transferred out of that pending count instead: the replacement has
+   no restored claims yet, so releasing it would destroy a texture that surviving
+   leases and its creator still own, and the later top-up would restore the claim.
 7. Engine teardown revokes tokens, marks the feature engine disposed, clears its
    admission hook, and force-disposes retained resource claims. Scene teardown
    alone does not revoke leases. Explicit `disposeMeshGpu` remains force-disposal.
@@ -143,6 +147,9 @@ implementation or asset is copied.
   material/texture swaps, reentrancy, and independent engine hooks.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
+- `retained-shared-recovery-retirement.test.ts`: releasing one of two shared-texture
+  leases after texture replacement but before ownership settles keeps the survivor's
+  texture live, and its final teardown destroys it exactly once.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
   fresh identity/order, filter selection, disposal cancellation, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.

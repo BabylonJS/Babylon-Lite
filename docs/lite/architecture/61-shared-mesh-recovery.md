@@ -54,8 +54,10 @@ vertex/index values, shader interpretation, transforms, or draw order.
    Geometry disposal sets `_refCount` to zero when releasing the final claim,
    before destroying buffers. A zero-claim cache follows step 2 instead, resetting
    the owner set only after the fresh upload succeeds.
-4. On the same device with a new mesh identity, add it to owners and `retain` the
-   rebuilt allocation exactly once, then return that allocation.
+4. On the same device with a new mesh identity, add it to owners and return the
+   rebuilt allocation. `retain` it exactly once unless the mesh already points at
+   that allocation: a clone of an already recovered owner took its claim when
+   it was cloned, so adoption records it without a second reference.
 5. On the same device with an already recovered identity, return the allocation
    without increasing its reference count.
 6. On a later replacement device, repeat step 2; the old-device cache is replaced.
@@ -108,7 +110,8 @@ Babylon-style scene API or a clone/disposal implementation.
 - `device-lost-recovery.test.ts`: surrounding replacement-device sequencing and errors.
 - `retained-shared-recovery-retirement.test.ts`: controlled environment awaits,
   retirement after upload/before adoption, failed and overlapping scene recovery,
-  late clones, and exactly-once final destruction.
+  late clones, clones of the recovered source admitted before the scene sweep
+  (counted once), and exactly-once final destruction.
 - `mesh-retention.spec.ts`: actual native device loss while detached, restoration
   of render pixels and GPU picking after reinsertion, and final resource release.
 

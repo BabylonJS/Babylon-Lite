@@ -13,7 +13,10 @@ export function installSharedMeshRecovery(gpu: MeshGPU): void {
         if (device === engine._device && rebuilt!._refCount !== 0) {
             if (!owners!.has(mesh)) {
                 owners!.add(mesh);
-                retain(rebuilt!);
+                // A clone of a recovered owner already claimed the replacement when it was cloned.
+                if (mesh._gpu !== rebuilt) {
+                    retain(rebuilt!);
+                }
             }
             return rebuilt!;
         }
