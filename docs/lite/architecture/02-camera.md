@@ -324,6 +324,18 @@ Both terms are monotonically non-decreasing, so the sum is too and any change in
 
 The revision is deliberately **separate from `worldMatrixVersion`** rather than folded into it. Marking the camera transform dirty would signal camera _motion_, which additionally invalidates the camera's children (the world-matrix state pushes invalidation through `_children`) and, under floating origin, makes `wrapRenderableForFO` rebase **every renderable** in the scene — a per-frame cost if `ortho.halfHeight` is animated, for a change that moved nothing in world space. Transform-only consumers (floating origin, child nodes, mesh UBOs) keep reading `worldMatrixVersion` and are correctly unaffected.
 
+`_cameraProjectionChangeKey(camera)` owns the FOV/plane polling and returns only
+the projection revision, without querying the camera transform. `_cameraChangeKey`
+adds `worldMatrixVersion` to that result for consumers needing both dependencies.
+ShaderMaterial projection-only blocks use the projection revision directly;
+view-only blocks use the transform version instead.
+
+View caches key both `worldMatrixVersion` and the boolean floating-origin mode
+(`_viewFloatingOrigin`). View-projection caches additionally key that mode
+(`_vpFloatingOrigin`) alongside their existing change key and aspect. Switching
+absolute/eye-relative coordinates therefore recomputes the matrices even if the
+camera pose did not change. Projection matrices are unaffected by the mode.
+
 Because the fields are real own enumerable properties (defined via `Object.defineProperty`, not left optional), they also resolve as animation property paths. `resolvePropertyBinding` walks the path with `in` and writes through a plain `target[prop] = value` assignment, which lands on the setter:
 
 ```typescript

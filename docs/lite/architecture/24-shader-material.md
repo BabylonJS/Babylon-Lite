@@ -339,6 +339,45 @@ material's system/custom UBO layout and typed-array views, and serializes only c
 version changed. Call it before scene registration. Scenes that do not opt in retain the compact default serializer
 and do not include the caching implementation in their bundle.
 
+System-block invalidation is declaration-driven on both the default and cached paths; it
+does not require another opt-in or share system UBOs between meshes. GPU layouts and
+dependencies are derived from the material's snapshotted declarations, never parsed WGSL.
+Caller-owned declaration objects and arrays cannot change an existing material's layout.
+The public declaration collection remains read-only; changing shader layout requires a
+new material.
+
+| Declared system uniform | Inputs that invalidate its packet block                                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `world`                 | Mesh world version (including parents); camera identity, pose and floating-origin mode only while rebasing is required, plus transitions into/out of that mode |
+| `view`                  | Active camera identity, pose and floating-origin mode                                                                                                          |
+| `projection`            | Active camera identity, projection revision (FOV, planes, orthographic bounds) and effective target/viewport aspect                                            |
+| `viewProjection`        | Union of view and projection inputs                                                                                                                            |
+| `worldView`             | Union of world and view inputs                                                                                                                                 |
+| `worldViewProjection`   | Union of world and view-projection inputs                                                                                                                      |
+| `cameraPosition`        | Active camera identity, pose and floating-origin mode                                                                                                          |
+| `screenSize`            | Target width and height (not viewport or camera pose)                                                                                                          |
+| `alphaCutoff`           | Its scalar value, not the custom-uniform version                                                                                                               |
+
+Each packet retains a dependency bitmask derived once from its system UBO offsets and
+the last relevant inputs. Only declared dependencies are queried in the update path.
+An empty block's 16-byte zero padding is initialized at creation and never queued again.
+Nonempty blocks retain the first per-pass upload, so registration canvas dimensions
+cannot mask a different first render target or alternate pass camera. A relevant change
+serializes and uploads the entire system block with the same offsets, padding and F32
+bytes as before, either through `writeBuffer` or the existing `UniformCopyBatch`.
+Both writers resolve only the matrices their declared operations consume.
+
+Projection revision polling is independent of camera world-version queries. View and
+view-projection camera caches also key floating-origin mode, so toggling it without a
+pose change cannot reuse stale absolute/relative matrices. Null cameras preserve the
+existing zero camera-matrix/position values and absolute world matrix.
+
+Resource revision/custom-buffer identity checks and external-texture refresh run
+independently of the system-block gate. Rebuilds and device recovery create initialized
+packets and dependency masks against the replacement layout; disposal still prevents
+all updates to dead packets. This policy neither suppresses hidden-packet work nor
+changes draw submission or shared scene UBO behavior.
+
 `enableShaderUniformRangeUpdates` is an opt-in for materials with large custom UBOs and one or a few animated
 values. After the custom UBO has been packed once, each changed custom value is written directly into the
 material's retained packed `ArrayBuffer`. The opt-in updater widens one pending byte range across all changes made
@@ -556,9 +595,9 @@ not import the cache owner and pays only for the nullable optional call.
 
 The pipeline layout is:
 
-| Group | Owner                   | Bindings                                            |
-| ----- | ----------------------- | --------------------------------------------------- |
-| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                   |
+| Group | Owner                   | Bindings                                                                            |
+| ----- | ----------------------- | ----------------------------------------------------------------------------------- |
+| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                                                   |
 | 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers, external texture/sampler pairs |
 
 Group 1 binding order:
@@ -795,15 +834,15 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 
 Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite source WGSL-only.
 
-| Scene                          | Reference source                  | Lite coverage                                                          |
-| ------------------------------ | --------------------------------- | ---------------------------------------------------------------------- |
-| ShaderMaterial basic color     | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
-| ShaderMaterial texture sampler | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
-| ShaderMaterial external texture | Lite-authored video reference      | `texture_external`, per-frame import, `setShaderExternalTexture`       |
-| ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
-| ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
-| ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
-| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
+| Scene                           | Reference source                  | Lite coverage                                                          |
+| ------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| ShaderMaterial basic color      | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
+| ShaderMaterial texture sampler  | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
+| ShaderMaterial external texture | Lite-authored video reference     | `texture_external`, per-frame import, `setShaderExternalTexture`       |
+| ShaderMaterial uniform update   | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
+| ShaderMaterial defines variant  | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
+| ShaderMaterial alpha            | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
+| Thin-instance color opt-out     | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 
