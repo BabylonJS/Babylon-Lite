@@ -55,6 +55,13 @@ Use public `setMeshVisible(mesh, visible)` for both hiding and restoring: it inv
 opaque bundles. Render-task updates and batch flushes still precede recording/replaying bundles
 and transparent sorting. No task, camera, bundle or draw ordering changes are introduced.
 
+Plain opaque and transparent paths share a file-local lifetime/ownership guard, independently
+of the optional update policy. The thin-instance group entry point retains its positional
+helper signature; its private builders capture those helper callbacks directly in the group
+factory's lexical scope instead of allocating and forwarding an intermediate helper object.
+Rebuild closures keep the same callbacks and explicit mesh-resource ownership. Helpers remain
+inside their existing asynchronous module boundaries rather than introducing cross-chunk exports.
+
 Regression tests in `tests/lite/unit/shader-visible-packet-updates.test.ts` assert zero hidden
 world-version reads, system writes/copies and bind-group rebuilds, one visible copy in a two-member
 group, shared custom uploads, restoration of all changed inputs, alternate cameras, transparent

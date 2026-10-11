@@ -288,6 +288,10 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     return packet;
 }
 
+function isPacketInactive(packet: ShaderPacket, material: ShaderMaterial, isOverride: boolean): boolean {
+    return !!packet._disposed || (!isOverride && packet.mesh.material !== material);
+}
+
 function createOpaqueRenderable(
     scene: SceneContext,
     material: ShaderMaterial,
@@ -308,7 +312,7 @@ function createOpaqueRenderable(
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
-            if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+            if (isPacketInactive(packet, material, isOverride)) {
                 continue;
             }
             updatePacket(scene, material, packet, context, uniformBatch);
@@ -317,7 +321,7 @@ function createOpaqueRenderable(
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
-            if (packet._disposed || packet.mesh.visible === false || (!isOverride && packet.mesh.material !== material)) {
+            if (isPacketInactive(packet, material, isOverride) || packet.mesh.visible === false) {
                 continue;
             }
             drawPacket(pass, engine, material, packet);
@@ -349,7 +353,7 @@ function createTransparentRenderable(
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
-        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+        if (isPacketInactive(packet, material, isOverride)) {
             return;
         }
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
@@ -360,7 +364,7 @@ function createTransparentRenderable(
         sortCenter[2] = m[14]!;
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
-        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+        if (isPacketInactive(packet, material, isOverride)) {
             return 0;
         }
         drawPacket(pass, engine, material, packet);
