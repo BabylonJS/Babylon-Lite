@@ -11,7 +11,7 @@ import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipel
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
-import { shaderSystemDependency } from "./shader-system-dependencies.js";
+import { ALPHA_CUTOFF, CAMERA_POSITION, SCREEN_SIZE, shaderSystemDependency } from "./shader-system-dependencies.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
  *  for \>4 bones/vertex) are the skinning attributes — bound from the mesh's skeleton/VAT buffers,
@@ -249,16 +249,8 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 }
 
 function systemUniformType(name: ShaderSystemUniformName): ShaderUniformType {
-    if (name === "cameraPosition") {
-        return "vec3<f32>";
-    }
-    if (name === "screenSize") {
-        return "vec2<f32>";
-    }
-    if (name === "alphaCutoff") {
-        return "f32";
-    }
-    return "mat4x4<f32>";
+    const dependency = shaderSystemDependency(name);
+    return dependency & CAMERA_POSITION ? "vec3<f32>" : dependency & SCREEN_SIZE ? "vec2<f32>" : dependency & ALPHA_CUTOFF ? "f32" : "mat4x4<f32>";
 }
 
 /** Create a ShaderMaterial from WGSL sources and declarations, validating

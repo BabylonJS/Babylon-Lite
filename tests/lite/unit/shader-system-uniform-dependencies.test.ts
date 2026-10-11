@@ -115,6 +115,12 @@ async function fixture(uniforms: readonly ShaderUniformOption[], cached: boolean
         vi.clearAllMocks();
     };
     const update = () => binding.update!(context);
+    // Mirrors scene-core: flagging floating origin also invalidates the view/view-projection caches.
+    const setFloatingOrigin = (target: typeof camera, enabled: boolean) => {
+        target._useFloatingOrigin = enabled;
+        target._viewVer = -1;
+        target._vpVer = -1;
+    };
     const warm = () => {
         update();
         clear();
@@ -216,6 +222,7 @@ async function fixture(uniforms: readonly ShaderUniformOption[], cached: boolean
         clear,
         warm,
         update,
+        setFloatingOrigin,
         expectWrite,
         uploads,
         copies,
@@ -271,27 +278,34 @@ describe.each([false, true])("ShaderMaterial system dependencies (cached=%s)", (
         expect(f.worldVersionQuery).not.toHaveBeenCalled();
     });
 
-    it("keeps view and camera position independent of projection/viewport changes", async () => {
+    it("keeps view and camera position independent of viewport/target aspect but follows the camera change key", async () => {
         const f = await fixture(["view", "cameraPosition"], cached);
         f.warm();
-        f.camera.fov *= 0.5;
         f.camera.viewport = { x: 0, y: 0, width: 0.5, height: 1 };
         f.context.targetWidth *= 2;
         f.update();
         expect(f.systemWrites()).toHaveLength(0);
-        expect(f.changeKey).not.toHaveBeenCalled();
+        expect(f.changeKey).toHaveBeenCalledWith(f.camera);
         expect(f.aspectQuery).not.toHaveBeenCalled();
         f.camera.position.x += 1;
         f.update();
         f.expectWrite();
+        f.clear();
+        f.camera.fov *= 0.5;
+        f.update();
+        f.expectWrite();
     });
 
-    it("keeps projection independent of camera motion but invalidates projection edits and aspect", async () => {
+    it("invalidates projection on camera change key, projection edits and aspect", async () => {
         const f = await fixture(["projection"], cached);
         f.warm();
-        f.camera.position.x += 1;
         f.update();
         expect(f.systemWrites()).toHaveLength(0);
+        expect(f.changeKey).toHaveBeenCalledWith(f.camera);
+        f.camera.position.x += 1;
+        f.update();
+        f.expectWrite();
+        f.clear();
         f.camera.fov *= 0.5;
         f.update();
         f.expectWrite();
@@ -358,7 +372,7 @@ describe.each([false, true])("ShaderMaterial system dependencies (cached=%s)", (
         f.update();
         f.expectWrite();
         f.clear();
-        f.camera._useFloatingOrigin = true;
+        f.setFloatingOrigin(f.camera, true);
         f.update();
         f.expectWrite();
         f.clear();
@@ -366,16 +380,13 @@ describe.each([false, true])("ShaderMaterial system dependencies (cached=%s)", (
         f.update();
         f.expectWrite();
         f.clear();
-        f.camera.fov *= 0.5;
-        f.update();
-        expect(f.systemWrites()).toHaveLength(0);
         const alternate = f.createFreeCamera({ x: 9, y: 0, z: -4 }, { x: 0, y: 0, z: 0 });
-        alternate._useFloatingOrigin = true;
+        f.setFloatingOrigin(alternate, true);
         f.context._camera = alternate;
         f.update();
         f.expectWrite();
         f.clear();
-        alternate._useFloatingOrigin = false;
+        f.setFloatingOrigin(alternate, false);
         f.update();
         f.expectWrite();
         f.clear();
@@ -400,10 +411,10 @@ describe.each([false, true])("ShaderMaterial system dependencies (cached=%s)", (
                 f.mesh.position.y += 2;
             },
             () => {
-                f.camera._useFloatingOrigin = true;
+                f.setFloatingOrigin(f.camera, true);
             },
             () => {
-                f.camera._useFloatingOrigin = false;
+                f.setFloatingOrigin(f.camera, false);
             },
             () => {
                 f.context.targetWidth += 17;
@@ -482,13 +493,46 @@ describe.each([false, true])("ShaderMaterial system dependencies (cached=%s)", (
         f.update();
         f.expectWrite();
         f.clear();
-        f.camera._useFloatingOrigin = true;
+        f.setFloatingOrigin(f.camera, true);
         f.update();
         f.expectWrite();
         f.clear();
-        f.camera._useFloatingOrigin = false;
+        f.setFloatingOrigin(f.camera, false);
         f.update();
         f.expectWrite();
+    });
+
+    it.each(["projection", "viewProjection", "worldViewProjection"] as const)("reuploads %s for injected per-view XR projections", async (name) => {
+        const f = await fixture([name], cached);
+        const { createXrCamera, updateXrCameraForView } = await import("../../../packages/babylon-lite/src/xr/xr-camera");
+        const xr = createXrCamera("left");
+        const viewport = { x: 0, y: 0, width: 1, height: 1 };
+        // One camera renders both eyes: the second injection advances only worldMatrixVersion.
+        const eye = (x: number, focal: number) => {
+            const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1]);
+            const projectionMatrix = new Float32Array([focal, 0, 0, 0, 0, focal, 0, 0, 0, 0, -1, -1, 0, 0, -0.2, 0]);
+            return { projectionMatrix, transform: { matrix } } as unknown as XRView;
+        };
+        f.context._camera = xr;
+        for (const view of [eye(-0.03, 1), eye(0.03, 2)]) {
+            updateXrCameraForView(xr, view, f.context.targetWidth, f.context.targetHeight, viewport);
+            const injected = new Float32Array(xr._projCache!);
+            f.clear();
+            f.update();
+            const writes = f.systemWrites();
+            expect(writes).toHaveLength(1);
+            const uploaded = new Float32Array(writes[0]!.bytes.slice().buffer, f.spec._offsets.get(name)!, 16);
+            expect(new Float32Array(xr._projCache!)).toEqual(injected);
+            const expected = new Float32Array(16);
+            if (name === "projection") {
+                expected.set(injected);
+            } else if (name === "viewProjection") {
+                expected.set(xr._vpCache!);
+            } else {
+                multiplyMat4IntoBuffer(expected, 0, xr._vpCache!, 0, new Float32Array(f.mesh.worldMatrix), 0);
+            }
+            expect(uploaded).toEqual(expected);
+        }
     });
 
     it("invalidates projection plane/orthographic edits and alternate camera identity", async () => {

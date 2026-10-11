@@ -11,7 +11,7 @@ import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
-import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraProjectionChangeKey } from "../../camera/camera.js";
+import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
@@ -26,6 +26,7 @@ import {
     VIEW,
     PROJECTION,
     VIEW_PROJECTION,
+    CAMERA,
     CAMERA_POSITION,
     SCREEN_SIZE,
     ALPHA_CUTOFF,
@@ -422,18 +423,18 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
     const state = material as ShaderMaterialRenderState;
     const dependencies = packet._systemDependencies;
     if (dependencies) {
+        // Each input is keyed only when a declared system uniform reads it. Camera-dependent blocks key the
+        // full `_cameraChangeKey` (transform + projection revision): injected projections such as per-eye XR
+        // matrices advance only `worldMatrixVersion`, so a projection-only key would miss them.
         const camera = context._camera ?? scene.camera;
-        const floatingOrigin = !!(dependencies & (WORLD | VIEW | VIEW_PROJECTION | CAMERA_POSITION)) && !!camera?._useFloatingOrigin;
-        const poseDependency = dependencies & (VIEW | VIEW_PROJECTION | CAMERA_POSITION) || (dependencies & WORLD && floatingOrigin);
-        const projectionDependencies = dependencies & (PROJECTION | VIEW_PROJECTION);
-        const cameraIdentity = poseDependency || projectionDependencies ? camera : null;
-        const cameraVersion = cameraIdentity
-            ? (poseDependency ? cameraIdentity.worldMatrixVersion : 0) + (projectionDependencies ? _cameraProjectionChangeKey(cameraIdentity) : 0)
-            : -1;
+        const floatingOrigin = !!camera?._useFloatingOrigin;
+        // Under floating origin the world matrix is camera-relative, so world blocks also follow the camera.
+        const cameraIdentity = dependencies & CAMERA || (floatingOrigin && dependencies & WORLD) ? camera : null;
+        const cameraVersion = cameraIdentity ? _cameraChangeKey(cameraIdentity) : -1;
         const meshWmVersion = dependencies & WORLD ? packet.mesh.worldMatrixVersion : -1;
         const targetWidth = dependencies & SCREEN_SIZE ? context.targetWidth : 0;
         const targetHeight = dependencies & SCREEN_SIZE ? context.targetHeight : 0;
-        const aspect = projectionDependencies && camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
+        const aspect = dependencies & (PROJECTION | VIEW_PROJECTION) && camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
         const alphaCutoff = dependencies & ALPHA_CUTOFF ? (material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4) : 0;
         if (
             packet._lastCamera !== cameraIdentity ||
@@ -747,50 +748,40 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
     let viewProjection: Float32Array | undefined;
     for (const [name, offset] of spec._offsets) {
         const f = offset / 4;
-        switch (name) {
-            case "world":
-                data.set((world ??= _shaderWorldMatrix(mesh, camera)), f);
-                break;
-            case "view":
-            case "projection":
-            case "viewProjection":
-            case "worldView":
-            case "worldViewProjection":
-                if (camera) {
-                    const dependencies = shaderSystemDependency(name);
-                    const matrix =
-                        dependencies & VIEW
-                            ? (view ??= getViewMatrix(camera) as unknown as Float32Array)
-                            : dependencies & PROJECTION
-                              ? (getProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array)
-                              : (viewProjection ??= getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array);
-                    if (dependencies & WORLD) {
-                        multiplyMat4IntoBuffer(data, f, matrix, 0, (world ??= _shaderWorldMatrix(mesh, camera)), 0);
-                    } else {
-                        data.set(matrix, f);
-                    }
+        const dependency = shaderSystemDependency(name);
+        if (dependency & (VIEW | PROJECTION | VIEW_PROJECTION)) {
+            if (camera) {
+                const matrix =
+                    dependency & VIEW
+                        ? (view ??= getViewMatrix(camera) as unknown as Float32Array)
+                        : dependency & PROJECTION
+                          ? (getProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array)
+                          : (viewProjection ??= getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array);
+                if (dependency & WORLD) {
+                    multiplyMat4IntoBuffer(data, f, matrix, 0, (world ??= _shaderWorldMatrix(mesh, camera)), 0);
+                } else {
+                    data.set(matrix, f);
                 }
-                break;
-            case "cameraPosition":
-                // Zero under floating origin, matching `_packSceneUniforms`'
-                // `vEyePosition`: `world` above is camera-relative, so in the
-                // frame the shader actually works in the camera IS the origin.
-                // Writing the absolute position here would put the eye and the
-                // geometry in two different frames.
-                if (camera && !camera._useFloatingOrigin) {
-                    const wm = camera.worldMatrix as unknown as ArrayLike<number>;
-                    data[f] = wm[12]!;
-                    data[f + 1] = wm[13]!;
-                    data[f + 2] = wm[14]!;
-                }
-                break;
-            case "screenSize":
-                data[f] = targetWidth;
-                data[f + 1] = targetHeight;
-                break;
-            case "alphaCutoff":
-                data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
-                break;
+            }
+        } else if (dependency & WORLD) {
+            data.set((world ??= _shaderWorldMatrix(mesh, camera)), f);
+        } else if (dependency & CAMERA_POSITION) {
+            // Zero under floating origin, matching `_packSceneUniforms`'
+            // `vEyePosition`: `world` above is camera-relative, so in the
+            // frame the shader actually works in the camera IS the origin.
+            // Writing the absolute position here would put the eye and the
+            // geometry in two different frames.
+            if (camera && !camera._useFloatingOrigin) {
+                const wm = camera.worldMatrix as unknown as ArrayLike<number>;
+                data[f] = wm[12]!;
+                data[f + 1] = wm[13]!;
+                data[f + 2] = wm[14]!;
+            }
+        } else if (dependency & SCREEN_SIZE) {
+            data[f] = targetWidth;
+            data[f + 1] = targetHeight;
+        } else if (dependency & ALPHA_CUTOFF) {
+            data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
         }
     }
 }

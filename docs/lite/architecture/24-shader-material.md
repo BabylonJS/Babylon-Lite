@@ -346,17 +346,27 @@ Caller-owned declaration objects and arrays cannot change an existing material's
 The public declaration collection remains read-only; changing shader layout requires a
 new material.
 
-| Declared system uniform | Inputs that invalidate its packet block                                                                                                                        |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `world`                 | Mesh world version (including parents); camera identity, pose and floating-origin mode only while rebasing is required, plus transitions into/out of that mode |
-| `view`                  | Active camera identity, pose and floating-origin mode                                                                                                          |
-| `projection`            | Active camera identity, projection revision (FOV, planes, orthographic bounds) and effective target/viewport aspect                                            |
-| `viewProjection`        | Union of view and projection inputs                                                                                                                            |
-| `worldView`             | Union of world and view inputs                                                                                                                                 |
-| `worldViewProjection`   | Union of world and view-projection inputs                                                                                                                      |
-| `cameraPosition`        | Active camera identity, pose and floating-origin mode                                                                                                          |
-| `screenSize`            | Target width and height (not viewport or camera pose)                                                                                                          |
-| `alphaCutoff`           | Its scalar value, not the custom-uniform version                                                                                                               |
+| Declared system uniform | Inputs that invalidate its packet block                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `world`                 | Mesh world version (including parents); while the active camera rebases (floating origin), also that camera's identity and change key |
+| `view`                  | Active camera identity, change key and floating-origin mode                                                                           |
+| `projection`            | Active camera identity, change key and effective target/viewport aspect                                                               |
+| `viewProjection`        | Union of view and projection inputs                                                                                                   |
+| `worldView`             | Union of world and view inputs                                                                                                        |
+| `worldViewProjection`   | Union of world and view-projection inputs                                                                                             |
+| `cameraPosition`        | Active camera identity, change key and floating-origin mode                                                                           |
+| `screenSize`            | Target width and height (not viewport or camera pose)                                                                                 |
+| `alphaCutoff`           | Its scalar value, not the custom-uniform version                                                                                      |
+
+Every camera-dependent block keys the full `_cameraChangeKey` (`worldMatrixVersion` plus the
+projection revision) rather than a pose-only or projection-only split. Injected projections,
+such as the per-eye `XRView.projectionMatrix` written by `updateXrCameraForView`, advance only
+`worldMatrixVersion`, so a projection-only key would keep a stale projection. The cost is a
+redundant upload of a view-only block on an FOV/plane edit, or of a projection-only block on
+camera motion — both rare compared with the camera-independent blocks this policy skips.
+The packet also keys the active camera's floating-origin mode, so a camera flagged after a
+packet's first upload (for example, a former pass-override camera that becomes the active
+scene camera) is re-serialized even though its change key did not move.
 
 Each packet retains a dependency bitmask derived once from its system UBO offsets and
 the last relevant inputs. Only declared dependencies are queried in the update path.
@@ -365,12 +375,11 @@ Nonempty blocks retain the first per-pass upload, so registration canvas dimensi
 cannot mask a different first render target or alternate pass camera. A relevant change
 serializes and uploads the entire system block with the same offsets, padding and F32
 bytes as before, either through `writeBuffer` or the existing `UniformCopyBatch`.
-Both writers resolve only the matrices their declared operations consume.
+Both writers resolve only the matrices their declared operations consume, and the default
+writer dispatches each UBO offset by its dependency bits rather than by uniform name.
 
-Projection revision polling is independent of camera world-version queries. View and
-view-projection camera caches also key floating-origin mode, so toggling it without a
-pose change cannot reuse stale absolute/relative matrices. Null cameras preserve the
-existing zero camera-matrix/position values and absolute world matrix.
+Null cameras preserve the existing zero camera-matrix/position values and absolute world
+matrix.
 
 Resource revision/custom-buffer identity checks and external-texture refresh run
 independently of the system-block gate. Rebuilds and device recovery create initialized
@@ -460,6 +469,7 @@ packages/babylon-lite/src/material/shader/
   enable-shader-material-final-color.ts  Opt-in effective vertex/instance color helper.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
+  shader-system-dependencies.ts  System-uniform name → dependency-bit table shared by validation and writers.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
   shader-pipeline-cache.ts Lazy cross-material bindings, modules, and pipeline cache.
   enable-shader-material-pipeline-sharing.ts  Opt-in global cache attachment and layout-identity memo.
@@ -648,6 +658,52 @@ Consequences a shader author sees:
 
 With floating origin off, every value above is the plain absolute one and the path is copy-free.
 
+### System-uniform dependency table
+
+`shader-system-dependencies.ts` is the single classification of system uniform names. It has no
+module-level side effects and exports only constants and two internal functions:
+
+```typescript
+export const WORLD = 1;
+export const VIEW = 2;
+export const PROJECTION = 4;
+export const VIEW_PROJECTION = 8;
+export const CAMERA_POSITION = 16;
+export const SCREEN_SIZE = 32;
+export const ALPHA_CUTOFF = 64;
+export const CAMERA = VIEW | PROJECTION | VIEW_PROJECTION | CAMERA_POSITION;
+
+/** Dependency bits of one name; 0 for any non-system name (including "_pad"). */
+export function shaderSystemDependency(name: string): number;
+/** Bitwise OR over every name in `spec._offsets`. */
+export function shaderSystemDependencies(spec: UboSpec): number;
+```
+
+| Name                  | Bits                       |
+| --------------------- | -------------------------- |
+| `world`               | `WORLD`                    |
+| `view`                | `VIEW`                     |
+| `projection`          | `PROJECTION`               |
+| `viewProjection`      | `VIEW_PROJECTION`          |
+| `worldView`           | `WORLD \| VIEW`            |
+| `worldViewProjection` | `WORLD \| VIEW_PROJECTION` |
+| `cameraPosition`      | `CAMERA_POSITION`          |
+| `screenSize`          | `SCREEN_SIZE`              |
+| `alphaCutoff`         | `ALPHA_CUTOFF`             |
+
+The table is a null-prototype object literal, so inherited keys such as `constructor` classify as 0.
+Consumers:
+
+- `shader-material.ts`: `_isShaderSystemUniform(name)` is `shaderSystemDependency(name) !== 0`, and
+  `systemUniformType` derives `vec3<f32>` / `vec2<f32>` / `f32` / `mat4x4<f32>` from the
+  `CAMERA_POSITION` / `SCREEN_SIZE` / `ALPHA_CUTOFF` / matrix bits.
+- `shader-renderable.ts`: `createPacket` stores `shaderSystemDependencies(systemSpec)` as
+  `ShaderPacket._systemDependencies`; `updatePacket` gates on it; `writeSystemUniforms` dispatches each
+  offset by its bits (matrix bits select view, projection or view-projection and `WORLD` multiplies by
+  the rebased world; otherwise world, camera position, screen size or alpha cutoff).
+- `enable-shader-material-uniform-caching.ts`: the cached system write plan stores the same mask and
+  resolves only the matrices it names.
+
 `_shaderWorldMatrix`'s third parameter, `out`, is optional and exists only so tests and other direct callers can supply their own destination instead of reusing the module-scoped FO scratch buffer — without it, two calls in a row alias the same array, and the second overwrites the first. The two renderable writers above never pass it, so they keep the original copy-free behaviour: the shared scratch under FO, `mesh.worldMatrix` returned by reference when FO is off. When `out` **is** given, both branches write into it (including the FO-off case, which would otherwise return `mesh.worldMatrix` unchanged) so passing `out` always means "the answer is here."
 
 ## Pipeline Configuration
@@ -828,7 +884,8 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 - `texture/texture-2d.ts` for public texture resources.
 - `texture/external-texture.ts` for caller-owned video external-texture state.
 - `resource/gpu-pool.ts` for texture acquire/release and sampler reuse where appropriate.
-- `camera/camera.ts` for active pass view/projection data if a per-mesh system uniform requires projection.
+- `camera/camera.ts` for active pass view/projection data and `_cameraChangeKey` for camera-dependent system-block invalidation.
+- `material/shader/shader-system-dependencies.ts` for system-uniform classification and dependency bits.
 
 ## Test Specification
 
