@@ -10,7 +10,7 @@ export function installSharedMeshRecovery(gpu: MeshGPU): void {
     let rebuilt: MeshGPU | undefined;
     let owners: WeakSet<Mesh> | undefined;
     const recover: NonNullable<MeshGPU["_recoverShared"]> = (engine, mesh, upload) => {
-        if (device === engine._device) {
+        if (device === engine._device && rebuilt!._refCount !== 0) {
             if (!owners!.has(mesh)) {
                 owners!.add(mesh);
                 retain(rebuilt!);

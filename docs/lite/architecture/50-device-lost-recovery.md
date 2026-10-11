@@ -85,6 +85,12 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
+Mesh recovery rechecks terminal mesh disposal after each awaited shared-geometry,
+skeleton, and morph factory import, before allocating or assigning replacement
+resources. A detached mesh whose final lease retires during an import is skipped;
+its already-uploaded geometry is released by the normal retirement path, and no
+deformation resources are allocated for the disposed identity.
+
 Automatic reconstruction of storage-backed meshes and writable/vertex/index/indirect storage is not part
 of this integration. Their recovery-specific registry, retained sources, and handle-refresh
 pass have been removed pending the recovery redesign. The existing CPU-backed storage

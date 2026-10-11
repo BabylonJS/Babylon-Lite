@@ -50,11 +50,15 @@ vertex/index values, shader interpretation, transforms, or draw order.
 2. On a new device, call `upload(engine, mesh)` exactly once. Only after upload
    succeeds, commit the new device/allocation and initialize owners with this mesh.
    That upload's initial reference is the first owner's claim.
-3. On the same device with a new mesh identity, add it to owners and `retain` the
+3. Reuse the same-device cache only while its allocation still has a live claim.
+   Geometry disposal sets `_refCount` to zero when releasing the final claim,
+   before destroying buffers. A zero-claim cache follows step 2 instead, resetting
+   the owner set only after the fresh upload succeeds.
+4. On the same device with a new mesh identity, add it to owners and `retain` the
    rebuilt allocation exactly once, then return that allocation.
-4. On the same device with an already recovered identity, return the allocation
+5. On the same device with an already recovered identity, return the allocation
    without increasing its reference count.
-5. On a later replacement device, repeat step 2; the old-device cache is replaced.
+6. On a later replacement device, repeat step 2; the old-device cache is replaced.
 
 Upload errors propagate and do not commit a partially rebuilt cache. Normal
 mesh disposal releases each recovered owner's claim; the final claim destroys
@@ -62,6 +66,13 @@ the allocation. Leases and scene memberships do not manufacture extra geometry
 claims. Recovery callers skip disposed meshes and use a seen-identity set across
 retained meshes and all registered scenes, so one identity is never counted twice
 merely because it belongs to multiple scenes or is also leased.
+
+No temporary recovery claim is held across asynchronous scene rebuilds. If the
+first recovered retained mesh retires while a sibling's environment is awaiting
+recovery, its replacement is destroyed normally. The later live sibling uploads
+a fresh allocation rather than adopting that destroyed cache. Environment failure,
+scene cancellation, and overlapping recovery therefore require no extra recovery
+claim cleanup; a failed fresh upload propagates and leaves the dead cache invalid.
 
 This callback is invoked only for valid live owners during recovery, not as a
 general API to revive a disposed allocation. Untracked, unleased loose meshes
@@ -95,6 +106,9 @@ Babylon-style scene API or a clone/disposal implementation.
   one replacement allocation; scene/lease multiplicity does not add sharing claims.
 - `mesh-clone-gpu-dispose.test.ts`: independent clone disposal and final destruction.
 - `device-lost-recovery.test.ts`: surrounding replacement-device sequencing and errors.
+- `retained-shared-recovery-retirement.test.ts`: controlled environment awaits,
+  retirement after upload/before adoption, failed and overlapping scene recovery,
+  late clones, and exactly-once final destruction.
 - `mesh-retention.spec.ts`: actual native device loss while detached, restoration
   of render pixels and GPU picking after reinsertion, and final resource release.
 
@@ -110,4 +124,5 @@ Babylon-style scene API or a clone/disposal implementation.
 - `tests/lite/unit/mesh-clone-gpu-dispose.test.ts`
 - `tests/lite/unit/mesh-retention.test.ts`
 - `tests/lite/unit/device-lost-recovery.test.ts`
+- `tests/lite/unit/retained-shared-recovery-retirement.test.ts`
 - `tests/lite/plumbing/mesh-retention.spec.ts`

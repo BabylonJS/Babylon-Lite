@@ -195,12 +195,18 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
         }
         if (mesh.skeleton) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
+            if (mesh._disposed) {
+                continue;
+            }
             const old = mesh.skeleton;
             const rebuilt = skeletonFactory(engine, old.joints, old.weights, old.boneCount, old.boneMatrices, old.joints1, old.weights1);
             Object.assign(old as MutableSkeleton, rebuilt);
         }
         if (mesh.morphTargets) {
             morphFactory ??= (await import("../morph/create-morph-targets.js")).createMorphTargets;
+            if (mesh._disposed) {
+                continue;
+            }
             const old = mesh.morphTargets;
             const rebuilt = morphFactory(
                 engine,
