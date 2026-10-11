@@ -165,6 +165,8 @@ export interface ShaderStorageBufferSlot {
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
+    /** @internal Optional packet-update policy installed by its explicit enabler. */
+    _deferPacketUpdate?: (visible: boolean | undefined) => boolean;
     /** @internal Non-canonical vertex formats installed by `setShaderAttributeFormats`. */
     _attributeFormats?: ShaderAttributeFormats;
     readonly vertexSource: WgslSource;

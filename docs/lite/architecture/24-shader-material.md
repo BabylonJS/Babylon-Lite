@@ -25,10 +25,40 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
 export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
 export function enableShaderMaterialFinalColor(material: ShaderMaterial): void;
 export function enableShaderMaterialPipelineSharing(): void;
+export function enableShaderMaterialVisiblePacketUpdates(material: ShaderMaterial): void;
 export function setShaderAttributeFormats(material: ShaderMaterial, formats: ShaderAttributeFormats): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
+
+`enableShaderMaterialVisiblePacketUpdates(material)` opts one material into deferring hidden
+packet system-uniform evaluation/uploads and resource bind-group refreshes. Default behavior
+is unchanged. The helper installs an internal material-owned predicate on a scalar visibility
+value; the common packet updater calls that seam before reading any camera, world version,
+target, alpha-cutoff or resource revision. The predicate returns true only for `visible === false`.
+Repeated enabling is safe, including after bindings have been built. No import-time registration
+or visibility mutation occurs. Unused policy code is tree-shaken.
+
+The policy covers grouped opaque members, single packets, transparent packets and the shared
+thin-instance packet updater. Material-shared custom UBO uploads remain active, even if every
+packet is hidden: other bindings/views can share that material state. Transparent sort centers
+and thin-instance synchronization/culling retain their existing schedule; this is not a general
+hidden-renderable scheduler. Initial packet allocation and pipeline preparation are not deferred.
+
+Hidden packets keep their last-written dependency keys and resource revision untouched.
+The normal updater therefore observes every accumulated change before the first restored draw,
+using the current pass's `DrawUpdateContext._camera` (or the scene camera), dimensions and material
+state. Resource acquisition/release stays transactional. Existing disposed/material-mismatch guards
+run first; rebuilds and material overrides use their owning material's predicate. Material views
+inherit source policy through the existing prototype chain unless enabled on the view itself.
+Use public `setMeshVisible(mesh, visible)` for both hiding and restoring: it invalidates cached
+opaque bundles. Render-task updates and batch flushes still precede recording/replaying bundles
+and transparent sorting. No task, camera, bundle or draw ordering changes are introduced.
+
+Regression tests in `tests/lite/unit/shader-visible-packet-updates.test.ts` assert zero hidden
+world-version reads, system writes/copies and bind-group rebuilds, one visible copy in a two-member
+group, shared custom uploads, restoration of all changed inputs, alternate cameras, transparent
+sorting, disposal, replacement and override rebuilds.
 
 `enableShaderMaterialPipelineSharing()` is the zero-argument, package-wide opt-in for sharing
 equivalent ShaderMaterial layouts, modules and pipelines. Call it before pipeline preparation.
@@ -556,9 +586,9 @@ not import the cache owner and pays only for the nullable optional call.
 
 The pipeline layout is:
 
-| Group | Owner                   | Bindings                                            |
-| ----- | ----------------------- | --------------------------------------------------- |
-| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                   |
+| Group | Owner                   | Bindings                                                                            |
+| ----- | ----------------------- | ----------------------------------------------------------------------------------- |
+| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                                                   |
 | 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers, external texture/sampler pairs |
 
 Group 1 binding order:
@@ -795,15 +825,15 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 
 Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite source WGSL-only.
 
-| Scene                          | Reference source                  | Lite coverage                                                          |
-| ------------------------------ | --------------------------------- | ---------------------------------------------------------------------- |
-| ShaderMaterial basic color     | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
-| ShaderMaterial texture sampler | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
-| ShaderMaterial external texture | Lite-authored video reference      | `texture_external`, per-frame import, `setShaderExternalTexture`       |
-| ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
-| ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
-| ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
-| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
+| Scene                           | Reference source                  | Lite coverage                                                          |
+| ------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| ShaderMaterial basic color      | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
+| ShaderMaterial texture sampler  | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
+| ShaderMaterial external texture | Lite-authored video reference     | `texture_external`, per-frame import, `setShaderExternalTexture`       |
+| ShaderMaterial uniform update   | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
+| ShaderMaterial defines variant  | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
+| ShaderMaterial alpha            | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
+| Thin-instance color opt-out     | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 
