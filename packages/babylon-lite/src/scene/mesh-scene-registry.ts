@@ -94,6 +94,7 @@ export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
     if (mesh._disposed) {
         throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
     }
+    _materialValidator?.(mesh, mesh.material);
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {

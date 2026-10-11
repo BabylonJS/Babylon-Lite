@@ -142,8 +142,13 @@ export function setMeshIndexedIndirect(mesh: Mesh, buffer: StorageBuffer | null,
         });
         _installMeshRetirementObserver((retired) => borrows?.delete(retired));
         _installMeshMaterialValidator((target, material) => {
-            if (borrows?.has(target) && material?._buildGroup._materialFamily !== "shader") {
-                throw new Error("setMeshIndexedIndirect: unbind arguments before replacing ShaderMaterial with another material family.");
+            if (borrows?.has(target)) {
+                if (material?._buildGroup._materialFamily !== "shader") {
+                    throw new Error("setMeshIndexedIndirect: unbind arguments before replacing ShaderMaterial with another material family.");
+                }
+                if (target.thinInstances) {
+                    throw new Error("setMeshIndexedIndirect: unbind arguments before enabling thin instances.");
+                }
             }
         });
     }

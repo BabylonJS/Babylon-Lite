@@ -12,6 +12,8 @@ import { registerMeshScene } from "../../../packages/babylon-lite/src/scene/mesh
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 function fixture() {
     const device = {
@@ -131,5 +133,15 @@ describe("indirect replacement and deferred resource drain", () => {
         f.engine._currentEncoder = previousEncoder;
         processMaterialSwaps(f.scene);
         expect(f.draw()).toBe(2);
+    });
+
+    it("rejects an unsupported material changed before a borrowed clone's first scene registration", () => {
+        const f = fixture();
+        const clone = cloneTransformNode(f.meshes[0]!) as Mesh;
+        setMeshIndexedIndirect(clone, f.args);
+        clone.material = { _buildGroup: vi.fn() } as unknown as Mesh["material"];
+        expect(() => registerMeshScene(f.scene, clone)).toThrow(/unbind/);
+        setMeshIndexedIndirect(clone, null);
+        expect(() => registerMeshScene(f.scene, clone)).not.toThrow();
     });
 });
