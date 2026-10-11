@@ -402,6 +402,9 @@ function createShaderBinding(
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
+    if (material._deferPacketUpdate?.(packet.mesh.visible)) {
+        return;
+    }
     const engine = scene.surface.engine;
     const state = material as ShaderMaterialRenderState;
     // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last

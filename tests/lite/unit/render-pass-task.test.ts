@@ -743,7 +743,14 @@ describe("RenderPassTask transparent sorting", () => {
                 children: [],
                 material,
                 receiveShadows: false,
-                _gpu: { positionBuffer: {} as GPUBuffer, normalBuffer: {} as GPUBuffer, uvBuffer: {} as GPUBuffer, indexBuffer: {} as GPUBuffer, indexFormat: "uint32", indexCount: 3 },
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint32",
+                    indexCount: 3,
+                },
             })
         );
         const result = buildShaderMaterialRenderables(scene, meshes, getUniformCopyBatch);
