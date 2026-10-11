@@ -5,7 +5,7 @@ import { BU } from "../engine/gpu-flags.js";
 import { _getStorageBufferHandle, type StorageBuffer } from "../resource/storage-buffer.js";
 import { _installShaderIndexedDrawResolver, type ShaderPacket } from "../material/shader/shader-renderable.js";
 import { _installMeshRetirementObserver } from "./mesh-dispose.js";
-import { _installMeshMaterialValidator, _markMeshRenderableDirty } from "../scene/mesh-scene-registry.js";
+import { _getMeshScenes, _installMeshMaterialValidator, markMeshRenderableDirty } from "../scene/mesh-scene-registry.js";
 
 /** @internal Populate the WebGPU indexed-indirect ABI, including the signed baseVertex word. */
 export function writeMeshIndexedIndirectArgs(args: Uint32Array, gpu: MeshGPU, instanceCount: number): void {
@@ -150,7 +150,7 @@ export function setMeshIndexedIndirect(mesh: Mesh, buffer: StorageBuffer | null,
     // The existing epoch also invalidates independently owned/override task
     // bundles, whose draw closures consume the same mesh-local borrow.
     bumpVisibilityEpoch();
-    _markMeshRenderableDirty(mesh, (scene) => {
+    for (const scene of _getMeshScenes(mesh) ?? []) {
         // A merged opaque packet can survive its replacement until deferred UBO
         // retirement. Stop that old draw now, without destroying in-flight resources.
         for (const dispose of scene._meshDisposables.get(mesh) ?? []) {
@@ -160,7 +160,8 @@ export function setMeshIndexedIndirect(mesh: Mesh, buffer: StorageBuffer | null,
             }
         }
         scene._renderableVersion++;
-    });
+    }
+    markMeshRenderableDirty(mesh);
 }
 
 /** Report physical index capacity and CPU-known counts without GPU readback. */

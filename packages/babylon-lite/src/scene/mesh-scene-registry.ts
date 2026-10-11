@@ -39,19 +39,18 @@ export function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
  *  Use after changing renderable-affecting mesh state that is not observable through
  *  the material setter, such as primitive topology or replaced GPU geometry buffers. */
 export function markMeshRenderableDirty(mesh: Mesh): void {
-    _markMeshRenderableDirty(mesh);
-}
-
-/** @internal Apply optional packet invalidation before queuing each owning scene's rebuild. */
-export function _markMeshRenderableDirty(mesh: Mesh, invalidate?: (scene: SceneContext) => void): void {
     const scenes = _meshScenes?.get(mesh);
     if (!scenes) {
         return;
     }
     for (const scene of scenes) {
-        invalidate?.(scene);
         enqueueMaterialSwap(scene, mesh);
     }
+}
+
+/** @internal Read subscriptions without storing scene references on a mesh. */
+export function _getMeshScenes(mesh: Mesh): ReadonlySet<SceneContext> | undefined {
+    return _meshScenes?.get(mesh);
 }
 
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
