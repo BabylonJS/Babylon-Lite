@@ -19,6 +19,8 @@ export interface StorageBuffer {
     _data: Uint8Array | null;
     /** @internal */
     readonly _engine: EngineContext;
+    /** @internal Device owning the current handle; GPU-role allocations are not recovered. */
+    _device: GPUDevice;
     /** @internal */
     readonly _label?: string;
     /** @internal Bound as `var<storage, read_write>` and usable as a compute target. */
@@ -106,6 +108,7 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
         _destroyed: { value: false, writable: true },
         _data: { value: bytes, writable: true },
         _engine: { value: engine },
+        _device: { value: engine._device, writable: true },
         _label: { value: label },
         _writable: { value: writable },
         _usage: { value: usage },
@@ -128,6 +131,9 @@ export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBu
     if (!engine._storageBuffers?.has(buffer)) {
         throw new Error("StorageBuffer is not a live registered allocation.");
     }
+    if (buffer._device !== engine._device) {
+        throw new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss.");
+    }
     return buffer._buffer!;
 }
 
@@ -145,6 +151,7 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
     if (!engine._storageBuffers?.has(buffer)) {
         throw new Error("StorageBuffer is not a live registered allocation.");
     }
+    _getStorageBufferHandle(engine, buffer);
     if (!Number.isInteger(byteOffset) || byteOffset < 0 || (byteOffset & 3) !== 0) {
         throw new Error("StorageBuffer byteOffset must be a non-negative multiple of 4.");
     }
@@ -176,6 +183,9 @@ export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLen
     }
     if (!buffer._writable) {
         return Promise.reject(new Error("readStorageBuffer requires a writable StorageBuffer created with COPY_SRC usage."));
+    }
+    if (buffer._device !== buffer._engine._device) {
+        return Promise.reject(new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss."));
     }
     if (buffer._engine._currentEncoder) {
         return Promise.reject(new Error("readStorageBuffer cannot run while a frame encoder is active; wait until the producing frame is submitted."));

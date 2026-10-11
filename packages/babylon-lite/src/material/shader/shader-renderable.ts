@@ -83,6 +83,18 @@ interface ShaderExternalTextureBindingResolver {
 
 let _externalTextureResolver: ShaderExternalTextureBindingResolver | null = null;
 
+interface ShaderIndexedDrawResolver {
+    update(engine: EngineContext, mesh: Mesh): void;
+    draw(pass: ShaderRenderPass, engine: EngineContext, mesh: Mesh): boolean;
+}
+
+let _indexedDrawResolver: ShaderIndexedDrawResolver | null = null;
+
+/** @internal Install plain-mesh indirect drawing only at its public enabler. */
+export function _installShaderIndexedDrawResolver(resolver: ShaderIndexedDrawResolver): void {
+    _indexedDrawResolver = resolver;
+}
+
 /** @internal Install external-texture refresh and binding behavior on explicit binding API use. */
 export function _installShaderExternalTextureBindingResolver(resolver: ShaderExternalTextureBindingResolver): void {
     _externalTextureResolver = resolver;
@@ -162,6 +174,11 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
  *  module exports — so those helpers keep their mangled names in this chunk (an
  *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
 export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    if (_indexedDrawResolver) {
+        for (const mesh of meshes) {
+            _indexedDrawResolver.update(scene.surface.engine, mesh);
+        }
+    }
     let getUniformBatch: UniformBatchFactory | undefined;
     if (meshes.length > 1) {
         const { getUniformCopyBatch } = await import("../../render/uniform-copy-batch.js");
@@ -403,6 +420,7 @@ function createShaderBinding(
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
     const engine = scene.surface.engine;
+    _indexedDrawResolver?.update(engine, packet.mesh);
     const state = material as ShaderMaterialRenderState;
     // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last
     // write: same camera (identity + worldMatrixVersion — the same change key the view/projection caches
@@ -515,7 +533,9 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup!);
-    pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
+    if (!_indexedDrawResolver?.draw(pass, engine, packet.mesh)) {
+        pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
+    }
 }
 
 function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {

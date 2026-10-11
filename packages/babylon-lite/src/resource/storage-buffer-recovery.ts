@@ -22,6 +22,7 @@ export function rebuildCpuStorageBuffers(engine: EngineContext): void {
     for (const buffer of engine._storageBuffers ?? []) {
         if (!buffer._destroyed && buffer._data) {
             buffer._buffer = createMappedBuffer(engine, buffer._data, BU.STORAGE, buffer._label);
+            buffer._device = engine._device;
         }
     }
 }

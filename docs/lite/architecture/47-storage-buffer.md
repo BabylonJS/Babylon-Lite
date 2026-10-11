@@ -73,6 +73,13 @@ rebound or recreated after device loss. Applications using these features must r
 affected allocations and meshes before rendering resumes. The legacy plain-storage rebuild
 does not cover these newer roles or repair an existing storage mesh.
 
+The opt-in `setMeshIndexedIndirect(mesh, args, byteOffset)` consumer accepts a
+twenty-byte GPU-authored indexed draw record in an INDIRECT allocation. See
+[plain storage indexed indirect draws](mesh-indexed-indirect.md) for ABI, borrowing,
+unknown-count diagnostics, cached-bundle invalidation, and producer rerun requirements.
+Storage handles now retain their creation device; binding an unrecovered GPU-role
+allocation on a replacement device is rejected rather than submitting an old handle.
+
 ## Pipeline Configuration
 
 The module creates no pipelines. Shader-material storage declarations continue to create read-only-storage bind-group-layout entries. Rebinding the same resource is a no-op, while binding a different resource increments the material resource version once.

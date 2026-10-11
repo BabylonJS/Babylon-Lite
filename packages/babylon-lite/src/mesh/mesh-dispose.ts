@@ -10,6 +10,12 @@ import { _detachThinInstanceLodMesh } from "./thin-instance.js";
 type VertexBufferDisposer = (gpu: MeshGPU) => void;
 
 let _borrowAwareDisposer: ((gpu: MeshGPU, disposeVertices: VertexBufferDisposer) => void) | null = null;
+let _retirementObserver: ((mesh: Mesh) => void) | null = null;
+
+/** @internal Install opt-in cleanup of mesh-local borrowed draw state. */
+export function _installMeshRetirementObserver(observer: (mesh: Mesh) => void): void {
+    _retirementObserver = observer;
+}
 
 /** @internal Install the borrow-aware geometry disposer (called by `mesh-from-storage`). */
 export function _installBorrowAwareGeometryDisposer(dispose: (gpu: MeshGPU, disposeVertices: VertexBufferDisposer) => void): void {
@@ -40,6 +46,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
         return;
     }
     mesh._disposed = true;
+    _retirementObserver?.(mesh);
     const g = mesh._gpu;
     if (release(g)) {
         if (_borrowAwareDisposer) {
