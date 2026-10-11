@@ -321,8 +321,8 @@ export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-unif
 // caller's business. Tree-shaken away when unused.
 export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
 export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
-export { setMeshIndexedIndirect, getMeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect.js";
-export type { MeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect.js";
+export { setMeshIndexedIndirect, getMeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
+export type { MeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
 // data in .w). Opt-in: costs nothing in scenes that never declare one.
 export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";

@@ -77,8 +77,9 @@ The opt-in `setMeshIndexedIndirect(mesh, args, byteOffset)` consumer accepts a
 twenty-byte GPU-authored indexed draw record in an INDIRECT allocation. See
 [plain storage indexed indirect draws](mesh-indexed-indirect.md) for ABI, borrowing,
 unknown-count diagnostics, cached-bundle invalidation, and producer rerun requirements.
-Storage handles now retain their creation device; binding an unrecovered GPU-role
-allocation on a replacement device is rejected rather than submitting an old handle.
+Device recovery clears the old-device handle of GPU-role allocations (they have no CPU
+shadow to rebuild from), so binding one on the replacement device is rejected rather than
+submitting a handle from the lost device.
 
 ## Pipeline Configuration
 

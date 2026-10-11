@@ -58,9 +58,9 @@ bundles, including material-override tasks. Argument replacement does not requir
 Unbind before switching to a different material family or enabling thin instances.
 Do not mutate a borrow while a frame encoder is active.
 
-Storage allocations record their owning device. Plain read-only storage recovery
-updates that device with its CPU-shadow reconstruction. GPU-role storage has no
-CPU shadow and is not reconstructed. After device loss, recreate the vertex,
+Plain read-only storage recovery rebuilds its handle from the CPU shadow. GPU-role
+storage has no CPU shadow; recovery clears its old-device handle, so every bind path
+(compute, ShaderMaterial storage, vertex/index/indirect consumers) rejects it explicitly. After device loss, recreate the vertex,
 index, and indirect allocations and storage mesh on the replacement device,
 rebind compute and draw consumers, and rerun the producer before rendering.
 Rebinding an old GPU-role allocation cannot make its data valid on a new device.
@@ -85,8 +85,9 @@ Native acceptance must dispatch compute into the argument allocation and observe
 changed rendered pixels without reading argument bytes or changing CPU indexCount.
 Root API declarations and tree-shaking tests cover the public entry and opt-in seam.
 
-Implementation: `packages/babylon-lite/src/mesh/mesh-indexed-indirect.ts`;
+Implementation: `packages/babylon-lite/src/mesh/mesh-indexed-indirect-borrow.ts` (kept apart from
+the `mesh-indexed-indirect.ts` ABI writer, which thin-instance paths import statically);
 Shader resolver seam: `material/shader/shader-renderable.ts`;
-device provenance: `resource/storage-buffer.ts` and recovery module;
+old-device rejection: `resource/storage-buffer-recovery.ts` and `resource/storage-buffer.ts`;
 retirement seam: `mesh/mesh-dispose.ts`; scene invalidation:
 `scene/mesh-scene-registry.ts`.

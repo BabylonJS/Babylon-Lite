@@ -6,7 +6,7 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { createMeshFromStorageBuffer } from "../../../packages/babylon-lite/src/mesh/mesh-from-storage";
-import { setMeshIndexedIndirect } from "../../../packages/babylon-lite/src/mesh/mesh-indexed-indirect";
+import { setMeshIndexedIndirect } from "../../../packages/babylon-lite/src/mesh/mesh-indexed-indirect-borrow";
 import { createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
 import { registerMeshScene } from "../../../packages/babylon-lite/src/scene/mesh-scene-registry";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";

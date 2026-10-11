@@ -11,7 +11,7 @@ export interface StorageBuffer {
     readonly [storageBufferBrand]: true;
     /** Writable capacity in bytes, padded to WebGPU's four-byte alignment. */
     readonly byteLength: number;
-    /** @internal */
+    /** @internal Null after disposal, or after device recovery for GPU-role allocations (no CPU shadow to rebuild from). */
     _buffer: GPUBuffer | null;
     /** @internal */
     _destroyed: boolean;
@@ -19,8 +19,6 @@ export interface StorageBuffer {
     _data: Uint8Array | null;
     /** @internal */
     readonly _engine: EngineContext;
-    /** @internal Device owning the current handle; GPU-role allocations are not recovered. */
-    _device: GPUDevice;
     /** @internal */
     readonly _label?: string;
     /** @internal Bound as `var<storage, read_write>` and usable as a compute target. */
@@ -108,7 +106,6 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
         _destroyed: { value: false, writable: true },
         _data: { value: bytes, writable: true },
         _engine: { value: engine },
-        _device: { value: engine._device, writable: true },
         _label: { value: label },
         _writable: { value: writable },
         _usage: { value: usage },
@@ -123,6 +120,9 @@ export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBu
     // GPU-role allocations intentionally have no `_data` shadow, so liveness is
     // decided by `_buffer` rather than by the mirror.
     if (buffer._destroyed || !buffer._buffer) {
+        if (!buffer._destroyed && buffer._engine?._storageBuffers?.has(buffer)) {
+            throw new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss.");
+        }
         throw new Error("StorageBuffer has been disposed.");
     }
     if (buffer._engine !== engine) {
@@ -131,10 +131,7 @@ export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBu
     if (!engine._storageBuffers?.has(buffer)) {
         throw new Error("StorageBuffer is not a live registered allocation.");
     }
-    if (buffer._device !== engine._device) {
-        throw new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss.");
-    }
-    return buffer._buffer!;
+    return buffer._buffer;
 }
 
 /** Replace a byte range without changing the storage buffer's binding identity. */
@@ -178,13 +175,13 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
 export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
 export function readStorageBuffer(buffer: StorageBuffer, byteOffset: number, byteLength?: number): Promise<ArrayBuffer>;
 export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLength = buffer.byteLength - byteOffset): Promise<ArrayBuffer> {
-    if (buffer._destroyed || !buffer._buffer || !buffer._engine._storageBuffers?.has(buffer)) {
+    if (buffer._destroyed || !buffer._engine._storageBuffers?.has(buffer)) {
         return Promise.reject(new Error("StorageBuffer is not a live registered allocation."));
     }
     if (!buffer._writable) {
         return Promise.reject(new Error("readStorageBuffer requires a writable StorageBuffer created with COPY_SRC usage."));
     }
-    if (buffer._device !== buffer._engine._device) {
+    if (!buffer._buffer) {
         return Promise.reject(new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss."));
     }
     if (buffer._engine._currentEncoder) {

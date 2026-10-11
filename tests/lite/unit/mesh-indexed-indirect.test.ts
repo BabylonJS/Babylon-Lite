@@ -4,7 +4,7 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { createMeshFromStorageBuffer } from "../../../packages/babylon-lite/src/mesh/mesh-from-storage";
-import { getMeshIndexedDrawInfo, setMeshIndexedIndirect } from "../../../packages/babylon-lite/src/mesh/mesh-indexed-indirect";
+import { getMeshIndexedDrawInfo, setMeshIndexedIndirect } from "../../../packages/babylon-lite/src/mesh/mesh-indexed-indirect-borrow";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
@@ -163,11 +163,10 @@ describe("plain storage mesh indexed indirect borrowing", () => {
         const plain = createStorageBuffer(f.engine, new Uint32Array([42]));
         setMeshIndexedIndirect(f.mesh, f.args, 4);
         expect(f.args._data).toBeNull();
-        const old = f.args._buffer;
         f.engine._device = fixture().engine._device;
         rebuildCpuStorageBuffers(f.engine);
         expect(plain._buffer).not.toBeNull();
-        expect(f.args._buffer).toBe(old);
+        expect(f.args._buffer).toBeNull();
         expect(() => f.draw()).toThrow(/device|recreat/i);
         expect(() => setMeshIndexedIndirect(f.mesh, f.args, 4)).toThrow(/device|recreat/i);
         const replacement = createStorageBuffer(f.engine, 24, { writable: true, indirect: true });
