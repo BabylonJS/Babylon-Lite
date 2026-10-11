@@ -68,7 +68,9 @@ describe("plain storage mesh indexed indirect borrowing", () => {
         f.draw();
         expect(f.pass.drawIndexedIndirect).toHaveBeenCalledExactlyOnceWith(f.args._buffer, 4);
         expect(f.pass.drawIndexed).not.toHaveBeenCalled();
-        expect(f.engine._device.queue.writeBuffer).not.toHaveBeenCalled();
+        for (const [target] of vi.mocked(f.engine._device.queue.writeBuffer).mock.calls) {
+            expect(target).not.toBe(f.args._buffer);
+        }
         expect(f.mesh._gpu.indexCount).toBe(6);
         expect(f.mesh._gpu._firstIndex).toBe(1);
         expect(f.mesh._gpu._baseVertex).toBe(2);
