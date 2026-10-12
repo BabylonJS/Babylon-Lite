@@ -11,6 +11,7 @@ import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipel
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
+import { ALPHA_CUTOFF, CAMERA_POSITION, SCREEN_SIZE, shaderSystemDependency } from "./shader-system-dependencies.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
  *  for \>4 bones/vertex) are the skinning attributes — bound from the mesh's skeleton/VAT buffers,
@@ -242,39 +243,19 @@ function isSupportedAttribute(name: string): name is ShaderAttributeName {
     return !!_attributeInfo(name);
 }
 
-function isSystemUniform(name: string): name is ShaderSystemUniformName {
-    return (
-        name === "world" ||
-        name === "view" ||
-        name === "projection" ||
-        name === "viewProjection" ||
-        name === "worldView" ||
-        name === "worldViewProjection" ||
-        name === "cameraPosition" ||
-        name === "screenSize" ||
-        name === "alphaCutoff"
-    );
+/** @internal */
+export function _isShaderSystemUniform(name: string): name is ShaderSystemUniformName {
+    return shaderSystemDependency(name) !== 0;
 }
 
 function systemUniformType(name: ShaderSystemUniformName): ShaderUniformType {
-    if (name === "cameraPosition") {
-        return "vec3<f32>";
-    }
-    if (name === "screenSize") {
-        return "vec2<f32>";
-    }
-    if (name === "alphaCutoff") {
-        return "f32";
-    }
-    return "mat4x4<f32>";
-}
-
-export function _isShaderSystemUniform(name: string): name is ShaderSystemUniformName {
-    return isSystemUniform(name);
+    const dependency = shaderSystemDependency(name);
+    return dependency & CAMERA_POSITION ? "vec3<f32>" : dependency & SCREEN_SIZE ? "vec2<f32>" : dependency & ALPHA_CUTOFF ? "f32" : "mat4x4<f32>";
 }
 
 /** Create a ShaderMaterial from WGSL sources and declarations, validating
- *  attributes, uniforms, samplers, and defines. External texture declarations
+ *  attributes, uniforms, samplers, and defines. Uniform declarations are copied
+ *  so caller mutation cannot change the compiled layout or its dependencies. External texture declarations
  *  are snapshotted here and validated by their optional binding API.
  *  @param options - Sources, attributes, uniforms, resource declarations, defines, and render state.
  *  @returns The constructed `ShaderMaterial`. */
@@ -395,7 +376,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
 }
 
 function normalizeSystemUniform(name: string): ShaderUniformDecl {
-    if (!isSystemUniform(name)) {
+    if (!_isShaderSystemUniform(name)) {
         throw new Error(`ShaderMaterial: custom uniform "${name}" must use an explicit typed declaration.`);
     }
     return { name, type: systemUniformType(name) };
@@ -406,7 +387,7 @@ function normalizeCustomUniform(decl: ShaderUniformDecl): ShaderUniformDecl {
     if (!isUniformType(decl.type)) {
         throw new Error(`ShaderMaterial: unsupported uniform type "${String(decl.type)}" for "${decl.name}".`);
     }
-    return decl;
+    return { ...decl };
 }
 
 function isUniformType(type: string): type is ShaderUniformType {
