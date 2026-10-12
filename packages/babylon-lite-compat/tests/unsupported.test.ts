@@ -177,10 +177,7 @@ describe("Unsupported API stubs throw on construction", () => {
         ["MultiMaterial", () => new MultiMaterial()],
         ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
         ["GaussianSplattingMaterial", () => new GaussianSplattingMaterial("material")],
-        [
-            "GaussianSplattingDebugMaterialPlugin",
-            () => new GaussianSplattingDebugMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
-        ],
+        ["GaussianSplattingDebugMaterialPlugin", () => new GaussianSplattingDebugMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial)],
         [
             "GaussianSplattingGpuPickingMaterialPlugin",
             () => new GaussianSplattingGpuPickingMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
@@ -189,10 +186,7 @@ describe("Unsupported API stubs throw on construction", () => {
             "GaussianSplattingSolidColorMaterialPlugin",
             () => new GaussianSplattingSolidColorMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial, []),
         ],
-        [
-            "GaussianSplattingSizeMaterialPlugin",
-            () => new GaussianSplattingSizeMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
-        ],
+        ["GaussianSplattingSizeMaterialPlugin", () => new GaussianSplattingSizeMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial)],
         [
             "GaussianSplattingOverdrawMaterialPlugin",
             () => new GaussianSplattingOverdrawMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
