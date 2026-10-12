@@ -583,4 +583,11 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | Device-lost recovery                          | ✅      | Opt-in SceneContext, SpriteRenderer, and TextRenderer recovery via the corresponding `enableDeviceLost*Recovery` API (Scene 164 covers SceneContext)                                                                   |
 | Screen-space SSS (PrePass)                    | ❌      | Not implemented — only BRDF-layer translucency                                                                                                                                                                         |
 
+For ShaderMaterial scenes with hidden meshes, call
+`enableShaderMaterialVisiblePacketUpdates(material)` to defer hidden packet system-uniform
+and resource updates, including members of grouped opaque bindings. Shared custom uniforms
+and transparent sorting remain active. Always hide and restore with `setMeshVisible(mesh, visible)`
+so cached bundles are invalidated; pending packet changes refresh before the restored draw.
+The default update policy is unchanged.
+
 See `lab/lite/src/lite/scene*.ts` for end-to-end examples of each extension in action.

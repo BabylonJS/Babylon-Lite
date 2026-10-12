@@ -55,6 +55,26 @@ async function initialViteCode(source: string): Promise<string> {
 }
 
 describe("rendering opt-in boundaries", () => {
+    it.each([false, true])("retains hidden ShaderMaterial policy only with its explicit enabler (%s)", async (enabled) => {
+        const code = await initialViteCode(`import { createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""} } from ${JSON.stringify(LIB_ENTRY)};
+console.log(createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""});`);
+        expect(code.includes("function enableShaderMaterialVisiblePacketUpdates")).toBe(enabled);
+        expect(code.includes("function isHidden")).toBe(enabled);
+    });
+
+    it("emits byte-identical code when the visible-packet enabler is imported but unused", async () => {
+        const source = `import { createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)}; console.log(createShaderMaterial);`;
+        const baseline = await runRollup({ entrySource: source, format: "es", minify: false });
+        const unused = await runRollup({
+            entrySource: `import { enableShaderMaterialVisiblePacketUpdates } from ${JSON.stringify(LIB_ENTRY)}; ${source}`,
+            format: "es",
+            minify: false,
+        });
+        expect(baseline.errors).toEqual([]);
+        expect(unused.errors).toEqual([]);
+        expect(unused.code).toBe(baseline.code);
+    });
+
     it.each([false, true])("keeps Node implementations out of storage-only Shader graphs (%s)", async (node) => {
         const code = await initialViteCode(`import { createMeshFromStorageBuffer, createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)};
 ${

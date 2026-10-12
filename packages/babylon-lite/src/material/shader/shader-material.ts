@@ -5,7 +5,7 @@ import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import type { WgslSource } from "../../shader/wgsl.js";
 import type { EngineContext } from "../../engine/engine.js";
-import type { MeshGPU } from "../../mesh/mesh.js";
+import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
 import type { ExternalTexture } from "../../texture/external-texture.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
@@ -166,6 +166,8 @@ export interface ShaderStorageBufferSlot {
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
+    /** @internal Optional packet-update policy installed by its explicit enabler; true defers the mesh's packet. */
+    _deferPacketUpdate?: (mesh: Mesh) => boolean;
     /** @internal Non-canonical vertex formats installed by `setShaderAttributeFormats`. */
     _attributeFormats?: ShaderAttributeFormats;
     readonly vertexSource: WgslSource;
