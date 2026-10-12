@@ -412,7 +412,9 @@ export function addDeferredSceneRenderables(
  * to the scene, dispatching on its type. Asset containers are unpacked and each contained
  * entity added recursively. Optional scene-hosted systems such as depth-hosted sprites
  * expose their own opt-in add functions so mesh-only scenes do not pay feature-specific
- * routing bytes here.
+ * routing bytes here. Adding a camera makes it the scene's active camera (`scene.camera`),
+ * replacing any previous one; an asset container's camera is only installed when the scene
+ * has none.
  * @param scene - The owning scene (pillar 4b: entities never reference the scene themselves).
  * @param entity - The entity (or asset container) to add.
  * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
@@ -491,6 +493,8 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
+    } else if ("fov" in entity) {
+        ctx.camera = entity as Camera;
     }
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
