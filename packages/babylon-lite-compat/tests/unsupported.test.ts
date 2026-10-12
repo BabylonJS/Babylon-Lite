@@ -248,8 +248,10 @@ describe("Unsupported API stubs throw on construction", () => {
             expect(registered).toHaveLength(0);
         });
 
-        it("exposes the mechanical constant and varying helper", () => {
+        it("exposes the mechanical constant, picking encoder, and varying helper", () => {
             expect(GaussianSplattingMaxPartCount).toBe(128);
+            expect(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor(0x123456)).toEqual([0x12 / 255, 0x34 / 255, 0x56 / 255]);
+            expectTypeOf(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor).returns.toEqualTypeOf<[number, number, number]>();
             expect(GetPartIndexVaryingDeclaration(ShaderLanguage.GLSL)).toContain("varying float vPartIndex;");
             expect(GetPartIndexVaryingDeclaration(ShaderLanguage.WGSL)).toContain("varying vPartIndex: f32;");
         });

@@ -13,7 +13,7 @@
  */
 
 import { unsupported } from "../error.js";
-import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
+import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, encodeIdToColor, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
 import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
@@ -312,6 +312,10 @@ export class GaussianSplattingDebugMaterialPlugin extends MaterialPluginBase {
 }
 
 export class GaussianSplattingGpuPickingMaterialPlugin extends MaterialPluginBase {
+    public static EncodeIdToColor(id: number): [number, number, number] {
+        return encodeIdToColor(id);
+    }
+
     /** @internal An unsupported plugin must not attach to a Lite material. */
     protected override get _attachToLite(): boolean {
         return false;

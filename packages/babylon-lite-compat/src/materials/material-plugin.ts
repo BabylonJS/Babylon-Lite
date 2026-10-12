@@ -120,7 +120,7 @@ export class MaterialPluginBase {
         this.resolveIncludes = resolveIncludes;
         this._pluginDefineNames = defines;
         const pluginManager = material.pluginManager ?? new MaterialPluginManager(material);
-        if (addToPluginList) {
+        if (addToPluginList || this._attachToLite) {
             material.pluginManager ??= pluginManager;
         }
         this._pluginManager = pluginManager;
