@@ -528,6 +528,37 @@ stages:
                   env:
                       REUSE_BROWSER: "1"
 
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/shado-parity-junit.xml test-results/shado-parity-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/shado-parity-junit.xml test-results/shado-parity-report
+                      echo "##vso[task.setvariable variable=ShadoArtifactsSafe]true"
+                  condition: and(always(), eq(variables['RUN_PARITY_TESTS'], 'true'))
+                  displayName: "Sanitize and verify Shado parity artifacts"
+                  continueOnError: true
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ShadoArtifactsSafe'], 'true'))
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "test-results/shado-parity-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Parity (Shado/Dawn)"
+                      publishRunAttachments: false
+                  continueOnError: true
+
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['ShadoArtifactsSafe'], 'true'))
+                  inputs:
+                      targetPath: "test-results/shado-parity-report"
+                      artifactName: "shado-parity-report"
+                      publishLocation: "pipeline"
+                  continueOnError: true
+                  displayName: "Publish Shado parity HTML report"
+
                 # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
                 # via a direct CDP connection — NO browserstack-node-sdk. The wait
                 # script grabs up to BSTACK_SESSIONS_REQUIRED parallel sessions and

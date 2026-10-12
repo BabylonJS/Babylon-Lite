@@ -48,8 +48,13 @@ const sceneOptions = new Map<number, ShadoSceneOptions>([
     [278, { settleMs: 300 }],
     [280, { settleMs: 500 }],
     [281, { settleMs: 500 }],
+    [290, { query: "?captureFrame=180", waitFlag: "captureReady", timeoutMs: 180_000 }],
     [302, { query: "?seekTime=2", waitFlag: "animationFrozen" }],
 ]);
+
+const unsupportedScenes = new Map<number, string>([[306, "Dawn's Node binding cannot import a headless Canvas2D source as a GPUExternalTexture"]]);
+
+const nonComparableScenes = new Map<number, string>([[311, "The committed golden is stale; the authoritative parity test captures a live Babylon.js reference"]]);
 
 test.beforeAll(startShadoSceneRunner);
 test.afterAll(stopShadoSceneRunner);
@@ -64,14 +69,24 @@ for (const sceneConfig of sceneConfigs) {
         test.skip(!selected, "Scene excluded by SHADO_SCENES");
         test.skip(shouldSkipParity(sceneConfig), "Scene excluded from parity");
         test.skip(!fs.existsSync(goldenPath), "No committed golden is available");
+        test.skip(unsupportedScenes.has(sceneConfig.id), unsupportedScenes.get(sceneConfig.id));
+        test.skip(nonComparableScenes.has(sceneConfig.id), nonComparableScenes.get(sceneConfig.id));
 
+        const options = sceneOptions.get(sceneConfig.id);
+        const phaseCount = options?.waitFlag ? 2 : 1;
+        const timeoutMs = options?.timeoutMs ?? 60_000;
+        testInfo.setTimeout(Math.max(testInfo.timeout, timeoutMs * phaseCount + (options?.settleMs ?? 100) + 30_000));
         const golden = PNG.sync.read(fs.readFileSync(goldenPath));
         const { actualPath } = await renderShadoScene(sceneConfig.id, testInfo.outputPath(`scene${sceneConfig.id}-actual.png`), {
-            ...sceneOptions.get(sceneConfig.id),
+            ...options,
             width: golden.width,
             height: golden.height,
         });
         const result = compareImages(actualPath, goldenPath);
+        if (result.mad > sceneConfig.maxMad) {
+            await testInfo.attach("Shado actual", { path: actualPath, contentType: "image/png" });
+            await testInfo.attach("Browser golden", { path: goldenPath, contentType: "image/png" });
+        }
         expect(result.mad, `MAD should be <= ${sceneConfig.maxMad}; max channel delta was ${result.maxDiff}`).toBeLessThanOrEqual(sceneConfig.maxMad);
     });
 }

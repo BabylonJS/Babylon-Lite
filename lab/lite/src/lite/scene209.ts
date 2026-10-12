@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas, { useHighPrecisionMatrix: true, useFloatingOrigin: true });
     const scene = createSceneContext(engine);
+    scene.fixedDeltaMs = 1000 / 60;
 
     // Camera framing mirrors scene40, shifted to the OFFSET location.
     scene.camera = createFreeCamera({ x: OFFSET, y: 5, z: OFFSET - 10 }, { x: OFFSET, y: 0, z: OFFSET });

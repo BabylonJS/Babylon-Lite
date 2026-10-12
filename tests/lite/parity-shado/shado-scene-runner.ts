@@ -1,8 +1,10 @@
 import { createHeadlessCanvas, encodePng, installHeadlessKtx2Transcoder, installHeadlessWebGpu, installImageDecoder, type HeadlessGpu } from "@knervous/shado/devtools";
 import { createCanvas as createRasterCanvas, ImageData as RasterImageData } from "@napi-rs/canvas";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { runInThisContext } from "node:vm";
 import { Worker as NodeWorker } from "node:worker_threads";
 import sharp from "sharp";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
@@ -43,12 +45,15 @@ interface LiteRuntime {
 
 interface TestGlobals {
     __shadoParityEngines?: TestEngine[];
+    DracoDecoderModule?: DracoFactory;
 }
 
 interface HeadlessImageBitmap extends Uint8Array {
     height: number;
     width: number;
 }
+
+type DracoFactory = (configuration?: { locateFile?: (file: string) => string }) => Promise<unknown>;
 
 class BrowserWorker {
     onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -124,6 +129,7 @@ let headlessGpu: HeadlessGpu | null = null;
 let lite: LiteRuntime | null = null;
 let serverOrigin = "";
 let originalFetch: typeof fetch | null = null;
+let previousDracoDecoderDescriptor: PropertyDescriptor | undefined;
 
 function bindMember(target: object, property: PropertyKey): unknown {
     const value = Reflect.get(target, property);
@@ -267,6 +273,29 @@ function installDom(canvas: TestCanvas, query: string): void {
     });
 }
 
+function installHeadlessDracoDecoder(): void {
+    const globals = globalThis as typeof globalThis & TestGlobals;
+    previousDracoDecoderDescriptor = Object.getOwnPropertyDescriptor(globalThis, "DracoDecoderModule");
+    const decoderPath = path.join(LAB_ROOT, "public/draco_decoder.js");
+    const source = fs.readFileSync(decoderPath, "utf8");
+    const moduleShim: { exports: unknown } = { exports: {} };
+    const evaluate = runInThisContext(`(function (module, exports, require, __filename, __dirname) {\n${source}\n})`, {
+        filename: decoderPath,
+    }) as (module: { exports: unknown }, exports: unknown, require: NodeRequire, filename: string, dirname: string) => void;
+    evaluate(moduleShim, moduleShim.exports, createRequire(path.join(REPO_ROOT, "package.json")), decoderPath, path.dirname(decoderPath));
+    const factory = moduleShim.exports as DracoFactory;
+    globals.DracoDecoderModule = (configuration = {}) =>
+        factory({
+            ...configuration,
+            locateFile: (file) => path.join(LAB_ROOT, "public", file),
+        });
+}
+
+function formatDataset(dataset: Record<string, string>): string {
+    const entries = Object.entries(dataset);
+    return entries.length === 0 ? "" : `; dataset=${JSON.stringify(dataset)}`;
+}
+
 async function waitForReady(canvas: TestCanvas, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (canvas.dataset.ready !== "true") {
@@ -274,7 +303,7 @@ async function waitForReady(canvas: TestCanvas, timeoutMs: number): Promise<void
             throw new Error(canvas.dataset.error);
         }
         if (Date.now() >= deadline) {
-            throw new Error(`Timed out after ${timeoutMs}ms waiting for canvas.dataset.ready`);
+            throw new Error(`Timed out after ${timeoutMs}ms waiting for canvas.dataset.ready${formatDataset(canvas.dataset)}`);
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -287,7 +316,7 @@ async function waitForFlag(canvas: TestCanvas, flag: string, timeoutMs: number):
             throw new Error(canvas.dataset.error);
         }
         if (Date.now() >= deadline) {
-            throw new Error(`Timed out after ${timeoutMs}ms waiting for canvas.dataset.${flag}`);
+            throw new Error(`Timed out after ${timeoutMs}ms waiting for canvas.dataset.${flag}${formatDataset(canvas.dataset)}`);
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -347,6 +376,7 @@ export async function startShadoSceneRunner(): Promise<void> {
         };
     });
     lite = (await import(LITE_MODULE_URL)) as LiteRuntime;
+    installHeadlessDracoDecoder();
 
     server = await createServer({
         configFile: false,
@@ -368,14 +398,24 @@ export async function startShadoSceneRunner(): Promise<void> {
     }
 
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (input, init) => {
+    globalThis.fetch = async (input, init) => {
+        let rewrittenInput = input;
         if (typeof input === "string" && input.startsWith("/")) {
-            return originalFetch!(`${serverOrigin}${input}`, init);
+            rewrittenInput = `${serverOrigin}${input}`;
+        } else if (input instanceof URL && input.origin === "http://localhost") {
+            rewrittenInput = new URL(`${input.pathname}${input.search}`, serverOrigin);
         }
-        if (input instanceof URL && input.origin === "http://localhost") {
-            return originalFetch!(new URL(`${input.pathname}${input.search}`, serverOrigin), init);
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await originalFetch!(rewrittenInput, init);
+            } catch (error) {
+                if ((method !== "GET" && method !== "HEAD") || !(error instanceof TypeError) || attempt >= 2) {
+                    throw error;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+            }
         }
-        return originalFetch!(input, init);
     };
 }
 
@@ -384,6 +424,12 @@ export async function stopShadoSceneRunner(): Promise<void> {
         globalThis.fetch = originalFetch;
         originalFetch = null;
     }
+    if (previousDracoDecoderDescriptor) {
+        Object.defineProperty(globalThis, "DracoDecoderModule", previousDracoDecoderDescriptor);
+    } else {
+        delete (globalThis as typeof globalThis & TestGlobals).DracoDecoderModule;
+    }
+    previousDracoDecoderDescriptor = undefined;
     await server?.close();
     server = null;
     headlessGpu?.dispose();
