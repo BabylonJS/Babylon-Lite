@@ -3,7 +3,14 @@ import { rebuildRegisteredScenes, _rebuildMeshes } from "../../../packages/babyl
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";
-import { resizeMeshGeometry, resizeSharedMeshGeometry, updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
+import {
+    resizeMeshGeometry,
+    resizeSharedMeshGeometry,
+    setMeshDrawRange,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
+    updateMeshPositions,
+} from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
 import { retainMeshResources, releaseMeshResources } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import type { MeshResourceLease } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
@@ -230,6 +237,67 @@ describe("shared replacement retirement during registered scene recovery", () =>
             }
         }
     });
+
+    it.each(["geometry update", "capacity update", "attribute update", "draw range"] as const)(
+        "rebuilds original geometry when the first recovered owner modifies its replacement in place (%s)",
+        async (mode) => {
+            const { engine, scene, mesh, clone, createBuffer } = fixture();
+            const original = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+            mesh._cpuPositions = clone._cpuPositions = original;
+            mesh.boundMax = clone.boundMax = [1, 1, 0];
+            const contents = new Map<GPUBuffer, ArrayBuffer>();
+            createBuffer.mockImplementation((descriptor: GPUBufferDescriptor): GPUBuffer => {
+                const storage = new ArrayBuffer(Number(descriptor.size));
+                const buffer = stub<GPUBuffer>({ destroy: vi.fn(), size: Number(descriptor.size), getMappedRange: () => storage, unmap: () => undefined });
+                contents.set(buffer, storage);
+                return buffer;
+            });
+            const writeBuffer = vi.fn((buffer: GPUBuffer, offset: number, data: ArrayBuffer, dataOffset: number, size: number) => {
+                new Uint8Array(contents.get(buffer)!, offset, size).set(new Uint8Array(data, dataOffset, size));
+            });
+            Object.assign(engine._device.queue, { writeBuffer });
+            Object.assign(engine, { _renderingContexts: [scene] });
+            const lease = retainMeshResources(engine, mesh);
+            const { entered, resume } = gateEnvironment();
+            const recovery = rebuildRegisteredScenes(engine);
+            await entered;
+            const modified = mesh._gpu;
+            try {
+                const moved = new Float32Array([5, 5, 5, 6, 5, 5, 5, 6, 5]);
+                const normals = new Float32Array(9);
+                const indices = new Uint32Array([0, 1, 2]);
+                if (mode === "geometry update") {
+                    updateMeshGeometry(engine, mesh, moved, normals, indices);
+                } else if (mode === "capacity update") {
+                    expect(updateMeshGeometryCapacity(engine, mesh, moved, normals, indices).stable).toBe(true);
+                } else if (mode === "attribute update") {
+                    updateMeshPositions(engine, mesh, moved);
+                } else {
+                    setMeshDrawRange(engine, mesh, { vertices: { offset: 0, count: 3 }, indices: { offset: 0, count: 0 } });
+                }
+                expect(mesh._gpu).toBe(modified);
+            } finally {
+                resume();
+            }
+            await recovery;
+            const live = clone._gpu;
+            expect(live).not.toBe(modified);
+            expect(live._drawRangeSource).toBeUndefined();
+            expect(live.indexCount).toBe(3);
+            expect(new Float32Array(contents.get(live.positionBuffer)!, 0, 9)).toEqual(original);
+            expect(clone._cpuPositions).toBe(original);
+            expect(clone.boundMax).toEqual([1, 1, 0]);
+            expect(createBuffer).toHaveBeenCalledTimes(8);
+            disposeMeshGpu(clone);
+            releaseMeshResources(lease);
+            await waitForGpuResourceRetirements(engine);
+            for (const gpu of [modified, live]) {
+                for (const buffer of buffers(gpu)) {
+                    expect(buffer.destroy).toHaveBeenCalledTimes(1);
+                }
+            }
+        }
+    );
 
     it("counts a clone of the recovered source once when the scene sweep reaches it", async () => {
         const { engine, scene, mesh, clone, createBuffer } = fixture();

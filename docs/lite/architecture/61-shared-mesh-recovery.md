@@ -50,13 +50,19 @@ vertex/index values, shader interpretation, transforms, or draw order.
 2. On a new device, call `upload(engine, mesh)` exactly once. Only after upload
    succeeds, commit the new device/allocation and initialize owners with this mesh.
    That upload's initial reference is the first owner's claim.
-3. Reuse the same-device cache only while its allocation still has a live claim.
-   Every final geometry-claim release sets `_refCount` to zero before scheduling
-   buffer destruction: terminal disposal, `resizeMeshGeometry`,
+3. Reuse the same-device cache only while its allocation still has a live claim
+   and is unmodified. Every final geometry-claim release sets `_refCount` to zero
+   before scheduling buffer destruction: terminal disposal, `resizeMeshGeometry`,
    `resizeSharedMeshGeometry`, and capacity growth through
    `updateMeshGeometryCapacity`. Geometry replacement leaves the mesh alive, so
-   mesh-disposal checks alone cannot detect it. A zero-claim cache follows step 2
-   instead, resetting the owner set only after the fresh upload succeeds.
+   mesh-disposal checks alone cannot detect it. While its first owner is the only
+   claim, the allocation also passes the unshared-update guards, so in-place edits
+   (`updateMeshGeometry`, in-capacity `updateMeshGeometryCapacity`, per-attribute
+   `updateMesh*` writes, `setMeshDrawRange`) clear its `_recoverShared` hook; the
+   cache is reused only while the allocation still carries this hook. A zero-claim
+   or modified cache follows step 2 instead, so an unrecovered sibling uploads its
+   own original geometry, and the owner set is reset only after that upload
+   succeeds. The modified owner recovers independently on a later device loss.
 4. On the same device with a new mesh identity, add it to owners and return the
    rebuilt allocation. `retain` it exactly once unless the mesh already points at
    that allocation: a clone of an already recovered owner took its claim when
@@ -114,8 +120,9 @@ Babylon-style scene API or a clone/disposal implementation.
 - `retained-shared-recovery-retirement.test.ts`: controlled environment awaits,
   retirement after upload/before adoption, failed and overlapping scene recovery,
   late clones, clones of the recovered source admitted before the scene sweep
-  (counted once), individual/shared resize and capacity growth of the first
-  owner before a sibling adopts the cache, and exactly-once final destruction.
+  (counted once), individual/shared resize, capacity growth and in-place
+  geometry/attribute/draw-range edits of the first owner before a sibling adopts
+  the cache, and exactly-once final destruction.
 - `mesh-retention.spec.ts`: actual native device loss while detached, restoration
   of render pixels and GPU picking after reinsertion, and final resource release.
 
