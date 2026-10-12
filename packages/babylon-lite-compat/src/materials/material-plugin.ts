@@ -119,7 +119,7 @@ export class MaterialPluginBase {
         this._priority = priority;
         this.resolveIncludes = resolveIncludes;
         this._pluginDefineNames = defines;
-        this._pluginManager = material.pluginManager ??= new MaterialPluginManager(material);
+        this._pluginManager = addToPluginList ? (material.pluginManager ??= new MaterialPluginManager(material)) : new MaterialPluginManager(material);
         this.markAllDefinesAsDirty = () => material._markPluginDefinesDirty();
         this._lite = {
             get name() {

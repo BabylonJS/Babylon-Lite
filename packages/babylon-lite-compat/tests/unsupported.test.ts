@@ -67,6 +67,17 @@ import {
     RootMotionClip,
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
+    GaussianSplattingMaterial,
+    GaussianSplattingDebugMaterialPlugin,
+    GaussianSplattingGpuPickingMaterialPlugin,
+    GaussianSplattingSolidColorMaterialPlugin,
+    GaussianSplattingSizeMaterialPlugin,
+    GaussianSplattingOverdrawMaterialPlugin,
+    RegisterGaussianSplattingMaterial,
+    RegisterGaussianSplattingSizeMaterialPlugin,
+    GaussianSplattingMaxPartCount,
+    GetGaussianSplattingMaxPartCount,
+    GetPartIndexVaryingDeclaration,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
 import {
@@ -95,6 +106,7 @@ import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
+import { ShaderLanguage } from "../src/misc/engine-constants";
 import type { EffectWrapperCreationOptions } from "../src/unsupported/unsupported-extended";
 
 describe("LiteCompatError", () => {
@@ -164,6 +176,27 @@ describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
         ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
+        ["GaussianSplattingMaterial", () => new GaussianSplattingMaterial("material")],
+        [
+            "GaussianSplattingDebugMaterialPlugin",
+            () => new GaussianSplattingDebugMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
+        [
+            "GaussianSplattingGpuPickingMaterialPlugin",
+            () => new GaussianSplattingGpuPickingMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
+        [
+            "GaussianSplattingSolidColorMaterialPlugin",
+            () => new GaussianSplattingSolidColorMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial, []),
+        ],
+        [
+            "GaussianSplattingSizeMaterialPlugin",
+            () => new GaussianSplattingSizeMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
+        [
+            "GaussianSplattingOverdrawMaterialPlugin",
+            () => new GaussianSplattingOverdrawMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
@@ -203,6 +236,42 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+
+    describe("Gaussian splatting material stubs", () => {
+        it("does not retain a failed plugin on the supplied material", () => {
+            const material = Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial;
+
+            expect(() => new GaussianSplattingSizeMaterialPlugin(material)).toThrow(LiteCompatError);
+            expect(material.pluginManager).toBeUndefined();
+        });
+
+        it("does not register a failed material with the supplied scene", () => {
+            const registered: Material[] = [];
+            const scene = { _registerMaterial: (material: Material) => registered.push(material) } as unknown as Scene;
+
+            expect(() => new GaussianSplattingMaterial("material", scene)).toThrow(LiteCompatError);
+            expect(registered).toHaveLength(0);
+        });
+
+        it("exposes the mechanical constant and varying helper", () => {
+            expect(GaussianSplattingMaxPartCount).toBe(128);
+            expect(GetPartIndexVaryingDeclaration(ShaderLanguage.GLSL)).toContain("varying float vPartIndex;");
+            expect(GetPartIndexVaryingDeclaration(ShaderLanguage.WGSL)).toContain("varying vPartIndex: f32;");
+        });
+
+        it("preserves the new visualization plugin property shapes", () => {
+            expectTypeOf<GaussianSplattingSizeMaterialPlugin["isEnabled"]>().toEqualTypeOf<boolean>();
+            expectTypeOf<GaussianSplattingSizeMaterialPlugin["sizeScale"]>().toEqualTypeOf<number>();
+            expectTypeOf<GaussianSplattingOverdrawMaterialPlugin["isEnabled"]>().toEqualTypeOf<boolean>();
+            expectTypeOf<GaussianSplattingOverdrawMaterialPlugin["intensity"]>().toEqualTypeOf<number>();
+        });
+
+        it("exposes registration functions with the material-lifecycle blocker", () => {
+            expect(() => RegisterGaussianSplattingMaterial()).toThrow(LiteCompatError);
+            expect(() => RegisterGaussianSplattingSizeMaterialPlugin()).toThrow(LiteCompatError);
+            expect(() => GetGaussianSplattingMaxPartCount({} as AbstractEngine)).toThrow(LiteCompatError);
+        });
     });
 });
 
