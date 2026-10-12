@@ -13,7 +13,7 @@
  */
 
 import { unsupported } from "../error.js";
-import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, encodeIdToColor, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
+import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, encodeIdToColor, getGaussianSplattingMaxPartCount, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
 import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
@@ -36,9 +36,6 @@ const DITHERED_TILE_FADE_UNSUPPORTED =
     "Lite's material-plugin bridge supports shared shader injection, but not Babylon.js per-draw mesh uniforms, hardware-instance bounds, or custom thin-instance attributes/varyings. Adding those requires an opt-in per-renderable plugin-data design.";
 const GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED =
     "Lite's Gaussian-splat renderable fixes shader fragments and render state at load time and exposes no post-load material replacement or pipeline-rebuild lifecycle. Supporting Babylon.js GaussianSplattingMaterial plugins requires an opt-in Lite splat-material lifecycle design.";
-const GAUSSIAN_SPLATTING_PART_CAP_UNSUPPORTED =
-    "Babylon.js derives the compound-part limit from maxVertexUniformVectors, but Babylon Lite's WebGPU capability surface does not expose an equivalent vector-uniform limit. Defining that cross-API capability mapping requires a Lite engine-capability contract.";
-
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -274,8 +271,8 @@ export interface IGaussianSplattingDebugOptions {
 
 export const GaussianSplattingMaxPartCount = GAUSSIAN_SPLATTING_MAX_PART_COUNT;
 
-export function GetGaussianSplattingMaxPartCount(_engine: AbstractEngine): number {
-    return unsupported("GetGaussianSplattingMaxPartCount", GAUSSIAN_SPLATTING_PART_CAP_UNSUPPORTED);
+export function GetGaussianSplattingMaxPartCount(engine: AbstractEngine): number {
+    return getGaussianSplattingMaxPartCount(engine._lite);
 }
 
 export function GetPartIndexVaryingDeclaration(shaderLanguage: ShaderLanguage): string {

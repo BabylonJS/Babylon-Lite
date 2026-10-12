@@ -248,12 +248,31 @@ describe("Unsupported API stubs throw on construction", () => {
             expect(registered).toHaveLength(0);
         });
 
-        it("exposes the mechanical constant, picking encoder, and varying helper", () => {
+        it("exposes the mechanical constant, part-count query, picking encoder, and varying helper", () => {
+            const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
+            engine._lite = {
+                _device: {
+                    limits: { maxUniformBufferBindingSize: 500 },
+                },
+            } as AbstractEngine["_lite"];
+
             expect(GaussianSplattingMaxPartCount).toBe(128);
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(17);
+            expectTypeOf(GetGaussianSplattingMaxPartCount).returns.toBeNumber();
             expect(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor(0x123456)).toEqual([0x12 / 255, 0x34 / 255, 0x56 / 255]);
             expectTypeOf(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor).returns.toEqualTypeOf<[number, number, number]>();
             expect(GetPartIndexVaryingDeclaration(ShaderLanguage.GLSL)).toContain("varying float vPartIndex;");
             expect(GetPartIndexVaryingDeclaration(ShaderLanguage.WGSL)).toContain("varying vPartIndex: f32;");
+        });
+
+        it("clamps the part-count query to the upstream bounds", () => {
+            const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
+            const limits = { maxUniformBufferBindingSize: 0 };
+            engine._lite = { _device: { limits } } as AbstractEngine["_lite"];
+
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(1);
+            limits.maxUniformBufferBindingSize = 65536;
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(256);
         });
 
         it("preserves the new visualization plugin property shapes", () => {
@@ -266,7 +285,6 @@ describe("Unsupported API stubs throw on construction", () => {
         it("exposes registration functions with the material-lifecycle blocker", () => {
             expect(() => RegisterGaussianSplattingMaterial()).toThrow(LiteCompatError);
             expect(() => RegisterGaussianSplattingSizeMaterialPlugin()).toThrow(LiteCompatError);
-            expect(() => GetGaussianSplattingMaxPartCount({} as AbstractEngine)).toThrow(LiteCompatError);
         });
     });
 });
