@@ -95,14 +95,19 @@ preparation produces an empty result and does not recreate its targets.
 6. Final release removes the retention and engine mesh entry, clears the admission
    hook when that engine has no remaining leased meshes, and schedules fenced
    teardown. The callback rechecks all current scene/retention ownership before
-   disposing geometry, then releases the captured texture claims. While device
-   recovery still has a pending ownership top-up for a replaced texture, retention
+   disposing geometry, then releases the captured texture claims. Device recovery
+   queues a texture's pending ownership top-up before its rebuild's first await,
+   keyed by both the wrapper and the outgoing handle, so the window covers an
+   in-flight url fetch before the handle is replaced or adopted. While that top-up
+   is pending, retention
    keeps that pending total equal to the claims still owed from before the loss
    plus the claims currently live. A claim acquired in that window is live and
    also raises the total, so settlement keeps it instead of absorbing it into the
    pre-loss count. A released claim lowers the total and drops a live claim only
    when nothing is still owed. Otherwise, releasing the replacement would destroy a
-   texture that surviving leases and its creator still own.
+   texture that surviving leases and its creator still own. A total released to
+   zero with no live claim retires the replacement at settlement instead of
+   leaking it.
 7. Engine teardown revokes tokens, marks the feature engine disposed, clears its
    admission hook, and force-disposes retained resource claims. Scene teardown
    alone does not revoke leases. Explicit `disposeMeshGpu` remains force-disposal.
@@ -155,7 +160,11 @@ implementation or asset is copied.
   texture live, and its final teardown destroys it exactly once. A clone retained
   after replacement keeps its own claim through settlement and pre-loss release;
   releasing it before settlement neither debits pre-loss owners nor leaks once every
-  owed claim has been re-acquired.
+  owed claim has been re-acquired. With a controlled url fetch paused before handle
+  replacement, a lease acquired mid-fetch survives the creator's and the pre-loss
+  lease's release; a fenced release mid-fetch is not restored at settlement; and
+  releasing the last lease claim mid-fetch retires the replacement. Each final
+  teardown destroys the replacement exactly once.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
   fresh identity/order, filter selection, disposal cancellation, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.

@@ -176,14 +176,16 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     }
 }
 
-/** Device recovery replaces texture handles before scene handlers run, then tops each replacement's
- *  live count up to its queued pending total only after every handler finishes. Retention keeps that
- *  total equal to owed pre-loss claims plus live claims, so the top-up adds back exactly what is owed:
+/** Device recovery queues each rebuilt texture's pre-loss ownership before its first await (so a url
+ *  fetch in flight is covered), replaces handles before scene handlers run, then tops each
+ *  replacement's live count up to its queued pending total only after every handler finishes. An
+ *  entry matches a wrapper still holding the outgoing handle as well as one holding the replacement.
+ *  Retention keeps that total equal to owed pre-loss claims plus live claims, so the top-up adds back exactly what is owed:
  *  a claim acquired in this window is live and also raises the total, and a released claim lowers
  *  the total, dropping a live claim only when nothing is owed. Releasing the replacement while claims
  *  are still owed would destroy it before surviving owners regain them. */
-function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number] | undefined {
-    return engine._deviceLostRecovery?._pendingOwnership?.find(([candidate]) => candidate.texture === texture.texture);
+function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number, GPUTexture] | undefined {
+    return engine._deviceLostRecovery?._pendingOwnership?.find(([candidate, , outgoing]) => candidate.texture === texture.texture || outgoing === texture.texture);
 }
 
 function acquireRetainedTexture(engine: EngineContext, texture: Texture2D): void {

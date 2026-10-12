@@ -5,6 +5,7 @@ import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./tex
 import type { DeviceLostRecoveryState } from "../engine/device-lost-recovery.js";
 import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
+import { releaseTexture } from "../resource/texture-release.js";
 import { _isTextureReleased, _textureOwners } from "../resource/texture-owner-state.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
@@ -56,12 +57,20 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     }
     // Read before the rebuild replaces the handle: this is the outgoing texture's ownership.
     const owners = _textureOwners(tex);
+    // Queued before the first await, keyed by the outgoing handle as well as the wrapper, so
+    // retention lease acquisitions and releases made while a url fetch is still in flight —
+    // before the handle is replaced or adopted by sibling wrappers — adjust the carried total
+    // instead of being overwritten by this stale snapshot at settlement.
+    const state = owners > 0 ? engine._deviceLostRecovery : undefined;
+    if (state) {
+        (state._pendingOwnership ??= []).push([tex, owners, tex.texture]);
+    }
     // Recorded before the first await so a wrapper visited while this rebuild is still running
     // finds it and waits, rather than starting a second one.
     const done = rebuildFromSource(engine, tex, source);
     _rebuiltOn.set(source, { device: engine._device, tex, done });
     await done;
-    // Queue that ownership to be carried onto the replacement, which starts unowned. Without it the
+    // That ownership is carried onto the replacement, which starts unowned. Without it the
     // first consumer to bind and then unbind a rebuilt texture destroys it while the application
     // still holds the wrapper. Carrying it HERE would be wrong: recovery re-establishes part of the
     // pre-loss ownership itself — `rebuildSceneGpu` discards a mesh's queued texture releases and
@@ -72,12 +81,6 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     // released-texture detection on a later loss. Kinds whose creator never acquired have no
     // ownership to carry. Wrappers that adopt queue none either, exactly as `cloneTexture2D` takes
     // none at creation: they share the references held for the texture they now point at.
-    if (owners > 0) {
-        const state = engine._deviceLostRecovery;
-        if (state) {
-            (state._pendingOwnership ??= []).push([tex, owners]);
-        }
-    }
 }
 
 /**
@@ -103,8 +106,15 @@ export function settleRebuiltTextureOwnership(state: DeviceLostRecoveryState): v
     if (!pending) {
         return;
     }
-    for (const [tex, owners] of pending) {
-        for (let held = _textureOwners(tex); held < owners; held++) {
+    for (const [tex, owners, outgoing] of pending) {
+        let held = _textureOwners(tex);
+        // Every owner released during the rebuild: retire the unowned replacement as the last
+        // release would have, instead of leaving it allocated with nothing left to release it.
+        if (!owners && !held && tex.texture !== outgoing) {
+            acquireTexture(tex);
+            releaseTexture(tex);
+        }
+        for (; held < owners; held++) {
             acquireTexture(tex);
         }
     }

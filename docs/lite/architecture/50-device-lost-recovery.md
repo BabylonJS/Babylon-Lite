@@ -302,6 +302,14 @@ the outgoing texture had and tops the replacement up to that number. Without it
 the first consumer to bind and then unbind a rebuilt texture destroys it while
 the application still holds the wrapper.
 
+The count is queued, together with the outgoing handle, before the rebuild's
+first await rather than after the replacement is installed. A url rebuild awaits
+a network fetch, and mesh retention can acquire or release lease claims during
+it. Queuing early lets those changes adjust the carried total, and matching on the
+outgoing handle also covers sibling wrappers that still point at it before
+adoption. A total released to zero, with no handler claim left on the
+replacement, retires the replacement at settlement instead of leaking it.
+
 The top-up is deferred until every per-context handler has run, and that is what
 makes the count correct rather than inflated. Recovery re-establishes part of the
 pre-loss ownership itself: `rebuildSceneGpu` discards a mesh's queued texture
