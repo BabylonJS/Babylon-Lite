@@ -103,11 +103,12 @@ export function createHtmlElementTexture(
     };
     upload(engine);
     initializeParameters(engine);
-    engine._textures.push(tex);
+    engine._textures.add(tex);
     return tex;
 }
 
-/** Re-upload the texture from its source element. No-op when the context is
+/** Re-upload the texture from its source element. Only valid for textures
+ *  created by {@link createHtmlElementTexture}. No-op when the context is
  *  lost/disposed or the texture is disposed. */
 export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture): void {
     if (engine._isLost || engine._disposed || tex._disposed) {

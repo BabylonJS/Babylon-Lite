@@ -85,6 +85,9 @@ function aabbCache(): WeakMap<Float32Array, LocalAabb> {
 
 /** @internal Compute (and cache) a mesh's local-space AABB from its CPU positions. */
 function localAabb(mesh: Mesh): LocalAabb | null {
+    if (mesh._gpu?._drawRangeSource && mesh._gpu.indexCount === 0) {
+        return null;
+    }
     const positions = mesh._cpuPositions;
     if (!positions || positions.length < 3) {
         return null;

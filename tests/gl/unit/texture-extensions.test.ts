@@ -160,7 +160,7 @@ describe("lite-gl texture: external handle wrap", () => {
         expect(tex.width).toBe(16);
         expect(tex.height).toBe(8);
         expect(tex.isReady).toBe(true);
-        expect(engine._textures).toHaveLength(0); // external — owner manages restore
+        expect(engine._textures.size).toBe(0); // external — owner manages restore
     });
 });
 

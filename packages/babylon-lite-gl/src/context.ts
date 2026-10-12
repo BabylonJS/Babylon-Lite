@@ -132,12 +132,12 @@ export interface GLEngineContext {
      */
     _effectCache: Map<string, GLEffect>;
     /**
-     * Live texture registry — populated by `createRawTexture` /
-     * `loadTexture2D` / `createHtmlElementTexture`. Used by the
-     * context-restored protocol to replay uploads.
+     * Live managed 2D/3D texture registry. Set deletion avoids linear searches
+     * and array shifts during eviction; iteration preserves creation order
+     * among survivors for context-restore replay.
      * @internal
      */
-    _textures: (GLTexture | GLTexture3D)[];
+    _textures: Set<GLTexture | GLTexture3D>;
     /**
      * Live render-target registry — populated by `createRenderTarget`. Used by
      * the context-restored protocol to rebuild framebuffers + attachments after
@@ -237,7 +237,7 @@ export function createGLEngine(canvas: HTMLCanvasElement | OffscreenCanvas, opti
         _state: createGLState(caps.maxTextureUnits),
         _effects: [],
         _effectCache: new Map(),
-        _textures: [],
+        _textures: new Set(),
         _renderTargets: [],
         _currentRenderTarget: null,
         _buffers: [],
@@ -276,7 +276,9 @@ export function disposeGLEngine(engine: GLEngineContext): void {
     engine.canvas.removeEventListener("webglcontextrestored", engine._restoredHandler, false);
 
     const gl = engine.gl;
-    // Iterate snapshots — the dispose paths splice into the registries.
+    const textures = Array.from(engine._textures);
+    engine._textures.clear();
+    // Iterate snapshots — dispose paths can mutate the live registries.
     const effects = engine._effects.slice();
     for (const eff of effects) {
         if (!eff._disposed) {
@@ -289,14 +291,12 @@ export function disposeGLEngine(engine: GLEngineContext): void {
     }
     engine._effects.length = 0;
     engine._effectCache.clear();
-    const textures = engine._textures.slice();
     for (const tex of textures) {
-        if (!tex._disposed) {
-            tex._disposed = true;
-            gl.deleteTexture(tex.handle);
-        }
+        // The snapshot contains live textures only. Force-delete every handle,
+        // even if reentrant disposal marks a later texture disposed first.
+        tex._disposed = true;
+        gl.deleteTexture(tex.handle);
     }
-    engine._textures.length = 0;
     // Render targets own their FBO + renderbuffer + color texture; free them via
     // the per-RT closure so context.ts needs no runtime import of render-target.
     const rts = engine._renderTargets.slice();

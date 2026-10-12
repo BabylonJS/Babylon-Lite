@@ -25,10 +25,50 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
 export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
 export function enableShaderMaterialFinalColor(material: ShaderMaterial): void;
 export function enableShaderMaterialPipelineSharing(): void;
+export function enableShaderMaterialVisiblePacketUpdates(material: ShaderMaterial): void;
 export function setShaderAttributeFormats(material: ShaderMaterial, formats: ShaderAttributeFormats): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
+
+`enableShaderMaterialVisiblePacketUpdates(material)` opts one material into deferring hidden
+packet system-uniform evaluation/uploads and resource bind-group refreshes. Default behavior
+is unchanged. The helper installs an internal material-owned predicate on the packet's mesh;
+the common packet updater calls that seam before reading any camera, world version,
+target, alpha-cutoff or resource revision. The predicate returns true only for `mesh.visible === false`.
+Repeated enabling is safe, including after bindings have been built. No import-time registration
+or visibility mutation occurs. Unused policy code is tree-shaken.
+
+The policy covers grouped opaque members, single packets, transparent packets and the shared
+thin-instance packet updater. Material-shared custom UBO uploads remain active, even if every
+packet is hidden: other bindings/views can share that material state. Transparent sort centers
+and thin-instance synchronization/culling retain their existing schedule; this is not a general
+hidden-renderable scheduler. Initial packet allocation and pipeline preparation are not deferred.
+
+Hidden packets keep their last-written dependency keys and resource revision untouched.
+The normal updater therefore observes every accumulated change before the first restored draw,
+using the current pass's `DrawUpdateContext._camera` (or the scene camera), dimensions and material
+state. Resource acquisition/release stays transactional. Existing disposed/material-mismatch guards
+run first; rebuilds and material overrides use their owning material's predicate. Material views
+(`createShaderNormalMaterialView`, `createShaderNoColorMaterialView`) inherit the source material's
+policy through the existing prototype chain; enable the policy on the source material, because the
+public view factories return `MaterialView` rather than `ShaderMaterial`.
+Use public `setMeshVisible(mesh, visible)` for both hiding and restoring: it invalidates cached
+opaque bundles. Render-task updates and batch flushes still precede recording/replaying bundles
+and transparent sorting. No task, camera, bundle or draw ordering changes are introduced.
+
+Plain opaque and transparent paths share a file-local lifetime/ownership guard, independently
+of the optional update policy. The thin-instance group entry point retains its positional
+helper signature; its private builders capture those helper callbacks directly in the group
+factory's lexical scope instead of allocating and forwarding an intermediate helper object.
+Rebuild closures keep the same callbacks and explicit mesh-resource ownership. Helpers remain
+inside their existing asynchronous module boundaries rather than introducing cross-chunk exports.
+
+Regression tests in `tests/lite/unit/shader-visible-packet-updates.test.ts` assert zero hidden
+world-version reads, system writes/copies and bind-group rebuilds, one visible copy in a two-member
+group, shared custom uploads, restoration of all changed inputs, alternate cameras, transparent
+sorting, disposal, replacement and override rebuilds, and a thin-instanced mesh whose instance
+uploads continue while hidden and whose packet refreshes before its restored draw.
 
 `enableShaderMaterialPipelineSharing()` is the zero-argument, package-wide opt-in for sharing
 equivalent ShaderMaterial layouts, modules and pipelines. Call it before pipeline preparation.
@@ -339,6 +379,54 @@ material's system/custom UBO layout and typed-array views, and serializes only c
 version changed. Call it before scene registration. Scenes that do not opt in retain the compact default serializer
 and do not include the caching implementation in their bundle.
 
+System-block invalidation is declaration-driven on both the default and cached paths; it
+does not require another opt-in or share system UBOs between meshes. GPU layouts and
+dependencies are derived from the material's snapshotted declarations, never parsed WGSL.
+Caller-owned declaration objects and arrays cannot change an existing material's layout.
+The public declaration collection remains read-only; changing shader layout requires a
+new material.
+
+| Declared system uniform | Inputs that invalidate its packet block                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `world`                 | Mesh world version (including parents); while the active camera rebases (floating origin), also that camera's identity and change key |
+| `view`                  | Active camera identity, change key and floating-origin mode                                                                           |
+| `projection`            | Active camera identity, change key and effective target/viewport aspect                                                               |
+| `viewProjection`        | Union of view and projection inputs                                                                                                   |
+| `worldView`             | Union of world and view inputs                                                                                                        |
+| `worldViewProjection`   | Union of world and view-projection inputs                                                                                             |
+| `cameraPosition`        | Active camera identity, change key and floating-origin mode                                                                           |
+| `screenSize`            | Target width and height (not viewport or camera pose)                                                                                 |
+| `alphaCutoff`           | Its scalar value, not the custom-uniform version                                                                                      |
+
+Every camera-dependent block keys the full `_cameraChangeKey` (`worldMatrixVersion` plus the
+projection revision) rather than a pose-only or projection-only split. Injected projections,
+such as the per-eye `XRView.projectionMatrix` written by `updateXrCameraForView`, advance only
+`worldMatrixVersion`, so a projection-only key would keep a stale projection. The cost is a
+redundant upload of a view-only block on an FOV/plane edit, or of a projection-only block on
+camera motion — both rare compared with the camera-independent blocks this policy skips.
+The packet also keys the active camera's floating-origin mode, so a camera flagged after a
+packet's first upload (for example, a former pass-override camera that becomes the active
+scene camera) is re-serialized even though its change key did not move.
+
+Each packet retains a dependency bitmask derived once from its system UBO offsets and
+the last relevant inputs. Only declared dependencies are queried in the update path.
+An empty block's 16-byte zero padding is initialized at creation and never queued again.
+Nonempty blocks retain the first per-pass upload, so registration canvas dimensions
+cannot mask a different first render target or alternate pass camera. A relevant change
+serializes and uploads the entire system block with the same offsets, padding and F32
+bytes as before, either through `writeBuffer` or the existing `UniformCopyBatch`.
+Both writers resolve only the matrices their declared operations consume, and the default
+writer dispatches each UBO offset by its dependency bits rather than by uniform name.
+
+Null cameras preserve the existing zero camera-matrix/position values and absolute world
+matrix.
+
+Resource revision/custom-buffer identity checks and external-texture refresh run
+independently of the system-block gate. Rebuilds and device recovery create initialized
+packets and dependency masks against the replacement layout; disposal still prevents
+all updates to dead packets. This policy neither suppresses hidden-packet work nor
+changes draw submission or shared scene UBO behavior.
+
 `enableShaderUniformRangeUpdates` is an opt-in for materials with large custom UBOs and one or a few animated
 values. After the custom UBO has been packed once, each changed custom value is written directly into the
 material's retained packed `ArrayBuffer`. The opt-in updater widens one pending byte range across all changes made
@@ -419,8 +507,10 @@ packages/babylon-lite/src/material/shader/
   shader-material-view-gpu.ts  Terminal private view-UBO retirement.
   enable-shader-material-instance-world.ts  Opt-in regular/thin-instance final-world helper.
   enable-shader-material-final-color.ts  Opt-in effective vertex/instance color helper.
+  enable-shader-material-visible-packet-updates.ts  Opt-in hidden-packet deferral; owns the visibility predicate.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
+  shader-system-dependencies.ts  System-uniform name → dependency-bit table shared by validation and writers.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
   shader-pipeline-cache.ts Lazy cross-material bindings, modules, and pipeline cache.
   enable-shader-material-pipeline-sharing.ts  Opt-in global cache attachment and layout-identity memo.
@@ -556,9 +646,9 @@ not import the cache owner and pays only for the nullable optional call.
 
 The pipeline layout is:
 
-| Group | Owner                   | Bindings                                            |
-| ----- | ----------------------- | --------------------------------------------------- |
-| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                   |
+| Group | Owner                   | Bindings                                                                            |
+| ----- | ----------------------- | ----------------------------------------------------------------------------------- |
+| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                                                   |
 | 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers, external texture/sampler pairs |
 
 Group 1 binding order:
@@ -608,6 +698,52 @@ Consequences a shader author sees:
 - Absolute world coordinates are not recoverable from the UBO. A shader that genuinely needs them should take them as a custom uniform.
 
 With floating origin off, every value above is the plain absolute one and the path is copy-free.
+
+### System-uniform dependency table
+
+`shader-system-dependencies.ts` is the single classification of system uniform names. It has no
+module-level side effects and exports only constants and two internal functions:
+
+```typescript
+export const WORLD = 1;
+export const VIEW = 2;
+export const PROJECTION = 4;
+export const VIEW_PROJECTION = 8;
+export const CAMERA_POSITION = 16;
+export const SCREEN_SIZE = 32;
+export const ALPHA_CUTOFF = 64;
+export const CAMERA = VIEW | PROJECTION | VIEW_PROJECTION | CAMERA_POSITION;
+
+/** Dependency bits of one name; 0 for any non-system name (including "_pad"). */
+export function shaderSystemDependency(name: string): number;
+/** Bitwise OR over every name in `spec._offsets`. */
+export function shaderSystemDependencies(spec: UboSpec): number;
+```
+
+| Name                  | Bits                       |
+| --------------------- | -------------------------- |
+| `world`               | `WORLD`                    |
+| `view`                | `VIEW`                     |
+| `projection`          | `PROJECTION`               |
+| `viewProjection`      | `VIEW_PROJECTION`          |
+| `worldView`           | `WORLD \| VIEW`            |
+| `worldViewProjection` | `WORLD \| VIEW_PROJECTION` |
+| `cameraPosition`      | `CAMERA_POSITION`          |
+| `screenSize`          | `SCREEN_SIZE`              |
+| `alphaCutoff`         | `ALPHA_CUTOFF`             |
+
+The table is a null-prototype object literal, so inherited keys such as `constructor` classify as 0.
+Consumers:
+
+- `shader-material.ts`: `_isShaderSystemUniform(name)` is `shaderSystemDependency(name) !== 0`, and
+  `systemUniformType` derives `vec3<f32>` / `vec2<f32>` / `f32` / `mat4x4<f32>` from the
+  `CAMERA_POSITION` / `SCREEN_SIZE` / `ALPHA_CUTOFF` / matrix bits.
+- `shader-renderable.ts`: `createPacket` stores `shaderSystemDependencies(systemSpec)` as
+  `ShaderPacket._systemDependencies`; `updatePacket` gates on it; `writeSystemUniforms` dispatches each
+  offset by its bits (matrix bits select view, projection or view-projection and `WORLD` multiplies by
+  the rebased world; otherwise world, camera position, screen size or alpha cutoff).
+- `enable-shader-material-uniform-caching.ts`: the cached system write plan stores the same mask and
+  resolves only the matrices it names.
 
 `_shaderWorldMatrix`'s third parameter, `out`, is optional and exists only so tests and other direct callers can supply their own destination instead of reusing the module-scoped FO scratch buffer — without it, two calls in a row alias the same array, and the second overwrites the first. The two renderable writers above never pass it, so they keep the original copy-free behaviour: the shared scratch under FO, `mesh.worldMatrix` returned by reference when FO is off. When `out` **is** given, both branches write into it (including the FO-off case, which would otherwise return `mesh.worldMatrix` unchanged) so passing `out` always means "the answer is here."
 
@@ -789,21 +925,22 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 - `texture/texture-2d.ts` for public texture resources.
 - `texture/external-texture.ts` for caller-owned video external-texture state.
 - `resource/gpu-pool.ts` for texture acquire/release and sampler reuse where appropriate.
-- `camera/camera.ts` for active pass view/projection data if a per-mesh system uniform requires projection.
+- `camera/camera.ts` for active pass view/projection data and `_cameraChangeKey` for camera-dependent system-block invalidation.
+- `material/shader/shader-system-dependencies.ts` for system-uniform classification and dependency bits.
 
 ## Test Specification
 
 Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite source WGSL-only.
 
-| Scene                          | Reference source                  | Lite coverage                                                          |
-| ------------------------------ | --------------------------------- | ---------------------------------------------------------------------- |
-| ShaderMaterial basic color     | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
-| ShaderMaterial texture sampler | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
-| ShaderMaterial external texture | Lite-authored video reference      | `texture_external`, per-frame import, `setShaderExternalTexture`       |
-| ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
-| ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
-| ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
-| Thin-instance color opt-out    | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
+| Scene                           | Reference source                  | Lite coverage                                                          |
+| ------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| ShaderMaterial basic color      | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
+| ShaderMaterial texture sampler  | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
+| ShaderMaterial external texture | Lite-authored video reference     | `texture_external`, per-frame import, `setShaderExternalTexture`       |
+| ShaderMaterial uniform update   | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
+| ShaderMaterial defines variant  | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
+| ShaderMaterial alpha            | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
+| Thin-instance color opt-out     | Lite unit contract                | Override keeps matrix instancing but omits color layout, sync and bind |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 

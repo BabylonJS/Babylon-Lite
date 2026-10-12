@@ -277,6 +277,7 @@ export {
     createMeshFromData,
     updateMeshGeometry,
     updateMeshGeometryCapacity,
+    setMeshDrawRange,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -287,7 +288,7 @@ export {
     resizeSharedMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
-export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges, MeshDrawRange } from "./mesh/mesh-factories.js";
 export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
 export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
@@ -320,6 +321,8 @@ export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-unif
 // caller's business. Tree-shaken away when unused.
 export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
 export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
+export { setMeshIndexedIndirect, getMeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
+export type { MeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
 // data in .w). Opt-in: costs nothing in scenes that never declare one.
 export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
@@ -538,6 +541,7 @@ export { getShaderExternalTexture, setShaderExternalTexture } from "./material/s
 export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
+export { enableShaderMaterialVisiblePacketUpdates } from "./material/shader/enable-shader-material-visible-packet-updates.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
 export { enableShaderMaterialFinalColor } from "./material/shader/enable-shader-material-final-color.js";
 export { enableShaderMaterialPipelineSharing } from "./material/shader/enable-shader-material-pipeline-sharing.js";

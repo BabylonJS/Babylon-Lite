@@ -123,6 +123,29 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         expect(waiting).toContain("new Promise");
     });
 
+    it("keeps decoded-source creation out of raw-texture-only bundles", async () => {
+        const bundle = async (name: string) =>
+            (
+                await build({
+                    stdin: { contents: `export { ${name} } from "babylon-lite-gl";`, resolveDir: repoRoot, sourcefile: "source-entry.ts" },
+                    bundle: true,
+                    minify: true,
+                    treeShaking: true,
+                    format: "esm",
+                    target: "esnext",
+                    platform: "browser",
+                    legalComments: "none",
+                    alias: liteGlAlias,
+                    write: false,
+                })
+            ).outputFiles[0]!.text;
+        expect(await bundle("createRawTexture")).not.toMatch(/retainSource|source texture dimensions|naturalWidth|videoWidth|displayWidth/);
+        const source = await bundle("createTextureFromSource");
+        expect(source).toContain("retainSource");
+        expect(source).toContain("source texture dimensions");
+        expect(source).not.toMatch(/fetch\(|createImageBitmap\(|_dynSource|samplingMode/);
+    });
+
     for (const scene of scenes) {
         it(`scene${scene.id} (${scene.slug}) ≤ ${scene.maxRawKB} KB raw`, async () => {
             const { rawKB, gzipKB } = await measureSceneBundle(scene.id);

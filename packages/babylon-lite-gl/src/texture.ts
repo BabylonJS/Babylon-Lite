@@ -204,7 +204,7 @@ export function createRawTexture(
     };
     upload(engine);
     initializeParameters(engine);
-    engine._textures.push(tex);
+    engine._textures.add(tex);
     return tex;
 }
 
@@ -402,7 +402,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
     // Placeholder upload — makes the texture sampleable before the real image arrives.
     upload(engine);
     initializeParameters(engine);
-    engine._textures.push(tex);
+    engine._textures.add(tex);
 
     // Fetch + decode the real image. Re-uploads via the same closure once the
     // bitmap is in hand (so context-restore replay sees the real image too).
@@ -495,7 +495,11 @@ export function bindTextureForUpload(engine: GLEngineContext, handle: WebGLTextu
 
 /** Disposes the texture. Walks `_state.boundTextures` and clears every slot
  *  that still references the handle — otherwise a later `bindTexture(unit, B)`
- *  to the same unit would be wrongly elided when slot still showed handle A. */
+ *  to the same unit would be wrongly elided when slot still showed handle A.
+ *  Deregistration is expected O(1), independent of the live texture count.
+ *  Shared references keep the texture registered until its final release;
+ *  repeated disposal is a no-op. Unregistered wrappers keep their existing
+ *  handle-deletion semantics without affecting the live registry. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void {
     if (tex._disposed) {
         return;
@@ -505,10 +509,7 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void {
         return;
     }
     tex._disposed = true;
-    const i = engine._textures.indexOf(tex);
-    if (i !== -1) {
-        engine._textures.splice(i, 1);
-    }
+    engine._textures.delete(tex);
     if (!engine._isLost && !engine._disposed) {
         engine.gl.deleteTexture(tex.handle);
     }

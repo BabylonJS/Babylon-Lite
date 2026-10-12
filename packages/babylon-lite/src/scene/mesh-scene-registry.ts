@@ -51,6 +51,13 @@ export function meshSceneEngine(mesh: Mesh): SceneContext["surface"]["engine"] |
     return engine;
 }
 
+let _materialValidator: ((mesh: Mesh, material: Mesh["material"]) => void) | null = null;
+
+/** @internal Install optional validation of material transitions for a borrowed consumer. */
+export function _installMeshMaterialValidator(validate: (mesh: Mesh, material: Mesh["material"]) => void): void {
+    _materialValidator = validate;
+}
+
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
  *  Dedup is per-(scene, mesh) via swap-queue membership — a single shared mesh may be queued
@@ -77,6 +84,11 @@ export function markMeshRenderableDirty(mesh: Mesh): void {
     }
 }
 
+/** @internal Read subscriptions without storing scene references on a mesh. */
+export function _getMeshScenes(mesh: Mesh): ReadonlySet<SceneContext> | undefined {
+    return _meshScenes?.get(mesh);
+}
+
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
  *  rebuild in EVERY scene the mesh currently belongs to. Installed exactly once per mesh. The
  *  setter looks the subscriber set up from `_meshScenes` on each write rather than capturing
@@ -90,6 +102,7 @@ function installMaterialSetter(mesh: Mesh): void {
         },
         set(v) {
             if (v !== _mat) {
+                _materialValidator?.(mesh, v);
                 _retainMaterial?.(mesh, v);
                 _mat = v;
                 // Registration creates the record before this setter; live mesh records are never deleted.
@@ -127,6 +140,7 @@ export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
     if (mesh._disposed) {
         throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed. Create a new mesh instead.`);
     }
+    _materialValidator?.(mesh, mesh.material);
     _meshRetained?.(mesh, scene.surface.engine);
     _retainMaterial?.(mesh, mesh.material);
     // Keep ordinary admission inline so optional pre-admission observation adds no bundle cost.

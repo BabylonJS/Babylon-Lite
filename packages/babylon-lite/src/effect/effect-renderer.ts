@@ -9,6 +9,7 @@ import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "../frame-graph/task.js";
+import type { NormalizedViewport } from "../camera/camera.js";
 import { wgsl } from "../shader/wgsl.js";
 
 const DEFAULT_VERTEX_WGSL = wgsl`struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
@@ -82,6 +83,10 @@ export interface EffectRenderTaskConfig {
 /** A frame-graph task that renders an `EffectWrapper` as a fullscreen pass into an offscreen `RenderTarget`. */
 export interface EffectRenderTask extends Task {
     readonly name: string;
+    /** Optional draw region, normalized to the target (origin bottom-left, like a camera viewport). When set, the
+     *  fullscreen pass only rasterizes this rectangle (a scissor; the target is still cleared whole when `clear` is on);
+     *  an empty rectangle draws nothing. `null`/absent draws the whole target. Plain data: update it any frame. */
+    scissor?: NormalizedViewport | null;
     /** @internal */
     readonly _config: EffectRenderTaskConfig;
     /** @internal */
@@ -251,6 +256,18 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
             task._bindGroup = getEffectBindGroup(effect);
             applyColorAttachmentState(task._colorAttachment, rt, undefined, task._config.clear !== false, task._config.clearColor!);
             const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+            const scissor = task.scissor;
+            if (scissor) {
+                const x0 = Math.max(0, Math.floor(scissor.x * rt._width));
+                const x1 = Math.min(rt._width, Math.ceil((scissor.x + scissor.width) * rt._width));
+                const y0 = Math.max(0, Math.floor((1 - scissor.y - scissor.height) * rt._height));
+                const y1 = Math.min(rt._height, Math.ceil((1 - scissor.y) * rt._height));
+                if (scissor.width <= 0 || scissor.height <= 0 || x1 <= x0 || y1 <= y0) {
+                    pass.end();
+                    return 0;
+                }
+                pass.setScissorRect(x0, y0, x1 - x0, y1 - y0);
+            }
             pass.setPipeline(pipeline);
             if (task._bindGroup) {
                 pass.setBindGroup(0, task._bindGroup);

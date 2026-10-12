@@ -21,6 +21,18 @@ import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 import { _attributeInfo, _getShaderVbSupport, type ShaderRenderPass, type ShaderVbLayout } from "./shader-vb-support.js";
+import {
+    WORLD,
+    VIEW,
+    PROJECTION,
+    VIEW_PROJECTION,
+    CAMERA,
+    CAMERA_POSITION,
+    SCREEN_SIZE,
+    ALPHA_CUTOFF,
+    shaderSystemDependencies,
+    shaderSystemDependency,
+} from "./shader-system-dependencies.js";
 
 type UniformBatchFactory = (signature: RenderTargetSignature) => UniformCopyBatch;
 
@@ -30,6 +42,8 @@ export interface ShaderPacket {
     readonly mesh: Mesh;
     readonly systemUBO: GPUBuffer;
     readonly systemData: Float32Array;
+    /** @internal Declaration dependencies captured with the system layout. */
+    readonly _systemDependencies: number;
     /** @internal Null only while `createPacket` is constructing the packet; a
      *  packet is never published unless bind-group creation succeeds. */
     _bindGroup: GPUBindGroup | null;
@@ -55,6 +69,8 @@ export interface ShaderPacket {
     _lastCamera?: Camera | null;
     /** @internal */
     _lastCameraVersion?: number;
+    /** @internal */
+    _lastFloatingOrigin?: boolean;
     /** @internal */
     _lastMeshWmVersion?: number;
     /** @internal */
@@ -82,6 +98,18 @@ interface ShaderExternalTextureBindingResolver {
 }
 
 let _externalTextureResolver: ShaderExternalTextureBindingResolver | null = null;
+
+interface ShaderIndexedDrawResolver {
+    update(engine: EngineContext, mesh: Mesh): void;
+    draw(pass: ShaderRenderPass, engine: EngineContext, mesh: Mesh): boolean;
+}
+
+let _indexedDrawResolver: ShaderIndexedDrawResolver | null = null;
+
+/** @internal Install plain-mesh indirect drawing only at its public enabler. */
+export function _installShaderIndexedDrawResolver(resolver: ShaderIndexedDrawResolver): void {
+    _indexedDrawResolver = resolver;
+}
 
 /** @internal Install external-texture refresh and binding behavior on explicit binding API use. */
 export function _installShaderExternalTextureBindingResolver(resolver: ShaderExternalTextureBindingResolver): void {
@@ -162,6 +190,11 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
  *  module exports — so those helpers keep their mangled names in this chunk (an
  *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
 export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    if (_indexedDrawResolver) {
+        for (const mesh of meshes) {
+            _indexedDrawResolver.update(scene.surface.engine, mesh);
+        }
+    }
     let getUniformBatch: UniformBatchFactory | undefined;
     if (meshes.length > 1) {
         const { getUniformCopyBatch } = await import("../../render/uniform-copy-batch.js");
@@ -271,6 +304,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
         mesh,
         systemUBO,
         systemData,
+        _systemDependencies: shaderSystemDependencies(systemSpec),
         _bindGroup: null,
         _lastResourceVersion: material._resourceVersion,
         _boundTextures: [],
@@ -286,6 +320,10 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
         packet._boundTextures.push(tex);
     }
     return packet;
+}
+
+function isPacketInactive(packet: ShaderPacket, material: ShaderMaterial, isOverride: boolean): boolean {
+    return !!packet._disposed || (!isOverride && packet.mesh.material !== material);
 }
 
 function createOpaqueRenderable(
@@ -308,7 +346,7 @@ function createOpaqueRenderable(
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
-            if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+            if (isPacketInactive(packet, material, isOverride)) {
                 continue;
             }
             updatePacket(scene, material, packet, context, uniformBatch);
@@ -317,7 +355,7 @@ function createOpaqueRenderable(
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
-            if (packet._disposed || packet.mesh.visible === false || (!isOverride && packet.mesh.material !== material)) {
+            if (isPacketInactive(packet, material, isOverride) || packet.mesh.visible === false) {
                 continue;
             }
             drawPacket(pass, engine, material, packet);
@@ -349,7 +387,7 @@ function createTransparentRenderable(
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
-        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+        if (isPacketInactive(packet, material, isOverride)) {
             return;
         }
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
@@ -360,7 +398,7 @@ function createTransparentRenderable(
         sortCenter[2] = m[14]!;
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
-        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
+        if (isPacketInactive(packet, material, isOverride)) {
             return 0;
         }
         drawPacket(pass, engine, material, packet);
@@ -402,47 +440,52 @@ function createShaderBinding(
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
+    if (material._deferPacketUpdate?.(packet.mesh)) {
+        return;
+    }
     const engine = scene.surface.engine;
+    _indexedDrawResolver?.update(engine, packet.mesh);
     const state = material as ShaderMaterialRenderState;
-    // Skip the system-UBO recompute + writeBuffer when EVERY input is unchanged since this packet's last
-    // write: same camera (identity + worldMatrixVersion — the same change key the view/projection caches
-    // already rely on), same mesh world-matrix version, same target size and same material uniform version
-    // (alphaCutoff). A packet is updated once per PASS per frame, and most packets are static meshes under
-    // a camera that only moves some frames — these per-packet writeBuffers dominate CPU frame time in
-    // large scenes, and the skipped ones are byte-identical rewrites of what the UBO already holds.
-    const camera = context._camera ?? scene.camera;
-    const cameraVersion = camera ? _cameraChangeKey(camera) : -1;
-    const meshWmVersion = packet.mesh.worldMatrixVersion;
-    // alphaCutoff is compared by VALUE, not by the material's uniform version: animated materials bump
-    // that version every frame (time uniforms and the like live in the CUSTOM ubo, which has its own
-    // version gate), and keying on it would defeat this skip for exactly the materials that dominate.
-    const alphaCutoff = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
-    // Effective aspect keys the view/projection uniforms: getEffectiveAspectRatio folds in the camera's
-    // normalized viewport, which can change (altering projection) with target size and worldMatrixVersion
-    // both unchanged, so targetWidth/Height alone would not catch it.
-    const aspect = camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
-    if (
-        packet._lastCamera !== camera ||
-        packet._lastCameraVersion !== cameraVersion ||
-        packet._lastMeshWmVersion !== meshWmVersion ||
-        packet._lastTargetWidth !== context.targetWidth ||
-        packet._lastTargetHeight !== context.targetHeight ||
-        packet._lastAspect !== aspect ||
-        packet._lastAlphaCutoff !== alphaCutoff
-    ) {
-        systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
-        if (uniformBatch) {
-            uniformBatch.queue(packet.systemUBO, packet.systemData);
-        } else {
-            engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+    const dependencies = packet._systemDependencies;
+    if (dependencies) {
+        // Each input is keyed only when a declared system uniform reads it. Camera-dependent blocks key the
+        // full `_cameraChangeKey` (transform + projection revision): injected projections such as per-eye XR
+        // matrices advance only `worldMatrixVersion`, so a projection-only key would miss them.
+        const camera = context._camera ?? scene.camera;
+        const floatingOrigin = !!camera?._useFloatingOrigin;
+        // Under floating origin the world matrix is camera-relative, so world blocks also follow the camera.
+        const cameraIdentity = dependencies & CAMERA || (floatingOrigin && dependencies & WORLD) ? camera : null;
+        const cameraVersion = cameraIdentity ? _cameraChangeKey(cameraIdentity) : -1;
+        const meshWmVersion = dependencies & WORLD ? packet.mesh.worldMatrixVersion : -1;
+        const targetWidth = dependencies & SCREEN_SIZE ? context.targetWidth : 0;
+        const targetHeight = dependencies & SCREEN_SIZE ? context.targetHeight : 0;
+        const aspect = dependencies & (PROJECTION | VIEW_PROJECTION) && camera ? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) : 1;
+        const alphaCutoff = dependencies & ALPHA_CUTOFF ? (material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4) : 0;
+        if (
+            packet._lastCamera !== cameraIdentity ||
+            packet._lastCameraVersion !== cameraVersion ||
+            packet._lastFloatingOrigin !== floatingOrigin ||
+            packet._lastMeshWmVersion !== meshWmVersion ||
+            packet._lastTargetWidth !== targetWidth ||
+            packet._lastTargetHeight !== targetHeight ||
+            packet._lastAspect !== aspect ||
+            packet._lastAlphaCutoff !== alphaCutoff
+        ) {
+            systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+            if (uniformBatch) {
+                uniformBatch.queue(packet.systemUBO, packet.systemData);
+            } else {
+                engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+            }
+            packet._lastCamera = cameraIdentity;
+            packet._lastCameraVersion = cameraVersion;
+            packet._lastFloatingOrigin = floatingOrigin;
+            packet._lastMeshWmVersion = meshWmVersion;
+            packet._lastTargetWidth = targetWidth;
+            packet._lastTargetHeight = targetHeight;
+            packet._lastAspect = aspect;
+            packet._lastAlphaCutoff = alphaCutoff;
         }
-        packet._lastCamera = camera;
-        packet._lastCameraVersion = cameraVersion;
-        packet._lastMeshWmVersion = meshWmVersion;
-        packet._lastTargetWidth = context.targetWidth;
-        packet._lastTargetHeight = context.targetHeight;
-        packet._lastAspect = aspect;
-        packet._lastAlphaCutoff = alphaCutoff;
     }
     if (packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
@@ -515,7 +558,9 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup!);
-    pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
+    if (!_indexedDrawResolver?.draw(pass, engine, packet.mesh)) {
+        pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
+    }
 }
 
 function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {
@@ -725,69 +770,45 @@ export function _shaderWorldMatrix(mesh: Mesh, camera: Camera | null, out?: Floa
 
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
     data.fill(0);
-    const world = _shaderWorldMatrix(mesh, camera);
-    const aspect = camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
-    const view = camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
-    const projection = camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
-    const viewProjection = camera ? (getViewProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
-    for (const uniform of material.uniformDecls) {
-        if (!_isShaderSystemUniform(uniform.name)) {
-            continue;
-        }
-        const offset = spec._offsets.get(uniform.name);
-        if (offset === undefined) {
-            continue;
-        }
+    let world: Float32Array | undefined;
+    let view: Float32Array | undefined;
+    let viewProjection: Float32Array | undefined;
+    for (const [name, offset] of spec._offsets) {
         const f = offset / 4;
-        switch (uniform.name) {
-            case "world":
-                data.set(world, f);
-                break;
-            case "view":
-                if (view) {
-                    data.set(view, f);
+        const dependency = shaderSystemDependency(name);
+        if (dependency & (VIEW | PROJECTION | VIEW_PROJECTION)) {
+            if (camera) {
+                const matrix =
+                    dependency & VIEW
+                        ? (view ??= getViewMatrix(camera) as unknown as Float32Array)
+                        : dependency & PROJECTION
+                          ? (getProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array)
+                          : (viewProjection ??= getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, targetWidth, targetHeight)) as unknown as Float32Array);
+                if (dependency & WORLD) {
+                    multiplyMat4IntoBuffer(data, f, matrix, 0, (world ??= _shaderWorldMatrix(mesh, camera)), 0);
+                } else {
+                    data.set(matrix, f);
                 }
-                break;
-            case "projection":
-                if (projection) {
-                    data.set(projection, f);
-                }
-                break;
-            case "viewProjection":
-                if (viewProjection) {
-                    data.set(viewProjection, f);
-                }
-                break;
-            case "worldView":
-                if (view) {
-                    multiplyMat4IntoBuffer(data, f, view, 0, world, 0);
-                }
-                break;
-            case "worldViewProjection":
-                if (viewProjection) {
-                    multiplyMat4IntoBuffer(data, f, viewProjection, 0, world, 0);
-                }
-                break;
-            case "cameraPosition":
-                // Zero under floating origin, matching `_packSceneUniforms`'
-                // `vEyePosition`: `world` above is camera-relative, so in the
-                // frame the shader actually works in the camera IS the origin.
-                // Writing the absolute position here would put the eye and the
-                // geometry in two different frames.
-                if (camera && !camera._useFloatingOrigin) {
-                    const wm = camera.worldMatrix as unknown as ArrayLike<number>;
-                    data[f] = wm[12]!;
-                    data[f + 1] = wm[13]!;
-                    data[f + 2] = wm[14]!;
-                }
-                break;
-            case "screenSize":
-                data[f] = targetWidth;
-                data[f + 1] = targetHeight;
-                break;
-            case "alphaCutoff":
-                data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
-                break;
+            }
+        } else if (dependency & WORLD) {
+            data.set((world ??= _shaderWorldMatrix(mesh, camera)), f);
+        } else if (dependency & CAMERA_POSITION) {
+            // Zero under floating origin, matching `_packSceneUniforms`'
+            // `vEyePosition`: `world` above is camera-relative, so in the
+            // frame the shader actually works in the camera IS the origin.
+            // Writing the absolute position here would put the eye and the
+            // geometry in two different frames.
+            if (camera && !camera._useFloatingOrigin) {
+                const wm = camera.worldMatrix as unknown as ArrayLike<number>;
+                data[f] = wm[12]!;
+                data[f + 1] = wm[13]!;
+                data[f + 2] = wm[14]!;
+            }
+        } else if (dependency & SCREEN_SIZE) {
+            data[f] = targetWidth;
+            data[f + 1] = targetHeight;
+        } else if (dependency & ALPHA_CUTOFF) {
+            data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
         }
     }
 }
