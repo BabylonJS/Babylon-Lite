@@ -521,7 +521,21 @@ stages:
                   displayName: "Install Dawn software Vulkan dependencies"
                   condition: eq(variables['RUN_PARITY_TESTS'], 'true')
 
-                - script: pnpm test:parity:shado
+                # Run small sequential shards in fresh Node processes so native
+                # Dawn/Vulkan resources cannot accumulate across the full matrix.
+                - script: |
+                      set -euo pipefail
+                      pnpm build:lib
+                      test_status=0
+                      mkdir -p "test-results/shado-parity-blob-$(Build.BuildId)"
+                      for shard in 1 2 3 4 5 6 7 8; do
+                          if ! PLAYWRIGHT_BLOB_OUTPUT_FILE="test-results/shado-parity-blob-$(Build.BuildId)/report-$shard.zip" pnpm exec playwright test --config config/playwright.parity-shado.config.ts --reporter=list,blob --shard="$shard/8"; then
+                              test_status=1
+                          fi
+                      done
+                      PLAYWRIGHT_HTML_OUTPUT_DIR="test-results/shado-parity-report" pnpm exec playwright merge-reports --reporter=html "test-results/shado-parity-blob-$(Build.BuildId)"
+                      PLAYWRIGHT_JUNIT_OUTPUT_FILE="test-results/shado-parity-junit.xml" pnpm exec playwright merge-reports --reporter=junit "test-results/shado-parity-blob-$(Build.BuildId)"
+                      exit "$test_status"
                   displayName: "Run all headless parity scenes (Shado/Dawn)"
                   condition: eq(variables['RUN_PARITY_TESTS'], 'true')
                   continueOnError: true
@@ -530,6 +544,10 @@ stages:
 
                 - script: |
                       set -euo pipefail
+                      if [ ! -f test-results/shado-parity-junit.xml ] || [ ! -d test-results/shado-parity-report ]; then
+                          echo "No complete Shado parity report was produced; skipping publication."
+                          exit 0
+                      fi
                       npx tsx scripts/redact-secrets.ts sanitize test-results/shado-parity-junit.xml test-results/shado-parity-report
                       npx tsx scripts/redact-secrets.ts verify test-results/shado-parity-junit.xml test-results/shado-parity-report
                       echo "##vso[task.setvariable variable=ShadoArtifactsSafe]true"
