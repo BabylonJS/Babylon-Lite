@@ -311,22 +311,24 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _drawCallsPre: 0,
 
         _update(): void {
-            // When the engine was created with `useFloatingOrigin: true`, mark
-            // the active camera so `getViewMatrix` knows to zero its
-            // translation column (the GPU view × world product is then the
-            // eye-relative result the LWR offset trick produces). For non-LWR
-            // engines `eng.useFloatingOrigin` is false and this is a single
-            // boolean check per frame — the inner branch is dead.
-            if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
-                ctx.camera._useFloatingOrigin = true;
-                ctx.camera._viewVer = -1;
-                ctx.camera._vpVer = -1;
-            }
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
             const encoder = eng._currentEncoder;
             let draws = 0;
             for (const cb of ctx._beforeRender) {
                 cb(d);
+            }
+            // Match the active camera's floating-origin mode to this engine, after callbacks (which may
+            // install a camera) and before any pre-pass, uniform update or record reads its view. A camera
+            // can arrive fresh or from an engine with the opposite mode: `getViewMatrix` zeroes the view
+            // translation only under the flag. The view cache resets, and clearing the projection snapshot
+            // re-arms `_cameraChangeKey` (as on a fresh camera) so its next call advances `_projRev`: the
+            // view-projection cache and every change-key consumer (scene UBO, text, CSM, TAA, …) rewrite in
+            // this frame.
+            const cam = ctx.camera;
+            if (cam && !cam._useFloatingOrigin !== !eng.useFloatingOrigin) {
+                cam._useFloatingOrigin = eng.useFloatingOrigin;
+                cam._viewVer = -1;
+                cam._projFov = undefined;
             }
             if (ctx._materialSwapQueue.length) {
                 void processMaterialSwaps(ctx);

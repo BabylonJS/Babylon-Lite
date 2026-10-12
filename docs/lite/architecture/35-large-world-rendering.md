@@ -118,19 +118,23 @@ Camera identity is part of the key because `worldMatrixVersion` is a per-camera 
 
 LWR stores no mirror fields on `SceneContext`: the offset is the active camera's world position, read on demand, and invalidation rides that camera's identity and `worldMatrixVersion`. Non-LWR scenes therefore carry no inert zeroed offset/version state.
 
-`scene/scene-core.ts` does retain the LWR lifecycle, and it is the only writer of it. Inside `_update`, the first frame with FO on stamps the flag `getViewMatrix` reads and drops the stale view caches:
+`scene/scene-core.ts` does retain the LWR lifecycle, and it is the only writer of it. Inside `_update`, after the `onBeforeRender` callbacks (which may install a camera) and before any pre-pass, uniform updater or record reads the view, the active camera's flag is synced to the engine in both directions:
 
 ```typescript
-if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
-    ctx.camera._useFloatingOrigin = true;
-    ctx.camera._viewVer = -1;
-    ctx.camera._vpVer = -1;
+const cam = ctx.camera;
+if (cam && !cam._useFloatingOrigin !== !eng.useFloatingOrigin) {
+    cam._useFloatingOrigin = eng.useFloatingOrigin;
+    cam._viewVer = -1;
+    cam._projFov = undefined;
 }
 ```
+
+A camera can reach a scene fresh (flag unset) or from an engine with the opposite mode (`removeFromScene` + `addToScene`, or direct assignment), so the mode is a property of the destination, not of the camera's history. A flip resets the view cache and clears the projection snapshot, which re-arms `_cameraChangeKey` exactly as on a fresh camera: its next call advances `_projRev`, so the view-projection cache and every change-key consumer — the scene UBO, text MVP, CSM, TAA — rewrite in the same frame instead of reusing an entry packed in the other coordinate frame. A fresh camera on an FO-off engine keeps the flag unset, so non-LWR scenes see no flip.
 
 ## Validation
 
 - Unit: `tests/unit/floating-origin.test.ts` covers the offset read and the lifecycle — `getFloatingOriginOffset` returning the active camera's world position and zero when no camera is set, and `scene._update` stamping `camera._useFloatingOrigin` only when the engine has FO on.
+- Unit: `tests/unit/camera-floating-origin-mode.test.ts` drives the real `_update`, `addToScene`/`removeFromScene` and `_writePassSceneUBO`: a fresh far camera installed from `onBeforeRender` uploads an FO view on its first and next frames, a camera moved from an FO-on to an FO-off scene uploads an absolute view, and flipping back rewrites the scene UBO even though the camera's transform and projection are unchanged.
 - Unit: `tests/unit/floating-origin-upload.test.ts` covers the zeroing and precision-recovery paths — `getViewMatrix` zeroing the view translation under `_useFloatingOrigin` (with the FO-off large-magnitude control), `packMat4IntoF32WithOffset` landing `delta` in the F32 view for a mesh at world `1e6 + delta`, and the eye-relative-zero `vEyePosition` write.
 - Unit: `tests/unit/shader-material-floating-origin.test.ts` covers subtraction site (4) behaviourally — moving the camera toward a fixed mesh must change projected depth and on-screen span in proportion to the real distance, `world`/`worldView`/`worldViewProjection` must stay in one frame, and the eye must sit at the origin under FO and at its real position without it. The FO-off cases are controls: without them a fix that merely zeroed the translation would pass.
 - Parity: `tests/parity/scenes/scene200-fo-off.spec.ts` and `scene201-fo-on.spec.ts` render the same far-from-origin scene with FO off vs FO on. The two captures MUST diverge (cross-golden MAD ≥ 5.0), proving the offset path is engaged and meaningfully shifts pixels.
@@ -144,16 +148,16 @@ Everything else is reached dynamically. Consumers of the runtime go through engi
 
 ## Files / size
 
-| File                                                                        | Purpose                                                                         |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `large-world/floating-origin.ts` (~70 lines)                                | `getFloatingOriginOffset` public read, `wrapRenderableForFO`, light FO helpers  |
-| `engine/engine.ts` (FO block in `createEngine`)                             | Dynamic-import gate, `useFO && !useHpm` validation                              |
-| `large-world/pack-mat4-with-offset.ts`                                      | `makePackMeshWorld` — mesh-world packer subtracting the offset at the F32 store |
-| `camera/camera.ts` (`_useFloatingOrigin?` flag, `getViewMatrix` zeroing)    | View translation zeroed under FO                                                |
-| `scene/scene-core.ts` (`_update` FO block)                                  | Stamps `camera._useFloatingOrigin`, invalidates `_viewVer` / `_vpVer`           |
-| `material/{standard,pbr,node}-renderable.ts` (packer selection, FO wrapper) | Mesh UBO invalidation when the camera moves                                     |
-| `frame-graph/scene-uniforms-pack.ts` (`_packSceneUniforms`)                 | Writes `vEyePosition = (0, 0, 0)` under FO                                      |
-| `math/pack-mat4-into-f32.ts` (`packMat4IntoF32`)                            | Precision-only packer; the non-FO fallback and the view-matrix path             |
+| File                                                                        | Purpose                                                                            |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `large-world/floating-origin.ts` (~70 lines)                                | `getFloatingOriginOffset` public read, `wrapRenderableForFO`, light FO helpers     |
+| `engine/engine.ts` (FO block in `createEngine`)                             | Dynamic-import gate, `useFO && !useHpm` validation                                 |
+| `large-world/pack-mat4-with-offset.ts`                                      | `makePackMeshWorld` — mesh-world packer subtracting the offset at the F32 store    |
+| `camera/camera.ts` (`_useFloatingOrigin?` flag, `getViewMatrix` zeroing)    | View translation zeroed under FO                                                   |
+| `scene/scene-core.ts` (`_update` FO block)                                  | Syncs `camera._useFloatingOrigin` both ways; resets `_viewVer`, re-arms `_projRev` |
+| `material/{standard,pbr,node}-renderable.ts` (packer selection, FO wrapper) | Mesh UBO invalidation when the camera moves                                        |
+| `frame-graph/scene-uniforms-pack.ts` (`_packSceneUniforms`)                 | Writes `vEyePosition = (0, 0, 0)` under FO                                         |
+| `math/pack-mat4-into-f32.ts` (`packMat4IntoF32`)                            | Precision-only packer; the non-FO fallback and the view-matrix path                |
 
 ## Wired features
 
