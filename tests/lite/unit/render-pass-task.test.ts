@@ -19,6 +19,12 @@ import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../
 import { getComputeDispatchBatch } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
 import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/render/draw-update-batches";
 import { invalidateRenderBundles } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { enableShaderMaterialVisiblePacketUpdates } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-visible-packet-updates";
+import { createShaderMaterial, setShaderFloat } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { setMeshVisible } from "../../../packages/babylon-lite/src/scene/scene";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -708,6 +714,86 @@ describe("RenderPassTask transparent sorting", () => {
         task.execute?.();
 
         expect(bundleDescriptors).toHaveLength(2);
+    });
+
+    it("refreshes deferred ShaderMaterial packets and flushes copies before the first restored bundle", () => {
+        const events: string[] = [];
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const copies: [GPUBuffer, number, GPUBuffer, number, number][] = [];
+        const engine = makeMockEngine({
+            bundleDescriptors,
+            bufferCopies: copies,
+            onWriteBuffer(buffer) {
+                if ((buffer as GPUBuffer & { descriptor: GPUBufferDescriptor }).descriptor.label === "render-task-uniform-upload") {
+                    events.push("upload");
+                }
+            },
+        });
+        const scene = createSceneContext(engine);
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+            uniforms: ["world", { name: "amount", type: "f32" }],
+        });
+        enableShaderMaterialVisiblePacketUpdates(material);
+        const meshes = ["a", "b"].map((name) =>
+            initMeshTransform({
+                name,
+                children: [],
+                material,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint32",
+                    indexCount: 3,
+                },
+            })
+        );
+        const result = buildShaderMaterialRenderables(scene, meshes, getUniformCopyBatch);
+        scene._renderables.push(...result.renderables);
+        const recordedGroups: GPUBindGroup[][] = [];
+        engine._device.createRenderBundleEncoder = () => {
+            const groups: GPUBindGroup[] = [];
+            recordedGroups.push(groups);
+            events.push("record");
+            return {
+                setBindGroup(index: number, group: GPUBindGroup) {
+                    if (index === 1) {
+                        groups.push(group);
+                    }
+                },
+                setPipeline: () => undefined,
+                setVertexBuffer: () => undefined,
+                setIndexBuffer: () => undefined,
+                drawIndexed: () => undefined,
+                finish: () => ({}) as GPURenderBundle,
+            } as unknown as GPURenderBundleEncoder;
+        };
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        task.record();
+        task.execute!();
+        expect(recordedGroups[0]).toHaveLength(2);
+        setMeshVisible(meshes[1]!, false);
+        meshes[1]!.position.x = 7;
+        setShaderFloat(material, "amount", 0.5);
+        copies.length = events.length = 0;
+        task.execute!();
+        expect(copies).toHaveLength(1);
+        expect(events).toEqual(["upload", "record"]);
+        expect(recordedGroups[1]).toHaveLength(1);
+        copies.length = events.length = 0;
+        task.execute!();
+        expect(copies).toHaveLength(0);
+        expect(events).toHaveLength(0);
+        setMeshVisible(meshes[1]!, true);
+        task.execute!();
+        expect(copies).toHaveLength(1);
+        expect(events).toEqual(["upload", "record"]);
+        expect(recordedGroups[2]).toHaveLength(2);
     });
 
     it("flushes binding compute work through one compute pass per render task", async () => {

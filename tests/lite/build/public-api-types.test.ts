@@ -307,6 +307,7 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
     createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
     createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
+    enableShaderMaterialVisiblePacketUpdates,
     prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
     type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
@@ -356,6 +357,11 @@ const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptio
 const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
 void unsupportedOffsets;
 const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+enableShaderMaterialVisiblePacketUpdates(shader);
+// @ts-expect-error The packet seam is internal, not a public material property.
+shader._deferPacketUpdate;
+// @ts-expect-error The policy requires a ShaderMaterial.
+enableShaderMaterialVisiblePacketUpdates({});
 setShaderAttributeFormats(shader, { position: "float32x4" });
 storageMesh.material = shader;
 const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
