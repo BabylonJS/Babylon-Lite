@@ -3,6 +3,7 @@ import { rebuildRegisteredScenes, _rebuildMeshes } from "../../../packages/babyl
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";
+import { resizeMeshGeometry, resizeSharedMeshGeometry, updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
 import { retainMeshResources, releaseMeshResources } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import type { MeshResourceLease } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
@@ -172,6 +173,58 @@ describe("shared replacement retirement during registered scene recovery", () =>
         releaseMeshResources(lease);
         await waitForGpuResourceRetirements(engine);
         for (const gpu of [retired, live]) {
+            for (const buffer of buffers(gpu)) {
+                expect(buffer.destroy).toHaveBeenCalledTimes(1);
+            }
+        }
+    });
+
+    it.each(["resize", "shared resize", "capacity growth"] as const)("rebuilds live geometry when the first recovered owner replaces its geometry (%s)", async (mode) => {
+        const { engine, scene, mesh, clone, createBuffer } = fixture();
+        Object.assign(engine, { _renderingContexts: [scene] });
+        const lease = retainMeshResources(engine, mesh);
+        const { entered, resume } = gateEnvironment();
+        const recovery = rebuildRegisteredScenes(engine);
+        await entered;
+        const replaced = mesh._gpu;
+        expect(createBuffer).toHaveBeenCalledTimes(4);
+        let sibling: Mesh | undefined;
+        try {
+            const positions = new Float32Array(12);
+            const normals = new Float32Array(12);
+            const indices = new Uint32Array([0, 1, 2, 0, 2, 3]);
+            if (mode === "resize") {
+                resizeMeshGeometry(engine, mesh, positions, normals, indices);
+            } else if (mode === "shared resize") {
+                sibling = cloneTransformNode(mesh) as Mesh;
+                resizeSharedMeshGeometry(engine, [mesh, sibling], positions, normals, indices);
+            } else {
+                updateMeshGeometryCapacity(engine, mesh, positions, normals, indices);
+            }
+            expect(mesh._gpu).not.toBe(replaced);
+            await waitForGpuResourceRetirements(engine);
+            for (const buffer of buffers(replaced)) {
+                expect(buffer.destroy).toHaveBeenCalledTimes(1);
+            }
+        } finally {
+            resume();
+        }
+        await recovery;
+        const live = clone._gpu;
+        expect(live).not.toBe(replaced);
+        expect(live).not.toBe(mesh._gpu);
+        expect(live.indexCount).toBe(3);
+        for (const buffer of buffers(live)) {
+            expect(buffer.destroy).not.toHaveBeenCalled();
+        }
+        const resized = mesh._gpu;
+        disposeMeshGpu(clone);
+        if (sibling) {
+            disposeMeshGpu(sibling);
+        }
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        for (const gpu of [replaced, resized, live]) {
             for (const buffer of buffers(gpu)) {
                 expect(buffer.destroy).toHaveBeenCalledTimes(1);
             }

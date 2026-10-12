@@ -51,9 +51,12 @@ vertex/index values, shader interpretation, transforms, or draw order.
    succeeds, commit the new device/allocation and initialize owners with this mesh.
    That upload's initial reference is the first owner's claim.
 3. Reuse the same-device cache only while its allocation still has a live claim.
-   Geometry disposal sets `_refCount` to zero when releasing the final claim,
-   before destroying buffers. A zero-claim cache follows step 2 instead, resetting
-   the owner set only after the fresh upload succeeds.
+   Every final geometry-claim release sets `_refCount` to zero before scheduling
+   buffer destruction: terminal disposal, `resizeMeshGeometry`,
+   `resizeSharedMeshGeometry`, and capacity growth through
+   `updateMeshGeometryCapacity`. Geometry replacement leaves the mesh alive, so
+   mesh-disposal checks alone cannot detect it. A zero-claim cache follows step 2
+   instead, resetting the owner set only after the fresh upload succeeds.
 4. On the same device with a new mesh identity, add it to owners and return the
    rebuilt allocation. `retain` it exactly once unless the mesh already points at
    that allocation: a clone of an already recovered owner took its claim when
@@ -111,7 +114,8 @@ Babylon-style scene API or a clone/disposal implementation.
 - `retained-shared-recovery-retirement.test.ts`: controlled environment awaits,
   retirement after upload/before adoption, failed and overlapping scene recovery,
   late clones, clones of the recovered source admitted before the scene sweep
-  (counted once), and exactly-once final destruction.
+  (counted once), individual/shared resize and capacity growth of the first
+  owner before a sibling adopts the cache, and exactly-once final destruction.
 - `mesh-retention.spec.ts`: actual native device loss while detached, restoration
   of render pixels and GPU picking after reinsertion, and final resource release.
 

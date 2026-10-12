@@ -621,6 +621,8 @@ export function resizeSharedMeshGeometry(
 }
 
 function retireMeshGeometryBuffers(engine: EngineContext, gpu: Mesh["_gpu"]): void {
+    // Final claim released: mark the allocation dead now so a same-device recovery cache cannot adopt it.
+    gpu._refCount = 0;
     retireGpuResources(engine, () => {
         gpu.positionBuffer.destroy();
         gpu.normalBuffer.destroy();
