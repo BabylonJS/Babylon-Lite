@@ -5,6 +5,7 @@ import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderMaterial, ShaderUniformSlot } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { _installShaderUniformWriters, _shaderWorldMatrix, type ShaderCustomUniformWriter, type ShaderSystemUniformWriter } from "./shader-renderable.js";
+import { WORLD, VIEW, PROJECTION, VIEW_PROJECTION, shaderSystemDependencies } from "./shader-system-dependencies.js";
 
 interface CustomWritePlan {
     readonly data: ArrayBuffer;
@@ -24,6 +25,7 @@ interface SystemWritePlan {
     readonly operations: Uint8Array;
     readonly indices: Int32Array;
     readonly alphaCutoff: ShaderUniformSlot | undefined;
+    readonly dependencies: number;
 }
 
 const customPlans = new WeakMap<ShaderMaterial, CustomWritePlan>();
@@ -101,7 +103,8 @@ function getSystemWritePlan(material: ShaderMaterial, spec: UboSpec): SystemWrit
         spec,
         operations: new U8(operations),
         indices: new I32(indices),
-        alphaCutoff: material._uniformValues.get("alphaCutoff"),
+        alphaCutoff: spec._offsets.has("alphaCutoff") ? material._uniformValues.get("alphaCutoff") : undefined,
+        dependencies: shaderSystemDependencies(spec),
     };
     systemPlans.set(material, plan);
     return plan;
@@ -143,19 +146,17 @@ const writeCachedCustomUniforms: ShaderCustomUniformWriter = (engine, material, 
 
 const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, material, mesh, camera, targetWidth, targetHeight) => {
     const plan = getSystemWritePlan(material, spec);
-    // Same floating-origin rebasing as the default writer — see
-    // `_shaderWorldMatrix`. Enabling uniform caching must not change what is
-    // drawn, only how often it is serialized.
-    const world = _shaderWorldMatrix(mesh, camera);
-    const aspect = camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
-    const view = camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
-    const projection = camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
-    const viewProjection = camera ? (getViewProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
+    const dependencies = plan.dependencies;
+    const world = dependencies & WORLD ? _shaderWorldMatrix(mesh, camera) : null;
+    const aspect = dependencies & (PROJECTION | VIEW_PROJECTION) && camera ? getEffectiveAspectRatio(camera, targetWidth, targetHeight) : 1;
+    const view = dependencies & VIEW && camera ? (getViewMatrix(camera) as unknown as Float32Array) : null;
+    const projection = dependencies & PROJECTION && camera ? (getProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
+    const viewProjection = dependencies & VIEW_PROJECTION && camera ? (getViewProjectionMatrix(camera, aspect) as unknown as Float32Array) : null;
     for (let i = 0; i < plan.operations.length; i++) {
         const index = plan.indices[i]!;
         switch (plan.operations[i]!) {
             case 0:
-                data.set(world, index);
+                data.set(world!, index);
                 break;
             case 1:
                 view ? data.set(view, index) : data.fill(0, index, index + 16);
@@ -167,10 +168,10 @@ const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, materi
                 viewProjection ? data.set(viewProjection, index) : data.fill(0, index, index + 16);
                 break;
             case 4:
-                view ? multiplyMat4IntoBuffer(data, index, view, 0, world, 0) : data.fill(0, index, index + 16);
+                view ? multiplyMat4IntoBuffer(data, index, view, 0, world!, 0) : data.fill(0, index, index + 16);
                 break;
             case 5:
-                viewProjection ? multiplyMat4IntoBuffer(data, index, viewProjection, 0, world, 0) : data.fill(0, index, index + 16);
+                viewProjection ? multiplyMat4IntoBuffer(data, index, viewProjection, 0, world!, 0) : data.fill(0, index, index + 16);
                 break;
             case 6:
                 // Zero under floating origin — the eye is the origin of the
@@ -200,7 +201,7 @@ const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, materi
  *
  * Call once before registering scenes that contain many ShaderMaterials or large custom uniform blocks.
  * The default path stays compact; enabled scenes avoid repeated layout lookups and rewrite only custom
- * uniform slots whose value changed.
+ * uniform slots whose value changed. Both paths invalidate system blocks only for declared dependencies.
  */
 export function enableShaderMaterialUniformCaching(): void {
     _installShaderUniformWriters(writeCachedSystemUniforms, writeCachedCustomUniforms);

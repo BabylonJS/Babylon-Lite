@@ -131,7 +131,7 @@ export function tryBind(
             } else if (ti._drawArgsBuffer) {
                 pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount, instanceCount, 0, gpu._baseVertex);
+                pass.drawIndexed(gpu.indexCount, instanceCount, gpu._firstIndex ?? 0, gpu._baseVertex);
             }
         },
     };
@@ -172,7 +172,7 @@ function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, 
                 if (ti._drawArgsBuffer) {
                     pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
                 } else {
-                    pass.drawIndexed(gpu.indexCount, instanceCount, 0, gpu._baseVertex);
+                    pass.drawIndexed(gpu.indexCount, instanceCount, gpu._firstIndex ?? 0, gpu._baseVertex);
                 }
             }
         },

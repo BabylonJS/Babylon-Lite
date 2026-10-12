@@ -82,6 +82,8 @@ export {
     createTextureFromHandle,
 } from "./texture.js";
 export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export { createTextureFromSource } from "./texture-source.js";
+export type { GLTextureSourceOptions } from "./texture-source.js";
 export {
     createTexture3DFromPixels,
     bindTexture3D,

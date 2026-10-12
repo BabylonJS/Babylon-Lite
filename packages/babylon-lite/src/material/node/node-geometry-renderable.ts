@@ -433,7 +433,7 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 }
                 pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
                 pass.setBindGroup(1, bindGroup!);
-                pass.drawIndexed(g.indexCount, 1, 0, g._baseVertex);
+                pass.drawIndexed(g.indexCount, 1, g._firstIndex ?? 0, g._baseVertex);
                 return 1;
             };
             return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };

@@ -306,9 +306,11 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
     createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
-    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
+    enableShaderMaterialVisiblePacketUpdates,
     prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
+    type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -355,6 +357,11 @@ const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptio
 const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
 void unsupportedOffsets;
 const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+enableShaderMaterialVisiblePacketUpdates(shader);
+// @ts-expect-error The packet seam is internal, not a public material property.
+shader._deferPacketUpdate;
+// @ts-expect-error The policy requires a ShaderMaterial.
+enableShaderMaterialVisiblePacketUpdates({});
 setShaderAttributeFormats(shader, { position: "float32x4" });
 storageMesh.material = shader;
 const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
@@ -368,6 +375,16 @@ void rangedReadback;
 // @ts-expect-error GPU allocation handles remain internal.
 storage._buffer;
 resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+const vertices: MeshGeometryRange = { offset: 1, count: 3 };
+const range: MeshDrawRange = { vertices, indices: { offset: 3, count: 3 } };
+setMeshDrawRange(engine, mesh, range);
+// @ts-expect-error Draw ranges are immutable inputs, not mesh-owned mutable state.
+range.vertices.count = 4;
+declare const geometry: MeshGPU;
+const activeIndexCount: number = geometry.indexCount;
+void activeIndexCount;
+// @ts-expect-error Geometry counts remain readonly public observations.
+geometry.indexCount = 3;
 `
             );
             const result = spawnSync(

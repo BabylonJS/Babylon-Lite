@@ -305,7 +305,7 @@ function buildNodeMeshRenderablesImpl(
             if (pkt._drawArgs) {
                 pass.drawIndexedIndirect(pkt._drawArgs, 0);
             } else {
-                pass.drawIndexed(g.indexCount, requiresInstances ? ti?.count : 1, 0, g._baseVertex);
+                pass.drawIndexed(g.indexCount, requiresInstances ? ti?.count : 1, g._firstIndex ?? 0, g._baseVertex);
             }
         };
 
