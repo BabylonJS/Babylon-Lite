@@ -63,9 +63,10 @@ export function getFloatingOriginOffset(scene: SceneContext): Vec3 {
 export function lightFoVersion(scene: SceneContext): number {
     const cam = scene.camera;
     const version = cam ? cam.worldMatrixVersion : -1;
-    let key = _lightFoKeys.get(scene);
+    const keys = (_lightFoKeys ??= new WeakMap());
+    let key = keys.get(scene);
     if (!key) {
-        _lightFoKeys.set(scene, (key = [cam, version, 0]));
+        keys.set(scene, (key = [cam, version, 0]));
     } else if (key[0] !== cam || key[1] !== version) {
         key[0] = cam;
         key[1] = version;
@@ -74,7 +75,7 @@ export function lightFoVersion(scene: SceneContext): number {
     return key[2];
 }
 
-const _lightFoKeys = new WeakMap<SceneContext, [Camera | null, number, number]>();
+let _lightFoKeys: WeakMap<SceneContext, [Camera | null, number, number]> | null = null;
 
 /** @internal Subtract the active-camera floating-origin offset from the
  *  positional (point = type tag 0, spot = type tag 2) light entries already
