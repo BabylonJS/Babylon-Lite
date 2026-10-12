@@ -162,7 +162,7 @@ describe("BrowserStack artifact security", () => {
     });
 });
 
-describe("BrowserStack pipeline publication gates", () => {
+describe("Pipeline artifact publication gates", () => {
     const pipeline = readFileSync(resolve(repoRoot, "azure-pipelines.yml"), "utf8");
     const uploadTemplate = readFileSync(resolve(repoRoot, "config/templates/upload-test-report.yml"), "utf8");
     const parityConfig = readFileSync(resolve(repoRoot, "config/playwright.parity-cloud.config.ts"), "utf8");
@@ -173,13 +173,16 @@ describe("BrowserStack pipeline publication gates", () => {
         expect(perfConfig).toContain('trace: "off"');
     });
 
-    it("sets ArtifactsSafe only after sanitize and verify commands", () => {
-        const safetySteps = [...pipeline.matchAll(/npx tsx scripts\/redact-secrets\.ts sanitize[\s\S]*?##vso\[task\.setvariable variable=ArtifactsSafe\]true/g)];
-        expect(safetySteps).toHaveLength(2);
+    it("sets artifact safety variables only after sanitize and verify commands", () => {
+        const safetySteps = pipeline.split(/\n(?= {16}- (?:script|task|template):)/).filter((step) => step.includes("npx tsx scripts/redact-secrets.ts sanitize"));
+
+        expect(safetySteps).toHaveLength(3);
+        expect(safetySteps.filter((step) => step.includes("variable=ArtifactsSafe]true"))).toHaveLength(2);
+        expect(safetySteps.filter((step) => step.includes("variable=ShadoArtifactsSafe]true"))).toHaveLength(1);
         expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(2);
         for (const step of safetySteps) {
-            expect(step[0]).toContain("redact-secrets.ts verify");
-            expect(step[0]).not.toContain("continueOnError");
+            expect(step).toContain("redact-secrets.ts verify");
+            expect(step).not.toContain("continueOnError");
         }
     });
 
