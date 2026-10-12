@@ -13,6 +13,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { SKELETON_HELPERS, makeSkinningCode } from "../shader/fragments/skeleton-fragment.js";
 import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
+import { wgsl } from "../shader/wgsl.js";
 
 let _device: GPUDevice | null = null;
 let _projections: Map<string, PickingVertexProjection> | null = null;
@@ -39,7 +40,7 @@ function emptyBG(engine: EngineContext): GPUBindGroup {
  *  that module belongs to the material chunk, and importing one string from it splits it into a
  *  separate shared chunk that every morph render scene then pays for. Must stay byte-compatible with
  *  the `_vertexHelperFunctions` declarations there — both views read the same buffers. */
-const MORPH_STRUCTS = `struct morphUniforms {
+const MORPH_STRUCTS = wgsl`struct morphUniforms {
 count: u32,
 vertexCount: u32,
 _p0: u32,
@@ -53,7 +54,7 @@ d: array<f32>,
 /** Position-only morph accumulation. The render fragment also accumulates normal deltas; picking never
  *  needs normals, so this reads only the position half of each 6-float (position xyz, normal xyz)
  *  delta record. The stride and weight indexing match `morph-fragment-core.ts` exactly. */
-const MORPH_POSITION = `var morphedPos = position;
+const MORPH_POSITION = wgsl`var morphedPos = position;
 for (var i = 0u; i < morph.count; i = i + 1u) {
 let b = (i * morph.vertexCount + vertexIndex) * 6u;
 morphedPos = morphedPos + morph.weights[i] * vec3<f32>(morphDeltas.d[b], morphDeltas.d[b + 1u], morphDeltas.d[b + 2u]);
@@ -63,13 +64,13 @@ function declarations(skeleton: boolean, morph: boolean): string {
     const parts: string[] = [];
     let binding = 0;
     if (skeleton) {
-        parts.push(SKELETON_HELPERS, `@group(3) @binding(${binding++}) var boneSampler: texture_2d<f32>;`);
+        parts.push(SKELETON_HELPERS, wgsl`@group(3) @binding(${binding++}) var boneSampler: texture_2d<f32>;`);
     }
     if (morph) {
         parts.push(
             MORPH_STRUCTS,
-            `@group(3) @binding(${binding++}) var<storage, read> morphDeltas: morphDeltasUniforms;`,
-            `@group(3) @binding(${binding}) var<storage, read> morph: morphUniforms;`
+            wgsl`@group(3) @binding(${binding++}) var<storage, read> morphDeltas: morphDeltasUniforms;`,
+            wgsl`@group(3) @binding(${binding}) var<storage, read> morph: morphUniforms;`
         );
     }
     return parts.join("\n");
@@ -95,10 +96,10 @@ function body(skeleton: boolean, has8Bones: boolean, morph: boolean, worldExpr: 
         parts.push(MORPH_POSITION);
     }
     if (skeleton) {
-        parts.push(`var finalWorld = ${worldExpr};`, makeSkinningCode(has8Bones, worldExpr));
+        parts.push(wgsl`var finalWorld = ${worldExpr};`, makeSkinningCode(has8Bones, worldExpr));
     }
     const transform = skeleton ? "finalWorld" : worldExpr;
-    parts.push(`let projectedTransform = ${transform};`, `let projectedWorld = (${transform} * vec4f(${morph ? "morphedPos" : "position"}, 1.0)).xyz;`);
+    parts.push(wgsl`let projectedTransform = ${transform};`, wgsl`let projectedWorld = (${transform} * vec4f(${morph ? "morphedPos" : "position"}, 1.0)).xyz;`);
     return parts.join("\n");
 }
 

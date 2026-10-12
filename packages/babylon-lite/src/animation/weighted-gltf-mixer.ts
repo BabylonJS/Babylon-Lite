@@ -7,11 +7,29 @@ import type { AnimationManager } from "./animation-manager.js";
 import type { NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
+
+type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPropertyGroups: boolean) => boolean;
+type PropertyMixerDirectHandler = (manager: AnimationManager, group: AnimationGroup) => void;
+type PropertyMixerFinishHandler = (manager: AnimationManager) => void;
+let _propertyMixerHandler: PropertyMixerHandler | null = null;
+let _propertyMixerDirectHandler: PropertyMixerDirectHandler | null = null;
+let _propertyMixerFinishHandler: PropertyMixerFinishHandler | null = null;
+
+/** @internal Install opt-in property-track handling for the skeletal blend manager. */
+export function _installPropertyMixerHandler(
+    handler: PropertyMixerHandler | null,
+    directHandler: PropertyMixerDirectHandler | null = null,
+    finishHandler: PropertyMixerFinishHandler | null = null
+): void {
+    _propertyMixerHandler = handler;
+    _propertyMixerDirectHandler = directHandler;
+    _propertyMixerFinishHandler = finishHandler;
+}
 
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
@@ -102,6 +120,7 @@ function getScratch(manager: AnimationManager): WeightedGltfScratch {
 }
 
 function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number): boolean {
+    const handledPropertyGroups = _propertyMixerHandler?.(manager, deltaMs, true) ?? false;
     const scratch = getScratch(manager);
     const keys = scratch.keys;
     keys.clear();
@@ -117,7 +136,21 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     }
 
     if (keys.size === 0) {
-        return false;
+        if (handledPropertyGroups) {
+            for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                const group = groups[groupIndex]!;
+                if (group._stopped) {
+                    continue;
+                }
+                if (group._propertyMixerHandled) {
+                    _propertyMixerDirectHandler?.(manager, group);
+                } else {
+                    tickAnimationCore(group, deltaMs, manager.engine);
+                }
+            }
+            _propertyMixerFinishHandler?.(manager);
+        }
+        return handledPropertyGroups;
     }
 
     scratch.targets.forEach(resetWeightedGltfTarget);
@@ -125,6 +158,10 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
         const group = groups[groupIndex]!;
         if (group._stopped) {
+            continue;
+        }
+        if (handledPropertyGroups && group._propertyMixerHandled) {
+            _propertyMixerDirectHandler?.(manager, group);
             continue;
         }
 
@@ -155,6 +192,9 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             uploadTarget(manager, target);
         }
     });
+    if (handledPropertyGroups) {
+        _propertyMixerFinishHandler?.(manager);
+    }
 
     return true;
 }
@@ -376,22 +416,25 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
 
 function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
     const clip = mixer[GLTF_CLIP];
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const isPlaying = group.isPlaying;
     if (isPlaying) {
         group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
     if (clip.duration <= 0) {
-        return 0;
+        group.currentTime = startTime;
+        return group.currentTime;
     }
 
     if (group.loopAnimation && isPlaying) {
-        group.currentTime %= clip.duration;
-        if (group.currentTime < 0) {
+        group.currentTime = startTime + ((group.currentTime - startTime) % clip.duration);
+        if (group.currentTime < startTime) {
             group.currentTime += clip.duration;
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, 0), clip.duration);
+        group.currentTime = Math.min(Math.max(group.currentTime, startTime), endTime);
     }
     return group.currentTime;
 }
@@ -436,7 +479,7 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         if (node._matrix) {
             localMat.set(node._matrix, nodeIdx * 16);
         } else {
-            mat4ComposeInto(
+            composeMat4IntoBuffer(
                 localMat,
                 nodeIdx * 16,
                 trs[off + T_OFF]!,
@@ -454,9 +497,9 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
         const parentIdx = node.parentIdx;
         if (parentIdx >= 0) {
-            mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {
-            mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
         }
     }
 
@@ -469,8 +512,8 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;
             const ibmOff = bi * 16;
-            mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld as unknown as Mat4Storage, 0, worldMat, jointIdx * 16);
-            mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+            multiplyMat4IntoBuffer(_boneTmp, 0, skel.invMeshWorld as unknown as Mat4Storage, 0, worldMat, jointIdx * 16);
+            multiplyMat4IntoBuffer(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
         }
 
         const texWidth = skel.boneCount * 4;

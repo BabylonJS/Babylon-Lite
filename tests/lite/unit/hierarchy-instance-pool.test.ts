@@ -10,10 +10,10 @@ import {
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
-import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
-import { mat4Multiply } from "../../../packages/babylon-lite/src/math/mat4-multiply";
-import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-translation";
+import { composeMat4 } from "../../../packages/babylon-lite/src/math/compose-mat4";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
+import { multiplyMat4 } from "../../../packages/babylon-lite/src/math/multiply-mat4";
+import { createTranslationMat4 } from "../../../packages/babylon-lite/src/math/create-translation-mat4";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 function makeMesh(name: string): Mesh {
@@ -63,15 +63,15 @@ describe("hierarchy instance pool", () => {
 
         const pool = createHierarchyInstancePool(root, 2);
         const angle = Math.PI / 2;
-        const rootInstance = mat4Compose(5, 0, 0, 0, 0, Math.sin(angle / 2), Math.cos(angle / 2), 1, 1, 1);
+        const rootInstance = composeMat4(5, 0, 0, 0, 0, Math.sin(angle / 2), Math.cos(angle / 2), 1, 1, 1);
 
         const index = addHierarchyInstance(pool, rootInstance);
 
         expect(index).toBe(0);
         expect(pool.count).toBe(1);
         const perMeshMatrix = readMatrix(mesh.thinInstances!.matrices as Float32Array, 0);
-        const actualFinalWorld = mat4Multiply(mesh.worldMatrix, perMeshMatrix);
-        const expectedFinalWorld = mat4Multiply(rootInstance, mesh.worldMatrix);
+        const actualFinalWorld = multiplyMat4(mesh.worldMatrix, perMeshMatrix);
+        const expectedFinalWorld = multiplyMat4(rootInstance, mesh.worldMatrix);
         expectMatrixClose(actualFinalWorld, expectedFinalWorld);
     });
 
@@ -85,14 +85,14 @@ describe("hierarchy instance pool", () => {
         const pool = createHierarchyInstancePool(root, 2);
         const templateWorld = readMatrix(mesh.worldMatrix as unknown as Float32Array, 0);
 
-        addHierarchyInstance(pool, mat4Identity());
-        const identityWorld = mat4Multiply(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 0));
+        addHierarchyInstance(pool, createIdentityMat4());
+        const identityWorld = multiplyMat4(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 0));
         expectMatrixClose(identityWorld, templateWorld);
 
-        const offset = mat4Translation(5, 0, 0);
+        const offset = createTranslationMat4(5, 0, 0);
         addHierarchyInstance(pool, offset);
-        const offsetWorld = mat4Multiply(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 1));
-        expectMatrixClose(offsetWorld, mat4Multiply(offset, templateWorld));
+        const offsetWorld = multiplyMat4(mesh.worldMatrix, readMatrix(mesh.thinInstances!.matrices as Float32Array, 1));
+        expectMatrixClose(offsetWorld, multiplyMat4(offset, templateWorld));
     });
 
     it("updates and swap-removes logical hierarchy instance slots across meshes", () => {
@@ -101,11 +101,11 @@ describe("hierarchy instance pool", () => {
         root.children.push(mesh);
         const pool = createHierarchyInstancePool(root, 3);
 
-        addHierarchyInstance(pool, mat4Translation(1, 0, 0));
-        addHierarchyInstance(pool, mat4Translation(2, 0, 0));
-        addHierarchyInstance(pool, mat4Translation(3, 0, 0));
+        addHierarchyInstance(pool, createTranslationMat4(1, 0, 0));
+        addHierarchyInstance(pool, createTranslationMat4(2, 0, 0));
+        addHierarchyInstance(pool, createTranslationMat4(3, 0, 0));
 
-        setHierarchyInstanceMatrix(pool, 0, mat4Translation(9, 0, 0));
+        setHierarchyInstanceMatrix(pool, 0, createTranslationMat4(9, 0, 0));
         expect(readMatrix(mesh.thinInstances!.matrices as Float32Array, 0)[12]).toBeCloseTo(9);
 
         removeHierarchyInstance(pool, 1);
@@ -127,8 +127,8 @@ describe("hierarchy instance pool", () => {
         expect(() => setHierarchyInstanceCount(pool, 2)).toThrow("within pool capacity");
         expect(() => removeHierarchyInstance(pool, 0)).toThrow("active hierarchy instance");
 
-        addHierarchyInstance(pool, mat4Translation(0, 0, 0));
-        expect(() => addHierarchyInstance(pool, mat4Translation(1, 0, 0))).toThrow("exceeded pool capacity");
-        expect(() => setHierarchyInstanceMatrix(pool, 1, mat4Translation(1, 0, 0))).toThrow("active hierarchy instance");
+        addHierarchyInstance(pool, createTranslationMat4(0, 0, 0));
+        expect(() => addHierarchyInstance(pool, createTranslationMat4(1, 0, 0))).toThrow("exceeded pool capacity");
+        expect(() => setHierarchyInstanceMatrix(pool, 1, createTranslationMat4(1, 0, 0))).toThrow("active hierarchy instance");
     });
 });

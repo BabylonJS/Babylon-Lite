@@ -1,3 +1,5 @@
+import { wgsl } from "../../shader/wgsl.js";
+
 /**
  * Pluggable tone mapping for PBR materials.
  *
@@ -39,6 +41,6 @@ export interface ToneMapping {
 export const StandardToneMapping: ToneMapping = {
     id: "standard",
     helpersWGSL: "",
-    callWGSL: `color*=scene.vImageInfos.x;
+    callWGSL: wgsl`color*=scene.vImageInfos.x;
 color=1.0-exp2(-1.590579*color);`,
 };

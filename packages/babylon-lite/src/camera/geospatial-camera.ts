@@ -4,7 +4,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { mat4LookAtWorldLHToRef } from "../math/mat4-look-at-world-lh.js";
+import { writeLookAtWorldMat4LHIntoBuffer } from "../math/write-look-at-world-mat4-lh-into-buffer.js";
 import type { GeospatialLimits } from "./geospatial-limits.js";
 import { createGeospatialLimits, getEffectivePitchMax, GEO_EPSILON } from "./geospatial-limits.js";
 
@@ -216,7 +216,7 @@ export function createGeospatialCamera(options: GeospatialCameraOptions): Geospa
 
     function cameraLocalWorldMatrix(): Mat4 {
         const center3: Vec3 = { x: position.x + lookAt.x, y: position.y + lookAt.y, z: position.z + lookAt.z };
-        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, position, center3, upVector);
+        writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, position, center3, upVector);
         return _localMat;
     }
 

@@ -21,7 +21,7 @@
  */
 
 import type { HierarchyInstancePool, Mat4, SceneContext, SceneNode, Vec3 } from "babylon-lite";
-import { addHierarchyInstance, addToScene, isPbrMaterial, mat4Compose, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
+import { addHierarchyInstance, addToScene, isPbrMaterial, composeMat4, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
 
 import { instantiateModel, type RacerAssets } from "./assets.js";
 import { bjsEulerToQuatInto } from "./bjs-euler.js";
@@ -81,7 +81,7 @@ function multiplyMatrices(dst: Float32Array, a: Float32Array, b: Float32Array): 
 /** Clone the ship model and build a pool of `count` racers, all initially at the origin. */
 export function createShipFleet(assets: RacerAssets, count: number): ShipFleet {
     const { root, pool } = instantiateModel(assets.shipTemplate, count);
-    const identity = mat4Compose(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+    const identity = composeMat4(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
     for (let i = 0; i < count; i++) {
         addHierarchyInstance(pool, identity);
     }

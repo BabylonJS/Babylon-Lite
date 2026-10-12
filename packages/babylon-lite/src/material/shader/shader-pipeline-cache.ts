@@ -1,8 +1,9 @@
 import type { EngineContext } from "../../engine/engine.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
+import { _getShaderVbSupport } from "./shader-vb-support.js";
 
 interface ShaderModuleEntry {
     readonly id: number;
@@ -16,18 +17,20 @@ interface DeviceCache extends ShaderPipelineCache {
     nextModuleId: number;
 }
 
-interface CacheMaterial extends ShaderMaterial {
-    _shaderPipelineCache?: ShaderPipelineCache;
-}
-
 let _deviceCaches: WeakMap<GPUDevice, DeviceCache> | null = null;
 let _generation = 0;
+let _vertexBuffersKey: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null = null;
+
+/** @internal Install the optional vertex-layout key resolver. */
+export function _setShaderVertexBuffersKey(resolve: ((layouts: readonly GPUVertexBufferLayout[]) => string) | null): void {
+    _vertexBuffersKey = resolve;
+}
 
 /** @internal Enable cross-material ShaderMaterial caches for one multi-material build group. */
 export function enableShaderPipelineCache(engine: EngineContext, meshes: readonly Pick<Mesh, "material">[]): void {
-    const cache = getDeviceCache(engine._device);
+    const cache = _getShaderDeviceCache(engine._device);
     for (const mesh of meshes) {
-        (mesh.material as CacheMaterial)._shaderPipelineCache = cache;
+        (mesh.material as ShaderMaterial)._shaderPipelineCache = cache;
     }
 }
 
@@ -39,13 +42,13 @@ export function clearShaderPipelineCache(): void {
 
 /** @internal Move an installed cross-material cache to the current GPU device before async preparation. */
 export function retargetShaderPipelineCache(material: ShaderMaterial, device: GPUDevice): void {
-    const state = material as CacheMaterial;
-    if (state._shaderPipelineCache) {
-        state._shaderPipelineCache = getDeviceCache(device);
+    if (material._shaderPipelineCache) {
+        material._shaderPipelineCache = _getShaderDeviceCache(device);
     }
 }
 
-function getDeviceCache(device: GPUDevice): DeviceCache {
+/** @internal Resolve the shared cache for the current real GPU device. */
+export function _getShaderDeviceCache(device: GPUDevice): ShaderPipelineCache {
     _deviceCaches ??= new WeakMap();
     let cache = _deviceCaches.get(device);
     if (cache) {
@@ -78,17 +81,28 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
             }
             return entry;
         },
+        _getModules(gpu, material, currentBindings, key, label, createCodes) {
+            let memo = material._shaderModuleMemo;
+            if (!memo || memo[0] !== material || memo[1] !== currentBindings) {
+                material._shaderModuleMemo = memo = [material, currentBindings, new Map()];
+            }
+            let resolved = memo[2].get(key);
+            if (!resolved) {
+                const [vertexCode, fragmentCode] = createCodes();
+                const vert = cache!.getModule(gpu, vertexCode, `${label}-vertex`);
+                const frag = fragmentCode === null ? null : cache!.getModule(gpu, fragmentCode, `${label}-fragment`);
+                resolved = [vert, frag];
+                memo[2].set(key, resolved);
+            }
+            return resolved;
+        },
         getPipelineKey(sig, variantKey, vertexModuleId, fragmentModuleId, vertexBuffers, material, stencilKey): string {
             return JSON.stringify([
                 targetSignatureKey(sig),
                 variantKey,
                 vertexModuleId,
                 fragmentModuleId,
-                vertexBuffers.map((layout) => [
-                    layout.arrayStride,
-                    layout.stepMode ?? "vertex",
-                    Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
-                ]),
+                _vertexBuffersKey?.(vertexBuffers) ?? _serializeShaderVertexBuffers(vertexBuffers),
                 material.needAlphaBlending,
                 material.blendMode,
                 // The explicit blend override participates in the cross-material key: two materials
@@ -108,6 +122,17 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
     return cache;
 }
 
+/** @internal Canonical vertex-layout representation, unchanged by global sharing enablement. */
+export function _serializeShaderVertexBuffers(vertexBuffers: readonly GPUVertexBufferLayout[]): string {
+    return JSON.stringify(
+        vertexBuffers.map((layout) => [
+            layout.arrayStride,
+            layout.stepMode ?? "vertex",
+            Array.from(layout.attributes, (attribute) => [attribute.shaderLocation, attribute.offset, attribute.format]),
+        ])
+    );
+}
+
 function refresh(cache: DeviceCache): void {
     if (cache.localGeneration === _generation) {
         return;
@@ -121,8 +146,10 @@ function refresh(cache: DeviceCache): void {
 function bindingsKey(material: ShaderMaterial): string {
     return JSON.stringify([
         material.attributes,
+        _getShaderVbSupport()?._layouts(material) ?? null,
         material.uniformDecls.map((decl) => [decl.name, decl.type]),
         material.samplerDecls.map((decl) => [decl.name, decl.sampleType ?? "float", decl.viewDimension ?? "2d", decl.comparison === true]),
+        material._externalTextureDecls ?? null,
         material.storageBufferDecls.map((decl) => [decl.name, decl.type]),
     ]);
 }

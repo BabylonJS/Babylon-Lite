@@ -3,10 +3,12 @@ import { BU, SS } from "../engine/gpu-flags.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
+import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { targetSignatureKey } from "../engine/render-target-signature.js";
 import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
+import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
 /** Source sampling filter for a post-process pass. */
 export type PostProcessSamplingMode = "nearest" | "linear";
@@ -14,15 +16,15 @@ export type PostProcessSamplingMode = "nearest" | "linear";
 export type PostProcessAlphaMode = 0 | 1 | 2 | 7;
 
 export interface PostProcessShaderConfig {
-    fragmentWGSL: string;
-    vertexOutputWGSL?: string;
-    vertexMainWGSL?: string;
-    fragmentWrapperWGSL?: string;
-    uniformWGSL?: string;
+    fragmentWGSL: WgslSource;
+    vertexOutputWGSL?: WgslSource;
+    vertexMainWGSL?: WgslSource;
+    fragmentWrapperWGSL?: WgslSource;
+    uniformWGSL?: WgslSource;
     uniformByteLength?: number;
     uniformBinding?: number;
     writeUniforms?: (data: Float32Array) => void;
-    extraTextureWGSL?: string;
+    extraTextureWGSL?: WgslSource;
     extraTextures?: readonly RenderTarget[];
 }
 
@@ -75,15 +77,15 @@ interface PostProcessTaskInternal extends PostProcessTask {
     _colorAttachment: GPURenderPassColorAttachment;
 }
 
-const fullscreenVertexWGSL = (extraOutput: string, extraMain: string) => `struct PostProcessVertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f${extraOutput}}
+const fullscreenVertexWGSL = (extraOutput: string, extraMain: string) => wgsl`struct PostProcessVertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f${extraOutput}}
 @vertex fn postProcessVertex(@builtin(vertex_index) vertexIndex:u32)->PostProcessVertexOutput{var positions=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));let p=positions[vertexIndex];var out:PostProcessVertexOutput;out.position=vec4f(p,0,1);out.uv=vec2f(p.x*0.5+0.5,0.5-p.y*0.5);${extraMain}return out;}`;
 
-const SOURCE_WGSL = `@group(0) @binding(0) var sourceSampler:sampler;
+const SOURCE_WGSL = wgsl`@group(0) @binding(0) var sourceSampler:sampler;
 @group(0) @binding(1) var sourceTextureSampler:texture_2d<f32>;
 fn samplePostProcessSource(uv:vec2f)->vec4f{return textureSample(sourceTextureSampler,sourceSampler,uv);}
 fn readPostProcessSource(uv:vec2f)->vec4f{let dims=vec2f(textureDimensions(sourceTextureSampler));let p=clamp(floor(uv*dims)+vec2f(0.5),vec2f(0.5),dims-vec2f(0.5));return textureSampleLevel(sourceTextureSampler,sourceSampler,p/dims,0);}`;
 
-const FRAGMENT_WRAPPER_WGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{return applyPostProcess(samplePostProcessSource(input.uv),input.uv);}`;
+const FRAGMENT_WRAPPER_WGSL = wgsl`@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{return applyPostProcess(samplePostProcessSource(input.uv),input.uv);}`;
 
 export function createPostProcessTask(config: PostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): PostProcessTask {
     const source = config.sourceTexture;
@@ -193,7 +195,7 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
     });
     const entries: GPUBindGroupEntry[] = [
         { binding: 0, resource: task.sourceSamplingMode === "nearest" ? getNearestSampler(engine) : getBilinearSampler(engine) },
-        { binding: 1, resource: source._colorView },
+        { binding: 1, resource: source._colorSamplingView ?? source._colorView },
     ];
     const extraTextures = task._shader.extraTextures ?? [];
     if (task._uniformBuffer) {
@@ -204,7 +206,7 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
         if (!texture._colorView) {
             throw new Error(`PostProcessTask "${task.name}": extra texture ${i} has no color texture.`);
         }
-        entries.push({ binding: 2 + i, resource: texture._colorView });
+        entries.push({ binding: 2 + i, resource: texture._colorSamplingView ?? texture._colorView });
     }
     task._bindGroup = engine._device.createBindGroup({
         label: `${task.name}-bind-group`,
@@ -249,12 +251,10 @@ function createInternalTarget(name: string, source: RenderTarget): RenderTarget 
 function internalTargetKey(source: RenderTarget): string {
     const desc = source._descriptor;
     const sz = desc.size;
-    // SurfaceContext-keyed sources key by the surface's stable `_uniqueId` (NOT its current
-    // dimensions): the internal target is sized from the surface descriptor and tracks resizes
-    // automatically, so the key only needs to change when the source is retargeted to a
-    // *different* surface — including one that happens to share the old surface's size.
-    // Explicit-pixel sources key by their dims.
-    const sizeKey = "canvas" in sz ? `surface:${sz._uniqueId}` : `${sz.width}x${sz.height}`;
+    // Surface-backed sources key by stable surface identity rather than current dimensions because
+    // the internal target shares their live descriptor. Scaled sources add the scale so retargeting
+    // the same surface at another resolution recreates the internal target.
+    const sizeKey = "canvas" in sz ? `surface:${sz._uniqueId}` : "surface" in sz ? `surface:${sz.surface._uniqueId}@${sz.scale}` : `${sz.width}x${sz.height}`;
     return `${desc.format ?? "-"}|${desc.samples ?? 1}|${sizeKey}`;
 }
 
@@ -283,7 +283,7 @@ function getUniformBinding(task: PostProcessTaskInternal): number {
 }
 
 function getShaderModule(task: PostProcessTaskInternal, engine: EngineContext): GPUShaderModule {
-    const code = `${fullscreenVertexWGSL(task._shader.vertexOutputWGSL ?? "", task._shader.vertexMainWGSL ?? "")}\n${SOURCE_WGSL}\n${task._shader.extraTextureWGSL ?? ""}\n${task._shader.uniformWGSL ?? ""}\n${task._shader.fragmentWGSL}\n${task._shader.fragmentWrapperWGSL ?? FRAGMENT_WRAPPER_WGSL}`;
+    const code = wgsl`${fullscreenVertexWGSL(task._shader.vertexOutputWGSL ?? "", task._shader.vertexMainWGSL ?? "")}\n${SOURCE_WGSL}\n${task._shader.extraTextureWGSL ?? ""}\n${task._shader.uniformWGSL ?? ""}\n${task._shader.fragmentWGSL}\n${task._shader.fragmentWrapperWGSL ?? FRAGMENT_WRAPPER_WGSL}`;
     if (!task._shaderModule || task._shaderModuleCode !== code) {
         task._shaderModuleCode = code;
         task._shaderModule = engine._device.createShaderModule({

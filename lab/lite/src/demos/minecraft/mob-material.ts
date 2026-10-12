@@ -10,15 +10,16 @@
 // the terrain shader skips this because its chunk meshes never rotate.
 
 import { createShaderMaterial, setShaderVector3, type ShaderMaterial } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const FACE_SHADE_FN = `fn mobFaceShade(n: vec3<f32>) -> f32 {
+const FACE_SHADE_FN = wgsl`fn mobFaceShade(n: vec3<f32>) -> f32 {
   if (n.y > 0.5) { return 1.0; }
   if (n.y < -0.5) { return 0.5; }
   if (abs(n.x) > 0.5) { return 0.82; }
   return 0.72;
 }`;
 
-const VERTEX_SRC = `struct VertexOutput {
+const VERTEX_SRC = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) albedo: vec3<f32>,
   @location(1) worldNormal: vec3<f32>,
@@ -37,7 +38,7 @@ const VERTEX_SRC = `struct VertexOutput {
   return out;
 }`;
 
-const FRAGMENT_SRC = `${FACE_SHADE_FN}
+const FRAGMENT_SRC = wgsl`${FACE_SHADE_FN}
 struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) albedo: vec3<f32>,

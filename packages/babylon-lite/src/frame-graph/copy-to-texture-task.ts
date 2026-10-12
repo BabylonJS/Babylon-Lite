@@ -9,10 +9,10 @@
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
  *       * Source and target have the same format and are single-sampled.
- *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
+ *       * View-relative source mip dimensions match the target attachment's dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
- *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Source and target expose color GPU textures and any selected subresources.
  *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
@@ -47,6 +47,7 @@ import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Options used to create a copy-to-texture frame-graph task. Selects the source render target, the target or resolve target, and optional viewport / mip-level settings for blit and copy paths. */
 export interface CopyToTextureTaskConfig {
@@ -58,14 +59,15 @@ export interface CopyToTextureTaskConfig {
      *  directly into `resolveTexture`. */
     targetTexture?: RenderTarget;
     /** When true, this task owns `targetTexture`: it rebuilds the target on every frame-graph build (including
-     *  canvas resize) and disposes it with the task. Leave false for externally owned or eager targets. */
+     *  canvas resize) and disposes it with the task. Leave false for externally owned targets. */
     ownsTargetTexture?: boolean;
     /** Viewport applied to the target before the blit. When undefined (default),
      *  the whole target is overwritten and the encoder-copy fast path becomes
      *  available. When set, the blit path is used. */
     viewport?: NormalizedViewport | null;
-    /** Source mip level to copy from. Default 0. The fast path uses this as
-     *  the source `mipLevel`; the blit path samples with `textureSampleLevel`. */
+    /** View-relative source mip level. Default 0. A texture-backed wrapper exposes
+     *  one mip, so LOD clamps to zero and both paths read its selected physical mip.
+     *  Ordinary sources use this as their source `mipLevel` or `textureSampleLevel` LOD. */
     lodLevel?: number;
     /** Optional single-sample texture that receives a hardware MSAA-resolve of
      *  the task's MSAA color attachment at end-of-pass. Two modes:
@@ -134,18 +136,18 @@ interface CopyToTextureTaskInternal extends CopyToTextureTask {
 // row). Since every RT now renders upright (row 0 = top of scene), the same
 // shader handles offscreen↔offscreen, swap↔swap, and the offscreen↔swap blits
 // without any V flip.
-const VERTEX_WGSL = `struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
+const VERTEX_WGSL = wgsl`struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{
 var pos=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
 var uv=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));
 return V(vec4f(pos[i],0,1),uv[i]);}`;
 
 function fragmentForSingle(lod: number): string {
-    return `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
+    return wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
 @fragment fn fs(v:V)->@location(0)vec4f{return textureSampleLevel(t,s,v.u,${lod.toFixed(1)});}`;
 }
 
-const FRAGMENT_MSAA_WGSL = `@group(0)@binding(0)var t:texture_multisampled_2d<f32>;
+const FRAGMENT_MSAA_WGSL = wgsl`@group(0)@binding(0)var t:texture_multisampled_2d<f32>;
 @fragment fn fs(v:V)->@location(0)vec4f{
 let d=vec2i(textureDimensions(t));
 let q=v.u*vec2f(d)-.5;
@@ -231,6 +233,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             if (source === eng.scRT) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture cannot be the engine scRT because its GPU texture changes every frame.`);
             }
+            if (source._syncEager) {
+                buildRenderTarget(source, eng);
+            }
             if (!source._colorTexture) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
             }
@@ -240,7 +245,7 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // Already-built RTs are no-ops in `buildRenderTarget`. Keeps copy-only chains
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
-            const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
+            const needsBuild = (rt: RenderTarget) => !!rt._syncEager || !rt._colorTexture;
             if (task._ownedTarget && (!task.ownsTargetTexture || task._ownedTarget !== task.targetTexture)) {
                 disposeRenderTarget(task._ownedTarget);
                 task._ownedTarget = null;
@@ -379,8 +384,11 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcSamples !== 1 || dstSamples !== 1) {
         return false;
     }
-    const lod = task.lodLevel;
-    if (lod >= sourceTexture.mipLevelCount) {
+    const sourceSubresource = source._colorSubresource;
+    // A wrapper's sampling view exposes one mip, so its view-relative LOD always clamps to zero.
+    const lod = sourceSubresource ? 0 : task.lodLevel;
+    const sourceMipLevel = sourceSubresource?.mipLevel ?? lod;
+    if (sourceMipLevel >= sourceTexture.mipLevelCount) {
         return false;
     }
     const srcMipW = Math.max(1, source._width >> lod);
@@ -388,9 +396,12 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcMipW !== target._width || srcMipH !== target._height) {
         return false;
     }
+    const subresource = target._colorSubresource;
     task._fast = {
-        _source: { texture: sourceTexture, mipLevel: lod },
-        _target: { texture: targetTexture },
+        _source: sourceSubresource
+            ? { texture: sourceTexture, mipLevel: sourceMipLevel, origin: { x: 0, y: 0, z: sourceSubresource.layer } }
+            : { texture: sourceTexture, mipLevel: sourceMipLevel },
+        _target: subresource ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } } : { texture: targetTexture },
         _size: { width: srcMipW, height: srcMipH },
     };
     return true;
@@ -406,7 +417,7 @@ function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, ta
     const entries: GPUBindGroupEntry[] = multisampledSource
         ? [{ binding: 0, resource: source._colorView! }]
         : [
-              { binding: 0, resource: source._colorView! },
+              { binding: 0, resource: source._colorSamplingView ?? source._colorView! },
               { binding: 1, resource: task.lodLevel > 0 ? getTrilinearSampler(engine) : getBilinearSampler(engine) },
           ];
     const bindGroup = engine._device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });
@@ -493,7 +504,7 @@ function getOrCreateCopyPipeline(engine: EngineContext, targetFormat: GPUTexture
     let shaderModule = _shaderModules!.get(moduleKey);
     if (!shaderModule) {
         const fragment = multisampledSource ? FRAGMENT_MSAA_WGSL : fragmentForSingle(lodLevel);
-        shaderModule = device.createShaderModule({ code: `${VERTEX_WGSL}\n${fragment}`, label: `copy-to-texture-${moduleKey}` });
+        shaderModule = device.createShaderModule({ code: wgsl`${VERTEX_WGSL}\n${fragment}`, label: `copy-to-texture-${moduleKey}` });
         _shaderModules!.set(moduleKey, shaderModule);
     }
     let bgl: GPUBindGroupLayout;

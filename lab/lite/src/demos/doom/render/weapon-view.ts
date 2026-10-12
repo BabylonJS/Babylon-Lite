@@ -33,6 +33,7 @@ import { findLumpIndex, getLump } from "../wad/wad-file.js";
 import { decodePatch } from "../wad/graphics.js";
 import type { Player } from "../player/player.js";
 import { Weapon } from "../player/player.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 interface WeaponSprites {
     /** Resting/idle frame lump name. */
@@ -74,7 +75,7 @@ const ATLAS_WIDTH = 512;
 
 // Full-bright psprite fragment: palette-indexed sample → COLORMAP row 0 (full-bright),
 // with a hard cutout discard on coverage. Mirrors the world/enemy palette path.
-const WEAPON_FRAGMENT = `let src = textureSample(atlasTex, atlasSamp, in.uv);
+const WEAPON_FRAGMENT = wgsl`let src = textureSample(atlasTex, atlasSamp, in.uv);
 if (src.a < 0.5) { discard; }
 let idx = floor(src.r * 255.0 + 0.5);
 let lut = textureSample(colormapTex, colormapSamp, vec2<f32>((idx + 0.5) / 256.0, 0.5 / 34.0));

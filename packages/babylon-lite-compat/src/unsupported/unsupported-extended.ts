@@ -10,10 +10,20 @@
  */
 
 import { unsupported } from "../error.js";
+import type { AbstractMesh, TransformNode } from "../meshes/meshes.js";
+import type { AbstractEngine } from "../engine/engine.js";
+import type { Matrix } from "../math/matrix.js";
+import type { Vector3 } from "../math/vector.js";
+import type { ShaderLanguage } from "../misc/engine-constants.js";
+import type { Node } from "../node/node.js";
+import type { Scene } from "../scene/scene.js";
+import type { BaseTexture } from "../textures/textures.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
 
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
+export type GeometryRenderingObjectIdProvider = (mesh: AbstractMesh) => number;
+
 export class ReflectionProbe {
     public constructor() {
         unsupported("ReflectionProbe", "Dynamic reflection probes are not implemented in Babylon Lite.");
@@ -61,6 +71,107 @@ export class PostProcess {
             "Babylon Lite uses frame-graph post-process tasks rather than camera-attached PostProcess objects. Use the native `create*PostProcessTask` APIs."
         );
     }
+}
+
+export class Effect {
+    public constructor() {
+        unsupported(
+            "Effect",
+            "Babylon.js Effect owns shader-store lookup, preprocessing, compilation, reflection, and binding; Lite exposes explicit typed WGSL material/render-shader APIs instead."
+        );
+    }
+
+    public isReady(): never {
+        return unsupported("Effect.isReady", "Lite has no Babylon.js Effect compilation lifecycle.");
+    }
+
+    public getEngine(): AbstractEngine {
+        return unsupported("Effect.getEngine", "Lite has no Babylon.js Effect object associated with a compat engine.");
+    }
+
+    public getCompilationError(): string {
+        return unsupported("Effect.getCompilationError", "Lite has no Babylon.js Effect compilation lifecycle or error store.");
+    }
+
+    public setTexture(_channel: string, _texture: BaseTexture): never {
+        return unsupported("Effect.setTexture", "Lite binds textures through typed material/render-shader APIs, not an Effect binding table.");
+    }
+
+    public setFloat(_uniformName: string, _value: number): never {
+        return unsupported("Effect.setFloat", "Lite binds uniforms through typed material/render-shader APIs, not an Effect binding table.");
+    }
+}
+
+export type EffectWrapperCustomShaderCodeProcessing = {
+    processCodeAfterIncludes?: (postProcessName: string, shaderType: string, code: string) => string;
+    processFinalCode?: (postProcessName: string, shaderType: string, code: string) => string;
+    defineCustomBindings?: (postProcessName: string, defines: string | null, uniforms: string[], samplers: string[]) => string | null;
+    bindCustomBindings?: (postProcessName: string, effect: Effect) => void;
+};
+
+export interface EffectWrapperCreationOptions {
+    engine?: AbstractEngine;
+    fragmentShader?: string;
+    useShaderStore?: boolean;
+    vertexShader?: string;
+    vertexUrl?: string;
+    attributeNames?: string[];
+    uniformNames?: string[];
+    uniforms?: string[] | null;
+    samplerNames?: string[];
+    samplers?: string[] | null;
+    uniformBuffers?: string[] | null;
+    defines?: string | string[] | null;
+    indexParameters?: any;
+    blockCompilation?: boolean;
+    onCompiled?: ((effect: Effect) => void) | null;
+    onError?: (effect: Effect, errors: string) => void;
+    name?: string;
+    shaderLanguage?: ShaderLanguage;
+    extraInitializations?: (useWebGPU: boolean, list: Promise<any>[]) => void;
+    extraInitializationsAsync?: () => Promise<void>;
+    useAsPostProcess?: boolean;
+    allowEmptySourceTexture?: boolean;
+}
+
+export class EffectWrapper {
+    public static ForceGLSL = false;
+
+    public static RegisterShaderCodeProcessing(_effectWrapperName: string | null, _customShaderCodeProcessing?: EffectWrapperCustomShaderCodeProcessing): never {
+        return unsupported(
+            "EffectWrapper.RegisterShaderCodeProcessing",
+            "Lite has no Babylon.js Effect shader-store/preprocessor registry to receive custom code-processing hooks."
+        );
+    }
+
+    public constructor(_options: EffectWrapperCreationOptions) {
+        unsupported(
+            "EffectWrapper",
+            "Babylon.js EffectWrapper compiles GLSL/WGSL through the Effect shader-store and preprocessor lifecycle; Lite exposes only explicit WGSL render shaders and has no Effect object to adapt."
+        );
+    }
+}
+
+const FRAME_GRAPH_MODEL_BLOCKER =
+    "Lite exposes standalone frame-graph task factories, but not Babylon.js's FrameGraph handles, task base classes, texture manager, or node-render-graph object model required by this API.";
+
+/** Babylon.js 9.29 frame-graph min/max reduction task. */
+export class FrameGraphMinMaxReducerTask {
+    public constructor(..._args: unknown[]) {
+        unsupported("FrameGraphMinMaxReducerTask", FRAME_GRAPH_MODEL_BLOCKER);
+    }
+}
+
+/** Babylon.js 9.29 node-render-graph min/max reduction block. */
+export class NodeRenderGraphMinMaxReducerBlock {
+    public constructor(..._args: unknown[]) {
+        unsupported("NodeRenderGraphMinMaxReducerBlock", FRAME_GRAPH_MODEL_BLOCKER);
+    }
+}
+
+/** Babylon.js 9.29 node-render-graph registration function. */
+export function RegisterMinMaxReducerBlock(): never {
+    return unsupported("RegisterMinMaxReducerBlock", FRAME_GRAPH_MODEL_BLOCKER);
 }
 
 function postProcessStub(name: string, nativeTask: string): { new (): never } {
@@ -169,6 +280,9 @@ export class WeightedSound {
 }
 
 // ─── Loaders (formats not present in Babylon Lite) ───────────────────
+const FBX_LOADER_UNSUPPORTED =
+    "FBX support requires a parser, DCC transform/material/animation mapping, geometry and skin materialization, and a scene-scheduled constraint solver. Those form a new loader subsystem with unresolved ownership and mapping policies.";
+
 export class OBJFileLoader {
     public constructor() {
         unsupported("OBJFileLoader", "The OBJ format is not supported by Babylon Lite. Convert to glTF.");
@@ -181,9 +295,174 @@ export class STLFileLoader {
     }
 }
 
+export type FBXNormalMapCoordinateSystem = "y-up" | "y-down";
+
+export interface FBXLoaderWarning {
+    source: "scene" | "model" | "geometry" | "skin" | "rig" | "animation" | "blendShape" | "camera" | "light";
+    message: string;
+    objectName?: string;
+    details?: unknown;
+}
+
+export interface FBXFileLoaderOptions {
+    preset?: "compatible" | "full";
+    normalMapCoordinateSystem?: FBXNormalMapCoordinateSystem;
+    materials?: "auto" | "standard" | "pbr";
+    unitScale?: "preserve" | "meters" | number;
+    shareGeometry?: boolean;
+    onWarning?: (warning: FBXLoaderWarning) => void;
+    nurbsSubdivision?: number;
+    curves?: "lines" | "skip";
+    constraints?: "apply" | "metadata";
+    rebaseAnimations?: boolean;
+    attachCamerasAndLights?: boolean;
+}
+
+export const FBXFileLoaderMetadata = {
+    name: "fbx",
+    extensions: {
+        ".fbx": { isBinary: true },
+    },
+} as const;
+
 export class FBXFileLoader {
-    public constructor() {
-        unsupported("FBXFileLoader", "The FBX format is not supported by Babylon Lite. Convert to glTF.");
+    public constructor(_options: Partial<FBXFileLoaderOptions> = {}) {
+        unsupported("FBXFileLoader", FBX_LOADER_UNSUPPORTED);
+    }
+}
+
+export type FBXConstraintType = "aim" | "parent" | "position" | "rotation" | "scale" | "singleChainIK" | "unknown";
+export type FBXConstraintVector3 = [number, number, number];
+export type FBXConstraintBoolean3 = [boolean, boolean, boolean];
+
+export interface FBXConstraintTarget {
+    modelId: number;
+    weight: number;
+    offsetTranslation: FBXConstraintVector3;
+    offsetRotation: FBXConstraintVector3;
+    offsetScale: FBXConstraintVector3;
+}
+
+export interface FBXConstraintData {
+    id: number;
+    name: string;
+    type: FBXConstraintType;
+    typeName: string;
+    nodeId?: number;
+    targets: FBXConstraintTarget[];
+    weight: number;
+    active: boolean;
+    affectTranslation: FBXConstraintBoolean3;
+    affectRotation: FBXConstraintBoolean3;
+    affectScale: FBXConstraintBoolean3;
+    offsetTranslation: FBXConstraintVector3;
+    offsetRotation: FBXConstraintVector3;
+    offsetScale: FBXConstraintVector3;
+    aimVector: FBXConstraintVector3;
+    upVector: FBXConstraintVector3;
+    worldUpVector: FBXConstraintVector3;
+    worldUpType: number;
+    worldUpNodeId?: number;
+    ikFirstJointId?: number;
+    ikEndJointId?: number;
+    ikEffectorId?: number;
+    ikPoleVector: FBXConstraintVector3;
+}
+
+export interface FBXConstraintBehaviorTarget {
+    node: TransformNode;
+    weight: number;
+    offset: Matrix;
+}
+
+export interface FBXConstraintBehaviorOptions {
+    root: TransformNode;
+    targets: FBXConstraintBehaviorTarget[];
+    upNode: TransformNode | null;
+    sceneUp: Vector3;
+}
+
+export class FBXConstraintSolver {
+    private constructor() {
+        unsupported("FBXConstraintSolver", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public static Get(_scene: Scene): FBXConstraintSolver | undefined {
+        return unsupported("FBXConstraintSolver.Get", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public static GetOrCreate(_scene: Scene): FBXConstraintSolver {
+        return unsupported("FBXConstraintSolver.GetOrCreate", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public get constraints(): readonly FBXConstraintBehavior[] {
+        return unsupported("FBXConstraintSolver.constraints", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public get cyclicConstraints(): readonly FBXConstraintBehavior[] {
+        return unsupported("FBXConstraintSolver.cyclicConstraints", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public register(_behavior: FBXConstraintBehavior): void {
+        unsupported("FBXConstraintSolver.register", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public unregister(_behavior: FBXConstraintBehavior): void {
+        unsupported("FBXConstraintSolver.unregister", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public invalidateOrder(): void {
+        unsupported("FBXConstraintSolver.invalidateOrder", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public beginFrame(): void {
+        unsupported("FBXConstraintSolver.beginFrame", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public solve(): void {
+        unsupported("FBXConstraintSolver.solve", FBX_LOADER_UNSUPPORTED);
+    }
+}
+
+export class FBXConstraintBehavior {
+    public readonly name: string;
+    public attachedNode: TransformNode | null = null;
+    public enabled = true;
+
+    public constructor(
+        public readonly constraint: FBXConstraintData,
+        _options: FBXConstraintBehaviorOptions
+    ) {
+        this.name = `fbxConstraint:${constraint.name}`;
+        unsupported("FBXConstraintBehavior", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public init(): void {
+        unsupported("FBXConstraintBehavior.init", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public attach(_target: TransformNode): void {
+        unsupported("FBXConstraintBehavior.attach", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public detach(): void {
+        unsupported("FBXConstraintBehavior.detach", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public captureBase(): void {
+        unsupported("FBXConstraintBehavior.captureBase", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public restoreBase(): void {
+        unsupported("FBXConstraintBehavior.restoreBase", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public dependencyNodes(): Array<Node | null> {
+        return unsupported("FBXConstraintBehavior.dependencyNodes", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public evaluate(): void {
+        unsupported("FBXConstraintBehavior.evaluate", FBX_LOADER_UNSUPPORTED);
     }
 }
 

@@ -99,6 +99,11 @@ export class SpriteManager {
         });
     }
 
+    /** Babylon.js `SpriteManager.isReady()` — an empty manager is ready without renderer preparation. */
+    public isReady(): boolean {
+        return this._sprites.length === 0 || this._lite !== undefined;
+    }
+
     /** @internal Map the Babylon.js `Constants.ALPHA_*` blend mode to a Lite billboard blend. */
     private _mapBlendMode(): BillboardBlendDescriptor {
         if (this.blendMode === ALPHA_ONEONE || this.blendMode === ALPHA_ADD) {
@@ -328,6 +333,11 @@ export class SpriteRenderer {
                 premultipliedAlpha: premultiplied,
             });
         });
+    }
+
+    /** Babylon.js `SpriteRenderer.isReady()` — the next render can build once its atlas is loaded. */
+    public isReady(): boolean {
+        return this._atlas !== undefined;
     }
 
     /** @internal Map the Babylon.js blend mode to a Lite sprite blend descriptor. */

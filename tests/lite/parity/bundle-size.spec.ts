@@ -247,7 +247,7 @@ for (const scene of SCENES) {
         if (scene.slug === "scene302-npe-moving-emitter") {
             for (const required of [
                 /\/particle\/node\/npe-emitter-provider\.[jt]s$/,
-                /\/math\/mat4-invert-to-ref\.[jt]s$/,
+                /\/math\/invert-mat4-to-ref-or-identity\.[jt]s$/,
                 /\/particle\/particle-scene\.[jt]s$/,
                 /\/particle\/particle-billboard\.[jt]s$/,
                 /\/sprite\/billboard-scene\.[jt]s$/,
@@ -259,7 +259,7 @@ for (const scene of SCENES) {
                 ).toBe(true);
             }
             const offenders = runtimeModules.filter((id) =>
-                /\/(math\/mat4-invert|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                /\/(math\/invert-mat4|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
                     id
                 )
             );
@@ -323,8 +323,9 @@ for (const scene of SCENES) {
 
         // Orthographic projection is an opt-in seam: `camera.ts` holds a module-local projector that
         // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
-        // scene. Guard both directions — no other scene may pull the module in, and scene 268 must.
-        const ORTHO_SCENE_IDS = new Set([187, 268]);
+        // scene. Guard both directions — no other scene may pull the module in, and the
+        // explicitly orthographic scenes must.
+        const ORTHO_SCENE_IDS = new Set([187, 268, 311, 312]);
         if (ORTHO_SCENE_IDS.has(scene.id)) {
             expect(
                 runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),

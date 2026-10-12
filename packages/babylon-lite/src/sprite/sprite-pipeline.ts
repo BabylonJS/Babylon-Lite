@@ -3,12 +3,13 @@ import { U16 } from "../engine/typed-arrays.js";
 import { BU, SS, CW } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
+import { _getSprite2DYSortHook } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
-import { _getSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
@@ -33,7 +34,7 @@ const SPRITE_COLOR_OFFSET_BYTES = 36;
 const SPRITE_DEPTH_OFFSET_BYTES = 52;
 
 function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
-    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+    return wgsl`${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
@@ -50,11 +51,11 @@ return s * in.tint * L.opacityMul;
  * paths share one source of truth.
  */
 export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
-    const group = `@group(${spriteGroupIndex})`;
-    const zAttribute = hasDepth ? `,\n@location(6) z: f32` : "";
-    const uvOffsetAttribute = uvScroll ? `,\n@location(7) o: vec2f` : "";
+    const group = wgsl`@group(${spriteGroupIndex})`;
+    const zAttribute = hasDepth ? wgsl`,\n@location(6) z: f32` : "";
+    const uvOffsetAttribute = uvScroll ? wgsl`,\n@location(7) o: vec2f` : "";
     const zPosition = hasDepth ? "1 - in.z" : "0";
-    return `struct Lr {
+    return wgsl`struct Lr {
 viewPos: vec2f,
 viewScale: f32,
 viewRot: f32,
@@ -155,13 +156,14 @@ export function getOrCreateSpritePipeline(
     depthWrite = false,
     depthStencilFormat?: GPUTextureFormat,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const deviceCache = getSpritePipelineDeviceCache(engine, cache);
     const resolvedDepthStencilFormat = normalizeDepthStencilFormat(hasDepth, depthStencilFormat);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = hasDepth && depthWrite && sampleCount > 1 && !!layer && !!alphaToCoverageResolver?.(layer);
-    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, alphaToCoverage, layer);
+    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, alphaToCoverage, layer, depthCompare);
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
@@ -178,7 +180,8 @@ export function getOrCreateSpritePipeline(
         resolvedDepthStencilFormat,
         alphaToCoverage,
         sceneBindGroupLayout,
-        layer
+        layer,
+        depthCompare
     );
     deviceCache._pipelines.set(key, pipeline);
     return pipeline;
@@ -239,12 +242,13 @@ function spritePipelineKey(
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
     alphaToCoverage: boolean,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
     const uvKey = layer?._uvScrollAttr ? "1" : "0";
     const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:${alphaToCoverage ? "a" : "n"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:${hasDepth ? depthCompare : "-"}:${alphaToCoverage ? "a" : "n"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
 function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -279,7 +283,8 @@ function buildSpritePipeline(
     depthStencilFormat: GPUTextureFormat | null,
     alphaToCoverage: boolean,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const device = engine._device;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
@@ -342,7 +347,7 @@ function buildSpritePipeline(
     if (hasDepth) {
         descriptor.depthStencil = {
             format: depthStencilFormat!,
-            depthCompare: "greater-equal",
+            depthCompare,
             depthWriteEnabled: depthWrite,
         };
     }

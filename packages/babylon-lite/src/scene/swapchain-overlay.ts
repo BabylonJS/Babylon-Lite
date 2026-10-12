@@ -1,5 +1,5 @@
 import type { SurfaceContext } from "../engine/surface.js";
-import type { RenderTask } from "../frame-graph/render-task.js";
+import type { RenderTaskBase as RenderTask } from "../frame-graph/render-task-base.js";
 import type { SceneContext } from "./scene-core.js";
 
 /** Find a scene's default render task that targets the surface swapchain — either

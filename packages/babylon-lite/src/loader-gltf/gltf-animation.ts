@@ -11,9 +11,9 @@ import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
-import { mat4Identity } from "../math/mat4-identity.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { createIdentityMat4 } from "../math/create-identity-mat4.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import { getLoaderTmpAnim } from "./_loader-scratch.js";
@@ -105,11 +105,11 @@ export function extractSkin(
 export function computeBoneTextureData(skin: GltfSkinData): Float32Array {
     const numBones = skin.jointNodes.length;
     const data = new F32(numBones * 16);
-    const invMeshWorld = mat4Invert(skin.meshWorldMatrix) ?? mat4Identity();
+    const invMeshWorld = invertMat4(skin.meshWorldMatrix) ?? createIdentityMat4();
     const tmp = getLoaderTmpAnim() as unknown as Mat4Storage;
     for (let i = 0; i < numBones; i++) {
-        mat4MultiplyInto(tmp, 0, invMeshWorld as unknown as Mat4Storage, 0, skin.jointWorldMatrices[i]! as unknown as Mat4Storage, 0);
-        mat4MultiplyInto(data, i * 16, tmp, 0, skin.inverseBindMatrices, i * 16);
+        multiplyMat4IntoBuffer(tmp, 0, invMeshWorld as unknown as Mat4Storage, 0, skin.jointWorldMatrices[i]! as unknown as Mat4Storage, 0);
+        multiplyMat4IntoBuffer(data, i * 16, tmp, 0, skin.inverseBindMatrices, i * 16);
     }
     return data;
 }
@@ -265,7 +265,7 @@ export function parseAnimationData(
         const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
 
         const meshWorldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
-        const invMeshWorld = mat4Invert(meshWorldMatrix) ?? mat4Identity();
+        const invMeshWorld = invertMat4(meshWorldMatrix) ?? createIdentityMat4();
 
         // Create a binding for EACH mesh primitive of this skinned node
         for (const mi of meshIndices) {

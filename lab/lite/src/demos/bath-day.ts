@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     scene.imageProcessing.toneMapping = AcesToneMapping;
 
     // Draco-compressed glTF — point the decoders at the demo-local wasm/js.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     // Load the model + DDS cubemap environment in parallel (same env as Scene 26).
     await Promise.all([

@@ -27,6 +27,15 @@ function runtimeModuleIds(scene: string): string[] {
 }
 
 describe("shadow deformation tracking bundle isolation", () => {
+    it("keeps runtime enablement checks out of shared shadow tasks and shaders", () => {
+        const shadowTask = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "frame-graph", "shadow-task.ts"), "utf-8");
+        expect(shadowTask).not.toContain("_runtimeEnabled");
+        for (const file of ["shadow-fragment-pcf.ts", "shadow-fragment-esm.ts", "csm-shadow-fragment-core.ts"]) {
+            const source = readFileSync(join(ROOT, "packages", "babylon-lite", "src", "shader", "fragments", file), "utf-8");
+            expect(source).not.toMatch(/if \([^)]*shadowsInfo[^)]*>= 1\.0|if \(darkness >= 1\.0/);
+        }
+    });
+
     it("keeps deformable shadow tracking out of shared runtime modules", () => {
         const sharedModules = [
             join("animation", "weighted-gltf-mixer.ts"),

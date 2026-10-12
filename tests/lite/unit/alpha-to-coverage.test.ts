@@ -24,6 +24,7 @@ import type { Sprite2DLayer } from "../../../packages/babylon-lite/src/sprite/sp
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import { clearTextPipelineCache, getOrCreateTextPipeline } from "../../../packages/babylon-lite/src/text/_gpu/text-pipeline";
 import type { TextRenderable } from "../../../packages/babylon-lite/src/text/text-renderable";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function makeEngine() {
     const createRenderPipeline = vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline);
@@ -79,8 +80,8 @@ function meshBindGroupLayout(pipeline: GPURenderPipeline): GPUBindGroupLayout {
 
 function makeShaderMaterial(options?: { needAlphaBlending?: boolean; depthWrite?: boolean }) {
     return createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
         attributes: ["position"],
         ...options,
     });
@@ -111,6 +112,10 @@ function fragmentStage(pipeline: GPURenderPipeline): GPUFragmentState {
 
 function depthWriteEnabled(pipeline: GPURenderPipeline): boolean | undefined {
     return (pipeline as unknown as GPURenderPipelineDescriptor).depthStencil?.depthWriteEnabled;
+}
+
+function depthCompare(pipeline: GPURenderPipeline): GPUCompareFunction | undefined {
+    return (pipeline as unknown as GPURenderPipelineDescriptor).depthStencil?.depthCompare;
 }
 
 describe("WebGPU alpha-to-coverage", () => {
@@ -283,7 +288,7 @@ describe("WebGPU alpha-to-coverage", () => {
         // Exactly one fragment module is ever compiled, and the source actually handed to
         // createShaderModule — not merely the file on disk — declares the override that the
         // A2C pipeline specialises, under the numeric id the descriptor keys it by.
-        const fragmentSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@location(0) vec4<f32>"));
+        const fragmentSources = createShaderModule.mock.calls.filter((call) => call[0].label === "text-frag").map((call) => call[0].code);
         expect(fragmentSources).toHaveLength(1);
         expect(fragmentSources[0]).toMatch(/@id\(0\)\s+override\s+a2c\s*:\s*bool/);
     });
@@ -328,5 +333,35 @@ describe("WebGPU alpha-to-coverage", () => {
         expect(enabledShader.code).not.toContain("discard");
         expect(alphaToCoverageEnabled(singleSample)).not.toBe(true);
         expect(singleSampleShader.code).toContain("discard");
+    });
+
+    it("propagates target depth comparisons through sprite, billboard, and text pipeline caches", () => {
+        const { engine } = makeEngine();
+        const sceneLayout = {} as GPUBindGroupLayout;
+
+        const spriteCache = createSpritePipelineCache();
+        const layer = { depth: "test-write", blendMode: spriteBlendOpaque } as Sprite2DLayer;
+        const reverseSprite = getOrCreateSpritePipeline(engine, spriteCache, "rgba8unorm", 1, spriteBlendOpaque, true, true, "depth24plus", sceneLayout, layer);
+        const standardSprite = getOrCreateSpritePipeline(engine, spriteCache, "rgba8unorm", 1, spriteBlendOpaque, true, true, "depth24plus", sceneLayout, layer, "less-equal");
+
+        const billboardCache = createBillboardPipelineCache();
+        const system = { _orientation: "facing", _depthMode: "cutout", blendMode: billboardBlendCutout } as BillboardSpriteSystem;
+        const reverseBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout);
+        const standardBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout, "less-equal");
+
+        clearTextPipelineCache(engine);
+        const text = {} as TextRenderable;
+        const reverseText = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text)._pipeline;
+        const standardText = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text, "less-equal")._pipeline;
+
+        for (const pipeline of [reverseSprite, reverseBillboard, reverseText]) {
+            expect(depthCompare(pipeline)).toBe("greater-equal");
+        }
+        for (const pipeline of [standardSprite, standardBillboard, standardText]) {
+            expect(depthCompare(pipeline)).toBe("less-equal");
+        }
+        expect(standardSprite).not.toBe(reverseSprite);
+        expect(standardBillboard).not.toBe(reverseBillboard);
+        expect(standardText).not.toBe(reverseText);
     });
 });

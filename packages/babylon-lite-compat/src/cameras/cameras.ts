@@ -10,8 +10,12 @@
 
 import {
     createArcRotateCamera,
+    createBankedFreeCamera,
     createFreeCamera,
     createGeospatialCamera,
+    disableOrthographicCamera,
+    enableArcRotateKeyboardControls,
+    enableOrthographicCamera,
     setGeospatialOrientation,
     attachGeospatialControls,
     attachControl as liteAttachControl,
@@ -21,19 +25,33 @@ import {
     getProjectionMatrix as liteGetProjectionMatrix,
     onBeforeRender,
 } from "babylon-lite";
-import type { ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, GeospatialCamera as LiteGeospatialCamera, Camera as LiteCamera } from "babylon-lite";
+import type {
+    ArcRotateCamera as LiteArcRotateCamera,
+    BankedFreeCamera as LiteBankedFreeCamera,
+    FreeCamera as LiteFreeCamera,
+    GeospatialCamera as LiteGeospatialCamera,
+    Camera as LiteCamera,
+} from "babylon-lite";
 
 import { unsupported } from "../error.js";
-import { Vector3 } from "../math/vector.js";
+import { liteBackedVector3, Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
+import { Viewport } from "../math/size.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
 /** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
 export abstract class Camera extends Node {
+    public static readonly PERSPECTIVE_CAMERA = 0;
+    public static readonly ORTHOGRAPHIC_CAMERA = 1;
+
     /** @internal Underlying Babylon Lite camera. */
     public abstract readonly _lite: LiteCamera;
     private _detach: (() => void) | undefined;
+    private _orthoLeft: number | null = null;
+    private _orthoRight: number | null = null;
+    private _orthoBottom: number | null = null;
+    private _orthoTop: number | null = null;
 
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
@@ -65,6 +83,86 @@ export abstract class Camera extends Node {
         this._lite.farPlane = value;
     }
 
+    public get orthoLeft(): number | null {
+        return this._lite.ortho ? this._lite.ortho.left : this._orthoLeft;
+    }
+    public set orthoLeft(value: number | null) {
+        this._orthoLeft = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.left = value;
+        }
+    }
+
+    public get orthoRight(): number | null {
+        return this._lite.ortho ? this._lite.ortho.right : this._orthoRight;
+    }
+    public set orthoRight(value: number | null) {
+        this._orthoRight = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.right = value;
+        }
+    }
+
+    public get orthoBottom(): number | null {
+        return this._lite.ortho ? this._lite.ortho.bottom : this._orthoBottom;
+    }
+    public set orthoBottom(value: number | null) {
+        this._orthoBottom = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.bottom = value;
+        }
+    }
+
+    public get orthoTop(): number | null {
+        return this._lite.ortho ? this._lite.ortho.top : this._orthoTop;
+    }
+    public set orthoTop(value: number | null) {
+        this._orthoTop = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.top = value;
+        }
+    }
+
+    public get mode(): number {
+        return this._lite.ortho ? Camera.ORTHOGRAPHIC_CAMERA : Camera.PERSPECTIVE_CAMERA;
+    }
+    public set mode(value: number) {
+        if (value === this.mode) {
+            return;
+        }
+        if (value === Camera.ORTHOGRAPHIC_CAMERA) {
+            enableOrthographicCamera(this._lite, {
+                left: this._orthoLeft,
+                right: this._orthoRight,
+                bottom: this._orthoBottom,
+                top: this._orthoTop,
+            });
+            return;
+        }
+        if (value === Camera.PERSPECTIVE_CAMERA) {
+            this._orthoLeft = this.orthoLeft;
+            this._orthoRight = this.orthoRight;
+            this._orthoBottom = this.orthoBottom;
+            this._orthoTop = this.orthoTop;
+            disableOrthographicCamera(this._lite);
+            return;
+        }
+        unsupported("Camera.mode", `Projection mode ${value} is not supported.`);
+    }
+
+    public get viewport(): Viewport {
+        const viewport = this._lite.viewport;
+        if (viewport instanceof Viewport) {
+            return viewport;
+        }
+        const compatViewport = viewport ? new Viewport(viewport.x, viewport.y, viewport.width, viewport.height) : new Viewport(0, 0, 1, 1);
+        this._lite.viewport = compatViewport;
+        return compatViewport;
+    }
+    public set viewport(value: Viewport) {
+        this._lite.viewport = value;
+    }
+
     /** World-space position of the camera. */
     public get globalPosition(): Vector3 {
         const p = getCameraPosition(this._lite);
@@ -86,7 +184,8 @@ export abstract class Camera extends Node {
         const canvas = scene?.getEngine().getRenderingCanvas() as { width?: number; height?: number } | undefined;
         const w = canvas?.width ?? 1;
         const h = canvas?.height ?? 1;
-        return h !== 0 ? w / h : 1;
+        const viewport = this._lite.viewport;
+        return h !== 0 && (!viewport || viewport.height !== 0) ? (w / h) * (viewport ? viewport.width / viewport.height : 1) : 1;
     }
 
     public abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;
@@ -212,8 +311,9 @@ export class ArcRotateCamera extends Camera {
         this._lite.panningSensibility = value;
     }
 
-    public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
-        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite);
+    public attachControl(canvas: HTMLCanvasElement, noPreventDefault = false): void {
+        enableArcRotateKeyboardControls();
+        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite, { keyboard: { preventDefault: !noPreventDefault } });
         this._setDetach(detach);
     }
 
@@ -306,6 +406,22 @@ export class GamepadCamera extends UniversalCamera {
 
 /** Babylon.js `FlyCamera` — 6-DOF free-flight camera. */
 export class FlyCamera extends TargetCamera {
+    /** @internal Underlying banked Babylon Lite free camera. */
+    public override readonly _lite: LiteBankedFreeCamera;
+
+    public constructor(name: string, position: Vector3, scene?: Scene) {
+        const lite = createBankedFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
+        super(name, position, scene, lite);
+        this._lite = lite;
+    }
+
+    public get upVector(): Vector3 {
+        return liteBackedVector3(this._lite.upVector);
+    }
+    public set upVector(value: Vector3) {
+        this._lite.upVector.set(value.x, value.y, value.z);
+    }
+
     public override getClassName(): string {
         return "FlyCamera";
     }

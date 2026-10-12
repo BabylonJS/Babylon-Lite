@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+    accessorIsStrided,
+    buildInterleavedMesh,
+    buildInterleavedPartial,
+    installLazyCpu,
+    computeAabbStrided,
+} from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { assembleMaterial } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
 const FLOAT = 5126;
 const UNSIGNED_BYTE = 5121;
@@ -43,6 +53,94 @@ function makeInterleavedAsset() {
 }
 
 describe("gltf-interleave", () => {
+    it("installs ShaderMaterial packing for both plain and thin draws", async () => {
+        vi.resetModules();
+        const [{ buildInterleavedMesh: buildMesh, buildInterleavedPartial: buildPartial }, { createPbrMaterial: createPbr }, { createShaderMaterial }, shaderRender, thin] =
+            await Promise.all([
+                import("../../../packages/babylon-lite/src/loader-gltf/gltf-interleave"),
+                import("../../../packages/babylon-lite/src/material/pbr/pbr-material"),
+                import("../../../packages/babylon-lite/src/material/shader/shader-material"),
+                import("../../../packages/babylon-lite/src/material/shader/shader-renderable"),
+                import("../../../packages/babylon-lite/src/mesh/thin-instance"),
+            ]);
+        const interleaved = new Float32Array([-0.5, -0.5, 0, 1, 0, 0, 1, 0.5, -0.5, 0, 0, 1, 0, 1, 0, 0.5, 0, 0, 0, 1, 1]);
+        const json = {
+            accessors: [
+                { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: 3, type: "VEC3" },
+                { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: 3, type: "VEC4" },
+            ],
+            bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: interleaved.byteLength, byteStride: 28 }],
+        };
+        const primitive = { attributes: { POSITION: 0, COLOR_0: 1 } };
+        const material = createPbr();
+        const source = {
+            ...(await buildPartial(json, new DataView(interleaved.buffer), primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, new DataView(interleaved.buffer), 0, "", []),
+        };
+        const device = {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
+                size: Number(descriptor.size),
+                getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                unmap: vi.fn(),
+                destroy: vi.fn(),
+            })),
+            createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout),
+            createBindGroup: vi.fn((descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup),
+            createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
+            createShaderModule: vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule),
+            createRenderPipeline: vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline),
+            queue: { writeBuffer: vi.fn() },
+        } as unknown as GPUDevice;
+        const engine = { _device: device, canvas: { width: 1, height: 1 } } as unknown as EngineContext;
+        const mesh = buildMesh(engine, source, 0, material);
+        mesh.material = createShaderMaterial({
+            attributes: ["position", "color"],
+            vertexSource: wgsl`@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4f{return vec4f(input.position,1);}`,
+            fragmentSource: wgsl`@fragment fn mainFragment()->@location(0) vec4f{return vec4f(1);}`,
+        });
+        const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() } as never;
+        const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 } as const;
+        const expectPacking = (pipeline: GPURenderPipeline): void => {
+            const layouts = (pipeline as unknown as GPURenderPipelineDescriptor).vertex.buffers!;
+            expect(layouts[0]).toMatchObject({ arrayStride: 28, attributes: [{ offset: 0 }] });
+            // The loader normalizes COLOR_0 into a tight float32x4 buffer. The real asset
+            // catches the noncanonical POSITION stride; synthetic layout tests cover offsets.
+            expect(layouts[1]).toMatchObject({ arrayStride: 16, attributes: [{ offset: 0 }] });
+        };
+
+        expectPacking(shaderRender.buildShaderMaterialRenderables(scene, [mesh]).renderables[0]!.bind(engine, signature).pipeline);
+        thin.setThinInstances(mesh, new Float32Array(16), 1);
+        expectPacking((await shaderRender.buildShaderGroup(scene, [mesh])).renderables[0]!.bind(engine, signature).pipeline);
+    });
+
+    it("publishes GPU packing by attribute name while preserving the CPU accessor records", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const source = {
+            ...(await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, binChunk, 0, "", []),
+        };
+        const engine = {
+            _device: {
+                createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
+                    label: descriptor.label,
+                    size: descriptor.size,
+                    getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                    unmap: vi.fn(),
+                    destroy: vi.fn(),
+                })),
+            },
+        } as unknown as EngineContext;
+        const mesh = buildInterleavedMesh(engine, source, 0, createPbrMaterial());
+        expect(Object.getPrototypeOf(mesh._gpu._vbLayout)).toBeNull();
+        expect(mesh._gpu._vbLayout!.position).toBe(source._vb!._p);
+        expect(mesh._gpu._vbLayout!.normal).toBe(source._vb!._n);
+        expect(mesh._gpu._vbLayout!.uv).toBeUndefined();
+        expect(mesh._gpu.positionBuffer).toBe(mesh._gpu.normalBuffer);
+        expect(mesh._gpu.uvBuffer).not.toBe(mesh._gpu.positionBuffer);
+        expect(source._vb!._p!._stride).toBe(24);
+        expect(source._vb!._n!._offset).toBe(12);
+    });
+
     it("accessorIsStrided detects interleaved vs tight bufferViews", () => {
         const { json } = makeInterleavedAsset();
         expect(accessorIsStrided(json, 0)).toBe(true); // POSITION (stride 24 ≠ 12)

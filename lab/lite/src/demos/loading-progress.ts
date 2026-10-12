@@ -71,7 +71,7 @@ function formatBytes(bytes: number): string {
 export function installFetchProgress(canvas: HTMLElement, options: InstallFetchProgressOptions = {}): LoadProgressHandle {
     const estimate = Math.max(0, Math.round(options.estimatedBytes ?? 0));
     const engineKB = Math.max(0, options.engineKB ?? (globalThis as { __DEMO_ENGINE_KB?: number }).__DEMO_ENGINE_KB ?? 0);
-    const original = globalThis.fetch.bind(globalThis);
+    const original = globalThis.fetch;
     const tasks: Task[] = [];
     let started = 0;
     let active = 0;
@@ -159,7 +159,7 @@ export function installFetchProgress(canvas: HTMLElement, options: InstallFetchP
     };
 
     const wrapped: typeof fetch = async (input, init) => {
-        const response = await original(input, init);
+        const response = await original.call(globalThis, input, init);
 
         const method = (init?.method ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
         const contentType = response.headers.get("content-type") ?? "";

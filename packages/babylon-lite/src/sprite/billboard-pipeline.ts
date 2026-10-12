@@ -8,6 +8,7 @@ import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 import { BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface BillboardPipelineDeviceCache {
     /** @internal */
@@ -49,15 +50,11 @@ export interface BillboardInstanceSortScratch {
     _sortDepths: Float32Array;
 }
 
-function getDepthModeEntry(depthMode: BillboardDepthMode): (typeof DEPTH_MODE_TABLE)[BillboardDepthMode] {
-    return DEPTH_MODE_TABLE[depthMode];
-}
-
 /** @internal Shared by the optional billboard custom-shader composer. */
 export function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
         case "facing":
-            return `struct B {
+            return wgsl`struct B {
 r: vec3f,
 u: vec3f,
 };
@@ -67,7 +64,7 @@ let u = normalize(vec3f(scene.view[0][1], scene.view[1][1], scene.view[2][1]));
 return B(r, -u);
 }`;
         case "axis-locked":
-            return `struct B {
+            return wgsl`struct B {
 r: vec3f,
 u: vec3f,
 };
@@ -86,7 +83,7 @@ return B(r, -a);
 
 function makeBillboardFragmentWgsl(depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
     if (depthMode === "cutout" && !alphaToCoverage) {
-        return `@fragment
+        return wgsl`@fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 if (s.a < billboards.axisAndCutoff.w) {
@@ -95,7 +92,7 @@ discard;
 return s * in.tint * billboards.opacityMul;
 }`;
     }
-    return `@fragment
+    return wgsl`@fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 return s * in.tint * billboards.opacityMul;
@@ -103,7 +100,7 @@ return s * in.tint * billboards.opacityMul;
 }
 
 function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
-    return `${SCENE_UBO_WGSL}
+    return wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,
@@ -162,19 +159,20 @@ export function getOrCreateBillboardPipeline(
     sampleCount: 1 | 4,
     system: BillboardSpriteSystem,
     depthStencilFormat: GPUTextureFormat,
-    sceneBindGroupLayout: GPUBindGroupLayout
+    sceneBindGroupLayout: GPUBindGroupLayout,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const deviceCache = getBillboardPipelineDeviceCache(engine, cache);
-    const depthEntry = getDepthModeEntry(system._depthMode);
+    const depthEntry = DEPTH_MODE_TABLE[system._depthMode];
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = depthEntry.writeEnabled && sampleCount > 1 && !!alphaToCoverageResolver?.(system);
     const customKey = _getBillboardFxHook()?.pipelineKeyPart(system) ?? "";
-    const key = `${format}:${sampleCount}:${system._orientation}:${system.blendMode._key}:${depthEntry.index}:${depthStencilFormat}:${alphaToCoverage ? "a" : "n"}:${customKey}`;
+    const key = `${format}:${sampleCount}:${system._orientation}:${system.blendMode._key}:${depthEntry.index}:${depthStencilFormat}:${depthCompare}:${alphaToCoverage ? "a" : "n"}:${customKey}`;
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
     }
-    const pipeline = buildBillboardPipeline(engine, deviceCache, format, sampleCount, system, depthStencilFormat, sceneBindGroupLayout, alphaToCoverage);
+    const pipeline = buildBillboardPipeline(engine, deviceCache, format, sampleCount, system, depthStencilFormat, sceneBindGroupLayout, alphaToCoverage, depthCompare);
     deviceCache._pipelines.set(key, pipeline);
     return pipeline;
 }
@@ -414,7 +412,7 @@ function getShaderModule(engine: EngineContext, cache: BillboardPipelineDeviceCa
     if (customModule) {
         return customModule;
     }
-    const key = `${orientation}:${getDepthModeEntry(depthMode).index}:${alphaToCoverage ? "a" : "n"}`;
+    const key = `${orientation}:${DEPTH_MODE_TABLE[depthMode].index}:${alphaToCoverage ? "a" : "n"}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
         module = engine._device.createShaderModule({ code: makeBillboardWgsl(orientation, depthMode, alphaToCoverage) });
@@ -431,10 +429,11 @@ function buildBillboardPipeline(
     system: BillboardSpriteSystem,
     depthStencilFormat: GPUTextureFormat,
     sceneBindGroupLayout: GPUBindGroupLayout,
-    alphaToCoverage: boolean
+    alphaToCoverage: boolean,
+    depthCompare: GPUCompareFunction
 ): GPURenderPipeline {
     const device = engine._device;
-    const depthEntry = getDepthModeEntry(system._depthMode);
+    const depthEntry = DEPTH_MODE_TABLE[system._depthMode];
     const shaderModule = getShaderModule(engine, cache, system, alphaToCoverage);
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
         { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
@@ -482,7 +481,7 @@ function buildBillboardPipeline(
             ],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
-        depthStencil: { format: depthStencilFormat, depthCompare: "greater-equal", depthWriteEnabled: depthEntry.writeEnabled },
+        depthStencil: { format: depthStencilFormat, depthCompare, depthWriteEnabled: depthEntry.writeEnabled },
         multisample: alphaToCoverage ? { count: sampleCount, alphaToCoverageEnabled: true } : { count: sampleCount },
     });
 }

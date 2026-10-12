@@ -24,6 +24,7 @@ import { createTextData, updateTextData } from "../../../packages/babylon-lite/s
 import type { TextLayer, TextRenderer } from "../../../packages/babylon-lite/src/text/text-renderer";
 import { createTextLayer, createTextRenderer } from "../../../packages/babylon-lite/src/text/text-renderer";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
+import { getRenderingContextKind } from "../../../packages/babylon-lite/src/engine/engine";
 
 // ── Mock GPU device ───────────────────────────────────────────────
 // Only the calls the text renderer makes during `_update()` are implemented. Textures and
@@ -153,6 +154,7 @@ describe("text renderer bind-group cache", () => {
         const layer = createTextLayer(data);
         const rr = createTextRenderer(surface, { layers: [layer] });
 
+        expect(getRenderingContextKind(rr)).toBe("text-renderer");
         rr._update();
 
         expect(data._groups.map((g) => g._curveSetId)).toEqual(["f", "g"]);

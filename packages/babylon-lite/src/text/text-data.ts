@@ -95,7 +95,8 @@ export interface TextData {
     readonly runs: readonly GlyphRun[];
     /** @internal Mutable alias of {@link runs} (same array reference). */
     _runs: GlyphRun[];
-    /** @internal Per-curve-set draw groups. Length = number of unique curveSet ids referenced. */
+    /** @internal Draw groups. Length = number of unique draw-group keys referenced (one per
+     *  curve set unless a styling feature splits one further). */
     _groups: TextDataDrawGroup[];
     /** @internal Per-run bookkeeping records, keyed by `GlyphRun` reference. */
     _runRecords: Map<GlyphRun, RunRecord>;
@@ -130,8 +131,9 @@ export interface TextData {
     /** @internal */ _dirtyEnd: number;
 }
 
-/** @internal Per-curve-set draw group within a TextData. One group per unique font used by the
- *  live runs. Groups own a contiguous *slot range* in the shared instance buffer; live and dead
+/** @internal Draw group within a TextData. One group per unique draw-group key — i.e. one per
+ *  unique font used by the live runs, unless an opt-in styling feature splits a curve set
+ *  further. Groups own a contiguous *slot range* in the shared instance buffer; live and dead
  *  slots intermix within that range. The vertex shader emits a degenerate quad for dead slots
  *  so they cost only a vertex-shader invocation. */
 export type TextDataDrawGroup = {
@@ -156,6 +158,10 @@ export type TextDataDrawGroup = {
     _bindGroup: GPUBindGroup | null;
     /** @internal Atlas-GPU upload version captured when `_bindGroup` was last (re)built. */
     _bindGroupVersion: number;
+    /** @internal Draw-group identity. Equals `_curveSetId` unless an opt-in styling feature
+     *  interned a different key for these runs, in which case the group needs the composed
+     *  variant pipeline — `_groupKey !== _curveSetId` is exactly that test. */
+    _groupKey: TextGroupKey;
 };
 
 /** @internal Per-run bookkeeping. Lets us locate a run's instances inside its draw group's
@@ -182,8 +188,10 @@ export const TEXT_INSTANCE_FLOATS = 3;
 export const TEXT_INSTANCE_BYTES = TEXT_INSTANCE_FLOATS * 4;
 
 /** Floats per style-palette entry, matching the WGSL `TextStyle` struct: a `vec4<f32>` color
- *  followed by a `vec4<f32>` of params whose `.x` carries the run's `invScale`. The rest is
- *  reserved padding that keeps the struct naturally 16-byte aligned. */
+ *  followed by a `vec4<f32>` of params whose `.x` carries the run's `invScale` and whose `.y`
+ *  carries the optional per-run style parameter (see {@link TextStyleSeam}; 0 when no styling
+ *  feature is installed). The rest is reserved padding that keeps the struct naturally
+ *  16-byte aligned. */
 export const TEXT_STYLE_FLOATS = 8;
 export const TEXT_STYLE_BYTES = TEXT_STYLE_FLOATS * 4;
 
@@ -197,6 +205,40 @@ const MAX_PACKED_INDEX = 0xfffe;
 const MAX_STYLE_ENTRIES = MAX_PACKED_INDEX + 1;
 
 const WHITE_COLOR: readonly [number, number, number, number] = [1, 1, 1, 1];
+
+// ─── Optional per-run styling seam ─────────────────────────────────────────
+// Installed by an opt-in styling feature (currently `set-font-weight-offset.ts`) from
+// inside its setter; null otherwise. This module attaches no meaning to either result:
+// `_param` is a float copied verbatim into `TextStyle.params.y`, `_key` is a token
+// compared only with `===`. All feature semantics live in the installing module.
+
+/** @internal Opaque draw-group identity, compared by `===` only. The default is the run's
+ *  own {@link CurveSetId}; a styling feature may substitute an interned non-string token,
+ *  which by construction can never equal a curve-set id — so no composite/delimited key can
+ *  make one curve set's group alias another's. */
+export type TextGroupKey = CurveSetId | object;
+
+/** @internal Per-run styling hooks supplied by an opt-in feature. */
+export interface TextStyleSeam {
+    /** @internal Draw-group key for a run — must be `run.curveSet` unless the run needs a
+     *  different pipeline variant, and must never equal another curve set's key. */
+    _key(run: GlyphRun): TextGroupKey;
+    /** @internal Extra style float, packed verbatim into `TextStyle.params.y`. */
+    _param(run: GlyphRun): number;
+}
+
+/** @internal */
+export let _textStyleSeam: TextStyleSeam | null = null;
+
+/** @internal Install the styling seam. Called once by the opt-in setter. */
+export function _installTextStyleSeam(seam: TextStyleSeam): void {
+    _textStyleSeam = seam;
+}
+
+/** Draw-group key for a run: its curve set unless a styling feature interned another. */
+function runGroupKey(run: GlyphRun): TextGroupKey {
+    return _textStyleSeam?._key(run) ?? run.curveSet;
+}
 
 // ─── Per-slot packing ──────────────────────────────────────────────────────
 
@@ -301,7 +343,7 @@ function allocateStyles(data: TextData, count: number, previous?: number[]): num
  *  change. Comparing against the `Math.fround` of each value rather than the value itself is
  *  what makes that check meaningful: the palette stores float32, so a double like `1 / 13.3`
  *  never compares equal to its own stored form and every frame would look like a change. */
-function writeStyle(data: TextData, entry: number, color: readonly [number, number, number, number], invScale: number): void {
+function writeStyle(data: TextData, entry: number, color: readonly [number, number, number, number], invScale: number, styleParam: number): void {
     const w = entry * TEXT_STYLE_FLOATS;
     const s = data._styles;
     const r = Math.fround(color[0]);
@@ -309,7 +351,8 @@ function writeStyle(data: TextData, entry: number, color: readonly [number, numb
     const b = Math.fround(color[2]);
     const a = Math.fround(color[3]);
     const iv = Math.fround(invScale);
-    if (s[w] === r && s[w + 1] === g && s[w + 2] === b && s[w + 3] === a && s[w + 4] === iv) {
+    const sp = Math.fround(styleParam);
+    if (s[w] === r && s[w + 1] === g && s[w + 2] === b && s[w + 3] === a && s[w + 4] === iv && s[w + 5] === sp) {
         return;
     }
     s[w] = r;
@@ -317,6 +360,7 @@ function writeStyle(data: TextData, entry: number, color: readonly [number, numb
     s[w + 2] = b;
     s[w + 3] = a;
     s[w + 4] = iv;
+    s[w + 5] = sp;
     data._styleVersion++;
 }
 
@@ -479,9 +523,9 @@ function freeSlots(data: TextData, group: TextDataDrawGroup, slots: number[]): v
 
 // ─── Draw-group helpers ────────────────────────────────────────────────────
 
-function findGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup | undefined {
+function findGroup(data: TextData, groupKey: TextGroupKey): TextDataDrawGroup | undefined {
     for (const g of data._groups) {
-        if (g._curveSetId === curveSetId) {
+        if (g._groupKey === groupKey) {
             return g;
         }
     }
@@ -496,8 +540,8 @@ function lookupCurveSet(storage: GlyphStorage, curveSetId: CurveSetId, op: strin
     return cs;
 }
 
-/** Build a fresh draw group for `curveSetId` starting at absolute slot `slotStart`. */
-function makeDrawGroup(curveSetId: CurveSetId, curveSet: GlyphStorageCurveSet, slotStart: number): TextDataDrawGroup {
+/** Build a fresh draw group for `groupKey` starting at absolute slot `slotStart`. */
+function makeDrawGroup(curveSetId: CurveSetId, curveSet: GlyphStorageCurveSet, slotStart: number, groupKey: TextGroupKey): TextDataDrawGroup {
     return {
         _curveSetId: curveSetId,
         _curveSet: curveSet,
@@ -507,16 +551,17 @@ function makeDrawGroup(curveSetId: CurveSetId, curveSet: GlyphStorageCurveSet, s
         _freeSlots: [],
         _bindGroup: null,
         _bindGroupVersion: -1,
+        _groupKey: groupKey,
     };
 }
 
-function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup {
-    const existing = findGroup(data, curveSetId);
+function ensureGroup(data: TextData, curveSetId: CurveSetId, groupKey: TextGroupKey): TextDataDrawGroup {
+    const existing = findGroup(data, groupKey);
     if (existing) {
         return existing;
     }
     const curveSet = lookupCurveSet(data._storage, curveSetId, "addRun");
-    const group = makeDrawGroup(curveSetId, curveSet, data._instanceCount);
+    const group = makeDrawGroup(curveSetId, curveSet, data._instanceCount, groupKey);
     data._groups.push(group);
     return group;
 }
@@ -529,8 +574,9 @@ function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup 
 function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun, slots: number[], styleSlots: number[]): number[] {
     const ratio = run.pixelsPerFontUnit;
     const invScale = ratio !== 0 ? 1 / ratio : 0;
+    const styleParam = _textStyleSeam?._param(run) ?? 0;
     const defaultStyle = styleSlots[0]!;
-    writeStyle(data, defaultStyle, run.defaultColor ?? WHITE_COLOR, invScale);
+    writeStyle(data, defaultStyle, run.defaultColor ?? WHITE_COLOR, invScale, styleParam);
     let overrideEntry = 0;
     // Materialized only once a glyph actually misses the atlas, seeded with the prefix that
     // did land; while it stays null, `slots` is by definition the live set.
@@ -544,7 +590,7 @@ function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun
         const color = pg.color;
         if (color !== undefined) {
             styleIdx = styleSlots[++overrideEntry]!;
-            writeStyle(data, styleIdx, color, invScale);
+            writeStyle(data, styleIdx, color, invScale, styleParam);
         }
         const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group._curveSet, pg.glyphId, pg.x, pg.y, styleIdx);
         if (!ok) {
@@ -590,21 +636,26 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
         data._instancesU32 = new Uint32Array(data._instances.buffer);
     }
 
-    // Preserve previous groups for bind-group reuse when curveSet identity matches.
-    const prevGroupByCurveSet = new Map<CurveSetId, TextDataDrawGroup>();
+    // Preserve previous groups for bind-group reuse when the draw-group key matches. The key
+    // is the run's exact `CurveSetId` unless a styling feature interned another token, and it
+    // is compared by identity — never a delimited composite string, which would let a curve
+    // set whose id already ends in the delimiter+suffix collide with another curve set's
+    // variant group.
+    const prevGroupByKey = new Map<TextGroupKey, TextDataDrawGroup>();
     for (const g of data._groups) {
-        prevGroupByCurveSet.set(g._curveSetId, g);
+        prevGroupByKey.set(g._groupKey, g);
     }
 
     data._storage = storage;
 
-    // Group runs by curveSet so each group's slots are contiguous initially.
-    const runsByCurveSet = new Map<CurveSetId, GlyphRun[]>();
+    // Group runs by draw-group key so each group's slots are contiguous initially.
+    const runsByKey = new Map<TextGroupKey, GlyphRun[]>();
     for (const run of runs) {
-        let list = runsByCurveSet.get(run.curveSet);
+        const key = runGroupKey(run);
+        let list = runsByKey.get(key);
         if (!list) {
             list = [];
-            runsByCurveSet.set(run.curveSet, list);
+            runsByKey.set(key, list);
         }
         list.push(run);
     }
@@ -617,11 +668,14 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     data._freeStyleSlots.length = 0;
     data._styleVersion++;
 
-    for (const [curveSetId, groupRuns] of runsByCurveSet) {
+    for (const [key, groupRuns] of runsByKey) {
+        // Every run in a group shares one curve set: the key is either the curve-set id
+        // itself or a token the styling feature interned per curve set.
+        const curveSetId = groupRuns[0]!.curveSet;
         const curveSet = lookupCurveSet(storage, curveSetId, "reset");
 
-        const existing = prevGroupByCurveSet.get(curveSetId);
-        const group: TextDataDrawGroup = existing ?? makeDrawGroup(curveSetId, curveSet, writeSlot);
+        const existing = prevGroupByKey.get(key);
+        const group: TextDataDrawGroup = existing ?? makeDrawGroup(curveSetId, curveSet, writeSlot, key);
         // Re-point cached curveSet at the (possibly new) storage's entry; invalidate
         // bind group when the underlying GlyphStorageCurveSet identity changed.
         if (group._curveSet !== curveSet) {
@@ -672,12 +726,27 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
 // ─── addRun / removeRun / replaceRun ───────────────────────────────────────
 
 function resolveRun(data: TextData, ref: GlyphRun | number): GlyphRun {
+    return typeof ref === "number" ? _resolveRunRef(data, ref, "updateTextData") : ref;
+}
+
+/** @internal Resolve a public `GlyphRun | number` reference against `data`'s live runs, so
+ *  an opt-in per-run feature setter validates its argument exactly the way `updateTextData`
+ *  does and throws the same shape of message. `op` prefixes that message.
+ *
+ *  Unlike the internal `resolveRun`, an object reference is *checked for membership*: a
+ *  feature setter is a standalone entry point, so it cannot rely on a caller having already
+ *  looked the run's record up. `updateTextData`'s index path shares this function, so the
+ *  index bound check can never drift between the two. */
+export function _resolveRunRef(data: TextData, ref: GlyphRun | number, op: string): GlyphRun {
     if (typeof ref === "number") {
         const r = data._runs[ref];
         if (!r) {
-            throw new Error(`updateTextData: run index ${ref} out of range (0..${data._runs.length - 1}).`);
+            throw new Error(`${op}: run index ${ref} out of range (0..${data._runs.length - 1}).`);
         }
         return r;
+    }
+    if (!data._runRecords.has(ref)) {
+        throw new Error(`${op}: GlyphRun reference is not in this TextData.`);
     }
     return ref;
 }
@@ -696,7 +765,7 @@ function applyAddRun(data: TextData, run: GlyphRun, insertBefore?: number): void
     const at = insertBefore ?? data._runs.length;
     lookupCurveSet(data._storage, run.curveSet, "addRun");
     const styleSlots = allocateStyles(data, countRunStyles(run));
-    const group = ensureGroup(data, run.curveSet);
+    const group = ensureGroup(data, run.curveSet, runGroupKey(run));
     const groupIdx = data._groups.indexOf(group);
     const slots = allocateSlots(data, group, run.glyphs.length);
     const live = writeRunToSlots(data, group, run, slots, styleSlots);
@@ -770,7 +839,7 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     // edit reduces to slot bookkeeping — no list splices, and no index scan to drive them. An
     // empty new run is the one exception: it can leave the group with nothing live, and only
     // the remove path knows how to retire a group.
-    if (newRun.curveSet === group._curveSetId && newRun.glyphs.length > 0) {
+    if (runGroupKey(newRun) === group._groupKey && newRun.glyphs.length > 0) {
         const styleSlots = allocateStyles(data, countRunStyles(newRun), rec._styleSlots);
         const prevSlotCount = rec._slots.length;
         let slots = rec._slots;

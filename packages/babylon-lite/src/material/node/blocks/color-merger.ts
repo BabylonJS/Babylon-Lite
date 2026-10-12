@@ -6,6 +6,7 @@
  */
 
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function tryResolve(block: NodeBlock, inputName: string, stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr | null {
     const input = block.inputs.get(inputName);
@@ -51,7 +52,7 @@ export const emitter: BlockEmitter = {
             const rgbExpr = ctx.cast(rgb, "vec3f").expr;
             const aExpr = a ? ctx.cast(a, "f32").expr : "0.0";
             if (outputName === "rgba") {
-                return { expr: `(vec4<f32>(${rgbExpr}, ${aExpr})${swizzle(block, 4)})`, type: "vec4f" };
+                return { expr: wgsl`(vec4<f32>(${rgbExpr}, ${aExpr})${swizzle(block, 4)})`, type: "vec4f" };
             }
             return { expr: `((${rgbExpr})${swizzle(block, 3)})`, type: "vec3f" };
         }
@@ -64,8 +65,8 @@ export const emitter: BlockEmitter = {
         const bExpr = b ? ctx.cast(b, "f32").expr : "0.0";
         const aExpr = a ? ctx.cast(a, "f32").expr : "0.0";
         if (outputName === "rgba") {
-            return { expr: `(vec4<f32>(${rExpr}, ${gExpr}, ${bExpr}, ${aExpr})${swizzle(block, 4)})`, type: "vec4f" };
+            return { expr: wgsl`(vec4<f32>(${rExpr}, ${gExpr}, ${bExpr}, ${aExpr})${swizzle(block, 4)})`, type: "vec4f" };
         }
-        return { expr: `(vec3<f32>(${rExpr}, ${gExpr}, ${bExpr})${swizzle(block, 3)})`, type: "vec3f" };
+        return { expr: wgsl`(vec3<f32>(${rExpr}, ${gExpr}, ${bExpr})${swizzle(block, 3)})`, type: "vec3f" };
     },
 };

@@ -28,6 +28,7 @@ export interface MockGL {
     /** Set whether the next compile/link should succeed. */
     setCompileSuccess(ok: boolean): void;
     setLinkSuccess(ok: boolean): void;
+    setProgramAllocationSuccess(ok: boolean): void;
     /** Mock parallel-shader-compile completion gate. Returns false until
      *  flipped via `setParallelComplete(true)`. */
     setParallelComplete(ok: boolean): void;
@@ -44,6 +45,7 @@ interface Internal {
     parallelComplete: boolean;
     compileSuccess: boolean;
     linkSuccess: boolean;
+    programAllocationSuccess: boolean;
     sampleCount: number;
     extensions: Record<string, boolean>;
 }
@@ -56,6 +58,7 @@ export function createMockGL(): MockGL {
         parallelComplete: true,
         compileSuccess: true,
         linkSuccess: true,
+        programAllocationSuccess: true,
         sampleCount: 0,
         // Default: all color-buffer-float extensions present so render-target
         // float caps report true. Toggle with `setExtensionAvailable`.
@@ -91,6 +94,7 @@ export function createMockGL(): MockGL {
         RED: 0x1903,
         LUMINANCE: 0x1909,
         RGBA8: 0x8058,
+        SRGB8_ALPHA8: 0x8c43,
         RGB8: 0x8051,
         RG8: 0x822b,
         R8: 0x8229,
@@ -99,16 +103,24 @@ export function createMockGL(): MockGL {
         RGBA16F: 0x881a,
         RGB16F: 0x881b,
         TEXTURE_2D: 0x0de1,
+        TEXTURE_3D: 0x806f,
+        MAX_3D_TEXTURE_SIZE: 0x8073,
         TEXTURE0: 0x84c0,
         TEXTURE_MIN_FILTER: 0x2801,
         TEXTURE_MAG_FILTER: 0x2800,
         TEXTURE_WRAP_S: 0x2802,
         TEXTURE_WRAP_T: 0x2803,
+        TEXTURE_WRAP_R: 0x8072,
         LINEAR: 0x2601,
         LINEAR_MIPMAP_LINEAR: 0x2703,
         NEAREST: 0x2600,
         CLAMP_TO_EDGE: 0x812f,
         UNPACK_FLIP_Y_WEBGL: 0x9240,
+        UNPACK_ROW_LENGTH: 0x0cf2,
+        UNPACK_SKIP_ROWS: 0x0cf3,
+        UNPACK_SKIP_PIXELS: 0x0cf4,
+        UNPACK_IMAGE_HEIGHT: 0x806e,
+        UNPACK_SKIP_IMAGES: 0x806d,
         VERTEX_SHADER: 0x8b31,
         FRAGMENT_SHADER: 0x8b30,
         COMPILE_STATUS: 0x8b81,
@@ -172,6 +184,9 @@ export function createMockGL(): MockGL {
             if (p === ENUMS.MAX_TEXTURE_SIZE) {
                 return 4096;
             }
+            if (p === ENUMS.MAX_3D_TEXTURE_SIZE) {
+                return 256;
+            }
             if (p === ENUMS.MAX_COMBINED_TEXTURE_IMAGE_UNITS) {
                 return 16;
             }
@@ -200,20 +215,27 @@ export function createMockGL(): MockGL {
         compileShader: (s: object): void => {
             rec("compileShader", s);
         },
-        getShaderParameter: (_s: object, p: number): boolean => {
+        getShaderParameter: (s: object, p: number): boolean => {
+            rec("getShaderParameter", s, p);
             if (p === ENUMS.COMPILE_STATUS) {
                 return state.compileSuccess;
             }
             return false;
         },
-        getShaderInfoLog: (): string => "mock compile error",
+        getShaderInfoLog: (s: object): string => {
+            rec("getShaderInfoLog", s);
+            return "mock compile error";
+        },
         deleteShader: (s: object): void => {
             rec("deleteShader", s);
         },
-        createProgram: (): object => {
+        createProgram: (): object | null => {
+            rec("createProgram");
+            if (!state.programAllocationSuccess) {
+                return null;
+            }
             const p = handle("program");
             programs.push({ compileStatus: true, linkStatus: state.linkSuccess, infoLog: "mock link error" });
-            rec("createProgram");
             return p;
         },
         attachShader: (p: object, s: object): void => {
@@ -225,16 +247,20 @@ export function createMockGL(): MockGL {
         linkProgram: (p: object): void => {
             rec("linkProgram", p);
         },
-        getProgramParameter: (_p: object, q: number): boolean | number => {
+        getProgramParameter: (p: object, q: number): boolean | number => {
+            rec("getProgramParameter", p, q);
             if (q === ENUMS.LINK_STATUS) {
-                return state.linkSuccess;
+                return state.linkSuccess && state.compileSuccess;
             }
             if (q === PARALLEL_EXT.COMPLETION_STATUS_KHR) {
                 return state.parallelComplete;
             }
             return 0;
         },
-        getProgramInfoLog: (): string => "mock link error",
+        getProgramInfoLog: (p: object): string => {
+            rec("getProgramInfoLog", p);
+            return "mock link error";
+        },
         deleteProgram: (p: object): void => {
             rec("deleteProgram", p);
         },
@@ -283,6 +309,9 @@ export function createMockGL(): MockGL {
         },
         texImage2D: (...args: unknown[]): void => {
             rec("texImage2D", ...args);
+        },
+        texImage3D: (...args: unknown[]): void => {
+            rec("texImage3D", ...args);
         },
         texParameteri: (target: number, p: number, v: number): void => {
             rec("texParameteri", target, p, v);
@@ -456,6 +485,9 @@ export function createMockGL(): MockGL {
         },
         setLinkSuccess: (ok) => {
             state.linkSuccess = ok;
+        },
+        setProgramAllocationSuccess: (ok) => {
+            state.programAllocationSuccess = ok;
         },
         setParallelComplete: (ok) => {
             state.parallelComplete = ok;

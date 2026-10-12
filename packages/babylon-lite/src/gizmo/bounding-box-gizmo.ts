@@ -23,8 +23,8 @@ import { addToScene, onBeforeRender } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { createBox, createCylinder } from "../mesh/mesh-factories.js";
 import { computeAabb } from "../math/compute-aabb.js";
-import { mat4FromQuat } from "../math/mat4-from-quat.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
+import { createMat4FromQuat } from "../math/create-mat4-from-quat.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
 import type { Mat4 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
@@ -133,7 +133,7 @@ function computeBoundsRecursive(root: SceneNode, extraCandidates?: readonly Mesh
             // When `preTransform` is supplied, fold it into the mesh's world
             // matrix so the AABB is computed in that rotated frame (used to get
             // the node's rotation-removed bounds for the OBB cage).
-            const m = preTransform ? mat4Multiply(preTransform, probe.worldMatrix as unknown as Mat4) : (probe.worldMatrix as never);
+            const m = preTransform ? multiplyMat4(preTransform, probe.worldMatrix as unknown as Mat4) : (probe.worldMatrix as never);
             const aabb = computeAabb(probe._cpuPositions, m as never);
             if (Number.isFinite(aabb[0][0])) {
                 if (aabb[0][0] < minX) {
@@ -624,7 +624,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         }
         // Node world rotation (scale removed) and its inverse rotation matrix.
         const q = rotationQuatFromMatrix(node.worldMatrix);
-        const rInv = mat4FromQuat(-q[0], -q[1], -q[2], q[3]);
+        const rInv = createMat4FromQuat(-q[0], -q[1], -q[2], q[3]);
         // Bounds in the rotation-removed frame so the cage is a tight OBB.
         // Fall back to walking the main scene's meshes so descendants attached
         // via the `.parent` setter alone (not pushed into `.children`) are

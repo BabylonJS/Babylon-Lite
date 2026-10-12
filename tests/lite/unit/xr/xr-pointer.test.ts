@@ -45,16 +45,16 @@ import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { XrInputManager, XrInputSource } from "../../../../packages/babylon-lite/src/xr/xr-input";
-import { mat4Compose } from "../../../../packages/babylon-lite/src/math/mat4-compose";
+import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
 
 const UNIT_CUBE = new Float32Array([-1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1]);
 
 function targetBox(z: number): Mesh {
-    return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: mat4Compose(0, 0, z, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
+    return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: composeMat4(0, 0, z, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
 }
 
 function targetBoxX(x: number): Mesh {
-    return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: mat4Compose(x, 0, 0, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
+    return { name: "target", pickable: undefined, _cpuPositions: UNIT_CUBE, worldMatrix: composeMat4(x, 0, 0, 0, 0, 0, 1, 1, 1, 1) } as unknown as Mesh;
 }
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);

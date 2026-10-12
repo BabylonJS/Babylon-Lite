@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, enableMirroredMeshesMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
+    createEngineMock: vi.fn(),
+    enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+    onEngineDeviceLostMock: vi.fn(),
+    registerSceneMock: vi.fn<() => Promise<void>>(),
     startEngineMock: vi.fn<() => Promise<void>>(),
 }));
 
@@ -8,22 +12,31 @@ vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
+        createEngine: createEngineMock,
+        enableMirroredMeshes: enableMirroredMeshesMock,
+        onEngineDeviceLost: onEngineDeviceLostMock,
+        registerScene: registerSceneMock,
         startEngine: startEngineMock,
     };
 });
 
 import type { EngineContext } from "babylon-lite";
-import { WebGPUEngine } from "../src/engine/engine";
+import { Engine, WebGPUEngine } from "../src/engine/engine";
 
 interface TestEngine {
     _startupComplete: boolean;
     _startPromise: Promise<void> | null;
     _startupWork: Array<() => Promise<void>>;
     _lateWork: Array<() => Promise<void>>;
-    _scenes: [];
+    _scenes: object[];
     _lite: EngineContext;
     _start(): Promise<void>;
     _registerLateWork(work: () => Promise<void>): void;
+}
+
+interface StartupScene {
+    _hasPendingMaterialPluginReconciliations: boolean;
+    _reconcilePendingMaterialPlugins(): Promise<void>;
 }
 
 function makeEngine(): TestEngine {
@@ -39,7 +52,58 @@ function makeEngine(): TestEngine {
 
 describe("compat engine startup ordering", () => {
     beforeEach(() => {
+        createEngineMock.mockReset();
+        createEngineMock.mockResolvedValue({});
+        enableMirroredMeshesMock.mockReset();
+        enableMirroredMeshesMock.mockResolvedValue();
+        onEngineDeviceLostMock.mockReset();
+        onEngineDeviceLostMock.mockReturnValue(() => undefined);
+        registerSceneMock.mockReset();
+        registerSceneMock.mockResolvedValue();
         startEngineMock.mockReset();
+    });
+
+    it("translates disabled antialiasing into a single-sample Lite surface", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        const booleanEngine = new Engine(canvas, false);
+        await booleanEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+
+        const objectEngine = new Engine(canvas, { antialias: false, msaaSamples: 4 });
+        await objectEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("retains Lite's sample-count setting when antialiasing is not disabled", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        const defaultEngine = new Engine(canvas, true);
+        await defaultEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, undefined);
+
+        const configuredEngine = new Engine(canvas, { antialias: true, msaaSamples: 1 });
+        await configuredEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("forwards Lite device loss to the BJS context-loss observable", async () => {
+        const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
+        const observer = vi.fn();
+        engine.onContextLostObservable.add(observer);
+        await engine.initAsync();
+
+        const callback = onEngineDeviceLostMock.mock.calls[0]![1] as () => void;
+        callback();
+
+        expect(observer).toHaveBeenCalledWith(engine);
+    });
+
+    it("rejects BJS canvas presentation options that require Lite's hot surface path", () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        expect(() => new WebGPUEngine(canvas, { canvasToneMapping: { mode: "extended" } })).toThrow(/surface configuration hot path/);
+        expect(() => new WebGPUEngine(canvas, { canvasColorSpace: "display-p3" })).toThrow(/surface configuration hot path/);
     });
 
     it("starts the main engine before awaiting utility-layer work", async () => {
@@ -55,6 +119,82 @@ describe("compat engine startup ordering", () => {
         await engine._start();
 
         expect(order).toEqual(["engine", "utility"]);
+    });
+
+    it("drains first-frame material-plugin requests before startup is marked complete", async () => {
+        const order: string[] = [];
+        startEngineMock.mockImplementation(async () => {
+            order.push("first-frame");
+        });
+        const engine = makeEngine();
+        engine._scenes.push({
+            _buildShadowGenerators: () => undefined,
+            _parseNodeMaterials: () => Promise.resolve(),
+            _awaitPendingTextures: () => Promise.resolve(),
+            _bakeGroundUvs: () => undefined,
+            _flushPendingAdds: () => undefined,
+            _buildMorphTargets: () => undefined,
+            _buildClusteredContainers: () => undefined,
+            _enableMaterialPlugins: () => Promise.resolve(),
+            _loadPendingEnvironment: () => Promise.resolve(),
+            _hasShadows: () => false,
+            _lite: {},
+            _reconcilePendingMaterialPlugins: () => {
+                order.push("plugins");
+                return Promise.resolve();
+            },
+            _hasPendingMaterialPluginReconciliations: false,
+        });
+
+        await engine._start();
+
+        expect(order).toEqual(["first-frame", "plugins"]);
+        expect(engine._startupComplete).toBe(true);
+    });
+
+    it("keeps draining all scenes until startup plugin requests are globally quiescent", async () => {
+        let finishSceneB!: () => void;
+        const sceneBDrain = new Promise<void>((resolve) => {
+            finishSceneB = resolve;
+        });
+        const startupSceneDefaults = {
+            _buildShadowGenerators: () => undefined,
+            _parseNodeMaterials: () => Promise.resolve(),
+            _awaitPendingTextures: () => Promise.resolve(),
+            _bakeGroundUvs: () => undefined,
+            _flushPendingAdds: () => undefined,
+            _buildMorphTargets: () => undefined,
+            _buildClusteredContainers: () => undefined,
+            _enableMaterialPlugins: () => Promise.resolve(),
+            _loadPendingEnvironment: () => Promise.resolve(),
+            _hasShadows: () => false,
+            _lite: {},
+        };
+        let sceneADrains = 0;
+        const sceneA: StartupScene & typeof startupSceneDefaults = {
+            ...startupSceneDefaults,
+            _hasPendingMaterialPluginReconciliations: false,
+            async _reconcilePendingMaterialPlugins() {
+                sceneADrains++;
+                sceneA._hasPendingMaterialPluginReconciliations = false;
+            },
+        };
+        const sceneB: StartupScene & typeof startupSceneDefaults = {
+            ...startupSceneDefaults,
+            _hasPendingMaterialPluginReconciliations: false,
+            _reconcilePendingMaterialPlugins: () => sceneBDrain,
+        };
+        const engine = makeEngine();
+        engine._scenes.push(sceneA, sceneB);
+
+        const startup = engine._start();
+        await vi.waitFor(() => expect(sceneADrains).toBe(1));
+        sceneA._hasPendingMaterialPluginReconciliations = true;
+        finishSceneB();
+        await startup;
+
+        expect(sceneADrains).toBe(2);
+        expect(engine._startupComplete).toBe(true);
     });
 
     it("runs utility-layer work registered after engine startup", async () => {

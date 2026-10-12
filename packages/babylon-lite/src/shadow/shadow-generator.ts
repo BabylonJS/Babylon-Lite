@@ -17,6 +17,17 @@ export interface ShadowTaskInternalState {
     };
     /** @internal */
     _casterMeshes: readonly import("../mesh/mesh.js").Mesh[];
+    /** @internal Scene version captured before the last fully successful inner-task recording. */
+    _recordedVersion?: number;
+}
+
+/** @internal Runtime shadow enablement state installed only by `setShadowGeneratorEnabled`. */
+export interface ShadowGeneratorEnabledState {
+    enabled: boolean;
+    uploadedEnabled?: boolean;
+    uploadedUbo?: GPUBuffer;
+    readonly uploadData: Float32Array;
+    renderShadowMap(engine: import("../engine/engine.js").EngineContext, state: ShadowTaskInternalState): number;
 }
 
 /** Runtime state for a light's shadow generator: shadow technique, map textures, light matrix, and per-frame task hooks. */
@@ -51,12 +62,16 @@ export interface ShadowGenerator {
     _version: number;
     /** @internal */
     _shadowTaskState?: ShadowTaskInternalState;
+    /** @internal State owned by the runtime shadow enablement module. */
+    _runtimeEnabledState?: ShadowGeneratorEnabledState;
     /** @internal Opt-in CSM cache state; undefined for the default path and other techniques. */
     _csmCache?: {
         /** @internal */
         _refitAngle: number;
         /** @internal */
         _refitMaxIntervalMs: number;
+        /** @internal Static cascades re-rendered per frame after a drift-only refit; 0 = all in one frame. */
+        _staticCascadesPerFrame?: number;
         /** @internal */
         _loaded?: boolean;
     };

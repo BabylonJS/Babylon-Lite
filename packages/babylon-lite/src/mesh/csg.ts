@@ -3,8 +3,8 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "./mesh.js";
 import type { Mat4 } from "../math/types.js";
 import type { Material } from "../material/material.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { normalizeVec3TupleOrUp } from "../math/normalize-vec3-tuple-or-up.js";
 import { createMeshFromData } from "./mesh-factories.js";
 
 declare const csgSolidBrand: unique symbol;
@@ -185,7 +185,7 @@ function planeFromVertices(a: CsgVertex, b: CsgVertex, c: CsgVertex): CsgPlane {
     const cax = c.x - a.x;
     const cay = c.y - a.y;
     const caz = c.z - a.z;
-    const [nx, ny, nz] = normalizeVec3(cay * baz - caz * bay, caz * bax - cax * baz, cax * bay - cay * bax, 1e-20);
+    const [nx, ny, nz] = normalizeVec3TupleOrUp(cay * baz - caz * bay, caz * bax - cax * baz, cax * bay - cay * bax, 1e-20);
     return new CsgPlane(nx, ny, nz, nx * a.x + ny * a.y + nz * a.z);
 }
 
@@ -206,7 +206,7 @@ function interpolateVertex(a: CsgVertex, b: CsgVertex, t: number): CsgVertex {
     const nx = a.nx + (b.nx - a.nx) * t;
     const ny = a.ny + (b.ny - a.ny) * t;
     const nz = a.nz + (b.nz - a.nz) * t;
-    const [nnx, nny, nnz] = normalizeVec3(nx, ny, nz, 1e-20);
+    const [nnx, nny, nnz] = normalizeVec3TupleOrUp(nx, ny, nz, 1e-20);
     return {
         x: a.x + (b.x - a.x) * t,
         y: a.y + (b.y - a.y) * t,
@@ -289,9 +289,9 @@ function transformPoint(m: Mat4, x: number, y: number, z: number): [number, numb
 
 function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: number): [number, number, number] {
     if (inv) {
-        return normalizeVec3(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
+        return normalizeVec3TupleOrUp(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
     }
-    return normalizeVec3(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
+    return normalizeVec3TupleOrUp(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
 }
 
 function requireCpuGeometry(mesh: Mesh): Mesh {
@@ -320,7 +320,7 @@ export function createCsgFromMesh(mesh: Mesh, materialSlot = 0): CsgSolid {
     const indices = internal._cpuIndices!;
     const uvs = internal._cpuUvs;
     const world = mesh.worldMatrix;
-    const invWorld = mat4Invert(world);
+    const invWorld = invertMat4(world);
     const polygons: CsgPolygon[] = [];
 
     for (let i = 0; i < indices.length; i += 3) {

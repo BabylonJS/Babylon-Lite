@@ -13,6 +13,230 @@
  */
 
 import { unsupported } from "../error.js";
+import type { AbstractEngine } from "../engine/engine.js";
+import { PushMaterial } from "../materials/materials.js";
+import type { Material } from "../materials/materials.js";
+import type { Scene } from "../scene/scene.js";
+import type { Camera } from "../cameras/cameras.js";
+import type { ShaderLanguage } from "../misc/engine-constants.js";
+import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
+import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
+import { MaterialPluginBase } from "../materials/material-plugin.js";
+import type { AnimationGroup } from "../animations/animation.js";
+import type { Bone } from "../bones/skeleton.js";
+import type { TransformNode } from "../meshes/meshes.js";
+import type { Vector3 } from "../math/vector.js";
+import type { Observable } from "../misc/observable.js";
+
+const FLUID_RENDERER_UNSUPPORTED =
+    "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
+const DITHERED_TILE_FADE_UNSUPPORTED =
+    "Lite's material-plugin bridge supports shared shader injection, but not Babylon.js per-draw mesh uniforms, hardware-instance bounds, or custom thin-instance attributes/varyings. Adding those requires an opt-in per-renderable plugin-data design.";
+
+// ─── Flow graph validation ───────────────────────────────────────────
+const FLOW_GRAPH_UNSUPPORTED =
+    "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
+
+export enum FlowGraphValidationSeverity {
+    Error = 0,
+    Warning = 1,
+}
+
+export interface IFlowGraphValidationIssue {
+    severity: FlowGraphValidationSeverity;
+    message: string;
+    block?: unknown;
+    connectionName?: string;
+}
+
+export interface IFlowGraphValidationResult {
+    isValid: boolean;
+    issues: IFlowGraphValidationIssue[];
+    errorCount: number;
+    warningCount: number;
+    issuesByBlock: Map<string, IFlowGraphValidationIssue[]>;
+}
+
+export function ValidateFlowGraph(_flowGraph: unknown): IFlowGraphValidationResult {
+    return unsupported("ValidateFlowGraph", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlocks: unknown[]): IFlowGraphValidationResult {
+    return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
+}
+
+// ─── Fluid rendering ─────────────────────────────────────────────────
+export abstract class FluidRenderingObject {
+    public static UsePerParticleSizeAttribute = false;
+
+    protected constructor(_scene: Scene, _shaderLanguage?: ShaderLanguage) {
+        unsupported("FluidRenderingObject", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRenderingObjectParticleSystem extends FluidRenderingObject {
+    public constructor(scene: Scene, _particleSystem: unknown, shaderLanguage?: ShaderLanguage) {
+        super(scene, shaderLanguage);
+    }
+}
+
+export class FluidRenderingObjectCustomParticles extends FluidRenderingObject {
+    public constructor(scene: Scene, _buffers: Record<string, ArrayLike<number>>, _numParticles: number, shaderLanguage?: ShaderLanguage) {
+        super(scene, shaderLanguage);
+    }
+}
+
+export class FluidRenderingTargetRenderer {
+    public constructor(_scene: Scene, _camera?: Camera, _shaderLanguage?: ShaderLanguage) {
+        unsupported("FluidRenderingTargetRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRenderer {
+    public constructor(_scene: Scene) {
+        unsupported("FluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRendererSceneComponent {
+    public constructor(_scene: Scene) {
+        unsupported("FluidRendererSceneComponent", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export function RegisterFluidRenderer(): void {
+    unsupported("RegisterFluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+}
+
+// ─── Root motion ─────────────────────────────────────────────────────
+const ROOT_MOTION_UNSUPPORTED =
+    "Babylon.js root motion analyzes animation hierarchies, rewrites in-place clips, journals mixer writes, and applies blended per-frame travel. Lite exposes animation playback but not that analysis and mixer-journal subsystem; its lifecycle and ownership require a Lite-level design.";
+
+export enum RootMotionSource {
+    None = 0,
+    Root = 1,
+    FootContact = 2,
+}
+
+export interface IRootMotionClipOptions {
+    rootNode?: TransformNode | Bone;
+    characterNode?: TransformNode;
+    contactNodes?: Array<TransformNode | Bone>;
+    source?: RootMotionSource;
+    extractRotation?: boolean;
+    samplesPerSecond?: number;
+    minimumTravel?: number;
+    minimumTurn?: number;
+    directionSnapAngle?: number;
+    extractLateralMotion?: boolean;
+    upAxis?: Vector3;
+    name?: string;
+    cloneAnimations?: boolean;
+}
+
+export class RootMotionClip {
+    public constructor(_animationGroup: AnimationGroup, _options: IRootMotionClipOptions = {}) {
+        unsupported("RootMotionClip", ROOT_MOTION_UNSUPPORTED);
+    }
+
+    public get sourceAnimationGroup(): AnimationGroup {
+        return unsupported("RootMotionClip.sourceAnimationGroup", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get animationGroup(): AnimationGroup {
+        return unsupported("RootMotionClip.animationGroup", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get controller(): RootMotionController | null {
+        return unsupported("RootMotionClip.controller", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get source(): RootMotionSource {
+        return unsupported("RootMotionClip.source", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get rootNode(): TransformNode | null {
+        return unsupported("RootMotionClip.rootNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get characterNode(): TransformNode {
+        return unsupported("RootMotionClip.characterNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get contactNodes(): ReadonlyArray<TransformNode> {
+        return unsupported("RootMotionClip.contactNodes", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get upAxis(): Vector3 {
+        return unsupported("RootMotionClip.upAxis", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get fromFrame(): number {
+        return unsupported("RootMotionClip.fromFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get toFrame(): number {
+        return unsupported("RootMotionClip.toFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get travelDirection(): Vector3 {
+        return unsupported("RootMotionClip.travelDirection", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleOffset(): Vector3 {
+        return unsupported("RootMotionClip.cycleOffset", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleDistance(): number {
+        return unsupported("RootMotionClip.cycleDistance", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleRotation(): number {
+        return unsupported("RootMotionClip.cycleRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get extractsRotation(): boolean {
+        return unsupported("RootMotionClip.extractsRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get duration(): number {
+        return unsupported("RootMotionClip.duration", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get averageSpeed(): number {
+        return unsupported("RootMotionClip.averageSpeed", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get characterHeight(): number {
+        return unsupported("RootMotionClip.characterHeight", ROOT_MOTION_UNSUPPORTED);
+    }
+    public getOffsetAtFrame(_frame: number, _result: Vector3): Vector3 {
+        return unsupported("RootMotionClip.getOffsetAtFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public getRotationAtFrame(_frame: number): number {
+        return unsupported("RootMotionClip.getRotationAtFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public dispose(): void {
+        unsupported("RootMotionClip.dispose", ROOT_MOTION_UNSUPPORTED);
+    }
+}
+
+export class RootMotionController {
+    public applyToCharacter = true;
+    public readonly onRootMotionObservable!: Observable<RootMotionController>;
+
+    public constructor(_characterNode: TransformNode, _clips: RootMotionClip[] = []) {
+        unsupported("RootMotionController", ROOT_MOTION_UNSUPPORTED);
+    }
+
+    public get characterNode(): TransformNode {
+        return unsupported("RootMotionController.characterNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get clips(): ReadonlyArray<RootMotionClip> {
+        return unsupported("RootMotionController.clips", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get deltaPosition(): Vector3 {
+        return unsupported("RootMotionController.deltaPosition", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get deltaRotation(): number {
+        return unsupported("RootMotionController.deltaRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public addClip(_clip: RootMotionClip): void {
+        unsupported("RootMotionController.addClip", ROOT_MOTION_UNSUPPORTED);
+    }
+    public removeClip(_clip: RootMotionClip): void {
+        unsupported("RootMotionController.removeClip", ROOT_MOTION_UNSUPPORTED);
+    }
+    public reset(): void {
+        unsupported("RootMotionController.reset", ROOT_MOTION_UNSUPPORTED);
+    }
+    public dispose(): void {
+        unsupported("RootMotionController.dispose", ROOT_MOTION_UNSUPPORTED);
+    }
+}
 
 // ─── Materials ───────────────────────────────────────────────────────
 export class MultiMaterial {
@@ -21,15 +245,150 @@ export class MultiMaterial {
     }
 }
 
+export type DitheredTileFadeSupportedMaterial = StandardMaterial | PBRMaterial;
+export type DitheredTileFadeMesh = Mesh | InstancedMesh;
+
+export interface IDitheredTileFadeBounds {
+    lowerBound: number;
+    upperBound: number;
+}
+
+export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
+    public static readonly Name = "DitheredTileFade";
+
+    /** @internal The unsupported constructor must not alter the material or scene. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: DitheredTileFadeSupportedMaterial) {
+        super(material, DitheredTileFadeMaterialPlugin.Name, 190);
+        unsupported("DitheredTileFadeMaterialPlugin", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public static GetOrCreate(_material: DitheredTileFadeSupportedMaterial): DitheredTileFadeMaterialPlugin {
+        return unsupported("DitheredTileFadeMaterialPlugin.GetOrCreate", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public get isEnabled(): boolean {
+        return unsupported("DitheredTileFadeMaterialPlugin.isEnabled", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public set isEnabled(_value: boolean) {
+        unsupported("DitheredTileFadeMaterialPlugin.isEnabled", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public setFadeBounds(_mesh: DitheredTileFadeMesh, _lowerBound: number, _upperBound: number): void {
+        unsupported("DitheredTileFadeMaterialPlugin.setFadeBounds", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public setFadeLowerBound(_mesh: DitheredTileFadeMesh, _lowerBound: number): void {
+        unsupported("DitheredTileFadeMaterialPlugin.setFadeLowerBound", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public setFadeUpperBound(_mesh: DitheredTileFadeMesh, _upperBound: number): void {
+        unsupported("DitheredTileFadeMaterialPlugin.setFadeUpperBound", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public getFadeBoundsToRef(_mesh: DitheredTileFadeMesh, _result: IDitheredTileFadeBounds): boolean {
+        return unsupported("DitheredTileFadeMaterialPlugin.getFadeBoundsToRef", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public resetFade(_mesh: DitheredTileFadeMesh): void {
+        unsupported("DitheredTileFadeMaterialPlugin.resetFade", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public setThinInstanceFadeBounds(_mesh: Mesh, _index: number, _lowerBound: number, _upperBound: number, _refresh = true): void {
+        unsupported("DitheredTileFadeMaterialPlugin.setThinInstanceFadeBounds", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public setThinInstanceFadeBoundsBuffer(_mesh: Mesh, _bounds: Float32Array): void {
+        unsupported("DitheredTileFadeMaterialPlugin.setThinInstanceFadeBoundsBuffer", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public commitThinInstanceFadeBounds(_mesh: Mesh): void {
+        unsupported("DitheredTileFadeMaterialPlugin.commitThinInstanceFadeBounds", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public resetThinInstanceFade(_mesh: Mesh, _index: number, _refresh = true): void {
+        unsupported("DitheredTileFadeMaterialPlugin.resetThinInstanceFade", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public reset(): void {
+        unsupported("DitheredTileFadeMaterialPlugin.reset", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public copyToMaterial(_material: DitheredTileFadeSupportedMaterial): DitheredTileFadeMaterialPlugin {
+        return unsupported("DitheredTileFadeMaterialPlugin.copyToMaterial", DITHERED_TILE_FADE_UNSUPPORTED);
+    }
+
+    public getClassName(): string {
+        return "DitheredTileFadeMaterialPlugin";
+    }
+}
+
 export class ShaderMaterial {
     public constructor() {
-        unsupported("ShaderMaterial", "Babylon Lite is WGSL-only. Use the native `createShaderMaterial` (WGSL) API; there is no automatic GLSL translation.");
+        unsupported(
+            "ShaderMaterial",
+            "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem."
+        );
     }
 }
 
 export class BackgroundMaterial {
     public constructor() {
         unsupported("BackgroundMaterial", "Standalone BackgroundMaterial is not wrapped. Use the compat `Scene` environment helpers / native `loadEnvironment` instead.");
+    }
+}
+
+export class OpenPBRMaterial extends PushMaterial {
+    /** @internal Unsupported stubs never expose a backing Lite material. */
+    public override get _lite(): never {
+        return unsupported(
+            "OpenPBRMaterial._lite",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+
+    public constructor(_name: string, _scene?: Scene, _forceGLSL = false) {
+        super(_name);
+        unsupported(
+            "OpenPBRMaterial",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+
+    public clone(_name: string, _cloneTexturesOnlyOnce = true, _rootUrl = ""): OpenPBRMaterial {
+        return unsupported(
+            "OpenPBRMaterial.clone",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export class OpenPBRMaterialDefines {
+    public constructor(_externalProperties?: Record<string, { type: string; default: unknown }>) {
+        unsupported(
+            "OpenPBRMaterialDefines",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export function RegisterOpenpbrMaterial(): void {
+    unsupported(
+        "RegisterOpenpbrMaterial",
+        "OpenPBR registration would install a material parser and shader subsystem that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+    );
+}
+
+export class OpenPBRMaterialLoadingAdapter {
+    public constructor(_material: Material) {
+        unsupported(
+            "OpenPBRMaterialLoadingAdapter",
+            "The adapter translates glTF material data into OpenPBRMaterial, whose shader/material subsystem requires Lite maintainer design."
+        );
     }
 }
 
@@ -325,17 +684,10 @@ export class MirrorTexture {
     }
 }
 
-// ─── HTML textures (DOM/CSS overlay interop) ─────────────────────────
-// New in BJS: `Materials/Textures/HTML/*` — uploads a live DOM element into a
-// texture and forwards pointer/raycast interaction onto an overlaid HTML layer.
-// This is a DOM-driven, host-page feature with no Babylon Lite equivalent (Lite
-// is a WebGPU renderer with no HTML overlay / interaction subsystem),
-// so every entry throws.
-
-/** Options accepted by Babylon.js `HtmlTexture` (shape-only stub for type parity). */
-export interface IHtmlTextureOptions {
-    [key: string]: unknown;
-}
+// ─── HTML texture interaction (DOM/CSS overlay interop) ──────────────
+// `HtmlTexture` itself is Lite-backed in textures/textures.ts. These remaining
+// APIs bind arbitrary textures to DOM overlay/raycast and polyfill lifecycles,
+// which Lite's owned HTML-texture surface does not expose.
 
 /** Options accepted by Babylon.js `HtmlInteractionManager` (shape-only stub). */
 export interface IHtmlInteractionManagerOptions {
@@ -357,12 +709,6 @@ export interface IInstallHtmlInCanvasPolyfillOptions {
     [key: string]: unknown;
 }
 
-export class HtmlTexture {
-    public constructor() {
-        unsupported("HtmlTexture", "Rendering a live DOM element into a texture is a host-page/DOM feature with no Babylon Lite equivalent.");
-    }
-}
-
 export class HtmlInteractionManager {
     public constructor() {
         unsupported("HtmlInteractionManager", "HTML overlay interaction is not part of Babylon Lite's WebGPU renderer.");
@@ -375,9 +721,13 @@ export class HtmlRaycastInteractionManager {
     }
 }
 
-/** Babylon.js `IsHtmlInCanvasUploadSupported` — HTML texture upload is unsupported by the compat layer. */
-export function IsHtmlInCanvasUploadSupported(): never {
-    return unsupported("IsHtmlInCanvasUploadSupported", "HTML-element texture upload is not supported by Babylon Lite.");
+/** Babylon.js `IsHtmlInCanvasUploadSupported` — kept in lockstep with the unavailable upload helper. */
+export function IsHtmlInCanvasUploadSupported(engine: AbstractEngine): boolean {
+    void engine;
+    return unsupported(
+        "IsHtmlInCanvasUploadSupported",
+        "Lite's HTML texture owns its element and texture together; it cannot back BJS's arbitrary InternalTexture upload contract."
+    );
 }
 
 /** Babylon.js `UploadHtmlElementToTexture` — HTML texture upload is unsupported by the compat layer. */
@@ -408,64 +758,6 @@ export function InstallHtmlInCanvasPolyfill(): never {
 /** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
 export function UninstallHtmlInCanvasPolyfill(): never {
     return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
-}
-
-// ─── Gaussian Splatting LOD streaming ────────────────────────────────
-// BJS `@babylonjs/loaders` SPLAT exposes a Gaussian-Splatting LOD *streaming*
-// subsystem (`GaussianSplattingStream` + `AddGaussianSplattingStreamPart[Async]`,
-// with `IGaussianSplattingStreamingPart` / `IGaussianSplattingStreamOptions` /
-// `ISOGLODMetadata` describing a compound mesh assembled from streamed parts).
-// It layers SOG-octree LOD residency management (download/residency controllers,
-// a block allocator) on top of a GPU work-buffer decode pipeline that decodes
-// SH / rotation / scale into shared render-target atlases via dedicated
-// GLSL+WGSL shaders. Babylon Lite loads a *whole* splat cloud eagerly
-// (`loadSplat` / `loadSOG` / `loadSPZ`, wrapped by the compat `GaussianSplattingMesh`)
-// and has no streaming/LOD residency subsystem or work-buffer decode pipeline to
-// back it. Adding one is a whole GPU subsystem with open design questions
-// (residency policy, LOD scheduling, atlas layout) — not a small, mechanical,
-// objective Lite addition — so these throw (structural blocker; move 3).
-
-/** Babylon.js `GaussianSplattingStreamDebugLodSource` — LOD debug source selector (shape-only stub for type parity). */
-export type GaussianSplattingStreamDebugLodSource = "optimal" | "current";
-
-/** Babylon.js `IGaussianSplattingStreamOptions` — GS LOD stream options (shape-only stub for type parity). */
-export interface IGaussianSplattingStreamOptions {
-    [key: string]: unknown;
-}
-
-/** Babylon.js `ISOGLODMetadata` — SOG LOD octree metadata (shape-only stub for type parity). */
-export interface ISOGLODMetadata {
-    [key: string]: unknown;
-}
-
-/** Babylon.js `IGaussianSplattingStreamingPart` — a streamed part of a GS compound mesh (shape-only stub for type parity). */
-export interface IGaussianSplattingStreamingPart {
-    [key: string]: unknown;
-}
-
-export class GaussianSplattingStream {
-    public constructor(..._args: unknown[]) {
-        unsupported(
-            "GaussianSplattingStream",
-            "Gaussian-Splatting LOD streaming is a whole GPU subsystem (SOG-octree LOD residency + work-buffer decode into render-target atlases) with no Babylon Lite equivalent. Load the full cloud with `GaussianSplattingMesh` / `loadSplat` instead."
-        );
-    }
-}
-
-/** Babylon.js `AddGaussianSplattingStreamPart` — appends a streamed LOD part to a GS compound mesh. */
-export function AddGaussianSplattingStreamPart(..._args: unknown[]): never {
-    return unsupported(
-        "AddGaussianSplattingStreamPart",
-        "Gaussian-Splatting LOD streaming (compound mesh + streamed parts) is not backed by Babylon Lite, which loads a whole splat cloud eagerly via `GaussianSplattingMesh`."
-    );
-}
-
-/** Babylon.js `AddGaussianSplattingStreamPartAsync` — async variant of {@link AddGaussianSplattingStreamPart}. */
-export function AddGaussianSplattingStreamPartAsync(..._args: unknown[]): never {
-    return unsupported(
-        "AddGaussianSplattingStreamPartAsync",
-        "Gaussian-Splatting LOD streaming (compound mesh + streamed parts) is not backed by Babylon Lite, which loads a whole splat cloud eagerly via `GaussianSplattingMesh`."
-    );
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────

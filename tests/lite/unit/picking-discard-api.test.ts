@@ -13,6 +13,9 @@ import { createVatPickProjectionWgsl } from "../../../packages/babylon-lite/src/
 import type { PickDiscardRule, PickOptions } from "../../../packages/babylon-lite/src";
 import type { PickPipelineModule, PickSource } from "../../../packages/babylon-lite/src/picking/pick-contributor";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
+import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -454,6 +457,66 @@ return input.worldPos + offsets[input.thinInstanceIndex].xyz + input.instanceExt
 });
 
 describe("picking discard pipeline API", () => {
+    it.each(["float16x4", "sint32x3", "float32x2"] as const)("rejects unsupported position format %s before encoding a pick", async (format) => {
+        const { engine, device, pass } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const material = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(0,0,0,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(material, { position: format });
+        mesh.material = material;
+        Object.assign(mesh._gpu, { _vbLayout: { position: { _stride: 16, _offset: 0 } } });
+
+        await expect(pickAsync(createGpuPicker(scene), 4, 4)).rejects.toThrow(/Default GPU picking cannot read "position" format/);
+        expect(device.renderPipelines).toHaveLength(0);
+        expect(pass.drawCalls).toHaveLength(0);
+
+        mesh.pickable = false;
+        await expect(pickAsync(createGpuPicker(scene), 4, 4)).resolves.toMatchObject({ hit: false });
+    });
+
+    it("allows compatible float32x4 positions to be picked as XYZ", async () => {
+        const { engine, device } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const material = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position.xyz,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(material, { position: "float32x4" });
+        mesh.material = material;
+        Object.assign(mesh._gpu, { _vbLayout: { position: { _stride: 16, _offset: 0 } } });
+
+        await expect(pickAsync(createGpuPicker(scene), 4, 4)).resolves.toMatchObject({ hit: true });
+        expect(
+            device.renderPipelines.some((pipeline) => pipeline.vertex.buffers?.some((layout) => layout?.arrayStride === 16 && layout.attributes[0]?.format === "float32x3"))
+        ).toBe(true);
+    });
+
+    it("rejects noncanonical discard-data formats only when that authored stream is consumed", async () => {
+        const { engine } = makePickerEngine();
+        const { scene, mesh } = makePickScene(engine);
+        const material = createShaderMaterial({
+            attributes: ["position", "color"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(material, { color: "unorm8x4" });
+        mesh.material = material;
+        Object.assign(mesh._gpu, { colorBuffer: {} as GPUBuffer, hasColor: true, _vbLayout: { color: { _stride: 4, _offset: 0 } } });
+        const discard: PickDiscardRule = {
+            key: "packed-color",
+            wgsl: "fn shouldDiscardPick(input: PickDiscardInput) -> bool { return input.vertexData.x > 0.5; }",
+            vertexData: "color",
+        };
+
+        await expect(pickAsync(createGpuPicker(scene), 4, 4, { discard })).rejects.toThrow(/Default GPU picking cannot read "color" format/);
+        Object.assign(mesh._gpu, { colorBuffer: null, hasColor: false });
+        await expect(pickAsync(createGpuPicker(scene), 4, 4, { discard })).resolves.toMatchObject({ hit: true });
+    });
+
     it("allows public discard rules to supply typed-array storage data", () => {
         const discard: PickDiscardRule = {
             key: "public-bindings",
@@ -822,8 +885,8 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
             uvBuffer: shared,
             hasUv: true,
             _vbLayout: {
-                _p: { _stride: 32, _offset: 0 },
-                _u: { _stride: 32, _offset: 24 },
+                position: { _stride: 32, _offset: 0 },
+                uv: { _stride: 32, _offset: 24 },
             },
         };
         const discard: PickDiscardRule = {
@@ -847,7 +910,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         mesh._gpu = {
             ...mesh._gpu,
             _vbLayout: {
-                _p: { _stride: 24, _offset: 8 },
+                position: { _stride: 24, _offset: 8 },
             },
         };
 
@@ -865,7 +928,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         mesh._gpu = {
             ...mesh._gpu,
             _vbLayout: {
-                _p: { _stride: 24, _offset: 8 },
+                position: { _stride: 24, _offset: 8 },
             },
         };
         mesh.thinInstances = {
@@ -890,7 +953,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         regularScene.mesh._gpu = {
             ...regularScene.mesh._gpu,
             _vbLayout: {
-                _p: { _stride: 24, _offset: 8 },
+                position: { _stride: 24, _offset: 8 },
             },
         };
         await pickAsync(createGpuPicker(regularScene.scene), 4, 4, { discard });
@@ -903,7 +966,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
         thinScene.mesh._gpu = {
             ...thinScene.mesh._gpu,
             _vbLayout: {
-                _p: { _stride: 24, _offset: 8 },
+                position: { _stride: 24, _offset: 8 },
             },
         };
         thinScene.mesh.thinInstances = {

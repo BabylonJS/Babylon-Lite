@@ -4,6 +4,7 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -16,7 +17,7 @@ export function createStdAmbientFragment(usesUV2: boolean): ShaderFragment {
             { _name: "aS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            AD: `baseAmbientColor = textureSample(aT, aS, ${uv}).rgb * mat.ambTexLvl;`,
+            AD: wgsl`baseAmbientColor = textureSample(aT, aS, ${uv}).rgb * mat.ambTexLvl;`,
         },
     };
 }

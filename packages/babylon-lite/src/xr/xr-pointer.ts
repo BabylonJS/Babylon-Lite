@@ -18,7 +18,7 @@ import type { PickingInfo } from "../picking/picking-info.js";
 import type { XrHandedness } from "./xr-support.js";
 import type { XrInputManager, XrInputSource } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { createBox, createTorus } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
@@ -365,7 +365,7 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
         const visual = computePointerVisual(origin, forward, hit ? info.distance : -1, opts.maxLength);
 
         // Laser: oriented by the target-ray rotation, centred on the beam, scaled to length.
-        const rot = mat4Decompose(m).rotation;
+        const rot = decomposeMat4(m).rotation;
         unit.laser.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);
         unit.laser.position.set(visual.laserPosition[0], visual.laserPosition[1], visual.laserPosition[2]);
         unit.laser.scaling.set(opts.laserThickness, opts.laserThickness, visual.beamLength);

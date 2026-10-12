@@ -1,5 +1,5 @@
 import { allocateMat4 } from "../../math/_matrix-allocator.js";
-import { mat4InvertToRefOrIdentity } from "../../math/mat4-invert-to-ref.js";
+import { invertMat4ToRefOrIdentity } from "../../math/invert-mat4-to-ref-or-identity.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Mat4, Mat4Storage } from "../../math/types.js";
@@ -61,7 +61,7 @@ export function withNodeParticleEmitterProvider<T extends object = BuildNodePart
                 copyMatrix(sampleProvider(provider), nextMatrix);
                 if (emitterInverseWorldMatrices.length) {
                     inverseScratch ??= allocateMat4();
-                    mat4InvertToRefOrIdentity(nextMatrix, inverseScratch);
+                    invertMat4ToRefOrIdentity(nextMatrix, inverseScratch);
                 }
                 copyMatrix(nextMatrix, emitterWorldMatrix);
                 mat4GetTranslationToRef(nextMatrix, emitter);

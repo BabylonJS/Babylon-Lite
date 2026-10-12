@@ -34,8 +34,10 @@ vi.mock("../../../packages/babylon-lite/src/loader-env/env-helpers.js", () => ({
     assembleEnvironmentTextures: mocks.assembleEnvironmentTextures,
 }));
 
-vi.mock("../../../packages/babylon-lite/src/resource/gpu-pool.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/resource/gpu-texture-acquire.js", () => ({
     acquireGPUTexture: mocks.acquireGPUTexture,
+}));
+vi.mock("../../../packages/babylon-lite/src/resource/gpu-texture-release.js", () => ({
     releaseGPUTexture: mocks.releaseGPUTexture,
 }));
 
@@ -86,6 +88,9 @@ describe("loadHdrEnvironment", () => {
             HDR_LOD_GENERATION_SCALE,
             scene.surface.engine
         );
+        expect(mocks.acquireGPUTexture).toHaveBeenCalledTimes(2);
+        scene._disposables[0]!();
+        expect(mocks.releaseGPUTexture).toHaveBeenCalledTimes(2);
     });
 
     it("can load IBL without creating a background", async () => {

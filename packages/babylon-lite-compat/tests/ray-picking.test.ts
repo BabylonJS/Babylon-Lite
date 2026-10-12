@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMeshesWithRay } from "babylon-lite";
 
-import { LiteCompatError, MeshBuilder, NullEngine, Ray, Scene, Vector3 } from "../src/index";
+import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../babylon-lite/src/math/_mat4-storage-f64";
+import { ArcRotateCamera, Matrix, MeshBuilder, NullEngine, Ray, Scene, Vector2, Vector3, Viewport } from "../src/index";
 
 function createPickScene(): { engine: NullEngine; scene: Scene; box: ReturnType<typeof MeshBuilder.CreateBox> } {
     const engine = new NullEngine();
@@ -20,6 +22,194 @@ function createPickScene(): { engine: NullEngine; scene: Scene; box: ReturnType<
     return { engine, scene, box };
 }
 
+function createRayScene(): { engine: NullEngine; scene: Scene; camera: ArcRotateCamera } {
+    const engine = new NullEngine();
+    const canvas = engine.getRenderingCanvas() as { width: number; height: number };
+    canvas.width = 800;
+    canvas.height = 600;
+    const scene = new Scene(engine);
+    const camera = new ArcRotateCamera("camera", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+    vi.spyOn(camera, "getViewMatrix").mockReturnValue(Matrix.Identity());
+    vi.spyOn(camera, "getProjectionMatrix").mockReturnValue(Matrix.Identity());
+    return { engine, scene, camera };
+}
+
+describe("Scene.pick", () => {
+    it("returns a synchronous CPU hit from screen coordinates", () => {
+        const { engine, scene, box } = createPickScene();
+        const canvas = engine.getRenderingCanvas() as { width: number; height: number };
+        canvas.width = 800;
+        canvas.height = 600;
+        new ArcRotateCamera("camera", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+
+        const hit = scene.pick(400, 300);
+
+        expect(hit.hit).toBe(true);
+        expect(hit.pickedMesh).toBe(box);
+        expect(hit.ray).toBeInstanceOf(Ray);
+        expect(scene.pick(400, 300, () => false).hit).toBe(false);
+    });
+
+    it("creates a ray with the selected camera and delegates to the CPU picker", () => {
+        const { scene } = createRayScene();
+        const explicit = new ArcRotateCamera("explicit", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+        const ray = new Ray(new Vector3(1, 2, 3), new Vector3(0, 0, 1));
+        const predicate = vi.fn(() => true);
+        const createPickingRay = vi.spyOn(scene, "createPickingRay").mockReturnValue(ray);
+        const expected = scene.pickWithRay(ray, () => false);
+        const pickWithRay = vi.spyOn(scene, "pickWithRay").mockReturnValue(expected);
+
+        expect(scene.pick(10, 20, predicate, undefined, explicit)).toBe(expected);
+        expect(createPickingRay).toHaveBeenCalledWith(10, 20, null, explicit);
+        expect(pickWithRay).toHaveBeenCalledWith(ray, predicate, false, undefined);
+    });
+
+    it("uses the active and pointer camera fallbacks", () => {
+        const { scene, camera } = createRayScene();
+        const pointerCamera = new ArcRotateCamera("pointer", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+        const createPickingRay = vi.spyOn(scene, "createPickingRay");
+
+        scene.pick(400, 300);
+        expect(createPickingRay).toHaveBeenLastCalledWith(400, 300, null, camera);
+
+        scene.activeCamera = null;
+        scene.cameraToUseForPointers = pointerCamera;
+        scene.pick(400, 300);
+        expect(createPickingRay).toHaveBeenLastCalledWith(400, 300, null, pointerCamera);
+    });
+
+    it("returns a clean miss when no camera is available", () => {
+        const scene = new Scene(new NullEngine());
+        const pickWithRay = vi.spyOn(scene, "pickWithRay");
+
+        const result = scene.pick(10, 20);
+
+        expect(result.hit).toBe(false);
+        expect(result.pickedMesh).toBeNull();
+        expect(pickWithRay).not.toHaveBeenCalled();
+    });
+
+    it("forwards precise picking modes", () => {
+        const { scene } = createRayScene();
+        const ray = new Ray(new Vector3(0, 0, -2), new Vector3(0, 0, 1));
+        vi.spyOn(scene, "createPickingRay").mockReturnValue(ray);
+        const result = scene.pickWithRay(ray);
+        const pickWithRay = vi.spyOn(scene, "pickWithRay").mockReturnValue(result);
+        const trianglePredicate = vi.fn(() => true);
+
+        expect(scene.pick(10, 20, undefined, true, null, trianglePredicate)).toBe(result);
+        expect(pickWithRay).toHaveBeenCalledWith(ray, undefined, true, trianglePredicate);
+    });
+});
+
+describe("Scene.createPickingRay", () => {
+    afterEach(() => _resetMatrixAllocatorForTests());
+
+    it("returns Babylon.js's zero ray when no camera is available", () => {
+        const scene = new Scene(new NullEngine());
+
+        const ray = scene.createPickingRay(10, 20);
+
+        expect(ray).toBeInstanceOf(Ray);
+        expect(ray.origin).toBeInstanceOf(Vector3);
+        expect(ray.origin.asArray()).toEqual([0, 0, 0]);
+        expect(ray.direction.asArray()).toEqual([0, 0, 0]);
+        expect(ray.length).toBe(Number.MAX_VALUE);
+    });
+
+    it("applies hardware scaling and the camera viewport before forwarding to Lite", () => {
+        const { engine, scene, camera } = createRayScene();
+        engine.setHardwareScalingLevel(2);
+        camera.viewport = new Viewport(0.25, 0.1, 0.5, 0.5);
+
+        const ray = scene.createPickingRay(300, 300);
+
+        expect(ray).toBeInstanceOf(Ray);
+        expect(ray.origin).toBeInstanceOf(Vector3);
+        expect(ray.origin.asArray()).toEqual([-1.25, 1.6, 1]);
+        expect(ray.direction.asArray()).toEqual([0, 0, -1]);
+        expect(ray.length).toBe(Number.MAX_VALUE);
+        expect(camera._lite.viewport).toBe(camera.viewport);
+    });
+
+    it("uses the camera viewport aspect ratio for projection", () => {
+        const { camera } = createRayScene();
+        vi.restoreAllMocks();
+        const fullWidthScale = camera.getProjectionMatrix().m[0]!;
+
+        camera.viewport = new Viewport(0, 0, 0.5, 1);
+
+        expect(camera.getProjectionMatrix().m[0]).toBeCloseTo(fullWidthScale * 2);
+    });
+
+    it("uses the explicit camera, active-camera fallback, and pointer-camera fallback", () => {
+        const { scene, camera } = createRayScene();
+        const explicit = new ArcRotateCamera("explicit", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+        vi.spyOn(explicit, "getViewMatrix").mockReturnValue(Matrix.Identity());
+        vi.spyOn(explicit, "getProjectionMatrix").mockReturnValue(Matrix.Translation(1, 0, 0));
+
+        expect(scene.createPickingRay(400, 300, null, explicit).origin.x).toBe(-1);
+        expect(scene.createPickingRay(400, 300).origin.x).toBe(0);
+
+        scene.activeCamera = null;
+        scene.cameraToUseForPointers = explicit;
+        expect(scene.createPickingRay(400, 300).origin.x).toBe(-1);
+        expect(camera).not.toBe(explicit);
+    });
+
+    it("composes world and camera transforms and supports camera-view space", () => {
+        const { scene, camera } = createRayScene();
+        vi.spyOn(camera, "getViewMatrix").mockReturnValue(Matrix.Translation(0, 2, 0));
+
+        const worldRay = scene.createPickingRay(400, 300, Matrix.Translation(1, 0, 0));
+        const cameraSpaceRay = scene.createPickingRay(400, 300, Matrix.Translation(1, 0, 0), camera, true);
+
+        expect(worldRay.origin.asArray()).toEqual([-1, -2, 1]);
+        expect(cameraSpaceRay.origin.asArray()).toEqual([-1, 0, 1]);
+    });
+
+    it("returns Babylon.js's zero ray for a singular transform", () => {
+        const { scene, camera } = createRayScene();
+        vi.spyOn(camera, "getProjectionMatrix").mockReturnValue(Matrix.Zero());
+
+        expect(scene.createPickingRay(400, 300).direction.asArray()).toEqual([0, 0, 0]);
+    });
+
+    it("unprojects through a real Lite camera", () => {
+        const { scene, camera } = createRayScene();
+        vi.restoreAllMocks();
+
+        const ray = scene.createPickingRay(400, 300);
+        const towardTarget = Vector3.Zero().subtract(ray.origin);
+
+        expect(ray.origin.x).toBeGreaterThan(9);
+        expect(ray.direction.x).toBeLessThan(-0.9);
+        expect(Vector3.Dot(ray.direction, towardTarget)).toBeGreaterThan(0);
+        expect(ray.direction.length()).toBeCloseTo(1);
+        expect(camera).toBe(scene.activeCamera);
+    });
+
+    it("preserves HPM precision for absolute and transformed-world picking rays", () => {
+        _setHpmAllocator(allocateF64Mat4);
+        const { engine, scene, camera } = createRayScene();
+        const cameraX = 1_000_000_001;
+        engine._lite.useFloatingOrigin = true;
+        camera._lite._useFloatingOrigin = true;
+        camera.alpha = -Math.PI / 2;
+        camera._lite.target.x = cameraX;
+
+        expect(camera._lite.worldMatrix).toBeInstanceOf(Float64Array);
+
+        const absoluteRay = scene.createPickingRay(400, 300);
+        const localRay = scene.createPickingRay(400, 300, Matrix.Translation(1_000_000_000, 0, 0));
+        const cameraSpaceRay = scene.createPickingRay(400, 300, null, camera, true);
+
+        expect(absoluteRay.origin.x).toBe(cameraX);
+        expect(localRay.origin.x).toBe(1);
+        expect(cameraSpaceRay.origin.x).toBe(0);
+    });
+});
+
 describe("Scene.pickWithRay", () => {
     it("maps Lite CPU hits back to Babylon.js mesh and vector wrappers", () => {
         const { scene, box } = createPickScene();
@@ -36,13 +226,24 @@ describe("Scene.pickWithRay", () => {
         expect(hit.ray).toBe(ray);
     });
 
-    it("forwards predicates and rejects unsupported picking modes", () => {
+    it("forwards mesh and triangle predicates with Babylon.js argument shapes", () => {
         const { scene } = createPickScene();
         const ray = new Ray(new Vector3(0, 0, -5), new Vector3(0, 0, 1));
+        const meshPredicate = vi.fn(() => true);
+        const trianglePredicate = vi.fn(() => true);
 
         expect(scene.pickWithRay(ray, () => false).hit).toBe(false);
-        expect(() => scene.pickWithRay(ray, undefined, true)).toThrow(LiteCompatError);
-        expect(() => scene.pickWithRay(ray, undefined, false, () => true)).toThrow(LiteCompatError);
+        expect(scene.pickWithRay(ray, meshPredicate, false, trianglePredicate).hit).toBe(true);
+        expect(meshPredicate).toHaveBeenCalledWith(expect.anything(), -1);
+        expect(trianglePredicate).toHaveBeenCalledWith(
+            expect.any(Vector3),
+            expect.any(Vector3),
+            expect.any(Vector3),
+            expect.any(Ray),
+            expect.any(Number),
+            expect.any(Number),
+            expect.any(Number)
+        );
     });
 
     it("honors default visibility, enabled, and pickable eligibility", () => {
@@ -101,12 +302,17 @@ describe("Scene.pickWithRay", () => {
         expect(scene.meshes).toContain(hit.pickedMesh);
     });
 
-    it("throws for unavailable UV and thin-instance picking", () => {
+    it("returns UV detail and picks thin instances", () => {
         const { scene, box } = createPickScene();
         const ray = new Ray(new Vector3(0, 0, -5), new Vector3(0, 0, 1));
 
-        expect(() => scene.pickWithRay(ray).getTextureCoordinates()).toThrow(LiteCompatError);
-        box.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 16);
-        expect(() => scene.pickWithRay(ray)).toThrow(LiteCompatError);
+        const uv = scene.pickWithRay(ray).getTextureCoordinates();
+        expect(uv).toBeInstanceOf(Vector2);
+        expect(uv?.asArray()).toEqual([0.5, 0.5]);
+        box.thinInstanceSetBuffer("matrix", new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 3, 0, 0, 1]), 16);
+        const thinHit = scene.pickWithRay(new Ray(new Vector3(3, 0, -5), new Vector3(0, 0, 1)));
+        expect(thinHit.pickedMesh).toBe(box);
+        expect(thinHit.thinInstanceIndex).toBe(0);
+        expect(thinHit.pickedPoint?.asArray()).toEqual([3, 0, -1]);
     });
 });

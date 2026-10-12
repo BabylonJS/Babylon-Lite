@@ -17,8 +17,9 @@
  *  Apply by passing the fragment in `loadSplat(scene, url, [gsLinearDepthFragment])`. */
 
 import type { GsShaderFragment } from "./gaussian-splatting-mesh.js";
+import { wgsl } from "../../shader/wgsl.js";
 
-const GS_LINEAR_DEPTH_HELPERS = /* wgsl */ `
+const GS_LINEAR_DEPTH_HELPERS = wgsl`
 fn gsLinearDepth(ndcZ: f32) -> f32 {
     // Lite uses a reverse-Z left-handed perspective matrix:
     //   projection[2][2] = -near / (far-near)
@@ -57,7 +58,7 @@ export const gsLinearDepthFragment: GsShaderFragment = {
     id: "gsLinearDepth",
     helperFunctions: GS_LINEAR_DEPTH_HELPERS,
     fragmentSlots: {
-        GS_FRAGMENT_BEFORE_FRAGCOLOR: /* wgsl */ `
+        GS_FRAGMENT_BEFORE_FRAGCOLOR: wgsl`
             if (dot(in.vPos, in.vPos) > in.vColor.a) { discard; }
             let _gsDepth = gsLinearDepth(in.pos.z);
             finalColor = vec4<f32>(_gsDepth, _gsDepth, _gsDepth, 1.0);
@@ -73,7 +74,7 @@ export const gsAlphaBlendedDepthFragment: GsShaderFragment = {
     id: "gsAlphaBlendedDepth",
     helperFunctions: GS_LINEAR_DEPTH_HELPERS,
     fragmentSlots: {
-        GS_FRAGMENT_BEFORE_FRAGCOLOR: /* wgsl */ `
+        GS_FRAGMENT_BEFORE_FRAGCOLOR: wgsl`
             let _gsDepth = gsLinearDepth(in.pos.z);
             finalColor = vec4<f32>(_gsDepth, _gsDepth, _gsDepth, finalColor.a);
         `,

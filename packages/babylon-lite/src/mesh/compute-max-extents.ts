@@ -18,7 +18,7 @@
 // Standalone and side-effect-free: only pulled into a bundle when imported.
 
 import type { Mat4Storage } from "../math/types.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { goToFrame } from "../animation/animation-group.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -265,7 +265,7 @@ export function computeMaxExtents(meshes: readonly Mesh[], animationGroup: Anima
             if (contribution.bones) {
                 const boneMatrices = meshes[i]!.skeleton!.boneMatrices;
                 for (const bone of contribution.bones) {
-                    mat4MultiplyInto(scratchMatrix, 0, worldMatrix as unknown as Mat4Storage, 0, boneMatrices, bone.boneIndex * 16);
+                    multiplyMat4IntoBuffer(scratchMatrix, 0, worldMatrix as unknown as Mat4Storage, 0, boneMatrices, bone.boneIndex * 16);
                     accumulateCorners(bone.corners, scratchMatrix, extents[i]!);
                 }
             } else if (contribution.corners) {

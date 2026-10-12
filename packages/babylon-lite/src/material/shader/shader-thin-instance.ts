@@ -20,22 +20,26 @@ import type { Material } from "../material.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
-import type { DrawUpdateContext, MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
+import type { DrawUpdateContext, MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
-import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
+import type { ShaderPacket } from "./shader-renderable.js";
+import type { ShaderRenderPass, ShaderVbLayout } from "./shader-vb-support.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
 /** The shader-renderable helpers handed in positionally by `buildShaderGroup`. */
 interface ShaderHelpers {
     buildPlain: (scene: SceneContext, meshes: Mesh[]) => MeshGroupBuildResult;
-    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux?: boolean) => ShaderPacket;
+    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources) => ShaderPacket;
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
-    getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
+    getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial) => GPUBuffer;
+    getVertexLayout?: (material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh) => ShaderVbLayout | null;
+    registerPipeline?: (mesh: Mesh, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -49,141 +53,32 @@ interface ShaderHelpers {
     getUniformBatch?: (signature: RenderTargetSignature) => UniformCopyBatch;
 }
 
-/** Instance vertex buffer layouts. `baseLocation` is the first free shader
- *  location after the material's own attributes. */
-function instanceVertexLayouts(baseLocation: number, hasColor: boolean): GPUVertexBufferLayout[] {
-    const layouts: GPUVertexBufferLayout[] = [
-        {
-            arrayStride: 64,
-            stepMode: "instance",
-            attributes: [
-                { shaderLocation: baseLocation, offset: 0, format: "float32x4" },
-                { shaderLocation: baseLocation + 1, offset: 16, format: "float32x4" },
-                { shaderLocation: baseLocation + 2, offset: 32, format: "float32x4" },
-                { shaderLocation: baseLocation + 3, offset: 48, format: "float32x4" },
-            ],
-        },
-    ];
+/** Append matching GPU layouts and WGSL inputs from the same matrix-row locations. */
+function appendInstanceInputs(layouts: GPUVertexBufferLayout[], baseLocation: number, hasColor: boolean): WgslSource {
+    const attributes: GPUVertexAttribute[] = [];
+    let source = wgsl``;
+    for (let row = 0; row < 4; row++) {
+        const shaderLocation = baseLocation + row;
+        attributes.push({ shaderLocation, offset: row * 16, format: "float32x4" });
+        source = wgsl`${source}@location(${shaderLocation}) world${row}: vec4<f32>,
+`;
+    }
+    layouts.push({ arrayStride: 64, stepMode: "instance", attributes });
     if (hasColor) {
         layouts.push({
             arrayStride: 16,
             stepMode: "instance",
             attributes: [{ shaderLocation: baseLocation + 4, offset: 0, format: "float32x4" }],
         });
-    }
-    return layouts;
-}
-
-/** WGSL lines appended inside `VertexInput` for instanced variants. */
-function instancePreludeAttributes(baseLocation: number, hasColor: boolean): string {
-    let wgsl = `@location(${baseLocation}) world0: vec4<f32>,
-@location(${baseLocation + 1}) world1: vec4<f32>,
-@location(${baseLocation + 2}) world2: vec4<f32>,
-@location(${baseLocation + 3}) world3: vec4<f32>,
-`;
-    if (hasColor) {
-        wgsl += `@location(${baseLocation + 4}) instanceColor: vec4<f32>,
+        source = wgsl`${source}@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
-    return wgsl;
-}
-
-/** Build ONE thin-instance renderable for a ShaderMaterial mesh (opaque or transparent). */
-function createShaderInstancedRenderable(
-    scene: SceneContext,
-    material: ShaderMaterial,
-    packet: ShaderPacket,
-    isOverride: boolean,
-    h: ShaderHelpers,
-    cull?: CullModule
-): Renderable {
-    const isTransparent = material.needAlphaBlending;
-    const mesh = packet.mesh;
-    const ti = mesh.thinInstances!;
-    // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
-    const hasColor = !!ti.colors && material._tic != 0;
-    const baseLocation = material.attributes.length;
-    const instanceLayouts = instanceVertexLayouts(baseLocation, hasColor);
-    const instanceAttrs = instancePreludeAttributes(baseLocation, hasColor);
-    const variantKey = "" + +hasColor;
-    const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
-    const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
-    let drawArgs: GPUBuffer | null = null;
-    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
-        if (packet._disposed) {
-            return;
-        }
-        if (!isOverride && mesh.material !== material) {
-            return;
-        }
-        h.updateCustomUbo(scene.surface.engine, material, uniformBatch);
-        h.updatePacket(scene, material, packet, context, uniformBatch);
-        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu.indexCount);
-        if (isTransparent) {
-            const m = mesh.worldMatrix as unknown as ArrayLike<number>;
-            sortCenter[0] = m[12]!;
-            sortCenter[1] = m[13]!;
-            sortCenter[2] = m[14]!;
-        }
-    };
-    const draw = (pass: ShaderRenderPass, engine: EngineContext, cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding): number => {
-        if (packet._disposed) {
-            return 0;
-        }
-        if (!isOverride && mesh.material !== material) {
-            return 0;
-        }
-        const gpu = mesh._gpu;
-        let slot = 0;
-        for (let i = 0; i < material.attributes.length; i++) {
-            pass.setVertexBuffer(slot++, h.getAttrBuffer(engine, mesh, material.attributes[i]!));
-        }
-        slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
-        pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-        pass.setBindGroup(1, packet._bindGroup);
-        if (cullBinding) {
-            cullBinding.draw(pass, gpu.indexCount, ti.count);
-        } else if (drawArgs) {
-            pass.drawIndexedIndirect(drawArgs, 0);
-        } else {
-            pass.drawIndexed(gpu.indexCount, ti.count);
-        }
-        return 1;
-    };
-    const r: Renderable = {
-        order: mesh.renderOrder ?? (isTransparent ? 200 : 100),
-        isTransparent,
-        mesh,
-        _worldCenter: sortCenter,
-        bind(eng, sig) {
-            const bindings = h.getOrCreateShaderPipelineBindings(eng, material);
-            const vertexBuffers = [...bindings.vertexBuffers, ...instanceLayouts];
-            const pipeline = h.getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
-            const uniformBatch = h.getUniformBatch?.(sig);
-            const baseUpdate = (context: DrawUpdateContext): void => update(context, uniformBatch);
-            const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, baseUpdate, sig);
-            return {
-                renderable: r,
-                pipeline,
-                _updateBatches: uniformBatch ? (cb ? [uniformBatch, cb._updateBatch] : [uniformBatch]) : cb ? [cb._updateBatch] : undefined,
-                update: cb ? cb.update : baseUpdate,
-                draw: (pass) => draw(pass, eng, cb),
-            };
-        },
-    };
-    return r;
-}
-
-/** Build one instanced renderable for `mesh` (used by the combined `rebuildSingle`). */
-function buildInstancedSingle(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, h: ShaderHelpers, cull?: CullModule): Renderable {
-    const bindings = h.getOrCreateShaderPipelineBindings(scene.surface.engine, material);
-    const packet = h.createPacket(scene, material, bindings.systemSpec, mesh, isOverride);
-    return createShaderInstancedRenderable(scene, material, packet, isOverride, h, cull);
+    return source;
 }
 
 /** Group entry point used whenever a ShaderMaterial scene has at least one
- *  thin-instanced mesh. Plain meshes flow through the passed-in `buildPlain`
- *  (`buildShaderMaterialRenderables`); instanced meshes get a dedicated renderable. */
+ *  thin-instanced mesh. Plain meshes flow through the passed-in `buildPlain`.
+ *  Builders capture the positional helpers directly, without an intermediate helper bag. */
 export function buildShaderRenderablesWithInstancing(
     scene: SceneContext,
     meshes: Mesh[],
@@ -195,18 +90,119 @@ export function buildShaderRenderablesWithInstancing(
     getOrCreateShaderPipeline: ShaderHelpers["getOrCreateShaderPipeline"],
     getOrCreateShaderPipelineBindings: ShaderHelpers["getOrCreateShaderPipelineBindings"],
     getUniformBatch?: ShaderHelpers["getUniformBatch"],
-    cull?: CullModule
+    cull?: CullModule,
+    getVertexLayout?: ShaderHelpers["getVertexLayout"],
+    registerPipeline?: ShaderHelpers["registerPipeline"]
 ): MeshGroupBuildResult {
-    const h: ShaderHelpers = {
-        buildPlain,
-        createPacket,
-        updatePacket,
-        updateCustomUbo,
-        getAttrBuffer,
-        getOrCreateShaderPipeline,
-        getOrCreateShaderPipelineBindings,
-        getUniformBatch,
-    };
+    /** Build ONE thin-instance renderable for a ShaderMaterial mesh (opaque or transparent). */
+    function createShaderInstancedRenderable(
+        scene: SceneContext,
+        material: ShaderMaterial,
+        packet: ShaderPacket,
+        bindings: ShaderPipelineBindings,
+        isOverride: boolean,
+        cull?: CullModule,
+        vertexLayout?: ShaderVbLayout
+    ): Renderable {
+        const isTransparent = material.needAlphaBlending;
+        const mesh = packet.mesh;
+        const ti = mesh.thinInstances!;
+        // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
+        const hasColor = !!ti.colors && material._tic != 0;
+        const baseLocation = material.attributes.length;
+        const variantKey = `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
+        const vertexBuffers = [...(vertexLayout?._vbs ?? bindings.vertexBuffers)];
+        const instanceAttrs = appendInstanceInputs(vertexBuffers, baseLocation, hasColor);
+        if (!vertexLayout && mesh._gpu._vbLayout) {
+            for (let index = 0; index < material.attributes.length; index++) {
+                const packing = mesh._gpu._vbLayout[material.attributes[index]!];
+                if (packing) {
+                    const canonical = vertexBuffers[index]!;
+                    vertexBuffers[index] = {
+                        ...canonical,
+                        arrayStride: packing._stride,
+                        attributes: [{ ...canonical.attributes[0]!, offset: packing._offset }],
+                    };
+                }
+            }
+        }
+        const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
+        const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
+        let drawArgs: GPUBuffer | null = null;
+        const isInactive = (): boolean => !!packet._disposed || (!isOverride && mesh.material !== material);
+        const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
+            if (isInactive()) {
+                return;
+            }
+            updateCustomUbo(scene.surface.engine, material, uniformBatch);
+            updatePacket(scene, material, packet, context, uniformBatch);
+            drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu);
+            if (isTransparent) {
+                const m = mesh.worldMatrix as unknown as ArrayLike<number>;
+                sortCenter[0] = m[12]!;
+                sortCenter[1] = m[13]!;
+                sortCenter[2] = m[14]!;
+            }
+        };
+        const draw = (pass: ShaderRenderPass, engine: EngineContext, cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding): number => {
+            if (isInactive()) {
+                return 0;
+            }
+            const gpu = mesh._gpu;
+            let slot = 0;
+            for (let i = 0; i < material.attributes.length; i++) {
+                pass.setVertexBuffer(slot++, getAttrBuffer(engine, mesh, material.attributes[i]!, material));
+            }
+            syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
+            pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
+            pass.setBindGroup(1, packet._bindGroup!);
+            if (cullBinding) {
+                cullBinding.draw(pass, gpu, ti.count);
+            } else if (drawArgs) {
+                pass.drawIndexedIndirect(drawArgs, 0);
+            } else {
+                pass.drawIndexed(gpu.indexCount, ti.count, gpu._firstIndex ?? 0, gpu._baseVertex);
+            }
+            return 1;
+        };
+        const r: Renderable = {
+            order: mesh.renderOrder ?? (isTransparent ? 200 : 100),
+            isTransparent,
+            _direct: !!material._externalTextureSlots?.size,
+            mesh,
+            _worldCenter: sortCenter,
+            bind(eng, sig) {
+                const bindings = getOrCreateShaderPipelineBindings(eng, material);
+                const pipeline = getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
+                const uniformBatch = getUniformBatch?.(sig);
+                const baseUpdate = (context: DrawUpdateContext): void => update(context, uniformBatch);
+                const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, baseUpdate, sig);
+                return {
+                    renderable: r,
+                    pipeline,
+                    _updateBatches: uniformBatch ? (cb ? [uniformBatch, cb._updateBatch] : [uniformBatch]) : cb ? [cb._updateBatch] : undefined,
+                    update: cb ? cb.update : baseUpdate,
+                    draw: (pass) => draw(pass, eng, cb),
+                };
+            },
+        };
+        registerPipeline?.(
+            mesh,
+            material,
+            hasColor,
+            vertexLayout ?? (mesh._gpu._vbLayout ? { _key: mesh._gpu._vbKey ?? "", _vbs: vertexBuffers.slice(0, baseLocation) } : undefined)
+        );
+        return r;
+    }
+
+    /** Build one instanced renderable for `mesh` (used by the combined `rebuildSingle`). */
+    function buildInstancedSingle(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, cull?: CullModule, resources?: MeshRebuildResources): Renderable {
+        const bindings = getOrCreateShaderPipelineBindings(scene.surface.engine, material);
+        const vertexLayout = getVertexLayout?.(material, bindings, mesh) ?? undefined;
+        const packet = createPacket(scene, material, bindings.systemSpec, mesh, resources);
+        return createShaderInstancedRenderable(scene, material, packet, bindings, isOverride, cull, vertexLayout);
+    }
+
     const instanced: Mesh[] = [];
     const plain: Mesh[] = [];
     for (const mesh of meshes) {
@@ -219,24 +215,24 @@ export function buildShaderRenderablesWithInstancing(
 
     const renderables: Renderable[] = [];
     let plainRebuild: MeshGroupBuildResult["rebuildSingle"] | undefined;
-    if (plain.length > 0) {
+    if (plain.length) {
         const plainResult = buildPlain(scene, plain);
         renderables.push(...plainResult.renderables);
         plainRebuild = plainResult.rebuildSingle;
     }
     for (const mesh of instanced) {
-        renderables.push(buildInstancedSingle(scene, mesh, mesh.material as ShaderMaterial, false, h, cull));
+        renderables.push(buildInstancedSingle(scene, mesh, mesh.material as ShaderMaterial, false, cull));
     }
 
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const material = (materialOverride ?? mesh.material) as ShaderMaterial;
         if (mesh.thinInstances) {
-            return buildInstancedSingle(s, mesh, material, materialOverride != null, h, cull);
+            return buildInstancedSingle(s, mesh, material, !!materialOverride, cull, resources);
         }
         if (plainRebuild) {
-            return plainRebuild(s, mesh, materialOverride);
+            return plainRebuild(s, mesh, materialOverride, resources);
         }
-        return buildPlain(s, [mesh]).rebuildSingle(s, mesh, materialOverride);
+        return buildPlain(s, []).rebuildSingle(s, mesh, materialOverride, resources);
     };
 
     return { renderables, rebuildSingle };

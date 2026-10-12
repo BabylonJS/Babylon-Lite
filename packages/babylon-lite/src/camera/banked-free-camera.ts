@@ -14,7 +14,7 @@
 import type { Vec3 } from "../math/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { _createFreeCamera, type FreeCamera } from "./free-camera.js";
-import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
+import { _markLocalMatrixDirty } from "../scene/world-matrix-state.js";
 
 /** A {@link FreeCamera} with an explicit, mutable world-space up vector. */
 export interface BankedFreeCamera extends FreeCamera {
@@ -40,7 +40,7 @@ export function createBankedFreeCamera(position: Vec3, target: Vec3, up: Vec3 = 
     // `upVector`'s dirty callback closes over `cam`, declared just below — safe because ObservableVec3's
     // constructor writes its private fields directly and never invokes `onDirty`, so the callback can
     // only ever fire after `cam` is assigned.
-    const upVector = new ObservableVec3(up.x, up.y, up.z, () => _markWorldMatrixDirty(cam));
+    const upVector = new ObservableVec3(up.x, up.y, up.z, () => _markLocalMatrixDirty(cam));
     const cam = _createFreeCamera(position, target, upVector) as BankedFreeCamera;
     Object.defineProperty(cam, "upVector", { value: upVector, enumerable: true });
     return cam;

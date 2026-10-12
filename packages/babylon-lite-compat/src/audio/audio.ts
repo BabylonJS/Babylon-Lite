@@ -130,6 +130,8 @@ export interface IWebAudioEngineOptions extends IAudioEngineV2Options {
     resumeOnPause: boolean;
     /** Retry interval (ms) for `resumeOnPause`. Defaults to `1000`. */
     resumeOnPauseRetryInterval: number;
+    /** Disable Babylon.js's iOS ringer-switch workaround. Lite does not install that workaround. */
+    disableIOSRingerSwitchWorkaround?: boolean;
 }
 
 /** Babylon.js `IVolumeAudioOptions`. */

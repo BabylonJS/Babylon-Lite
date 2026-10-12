@@ -152,6 +152,32 @@ export function parseNodeMaterialSource(source: unknown): NodeGraph {
     return { blocks, namedInputs, alphaMode, needsAlphaBlending, backFaceCulling: rawAlpha.backFaceCulling !== false };
 }
 
+/** Resolve one serialized InputBlock to the distinct WGSL uniform name Babylon assigns.
+ *  NME permits repeated display names (its default scalar name is commonly "Float"). */
+export function nodeUniformName(graph: NodeGraph, block: NodeBlock, sanitize: (name: string) => string): string {
+    const usedNames = new Set<string>();
+    for (const candidate of graph.blocks.values()) {
+        if (candidate.className !== "InputBlock" || typeof candidate.serialized["systemValue"] === "number") {
+            continue;
+        }
+        const mode = (candidate.serialized["mode"] ?? candidate.serialized["_mode"]) as number | undefined;
+        if (mode !== 0 && mode !== undefined) {
+            continue;
+        }
+        const baseName = sanitize(candidate.name || `input${candidate.id}`);
+        let name = baseName;
+        let suffix = 1;
+        while (usedNames.has(name)) {
+            name = `${baseName}${suffix++}`;
+        }
+        if (candidate.id === block.id) {
+            return name;
+        }
+        usedNames.add(name);
+    }
+    return sanitize(block.name || `input${block.id}`);
+}
+
 function stripBabylonPrefix(customType: string): string {
     return customType.startsWith("BABYLON.") ? customType.slice("BABYLON.".length) : customType;
 }

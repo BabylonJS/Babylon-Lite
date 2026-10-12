@@ -22,9 +22,9 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { NodeRest, SkeletonBinding } from "../animation/types.js";
 import type { GltfLoadCtx } from "../loader-gltf/gltf-feature.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "../loader-gltf/gltf-parser.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4Identity } from "../math/mat4-identity.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { createIdentityMat4 } from "../math/create-identity-mat4.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { TRS_STRIDE, T_OFF, R_OFF, S_OFF, computeTopoOrder, resetTRS, computeNodeWorldMatrices, writeBoneTextures } from "./skeleton-pose.js";
 import { _installBoneControl } from "./bone-control-hooks.js";
 
@@ -168,16 +168,27 @@ export function setBonePoseDeferred(skeleton: Skeleton, bone: Bone, px: number, 
     o.mask |= 3;
 }
 
-/** @internal Drive a non-animated glTF bone from an absolute Lite left-handed world pose
- *  without re-baking. The X reflection keeps the glTF-authored joint geometry in the
- *  same handedness convention as the loader's synthetic root. */
+/** Override a glTF bone from an absolute Lite world-space position and rotation
+ *  without re-baking. The loader's handedness reflection is applied internally.
+ *  Use this for world-space pose drivers such as physics ragdolls: update every
+ *  driven bone, then call {@link bakeSkeleton} once for the complete batch.
+ *  @param skeleton - Skeleton containing the bone.
+ *  @param bone - Bone to override.
+ *  @param px - World-space X position.
+ *  @param py - World-space Y position.
+ *  @param pz - World-space Z position.
+ *  @param rx - World-space quaternion X component.
+ *  @param ry - World-space quaternion Y component.
+ *  @param rz - World-space quaternion Z component.
+ *  @param rw - World-space quaternion W component.
+ *  @public */
 export function setBoneWorldPoseDeferred(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number): void {
     let world = skeleton._worldOverrides.get(bone._nodeIndex);
     if (!world) {
         world = new F32(16);
         skeleton._worldOverrides.set(bone._nodeIndex, world);
     }
-    mat4ComposeInto(world, 0, px, py, pz, rx, ry, rz, rw, -1, 1, 1);
+    composeMat4IntoBuffer(world, 0, px, py, pz, rx, ry, rz, rw, -1, 1, 1);
 }
 
 /** Recompute a skeleton's node hierarchy from rest + overrides and upload its bone
@@ -320,7 +331,7 @@ function extractSkinGroups(json: any, binChunk: DataView, meshes: Mesh[], parent
         const jointNodes: number[] = skin.joints;
         const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
         const meshWorldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
-        const invMeshWorld = mat4Invert(meshWorldMatrix) ?? mat4Identity();
+        const invMeshWorld = invertMat4(meshWorldMatrix) ?? createIdentityMat4();
         const bindings: SkeletonBinding[] = [];
         for (const mi of meshIndices) {
             const skeleton = meshes[mi]?.skeleton;

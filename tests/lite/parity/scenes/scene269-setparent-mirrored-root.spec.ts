@@ -7,7 +7,7 @@
  * non-negative scales drops the reflection and renders the model mirrored (forum topic 63859).
  *
  * Babylon.js `TransformNode.setParent()` folds the reflection onto a negative Y scale, so this
- * scene pins Lite's `mat4Decompose` to that same behaviour.
+ * scene pins Lite's `decomposeMat4` to that same behaviour.
  */
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";

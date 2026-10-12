@@ -25,12 +25,13 @@ import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 describe("ShaderMaterial uniform caching", () => {
     it("installs cached writers and skips unchanged vector serialization", () => {
         const material = createShaderMaterial({
-            vertexSource: "@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4<f32>{return vec4<f32>(input.position,1.0);}",
-            fragmentSource: "@fragment fn mainFragment()->@location(0) vec4<f32>{return vec4<f32>(1.0);}",
+            vertexSource: wgsl`@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4<f32>{return vec4<f32>(input.position,1.0);}`,
+            fragmentSource: wgsl`@fragment fn mainFragment()->@location(0) vec4<f32>{return vec4<f32>(1.0);}`,
             attributes: ["position"],
             uniforms: [
                 { name: "tint", type: "vec4<f32>", defaultValue: [1, 1, 1, 1] },
@@ -75,8 +76,8 @@ describe("ShaderMaterial uniform caching", () => {
         // default one — see `shader-material-floating-origin.test.ts` for what
         // that looked like on screen (a planet you could never reach).
         const material = createShaderMaterial({
-            vertexSource: "@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }",
-            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }",
+            vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
             attributes: ["position"],
             uniforms: ["world", "cameraPosition"],
         });

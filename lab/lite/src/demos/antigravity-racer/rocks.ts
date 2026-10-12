@@ -12,7 +12,7 @@
  */
 
 import type { HierarchyInstancePool, SceneContext, SceneNode } from "babylon-lite";
-import { addHierarchyInstance, addToScene, mat4Compose } from "babylon-lite";
+import { addHierarchyInstance, addToScene, composeMat4 } from "babylon-lite";
 
 import { instantiateModel, type RacerAssets } from "./assets.js";
 import { bjsEulerToQuat } from "./bjs-euler.js";
@@ -27,7 +27,7 @@ export function createRocks(assets: RacerAssets): RockField {
     const { root, pool } = instantiateModel(assets.rockTemplate, ROCK_TRANSFORMS.length, true);
     for (const t of ROCK_TRANSFORMS) {
         const q = bjsEulerToQuat(t.rotation[0], t.rotation[1], t.rotation[2]);
-        const trs = mat4Compose(t.position[0], t.position[1], t.position[2], q.x, q.y, q.z, q.w, t.scaling[0], t.scaling[1], t.scaling[2]);
+        const trs = composeMat4(t.position[0], t.position[1], t.position[2], q.x, q.y, q.z, q.w, t.scaling[0], t.scaling[1], t.scaling[2]);
         addHierarchyInstance(pool, trs);
     }
     // `rocks[i].receiveShadows = true` in the playground; they are also shadow casters (wired by world.ts).

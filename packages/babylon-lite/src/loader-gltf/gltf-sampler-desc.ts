@@ -1,4 +1,4 @@
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture } from "./gltf-pbr-builder.js";
 import type { GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -47,11 +47,7 @@ export function makeSamplerFor(engine: EngineContext, json: any, defaultSampler:
             return defaultSampler;
         }
         const desc = gltfTexSamplerDesc(json, texInfo);
-        // A non-mipmap sampler (lodMaxClamp 0) is created directly: the shared cache key omits
-        // the LOD clamp, so caching it there could alias a full-mip sampler with identical
-        // filter/wrap. These are rare (SDF/UI textures), so per-call creation is cheaper than
-        // growing the universal sampler key — which would move every non-glTF scene's bundle.
-        const sampler = desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+        const sampler = getOrCreateSampler(engine, desc);
         engine._deviceLostRecovery?._samplerDescriptors.set(sampler, desc);
         return sampler;
     };

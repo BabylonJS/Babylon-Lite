@@ -12,6 +12,7 @@
  */
 
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUT: Record<string, { swizzle: string; type: NodeValueType }> = {
     rgba: { swizzle: "", type: "vec4f" },
@@ -79,10 +80,10 @@ function applyColorSpace(expr: string, outputName: string, convertToLinear: bool
     }
     const power = convertToLinear ? "2.2" : "0.45454545";
     if (outputName === "rgba") {
-        return `vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
+        return wgsl`vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
     }
     if (outputName === "rgb") {
-        return `pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
+        return wgsl`pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
     }
     if (outputName === "r" || outputName === "g" || outputName === "b") {
         return `pow(max(${expr}${OUTPUT[outputName]!.swizzle}, 0.0), ${power})`;
@@ -126,36 +127,36 @@ function emitTriPlanarSample(block: NodeBlock, stage: Stage, state: NodeBuildSta
     const w = `_w${temp}`;
     const sample = `_sample${temp}`;
 
-    stageState.body.push(`let ${n} = ${normal.expr};`);
-    stageState.body.push(`var ${uvx} = (${position.expr}).yz;`);
-    stageState.body.push(`var ${uvy} = (${position.expr}).zx;`);
-    stageState.body.push(`var ${uvz} = (${position.expr}).xy;`);
+    stageState.body.push(wgsl`let ${n} = ${normal.expr};`);
+    stageState.body.push(wgsl`var ${uvx} = (${position.expr}).yz;`);
+    stageState.body.push(wgsl`var ${uvy} = (${position.expr}).zx;`);
+    stageState.body.push(wgsl`var ${uvz} = (${position.expr}).xy;`);
     if (block.serialized["projectAsCube"] === true) {
-        stageState.body.push(`${uvx} = (${uvx}).yx;`);
-        stageState.body.push(`if (${n}.x >= 0.0) { ${uvx}.x = -${uvx}.x; }`);
-        stageState.body.push(`if (${n}.y < 0.0) { ${uvy}.y = -${uvy}.y; }`);
-        stageState.body.push(`if (${n}.z < 0.0) { ${uvz}.x = -${uvz}.x; }`);
+        stageState.body.push(wgsl`${uvx} = (${uvx}).yx;`);
+        stageState.body.push(wgsl`if (${n}.x >= 0.0) { ${uvx}.x = -${uvx}.x; }`);
+        stageState.body.push(wgsl`if (${n}.y < 0.0) { ${uvy}.y = -${uvy}.y; }`);
+        stageState.body.push(wgsl`if (${n}.z < 0.0) { ${uvz}.x = -${uvz}.x; }`);
     }
-    stageState.body.push(`let _cU${temp} = cos(${formatFloat(transform.uAng)});`);
-    stageState.body.push(`let _sU${temp} = sin(${formatFloat(transform.uAng)});`);
-    stageState.body.push(`${uvx} = mat2x2<f32>(_cU${temp}, -_sU${temp}, _sU${temp}, _cU${temp}) * ${uvx};`);
-    stageState.body.push(`let _cV${temp} = cos(${formatFloat(transform.vAng)});`);
-    stageState.body.push(`let _sV${temp} = sin(${formatFloat(transform.vAng)});`);
-    stageState.body.push(`${uvy} = mat2x2<f32>(_cV${temp}, _sV${temp}, -_sV${temp}, _cV${temp}) * ${uvy};`);
-    stageState.body.push(`let _cW${temp} = cos(${formatFloat(transform.wAng)});`);
-    stageState.body.push(`let _sW${temp} = sin(${formatFloat(transform.wAng)});`);
-    stageState.body.push(`${uvz} = mat2x2<f32>(_cW${temp}, -_sW${temp}, _sW${temp}, _cW${temp}) * ${uvz};`);
-    stageState.body.push(`let _scale${temp} = vec2<f32>(${formatFloat(transform.uScale)}, ${formatFloat(transform.vScale)});`);
-    stageState.body.push(`let _offset${temp} = vec2<f32>(${formatFloat(transform.uOffset)}, ${formatFloat(transform.vOffset)});`);
-    stageState.body.push(`${uvx} = ${uvx} * _scale${temp} + _offset${temp};`);
-    stageState.body.push(`${uvy} = ${uvy} * _scale${temp} + _offset${temp};`);
-    stageState.body.push(`${uvz} = ${uvz} * _scale${temp} + _offset${temp};`);
-    stageState.body.push(`let ${x} = textureSample(nodeTex_${texX}, nodeSamp_${texX}, ${uvx});`);
-    stageState.body.push(`let ${y} = textureSample(nodeTex_${texY}, nodeSamp_${texY}, ${uvy});`);
-    stageState.body.push(`let ${z} = textureSample(nodeTex_${texZ}, nodeSamp_${texZ}, ${uvz});`);
-    stageState.body.push(`let ${w} = pow(abs(${n}), vec3<f32>(${sharpnessInput}));`);
+    stageState.body.push(wgsl`let _cU${temp} = cos(${formatFloat(transform.uAng)});`);
+    stageState.body.push(wgsl`let _sU${temp} = sin(${formatFloat(transform.uAng)});`);
+    stageState.body.push(wgsl`${uvx} = mat2x2<f32>(_cU${temp}, -_sU${temp}, _sU${temp}, _cU${temp}) * ${uvx};`);
+    stageState.body.push(wgsl`let _cV${temp} = cos(${formatFloat(transform.vAng)});`);
+    stageState.body.push(wgsl`let _sV${temp} = sin(${formatFloat(transform.vAng)});`);
+    stageState.body.push(wgsl`${uvy} = mat2x2<f32>(_cV${temp}, _sV${temp}, -_sV${temp}, _cV${temp}) * ${uvy};`);
+    stageState.body.push(wgsl`let _cW${temp} = cos(${formatFloat(transform.wAng)});`);
+    stageState.body.push(wgsl`let _sW${temp} = sin(${formatFloat(transform.wAng)});`);
+    stageState.body.push(wgsl`${uvz} = mat2x2<f32>(_cW${temp}, -_sW${temp}, _sW${temp}, _cW${temp}) * ${uvz};`);
+    stageState.body.push(wgsl`let _scale${temp} = vec2<f32>(${formatFloat(transform.uScale)}, ${formatFloat(transform.vScale)});`);
+    stageState.body.push(wgsl`let _offset${temp} = vec2<f32>(${formatFloat(transform.uOffset)}, ${formatFloat(transform.vOffset)});`);
+    stageState.body.push(wgsl`${uvx} = ${uvx} * _scale${temp} + _offset${temp};`);
+    stageState.body.push(wgsl`${uvy} = ${uvy} * _scale${temp} + _offset${temp};`);
+    stageState.body.push(wgsl`${uvz} = ${uvz} * _scale${temp} + _offset${temp};`);
+    stageState.body.push(wgsl`let ${x} = textureSample(nodeTex_${texX}, nodeSamp_${texX}, ${uvx});`);
+    stageState.body.push(wgsl`let ${y} = textureSample(nodeTex_${texY}, nodeSamp_${texY}, ${uvy});`);
+    stageState.body.push(wgsl`let ${z} = textureSample(nodeTex_${texZ}, nodeSamp_${texZ}, ${uvz});`);
+    stageState.body.push(wgsl`let ${w} = pow(abs(${n}), vec3<f32>(${sharpnessInput}));`);
     stageState.body.push(
-        `let ${sample} = ((${x} * ${w}.x + ${y} * ${w}.y + ${z} * ${w}.z) / (${w}.x + ${w}.y + ${w}.z)) * ${formatFloat(block.serialized["disableLevelMultiplication"] === true ? 1 : transform.level)};`
+        wgsl`let ${sample} = ((${x} * ${w}.x + ${y} * ${w}.y + ${z} * ${w}.z) / (${w}.x + ${w}.y + ${w}.z)) * ${formatFloat(block.serialized["disableLevelMultiplication"] === true ? 1 : transform.level)};`
     );
 
     const result = { expr: sample, type: "vec4f" } as const;

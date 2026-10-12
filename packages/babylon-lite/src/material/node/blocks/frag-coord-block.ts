@@ -1,6 +1,7 @@
 /** FragCoordBlock — exposes fragment pixel coordinates (`fragmentInputs.position` in BJS WGSL). */
 
 import type { BlockEmitter, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUTS: Record<string, { readonly swizzle: string; readonly type: NodeValueType }> = {
     xyzw: { swizzle: "", type: "vec4f" },
@@ -24,6 +25,6 @@ export const emitter: BlockEmitter = {
         if (!out) {
             throw new Error(`NodeMaterial: FragCoordBlock has no output "${outputName}"`);
         }
-        return { expr: `vec4<f32>(_NME_FRAG_COORD_.x, _NME_SCREEN_SIZE_.y - _NME_FRAG_COORD_.y, 1.0 - _NME_FRAG_COORD_.z, _NME_FRAG_COORD_.w)${out.swizzle}`, type: out.type };
+        return { expr: wgsl`vec4<f32>(_NME_FRAG_COORD_.x, _NME_SCREEN_SIZE_.y - _NME_FRAG_COORD_.y, 1.0 - _NME_FRAG_COORD_.z, _NME_FRAG_COORD_.w)${out.swizzle}`, type: out.type };
     },
 };

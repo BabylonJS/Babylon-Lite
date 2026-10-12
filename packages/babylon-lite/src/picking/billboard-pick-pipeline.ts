@@ -26,6 +26,7 @@ import { BILLBOARD_INSTANCE_STRIDE_BYTES } from "../sprite/billboard-sprite.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 import { getViewMatrix } from "../camera/camera.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Result of a successful {@link pickBillboardSprite} hit (re-exported from the public picker). */
 export interface BillboardPickInfo {
@@ -75,13 +76,13 @@ export function packBillboardPickUbo(view: Mat4, baseId: number, cutoff: number,
 function makePickBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
         case "facing":
-            return `fn basis() -> B {
+            return wgsl`fn basis() -> B {
 let r = normalize(bb.camRight);
 let u = normalize(bb.camUp);
 return B(r, -u);
 }`;
         case "axis-locked":
-            return `fn basis() -> B {
+            return wgsl`fn basis() -> B {
 let a = normalize(bb.axis);
 let cr = normalize(bb.camRight);
 let pr = cr - a * dot(cr, a);
@@ -96,18 +97,18 @@ return B(r, -a);
 
 function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
     const cutoutBindings = isCutout
-        ? `@group(1) @binding(1) var atlasTex: texture_2d<f32>;
+        ? wgsl`@group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;`
         : "";
-    const uvVarying = isCutout ? `,\n@location(1) uv: vec2f` : "";
-    const uvAssign = isCutout ? `out.uv = mix(in.a, in.b, q);` : "";
+    const uvVarying = isCutout ? wgsl`,\n@location(1) uv: vec2f` : "";
+    const uvAssign = isCutout ? wgsl`out.uv = mix(in.a, in.b, q);` : "";
     const cutoutDiscard = isCutout
-        ? `let s = textureSample(atlasTex, atlasSamp, in.uv);
+        ? wgsl`let s = textureSample(atlasTex, atlasSamp, in.uv);
 if (s.a < bb.cutoff) {
 discard;
 }`
         : "";
-    return `struct PickScene { viewProjection: mat4x4f };
+    return wgsl`struct PickScene { viewProjection: mat4x4f };
 @group(0) @binding(0) var<uniform> scene: PickScene;
 struct BB {
 camRight: vec3f,

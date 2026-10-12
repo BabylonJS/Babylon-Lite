@@ -1,8 +1,9 @@
 /** Single spot-light WGSL helpers for the PBR template. */
 
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
-export const SINGLE_LIGHT_STRUCTS = `
+export const SINGLE_LIGHT_STRUCTS = wgsl`
 struct LightEntry {
 vLightData: vec4<f32>,
 vLightDiffuse: vec4<f32>,
@@ -16,7 +17,7 @@ count: u32, _p0: u32, _p1: u32, _p2: u32,
 `;
 
 function specularBlock(): string {
-    return `let H = normalize(V + L);
+    return wgsl`let H = normalize(V + L);
 let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
 let VdotH = saturate(dot(V, H));
 let directRoughness = max(roughness, AA_factor_x);
@@ -28,7 +29,7 @@ var directSpecular = coloredFresnel * D * G * NdotL * lightColor * lightAtten * 
 }
 
 export function getSingleLightBlock(): string {
-    return `let entry = lights.lights[mli(0u)];
+    return wgsl`let entry = lights.lights[mli(0u)];
 let lightToFrag = entry.vLightData.xyz - input.worldPos;
 let lightDist = length(lightToFrag);
 let L = lightToFrag / max(lightDist, 0.0001);

@@ -32,6 +32,7 @@ import {
 } from "babylon-lite";
 import { TILE_H, TILE_W } from "./iso.js";
 import type { GameMap } from "./worldgen.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Render order: above the ocean shimmer (0.5), below the coast cells (1) and land, so the
  * sparkle sits on the open sea surface and is naturally covered by anything on land. */
@@ -79,7 +80,7 @@ export interface Glints {
  * scaled by `daylight` so the sea goes dark at night. The alpha is quantised into hard steps so
  * the glint stays crisp and pixelated.
  */
-const GLINT_FRAGMENT = `
+const GLINT_FRAGMENT = wgsl`
 let wpx0 = in.tint.xy + in.uv * in.tint.zw;
 let wpx = (floor(wpx0 / GLINT_PX) + 0.5) * GLINT_PX;
 let tx = wpx.x / ${TILE_W}.0 + wpx.y / ${TILE_H}.0;
@@ -143,7 +144,7 @@ export function createGlints(engine: EngineContext, sr: SpriteRenderer, world: G
     // let the shader map a world pixel back to a tile coordinate.
     const whiteTex = createTexture2DFromPixels(engine, new Uint8Array([255, 255, 255, 255]), 1, 1);
     const atlas = createGridSpriteAtlas(whiteTex, { cellWidthPx: 1, cellHeightPx: 1, pivot: [0.5, 0.5] });
-    const fragment = `const GLINT_W = ${width}.0;\nconst GLINT_H = ${height}.0;\nconst GLINT_PX = ${GLINT_PX}.0;\nconst GLINT_CELL = ${GLINT_CELL}.0;\nconst GLINT_GATE = ${GLINT_GATE};\nconst GLINT_DIRX = ${GLINT_DIRX};\nconst GLINT_DIRY = ${GLINT_DIRY};\n${GLINT_FRAGMENT}`;
+    const fragment = wgsl`const GLINT_W = ${width}.0;\nconst GLINT_H = ${height}.0;\nconst GLINT_PX = ${GLINT_PX}.0;\nconst GLINT_CELL = ${GLINT_CELL}.0;\nconst GLINT_GATE = ${GLINT_GATE};\nconst GLINT_DIRX = ${GLINT_DIRX};\nconst GLINT_DIRY = ${GLINT_DIRY};\n${GLINT_FRAGMENT}`;
     const shader = createSprite2DCustomShader({ fragment, extraTextures: [{ name: "land", texture: landTex }] });
     const layer = createSprite2DLayer(atlas, { capacity: 1, order: GLINT_ORDER, pivot: [0.5, 0.5], customShader: shader });
     addSpriteRendererLayer(sr, layer);

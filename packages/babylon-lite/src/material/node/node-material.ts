@@ -16,12 +16,14 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/renderable.js";
-import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
+import type * as ThinInstanceGpu from "../../mesh/thin-instance-gpu.js";
+import { parseNodeMaterialSource, findBlockByClassName, nodeUniformName } from "./node-parser.js";
 import { bjsTypeToNodeType, loadGraphEmitters, emitGraph, sanitize } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import type { Material } from "../material.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
 import type * as NodeEnv from "./node-env.js";
+import type { NodeShadowEmitter } from "./node-shadow-emitter.js";
 
 export { bjsTypeToNodeType, sanitize } from "./node-emitter.js";
 
@@ -49,8 +51,6 @@ export interface NodeMaterial extends Material {
     /** @internal Whether this material requires alpha blending (derived from graph + JSON flags). */
     readonly _needsAlphaBlending: boolean;
     /** @internal */
-    _nodeUBO: GPUBuffer | null;
-    /** @internal */
     _uboDirty: boolean;
     /** @internal */
     _uniformValues: Map<string, UniformSlot>;
@@ -72,6 +72,10 @@ export interface NodeMaterial extends Material {
     readonly _hasSkeleton: boolean;
     /** @internal */
     readonly _hasInstances: boolean;
+    /** @internal Lazily loaded only for node materials that opt into thin instances. */
+    readonly _syncThinInstances: typeof ThinInstanceGpu.syncThinInstanceGpuData | null;
+    /** @internal Lazily loaded only for node materials that opt into thin instances. */
+    readonly _syncThinInstanceForDraw: typeof ThinInstanceGpu.syncThinInstanceForDraw | null;
 }
 
 /** A live handle to one named Node Material input (uniform or texture). Set
@@ -103,7 +107,9 @@ export interface ParseNodeMaterialOptions {
     readonly hasSkeleton?: boolean;
     /** When true, InstancesBlock wires per-instance attributes. Default false. */
     readonly hasInstances?: boolean;
-    /** Optional graph-specific block loader. Avoids the full default registry when callers know the exact block set. */
+    /** Optional graph-specific block loader. Avoids the full default registry when callers know the exact block set.
+     *  Custom emitters may preserve the established flag-only contracts by setting `state.usesMorphTargets` or
+     *  `state.usesLightsUbo`; the async parser loads the corresponding feature when no private seam was installed. */
     readonly blockLoader?: (className: string) => Promise<BlockEmitter>;
 }
 
@@ -161,7 +167,15 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         hasSkeleton: options.hasSkeleton ?? false,
         hasInstances: options.hasInstances ?? false,
     });
+    // Preserve custom emitters written against the original public flag-only contract.
+    if (state.usesMorphTargets && !state._vertexFeature) {
+        state._vertexFeature = (await import("./node-morph.js")).createNodeMorphFeature;
+    }
+    if (state.usesLightsUbo && !state._meshFeature) {
+        state._meshFeature = (await import("./node-lighting.js")).createNodeLightingFeature;
+    }
     await resolvePbrMrHelpers(state);
+    const thinInstanceGpu = state.hasInstances ? await import("../../mesh/thin-instance-gpu.js") : null;
 
     // Dynamic import: env IBL helpers in node-env.ts are only loaded when the
     // graph emitted state.usesEnv. Scenes without ReflectionBlock+PBR-MR never
@@ -173,12 +187,11 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _envEmitter = envHelpers.emitEnv;
     }
 
-    // Dynamic import: the PCF/ESM WGSL helpers live in node-shadow.ts and
-    // are only loaded when the caller supplied shadowGenerators. Scenes
-    // without shadows never bundle this module.
-    let _shadowEmitter: typeof import("./node-shadow.js").emitShadow | undefined;
+    // Prepare sampling algorithms before any synchronous material-view compilation.
+    let _shadowEmitter: NodeShadowEmitter | undefined;
     if (options.shadowGenerators && options.shadowGenerators.length > 0) {
-        _shadowEmitter = (await import("./node-shadow.js")).emitShadow;
+        const { prepareNodeShadowEmitter } = await import("./node-shadow-emitter.js");
+        _shadowEmitter = await prepareNodeShadowEmitter(state.shadowLights);
     }
 
     const compile = compileNodePipeline(state, vertexWgsl, fragmentWgsl, {
@@ -196,8 +209,8 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     const uniformValues = new Map<string, UniformSlot>();
     for (const [name, blockId] of graph.namedInputs) {
         const block = graph.blocks.get(blockId)!;
-        const _name = sanitize(block.name || `input${block.id}`);
-        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        const _name = nodeUniformName(graph, block, sanitize);
+        const _offsetBytes = compile._nodeUboSpec?._offsets.get(_name);
         if (_offsetBytes === undefined) {
             continue;
         }
@@ -241,11 +254,11 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         if (block.className !== "InputBlock") {
             continue;
         }
-        const _name = sanitize(block.name || `input${block.id}`);
+        const _name = nodeUniformName(graph, block, sanitize);
         if (uniformValues.has(_name)) {
             continue;
         } // already handled above
-        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        const _offsetBytes = compile._nodeUboSpec?._offsets.get(_name);
         if (_offsetBytes === undefined) {
             continue;
         }
@@ -300,7 +313,6 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _vertexAttrNames: attrNames,
         _shadowGenerators: options.shadowGenerators ?? [],
         _needsAlphaBlending: graph.needsAlphaBlending,
-        _nodeUBO: null,
         _uboDirty: false,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
@@ -308,6 +320,8 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _emitters: emitters,
         _hasSkeleton: options.hasSkeleton ?? false,
         _hasInstances: options.hasInstances ?? false,
+        _syncThinInstances: thinInstanceGpu?.syncThinInstanceGpuData ?? null,
+        _syncThinInstanceForDraw: thinInstanceGpu?.syncThinInstanceForDraw ?? null,
     };
     return material;
 }
@@ -413,7 +427,7 @@ export function extractDefault(raw: unknown, type: NodeValueType): number[] {
 // ─── UBO writer ─────────────────────────────────────────────────────
 
 export function writeNodeUBO(engine: EngineContext, buffer: GPUBuffer, material: NodeMaterial): void {
-    const size = material._compile._nodeUboSize;
+    const size = material._compile._nodeUboSpec?._totalBytes ?? 0;
     if (size === 0) {
         return;
     }

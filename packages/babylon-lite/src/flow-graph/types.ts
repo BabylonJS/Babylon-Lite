@@ -11,27 +11,28 @@ import type { FgMatrix2D, FgMatrix3D } from "./custom-types/fg-matrix.js";
 /** A value that can flow along a data edge. */
 export type FgValue = number | boolean | string | Vec2 | Vec3 | Vec4 | Quat | Mat4 | FgInteger | FgMatrix2D | FgMatrix3D | Color3 | Color4 | null | undefined;
 
-/** Type tags. `const enum` → fully erased at build, zero runtime cost.
+/** Type tags.
  *  String values intentionally match the glTF / BJS `flowGraphType` identifiers
  *  so the declaration mapper can pass them through unchanged. */
-export const enum FgType {
-    Any = "any",
-    Number = "number",
-    Boolean = "boolean",
-    String = "string",
-    Integer = "FlowGraphInteger",
-    Vector2 = "Vector2",
-    Vector3 = "Vector3",
-    Vector4 = "Vector4",
-    Quaternion = "Quaternion",
-    Matrix = "Matrix",
-    Matrix2D = "Matrix2D",
-    Matrix3D = "Matrix3D",
-    Color3 = "Color3",
-    Color4 = "Color4",
+export const FgType = {
+    Any: "any",
+    Number: "number",
+    Boolean: "boolean",
+    String: "string",
+    Integer: "FlowGraphInteger",
+    Vector2: "Vector2",
+    Vector3: "Vector3",
+    Vector4: "Vector4",
+    Quaternion: "Quaternion",
+    Matrix: "Matrix",
+    Matrix2D: "Matrix2D",
+    Matrix3D: "Matrix3D",
+    Color3: "Color3",
+    Color4: "Color4",
     /** Opaque host reference. KHR uses canonical JSON Pointer strings; "" is null. */
-    Reference = "ref",
-}
+    Reference: "ref",
+} as const;
+export type FgType = (typeof FgType)[keyof typeof FgType];
 
 /** A data input/output port — plain data. */
 export interface FgDataSocket {
@@ -73,16 +74,17 @@ export interface FgGraph {
     readonly variables: Readonly<Record<string, { type: FgType; value: FgValue }>>;
 }
 
-/** Event channels an event block can subscribe to. `const enum` → erased. */
-export const enum FgEventType {
+/** Event channels an event block can subscribe to. */
+export const FgEventType = {
     /** Fired once when the graph starts (scene ready). */
-    Start = "start",
+    Start: "start",
     /** Fired every frame with `{ deltaMs, deltaTime }`. */
-    Tick = "tick",
+    Tick: "tick",
     /** Custom events sent between graphs; payload carries `eventName` + values. */
-    CustomEvent = "customEvent",
+    CustomEvent: "customEvent",
     /** Pointer events forwarded by the picking/input layer. */
-    Pointer = "pointer",
+    Pointer: "pointer",
     /** Keyboard events forwarded by the input layer. */
-    Key = "key",
-}
+    Key: "key",
+} as const;
+export type FgEventType = (typeof FgEventType)[keyof typeof FgEventType];

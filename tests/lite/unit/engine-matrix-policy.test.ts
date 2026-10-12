@@ -2,14 +2,14 @@ import { describe, expect, it, afterEach } from "vitest";
 
 import { allocateMat4, _setHpmAllocator, _resetMatrixAllocatorForTests } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
-import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
-import { mat4FromQuat } from "../../../packages/babylon-lite/src/math/mat4-from-quat";
-import { mat4Invert } from "../../../packages/babylon-lite/src/math/mat4-invert";
-import { mat4Multiply } from "../../../packages/babylon-lite/src/math/mat4-multiply";
-import { mat4Scale } from "../../../packages/babylon-lite/src/math/mat4-scale";
-import { mat4PerspectiveLH } from "../../../packages/babylon-lite/src/math/mat4-perspective-lh";
-import { mat4LookAtLH } from "../../../packages/babylon-lite/src/math/mat4-look-at-lh";
+import { composeMat4 } from "../../../packages/babylon-lite/src/math/compose-mat4";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
+import { createMat4FromQuat } from "../../../packages/babylon-lite/src/math/create-mat4-from-quat";
+import { invertMat4 } from "../../../packages/babylon-lite/src/math/invert-mat4";
+import { multiplyMat4 } from "../../../packages/babylon-lite/src/math/multiply-mat4";
+import { createScalingMat4 } from "../../../packages/babylon-lite/src/math/create-scaling-mat4";
+import { createPerspectiveMat4LH } from "../../../packages/babylon-lite/src/math/create-perspective-mat4-lh";
+import { createLookAtMat4LH } from "../../../packages/babylon-lite/src/math/create-look-at-mat4-lh";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 
 // The matrix allocator is a process-global lazy singleton (GUIDANCE pillar 4,
@@ -62,7 +62,7 @@ describe("matrix allocator (process-global singleton)", () => {
     // hardcoded `new F32(16)`. `createWorldMatrixState` allocates correctly, so a
     // node WITH A PARENT came out F64 and looked fine — but a ROOT node's
     // `getWorldMatrix()` returns its LOCAL matrix, which comes from
-    // `composeTrsLocalMatrix` -> `mat4Compose`/`mat4Identity`. So every
+    // `composeTrsLocalMatrix` -> `composeMat4`/`createIdentityMat4`. So every
     // root-level object silently kept an F32 world transform under
     // `useHighPrecisionMatrix: true`, which is precisely where large-world
     // precision is needed.
@@ -74,16 +74,16 @@ describe("matrix allocator (process-global singleton)", () => {
     it("every mat4 factory allocates through the allocator", () => {
         _setHpmAllocator(allocateF64Mat4);
         const q = { x: 0, y: 0, z: 0, w: 1 };
-        const a = mat4Identity();
+        const a = createIdentityMat4();
         const factories: Record<string, unknown> = {
-            mat4Identity: a,
-            mat4Compose: mat4Compose(1, 2, 3, q.x, q.y, q.z, q.w, 1, 1, 1),
-            mat4FromQuat: mat4FromQuat(q.x, q.y, q.z, q.w),
-            mat4Invert: mat4Invert(a),
-            mat4Multiply: mat4Multiply(a, a),
-            mat4Scale: mat4Scale(2, 2, 2),
-            mat4PerspectiveLH: mat4PerspectiveLH(1, 1, 0.5, 100),
-            mat4LookAtLH: mat4LookAtLH({ x: 0, y: 0, z: -5 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }),
+            createIdentityMat4: a,
+            composeMat4: composeMat4(1, 2, 3, q.x, q.y, q.z, q.w, 1, 1, 1),
+            createMat4FromQuat: createMat4FromQuat(q.x, q.y, q.z, q.w),
+            invertMat4: invertMat4(a),
+            multiplyMat4: multiplyMat4(a, a),
+            createScalingMat4: createScalingMat4(2, 2, 2),
+            createPerspectiveMat4LH: createPerspectiveMat4LH(1, 1, 0.5, 100),
+            createLookAtMat4LH: createLookAtMat4LH({ x: 0, y: 0, z: -5 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }),
         };
         // Named individually so a failure says WHICH factory bypassed it, rather
         // than just that one of them did.

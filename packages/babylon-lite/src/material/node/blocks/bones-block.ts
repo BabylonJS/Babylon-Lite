@@ -9,9 +9,10 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY = "nme_skinning";
-const HELPER_WGSL = `
+const HELPER_WGSL = wgsl`
 fn nme_skinningMatrix(indices: vec4<f32>, weights: vec4<f32>) -> mat4x4<f32> {
     let i0 = u32(indices.x);
     let i1 = u32(indices.y);

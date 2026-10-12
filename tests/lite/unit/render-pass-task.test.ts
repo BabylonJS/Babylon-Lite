@@ -2,19 +2,29 @@ import { describe, it, expect, vi } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import type { DrawBinding, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { DrawBinding, DrawUpdateBatch, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { getUniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
 import { createSceneContext, registerScene } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
+import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { _removeMeshFromRenderTask, type RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { rebuildTransferTarget, transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import { getComputeDispatchBatch } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
+import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/render/draw-update-batches";
 import { invalidateRenderBundles } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { enableShaderMaterialVisiblePacketUpdates } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-visible-packet-updates";
+import { createShaderMaterial, setShaderFloat } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { setMeshVisible } from "../../../packages/babylon-lite/src/scene/scene";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -265,6 +275,212 @@ function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "or
 }
 
 describe("RenderPassTask transparent sorting", () => {
+    it("keeps automatic scene rendering independent of explicit mesh ownership", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        expect("addMesh" in task).toBe(false);
+        expect("_pendingMeshes" in task).toBe(false);
+        expect("_prepareRenderables" in task).toBe(false);
+        scene._renderables.push(makeDrawOrderRenderable("first", {}, []));
+        task.record();
+        expect(task.execute!()).toBe(1);
+        scene._renderables.push(makeDrawOrderRenderable("second", {}, []));
+        scene._renderableVersion++;
+        expect(task.execute!()).toBe(2);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("does not mark scene mutations during binding as already synchronized", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const first = makeDrawOrderRenderable("first", {}, []);
+        const second = makeDrawOrderRenderable("second", {}, []);
+        const bindFirst = first.bind.bind(first);
+        let changed = false;
+        first.bind = (eng, signature) => {
+            const binding = bindFirst(eng, signature);
+            if (!changed) {
+                changed = true;
+                scene._renderables.push(second);
+                scene._renderableVersion++;
+            }
+            return binding;
+        };
+        scene._renderables.push(first);
+        const sourceVersion = scene._renderableVersion;
+
+        task.record();
+
+        expect(task._renderables).toEqual([first]);
+        expect(task._lastVersion).toBe(sourceVersion);
+        expect(task.execute!()).toBe(2);
+        expect(task._renderables).toEqual([first, second]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it.each([false, true])("preserves source versions when the scene mutates during automatic rebinding (transmission: %s)", (transmission) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const first = makeDrawOrderRenderable("first", {}, []);
+        const second = makeDrawOrderRenderable("second", {}, []);
+        scene._renderables.push(first);
+        if (transmission) {
+            enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        }
+        task.record();
+        expect(task.execute!()).toBe(1);
+        const bindFirst = first.bind.bind(first);
+        let changed = false;
+        first.bind = (eng, signature) => {
+            const binding = bindFirst(eng, signature);
+            if (!changed) {
+                changed = true;
+                scene._renderables.push(second);
+                scene._renderableVersion++;
+            }
+            return binding;
+        };
+        const sourceVersion = ++scene._renderableVersion;
+
+        expect(task.execute!()).toBe(1);
+        expect(task._lastVersion).toBe(sourceVersion);
+        expect(task.execute!()).toBe(2);
+        expect(task._renderables).toEqual([first, second]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it.each([false, true])("reuses explicit-task bundles across unrelated scene versions (transmission: %s)", (transmission) => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({ format: "rgba8unorm", dFormat: "depth24plus-stencil8", samples: 4, size: { width: 32, height: 32 } });
+        const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
+        task._renderables.push(makeDrawOrderRenderable("first", {}, []));
+        if (transmission) {
+            enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        }
+        task.record();
+        task.execute!();
+        const bundles = bundleDescriptors.length;
+        scene._renderableVersion++;
+
+        task.execute!();
+        expect(bundleDescriptors).toHaveLength(bundles);
+        invalidateRenderBundles(engine);
+        task.execute!();
+        expect(bundleDescriptors).toHaveLength(bundles + 1);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("refreshes scene bind groups without invalidating unchanged material bindings", () => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const renderable = makeDrawOrderRenderable("first", {}, []);
+        const bind = vi.spyOn(renderable, "bind");
+        scene._renderables.push(renderable);
+        task.record();
+        task.execute!();
+        const previousSceneGroup = task._sceneBG;
+        scene._lightGpuState!._buffer = engine._device.createBuffer({ size: scene._lightGpuState!._byteSize, usage: GPUBufferUsage.UNIFORM });
+
+        task.execute!();
+        expect(task._sceneBG).not.toBe(previousSceneGroup);
+        task.execute!();
+        expect(bind).toHaveBeenCalledOnce();
+        expect(bundleDescriptors).toHaveLength(2);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("preserves automatic draw buckets and live batches after a failed scene rebind", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const currentBatch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+        const candidates: DrawUpdateBatch[] = [];
+        let fail = true;
+        const make = (batch: () => DrawUpdateBatch | undefined): Renderable => {
+            const renderable: Renderable = {
+                order: 0,
+                isTransparent: false,
+                bind: (_engine, signature) => {
+                    enableDrawBatchCollection(signature);
+                    const value = batch();
+                    return { renderable, pipeline: {} as GPURenderPipeline, draw: () => 1, _updateBatches: value ? [value] : undefined };
+                },
+            };
+            return renderable;
+        };
+        scene._renderables.push(make(() => currentBatch));
+        task.record();
+        const renderables = task._renderables;
+        const bindings = task._opaqueBindings;
+        const batches = task._batchState;
+        const version = task._lastVersion;
+        scene._renderables.push(
+            make(() => {
+                const batch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+                candidates.push(batch);
+                return batch;
+            }),
+            make(() => {
+                if (fail) {
+                    throw new Error("automatic binding failed");
+                }
+                return undefined;
+            })
+        );
+        scene._renderableVersion++;
+        expect(() => task.execute!()).toThrow("automatic binding failed");
+        expect(task._renderables).toBe(renderables);
+        expect(task._opaqueBindings).toBe(bindings);
+        expect(task._batchState).toBe(batches);
+        expect(task._lastVersion).toBe(version);
+        expect(currentBatch.destroy).not.toHaveBeenCalled();
+        expect(candidates[0]!.destroy).toHaveBeenCalledOnce();
+        fail = false;
+        expect(task.execute!()).toBe(3);
+        expect(task._renderables).not.toBe(renderables);
+        expect(candidates[1]!.destroy).not.toHaveBeenCalled();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(currentBatch.destroy).toHaveBeenCalledOnce();
+        expect(candidates[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("removes borrowed meshes from automatic passes without claiming scene lifetimes", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const mesh = {} as Mesh;
+        const release = vi.fn();
+        const renderable: Renderable = {
+            mesh,
+            order: 0,
+            isTransparent: false,
+            bind: () => ({ renderable, pipeline: {} as GPURenderPipeline, draw: () => 1 }),
+        };
+        scene._meshDisposables.set(mesh, [release]);
+        scene._renderables.push(renderable);
+        task.record();
+        _removeMeshFromRenderTask(task, mesh);
+        expect(task._renderables).toHaveLength(0);
+        expect(task._opaqueBindings).toHaveLength(0);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(release).not.toHaveBeenCalled();
+        expect(scene._meshDisposables.get(mesh)).toEqual([release]);
+    });
+
     it("drops a mesh removed before first record from pending task inputs", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
@@ -281,7 +497,7 @@ describe("RenderPassTask transparent sorting", () => {
             _buildGroup: { _rebuildSingle: rebuildSingle },
         } as unknown as Material;
 
-        task.addMesh(mesh, { material });
+        addMeshToTask(task, mesh, { material });
         removeMeshFromTask(task, mesh);
         task.record();
 
@@ -290,7 +506,34 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
-    it("uses an override builder that is not registered as a scene group", () => {
+    it.each([false, true])("retains pending meshes until their scene-local group is ready (standalone: %s)", (standalone) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const foreignScene = createSceneContext(makeMockEngine(), { defaultRenderTask: false });
+        const rt = createRenderTarget({ lbl: "pending-group", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "pending-group", rt, autoMirror: false }, engine, scene);
+        const mesh = {} as Mesh;
+        const foreign = vi.fn(() => makeDrawOrderRenderable("foreign", {}, []));
+        const material = { _buildGroup: { _rebuildSingle: foreign, _sceneIndependentRebuild: standalone } } as unknown as Material;
+        foreignScene._groups.set(material._buildGroup, Object.assign([], { r: foreign }));
+        const localGroup = [mesh];
+        scene._groups.set(material._buildGroup, localGroup);
+        addMeshToTask(task, mesh, { material });
+        expect(() => task.record()).toThrow(/initial build in this scene/);
+        expect(foreign).not.toHaveBeenCalled();
+        expect(task._pendingMeshes).toHaveLength(1);
+        expect(task._renderables).toHaveLength(0);
+        const renderable = makeDrawOrderRenderable("local", {}, []);
+        const local = vi.fn(() => renderable);
+        scene._groups.get(material._buildGroup)!.r = local;
+        task.record();
+        expect(local).toHaveBeenCalledWith(scene, mesh, material, expect.objectContaining({ _lifetimeDisposers: expect.any(Array) }));
+        expect(task._pendingMeshes).toHaveLength(0);
+        expect(task._renderables).toEqual([renderable]);
+        task.dispose();
+    });
+
+    it("uses an explicitly scene-independent override builder without a scene group", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
         const rt = createRenderTarget({
@@ -304,14 +547,45 @@ describe("RenderPassTask transparent sorting", () => {
         const renderable = makeDrawOrderRenderable("override", {}, []);
         const rebuildSingle = vi.fn(() => renderable);
         const material = {
-            _buildGroup: { _rebuildSingle: rebuildSingle },
+            _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true },
         } as unknown as Material;
 
-        task.addMesh(mesh, { material });
+        addMeshToTask(task, mesh, { material });
         task.record();
 
-        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material);
+        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material, expect.objectContaining({ _lifetimeDisposers: expect.any(Array) }));
         expect(task._renderables).toEqual([renderable]);
+    });
+
+    it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+    ])("preserves transmission recording across mesh population (transmission first: %s, live task: %s)", (transmissionFirst, live) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "transmission-population", rt, autoMirror: false }, engine, scene);
+        const renderable = makeDrawOrderRenderable("override", {}, []);
+        const material = {
+            _buildGroup: { _rebuildSingle: () => renderable, _sceneIndependentRebuild: true },
+        } as unknown as Material;
+        const options = { linear: false, generateMipmaps: false };
+        let grab = transmissionFirst ? enableRenderTaskTransmission(task, engine, options) : undefined;
+        if (live) {
+            task.record();
+        }
+        addMeshToTask(task, {} as Mesh, { material });
+        grab ??= enableRenderTaskTransmission(task, engine, options);
+        task.record();
+        const texture = grab.texture;
+        expect(texture).not.toBeNull();
+        task.record();
+        expect(grab.texture).not.toBe(texture);
+        expect(task._renderables).toEqual([renderable]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("transfers a resolved mesh between live tasks without rebuilding its renderable", () => {
@@ -346,9 +620,9 @@ describe("RenderPassTask transparent sorting", () => {
             },
         };
         const rebuildSingle = vi.fn(() => renderable);
-        const material = { _buildGroup: { _rebuildSingle: rebuildSingle } } as unknown as Material;
+        const material = { _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true } } as unknown as Material;
 
-        from.addMesh(mesh, { material });
+        addMeshToTask(from, mesh, { material });
         from.record();
         to.record();
         draws.length = 0;
@@ -391,8 +665,8 @@ describe("RenderPassTask transparent sorting", () => {
         };
         const renderables = [makeRenderable(0), makeRenderable(1), makeRenderable(2)];
         for (const r of renderables) {
-            const material = { _buildGroup: { _rebuildSingle: () => r } } as unknown as Material;
-            from.addMesh(r.mesh!, { material });
+            const material = { _buildGroup: { _rebuildSingle: () => r, _sceneIndependentRebuild: true } } as unknown as Material;
+            addMeshToTask(from, r.mesh!, { material });
         }
         from.record();
         to.record();
@@ -417,7 +691,7 @@ describe("RenderPassTask transparent sorting", () => {
         expect(binds.length).toBe(0);
         expect(pending.size).toBe(1);
         for (const task of pending) {
-            task.record();
+            rebuildTransferTarget(task);
         }
         expect(binds.length).toBe(3);
         expect(to._renderables).toEqual(renderables);
@@ -440,6 +714,86 @@ describe("RenderPassTask transparent sorting", () => {
         task.execute?.();
 
         expect(bundleDescriptors).toHaveLength(2);
+    });
+
+    it("refreshes deferred ShaderMaterial packets and flushes copies before the first restored bundle", () => {
+        const events: string[] = [];
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const copies: [GPUBuffer, number, GPUBuffer, number, number][] = [];
+        const engine = makeMockEngine({
+            bundleDescriptors,
+            bufferCopies: copies,
+            onWriteBuffer(buffer) {
+                if ((buffer as GPUBuffer & { descriptor: GPUBufferDescriptor }).descriptor.label === "render-task-uniform-upload") {
+                    events.push("upload");
+                }
+            },
+        });
+        const scene = createSceneContext(engine);
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+            uniforms: ["world", { name: "amount", type: "f32" }],
+        });
+        enableShaderMaterialVisiblePacketUpdates(material);
+        const meshes = ["a", "b"].map((name) =>
+            initMeshTransform({
+                name,
+                children: [],
+                material,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint32",
+                    indexCount: 3,
+                },
+            })
+        );
+        const result = buildShaderMaterialRenderables(scene, meshes, getUniformCopyBatch);
+        scene._renderables.push(...result.renderables);
+        const recordedGroups: GPUBindGroup[][] = [];
+        engine._device.createRenderBundleEncoder = () => {
+            const groups: GPUBindGroup[] = [];
+            recordedGroups.push(groups);
+            events.push("record");
+            return {
+                setBindGroup(index: number, group: GPUBindGroup) {
+                    if (index === 1) {
+                        groups.push(group);
+                    }
+                },
+                setPipeline: () => undefined,
+                setVertexBuffer: () => undefined,
+                setIndexBuffer: () => undefined,
+                drawIndexed: () => undefined,
+                finish: () => ({}) as GPURenderBundle,
+            } as unknown as GPURenderBundleEncoder;
+        };
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        task.record();
+        task.execute!();
+        expect(recordedGroups[0]).toHaveLength(2);
+        setMeshVisible(meshes[1]!, false);
+        meshes[1]!.position.x = 7;
+        setShaderFloat(material, "amount", 0.5);
+        copies.length = events.length = 0;
+        task.execute!();
+        expect(copies).toHaveLength(1);
+        expect(events).toEqual(["upload", "record"]);
+        expect(recordedGroups[1]).toHaveLength(1);
+        copies.length = events.length = 0;
+        task.execute!();
+        expect(copies).toHaveLength(0);
+        expect(events).toHaveLength(0);
+        setMeshVisible(meshes[1]!, true);
+        task.execute!();
+        expect(copies).toHaveLength(1);
+        expect(events).toEqual(["upload", "record"]);
+        expect(recordedGroups[2]).toHaveLength(2);
     });
 
     it("flushes binding compute work through one compute pass per render task", async () => {
@@ -501,7 +855,7 @@ describe("RenderPassTask transparent sorting", () => {
         const rt = createRenderTarget({
             format: "bgra8unorm",
             dFormat: "depth32float",
-            _depthCompare: "less-equal",
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
@@ -510,6 +864,109 @@ describe("RenderPassTask transparent sorting", () => {
         enableRenderTaskTransmission(task, engine);
 
         expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
+    it("preserves an external depth target compare when transmission retargets a render task", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({
+            format: "bgra8unorm",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const depth = createRenderTarget({
+            dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "standard-z-external-depth", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
+    it("preserves scaled surface sizing when transmission retargets a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const size = { surface: engine, scale: 0.5 } as const;
+        const color = createRenderTarget({ format: "bgra8unorm", samples: 1, size });
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size });
+        const task = createRenderTask({ name: "scaled-transmission", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+        task.record();
+
+        expect(task._config.rt._descriptor.size).toBe(size);
+        expect(task._config.rt._width).toBe(400);
+        expect(task._config.rt._height).toBe(300);
+        expect(depth._width).toBe(400);
+        expect(depth._height).toBe(300);
+    });
+
+    it("synchronizes sampled eager targets borrowed by a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        color._eager = true;
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createRenderTask({ name: "borrowed-eager", rt: color, depth, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(color._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("synchronizes a borrowed sampled eager resolve target independently of its MSAA target", () => {
+        const engine = makeMockEngine({ msaaSamples: 4 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 4, size: { width: 500, height: 300 } });
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 500, height: 300 },
+            format: "rgba8unorm",
+            sampleCount: 4,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._width = 500;
+        color._height = 300;
+        const resolve = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 500, height: 300 } });
+        resolve._eager = true;
+        resolve._colorTexture = engine._device.createTexture({
+            size: { width: 400, height: 300 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        resolve._colorView = resolve._colorTexture.createView();
+        resolve._width = 400;
+        resolve._height = 300;
+        resolve._syncEager = vi.fn(function (this: RenderTarget): void {
+            this._width = 500;
+        });
+        const task = createRenderTask({ name: "borrowed-resolve", rt: color, rst: resolve, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(resolve._syncEager).toHaveBeenCalledWith(engine);
+        expect(resolve._width).toBe(500);
     });
 
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
@@ -742,6 +1199,45 @@ describe("RenderPassTask transparent sorting", () => {
         expect(colorAttachments[0]!.resolveTarget).toBeUndefined();
     });
 
+    it("refreshes the default task from an auxiliary surface scRT every frame", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({
+            msaaSamples: 1,
+            onBeginPass: (descriptor) => {
+                seenDescriptors.push(descriptor);
+            },
+        });
+        const initialView = {} as GPUTextureView;
+        const currentView = {} as GPUTextureView;
+        const surface = {
+            engine,
+            canvas: { width: 320, height: 240 },
+            msaaSamples: 1,
+            format: engine.format,
+            scRT: {
+                _colorTexture: {},
+                _colorView: initialView,
+                _depthTexture: null,
+                _depthView: null,
+                _descriptor: { format: engine.format, samples: 1, size: { width: 320, height: 240 } },
+                _width: 320,
+                _height: 240,
+                _eager: true,
+            } as unknown as RenderTarget,
+            _renderingContexts: [],
+        } as unknown as SurfaceContext;
+        const scene = createSceneContext(surface);
+        await registerScene(scene);
+        surface.scRT._colorView = currentView;
+
+        scene._record();
+
+        const swapDescriptor = seenDescriptors[seenDescriptors.length - 1]!;
+        const colorAttachments = swapDescriptor.colorAttachments as readonly GPURenderPassColorAttachment[];
+        expect(colorAttachments[0]!.view).toBe(currentView);
+        expect(colorAttachments[0]!.view).not.toBe(engine.scRT._colorView);
+    });
+
     it("binds an external depthTexture in place of the color RT's own depth view", async () => {
         const seenDescriptors: GPURenderPassDescriptor[] = [];
         const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
@@ -760,6 +1256,8 @@ describe("RenderPassTask transparent sorting", () => {
         const externalDepth = createRenderTarget({
             lbl: "external-depth",
             dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
@@ -782,11 +1280,13 @@ describe("RenderPassTask transparent sorting", () => {
         const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
         expect(depthAtt.view).toBe(sentinelDepthView);
         expect(depthAtt.depthLoadOp).toBe("load");
+        expect(depthAtt.depthClearValue).toBe(1);
         // Color RT has no depth of its own — verifies depthTexture really did override it.
         expect(colorRt._depthView).toBeNull();
         // The pipeline's signature must reflect the external depth format so
         // beginRenderPass validates against pipelines with depthStencil.format = depth32float.
         expect(task._targetSignature._depthStencilFormat).toBe("depth32float");
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
         // Regression: the cached opaque render-bundle encoder's attachment state
         // must include the overridden depth format too. The colour RT carries no
         // depthStencilFormat of its own, so a bundle built from the RT descriptor
@@ -887,9 +1387,11 @@ describe("RenderPassTask transparent sorting", () => {
         const rt = createRenderTarget({ lbl: "explicit", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
         const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
 
+        expect(task._pendingMeshes).toBeUndefined();
+        removeMeshFromTask(task, {} as Mesh);
+        expect(task._pendingMeshes).toBeUndefined();
         task.record();
 
-        expect(task._af).toBe(false);
         expect(task._renderables).toHaveLength(0);
     });
 
@@ -945,7 +1447,7 @@ describe("RenderPassTask transparent sorting", () => {
 });
 
 describe("RenderTask MSAA resolveTarget", () => {
-    it("wires a single-sample resolveTarget as the color attachment's end-of-pass resolve when the RT is MSAA", () => {
+    it("wires a single-sample resolveTarget at execution when the RT is MSAA", () => {
         const engine = makeMockEngine({ msaaSamples: 4 });
         const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
         scene.camera = makeCamera();
@@ -966,6 +1468,7 @@ describe("RenderTask MSAA resolveTarget", () => {
 
         const task = createRenderTask({ name: "msaa-scene", rt: msaaRt, rst: resolveTarget }, engine, scene);
         task.record();
+        task.execute!();
 
         // The resolve target's color view must be allocated and used as the
         // attachment's resolveTarget so WebGPU resolves the 4x MSAA in-pass.

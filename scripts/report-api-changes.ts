@@ -18,6 +18,11 @@ type CallableSignature = {
     suffix: string;
 };
 
+type ChangedApiHunk = {
+    removedLines: string[];
+    addedLines: string[];
+};
+
 const PACKAGE_NAME = "@babylonjs/lite";
 const API_REPORT_FILE_NAME = "babylon-lite.api.md";
 const BREAKING_MARKER = /^(?:BREAKING[ -]CHANGE:|[a-z][a-z0-9-]*(?:\([^)]+\))?!:)/m;
@@ -228,11 +233,17 @@ function isIgnorableApiLine(content: string): boolean {
     return !content || content === "}" || content.startsWith("//") || content.startsWith("/*") || content.startsWith("*");
 }
 
-function collectChangedApiLines(diff: string, marker: "+" | "-"): string[] {
-    const changedLines: string[] = [];
+function collectChangedApiHunks(diff: string): ChangedApiHunk[] {
+    const hunks: ChangedApiHunk[] = [];
+    let currentHunk: ChangedApiHunk | undefined;
 
     for (const line of diff.split(/\r?\n/)) {
-        if (!line.startsWith(marker) || line.startsWith(`${marker}${marker}${marker}`)) {
+        if (line.startsWith("@@")) {
+            currentHunk = { removedLines: [], addedLines: [] };
+            hunks.push(currentHunk);
+            continue;
+        }
+        if (!currentHunk || (!line.startsWith("+") && !line.startsWith("-")) || line.startsWith("+++") || line.startsWith("---")) {
             continue;
         }
 
@@ -241,10 +252,10 @@ function collectChangedApiLines(diff: string, marker: "+" | "-"): string[] {
             continue;
         }
 
-        changedLines.push(content);
+        (line.startsWith("+") ? currentHunk.addedLines : currentHunk.removedLines).push(content);
     }
 
-    return changedLines;
+    return hunks;
 }
 
 function updateDepth(character: string, depth: { angle: number; square: number; curly: number }): void {
@@ -372,6 +383,28 @@ function isNonBreakingOptionalParameterExpansion(removedLine: string, addedLine:
     }
 
     return addedSignature.parameters.slice(removedSignature.parameters.length).every(isOptionalParameter);
+}
+
+const API_EXTRACTOR_UNDOCUMENTED_SUFFIX = /\s+\/\/ \(undocumented\)$/;
+
+function isNonBreakingUndocumentedCommentLayoutChange(removedLine: string, addedLine: string): boolean {
+    const removedHasSuffix = API_EXTRACTOR_UNDOCUMENTED_SUFFIX.test(removedLine);
+    const addedHasSuffix = API_EXTRACTOR_UNDOCUMENTED_SUFFIX.test(addedLine);
+    if (removedHasSuffix === addedHasSuffix) {
+        return false;
+    }
+
+    return removedLine.replace(API_EXTRACTOR_UNDOCUMENTED_SUFFIX, "") === addedLine.replace(API_EXTRACTOR_UNDOCUMENTED_SUFFIX, "");
+}
+
+function isNonBreakingMultilineOptionalParameterExpansion(removedLine: string, addedLines: string[]): boolean {
+    const continuedParameterIndex = addedLines.indexOf(`${removedLine},`);
+    if (continuedParameterIndex === -1) {
+        return false;
+    }
+
+    const appendedParameter = addedLines[continuedParameterIndex + 1];
+    return appendedParameter !== undefined && isOptionalParameter(appendedParameter);
 }
 
 const CONST_LITERAL_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*) = (.+);$/;
@@ -773,20 +806,24 @@ function isNonBreakingTypedArrayGenericWidening(removedLine: string, addedLine: 
  * never appear in the diff. Omitting it only makes the gate stricter.
  */
 export function breakingApiLines(diff: string, currentReport = ""): string[] {
-    const removedLines = collectChangedApiLines(diff, "-");
-    const addedLines = collectChangedApiLines(diff, "+");
+    const hunks = collectChangedApiHunks(diff);
+    const addedLines = hunks.flatMap((hunk) => hunk.addedLines);
     const declarations = collectInterfaceDeclarations(currentReport);
 
-    return removedLines.filter(
-        (removedLine) =>
-            !addedLines.some(
-                (addedLine) =>
-                    isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
-                    isNonBreakingParameterWidening(removedLine, addedLine, declarations) ||
-                    isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
-                    isNonBreakingUnionWidening(removedLine, addedLine) ||
-                    isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)
-            )
+    return hunks.flatMap((hunk) =>
+        hunk.removedLines.filter(
+            (removedLine) =>
+                !hunk.addedLines.some((addedLine) => isNonBreakingUndocumentedCommentLayoutChange(removedLine, addedLine)) &&
+                !isNonBreakingMultilineOptionalParameterExpansion(removedLine, hunk.addedLines) &&
+                !addedLines.some(
+                    (addedLine) =>
+                        isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
+                        isNonBreakingParameterWidening(removedLine, addedLine, declarations) ||
+                        isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
+                        isNonBreakingUnionWidening(removedLine, addedLine) ||
+                        isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)
+                )
+        )
     );
 }
 

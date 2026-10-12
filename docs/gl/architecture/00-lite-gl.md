@@ -198,11 +198,10 @@ export interface GLEngineContext {
      *  `disposeEffect`. Used by the context-lost/restored protocol (§4.7)
      *  to rebuild programs. */
     _effects: GLEffect[];
-    /** Live texture registry — populated by `createRawTexture` /
-     *  `loadTexture2D` / `createHtmlElementTexture`, removed by
-     *  `disposeTexture`. Used by the context-restored protocol to replay
-     *  uploads. */
-    _textures: GLTexture[];
+    /** Live texture registry — all managed 2D/3D factories add their textures;
+     *  the matching dispose function deletes them in expected O(1) time.
+     *  Set iteration preserves creation order among surviving textures. */
+    _textures: Set<GLTexture | GLTexture3D>;
     /** Context-lost / restored callback lists. */
     _onLost: (() => void)[];
     _onRestored: (() => void)[];
@@ -315,7 +314,16 @@ export interface GLEffect {
 
 export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect;
 export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolean;
+/** Polls readiness once and returns a recorded compile/link/restore error,
+ *  or null when none has been recorded. Does not schedule background work. */
+export function getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null;
 export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, cb: (e: GLEffect) => void): void;
+/** Optional readiness scheduler; all scheduling code lives in effect-ready.ts. */
+export interface GLEffectWaitOptions {
+    /** Cancels this wait without disposing or cancelling the shared effect. */
+    signal?: AbortSignal;
+}
+export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>;
 export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void;
 
 /** Sets engine._state.currentProgram and calls gl.useProgram(...) iff changed.
@@ -354,19 +362,21 @@ export interface GLTexture {
      *  placeholder upload AND the final image upload — bindings made before
      *  `isReady=true` remain valid. */
     handle: WebGLTexture;
-    readonly target: GLenum; // gl.TEXTURE_2D
+    readonly target: GLenum; // normally gl.TEXTURE_2D; retained for source compatibility
     width: number;
     height: number;
     isReady: boolean;
     _disposed: boolean;
     /** Internal ref count for shared textures (HtmlElementTexture wrappers etc.). */
     _refCount: number;
-    /** Replay closure for context-restore (§4.7). Captures the original
-     *  arguments (raw bytes + format/type, or decoded `ImageBitmap`, or
-     *  the source HTML element) and re-issues the `gl.texImage2D` /
-     *  `texParameteri` sequence. */
+    /** Replays the latest pixel content into the live texture handle. */
     _upload: (engine: GLEngineContext) => void;
+    /** Initializes creation-time sampling state on the bound texture handle. */
+    _initializeParameters?: (engine: GLEngineContext) => void;
 }
+
+/** Internal helper for applying sampling and wrap state to the bound upload texture. */
+export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void;
 
 /** Uint8 raw upload. `format` and `type` are GL constants; the caller picks
  *  e.g. (gl.RGBA, gl.UNSIGNED_BYTE). Matches NeonBrush's createRawTexture usage. */
@@ -392,9 +402,10 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
 export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTexture | null): void;
 
 /** Sets `tex._disposed=true`, calls `gl.deleteTexture(tex.handle)`, walks
- *  `_state.boundTextures` and clears every unit that still references the
+ *  the matching target's binding cache and clears every unit that still references the
  *  handle (so a later `bindTexture(..., otherTex)` to the same unit is NOT
- *  incorrectly elided). Removes the texture from `engine._textures`. */
+ *  incorrectly elided). Deregisters via `engine._textures.delete(tex)` in
+ *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 
 /** Build a full mip chain for `tex` (a single `gl.generateMipmap`). Mipmaps are
@@ -403,7 +414,182 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 ```
 
-#### 3.4.1 HTML element textures
+The engine-owned texture registry is a `Set`, allocated inside
+`createGLEngine` (never at module scope). All managed factories register via
+`add`; `disposeTexture` and `disposeTexture3D` use `delete`, avoiding both the
+linear membership search and the array shift on every eviction. Deletion of
+an absent entry is harmless. External-handle wrappers and render-target-owned
+color textures remain unregistered, with their existing ownership semantics.
+Dropping a shared texture's reference count does not unregister it until its
+final release. Binding-cache invalidation still scans only the fixed number
+of hardware texture units, not the number of live textures.
+
+The `Set` preserves insertion order for context-loss/restore replay; deleting
+the current or another entry during traversal cannot shift unvisited entries
+behind the iterator. Loss finishes marking readiness before firing loss
+callbacks, so those callbacks may evict textures without corrupting replay.
+Restore skips disposed textures and replays the surviving set. There is no
+separate suspend/dispose-all API in lite-gl; clients may dispose each texture
+while traversing the live set without skipping entries.
+
+Engine teardown snapshots the live set and clears it before issuing texture
+deletions. Every handle in that snapshot is force-disposed exactly once, even
+if another disposal is triggered during a GL deletion; shared reference counts
+cannot keep resources alive after engine disposal. Unit tests cover a 15,000
+texture registry, arbitrary eviction batches, refcounts, unregistered handles,
+mixed 2D/3D restoration, mutation during restore and reentrant engine teardown.
+
+#### 3.4.0 Already-decoded 2D sources (optional)
+
+```ts
+export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internalFormat"> {
+    /** Default true: retain the source for context-restore replay. */
+    retainSource?: boolean;
+}
+export function createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture;
+```
+
+`createTextureFromSource` synchronously creates an immediately ready 2D RGBA
+texture from an already-decoded `ImageBitmap`, `ImageData`, canvas,
+`OffscreenCanvas`, image, video or `VideoFrame`. It performs exactly one
+source-overload `texImage2D(TEXTURE_2D, 0, RGBA, RGBA, UNSIGNED_BYTE, source)`:
+there is no placeholder or blank allocation before the source upload. It
+applies the four min/mag/S/T parameters once to the new handle, defaulting to
+`LINEAR` / `LINEAR` and `CLAMP_TO_EDGE` / `CLAMP_TO_EDGE`. Mipmaps remain a
+separate opt-in via `generateTextureMipMaps`; a mipmap minification filter
+requires the caller to generate its chain.
+
+The factory reads intrinsic dimensions: `naturalWidth` / `naturalHeight` for
+images, `videoWidth` / `videoHeight` for videos, `displayWidth` / `displayHeight`
+for video frames, and `width` / `height` otherwise. Dimensions must be positive
+integers within `engine.caps.maxTextureSize`. Invalid dimensions, invalid
+`unpackAlignment` (anything other than 1/2/4/8), a lost/disposed engine or a
+null texture allocation throw explicitly. An `ImageData` whose buffer was
+transferred (empty `data`) is also rejected up front, because WebGL would only
+raise `INVALID_VALUE` without throwing. Video elements must have a decoded
+current frame (`readyState >= 2`, `HAVE_CURRENT_DATA`); positive dimensions at
+`HAVE_METADATA` alone are insufficient. The shared validation rejects videos
+without a current frame before any GL call during creation and routes them
+through the logged blank fallback during restoration. This check uses the
+numeric readiness value without referencing DOM constructors.
+SVG and density-selected (`srcset`)
+image elements can upload at a size other than their natural size; convert
+them to an `ImageBitmap` first. No DOM constructor globals are
+needed, so bitmap/offscreen uploads also work in workers.
+
+Uploads use `setUnpackState` (defaults: `invertY=false`,
+`premultiplyAlpha=false`, alignment 4) and `bindTextureForUpload` (unit 0).
+The helpers elide unchanged pixel-store and binding state and correctly select
+unit 0 after multi-sampler use. WebGL ignores flip/premultiplication flags for
+`ImageBitmap`: callers must choose `imageOrientation` and `premultiplyAlpha`
+when decoding their bitmap. The factory neither decodes nor closes sources.
+
+The returned `GLTexture` is registered in `engine._textures` and disposed with
+`disposeTexture`. It has no update API: to change its pixels, dispose it and
+create a new one; `updateDynamicTexture` and `updateHtmlElementTexture` are
+only valid for their own factories' textures. By default its `_upload` closure retains the source for
+offline context restoration; callers must keep it usable (do not close a
+retained bitmap/video frame). Mutable sources are replayed with their current
+pixels and intrinsic size, not a creation-time snapshot. The standard restore
+protocol installs a new handle, replays one upload and invokes
+`_initializeParameters` to apply the four creation-time sampling parameters.
+If the retained source is unusable at restore time (closed bitmap, zero-size
+video, video without a current frame, upload exception), the closure logs the error, drops the source and
+allocates transparent-black RGBA8 storage at the last uploaded size instead.
+The failure stays local to that texture: it never aborts the engine-wide
+restore replay, so later textures, render targets and buffers still rebuild
+and the engine leaves the lost state.
+With `retainSource: false`, the closure drops its source reference immediately
+after the initial upload; callers may then close their bitmap/frame. Restore
+allocates transparent-black RGBA8 storage at the original dimensions and
+marks it ready. Applications needing the original pixels must re-upload or
+dispose/recreate the texture themselves, typically from `onContextRestored`.
+Restore replays level 0 only: callers using a mipmapped `minFilter` must call
+`generateTextureMipMaps` again from `onContextRestored`, otherwise the restored
+texture is mipmap-incomplete. This does not change
+`createDynamicTexture`'s immediately sampleable blank-allocation contract.
+
+Implementation lives in side-effect-free `texture-source.ts`, explicitly
+exported from the root barrel (no new package subpath). Non-users ship none of
+its source sizing, validation or retention logic. Unit tests assert the exact
+single-upload GL stream, repeated-upload state elision, nonzero active-unit
+transitions, source dimensions, validation, disposal, both restore modes and
+the unusable-retained-source fallback, including metadata-only video creation
+and restoration.
+
+#### 3.4.1 Native 3D pixel textures (optional)
+
+```ts
+export interface GLPixelsTexture3DOptions {
+    addressMode?: GLenum; // CLAMP_TO_EDGE (default), REPEAT, MIRRORED_REPEAT
+    filter?: GLenum; // LINEAR (default) or NEAREST, for min and mag
+    srgb?: boolean; // false (RGBA8) by default; true = SRGB8_ALPHA8
+}
+export interface GLTexture3D extends Omit<GLTexture, "target"> {
+    readonly target: typeof WebGL2RenderingContext.TEXTURE_3D;
+    depth: number;
+}
+export function createTexture3DFromPixels(engine: GLEngineContext, data: Uint8Array, width: number, height: number, depth: number, options?: GLPixelsTexture3DOptions): GLTexture3D;
+export function bindTexture3D(engine: GLEngineContext, unit: number, tex: GLTexture3D | null): void;
+export function setEffectTexture3D(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void;
+export function generateTexture3DMipMaps(engine: GLEngineContext, tex: GLTexture3D): void;
+export function updateTexture3DSamplingMode(engine: GLEngineContext, tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void;
+export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): void;
+```
+
+`createTexture3DFromPixels(engine, data, width, height, depth, options?)` is the
+WebGL2 counterpart to lite's `createTexture3DFromPixels`. It returns a
+`GLTexture3D` with a `depth` field and `target = gl.TEXTURE_3D`. Use the
+dedicated `setEffectTexture3D` / `bindTexture3D` / `disposeTexture3D` APIs;
+the generic 2D APIs do not support 3D textures. This deliberate difference
+keeps every 2D-only bundle free of 3D cache and binding code. GLSL consumers
+declare `uniform highp sampler3D lut;` and use `texture(lut, rgb)`; unlike a
+flattened 2D atlas, hardware performs trilinear interpolation on the original
+cube. Source bytes are tightly packed RGBA8 with
+x fastest, then y, then z (one slice = width * height * 4 bytes). Dimensions
+must be positive integers within `MAX_3D_TEXTURE_SIZE`; a too-short buffer is
+rejected. The source must remain unchanged while the texture is live so
+context restoration can replay the exact uploaded data.
+
+`GLPixelsTexture3DOptions` has `addressMode` (`CLAMP_TO_EDGE`, `REPEAT` or
+`MIRRORED_REPEAT`; default `CLAMP_TO_EDGE` on S/T/R), `filter` (`NEAREST` or
+`LINEAR`; default `LINEAR` on min/mag, without mipmaps), and `srgb` (default false, `RGBA8`; true uses
+`SRGB8_ALPHA8`). For color-grading LUTs use the linear default unless the
+source explicitly requires sRGB decoding. Creation sets the cached unpack
+state to alignment 4, flipY false, premultiply false; the optional 3D upload
+cache also zeros `UNPACK_ROW_LENGTH`, `UNPACK_IMAGE_HEIGHT`, and every
+`UNPACK_SKIP_*` field before its first upload and after a cache wipe. It uploads via
+`texImage3D(TEXTURE_3D, 0, format, width, height, depth, 0, RGBA,
+UNSIGNED_BYTE, data)`, and sets five texture parameters including `WRAP_R`.
+The engine registry replays pixels and parameters into a new handle on context
+restoration. Calling `generateTexture3DMipMaps` retains the generated-chain
+intent, so restore regenerates the mip levels from the retained level-0 pixels
+before applying the saved minification filter. The optional module owns an independent 3D per-unit binding cache,
+invalidated to an unknown sentinel on context loss and on `wipeGLStateCache`
+so the first subsequent bind explicitly selects its texture unit and reaches GL
+(including a null unbind); null unbinds only the
+target used by the matching 2D or 3D binder. The module's sampling/wrap
+updates persist across restoration and elide unchanged `texParameteri` calls
+without rebinding. Update setters reject invalid WebGL filter or wrap enums
+before modifying cached or GL state. All 3D creation, binding, disposal and
+parameter logic lives in its own side-effect-free module so 2D-only users do
+not ship 3D code.
+
+This supports Lumina's native 3D filter LUTs without repacking into a 2D
+atlas; consumers can retain the same shader coordinates and interpolation.
+The consumer migration and browser pixel/performance comparison remain separate
+from the LiteGL API change.
+
+**Source test:** `/gl/texture-3d-test.html` runs
+`lab/gl/src/texture-3d-test.ts`, which uploads eight distinct RGBA8 texels in
+x-fastest / y-next / z-last order. A fullscreen `sampler3D` effect samples
+their texel centers and the trilinear midpoint. The source test reads back
+each rendered result, reports PASS/FAIL on the page and rechecks after context
+restoration. It has no gallery card or parity golden; the mock-based unit
+tests cover upload calls, state caching, validation and restore replay.
+
+#### 3.4.2 HTML element textures
 
 Dynamic-importable so only InputGlow pulls it in:
 
@@ -755,7 +941,9 @@ from any bundle that doesn't use it.
 interface GLState {
     currentProgram: WebGLProgram | null;
     activeTextureUnit: number; // last gl.activeTexture(...)
-    boundTextures: (WebGLTexture | null)[]; // per-unit, length = caps.maxTextureUnits
+    boundTextures: (WebGLTexture | null)[]; // 2D per-unit, length = caps.maxTextureUnits
+    _boundTextures3D?: (WebGLTexture | null | undefined)[]; // undefined means unknown after wipe
+    _unpack3DLayoutKnown?: boolean; // owned by optional texture-3d module
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
     boundVao: WebGLVertexArrayObject | null;
@@ -831,12 +1019,13 @@ interface GLState {
 The cache is the source of truth for **what is currently bound**. It must be
 kept in sync with actual GL state. Two protocols enforce that:
 
-- **Disposal:** `disposeTexture` walks `_state.boundTextures` and nulls any unit
-  that held the disposed handle; `disposeEffect` clears `_state.currentProgram`
+- **Disposal:** `disposeTexture` walks the 2D binding cache, while
+  `disposeTexture3D` walks the optional module's independent 3D cache; each
+  clears any slot that held the disposed handle. `disposeEffect` clears `_state.currentProgram`
   iff it pointed at the disposed program. This prevents the next-bind to the
   same slot from being elided as a no-op.
 - **Context lost:** the `webglcontextlost` handler sets `_isLost=true` and
-  clears the entire `_state` (program=null, boundTextures filled with null,
+  clears the core `_state` (program=null, 2D texture binding cache filled with null,
   buffers=null, vao=null, boundFramebuffer=null, quad* = null, viewport=0, and
   the whole `rs` array — BOTH its actual half AND its desired twins — back to the
   unset sentinels with `statesDirty=false`). Resetting both halves means the
@@ -844,24 +1033,28 @@ kept in sync with actual GL state. Two protocols enforce that:
   `applyGLStates` re-issues from scratch. The `_flush*` reconciler slots are NOT
   cleared (they are pure function refs; a post-restore setter re-installs the
   same ref idempotently, and `statesDirty=false` gates the flush until then).
-  Setters become no-ops while `_isLost`. See §4.7.
+  The optional 3D module clears its own cache through a context-lost callback
+  (and a cache invalidator when the host calls `wipeGLStateCache`). Setters
+  become no-ops while `_isLost`. See §4.7.
 
 ### 4.2 Cache contract — which GL calls are elided
 
-| Operation                                  | Cache key                                 | Elided when                                                                   |
-| ------------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `gl.useProgram`                            | `_state.currentProgram`                   | Same program already current                                                  |
-| `gl.activeTexture`                         | `_state.activeTextureUnit`                | Already on that unit                                                          |
-| `gl.bindTexture`                           | `_state.boundTextures[unit]`              | Same texture already on that unit                                             |
-| `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                | Always — never re-issued per frame                                            |
-| `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`       | Value bit-equal to last                                                       |
-| `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                    | Value equal to last                                                           |
-| `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                 | Same buffer                                                                   |
-| `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`               | Same buffer                                                                   |
-| `gl.bindVertexArray`                       | `_state.boundVao`                         | Same VAO (the shared quad VAO lives forever)                                  |
-| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                 | Same FBO already bound (`bindRenderTarget`; null = canvas)                    |
-| `gl.viewport`                              | `_state.viewportX/Y/W/H`                  | All four match                                                                |
-| blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1) | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
+| Operation                                  | Cache key                                       | Elided when                                                                   |
+| ------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `gl.useProgram`                            | `_state.currentProgram`                         | Same program already current                                                  |
+| `gl.activeTexture`                         | `_state.activeTextureUnit`                      | Already on that unit                                                          |
+| `gl.pixelStorei` (2D unpack flags)         | `_state.unpackFlipY/PremultiplyAlpha/Alignment` | Same flag/alignment already applied, including decoded-source uploads         |
+| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`                    | Same 2D texture already on that unit                                          |
+| `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`                 | Same 3D texture already on that unit                                          |
+| `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                      | Always — never re-issued per frame                                            |
+| `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`             | Value bit-equal to last                                                       |
+| `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                          | Value equal to last                                                           |
+| `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
+| `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
+| `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
+| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget`; null = canvas)                    |
+| `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
+| blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 
 For the typical NeonBrush per-frame pattern (one effect, ~5 uniforms, 1–2 textures), after the first frame every steady-state frame issues exactly:
 
@@ -1121,10 +1314,19 @@ and ensure the shared quad VAO is always correct.
 
 ### 4.6 Readiness finalization (parallel-compile-safe)
 
-`createEffect` compiles shaders, calls `attachShader` × 2,
+`createEffect` submits shader compilation without querying shader status, calls `attachShader` × 2,
 `bindAttribLocation(program, 0, attributeNames[0])`, then `linkProgram`.
-It does NOT block on link completion — `isReady` starts as `false`,
+It does not query compile or link results — `isReady` starts as `false`,
 `_samplersAssigned` as `false`, `uniformLocations` and `samplerUnits` empty.
+Shader/program allocation failures still throw synchronously. Shader syntax
+and link errors instead surface during readiness polling, including without
+the parallel extension. This replaces the former synchronous shader-error
+throws: callers must inspect `getEffectCompilationError` after polling, or
+catch a rejected `waitForEffect` promise.
+Initial creation and restoration use one `compileEffectProgram` allocator,
+which returns the shader/program handles or an allocation diagnostic and
+releases any partial allocation. Creation throws that diagnostic with the
+effect name; restoration records it with a `context-restore` prefix.
 
 `isEffectReady(engine, effect)` is the polling gate:
 
@@ -1134,11 +1336,14 @@ if (effect._compileError !== null) return false;
 
 linked = (caps.parallelShaderCompile !== null)
     ? gl.getProgramParameter(program, caps.parallelShaderCompile.COMPLETION_STATUS_KHR)
-    : true                                  // synchronous link without the extension
+    : true                                  // LINK_STATUS may block without the extension
 if (!linked) return false;
 
 if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    effect._compileError = gl.getProgramInfoLog(program) ?? "link failed";
+    // Only AFTER link failure, query both shaders' COMPILE_STATUS and include
+    // failing stages' info logs alongside the program log. Empty logs get
+    // non-empty fallback diagnostics. Record and log the failure once.
+    effect._compileError = getLinkError(gl, program, effect._vs, effect._fs);
     return false;
 }
 
@@ -1159,6 +1364,37 @@ the render loop. That same poll drives finalization — there is no separate
 
 `_onCompiled[]` is fired and cleared during finalization. Listeners added
 _after_ readiness fire synchronously from `executeWhenCompiled` itself.
+
+`getEffectCompilationError(engine, effect)` runs one `isEffectReady` poll and
+returns `_compileError`. `null` means no failure has been recorded, not that
+the effect is ready. Recorded errors survive disposal and context loss for
+diagnostics; a successful context-restoration allocation clears the error,
+then readiness checks diagnose the replacement program normally. Restore
+allocation errors identify the stage and clean up any partially allocated
+shaders. Neither the accessor nor `executeWhenCompiled` starts a scheduler.
+
+`waitForEffect(engine, effect, { signal? })` is an opt-in helper in the separate,
+side-effect-free `effect-ready.ts` module, re-exported from the root barrel.
+It polls immediately, resolves with the effect when finalization succeeds,
+and otherwise polls once per animation frame independently of the render
+loop. It rejects with a labelled error on compile/link/restore failure,
+context loss, or disposal (disposal is observed on the next poll), and with
+the signal's Error reason on cancellation (other reasons become the `cause`
+of a native `DOMException` named `AbortError`). Context loss and abort events
+reject immediately, even while animation frames are suspended. Every exit
+removes the loss/abort listeners and cancels any scheduled frame; an already
+ready/failed/disposed/aborted effect schedules no frame. Polling exceptions
+also reject and clean up. Multiple waiters are independent; cancelling one
+does not dispose the shared effect or stop another waiter. No callbacks are
+added to `_onCompiled`, and importing only the manual APIs retains no promise,
+abort-listener or animation-frame scheduling code from this helper.
+
+The initial signal/lifecycle guards cover calls with an already-aborted,
+disposed, or lost input: registering listeners does not replay past events.
+Disposal has no notification, so it must also be checked on every poll and
+after finalization callbacks. Abort and context-loss listeners instead reject
+synchronously and set `settled`; the post-finalization settlement guard covers
+both, without duplicate abort/loss checks.
 
 ### 4.7 Context lost / restored protocol
 
@@ -1194,8 +1430,10 @@ The application's `onContextLost` callback may e.g. hide the canvas.
 2. For each `tex` in `engine._textures`: allocate a fresh `WebGLTexture`,
    assign to `tex.handle`, call `tex._upload(engine)` to replay the original
    upload (raw bytes for `createRawTexture`; retained `ImageBitmap` for
-   `loadTexture2D`; source HTML element for `createHtmlElementTexture`).
-   Set `tex.isReady=true` once the replay completes.
+   `loadTexture2D`; source HTML element for `createHtmlElementTexture`;
+   retained decoded source or blank storage for `createTextureFromSource`), then
+   call `tex._initializeParameters?.(engine)` while that fresh handle remains
+   bound. Set `tex.isReady=true` once the replay completes.
 3. `engine._isLost = false`.
 4. Restart the render loop if it was active before loss.
 5. Fire every callback in `engine._onRestored`.
@@ -1647,6 +1885,8 @@ with `skip*: true` (or no `maxRawKB`) unless there is a documented reason in the
 | `context restored: programs re-linked, samplers re-bound`  | Simulate restore → effects re-linked, sampler `uniform1i` re-issued exactly once per sampler.             |
 | `context restored: raw texture upload replayed`            | Simulate restore → `_upload(engine)` called, texture handle replaced, isReady=true.                       |
 | `context restored: loadTexture2D replays from ImageBitmap` | No re-fetch of the URL; the retained `ImageBitmap` is re-uploaded.                                        |
+| `raw texture updates preserve bound parameters`            | Update pixels on the same handle → no `texParameteri`; restore → pixels plus all four parameters replay.  |
+| `loadTexture2D final upload preserves bound parameters`    | Final image upload emits no `texParameteri`; restore replays the bitmap and all four parameters.          |
 | `runRenderLoop dedupes identical callbacks`                | Registering the same fn twice → fired once per frame (matches `AbstractEngine`).                          |
 | `stopRenderLoop() removes all loops`                       | After no-arg stop, no callbacks fire.                                                                     |
 | `setBlendMode issues Babylon-exact params per mode`        | DISABLE/ADD/ALPHA/PREMULTIPLIED each emit the right `enable/disable` + `blendFuncSeparate` tuple.         |
@@ -1818,6 +2058,7 @@ packages/babylon-lite-gl/
         render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation
         effect.ts           createEffect/createEffectWrapper/applyEffectWrapper, cached uniform setters, sampler finalize
+        effect-ready.ts     opt-in waitForEffect polling, cancellation, lifecycle rejection and frame/listener cleanup
         texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose
         html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture/GLSamplingMode
         blend.ts            GLBlendMode preset + setBlendMode (cached, Babylon setAlphaMode parity)

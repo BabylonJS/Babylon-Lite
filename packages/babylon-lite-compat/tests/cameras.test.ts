@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { ArcRotateCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { ArcRotateCamera, Camera, FlyCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { LiteCompatError } from "../src/error";
 import { Vector3 } from "../src/math/vector";
-import type { FreeCamera as LiteFreeCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
+import { enableOrthographicCamera } from "babylon-lite";
+import type { ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera } from "babylon-lite";
 
 /**
  * Minimal stand-in for a Lite free camera (the shape `parseBabylonCamera` returns
@@ -76,6 +78,113 @@ describe("Camera adoption (loaded .babylon cameras)", () => {
     });
 });
 
+describe("Camera projection mode", () => {
+    it("exposes the Babylon.js projection mode constants", () => {
+        expect(Camera.PERSPECTIVE_CAMERA).toBe(0);
+        expect(Camera.ORTHOGRAPHIC_CAMERA).toBe(1);
+    });
+
+    it("switches between Lite perspective and orthographic projections", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+        expect(camera.orthoLeft).toBeNull();
+        expect(camera.orthoRight).toBeNull();
+        expect(camera.orthoBottom).toBeNull();
+        expect(camera.orthoTop).toBeNull();
+        expect(camera.getProjectionMatrix().m[15]).toBe(0);
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        expect(camera.mode).toBe(Camera.ORTHOGRAPHIC_CAMERA);
+        expect(camera._lite.ortho).toBeDefined();
+        expect(camera.getProjectionMatrix().m[15]).toBe(1);
+
+        camera.mode = Camera.PERSPECTIVE_CAMERA;
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+        expect(camera._lite.ortho).toBeNull();
+        expect(camera.getProjectionMatrix().m[15]).toBe(0);
+    });
+
+    it("applies bounds configured before orthographic mode is enabled", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.orthoLeft = -8;
+        camera.orthoRight = 8;
+        camera.orthoBottom = -4.5;
+        camera.orthoTop = 4.5;
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(camera._lite.ortho?.left).toBe(-8);
+        expect(camera._lite.ortho?.right).toBe(8);
+        expect(camera._lite.ortho?.bottom).toBe(-4.5);
+        expect(camera._lite.ortho?.top).toBe(4.5);
+    });
+
+    it("forwards active bounds and null through Lite's live accessors", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        const initialProjection = camera.getProjectionMatrix().clone();
+
+        camera.orthoLeft = -7;
+
+        expect(camera._lite.ortho?.left).toBe(-7);
+        expect(camera.getProjectionMatrix().equals(initialProjection)).toBe(false);
+
+        camera.orthoLeft = null;
+
+        expect(camera._lite.ortho?.left).toBeNull();
+        expect(camera.orthoLeft).toBeNull();
+    });
+
+    it("preserves configured bounds when the mode changes or is reassigned", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        const bounds = camera._lite.ortho!;
+        camera.orthoLeft = -7;
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(camera._lite.ortho).toBe(bounds);
+        expect(camera._lite.ortho?.left).toBe(-7);
+
+        camera.mode = Camera.PERSPECTIVE_CAMERA;
+        expect(camera.orthoLeft).toBe(-7);
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        expect(camera._lite.ortho?.left).toBe(-7);
+    });
+
+    it("reflects native projection bounds on adopted cameras", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        enableOrthographicCamera(camera._lite, { halfHeight: 3, left: -6, right: 6, bottom: -3, top: 3 });
+        const adopted = ArcRotateCamera._adopt("adopted", camera._lite);
+
+        expect(adopted.mode).toBe(Camera.ORTHOGRAPHIC_CAMERA);
+        expect(adopted._lite.ortho?.halfHeight).toBe(3);
+        expect(adopted.orthoLeft).toBe(-6);
+        expect(adopted.orthoRight).toBe(6);
+        expect(adopted.orthoBottom).toBe(-3);
+        expect(adopted.orthoTop).toBe(3);
+
+        adopted.mode = Camera.PERSPECTIVE_CAMERA;
+        adopted.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(adopted.orthoLeft).toBe(-6);
+        expect(adopted.orthoRight).toBe(6);
+        expect(adopted.orthoBottom).toBe(-3);
+        expect(adopted.orthoTop).toBe(3);
+    });
+
+    it("rejects unknown projection modes", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+
+        expect(() => {
+            camera.mode = 2;
+        }).toThrow(LiteCompatError);
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+    });
+});
+
 describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
     function fakeLiteArcRotate(): LiteArcRotateCamera {
         return {
@@ -107,6 +216,65 @@ describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
         expect(cam.wheelPrecision).toBe(150);
         expect(cam.angularSensibility).toBe(2000);
         expect(cam.panningSensibility).toBe(25);
+    });
+
+    it.each([
+        ["the default prevention policy", undefined, true],
+        ["noPreventDefault=true", true, false],
+    ] as const)("attaches Arrow-key controls with %s and detaches them", (_description, noPreventDefault, expectedPrevented) => {
+        const scene = new Scene(new NullEngine());
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero(), scene);
+        const canvas = Object.assign(new EventTarget(), {
+            tabIndex: -1,
+            hasAttribute: () => false,
+            setPointerCapture: () => undefined,
+            releasePointerCapture: () => undefined,
+        }) as unknown as HTMLCanvasElement;
+        const keyboardEvent = (type: "keydown" | "keyup", code: string): Event =>
+            Object.assign(new Event(type, { cancelable: true }), { code, ctrlKey: false, altKey: false, metaKey: false });
+        const arrowLeftDown = keyboardEvent("keydown", "ArrowLeft");
+        const arrowLeftUp = keyboardEvent("keyup", "ArrowLeft");
+
+        camera.attachControl(canvas, noPreventDefault);
+        canvas.dispatchEvent(arrowLeftDown);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+        canvas.dispatchEvent(arrowLeftUp);
+
+        expect(camera.alpha).toBeLessThan(0);
+        expect(canvas.tabIndex).toBe(0);
+        expect(arrowLeftDown.defaultPrevented).toBe(expectedPrevented);
+        expect(arrowLeftUp.defaultPrevented).toBe(expectedPrevented);
+
+        camera.detachControl();
+        const detachedAlpha = camera.alpha;
+        const arrowRight = keyboardEvent("keydown", "ArrowRight");
+        canvas.dispatchEvent(arrowRight);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+
+        expect(camera.alpha).toBe(detachedAlpha);
+        expect(arrowRight.defaultPrevented).toBe(false);
+    });
+});
+
+describe("FlyCamera", () => {
+    it("forwards upVector assignment and in-place mutation to the banked Lite camera", () => {
+        const camera = new FlyCamera("fly", new Vector3(1, 2, 3));
+        const up = camera.upVector;
+
+        camera.upVector = new Vector3(0, 0, 1);
+        expect(camera._lite.upVector.x).toBe(0);
+        expect(camera._lite.upVector.y).toBe(0);
+        expect(camera._lite.upVector.z).toBe(1);
+
+        up.set(1, 0, 0);
+        expect(camera.upVector).toBe(up);
+        expect(camera._lite.upVector.x).toBe(1);
+        expect(camera._lite.upVector.y).toBe(0);
+        expect(camera._lite.upVector.z).toBe(0);
     });
 });
 

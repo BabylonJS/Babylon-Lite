@@ -63,4 +63,15 @@ describe("shadow camera facade", () => {
             expect(Array.from(getViewProjectionMatrix(camera, 1) as unknown as Float32Array)).toEqual(expected);
         }
     });
+
+    it("can advance directly from the facade's installed version", () => {
+        const camera = createShadowCamera(makeLight());
+        const first = camera.worldMatrixVersion + 1;
+        updateShadowCameraBase(camera, first, 1, 100, makeViewProj(700), makeViewProj(800));
+        expect(camera.worldMatrixVersion).toBe(first);
+
+        const second = camera.worldMatrixVersion + 1;
+        updateShadowCameraBase(camera, second, 2, 200, makeViewProj(900), makeViewProj(1000));
+        expect(camera.worldMatrixVersion).toBe(second);
+    });
 });

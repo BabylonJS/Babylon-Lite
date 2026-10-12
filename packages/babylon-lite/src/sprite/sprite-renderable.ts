@@ -22,7 +22,8 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
@@ -160,7 +161,8 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContext, target: R
         depthWrite,
         target._depthStencilFormat,
         getSceneBindGroupLayout(engine),
-        r._layer
+        r._layer,
+        target._depthCompare ?? "greater-equal"
     );
     let bindGroup = r._bindGroups.get(pipeline);
     if (!bindGroup) {

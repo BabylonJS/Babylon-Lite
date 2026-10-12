@@ -15,6 +15,7 @@ import type { Sprite2DLayer } from "./sprite-2d.js";
 import { makeSpritePrologueWgsl } from "./sprite-pipeline.js";
 import type { SpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
 import { _registerSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /**
  * Coverage-gamma sprite shader: the base prologue (vertex stage + `Layer` UBO with its `aa`
@@ -22,7 +23,7 @@ import { _registerSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.j
  * glyph edges composite heavier, mimicking gamma-space stem darkening.
  */
 function makeCoverageGammaWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
-    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+    return wgsl`${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);

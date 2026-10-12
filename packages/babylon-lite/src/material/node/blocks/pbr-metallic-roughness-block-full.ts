@@ -1,9 +1,11 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 import { buildPbrMrHelperFull } from "./pbr-mr-helper-full.js";
+import { wgsl } from "../../../shader/wgsl.js";
+import { createNodeLightingFeature } from "../node-lighting.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
-const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = wgsl`array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(block: NodeBlock, inputName: string, fallback: string, target: "vec3f" | "f32", stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {
     const input = block.inputs.get(inputName);
@@ -181,6 +183,7 @@ export const emitter: BlockEmitter = {
             })
         );
         state.usesLightsUbo = true;
+        state._meshFeature = createNodeLightingFeature;
 
         const memoKey = `_pbrmr_${block.id}_call`;
         let callVar: string;
@@ -201,7 +204,7 @@ export const emitter: BlockEmitter = {
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
-                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${baseIorExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${iriIntensityExpr}, ${iriIorExpr}, ${iriThicknessExpr}, ${sf});`
+                wgsl`let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${baseIorExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${iriIntensityExpr}, ${iriIorExpr}, ${iriThicknessExpr}, ${sf});`
             );
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         }

@@ -6,7 +6,7 @@ import { BU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 
 /** Skybox data stored on the scene for the auto-builder. */
 export interface SkyboxData {

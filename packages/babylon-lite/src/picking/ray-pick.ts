@@ -13,7 +13,7 @@
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import { createEmptyPickingInfo, type PickingInfo } from "./picking-info.js";
 import type { Ray } from "./ray.js";
 
@@ -61,7 +61,7 @@ export function createRayPickSnapshotFromMeshes(meshes: Iterable<Mesh>, options?
         if (!aabb) {
             continue;
         }
-        const invWorld = mat4Invert(mesh.worldMatrix);
+        const invWorld = invertMat4(mesh.worldMatrix);
         if (invWorld) {
             candidates.push({ mesh, aabb, invWorld });
         }
@@ -85,6 +85,9 @@ function aabbCache(): WeakMap<Float32Array, LocalAabb> {
 
 /** @internal Compute (and cache) a mesh's local-space AABB from its CPU positions. */
 function localAabb(mesh: Mesh): LocalAabb | null {
+    if (mesh._gpu?._drawRangeSource && mesh._gpu.indexCount === 0) {
+        return null;
+    }
     const positions = mesh._cpuPositions;
     if (!positions || positions.length < 3) {
         return null;

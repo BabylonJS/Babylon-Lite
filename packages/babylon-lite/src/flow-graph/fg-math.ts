@@ -14,8 +14,8 @@ import type { FgValue, Vec2 } from "./types.js";
 import type { Mat4, Quat, Vec3, Vec4 } from "../math/types.js";
 import { crossVec3 } from "../math/cross-vec3.js";
 import { dotVec3 } from "../math/dot-vec3.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { composeMat4 } from "../math/compose-mat4.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 
 function isVec2(v: unknown): v is Vec2 {
     return typeof v === "object" && v !== null && "x" in v && "y" in v && !("z" in v);
@@ -894,7 +894,7 @@ export function fgDeterminant(m: FgValue): number {
 
 // ─── Local Mat4 invert/multiply ───────────────────────────────────────────────
 // fg-math keeps its own column-major Mat4 invert/multiply instead of importing
-// the core `mat4Invert`/`mat4Multiply`. Those core modules are also used by the
+// the core `invertMat4`/`multiplyMat4`. Those core modules are also used by the
 // skeleton/animation runtime, and the flow-graph block chunks are emitted into
 // EVERY glTF scene's bundle (via the lazy gltf-feature-interactivity → getBlockDef
 // chunk graph). Sharing the core modules would make Rollup hoist them into shared
@@ -1100,13 +1100,13 @@ export function fgMatrixMultiplication(a: FgValue, b: FgValue): FgValue {
 
 /**
  * Compose a TRS `Mat4` from translation, rotation quaternion, and scale
- * (glTF `math/matCompose`). Uses core `mat4Compose` (column-major).
+ * (glTF `math/matCompose`). Uses core `composeMat4` (column-major).
  */
 export function fgMatrixCompose(pos: FgValue, quat: FgValue, scale: FgValue): Mat4 {
     const p = isVec3(pos) ? pos : { x: 0, y: 0, z: 0 };
     const q = isVec4(quat) ? quat : { x: 0, y: 0, z: 0, w: 1 };
     const s = isVec3(scale) ? scale : { x: 1, y: 1, z: 1 };
-    return mat4Compose(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
+    return composeMat4(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
 }
 
 /** Result of `fgMatrixDecompose`. */
@@ -1119,7 +1119,7 @@ export interface FgDecomposeResult {
 
 /**
  * Decompose a `Mat4` into translation, rotation (unit quaternion), and scale
- * (glTF `math/matDecompose`). Uses core `mat4Decompose`.
+ * (glTF `math/matDecompose`). Uses core `decomposeMat4`.
  *
  * Validity pre-check: the bottom row of the column-major matrix (`m[3]`, `m[7]`,
  * `m[11]`, `m[15]`) must round to `[0, 0, 0, 1]` at 4 decimal places;
@@ -1140,7 +1140,7 @@ export function fgMatrixDecompose(m: FgValue): FgDecomposeResult {
     if (r0 !== 0 || r1 !== 0 || r2 !== 0 || r3 !== 1) {
         return { position: zero, rotationQuaternion: identQ, scaling: oneS, isValid: false };
     }
-    const { translation, rotation, scale } = mat4Decompose(m);
+    const { translation, rotation, scale } = decomposeMat4(m);
     return { position: translation, rotationQuaternion: rotation, scaling: scale, isValid: true };
 }
 

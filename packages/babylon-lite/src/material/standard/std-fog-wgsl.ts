@@ -2,9 +2,10 @@
 
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { WGSL_FOG } from "../../shader/wgsl-fog.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 export const STD_FOG_HELPER = WGSL_FOG;
-export const STD_FOG_BLOCK = `if (scene.vFogInfos.x > 0.0) {
+export const STD_FOG_BLOCK = wgsl`if (scene.vFogInfos.x > 0.0) {
 let fog = calcFogFactor(input.vf);
 color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
 }`;
@@ -15,7 +16,7 @@ export function createStandardFogFragment(): ShaderFragment {
         _id: "std-fog",
         _varyings: [{ _name: "vf", _type: "vec3<f32>" }],
         _helperFunctions: STD_FOG_HELPER,
-        _vertexSlots: { VB: "out.vf = (scene.view * vec4<f32>(out.vp, 1.0)).xyz;" },
+        _vertexSlots: { VB: wgsl`out.vf = (scene.view * vec4<f32>(out.vp, 1.0)).xyz;` },
         _fragmentSlots: { BA: STD_FOG_BLOCK },
     };
 }

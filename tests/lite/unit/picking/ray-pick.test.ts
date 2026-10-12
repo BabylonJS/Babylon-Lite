@@ -4,7 +4,7 @@ import { createRayPickSnapshot, pickWithRay, pickWithRaySnapshot } from "../../.
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { Mat4 } from "../../../../packages/babylon-lite/src/math/types";
-import { mat4Compose } from "../../../../packages/babylon-lite/src/math/mat4-compose";
+import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
 import type { Ray } from "../../../../packages/babylon-lite/src/picking/ray";
 
 // Eight corners of a local unit cube spanning [-1, 1] on every axis.
@@ -27,8 +27,8 @@ function ray(origin: [number, number, number], direction: [number, number, numbe
     return { origin, direction, length };
 }
 
-const identity = mat4Compose(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
-const translateZ = (z: number): Mat4 => mat4Compose(0, 0, z, 0, 0, 0, 1, 1, 1, 1);
+const identity = composeMat4(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+const translateZ = (z: number): Mat4 => composeMat4(0, 0, z, 0, 0, 0, 1, 1, 1, 1);
 
 describe("pickWithRay (CPU ray/AABB)", () => {
     it("hits a box straight ahead and reports the entry distance + point", () => {
@@ -79,7 +79,7 @@ describe("pickWithRay (CPU ray/AABB)", () => {
 
     it("accounts for a scaled world matrix (ray transformed into local space)", () => {
         // Scale ×2 → world half-extent 2, centred at z = 5 → spans [3, 7], entry at 3.
-        const world = mat4Compose(0, 0, 5, 0, 0, 0, 1, 2, 2, 2);
+        const world = composeMat4(0, 0, 5, 0, 0, 0, 1, 2, 2, 2);
         const info = pickWithRay(makeScene([makeMesh("box", world)]), ray([0, 0, 0], [0, 0, 1]));
         expect(info.hit).toBe(true);
         expect(info.distance).toBeCloseTo(3, 5);

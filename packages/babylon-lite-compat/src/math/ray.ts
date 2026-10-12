@@ -47,7 +47,7 @@ export class Ray {
     }
 
     public static Zero(): Ray {
-        return new Ray(Vector3.Zero(), new Vector3(0, 0, 1), Number.MAX_VALUE);
+        return new Ray(Vector3.Zero(), Vector3.Zero(), Number.MAX_VALUE);
     }
 
     public static CreateNew(x: number, y: number, z: number, dx: number, dy: number, dz: number, length = Number.MAX_VALUE): Ray {

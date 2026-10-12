@@ -9,6 +9,8 @@
  *  mesh) so scenes whose assets always provide NORMAL — the common case, incl.
  *  scene1 — never bundle this WGSL: zero bundle cost.
  */
-export const FLAT_NORMAL_WGSL = `var N_geom=normalize(cross(dpdx(input.worldPos), dpdy(input.worldPos)));
+import { wgsl } from "../../../shader/wgsl.js";
+
+export const FLAT_NORMAL_WGSL = wgsl`var N_geom=normalize(cross(dpdx(input.worldPos), dpdy(input.worldPos)));
 if (dot(N_geom, normalize(scene.vEyePosition.xyz - input.worldPos)) < 0.0) { N_geom = -N_geom; }
 var N=N_geom;`;

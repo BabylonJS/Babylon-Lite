@@ -20,11 +20,20 @@
  */
 
 import type { Vec3 } from "../math/types.js";
+import { ensureHavokEventContext } from "./havok-events.js";
 import { onPhysicsAfterStep } from "./havok.js";
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
 
 /** A single collision event reported by Havok after a physics step. */
 export interface PhysicsCollisionInfo {
+    /** First participating body, corresponding to the reported contact point and normal. */
+    collider: PhysicsBody;
+    /** Thin-instance index of `collider`; `0` for an ordinary body. */
+    colliderIndex: number;
+    /** Second participating body. */
+    collidedAgainst: PhysicsBody;
+    /** Thin-instance index of `collidedAgainst`; `0` for an ordinary body. */
+    collidedAgainstIndex: number;
     /** Phase of the contact: a new contact, an ongoing contact, or a contact that just ended. */
     type: "STARTED" | "CONTINUED" | "FINISHED";
     /** World-space contact point (closest point on the first body). */
@@ -33,6 +42,8 @@ export interface PhysicsCollisionInfo {
     normal: Vec3;
     /** Magnitude of the impulse applied to resolve the contact (0 for `FINISHED`). */
     impulse: number;
+    /** Signed separation along the first contact normal; negative values indicate penetration. */
+    distance: number;
 }
 
 /**
@@ -60,11 +71,19 @@ export function setPhysicsBodyCollisionEventsEnabled(world: PhysicsWorld, body: 
  * @param cb - Callback invoked with each {@link PhysicsCollisionInfo} as it is read.
  */
 export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollisionInfo) => void): void {
+    if (world._collision) {
+        world._collision.callbacks.push(cb);
+        return;
+    }
     const hknp = world._hknp;
+    const events = ensureHavokEventContext(world);
     const startedValue = hknp.EventType.COLLISION_STARTED.value;
     const continuedValue = hknp.EventType.COLLISION_CONTINUED.value;
+    const collision = { callbacks: [cb] };
+    world._collision = collision;
 
     onPhysicsAfterStep(world, () => {
+        const callbackCount = collision.callbacks.length;
         let addr = hknp.HP_World_GetCollisionEvents(world._hkWorld)[1];
         while (addr) {
             const intBuf = new Int32Array(hknp.HEAPU8.buffer, addr);
@@ -72,13 +91,32 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             const type = intBuf[0];
             const offA = 2;
             const offB = 18;
+            const bodyA = events.resolve(intBuf[offA]!);
+            const bodyB = events.resolve(intBuf[offB]!);
+            if (!bodyA || !bodyB) {
+                addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
+                continue;
+            }
+            const pointA = { x: floatBuf[offA + 8]!, y: floatBuf[offA + 9]!, z: floatBuf[offA + 10]! };
+            const pointB = { x: floatBuf[offB + 8]!, y: floatBuf[offB + 9]!, z: floatBuf[offB + 10]! };
+            const normal = { x: floatBuf[offA + 11]!, y: floatBuf[offA + 12]!, z: floatBuf[offA + 13]! };
             const info: PhysicsCollisionInfo = {
+                collider: bodyA[0],
+                colliderIndex: bodyA[2],
+                collidedAgainst: bodyB[0],
+                collidedAgainstIndex: bodyB[2],
                 type: type === startedValue ? "STARTED" : type === continuedValue ? "CONTINUED" : "FINISHED",
-                point: { x: floatBuf[offA + 8]!, y: floatBuf[offA + 9]!, z: floatBuf[offA + 10]! },
-                normal: { x: floatBuf[offA + 11]!, y: floatBuf[offA + 12]!, z: floatBuf[offA + 13]! },
+                point: pointA,
+                normal,
                 impulse: floatBuf[offB + 13 + 3]!,
+                distance: (pointB.x - pointA.x) * normal.x + (pointB.y - pointA.y) * normal.y + (pointB.z - pointA.z) * normal.z,
             };
-            cb(info);
+            for (let index = 0; index < callbackCount; index++) {
+                collision.callbacks[index]!(info);
+                if (world._disposed) {
+                    return;
+                }
+            }
             addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
         }
     });

@@ -5,6 +5,7 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "VertexOutputBlock",
@@ -12,7 +13,7 @@ export const emitter: BlockEmitter = {
     emit(block, _outputName, _stage, state, ctx) {
         const vector = ctx.resolve(block, "vector", "vertex", state);
         const pos = ctx.cast(vector, "vec4f").expr;
-        state.vertex.body.push(`_NME_VTX_OUTPUT_ = ${pos};`);
+        state.vertex.body.push(wgsl`_NME_VTX_OUTPUT_ = ${pos};`);
         return { expr: pos, type: "vec4f" };
     },
 };

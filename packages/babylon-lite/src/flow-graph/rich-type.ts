@@ -3,7 +3,7 @@
 // No classes, no module-level instances — three pure functions, allocating
 // only inside the function body.
 
-import { quatFromRotationMatrix } from "../math/quat-from-rotation-matrix.js";
+import { createQuatFromRotationMat4 } from "../math/create-quat-from-rotation-mat4.js";
 import type { Color3, Color4, Mat4, Quat, Vec3, Vec4 } from "../math/types.js";
 import { fgInt, isFgInt } from "./custom-types/fg-integer.js";
 import { fgMatrix2D, fgMatrix3D } from "./custom-types/fg-matrix.js";
@@ -12,16 +12,17 @@ import { FgType } from "./types.js";
 
 /** Keyframe value categories an interpolation/animation block must distinguish.
  *  Replaces BJS `RichType.animationType`; quaternion targets must use slerp. */
-export const enum FgAnimationValueType {
-    Float = 0,
-    Vector2 = 1,
-    Vector3 = 2,
-    Vector4 = 3,
-    Quaternion = 4,
-    Color3 = 5,
-    Color4 = 6,
-    Matrix = 7,
-}
+export const FgAnimationValueType = {
+    Float: 0,
+    Vector2: 1,
+    Vector3: 2,
+    Vector4: 3,
+    Quaternion: 4,
+    Color3: 5,
+    Color4: 6,
+    Matrix: 7,
+} as const;
+export type FgAnimationValueType = (typeof FgAnimationValueType)[keyof typeof FgAnimationValueType];
 
 /** The default value for a type. Constructs fresh values inside the function
  *  (no shared module-level instances). Replaces `RichType.defaultValue`. */
@@ -111,7 +112,7 @@ function toQuaternion(value: FgValue): FgValue {
     }
     // A 4x4 matrix → extract its rotation as a quaternion.
     if (value instanceof Float32Array && value.length === 16) {
-        return quatFromRotationMatrix(value as unknown as Mat4);
+        return createQuatFromRotationMat4(value as unknown as Mat4);
     }
     return value;
 }

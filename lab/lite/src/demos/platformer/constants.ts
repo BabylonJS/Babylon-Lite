@@ -12,6 +12,7 @@
 
 import { TILE } from "./frames.js";
 import { type PickupState } from "./entities.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Sky-blue clear colour for the overworld (the renderer's background). */
 export const SKY = { r: 0.38, g: 0.62, b: 0.95, a: 1 } as const;
@@ -131,7 +132,7 @@ export const DEBRIS_DRAW = TILE * 0.42;
  * `createSprite2DCustomShader`: `in.uv`/`in.tint`, `atlasTex`/`atlasSamp`, `fx.time`/
  * `fx.params`, and the layer UBO `L.opacityMul`.
  */
-export const STAR_FRAGMENT = `
+export const STAR_FRAGMENT = wgsl`
 let base = textureSample(atlasTex, atlasSamp, in.uv);
 let strength = fx.params.x;
 let phase = fx.time * 7.0 + in.uv.y * 6.0 - in.uv.x * 3.0;

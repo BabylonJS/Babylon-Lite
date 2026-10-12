@@ -25,7 +25,7 @@ import type { MotionController, XrMotionControllerProfileOptions } from "./xr-mo
 import type { XrHandedness } from "./xr-support.js";
 import type { XrInputManager } from "./xr-input.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { createBox } from "../mesh/mesh-factories.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
@@ -319,7 +319,7 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
         }
 
         const m = src.gripMatrix as unknown as Mat4;
-        const rot = mat4Decompose(m).rotation;
+        const rot = decomposeMat4(m).rotation;
         unit.active.position.set(m[12]!, m[13]!, m[14]!);
         if (unit.model) {
             // Babylon's LH profile-model path parents the glTF root under a π Y rotation.

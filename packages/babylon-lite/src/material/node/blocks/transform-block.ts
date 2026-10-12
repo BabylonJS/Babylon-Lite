@@ -6,6 +6,7 @@
 
 import type { BlockEmitter } from "../node-types.js";
 import { formatFloat } from "./_math-factory.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "TransformBlock",
@@ -24,13 +25,13 @@ export const emitter: BlockEmitter = {
                 vec4 = vector.expr;
                 break;
             case "vec3f":
-                vec4 = `vec4<f32>(${vector.expr}, ${cw})`;
+                vec4 = wgsl`vec4<f32>(${vector.expr}, ${cw})`;
                 break;
             case "vec2f":
-                vec4 = `vec4<f32>(${vector.expr}, ${cz}, ${cw})`;
+                vec4 = wgsl`vec4<f32>(${vector.expr}, ${cz}, ${cw})`;
                 break;
             default:
-                vec4 = `vec4<f32>(${ctx.cast(vector, "vec3f").expr}, ${cw})`;
+                vec4 = wgsl`vec4<f32>(${ctx.cast(vector, "vec3f").expr}, ${cw})`;
         }
         return { expr: `(${transform.expr} * ${vec4})`, type: "vec4f" };
     },

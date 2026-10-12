@@ -5,7 +5,7 @@
  * Babylon Lite `{ x, y, z, w }` quaternion shape used on transform nodes.
  */
 
-import { mat4FromQuatInto, quatFromRotationMatrix } from "babylon-lite";
+import { writeMat4FromQuatIntoBuffer, createQuatFromRotationMat4 } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
@@ -66,10 +66,10 @@ export class Quaternion {
 
     /**
      * Babylon.js `Quaternion.fromRotationMatrix` — update this quaternion in place
-     * from the rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     * from the rotation part of `matrix`. Backed by Lite's `createQuatFromRotationMat4`.
      */
     public fromRotationMatrix(matrix: Matrix): this {
-        const q = quatFromRotationMatrix(matrix.m as unknown as Mat4);
+        const q = createQuatFromRotationMat4(matrix.m as unknown as Mat4);
         this.x = q.x;
         this.y = q.y;
         this.z = q.z;
@@ -82,7 +82,7 @@ export class Quaternion {
      * into `result`.
      */
     public toRotationMatrix<T extends Matrix>(result: T): T {
-        mat4FromQuatInto(result.m, this.x, this.y, this.z, this.w);
+        writeMat4FromQuatIntoBuffer(result.m, this.x, this.y, this.z, this.w);
         return result;
     }
 
@@ -136,7 +136,7 @@ export class Quaternion {
 
     /**
      * Babylon.js `Quaternion.FromRotationMatrix` — create a new quaternion from the
-     * rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     * rotation part of `matrix`. Backed by Lite's `createQuatFromRotationMat4`.
      */
     public static FromRotationMatrix(matrix: Matrix): Quaternion {
         const result = new Quaternion();
@@ -146,10 +146,10 @@ export class Quaternion {
 
     /**
      * Babylon.js `Quaternion.FromRotationMatrixToRef` — write the rotation part of
-     * `matrix` into `result`. Backed by Lite's `quatFromRotationMatrix`.
+     * `matrix` into `result`. Backed by Lite's `createQuatFromRotationMat4`.
      */
     public static FromRotationMatrixToRef(matrix: Matrix, result: Quaternion): Quaternion {
-        const q = quatFromRotationMatrix(matrix.m as unknown as Mat4);
+        const q = createQuatFromRotationMat4(matrix.m as unknown as Mat4);
         result.x = q.x;
         result.y = q.y;
         result.z = q.z;

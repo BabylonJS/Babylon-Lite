@@ -1,7 +1,7 @@
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -91,11 +91,7 @@ function resolveSourceSize(source: RenderTarget): { width: number; height: numbe
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    if ("canvas" in source._descriptor.size) {
-        const canvas = source._descriptor.size.canvas;
-        return { width: canvas.width, height: canvas.height };
-    }
-    return source._descriptor.size;
+    return _resolveRenderTargetSize(source._descriptor);
 }
 
 function blurTargetSize(source: RenderTarget, ratio: number): { width: number; height: number } {
@@ -144,8 +140,8 @@ export function createDepthOfFieldPostProcessTask(config: DepthOfFieldPostProces
     }
 
     // Circle-of-confusion target (single-channel, filterable). Inherits the source's size
-    // descriptor (a `SurfaceContext` for canvas-sized sources, or explicit pixels) so it
-    // tracks whichever target the source uses.
+    // descriptor (full/scaled surface dimensions or explicit pixels) so it tracks
+    // whichever target the source uses.
     const cocTarget = createRenderTarget({ lbl: `${name}-coc`, format: "r16float", samples: 1, size: params.sourceTexture._descriptor.size });
     const coc = createCircleOfConfusionPostProcessTask(
         {

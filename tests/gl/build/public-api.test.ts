@@ -19,7 +19,7 @@ const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 // The former per-feature sub-entries (`/sprites`, `/mesh`, …) were collapsed into
 // the barrel; their modules still emit as internal `dist/*.js` + `.d.ts` (the
 // barrel imports them) but are NOT public `exports`.
-const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture"] as const;
+const INTERNAL_MODULES = ["html-texture", "sprites", "render-target", "mesh", "depth-stencil", "scissor", "dynamic-texture", "texture-source"] as const;
 const REMOVED_SUBPATHS = ["./html-texture", "./sprites", "./render-target", "./mesh", "./depth-stencil", "./scissor", "./dynamic-texture"] as const;
 
 function typecheckDts(dts: string) {
@@ -89,6 +89,16 @@ describe("babylon-lite-gl build output", () => {
         }
         expect(dtsResult.status).toBe(0);
         expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLStencilOpState\b[^}]*\} from "\.\/depth-stencil\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTexture3D\b[^}]*\} from "\.\/texture-3d\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLEffectWaitOptions\b[^}]*\} from "\.\/effect-ready\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTextureSourceOptions\b[^}]*\} from "\.\/texture-source\.js";/);
+        expect(readFileSync(resolve(DIST, "texture-source.d.ts"), "utf-8")).toContain(
+            "createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture"
+        );
+        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null");
+        expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain(
+            "waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>"
+        );
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -103,6 +113,8 @@ describe("babylon-lite-gl build output", () => {
             "stopRenderLoop",
             // effects
             "createEffect",
+            "getEffectCompilationError",
+            "waitForEffect",
             "createEffectWrapper",
             "applyEffectWrapper",
             "drawEffect",
@@ -111,6 +123,14 @@ describe("babylon-lite-gl build output", () => {
             "setEffectMatrix3x3",
             // textures (LDR core + HDR opt-in + extensions)
             "createRawTexture",
+            "createTextureFromSource",
+            "createTexture3DFromPixels",
+            "bindTexture3D",
+            "setEffectTexture3D",
+            "generateTexture3DMipMaps",
+            "updateTexture3DSamplingMode",
+            "updateTexture3DWrapMode",
+            "disposeTexture3D",
             "createFloatTexture",
             "generateTextureMipMaps",
             "loadTexture2D",
@@ -171,6 +191,7 @@ describe("babylon-lite-gl build output", () => {
         expect(typeof mod.GLBlendMode, "export GLBlendMode").toBe("object");
         expect(typeof mod.GLBlendEquation, "export GLBlendEquation").toBe("object");
         expect(typeof mod.GLSamplingMode, "export GLSamplingMode").toBe("object");
+        expect(mod.setBoundTextureParams, "internal texture parameter helper must not be public").toBeUndefined();
 
         // The legacy `unbindRenderTarget` was folded into `bindRenderTarget(engine, null)`
         // and MUST NOT ship — its presence would mean the converge regressed.

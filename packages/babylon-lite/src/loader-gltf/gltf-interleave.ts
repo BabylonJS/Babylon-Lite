@@ -22,13 +22,14 @@ import type { Mat4 } from "../math/types.js";
 import type { Aabb } from "../math/aabb.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { Mesh, MeshGPU } from "../mesh/mesh.js";
+import type { Mesh, MeshGPU, MeshVbLayout } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
 import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
+import { _enableShaderVb } from "../material/shader/shader-vb.js";
 
 const FLOAT = 5126;
 const UNSIGNED_SHORT = 5123;
@@ -324,6 +325,8 @@ export async function buildInterleavedPartial(
  *  de-strided lazily later (see {@link installLazyCpu}). */
 function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
     const vbsrc = m._vb!;
+    const vertexLayout: MeshVbLayout = { position: vbsrc._p, normal: vbsrc._n, tangent: vbsrc._t, uv: vbsrc._u, uv2: vbsrc._u2, color: vbsrc._c };
+    Object.setPrototypeOf(vertexLayout, null);
     const shared = new Map<number, GPUBuffer>();
     const vbuf = (a: AccessorInterleave | undefined, tight: Float32Array | null): GPUBuffer | null => {
         if (!a) {
@@ -349,8 +352,8 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
         indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
         indexCount: m._indexCount,
         indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
-        _vbLayout: vbsrc,
-        _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}`,
+        _vbLayout: vertexLayout,
+        _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}.${k(vbsrc._u2)}.${k(vbsrc._c)}`,
     };
 }
 
@@ -361,6 +364,9 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  doesn't use it. */
 export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
     const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
+    // PBR, Standard and picking consume packing directly. Install the optional ShaderMaterial
+    // resolver here too, so both plain and thin draws honor this glTF mesh's stride and offsets.
+    _enableShaderVb();
 
     // Object-local AABB (see `Mesh.boundMin`): fold strided positions straight from the slice; tight positions
     // normally. `_worldMatrix` is deliberately NOT applied — the mesh hangs off its glTF node, whose transform

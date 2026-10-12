@@ -8,9 +8,11 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { recordMipmaps } from "../texture/generate-mipmaps.js";
 import { biasedMipLevelCount } from "../texture/mip-count.js";
 import type { DrawBinding } from "../render/renderable.js";
-import { drawList, type RenderTask } from "./render-task.js";
+import type { RenderTask } from "./render-task.js";
+import { drawList, type RenderTaskBase } from "./render-task-base.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createImageProcessingTask } from "./image-processing-task.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface RenderTaskTransmissionState {
     readonly texture: Texture2D;
@@ -71,8 +73,8 @@ export function _installDepthGrab(impl: DepthGrabImpl): void {
     _depthGrab = impl;
 }
 
-const BLIT_SHADER = `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}@fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;
-const BLIT_MSAA_SHADER = `@group(0)@binding(0)var t:texture_multisampled_2d<f32>;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}fn l(p:vec2i)->vec4f{let n=textureNumSamples(t);var c=vec4f(0);for(var i=0u;i<n;i++){c+=textureLoad(t,p,i);}return c/f32(n);}@fragment fn fs(v:V)->@location(0)vec4f{let d=vec2i(textureDimensions(t));let q=clamp(v.u*vec2f(d)-.5,vec2f(0),vec2f(d-vec2i(1)));let p=vec2i(floor(q));let f=fract(q);let p1=min(p+vec2i(1),d-vec2i(1));return mix(mix(l(p),l(vec2i(p1.x,p.y)),f.x),mix(l(vec2i(p.x,p1.y)),l(p1),f.x),f.y);}`;
+const BLIT_SHADER = wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}@fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;
+const BLIT_MSAA_SHADER = wgsl`@group(0)@binding(0)var t:texture_multisampled_2d<f32>;struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));return V(vec4f(p[i],0,1),u[i]);}fn l(p:vec2i)->vec4f{let n=textureNumSamples(t);var c=vec4f(0);for(var i=0u;i<n;i++){c+=textureLoad(t,p,i);}return c/f32(n);}@fragment fn fs(v:V)->@location(0)vec4f{let d=vec2i(textureDimensions(t));let q=clamp(v.u*vec2f(d)-.5,vec2f(0),vec2f(d-vec2i(1)));let p=vec2i(floor(q));let f=fract(q);let p1=min(p+vec2i(1),d-vec2i(1));return mix(mix(l(p),l(vec2i(p1.x,p.y)),f.x),mix(l(vec2i(p.x,p1.y)),l(p1),f.x),f.y);}`;
 const REFRACTION_LOD_BIAS = 4;
 let blitPipelines: Map<string, GPURenderPipeline> | null = null;
 let blitShader: GPUShaderModule | null = null;
@@ -106,11 +108,11 @@ export function _t(scene: SceneContext, engine: EngineContext): readonly [commit
 }
 
 function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
-    let lastRenderTask: RenderTask | null = null;
+    let lastRenderTask: RenderTaskBase | null = null;
     for (const task of scene._frameGraph._tasks) {
         if ("_renderables" in task) {
-            const renderTask = task as RenderTask;
-            enableRenderTaskTransmission(renderTask, engine);
+            const renderTask = task as RenderTaskBase;
+            enableTransmission(renderTask, engine);
             lastRenderTask = renderTask;
         }
     }
@@ -165,6 +167,10 @@ export interface SceneColorGrab {
 
 /** Enable mid-pass scene-color grabs for a single render task and return the live texture handle. The task is wrapped so transmissive draw calls can sample the opaque color rendered earlier in the same pass. */
 export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
+    return enableTransmission(task, engine, options);
+}
+
+function enableTransmission(task: RenderTaskBase, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
     const linear = options?.linear !== false;
     applyTransmissionOptions(task, options);
     // grabDepth is opt-in: only when set do we dynamic-import the depth-grab shaders/pipelines (installed via the
@@ -216,9 +222,10 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
     return grab;
 }
 
-function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
+function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
     const oldDesc = cfg.rt._descriptor;
+    const oldSize = oldDesc.size;
     const surface = task.scene.surface;
     const sampleCount = surface.msaaSamples;
     // The scene render task may target the shared engine scRT (single-sample,
@@ -236,10 +243,10 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
         lbl: "transmission-linear",
         format: "rgba16float",
         dFormat: ownsDepth ? (oldDesc.dFormat ?? "depth24plus-stencil8") : undefined,
-        _depthClearValue: oldDesc._depthClearValue,
-        _depthCompare: oldDesc._depthCompare,
+        depthClearValue: oldDesc.depthClearValue,
+        depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
-        size: surface,
+        size: "canvas" in oldSize || "surface" in oldSize ? oldSize : surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;
@@ -251,7 +258,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
     };
     sig._colorFormat = "rgba16float";
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
-    sig._depthCompare = newRt._descriptor._depthCompare;
+    sig._depthCompare = newRt._descriptor.depthCompare ?? cfg.depth?._descriptor.depthCompare;
     sig._sampleCount = sampleCount;
     task._ob.length = 0;
     task._lastVersion = -1;
@@ -322,7 +329,7 @@ function markPbrMaterialsLinear(scene: SceneContext): void {
     }
 }
 
-function createRenderTaskTransmission(task: RenderTask, engine: EngineContext): RenderTaskTransmissionState {
+function createRenderTaskTransmission(task: RenderTaskBase, engine: EngineContext): RenderTaskTransmissionState {
     const rt = task._config.rt;
     const width = 1024;
     const height = 1024;
@@ -358,7 +365,7 @@ function createRenderTaskTransmission(task: RenderTask, engine: EngineContext): 
     };
 }
 
-function configureTransmissionSource(state: RenderTaskTransmissionState, task: RenderTask, engine: EngineContext): void {
+function configureTransmissionSource(state: RenderTaskTransmissionState, task: RenderTaskBase, engine: EngineContext): void {
     const rt = task._config.rt;
     state._sourceWidth = rt._width;
     state._sourceHeight = rt._height;
@@ -384,7 +391,7 @@ function disposeRenderTaskTransmission(state: RenderTaskTransmissionState | null
     state?._depth?.texture.texture.destroy();
 }
 
-export function executePassWithTransmission(task: RenderTask, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
+export function executePassWithTransmission(task: RenderTaskBase, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
     state._copies = 0;
     const transparent = task._transparentBindings;
     // MSAA: resolve the FINAL scene colour into the task's single-sample resolve target (`rst`) so downstream
@@ -530,7 +537,7 @@ function canUpdateTransmission(state: RenderTaskTransmissionState): boolean {
     return state._copyCount === 0 || state._copies < state._copyCount;
 }
 
-function beginTaskPass(task: RenderTask, resolveTarget: GPUTextureView | null, sampleCount: number, load: boolean): GPURenderPassEncoder {
+function beginTaskPass(task: RenderTaskBase, resolveTarget: GPUTextureView | null, sampleCount: number, load: boolean): GPURenderPassEncoder {
     const att = task._colorAttachment;
     const depthLoadOp = load || !task._config.clr ? "load" : "clear";
     if (load) {
@@ -551,7 +558,7 @@ function beginTaskPass(task: RenderTask, resolveTarget: GPUTextureView | null, s
     return task.engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
 }
 
-function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
+function setPassState(task: RenderTaskBase, pass: GPURenderPassEncoder): void {
     const cfg = task._config;
     const rt = cfg.rt;
     const scene = task.scene;
@@ -567,34 +574,32 @@ function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
         pass.setViewport(x, y, w, h, 0, 1);
         pass.setScissorRect(x, y, w, h);
     }
-    pass.setBindGroup(0, task._sceneBG);
+    pass.setBindGroup(0, task._sceneBG!);
 }
 
-function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
+function drawBaseTask(task: RenderTaskBase, pass: GPURenderPassEncoder): number {
     const eng = task.engine;
     const rt = task._config.rt;
-    const scene = task.scene;
     const opaqueBindings = task._opaqueBindings;
     const opaqueBundles = task._ob;
 
     setPassState(task, pass);
 
-    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
+    if (task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
             depthStencilFormat: desc.dFormat,
             sampleCount: desc.samples ?? 1,
         });
-        be.setBindGroup(0, task._sceneBG);
+        be.setBindGroup(0, task._sceneBG!);
         drawList(be, opaqueBindings, eng);
         opaqueBundles[0] = be.finish();
-        task._lastVersion = scene._renderableVersion;
         task._lastVis = _vis;
     }
     let draws = opaqueBindings.length;
     pass.executeBundles(opaqueBundles);
-    pass.setBindGroup(0, task._sceneBG);
+    pass.setBindGroup(0, task._sceneBG!);
     draws += drawList(pass, task._directBindings, eng);
     return draws;
 }
@@ -604,7 +609,7 @@ function normalizeCopyCount(cfg: RenderTask["_config"]["transmission"]): number 
     return count === Infinity ? 0 : Math.max(0, count | 0);
 }
 
-function applyTransmissionOptions(task: RenderTask, options: TransmissionOptions | undefined): void {
+function applyTransmissionOptions(task: RenderTaskBase, options: TransmissionOptions | undefined): void {
     if (!options) {
         return;
     }

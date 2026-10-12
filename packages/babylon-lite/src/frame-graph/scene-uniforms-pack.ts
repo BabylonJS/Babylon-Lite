@@ -51,12 +51,10 @@ export function _packSceneUniforms(data: Float32Array, eng: EngineContext, scene
 
     data[87] = eng.canvas.width;
 
-    const envTextures = scene._envTextures;
-
     const img = scene.imageProcessing;
     data[76] = img.exposure;
     data[77] = img.contrast;
-    data[78] = envTextures?.lodGenerationScale ?? 0.8;
+    data[78] = scene._envTextures?.lodGenerationScale ?? 0.8;
     data[79] = +img.toneMappingEnabled;
     data[37] = eng.canvas.height;
 }

@@ -1,6 +1,7 @@
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
-const HELPER = `fn nme_computeFresnelTerm(viewDirection: vec3<f32>, worldNormal: vec3<f32>, bias: f32, power: f32) -> f32 {
+const HELPER = wgsl`fn nme_computeFresnelTerm(viewDirection: vec3<f32>, worldNormal: vec3<f32>, bias: f32, power: f32) -> f32 {
     let fresnelTerm = pow(bias + abs(dot(viewDirection, worldNormal)), power);
     return clamp(fresnelTerm, 0.0, 1.0);
 }`;

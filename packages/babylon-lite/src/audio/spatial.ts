@@ -27,7 +27,7 @@ import { type AudioSignal } from "./audio-signal.js";
 import { rebuildSoundSubGraphHead } from "./sound-sub-graph.js";
 import { type AudioGraphHost, type AudioGraphHostState } from "./host-types.js";
 import { type Mat4, type Quat, type Vec3 } from "../math/types.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 
 // ─── Public option/target types ──────────────────────────────────────
 
@@ -387,7 +387,7 @@ function updateAttachedSubNode(node: SpatialSubNode): void {
     if (!target) {
         return;
     }
-    const { translation, rotation } = mat4Decompose(target.worldMatrix);
+    const { translation, rotation } = decomposeMat4(target.worldMatrix);
     const updatesPosition = (node._attachmentType & ATTACH_POSITION) !== 0;
     if (updatesPosition) {
         node._position = translation;
@@ -733,7 +733,7 @@ function updateAttachedListener(listener: SpatialListener): void {
     if (!target) {
         return;
     }
-    const { translation, rotation } = mat4Decompose(target.worldMatrix);
+    const { translation, rotation } = decomposeMat4(target.worldMatrix);
     if (listener._attachmentType & ATTACH_POSITION) {
         listener._position = translation;
         updateListenerPosition(listener);

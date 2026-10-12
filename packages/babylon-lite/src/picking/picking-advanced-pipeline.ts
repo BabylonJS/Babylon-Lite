@@ -40,6 +40,18 @@ export interface PickVertexDataBinding {
     readonly interleave?: MeshVbAttr;
 }
 
+/** @internal The default picker consumes float32 components, not arbitrary material encodings. */
+export function validatePickingVertexFormat(mesh: Mesh, attribute: string): void {
+    const format = mesh.material?._attributeFormats?.[attribute];
+    if (!format) {
+        return;
+    }
+    const components = attribute === "position" || attribute === "normal" ? 3 : attribute === "uv" || attribute === "uv2" ? 2 : 4;
+    if (format !== "float32x4" && !(format === "float32x3" && components <= 3) && !(format === "float32x2" && components === 2)) {
+        throw new Error(`Default GPU picking cannot read "${attribute}" format "${format}" on mesh "${mesh.name}". Use compatible float32 data or exclude this mesh from picking.`);
+    }
+}
+
 let _cachedDevice: GPUDevice | null = null;
 let _meshBGL: GPUBindGroupLayout | null = null;
 let _tiMeshBGL: GPUBindGroupLayout | null = null;
@@ -220,18 +232,38 @@ export function getPickingPipelineSet(
 
 export function getPickVertexDataBinding(mesh: Mesh, attribute: PickVertexDataAttribute): PickVertexDataBinding | null {
     const gpu = mesh._gpu;
+    let buffer: GPUBuffer;
     switch (attribute) {
         case "normal":
-            return { buffer: gpu.normalBuffer, interleave: gpu._vbLayout?._n };
+            buffer = gpu.normalBuffer;
+            break;
         case "uv":
-            return gpu.hasUv === false ? null : { buffer: gpu.uvBuffer, interleave: gpu._vbLayout?._u };
+            if (gpu.hasUv === false) {
+                return null;
+            }
+            buffer = gpu.uvBuffer;
+            break;
         case "uv2":
-            return gpu.hasUv2 === false || !gpu.uv2Buffer ? null : { buffer: gpu.uv2Buffer, interleave: gpu._vbLayout?._u2 };
+            if (gpu.hasUv2 === false || !gpu.uv2Buffer) {
+                return null;
+            }
+            buffer = gpu.uv2Buffer;
+            break;
         case "tangent":
-            return gpu.hasTangent === false || !gpu.tangentBuffer ? null : { buffer: gpu.tangentBuffer, interleave: gpu._vbLayout?._t };
+            if (gpu.hasTangent === false || !gpu.tangentBuffer) {
+                return null;
+            }
+            buffer = gpu.tangentBuffer;
+            break;
         case "color":
-            return gpu.hasColor === false || !gpu.colorBuffer ? null : { buffer: gpu.colorBuffer, interleave: gpu._vbLayout?._c };
+            if (gpu.hasColor === false || !gpu.colorBuffer) {
+                return null;
+            }
+            buffer = gpu.colorBuffer;
+            break;
     }
+    validatePickingVertexFormat(mesh, attribute);
+    return { buffer, interleave: gpu._vbLayout?.[attribute] };
 }
 
 export function getPickingRegularPipeline(

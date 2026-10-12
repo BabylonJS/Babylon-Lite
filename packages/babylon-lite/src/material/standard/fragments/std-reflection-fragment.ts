@@ -1,9 +1,10 @@
 /** Standard Reflection Texture Fragment — spherical/planar environment reflection. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
-const REFLECTION_HELPERS = `
+const REFLECTION_HELPERS = wgsl`
 fn computeSphericalCoords(worldPos: vec3<f32>, worldNormal: vec3<f32>) -> vec2<f32> {
 let viewDir = normalize((scene.view * vec4<f32>(worldPos, 1.0)).xyz);
 let viewNormal = normalize((scene.view * vec4<f32>(worldNormal, 0.0)).xyz);
@@ -28,7 +29,7 @@ export function createStdReflectionFragment(): ShaderFragment {
         ],
         _helperFunctions: REFLECTION_HELPERS,
         _fragmentSlots: {
-            AD: `{
+            AD: wgsl`{
 var reflCoords: vec2<f32>;
 if (mat.rCm < 1.5) { reflCoords = computeSphericalCoords(input.vp, normalW); }
 else { reflCoords = computePlanarCoords(input.vp, normalW); }

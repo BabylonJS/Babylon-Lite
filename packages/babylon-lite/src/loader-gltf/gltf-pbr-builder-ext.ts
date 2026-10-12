@@ -8,7 +8,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
+import { getPbrGroupBuilder } from "../material/pbr/pbr-group-builder.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";

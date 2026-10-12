@@ -7,11 +7,13 @@ import type { EngineContext } from "../engine/engine.js";
 import type { PickContributor, PickSource, PickPassContext } from "./pick-contributor.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
-import { createEmptyUniformBuffer, createMappedBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 
 /** Existing regular-mesh vertex buffers a pick-discard rule can project into `PickDiscardInput.vertexData`. */
 export type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";
@@ -290,7 +292,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
                 needsDeformation ||= !!(mesh.morphTargets || mesh.skeleton);
-                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
+                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?.position || !!mesh.material?._attributeFormats;
             }
         }
     }
@@ -379,6 +381,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const tempBuffers: GPUBuffer[] = [];
     const detailedPositions = detailed ? new Map<Mesh, Float32Array>() : null;
     const detailedNormals = detailed ? new Map<Mesh, Float32Array>() : null;
+    // Active-range changes replace these CPU views. Validate both draw paths after readback
+    // rather than combine an old GPU primitive with the new active indices/UVs.
+    const detailedGeometry = detailed
+        ? new Map(candidates.map(({ mesh }) => [mesh, [mesh._cpuPositions, mesh._cpuNormals, mesh._cpuIndices, mesh._cpuUvs, mesh._cpuUv2s] as const]))
+        : null;
     // Capture deformation poses now, while the draw is still being recorded. The depth readback below
     // resolves a frame or two later, by which point the animation tick has advanced `boneMatrices` and
     // morph weights in place — deriving the hit triangle's face normal from those live mirrors would
@@ -425,7 +432,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 deformProjection!.bindDeformPickingProjection(engine, pass, set.regularPipeline, mesh, 1, !!discardBG);
             }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
             meshRanges.push({
                 base: nextId++,
                 count: 1,
@@ -534,6 +541,18 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
         }
         return createEmptyPickingInfo();
     }
+    if (hitMesh && detailedGeometry) {
+        const geometry = detailedGeometry.get(hitMesh)!;
+        if (
+            geometry[0] !== hitMesh._cpuPositions ||
+            geometry[1] !== hitMesh._cpuNormals ||
+            geometry[2] !== hitMesh._cpuIndices ||
+            geometry[3] !== hitMesh._cpuUvs ||
+            geometry[4] !== hitMesh._cpuUv2s
+        ) {
+            return createEmptyPickingInfo();
+        }
+    }
 
     const info = createEmptyPickingInfo();
     info.hit = true;
@@ -542,7 +561,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     info.ray = detailed ? pickRay : null;
 
     // Reconstruct world position from depth (using original full-res VP)
-    const invVP = mat4Invert(vp);
+    const invVP = invertMat4(vp);
     if (invVP) {
         const ndcX = (2 * sampleX) / w - 1;
         const ndcY = 1 - (2 * sampleY) / h;

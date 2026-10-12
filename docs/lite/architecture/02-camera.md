@@ -82,13 +82,89 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 ### `arc-rotate-controls.ts`
 
 ```typescript
+/** Camera gesture assigned to a pointer button. */
+export type ArcRotatePointerAction = "rotate" | "pan";
+
+/** Optional non-touch pointer-button mappings.
+ *  Omitted fields preserve the default independently. */
+export interface ArcRotatePointerMappings {
+    /** Primary button (PointerEvent.button 0). Default: "rotate". */
+    primaryButton?: ArcRotatePointerAction;
+    /** Secondary button (PointerEvent.button 2). Default: "pan". */
+    secondaryButton?: ArcRotatePointerAction;
+}
+
+export interface AttachControlOptions {
+    /** Non-touch pointer-button mappings. Touch remains one-finger rotate + pinch zoom. */
+    pointerMappings?: ArcRotatePointerMappings;
+    /** Keyboard controls after enableArcRotateKeyboardControls() installs the opt-in seam. */
+    keyboard?: boolean | ArcRotateKeyboardOptions;
+    shouldHandlePointerDown?: (event: PointerEvent) => boolean;
+    isExternalDragActive?: () => boolean;
+    isExternalPickPending?: () => boolean;
+}
+
 /** Attach orbit/zoom/pan controls to an ArcRotateCamera.
  *  Matches Babylon.js ArcRotateCameraPointersInput behavior with inertia.
  *  Input handlers accumulate into the camera's inertial offset properties.
  *  Inertia is applied each frame via scene._beforeRender (single RAF loop).
  *  Returns a cleanup function to remove all event listeners and the beforeRender hook. */
-export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void;
+export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void;
 ```
+
+### `arc-rotate-keyboard-controls.ts`
+
+```typescript
+/** KeyboardEvent.code mappings. Omitted fields retain the Arrow-key defaults. */
+export interface ArcRotateKeyboardMappings {
+    left?: readonly string[];
+    right?: readonly string[];
+    up?: readonly string[];
+    down?: readonly string[];
+}
+
+/** Optional keyboard configuration used after installing the keyboard seam. */
+export interface ArcRotateKeyboardOptions {
+    /** Key mappings, matched against KeyboardEvent.code. */
+    keys?: ArcRotateKeyboardMappings;
+    /** Prevent browser defaults for mapped keydown/keyup events. Default: true. */
+    preventDefault?: boolean;
+    /** Rotation divisor. Higher values rotate more slowly. Default: 100. */
+    angularSensitivity?: number;
+    /** Panning divisor. Higher values pan more slowly. Default: 50. */
+    panningSensitivity?: number;
+    /** Zooming divisor. Higher values zoom more slowly. Default: 25. */
+    zoomingSensitivity?: number;
+}
+
+/** Install the optional arc-rotate keyboard input seam. Process-global and idempotent. */
+export function enableArcRotateKeyboardControls(): void;
+```
+
+`pointerMappings` is resolved on each non-touch `pointerdown`. Each button falls
+back independently, so `{ primaryButton: "pan" }` changes only the primary
+button while the secondary button continues to pan. The selected action remains
+fixed for that drag. Both actions use the existing inertial paths and pointer
+capture; wheel input is always zoom and is not remappable. Touch ignores
+`pointerMappings`: one finger rotates and two fingers pinch-zoom exactly as in
+the default controls.
+
+Keyboard support is a separate opt-in module. Call
+`enableArcRotateKeyboardControls()` once before attaching a keyboard-enabled
+camera. The enabler installs an opaque factory seam in `attachControl`; when the
+enabler is absent from a bundle, the factory, listener behavior, held-key state,
+and optional per-frame/cleanup calls all fold away. This keeps pointer-only
+scenes free of keyboard implementation bytes.
+
+After installing the seam, keyboard input remains disabled when `keyboard` is
+omitted or `false`. Passing `keyboard: true` enables the legacy Arrow-key
+behavior. Passing an object also enables keyboard input and may override any
+direction's `KeyboardEvent.code` list independently; an empty list disables that
+direction. Mapped keydown and keyup events prevent browser defaults unless
+`preventDefault` is `false`; input handling and movement remain enabled either
+way. Sensitivities are divisors, so the defaults produce angular,
+panning, and zooming increments of `1 / 100`, `1 / 50`, and `1 / 25` per
+rendered frame respectively.
 
 ### `free-camera.ts`
 
@@ -158,12 +234,12 @@ Both constructors share ONE factory — `_createFreeCamera(position, target, up:
 branches on the up vector's origin and never defines an `upVector` property. `createFreeCamera` passes
 the shared `Vec3Up` constant, so scenes that never import the banked constructor are byte-identical to
 before this feature existed. `createBankedFreeCamera` does all of the opt-in work itself: it builds its
-own `ObservableVec3` up vector — deferring its dirty callback to `_markWorldMatrixDirty(cam)` once `cam`
+own `ObservableVec3` up vector — deferring its dirty callback to `_markLocalMatrixDirty(cam)` once `cam`
 exists, since the factory computes `wm` internally — and only then defines the public `upVector`
-property on the returned camera. Writing `upVector` invalidates the world matrix exactly like
+property on the returned camera. Writing `upVector` invalidates both local and world matrix caches exactly like
 `position` / `target` do. `up` defaults to world +Y, which makes a banked camera's initial world matrix
 identical to a plain one's. A degenerate up (parallel to the view direction) falls back to identity
-rotation, matching `mat4LookAtWorldLHToRef`.
+rotation, matching `writeLookAtWorldMat4LHIntoBuffer`.
 
 Equivalent to Babylon.js `camera.upVector`, which `TargetCamera._getViewMatrix` feeds to
 `Matrix.LookAtLHToRef`.
@@ -175,8 +251,21 @@ Equivalent to Babylon.js `camera.upVector`, which `TargetCamera._getViewMatrix` 
  *  Matches Babylon.js FreeCamera input behavior.
  *  Camera stays plain data — this function reads/writes its properties.
  *  Returns a cleanup function to remove all listeners and the beforeRender hook. */
+export interface FreeCameraControlOptions {
+    upKeys?: readonly string[];
+    downKeys?: readonly string[];
+    fastKeys?: readonly string[];
+    fastMultiplier?: number;
+}
 export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void;
+export function attachConfigurableFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: FreeCameraControlOptions): () => void;
 ```
+
+`attachFreeControl` retains the default mappings and byte-identical implementation used by existing
+scenes. `attachConfigurableFreeControl` is a separate opt-in so custom key arrays and speed-boost
+logic add zero bytes to ordinary free-camera users. Its `upKeys`/`downKeys` replace the default
+Space+PageUp / Shift+PageDown vertical mappings; `fastKeys` and `fastMultiplier` apply a held-key
+speed boost. Mouse look and inertia are unchanged.
 
 ### `orthographic.ts` — Opt-in Orthographic Projection
 
@@ -299,7 +388,7 @@ The local world matrix is: transpose(upper 3×3 of view) + eye position.
 
 ### FreeCamera Position & Orientation
 
-The FreeCamera's local world matrix is computed via `mat4LookAtWorldLHToRef(_localMat, position, target, up)` — see **World Matrix (all cameras)** below. `up` is the shared `Vec3Up` constant for `createFreeCamera` and the camera's own `upVector` for `createBankedFreeCamera`; `_createFreeCamera` reads whichever it is handed without branching.
+The FreeCamera's local world matrix is computed via `writeLookAtWorldMat4LHIntoBuffer(_localMat, position, target, up)` — see **World Matrix (all cameras)** below. `up` is the shared `Vec3Up` constant for `createFreeCamera` and the camera's own `upVector` for `createBankedFreeCamera`; `_createFreeCamera` reads whichever it is handed without branching.
 
 Initial yaw/pitch are derived from the position→target direction:
 
@@ -314,15 +403,15 @@ _pitch = atan2(dy, sqrt(dx² + dz²))
 
 ### FreeCamera Dirty Tracking
 
-`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`. A `BankedFreeCamera` adds `upVector`, its own `ObservableVec3` (constructed and defined entirely in `banked-free-camera.ts`) whose dirty callback invalidates the camera's world matrix via the shared `_markWorldMatrixDirty()` seam.
+`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`. A `BankedFreeCamera` adds `upVector`, its own `ObservableVec3` (constructed and defined entirely in `banked-free-camera.ts`) whose dirty callback invalidates both the camera's local and world matrix caches via the shared `_markLocalMatrixDirty()` seam.
 
 ### View Matrix
 
-Both cameras use the same world-matrix-to-view inversion (described above). This is equivalent to `mat4LookAtLH(eye, target, Vec3Up)` for their respective eye/target values.
+Both cameras use the same world-matrix-to-view inversion (described above). This is equivalent to `createLookAtMat4LH(eye, target, Vec3Up)` for their respective eye/target values.
 
 ### World Matrix (all cameras)
 
-A camera's local matrix is its **camera-to-world** matrix — cameras parent like any other node, and `getViewMatrix` inverts it per frame. `mat4LookAtWorldLHToRef(out, eye, target, up)` writes it directly as the columns `[xAxis, yAxis, zAxis, eye]`, where the basis is the same one `mat4LookAtLH` derives:
+A camera's local matrix is its **camera-to-world** matrix — cameras parent like any other node, and `getViewMatrix` inverts it per frame. `writeLookAtWorldMat4LHIntoBuffer(out, eye, target, up)` writes it directly as the columns `[xAxis, yAxis, zAxis, eye]`, where the basis is the same one `createLookAtMat4LH` derives:
 
 ```
 zAxis = normalize(target - eye)          // left-handed: +Z looks at the target
@@ -330,11 +419,11 @@ xAxis = normalize(cross(up, zAxis))
 yAxis = cross(zAxis, xAxis)
 ```
 
-All three factories (`ArcRotate`, `Free`, `Geospatial`) call it. They previously built a **view** matrix with `mat4LookAtLH` and inverted it back by hand — allocating a `Float32Array`, computing a translation column of three dot products that was immediately overwritten with the eye, then transposing the rotation — with the 17-line transpose block copy-pasted into each factory. Degenerate input (eye on target, or the view direction parallel to `up`) leaves an identity rotation with the eye translation, matching `mat4LookAtLH`'s identity fallback exactly.
+All three factories (`ArcRotate`, `Free`, `Geospatial`) call it. They previously built a **view** matrix with `createLookAtMat4LH` and inverted it back by hand — allocating a `Float32Array`, computing a translation column of three dot products that was immediately overwritten with the eye, then transposing the rotation — with the 17-line transpose block copy-pasted into each factory. Degenerate input (eye on target, or the view direction parallel to `up`) leaves an identity rotation with the eye translation, matching `createLookAtMat4LH`'s identity fallback exactly.
 
 ### Projection Matrix
 
-Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
+Both cameras: `createPerspectiveMat4LH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
 
 ### Projection Change Detection
 
@@ -360,7 +449,7 @@ Polling here rather than installing accessors in every camera factory keeps the 
 
 Cache invalidation for live bound changes is deliberately kept out of the shared path: the bounds setters bump `camera._projRev`. Projection-dependent consumers read `_cameraChangeKey(camera)` in place of `camera.worldMatrixVersion`, which is a substitution rather than an extra comparison, so no per-frame gate grows a slot.
 
-`mat4OrthoOffCenterLHToRef` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
+`writeOrthoOffCenterMat4LHIntoBuffer` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
 
 ```
 m[0]  =  2 / (right - left)      m[12] = (left + right) / (left - right)
@@ -369,7 +458,7 @@ m[10] = -1 / (far - near)        m[14] = far / (far - near)
 m[11] =  0                       m[15] = 1
 ```
 
-`mat4PerspectiveLHToRef` only writes the terms a perspective matrix needs and relies on the rest of a freshly allocated (zeroed) cache. The orthographic writer overwrites **all 16 elements**, so switching perspective → orthographic on the shared cache is safe unconditionally; the reverse is not symmetric, because `m[12]`, `m[13]` and `m[15]` are written only by the orthographic path, so `disableOrthographicCamera` clears exactly those three before handing `_projCache` back. Optional projectors fully overwriting their output is the contract, so a future third projection type cannot be contaminated by whichever ran before it. That cleanup lives in the lazy module so the shared perspective path pays nothing for it.
+`writePerspectiveMat4LHIntoBuffer` only writes the terms a perspective matrix needs and relies on the rest of a freshly allocated (zeroed) cache. The orthographic writer overwrites **all 16 elements**, so switching perspective → orthographic on the shared cache is safe unconditionally; the reverse is not symmetric, because `m[12]`, `m[13]` and `m[15]` are written only by the orthographic path, so `disableOrthographicCamera` clears exactly those three before handing `_projCache` back. Optional projectors fully overwriting their output is the contract, so a future third projection type cannot be contaminated by whichever ran before it. That cleanup lives in the lazy module so the shared perspective path pays nothing for it.
 
 ### Consumers that still assume a perspective projection
 
@@ -386,7 +475,7 @@ Both enable/disable reset the projection state, as does every bounds setter — 
 
 ### View-Projection Matrix
 
-Both cameras: `mat4Multiply(projectionMatrix, viewMatrix)`.
+Both cameras: `multiplyMat4(projectionMatrix, viewMatrix)`.
 
 ---
 
@@ -412,14 +501,14 @@ Both cameras: `mat4Multiply(projectionMatrix, viewMatrix)`.
 
 Input handlers do **not** directly modify camera properties. They accumulate into the camera's `inertial*` offset fields, which are applied and decayed each frame by `applyInertia()`.
 
-#### Left-drag (Rotate)
+#### Rotate action (primary-button default)
 
 ```
 camera.inertialAlphaOffset -= dx / angularSensibility
 camera.inertialBetaOffset  -= dy / angularSensibility
 ```
 
-#### Right-drag (Pan)
+#### Pan action (secondary-button default)
 
 ```
 camera.inertialPanningX += -dx / panningSensibility
@@ -446,11 +535,39 @@ on touchmove (2 fingers):  dist = distance between fingers
                             camera.radius = max(0.01, camera.radius)
 ```
 
+#### Keyboard (opt-in)
+
+`keydown` records the event's `code` and current modifier state; `keyup`
+removes it. `blur` and cleanup clear all held-key and modifier state.
+Recognized mappings prevent browser Arrow-key scrolling. Events with `metaKey`
+are not recorded, and holding Meta suppresses any already-held mapping. Shift
+does not alter the mapping. Ctrl takes precedence over Alt.
+
+At the start of every `applyInertia()` call, each held mapped key adds one
+legacy-compatible increment:
+
+| Held mapping | No modifier                      | Ctrl                         | Alt without Ctrl                 |
+| ------------ | -------------------------------- | ---------------------------- | -------------------------------- |
+| left         | `inertialAlphaOffset -= 1 / 100` | `inertialPanningX -= 1 / 50` | same as no modifier              |
+| right        | `inertialAlphaOffset += 1 / 100` | `inertialPanningX += 1 / 50` | same as no modifier              |
+| up           | `inertialBetaOffset -= 1 / 100`  | `inertialPanningY += 1 / 50` | `inertialRadiusOffset += 1 / 25` |
+| down         | `inertialBetaOffset += 1 / 100`  | `inertialPanningY -= 1 / 50` | `inertialRadiusOffset -= 1 / 25` |
+
+The configured `angularSensitivity`, `panningSensitivity`, and
+`zoomingSensitivity` replace `100`, `50`, and `25`. Opposing directions cancel.
+Combined two-axis rotation and Ctrl-panning directions are normalized before
+their sensitivity is applied, so diagonal movement has the same magnitude as a
+single-axis movement. Alt zoom remains one-dimensional. Keyboard input feeds
+the same inertial offsets as pointer and wheel input before those offsets are
+integrated and decayed; it does not create another animation loop.
+
 ### Per-Frame Inertia Application (`applyInertia`)
 
-Called each frame via `scene._beforeRender` (or fallback RAF if no scene passed):
+Called each frame via `scene._beforeRender`:
 
 ```
+invoke the opaque opt-in input hook (when installed for this attachment)
+
 // Rotation
 alpha += inertialAlphaOffset
 beta  += inertialBetaOffset
@@ -481,13 +598,11 @@ if |offset| < PANNING_EPSILON: offset = 0
 
 When `scene` is provided to `attachControl`:
 
-- `applyInertia` is registered on `(scene as SceneContextInternal)._beforeRender` — single RAF chain.
+- `applyInertia` is registered on `scene._beforeRender` — single RAF chain.
 - Cleanup removes the callback from `_beforeRender`.
 
-When `scene` is omitted (fallback):
-
-- `applyInertia` self-reschedules via `requestAnimationFrame`.
-- Cleanup calls `cancelAnimationFrame`.
+When `scene` is omitted, inputs can accumulate inertial offsets but no
+standalone animation loop is created.
 
 ### Event Registration
 
@@ -498,11 +613,67 @@ When `scene` is omitted (fallback):
 | `pointerup`   | `onPointerUp`   | —                             |
 | `wheel`       | `onWheel`       | `{ passive: false }`          |
 | `contextmenu` | `onContextMenu` | — (prevents right-click menu) |
-| `touchstart`  | `onTouchStart`  | `{ passive: true }`           |
-| `touchmove`   | `onTouchMove`   | `{ passive: true }`           |
+| `touchstart`  | `onTouchStart`  | `{ passive: false }`          |
+| `touchmove`   | `onTouchMove`   | `{ passive: false }`          |
 | `touchend`    | `onTouchEnd`    | —                             |
+| `gesture*`    | `onGesture`     | `{ passive: false }`          |
+| `keydown`     | `onKeyDown`     | — (opt-in keyboard module)    |
+| `keyup`       | `onKeyUp`       | — (opt-in keyboard module)    |
+| `blur`        | `onBlur`        | — (opt-in keyboard module)    |
 
 Pointer capture (`setPointerCapture`/`releasePointerCapture`) keeps drags active outside canvas.
+
+The primary and secondary buttons can independently select the rotate or pan
+action through `AttachControlOptions.pointerMappings`. Defaults are equivalent
+to the historic fixed mapping:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "rotate",
+        secondaryButton: "pan",
+    },
+});
+```
+
+To make a primary-button drag pan without application-owned camera math:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: { primaryButton: "pan" },
+});
+```
+
+Non-touch pointers include mouse and pen input. Touch pointer events deliberately
+bypass this mapping so one-finger orbit and two-finger pinch zoom are stable.
+Wheel zoom, external-interaction guards, pointer capture, and cleanup do not
+depend on the mapping.
+
+Keyboard controls are opt-in:
+
+```typescript
+enableArcRotateKeyboardControls();
+attachControl(camera, canvas, scene, { keyboard: true });
+```
+
+Custom mappings and sensitivities remain local to the attachment:
+
+```typescript
+enableArcRotateKeyboardControls();
+attachControl(camera, canvas, scene, {
+    keyboard: {
+        keys: {
+            left: ["KeyA"],
+            right: ["KeyD"],
+            up: ["KeyW"],
+            down: ["KeyS"],
+        },
+        angularSensitivity: 200,
+        panningSensitivity: 100,
+        zoomingSensitivity: 50,
+    },
+});
+```
 
 ---
 
@@ -590,48 +761,49 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite                                         | Babylon.js                                                                 |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `Camera` interface                                   | `BABYLON.Camera` base class                                                |
-| `createArcRotateCamera(alpha, beta, radius, target)` | `new BABYLON.ArcRotateCamera("cam", alpha, beta, radius, target, scene)`   |
-| `camera.alpha / beta / radius / target`              | Same property names                                                        |
-| `camera.fov` (default 0.8)                           | `camera.fov` (default 0.8)                                                 |
-| `camera.nearPlane` / `camera.farPlane`               | `camera.minZ` / `camera.maxZ`                                              |
-| `camera.inertia` (default 0.9)                       | `camera.inertia` (default 0.9)                                             |
-| `camera.panningInertia` (default 0.9)                | `camera.panningInertia` (default 0.9)                                      |
-| `camera.inertialAlphaOffset`                         | `camera.inertialAlphaOffset`                                               |
-| `camera.getViewMatrix()`                             | `camera.getViewMatrix()`                                                   |
-| `camera.getProjectionMatrix(aspect)`                 | `camera.getProjectionMatrix()`                                             |
-| `enableOrthographicCamera(camera, bounds)`           | `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                                 |
-| `camera.ortho.left / right / bottom / top`           | `camera.orthoLeft / orthoRight / orthoBottom / orthoTop`                   |
-| `camera.ortho.halfHeight` (aspect-derived width)     | no equivalent — BJS defaults to half the render size in pixels             |
-| Animate path `"ortho.halfHeight"`                    | `Animation` on `orthoTop` / `orthoBottom` / …                              |
-| `disableOrthographicCamera(camera)`                  | `camera.mode = Camera.PERSPECTIVE_CAMERA`                                  |
-| `attachControl(camera, canvas, scene)`               | `camera.attachControl(canvas, true)`                                       |
-| `angularSensibility = 1000`                          | `camera.inputs.attached.pointers.angularSensibilityX/Y`                    |
-| `panningSensibility = 50`                            | `camera.inputs.attached.pointers.panningSensibility`                       |
-| `wheelPrecision = 3`                                 | `camera.inputs.attached.mousewheel.wheelPrecision`                         |
-| Left-drag → rotate                                   | `ArcRotateCameraPointersInput` button 0                                    |
-| Right-drag → pan                                     | `ArcRotateCameraPointersInput` button 2                                    |
-| Wheel → zoom radius                                  | `ArcRotateCameraMouseWheelInput`                                           |
-| Pinch → zoom radius (direct, no inertia)             | `ArcRotateCameraPointersInput` multitouch pinch                            |
-| Beta clamped to `[0.01, π-0.01]`                     | `camera.lowerBetaLimit / upperBetaLimit`                                   |
-| `createFreeCamera(position, target)`                 | `new BABYLON.FreeCamera("cam", position, scene); camera.setTarget(target)` |
-| `createBankedFreeCamera(position, target, up)`       | ditto, plus `camera.upVector = up` (used by `Matrix.LookAtLHToRef`)        |
-| `camera.speed` (default 2.0)                         | `camera.speed` (default 2.0)                                               |
-| `camera.angularSensitivity` (default 2000)           | `camera.inputs.attached.mouse.angularSensibility`                          |
-| `attachFreeControl(camera, canvas, scene)`           | `camera.attachControl(canvas)`                                             |
-| WASD / Arrow keys                                    | `FreeCameraKeyboardMoveInput`                                              |
-| Mouse drag → yaw/pitch                               | `FreeCameraMouseInput`                                                     |
-| Pitch clamped to ±(π/2 − 0.01)                       | BJS `FreeCameraMouseInput` pitch limits                                    |
-| `_yaw` / `_pitch` (internal)                         | BJS internal `_cameraRotationMatrix`                                       |
+| Babylon Lite                                                                | Babylon.js                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `Camera` interface                                                          | `BABYLON.Camera` base class                                                |
+| `createArcRotateCamera(alpha, beta, radius, target)`                        | `new BABYLON.ArcRotateCamera("cam", alpha, beta, radius, target, scene)`   |
+| `camera.alpha / beta / radius / target`                                     | Same property names                                                        |
+| `camera.fov` (default 0.8)                                                  | `camera.fov` (default 0.8)                                                 |
+| `camera.nearPlane` / `camera.farPlane`                                      | `camera.minZ` / `camera.maxZ`                                              |
+| `camera.inertia` (default 0.9)                                              | `camera.inertia` (default 0.9)                                             |
+| `camera.panningInertia` (default 0.9)                                       | `camera.panningInertia` (default 0.9)                                      |
+| `camera.inertialAlphaOffset`                                                | `camera.inertialAlphaOffset`                                               |
+| `camera.getViewMatrix()`                                                    | `camera.getViewMatrix()`                                                   |
+| `camera.getProjectionMatrix(aspect)`                                        | `camera.getProjectionMatrix()`                                             |
+| `enableOrthographicCamera(camera, bounds)`                                  | `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                                 |
+| `camera.ortho.left / right / bottom / top`                                  | `camera.orthoLeft / orthoRight / orthoBottom / orthoTop`                   |
+| `camera.ortho.halfHeight` (aspect-derived width)                            | no equivalent — BJS defaults to half the render size in pixels             |
+| Animate path `"ortho.halfHeight"`                                           | `Animation` on `orthoTop` / `orthoBottom` / …                              |
+| `disableOrthographicCamera(camera)`                                         | `camera.mode = Camera.PERSPECTIVE_CAMERA`                                  |
+| `attachControl(camera, canvas, scene)`                                      | `camera.attachControl(canvas, true)`                                       |
+| `enableArcRotateKeyboardControls(); attachControl(..., { keyboard: true })` | `ArcRotateCameraKeyboardMoveInput`                                         |
+| `angularSensibility = 1000`                                                 | `camera.inputs.attached.pointers.angularSensibilityX/Y`                    |
+| `panningSensibility = 50`                                                   | `camera.inputs.attached.pointers.panningSensibility`                       |
+| `wheelPrecision = 3`                                                        | `camera.inputs.attached.mousewheel.wheelPrecision`                         |
+| Primary drag → rotate (default, configurable)                               | `ArcRotateCameraPointersInput` button 0                                    |
+| Secondary drag → pan (default, configurable)                                | `ArcRotateCameraPointersInput` button 2                                    |
+| Wheel → zoom radius                                                         | `ArcRotateCameraMouseWheelInput`                                           |
+| Pinch → zoom radius (direct, no inertia)                                    | `ArcRotateCameraPointersInput` multitouch pinch                            |
+| Beta clamped to `[0.01, π-0.01]`                                            | `camera.lowerBetaLimit / upperBetaLimit`                                   |
+| `createFreeCamera(position, target)`                                        | `new BABYLON.FreeCamera("cam", position, scene); camera.setTarget(target)` |
+| `createBankedFreeCamera(position, target, up)`                              | ditto, plus `camera.upVector = up` (used by `Matrix.LookAtLHToRef`)        |
+| `camera.speed` (default 2.0)                                                | `camera.speed` (default 2.0)                                               |
+| `camera.angularSensitivity` (default 2000)                                  | `camera.inputs.attached.mouse.angularSensibility`                          |
+| `attachFreeControl(camera, canvas, scene)`                                  | `camera.attachControl(canvas)`                                             |
+| WASD / Arrow keys                                                           | `FreeCameraKeyboardMoveInput`                                              |
+| Mouse drag → yaw/pitch                                                      | `FreeCameraMouseInput`                                                     |
+| Pitch clamped to ±(π/2 − 0.01)                                              | BJS `FreeCameraMouseInput` pitch limits                                    |
+| `_yaw` / `_pitch` (internal)                                                | BJS internal `_cameraRotationMatrix`                                       |
 
 ## Dependencies
 
 - **`camera.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`.
-- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `writeLookAtWorldMat4LHIntoBuffer` from `../math/write-look-at-world-mat4-lh-into-buffer.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`arc-rotate-controls.ts` imports**: `ArcRotateCamera` from `./arc-rotate.js`; `SceneContext`, `SceneContextInternal` from `../scene/scene.js`.
-- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `writeLookAtWorldMat4LHIntoBuffer` from `../math/write-look-at-world-mat4-lh-into-buffer.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`free-camera-controls.ts` imports**: `FreeCamera`, `FreeCameraInternal` from `./free-camera.js`; `SceneContext` from `../scene/scene.js`.
 - **Depended on by**: `scene.ts` (creates camera), render pipeline (reads camera matrices).
 
@@ -651,6 +823,14 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `pinch zoom`                                   | Two-touch events correctly scale radius directly                                                  |
 | `inertia decay`                                | After input stops, offsets decay by `camera.inertia` per frame                                    |
 | `cleanup removes all listeners + beforeRender` | After cleanup, events and RAF hook removed                                                        |
+| `primary/secondary mappings are independent`   | Either button can select rotate or pan without changing the other button                          |
+| `custom mappings preserve touch`               | One-finger touch still rotates and two-finger pinch still zooms                                   |
+| `keyboard defaults and modifiers`              | Arrow rotation, Ctrl panning, Alt vertical zoom, Ctrl-over-Alt precedence                         |
+| `keyboard direction normalization`             | Default/custom diagonals preserve single-axis speed; opposing directions cancel                   |
+| `keyboard lifecycle`                           | Held input repeats per frame; keyup, blur, and cleanup stop further accumulation                  |
+| `keyboard filtering`                           | Meta-modified mappings are ignored; Shift does not alter mappings                                 |
+| `custom keyboard options`                      | Direction code lists and all three sensitivity divisors override independently                    |
+| `keyboard disabled by default`                 | No keyboard listeners or held-key input unless `keyboard` is requested                            |
 | **FreeCamera**                                 |                                                                                                   |
 | `initial yaw/pitch from position→target`       | Verify atan2 computation                                                                          |
 | `WASD movement in local space`                 | W moves along +Z local, A along −X local                                                          |
@@ -683,12 +863,13 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 
 ## File Manifest
 
-| File                                 | Size       | Purpose                                                |
-| ------------------------------------ | ---------- | ------------------------------------------------------ |
-| `src/camera/camera.ts`               | ~15 lines  | Shared `Camera` interface contract                     |
-| `src/camera/arc-rotate.ts`           | ~198 lines | ArcRotateCamera data + world matrix + dirty tracking   |
-| `src/camera/arc-rotate-controls.ts`  | ~220 lines | ArcRotate pointer/wheel/touch input with inertia model |
-| `src/camera/free-camera.ts`          | ~161 lines | FreeCamera data + world matrix + dirty tracking        |
-| `src/camera/banked-free-camera.ts`   | ~44 lines  | Opt-in FreeCamera with an explicit mutable up vector   |
-| `src/camera/free-camera-controls.ts` | ~184 lines | FreeCamera keyboard/mouse input with inertia           |
-| `src/camera/orthographic.ts`         | ~75 lines  | Opt-in orthographic projection (installs the seam)     |
+| File                                         | Size       | Purpose                                                       |
+| -------------------------------------------- | ---------- | ------------------------------------------------------------- |
+| `src/camera/camera.ts`                       | ~15 lines  | Shared `Camera` interface contract                            |
+| `src/camera/arc-rotate.ts`                   | ~198 lines | ArcRotateCamera data + world matrix + dirty tracking          |
+| `src/camera/arc-rotate-controls.ts`          | ~400 lines | ArcRotate pointer/wheel/touch input with inertia model        |
+| `src/camera/arc-rotate-keyboard-controls.ts` | ~160 lines | Opt-in ArcRotate keyboard mappings, listeners, and input seam |
+| `src/camera/free-camera.ts`                  | ~161 lines | FreeCamera data + world matrix + dirty tracking               |
+| `src/camera/banked-free-camera.ts`           | ~44 lines  | Opt-in FreeCamera with an explicit mutable up vector          |
+| `src/camera/free-camera-controls.ts`         | ~184 lines | FreeCamera keyboard/mouse input with inertia                  |
+| `src/camera/orthographic.ts`                 | ~75 lines  | Opt-in orthographic projection (installs the seam)            |

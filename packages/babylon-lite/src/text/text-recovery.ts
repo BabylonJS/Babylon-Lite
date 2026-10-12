@@ -1,5 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { createStyleBuffer } from "./_gpu/text-style-gpu.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { TEXT_INSTANCE_BYTES, TEXT_STYLE_BYTES } from "./text-data.js";

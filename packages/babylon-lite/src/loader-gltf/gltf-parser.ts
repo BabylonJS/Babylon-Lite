@@ -6,8 +6,8 @@
  */
 import { F32, U32, U16, U8, I16, I8 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { getLoaderTmpLocal } from "./_loader-scratch.js";
 
@@ -172,8 +172,8 @@ export function findParent(parentMap: Map<number, number>, childIdx: number): nu
  * Total cost across all nodes: O(n) instead of O(n²).
  *
  * Zero-alloc path for the TRS case (common): `local` is composed into a shared
- * scratch via `mat4ComposeInto`, then multiplied into the freshly-allocated
- * `world` via `mat4MultiplyInto`. Only one Float32Array allocation per node
+ * scratch via `composeMat4IntoBuffer`, then multiplied into the freshly-allocated
+ * `world` via `multiplyMat4IntoBuffer`. Only one Float32Array allocation per node
  * (the cached world matrix itself) instead of two. Recursion always resolves
  * `parentWorld` before touching the scratch, so the shared buffer is safe.
  */
@@ -197,7 +197,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
         const r = node.rotation ?? [0, 0, 0, 1];
         const s = node.scale ?? [1, 1, 1];
         const local = getLoaderTmpLocal() as unknown as Mat4Storage;
-        mat4ComposeInto(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
+        composeMat4IntoBuffer(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
         localBuf = local;
     }
 
@@ -210,7 +210,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
     // `allocateMat4()` in `initMeshTransform` and pick up whatever precision
     // the process-global allocator was set to.
     const world = new F32(16) as unknown as Mat4;
-    mat4MultiplyInto(world as unknown as Mat4Storage, 0, parentWorld as unknown as Mat4Storage, 0, localBuf, 0);
+    multiplyMat4IntoBuffer(world as unknown as Mat4Storage, 0, parentWorld as unknown as Mat4Storage, 0, localBuf, 0);
 
     cache.set(nodeIdx, world);
     return world;

@@ -16,31 +16,36 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
-import { mat4Scale } from "../math/mat4-scale.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import type { PhysicsCollisionInfo } from "./havok-collision.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { createScalingMat4 } from "../math/create-scaling-mat4.js";
+import type { NativeMassProperties } from "./havok-mass-properties.js";
+import type { HavokThinInstanceAdvancedContext } from "./havok-thin-instance-advanced.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
 /** Geometry type of a physics collision shape. */
-export const enum PhysicsShapeType {
-    SPHERE = 0,
-    CAPSULE = 1,
-    CYLINDER = 2,
-    BOX = 3,
-    CONVEX_HULL = 4,
-    CONTAINER = 5,
-    MESH = 6,
-    HEIGHTFIELD = 7,
-}
+export const PhysicsShapeType = {
+    SPHERE: 0,
+    CAPSULE: 1,
+    CYLINDER: 2,
+    BOX: 3,
+    CONVEX_HULL: 4,
+    CONTAINER: 5,
+    MESH: 6,
+    HEIGHTFIELD: 7,
+} as const;
+export type PhysicsShapeType = (typeof PhysicsShapeType)[keyof typeof PhysicsShapeType];
 
 /** How a body moves: `STATIC` (immovable), `ANIMATED` (driven by the node transform), or `DYNAMIC` (simulated). */
-export const enum PhysicsMotionType {
-    STATIC = 0,
-    ANIMATED = 1,
-    DYNAMIC = 2,
-}
+export const PhysicsMotionType = {
+    STATIC: 0,
+    ANIMATED: 1,
+    DYNAMIC: 2,
+} as const;
+export type PhysicsMotionType = (typeof PhysicsMotionType)[keyof typeof PhysicsMotionType];
 
 /**
  * How a moved transform node is propagated to its physics body before each step.
@@ -48,33 +53,36 @@ export const enum PhysicsMotionType {
  * and `ACTION` sets the body's velocity so it reaches the node (`HP_Body_SetTargetQTransform`,
  * dragging resting bodies via friction). Values match Babylon.js `PhysicsPrestepType`.
  */
-export const enum PhysicsPrestepType {
-    DISABLED = 0,
-    TELEPORT = 1,
-    ACTION = 2,
-}
+export const PhysicsPrestepType = {
+    DISABLED: 0,
+    TELEPORT: 1,
+    ACTION: 2,
+} as const;
+export type PhysicsPrestepType = (typeof PhysicsPrestepType)[keyof typeof PhysicsPrestepType];
 
 /** Type of Havok Physics V2 constraint. */
-export const enum PhysicsConstraintType {
-    BALL_AND_SOCKET = 1,
-    DISTANCE = 2,
-    HINGE = 3,
-    SLIDER = 4,
-    LOCK = 5,
-    PRISMATIC = 6,
-    SIX_DOF = 7,
-}
+export const PhysicsConstraintType = {
+    BALL_AND_SOCKET: 1,
+    DISTANCE: 2,
+    HINGE: 3,
+    SLIDER: 4,
+    LOCK: 5,
+    PRISMATIC: 6,
+    SIX_DOF: 7,
+} as const;
+export type PhysicsConstraintType = (typeof PhysicsConstraintType)[keyof typeof PhysicsConstraintType];
 
 /** Axis addressed by a Physics V2 constraint limit. */
-export const enum PhysicsConstraintAxis {
-    LINEAR_X = 0,
-    LINEAR_Y = 1,
-    LINEAR_Z = 2,
-    ANGULAR_X = 3,
-    ANGULAR_Y = 4,
-    ANGULAR_Z = 5,
-    LINEAR_DISTANCE = 6,
-}
+export const PhysicsConstraintAxis = {
+    LINEAR_X: 0,
+    LINEAR_Y: 1,
+    LINEAR_Z: 2,
+    ANGULAR_X: 3,
+    ANGULAR_Y: 4,
+    ANGULAR_Z: 5,
+    LINEAR_DISTANCE: 6,
+} as const;
+export type PhysicsConstraintAxis = (typeof PhysicsConstraintAxis)[keyof typeof PhysicsConstraintAxis];
 
 // ─── Option interfaces ───────────────────────────────────────────────
 
@@ -160,8 +168,9 @@ export interface PhysicsBody {
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
     /** @internal */ _rotationLockMask?: number;
-    /** @internal */ _rotationLockSource?: any[];
-    /** @internal */ _massPropertiesTransform?: (massProperties: any[]) => void;
+    /** @internal */ _rotationLockSource?: NativeMassProperties;
+    /** @internal */ _rotationLockSources?: NativeMassProperties[];
+    /** @internal */ _massPropertiesTransform?: (massProperties: NativeMassProperties, instanceIndex?: number) => void;
     /** @internal */ _preStep: boolean;
     /** @internal How a moved node is propagated to the body pre-step (TELEPORT by default). */
     _prestepType: PhysicsPrestepType;
@@ -198,7 +207,7 @@ export interface PhysicsConstraint {
 
 /** Pure-state handle to a Havok physics world: the WASM module, the native world, its bodies, and the timestep. */
 export interface PhysicsWorld {
-    /** @internal */ readonly _hknp: any;
+    /** @internal */ _hknp: any;
     /** @internal */ readonly _hkWorld: any;
     /** @internal */ readonly _bodies: PhysicsBody[];
     /** @internal Owning scene, retained so out-of-step callers (e.g. the character controller) can
@@ -216,12 +225,57 @@ export interface PhysicsWorld {
     _gravity: number[];
     /** @internal Floating-origin runtime; present only after `enableHavokFloatingOrigin` is called. */
     _fo?: HavokFloatingOriginContext;
+    /** @internal Lazily installed thin-instance body seam. */
+    _thin?: HavokThinInstanceContext;
+    /** @internal Advanced per-instance shape and mass behavior installed only by opt-in consumers. */
+    _thinAdvanced?: HavokThinInstanceAdvancedContext;
+    /** @internal Lazily installed body-aware event lifetime seam. */
+    _events?: HavokEventContext;
+    /** @internal Lazily installed shared collision-event dispatcher. */
+    _collision?: HavokCollisionContext;
+    /** @internal Set before native disposal so callbacks and stale step closures stop immediately. */
+    _disposed?: boolean;
     /** @internal Callbacks run after each physics step (post body→node sync, pre-render). */
     _afterStep?: ((timestep: number) => void)[];
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
     _queryCollector?: any;
     /** @internal Removes the per-frame step callback from the scene; called by `disposePhysics` before the native world is released. */
     _stopStep?: () => void;
+}
+
+/** @internal A tracked Lite body, native Havok handle, and instance index. */
+export type ResolvedPhysicsBodyInstance = [PhysicsBody, any, number];
+
+/** @internal Installed only when body-aware collision or trigger events are enabled. */
+export interface HavokEventContext {
+    begin(): void;
+    end(): void;
+    add(body: PhysicsBody): void;
+    remove(body: PhysicsBody): boolean;
+    resolve(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
+    dispose(): void;
+}
+
+/** @internal Installed only when collision events are enabled. */
+export interface HavokCollisionContext {
+    readonly callbacks: ((info: PhysicsCollisionInfo) => void)[];
+}
+
+/** @internal Installed only when thin-instance physics is explicitly enabled. */
+export interface HavokThinInstanceContext {
+    validate(node: SceneNode): void;
+    create(node: SceneNode, motionType: PhysicsMotionType, startsAsleep: boolean): PhysicsBody | undefined;
+    from(body: PhysicsBody): boolean;
+    to(body: PhysicsBody): boolean;
+    target(body: PhysicsBody): boolean;
+    count(body: PhysicsBody): number | undefined;
+    instance(body: PhysicsBody, index: number): any | undefined;
+    resolve(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
+    com(body: PhysicsBody, nativeBody: any, localCenter: readonly [number, number, number]): Vec3 | undefined;
+    matrix(body: PhysicsBody, nativeBody: any): Mat4 | undefined;
+    impulse(body: PhysicsBody, impulse: Vec3): boolean;
+    mass(body: PhysicsBody, properties: PhysicsMassProperties, fallbackInertia?: number): boolean;
+    dispose(): void;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -292,6 +346,17 @@ export async function enableHavokFloatingOrigin(world: PhysicsWorld, floatingOri
     world._fo = fo.createHavokFloatingOriginContext(world._hkWorld, world._gravity, floatingOriginWorldRadius);
 }
 
+/**
+ * Enable lazily loaded Havok rigid bodies for meshes with thin-instance matrices.
+ * Call before creating those bodies; without this explicit opt-in, a thin-instance mesh creates one ordinary body.
+ */
+export async function enableHavokThinInstancePhysics(world: PhysicsWorld): Promise<void> {
+    if (!world._thin) {
+        const thin = await import("./havok-thin-instances.js");
+        world._thin ??= thin.createHavokThinInstanceContext(world);
+    }
+}
+
 // ─── Per-frame stepping ──────────────────────────────────────────────
 
 /** Hard ceiling on a single physics step (100 ms = a 10 fps floor). A long hitch — backgrounded tab,
@@ -301,6 +366,9 @@ export async function enableHavokFloatingOrigin(world: PhysicsWorld, floatingOri
 const MAX_STEP_MS = 100;
 
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
+    if (world._disposed) {
+        return;
+    }
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
     // Step size in ms: the world's own fixed step when set (`> 0`), otherwise the live per-frame delta
     // the scene supplies — which the render loop already resolves as `scene.fixedDeltaMs > 0 ?
@@ -351,8 +419,17 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // post-step scene logic runs in `onAfterRenderObservable`.
     if (world._afterStep) {
         const cbs = world._afterStep.slice();
-        for (let i = 0; i < cbs.length; i++) {
-            cbs[i]!(dt);
+        const events = world._events;
+        events?.begin();
+        try {
+            for (let i = 0; i < cbs.length; i++) {
+                cbs[i]!(dt);
+                if (world._disposed) {
+                    break;
+                }
+            }
+        } finally {
+            events?.end();
         }
     }
 }
@@ -370,6 +447,9 @@ export function onPhysicsAfterStep(world: PhysicsWorld, cb: (timestep: number) =
 }
 
 function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
+    if (body._world._thin?.from(body)) {
+        return;
+    }
     const t = hknp.HP_Body_GetQTransform(body._hkBody)[1];
     const pos = t[0]; // [x, y, z]
     const rot = t[1]; // [x, y, z, w]
@@ -379,6 +459,9 @@ function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
 }
 
 function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
+    if (body._world._thin?.to(body)) {
+        return;
+    }
     const node = body.node;
     const p = node.position;
     const q = node.rotationQuaternion;
@@ -392,6 +475,9 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
 // velocity that carries the body to the node over the step. Resting bodies stacked on top are then
 // dragged along by friction rather than tunneled through.
 function _syncNodeToBodyTarget(hknp: any, body: PhysicsBody): void {
+    if (body._world._thin?.target(body)) {
+        return;
+    }
     const node = body.node;
     const p = node.position;
     const q = node.rotationQuaternion;
@@ -535,13 +621,15 @@ export function getPhysicsVelocityLimits(world: PhysicsWorld): { maxLinear: numb
  */
 export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionType: PhysicsMotionType, startsAsleep = false): PhysicsBody {
     const { _hknp: hknp, _hkWorld: hkWorld } = world;
-
-    const hkBody = hknp.HP_Body_Create()[1];
-
-    // Set motion type
+    const thinBody = world._thin?.create(node, motionType, startsAsleep);
+    if (thinBody) {
+        world._bodies.push(thinBody);
+        world._events?.add(thinBody);
+        return thinBody;
+    }
     const hkMotion =
         motionType === PhysicsMotionType.STATIC ? hknp.MotionType.STATIC : motionType === PhysicsMotionType.ANIMATED ? hknp.MotionType.KINEMATIC : hknp.MotionType.DYNAMIC;
-    hknp.HP_Body_SetMotionType(hkBody, hkMotion);
+    const hkBody = hknp.HP_Body_Create()[1];
 
     const body: PhysicsBody = {
         _hkBody: hkBody,
@@ -553,6 +641,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
         motionType,
     };
 
+    hknp.HP_Body_SetMotionType(hkBody, hkMotion);
     if (world._fo) {
         // Floating origin: place the body in its region, storing it in region-local coordinates.
         world._fo.placeBody(world, body, startsAsleep);
@@ -569,7 +658,13 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     }
 
     world._bodies.push(body);
+    world._events?.add(body);
     return body;
+}
+
+/** Return the number of native rigid bodies represented by a Lite physics body. */
+export function getPhysicsBodyInstanceCount(body: PhysicsBody): number {
+    return body._world._thin?.count(body) ?? 1;
 }
 
 /**
@@ -819,13 +914,13 @@ class MeshAccumulator {
     }
 
     public addNodeMeshes(root: SceneNode, includeChildren: boolean): void {
-        const invRoot = mat4Invert(root.worldMatrix as Mat4);
+        const invRoot = invertMat4(root.worldMatrix as Mat4);
         if (!invRoot) {
             throw new Error("Cannot create physics mesh shape from a singular root transform.");
         }
 
-        const rootScale = mat4Scale(root.scaling.x, root.scaling.y, root.scaling.z);
-        const rootToBody = mat4Multiply(rootScale, invRoot);
+        const rootScale = createScalingMat4(root.scaling.x, root.scaling.y, root.scaling.z);
+        const rootToBody = multiplyMat4(rootScale, invRoot);
         this._addNodeMesh(root, rootToBody);
 
         if (includeChildren) {
@@ -876,7 +971,7 @@ class MeshAccumulator {
             return;
         }
 
-        const meshToBody = mat4Multiply(rootToBody, node.worldMatrix as Mat4);
+        const meshToBody = multiplyMat4(rootToBody, node.worldMatrix as Mat4);
         const indexOffset = this._vertices.length / 3;
         for (let i = 0; i < positions.length; i += 3) {
             transformPositionInto(this._vertices, meshToBody, positions[i]!, positions[i + 1]!, positions[i + 2]!);
@@ -1030,12 +1125,12 @@ export function addPhysicsShapeChild(world: PhysicsWorld, container: PhysicsShap
  * @param childNode - Scene node associated with the child shape.
  */
 export function addPhysicsShapeChildFromParent(world: PhysicsWorld, container: PhysicsShape, parentNode: SceneNode, child: PhysicsShape, childNode: SceneNode): void {
-    const invParent = mat4Invert(parentNode.worldMatrix as Mat4);
+    const invParent = invertMat4(parentNode.worldMatrix as Mat4);
     if (!invParent) {
         throw new Error("Cannot add physics child shape from a singular parent transform.");
     }
-    const childToParent = mat4Multiply(invParent, childNode.worldMatrix as Mat4);
-    const transform = mat4Decompose(childToParent);
+    const childToParent = multiplyMat4(invParent, childNode.worldMatrix as Mat4);
+    const transform = decomposeMat4(childToParent);
     addPhysicsShapeChild(world, container, child, transform.translation, transform.rotation, transform.scale);
 }
 
@@ -1071,56 +1166,20 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
  *   so it tumbles around its real centre.
  */
 export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass: number, centerOfMass?: Vec3): void {
-    // Match Babylon.js HavokPlugin._internalUpdateMassProperties: for a body with a shape, start from
-    // the shape-derived mass properties (correct anisotropic inertia tensor + centre of mass +
-    // orientation) and override only the mass scalar. Writing a placeholder isotropic inertia would
-    // make constrained/torqued bodies rotate at the wrong rate and break physics parity. A shape-less
-    // body has no inertia to derive, so keep the previous mass-proportional isotropic fallback.
-    const massProps = body._shape ? buildMassProperties(world, body) : [[0, 0, 0], mass, [mass, mass, mass], [0, 0, 0, 1]];
-    massProps[1] = mass;
+    if (world._thin?.mass(body, { mass, centerOfMass }, mass)) {
+        return;
+    }
+    const raw = world._hknp;
+    const ok = raw.Result?.RESULT_OK ?? 0;
+    const shape = raw.HP_Body_GetShape(body._hkBody);
+    const shapeMass = shape[0] === ok ? raw.HP_Shape_BuildMassProperties(shape[1]) : null;
+    const massProperties: NativeMassProperties = shapeMass?.[0] === ok ? shapeMass[1] : [[0, 0, 0], mass, [mass, mass, mass], [0, 0, 0, 1]];
+    massProperties[1] = mass;
     if (centerOfMass) {
-        massProps[0] = [centerOfMass.x, centerOfMass.y, centerOfMass.z];
+        massProperties[0] = [centerOfMass.x, centerOfMass.y, centerOfMass.z];
     }
-    body._massPropertiesTransform?.(massProps);
-    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
-}
-
-/**
- * Sets a body's mass properties, preserving Havok's shape-derived values for omitted fields and
- * reapplying active rotation-axis locks.
- * @param world - The physics world.
- * @param body - The body to update.
- * @param properties - Mass-property overrides.
- */
-export function setPhysicsBodyMassProperties(world: PhysicsWorld, body: PhysicsBody, properties: PhysicsMassProperties): void {
-    const massProps = buildMassProperties(world, body);
-    if (properties.centerOfMass) {
-        massProps[0] = [properties.centerOfMass.x, properties.centerOfMass.y, properties.centerOfMass.z];
-    }
-    if (properties.mass !== undefined) {
-        massProps[1] = properties.mass;
-    }
-    if (properties.inertia) {
-        massProps[2] = [properties.inertia.x, properties.inertia.y, properties.inertia.z];
-    }
-    if (properties.inertiaOrientation) {
-        massProps[3] = [properties.inertiaOrientation.x, properties.inertiaOrientation.y, properties.inertiaOrientation.z, properties.inertiaOrientation.w];
-    }
-    body._massPropertiesTransform?.(massProps);
-    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
-}
-
-function buildMassProperties(world: PhysicsWorld, body: PhysicsBody): any[] {
-    const hknp = world._hknp;
-    const ok = hknp.Result?.RESULT_OK ?? 0;
-    const shape = hknp.HP_Body_GetShape(body._hkBody);
-    if (shape[0] === ok) {
-        const shapeMass = hknp.HP_Shape_BuildMassProperties(shape[1]);
-        if (shapeMass[0] === ok) {
-            return shapeMass[1];
-        }
-    }
-    return [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]];
+    body._massPropertiesTransform?.(massProperties);
+    raw.HP_Body_SetMassProperties(body._hkBody, massProperties);
 }
 
 // ─── Body control (impulse / velocity / motion type / transform) ─────
@@ -1137,6 +1196,9 @@ function buildMassProperties(world: PhysicsWorld, body: PhysicsBody): any[] {
  */
 export function applyPhysicsImpulse(world: PhysicsWorld, body: PhysicsBody, impulse: Vec3, point?: Vec3): void {
     const hknp = world._hknp;
+    if (!point && world._thin?.impulse(body, impulse)) {
+        return;
+    }
     let loc = point;
     if (!loc) {
         const t = hknp.HP_Body_GetQTransform(body._hkBody)[1];
@@ -1176,146 +1238,6 @@ export function setPhysicsBodyAngularVelocity(world: PhysicsWorld, body: Physics
 }
 
 /**
- * Lock angular motion around selected body-local axes.
- * Havok represents a locked angular degree of freedom with zero inertia.
- * Locks are cumulative and remain active when the body's mass properties are rebuilt.
- */
-export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
-    const requestedMask = physicsRotationAxesMask(axes);
-    if (requestedMask === 0) {
-        return;
-    }
-    const previousMask = body._rotationLockMask ?? 0;
-    const mask = previousMask | requestedMask;
-    if (mask === previousMask) {
-        return;
-    }
-    let source = body._rotationLockSource;
-    if (previousMask === 0) {
-        const hknp = world._hknp;
-        const result = hknp.HP_Body_GetMassProperties(body._hkBody);
-        const ok = hknp.Result?.RESULT_OK ?? 0;
-        if (result[0] !== ok) {
-            throw new Error("Failed to read physics body mass properties.");
-        }
-        source = cloneMassProperties(result[1]);
-    }
-    const massProperties = cloneMassProperties(source!);
-    applyBodyRotationLocks(massProperties, mask);
-    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
-    body._rotationLockMask = mask;
-    body._rotationLockSource = source;
-    body._massPropertiesTransform ??= (properties) => {
-        body._rotationLockSource = cloneMassProperties(properties);
-        applyBodyRotationLocks(properties, body._rotationLockMask ?? 0);
-    };
-}
-
-/**
- * Unlock angular motion around selected body-local axes.
- * Axes that remain locked continue to be reapplied when mass properties are rebuilt.
- */
-export function unlockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
-    const requestedMask = physicsRotationAxesMask(axes);
-    const previousMask = body._rotationLockMask ?? 0;
-    const mask = previousMask & ~requestedMask;
-    if (mask === previousMask) {
-        return;
-    }
-    const massProperties = cloneMassProperties(body._rotationLockSource!);
-    applyBodyRotationLocks(massProperties, mask);
-    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
-    body._rotationLockMask = mask || undefined;
-    if (mask === 0) {
-        body._rotationLockSource = undefined;
-        body._massPropertiesTransform = undefined;
-    }
-}
-
-function physicsRotationAxesMask(axes: readonly PhysicsRotationAxis[]): number {
-    let mask = 0;
-    for (const axis of axes) {
-        if (axis === "x") {
-            mask |= 1;
-        } else if (axis === "y") {
-            mask |= 2;
-        } else if (axis === "z") {
-            mask |= 4;
-        } else {
-            throw new Error(`Unknown physics rotation axis "${String(axis)}".`);
-        }
-    }
-    return mask;
-}
-
-function cloneMassProperties(massProperties: any[]): any[] {
-    return [[...massProperties[0]], massProperties[1], [...massProperties[2]], [...massProperties[3]]];
-}
-
-function applyBodyRotationLocks(massProperties: any[], mask: number): void {
-    if (mask === 0) {
-        return;
-    }
-    const inertia = massProperties[2];
-    const q = massProperties[3];
-    const x = q[0],
-        y = q[1],
-        z = q[2],
-        w = q[3];
-    const xx = x * x,
-        yy = y * y,
-        zz = z * z,
-        xy = x * y,
-        xz = x * z,
-        yz = y * z,
-        xw = x * w,
-        yw = y * w,
-        zw = z * w;
-    const r00 = 1 - 2 * (yy + zz),
-        r01 = 2 * (xy - zw),
-        r02 = 2 * (xz + yw),
-        r10 = 2 * (xy + zw),
-        r11 = 1 - 2 * (xx + zz),
-        r12 = 2 * (yz - xw),
-        r20 = 2 * (xz - yw),
-        r21 = 2 * (yz + xw),
-        r22 = 1 - 2 * (xx + yy);
-    const ixx = r00 * r00 * inertia[0] + r01 * r01 * inertia[1] + r02 * r02 * inertia[2];
-    const iyy = r10 * r10 * inertia[0] + r11 * r11 * inertia[1] + r12 * r12 * inertia[2];
-    const izz = r20 * r20 * inertia[0] + r21 * r21 * inertia[1] + r22 * r22 * inertia[2];
-    if (mask === 1) {
-        setSingleAxisLockedInertia(massProperties, 0, iyy, izz, r10 * r20 * inertia[0] + r11 * r21 * inertia[1] + r12 * r22 * inertia[2]);
-        return;
-    }
-    if (mask === 2) {
-        setSingleAxisLockedInertia(massProperties, 1, ixx, izz, -(r00 * r20 * inertia[0] + r01 * r21 * inertia[1] + r02 * r22 * inertia[2]));
-        return;
-    }
-    if (mask === 4) {
-        setSingleAxisLockedInertia(massProperties, 2, ixx, iyy, r00 * r10 * inertia[0] + r01 * r11 * inertia[1] + r02 * r12 * inertia[2]);
-        return;
-    }
-    massProperties[2] = [mask & 1 ? 0 : ixx, mask & 2 ? 0 : iyy, mask & 4 ? 0 : izz];
-    massProperties[3] = [0, 0, 0, 1];
-}
-
-function setSingleAxisLockedInertia(massProperties: any[], axis: number, a: number, b: number, coupling: number): void {
-    if (coupling === 0) {
-        massProperties[2] = axis === 0 ? [0, a, b] : axis === 1 ? [a, 0, b] : [a, b, 0];
-        massProperties[3] = [0, 0, 0, 1];
-        return;
-    }
-    const mean = (a + b) * 0.5;
-    const radius = Math.hypot((a - b) * 0.5, coupling);
-    const halfAngle = Math.atan2(2 * coupling, a - b) * 0.25;
-    const s = Math.sin(halfAngle);
-    const q = [0, 0, 0, Math.cos(halfAngle)];
-    q[axis] = s;
-    massProperties[2] = axis === 0 ? [0, mean + radius, mean - radius] : axis === 1 ? [mean + radius, 0, mean - radius] : [mean + radius, mean - radius, 0];
-    massProperties[3] = q;
-}
-
-/**
  * Switch a body's motion type at runtime (e.g. ANIMATED/kinematic while a prop is grabbed, then
  * DYNAMIC on release). Mutates `body.motionType` so the per-frame step syncs it the right way
  * (ANIMATED: node → body before the step; DYNAMIC: body → node after).
@@ -1338,6 +1260,9 @@ export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, 
         [position.x, position.y, position.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],
     ]);
+    if (world._thin?.count(body) !== undefined) {
+        return;
+    }
     body.node.position.set(position.x, position.y, position.z);
     body.node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 }
@@ -1360,7 +1285,9 @@ export function removePhysicsBody(world: PhysicsWorld, body: PhysicsBody): void 
     }
     bodies.splice(i, 1);
     hknp.HP_World_RemoveBody(hkWorld, body._hkBody);
-    hknp.HP_Body_Release(body._hkBody);
+    if (!world._events?.remove(body)) {
+        hknp.HP_Body_Release(body._hkBody);
+    }
 }
 
 /**
@@ -1397,6 +1324,7 @@ export function releasePhysicsConstraint(world: PhysicsWorld, constraint: Physic
  */
 export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsAggregate {
     const motionType = options.mass === 0 ? PhysicsMotionType.STATIC : PhysicsMotionType.DYNAMIC;
+    world._thin?.validate(node);
 
     // Use a caller-supplied pre-built shape if present (e.g. a mesh/convex-hull
     // shape built via createPhysicsShape); otherwise build a primitive shape.
@@ -1404,7 +1332,7 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
     let shape = options.shape;
     if (!shape) {
         // Build shape parameters, auto-sizing from bounding box if needed
-        const shapeParams = _buildShapeParams(node, type, options);
+        const shapeParams = _buildShapeParams(node, type, options, !(world._thin && world._thinAdvanced && node.thinInstances));
         const hkShape = createPrimitivePhysicsShapeHandle(world._hknp, type, shapeParams);
         if (hkShape === null) {
             throw new Error("createPhysicsAggregate supports only primitive physics shapes.");
@@ -1430,12 +1358,16 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
     return { body, shape };
 }
 
-function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsShapeParameters {
+function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions, applyNodeScale: boolean): PhysicsShapeParameters {
     const params: PhysicsShapeParameters = {};
-    const scaleX = Math.abs(node.scaling.x);
-    const scaleYMagnitude = Math.abs(node.scaling.y);
-    const scaleZ = Math.abs(node.scaling.z);
-    const scaleY = node.scaling.x * node.scaling.y * node.scaling.z < 0 ? -scaleYMagnitude : scaleYMagnitude;
+    let { x: scaleX, y: scaleY, z: scaleZ } = node.scaling;
+    if (!applyNodeScale) {
+        scaleX = scaleY = scaleZ = 1;
+    }
+    const scaleYMagnitude = Math.abs(scaleY);
+    scaleY = scaleX * scaleY * scaleZ < 0 ? -scaleYMagnitude : scaleYMagnitude;
+    scaleX = Math.abs(scaleX);
+    scaleZ = Math.abs(scaleZ);
     const min = node.boundMin ?? [-0.5, -0.5, -0.5];
     const max = node.boundMax ?? [0.5, 0.5, 0.5];
     const extents = {
@@ -1444,12 +1376,8 @@ function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsA
         z: (max[2] - min[2]) * scaleZ,
     };
 
-    if (options.center) {
-        params.center = options.center;
-    }
-    if (options.rotation) {
-        params.rotation = options.rotation;
-    }
+    params.center = options.center;
+    params.rotation = options.rotation;
 
     switch (type) {
         case PhysicsShapeType.SPHERE: {
@@ -1520,6 +1448,10 @@ export function getPhysicsBodyDebugGeometry(world: PhysicsWorld, body: PhysicsBo
  * @param world - The physics world to dispose.
  */
 export function disposePhysics(world: PhysicsWorld): void {
+    if (world._disposed) {
+        return;
+    }
+    world._disposed = true;
     // Stop per-frame stepping before any native world is released so a still-queued
     // _beforeRender callback can't step a freed world (use-after-free in Havok WASM).
     world._stopStep?.();
@@ -1529,8 +1461,10 @@ export function disposePhysics(world: PhysicsWorld): void {
     // onPhysicsCollision). They read the native world via HP_World_GetCollisionEvents,
     // so they must not survive it — clear them alongside the step callback.
     world._afterStep = undefined;
+    world._collision = undefined;
 
     if (world._fo) {
+        world._events?.dispose();
         world._fo.dispose(world);
         return;
     }
@@ -1544,6 +1478,8 @@ export function disposePhysics(world: PhysicsWorld): void {
         hknp.HP_Body_Release(b._hkBody);
     }
     bodies.length = 0;
+    world._events?.dispose();
+    world._thin?.dispose();
 
     // Release world
     hknp.HP_World_Release(hkWorld);

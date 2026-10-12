@@ -53,8 +53,10 @@ export interface AnimationClip {
     readonly name: string;
     readonly channels: readonly AnimationChannel[];
     readonly samplers: readonly AnimationSampler[];
-    /** Total duration in seconds (max of all sampler input times). */
+    /** Total playback duration in seconds. */
     readonly duration: number;
+    /** @internal Authored first sample time. Defaults to 0 for glTF. */
+    readonly _startTime?: number;
     /** Frame rate used by AnimationGroup goToFrame(); defaults to 60. */
     readonly frameRate?: number;
 }

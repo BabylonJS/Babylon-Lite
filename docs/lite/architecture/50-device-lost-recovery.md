@@ -85,6 +85,12 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
+Automatic reconstruction of storage-backed meshes and writable/vertex/index/indirect storage is not part
+of this integration. Their recovery-specific registry, retained sources, and handle-refresh
+pass have been removed pending the recovery redesign. The existing CPU-backed storage
+buffer hook remains for plain read-only allocations. Applications must recreate affected
+GPU-role allocations and meshes.
+
 Environment recovery supports `loadEnvironment` (`.env`) and
 `loadHdrEnvironment`. Recovery must be enabled before the environment is
 loaded so the URL/settings source is retained. It recreates the specular cube
@@ -145,13 +151,13 @@ that then discards the locals they were built from.
 
 Two capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
-re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
+re-deriving the rules during recovery — cost ~65 B for _every_ environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
 Discovery removes the loader seam entirely. Against the pre-feature baseline the
 feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
 parity scene, and the only one that enables recovery — carries +1,554 B; 56
-scenes are *smaller* than before because the loader capture seam is gone. The 11
+scenes are _smaller_ than before because the loader capture seam is gone. The 11
 background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
 unconditionally rather than gated on capture being enabled; one closure per
 background is cheaper than the branch that would guard it. Choosing thunks over
@@ -176,9 +182,9 @@ Recovery deduplicates generators referenced by `scene.lights` and
 `scene.shadowGenerators`, disposes their nested render-task state, recreates
 their device-owned textures, samplers, uniform buffers, pipelines, and bind
 groups, and preserves the public `ShadowGenerator` identity. This currently
-supports directional ESM generators, the shadow type used by Babylon Lite
-Viewer; recovery fails explicitly for PCF or CSM instead of resuming with stale
-device resources. ESM retains only the two blur scalars it cannot reconstruct —
+supports directional ESM and CSM generators; recovery fails explicitly for PCF
+instead of resuming with stale device resources. ESM retains only the two blur
+scalars it cannot reconstruct —
 `_blurKernel` and `_blurScale`, held as internal fields on the generator's
 `EsmShadowTaskResources` — and `shadow-recovery.ts` reads them from that object
 during the loss-only rebuild. `_blurScale` is retained rather than re-derived as
@@ -188,6 +194,16 @@ original value. Every remaining option is derived from steady-state runtime
 fields: `mapSize`, `bias`, `orthoMinZ`, `orthoMaxZ`, and `forceRefreshEveryFrame`
 from the generator's `_config`, and `darkness`, `depthScale`, and
 `frustumEdgeFalloff` from its `_shadowsInfo` array.
+CSM reallocates the depth array, comparison sampler, shadow-params UBO, and
+80-float receiver UBO directly on the original generator. Its configuration,
+CPU arrays, installed task hooks, receiver callbacks, and runtime enablement
+state remain attached to that object. The replacement depth array keeps the
+configured map size and cascade count; an enabled static cache also keeps
+`COPY_DST` usage. Clearing the nested task state makes the retained hooks build
+fresh cascade tasks on their next use. A previously borrowed receiver
+`Texture2D` keeps its identity while adopting the replacement texture, array
+view, sampler, and dimensions. Recovery acquires the generator's ownership
+reference on that replacement before rebuilt material groups acquire theirs.
 Rebuilding material groups afterward binds receivers and casters only to
 replacement-device resources.
 
@@ -221,6 +237,13 @@ shader/pipeline caches naturally select new-device entries.
 URL, solid, bitmap, dynamic, raw-pixel, and empty render-target textures carry
 pure recovery data only when Scene or Sprite recovery capture is enabled.
 Raw-pixel updates and runtime atlas appends update the retained CPU copy.
+After a successful `updateTextureRegion` queue write, the same optional `w`
+capture seam receives the source `ArrayBufferView`, destination x/y/extent,
+view-relative byte offset, and row stride. Only the enabled capture module
+interprets the view as bytes and copies each updated RGBA8 row into the packed
+`pixels` source; padding and bytes outside the supplied view are not retained.
+Later caller mutation cannot change the recovery snapshot. Other source kinds
+are unchanged, and disabled recovery adds no byte-view allocation or retention.
 Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
@@ -319,7 +342,7 @@ threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
 too, and a parameter those call sites did not pass would silently drop the
 ownership of anything they rebuilt first.
 
-Whether a texture has been *released* is asked of every kind, because every kind
+Whether a texture has been _released_ is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
 destroys a texture whose creator took no reference of its own. Rebuilding a
 destroyed texture hands a live one back to a wrapper the application has
@@ -419,6 +442,11 @@ module-level side effects; mutable caches remain null until an explicit call.
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the
   PBR fallback is cleared before material groups rebuild.
+- CSM recovery unit tests cover the default and enabled static-cache paths,
+  replacement-device depth-array/sampler/UBO resources, retained configuration
+  and CPU/hook/callback/enablement references, a stable borrowed receiver wrapper,
+  cache copy-destination usage, nested task disposal, and the generator's
+  ownership surviving one rebuilt material acquire/release cycle.
 - A real-loss browser scene covers environment-lit PBR, a directional ESM
   caster, and a shadow-only receiver. It asserts replacement-device
   environment/fallback/shadow resources, preserved environment identity, no
@@ -427,6 +455,11 @@ module-level side effects; mutable caches remain null until an explicit call.
 - Sprite unit tests replace a fake device and assert new index, instance,
   uniform, FX, pipeline/bind-group/bundle state, recovered atlas/custom/target
   textures, preserved CPU/layer state, and exact-kind enumeration.
+- Pixel recovery tests call `updateTextureRegion` with byte, word, and `DataView`
+  inputs, nonzero view/relative offsets, padded rows, and subsequent caller
+  mutation. Replacement-device uploads must reproduce the complete updated
+  image; rejected uploads must not alter the snapshot, and disabled recovery
+  must not capture a source.
 - Text unit tests replace a fake device and assert new layer buffers and Slug
   atlas textures, invalidated/rebuilt bindings and bundles, preserved
   `TextData`/layer state, and exact-kind enumeration.

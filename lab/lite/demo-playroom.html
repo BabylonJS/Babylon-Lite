@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <link rel="icon" href="data:," />
+        <title>Babylon Lite — The Playroom</title>
+        <style>
+            :root {
+                font-family: Verdana, sans-serif;
+                color: white;
+                --playroom-startup-action-size: 15vw;
+                --playroom-kick-size: min(20vw, 40vh);
+                --playroom-next-size: 20vw;
+                --playroom-replay-size: 20vw;
+                --playroom-free-size: 12vw;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #151626;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+                touch-action: none;
+            }
+            .playroom-ui {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 10;
+            }
+            .playroom-hud {
+                position: absolute;
+                inset: 0 0 auto;
+                text-align: center;
+                text-shadow: 3px 3px 8px #111;
+            }
+            .playroom-throw {
+                height: 30px;
+                font-size: 20px;
+                line-height: 30px;
+            }
+            .playroom-points {
+                height: 30px;
+                color: #a09;
+                font-size: 24px;
+                font-weight: bold;
+                line-height: 30px;
+                text-shadow: 0 0 3px #bbb;
+            }
+            .playroom-controls {
+                position: absolute;
+                inset: 0;
+            }
+            button {
+                pointer-events: auto;
+                border: 0;
+                padding: 0;
+                background: center/contain no-repeat;
+                color: transparent;
+                cursor: pointer;
+                filter: drop-shadow(0 3px 5px #0008);
+                touch-action: manipulation;
+                transition: scale 80ms linear;
+                -webkit-tap-highlight-color: transparent;
+            }
+            button:active:not(:disabled) {
+                scale: 0.95;
+            }
+            button:disabled {
+                cursor: default;
+                opacity: 1;
+            }
+            button:focus-visible {
+                outline: 3px solid white;
+                outline-offset: 3px;
+            }
+            .playroom-control {
+                position: absolute;
+            }
+            #playroom-kick {
+                right: 0;
+                bottom: 2vh;
+                width: var(--playroom-kick-size);
+                height: var(--playroom-kick-size);
+                background-image: url("./bundle/demos/playroom/ui/kick.png");
+            }
+            #playroom-next {
+                bottom: 2vh;
+                left: 0;
+                width: var(--playroom-next-size);
+                height: var(--playroom-next-size);
+                background-image: url("./bundle/demos/playroom/ui/nextKickButton.png");
+            }
+            #playroom-replay {
+                right: 0;
+                bottom: 7vh;
+                width: var(--playroom-replay-size);
+                height: var(--playroom-replay-size);
+                background-image: url("./bundle/demos/playroom/ui/playAgain.png");
+            }
+            #playroom-free {
+                top: 0;
+                right: 0;
+                width: var(--playroom-free-size);
+                height: var(--playroom-free-size);
+                background-image: url("./bundle/demos/playroom/ui/freemode.png");
+            }
+            .playroom-startup {
+                position: absolute;
+                inset: 0;
+                overflow: hidden;
+                background: transparent;
+            }
+            .playroom-startup-art {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                pointer-events: none;
+                user-select: none;
+            }
+            #playroom-startup-action {
+                position: absolute;
+                right: 2vw;
+                bottom: 2vh;
+                width: var(--playroom-startup-action-size);
+                height: var(--playroom-startup-action-size);
+                background-size: 0 0;
+                --playroom-action-rotation: 0rad;
+            }
+            #playroom-startup-action::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: inherit;
+                background-size: contain;
+                transform: rotate(var(--playroom-action-rotation));
+            }
+            .playroom-startup[data-state="loading"] #playroom-startup-action {
+                background-image: url("./bundle/demos/playroom/ui/loading.png");
+            }
+            .playroom-startup[data-state="ready"] #playroom-startup-action {
+                background-image: url("./bundle/demos/playroom/ui/havok_playButton_landscape_outlines.png");
+            }
+            .playroom-startup[data-state="error"] #playroom-startup-action {
+                display: none;
+            }
+            .playroom-startup-error {
+                pointer-events: auto;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                max-width: min(36rem, 90vw);
+                padding: 0.75rem 1rem;
+                transform: translate(-50%, -50%);
+                border: 2px solid #fff;
+                background: rgb(21 22 38 / 88%);
+                color: white;
+                text-align: center;
+            }
+            .playroom-startup[hidden],
+            button[hidden] {
+                display: none;
+            }
+            .sr-only {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+            }
+            @media (orientation: portrait) {
+                :root {
+                    --playroom-startup-action-size: 20vw;
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                button {
+                    transition: none;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas" aria-label="The Playroom physics game"></canvas>
+        <main class="playroom-ui">
+            <div class="playroom-hud" hidden>
+                <div id="playroom-throw-count" class="playroom-throw">throw 1 / 3</div>
+                <div id="playroom-score" class="playroom-points">0 points</div>
+            </div>
+            <section id="playroom-startup" class="playroom-startup" data-state="loading" aria-label="The Playroom">
+                <img
+                    id="playroom-startup-art"
+                    class="playroom-startup-art"
+                    src="./bundle/demos/playroom/ui/havok_splash_landscape_outlines.png"
+                    data-landscape-src="./bundle/demos/playroom/ui/havok_splash_landscape_outlines.png"
+                    data-portrait-src="./bundle/demos/playroom/ui/havok_splash_portrait_outlines.png"
+                    alt=""
+                />
+                <button id="playroom-startup-action" type="button" aria-label="Loading The Playroom" aria-describedby="playroom-loading-status" disabled>Loading</button>
+                <div id="playroom-startup-error" class="playroom-startup-error" role="alert" hidden></div>
+            </section>
+            <nav class="playroom-controls" aria-label="Game controls">
+                <button id="playroom-kick" class="playroom-control" type="button" aria-label="Kick" hidden>Kick</button>
+                <button id="playroom-next" class="playroom-control" type="button" aria-label="Next kick" hidden>Next kick</button>
+                <button id="playroom-replay" class="playroom-control" type="button" aria-label="Play again" hidden>Play again</button>
+                <button id="playroom-free" class="playroom-control" type="button" aria-label="Toggle free mode" aria-pressed="false" hidden>Free mode</button>
+            </nav>
+            <div id="playroom-audio" class="sr-only" role="status">Loading audio</div>
+            <div id="playroom-loading-status" class="sr-only" role="status">Loading The Playroom…</div>
+        </main>
+        <script type="module" src="/lite/bundle/demos/playroom.js"></script>
+    </body>
+</html>

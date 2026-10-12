@@ -21,7 +21,7 @@ import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { stopAnimation } from "../animation/animation-group.js";
 import type { SkeletonBinding, VatData } from "../animation/types.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import type { Mat4 } from "../math/types.js";
 import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
 import { pbrExt as vatPbrExt } from "../material/pbr/fragments/vat-fragment.js";
@@ -428,7 +428,7 @@ function computeRestOrigins(bones: readonly number[], ibm: Float32Array, boneCou
         if (b < 0 || b >= boneCount) {
             continue;
         }
-        const inv = mat4Invert(ibm.subarray(b * 16, b * 16 + 16) as unknown as Mat4);
+        const inv = invertMat4(ibm.subarray(b * 16, b * 16 + 16) as unknown as Mat4);
         if (inv) {
             out.set(b, [inv[12]!, inv[13]!, inv[14]!]);
         }

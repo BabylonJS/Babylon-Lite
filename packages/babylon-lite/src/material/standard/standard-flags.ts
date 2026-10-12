@@ -40,6 +40,7 @@ export const LIGHTMAP_FLIP_V = 1 << 22;
  *  from `MATERIAL_ALPHA_BLEND`, which is also used by material and thin-instance
  *  alpha, so those sources never create a redundant vertex-colour shader variant. */
 export const VERTEX_ALPHA = 1 << 24;
+// Bit 25 is reserved by HAS_STD_PLUGINS in the opt-in std-plugin-bridge module.
 /** Mesh uses skeletal skinning. Enabled through the Standard mesh-feature subpath. */
 export const HAS_SKELETON = 1 << 26;
 /** Skinned mesh has a second JOINTS/WEIGHTS set. */
@@ -73,9 +74,10 @@ export interface StdExt {
     /** @internal Effective Standard feature bits contributed by one mesh. */
     _meshFeatures?(meshFeatures: number, material?: StandardMaterialProps): number;
     /** @internal */
-    _frag(features: number, meshFeatures?: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
-    /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
-    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, scene?: SceneContext): number;
+    _frag(features: number, meshFeatures?: number, material?: StandardMaterialProps): ShaderFragment;
+    /** @internal Push group-1 bind entries starting at binding `b`; return new b.
+     *  Register binding-owned releases in `disposers`; auxiliary owners survive main-material changes. */
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, scene?: SceneContext, disposers?: (() => void)[], auxiliary?: boolean): number;
     /** @internal Bind feature-owned vertex buffers and return the next slot. */
     _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */
@@ -85,6 +87,14 @@ export interface StdExt {
 export interface ShadowLightSlotLite {
     lightIndex: number;
     shadowType: "esm" | "pcf";
+}
+
+/** @internal Optional material-specific shader identity, installed by opt-in extensions. */
+export let _stdMaterialVariantKey: ((material: StandardMaterialProps) => string) | null = null;
+
+/** @internal Install material-variant cache keying without adding an extension scan to the core. */
+export function _installStdMaterialVariantKey(resolve: (material: StandardMaterialProps) => string): void {
+    _stdMaterialVariantKey = resolve;
 }
 
 // Lazy-init: avoids a module-level `new Map()` that defeats tree-shaking for

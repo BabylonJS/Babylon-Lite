@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { transformCoordinatesToRef, transformNormalToRef, mat4GetTranslationToRef } from "../../../packages/babylon-lite/src/math/mat4-transform";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
-import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-translation";
-import { mat4FromQuatInto } from "../../../packages/babylon-lite/src/math/mat4-from-quat";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
+import { createTranslationMat4 } from "../../../packages/babylon-lite/src/math/create-translation-mat4";
+import { writeMat4FromQuatIntoBuffer } from "../../../packages/babylon-lite/src/math/create-mat4-from-quat";
 import type { Mat4, Vec3 } from "../../../packages/babylon-lite/src/math/types";
 
 /** Build a Mat4 from 16 column-major numbers (test-only). */
@@ -18,15 +18,15 @@ function mat4(values: number[]): Mat4 {
 describe("mat4 vec transforms", () => {
     it("identity leaves points and directions unchanged", () => {
         const out: Vec3 = { x: 0, y: 0, z: 0 };
-        transformCoordinatesToRef(1, 2, 3, mat4Identity(), out);
+        transformCoordinatesToRef(1, 2, 3, createIdentityMat4(), out);
         expect(out).toEqual({ x: 1, y: 2, z: 3 });
-        transformNormalToRef(1, 2, 3, mat4Identity(), out);
+        transformNormalToRef(1, 2, 3, createIdentityMat4(), out);
         expect(out).toEqual({ x: 1, y: 2, z: 3 });
     });
 
     it("translation offsets points but not directions", () => {
         const out: Vec3 = { x: 0, y: 0, z: 0 };
-        const m = mat4Translation(10, 20, 30);
+        const m = createTranslationMat4(10, 20, 30);
         transformCoordinatesToRef(1, 2, 3, m, out);
         expect(out).toEqual({ x: 11, y: 22, z: 33 });
         transformNormalToRef(1, 2, 3, m, out);
@@ -63,13 +63,13 @@ describe("mat4 vec transforms", () => {
 
     it("mat4GetTranslationToRef reads the translation column", () => {
         const out: Vec3 = { x: 0, y: 0, z: 0 };
-        mat4GetTranslationToRef(mat4Translation(4, -5, 6), out);
+        mat4GetTranslationToRef(createTranslationMat4(4, -5, 6), out);
         expect(out).toEqual({ x: 4, y: -5, z: 6 });
     });
 
-    it("mat4FromQuatInto writes into existing storage and resets translation", () => {
+    it("writeMat4FromQuatIntoBuffer writes into existing storage and resets translation", () => {
         const out = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 7, 8, 9, 1]);
-        const returned = mat4FromQuatInto(out, 0, 0, Math.sin(Math.PI / 4), Math.cos(Math.PI / 4));
+        const returned = writeMat4FromQuatIntoBuffer(out, 0, 0, Math.sin(Math.PI / 4), Math.cos(Math.PI / 4));
 
         expect(returned).toBe(out);
         expect(out[0]).toBeCloseTo(0, 6);

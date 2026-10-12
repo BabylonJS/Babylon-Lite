@@ -11,7 +11,6 @@ function makeThinInstances(withColors = false): ThinInstanceData {
         _capacity: 1,
         _version: 1,
         _gpuBuffer: null,
-        _gpuBufferStorage: false,
         _gpuVersion: 0,
         _dirtyMin: 0,
         _dirtyMax: 1,

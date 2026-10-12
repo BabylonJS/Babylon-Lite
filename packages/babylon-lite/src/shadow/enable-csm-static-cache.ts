@@ -7,6 +7,11 @@ export interface CsmStaticCacheOptions {
     refitAngle: number;
     /** Force a refit after this much wall time, including while the light is paused. Default 0 (no interval floor). */
     refitMaxIntervalMs?: number;
+    /** Spread a drift-only refit's static re-render over frames: at most this many cascades are
+     *  re-rendered per frame, round-robin, so the periodic refresh costs a slice of every frame instead
+     *  of one long frame. Refits caused by the camera, the content or the caster membership still
+     *  re-render every cascade in their own frame. 0 or omitted keeps the single-frame re-render. */
+    staticCascadesPerFrame?: number;
 }
 
 let enabling: WeakMap<ShadowGenerator, Promise<void>> | null = null;
@@ -25,6 +30,10 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
     if (!Number.isFinite(options.refitAngle) || options.refitAngle <= 0) {
         return Promise.reject(new RangeError("enableCsmStaticCache requires a positive finite refitAngle"));
     }
+    const staticCascadesPerFrame = options.staticCascadesPerFrame ?? 0;
+    if (!Number.isInteger(staticCascadesPerFrame) || staticCascadesPerFrame < 0) {
+        return Promise.reject(new RangeError("enableCsmStaticCache requires a non-negative integer staticCascadesPerFrame"));
+    }
     if (sg._shadowTaskState || sg._csmReceiverTexture || engine.surfaces.some((surface) => surface._renderingContexts.length > 0)) {
         return Promise.reject(new Error("enableCsmStaticCache must run before scene registration and receiver texture access"));
     }
@@ -42,7 +51,7 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
         format: "depth32float",
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    sg._csmCache = { _refitAngle: options.refitAngle, _refitMaxIntervalMs: options.refitMaxIntervalMs ?? 0 };
+    sg._csmCache = { _refitAngle: options.refitAngle, _refitMaxIntervalMs: options.refitMaxIntervalMs ?? 0, _staticCascadesPerFrame: staticCascadesPerFrame };
     oldTexture.destroy();
     const promise = import("./csm-shadow-cache.js").then((module) => {
         sg._csmCache!._loaded = true;

@@ -1,6 +1,7 @@
 /** TwirlBlock — rotates a vec2 around a center by strength * distance, then adds offset. */
 
 import type { BlockEmitter, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUTS: Record<string, { readonly swizzle: string; readonly type: NodeValueType }> = {
     output: { swizzle: "", type: "vec2f" },
@@ -27,10 +28,10 @@ export const emitter: BlockEmitter = {
         const delta = ctx.temp(state, "twirlDelta");
         const angle = ctx.temp(state, "twirlAngle");
         const result = ctx.temp(state, "twirl");
-        state.fragment.body.push(`let ${delta} = ${input.expr} - ${center.expr};`);
-        state.fragment.body.push(`let ${angle} = ${strength.expr} * length(${delta});`);
+        state.fragment.body.push(wgsl`let ${delta} = ${input.expr} - ${center.expr};`);
+        state.fragment.body.push(wgsl`let ${angle} = ${strength.expr} * length(${delta});`);
         state.fragment.body.push(
-            `let ${result} = vec2<f32>(cos(${angle}) * ${delta}.x - sin(${angle}) * ${delta}.y, sin(${angle}) * ${delta}.x + cos(${angle}) * ${delta}.y) + ${center.expr} + ${offset.expr};`
+            wgsl`let ${result} = vec2<f32>(cos(${angle}) * ${delta}.x - sin(${angle}) * ${delta}.y, sin(${angle}) * ${delta}.x + cos(${angle}) * ${delta}.y) + ${center.expr} + ${offset.expr};`
         );
         const out = OUTPUTS[outputName];
         if (!out) {

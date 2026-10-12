@@ -26,7 +26,7 @@
  */
 
 import type { EngineContext, Mesh, SceneContext, ShadowGenerator, Vec3 } from "babylon-lite";
-import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
+import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3, scaleVec3, subtractVec3 } from "babylon-lite";
 
 import { BOOST_LEFT_OFFSET, BOOST_PERIOD, BOOST_RIGHT_OFFSET, DEFAULT_CONTROL_POINTS, RING_COUNT, TRACK_CROSS_NORMALS, TRACK_CROSS_SECTION } from "./constants.js";
 import { createTrackMaterial, FLOATS_PER_FRAME, type TrackMaterial, type TrackTextures } from "./track-material.js";
@@ -85,13 +85,13 @@ function computeControlUps(points: readonly Vec3[]): Vec3[] {
         const p = points[i]!;
         const pp = points[(i - 1 + l) % l]!;
         const pn = points[(i + 1) % l]!;
-        const prevDir = normalizeVec3Object(subVec3(p, pp));
-        const nextDir = normalizeVec3Object(subVec3(pn, p));
+        const prevDir = normalizeVec3(subtractVec3(p, pp));
+        const nextDir = normalizeVec3(subtractVec3(pn, p));
         let up = crossVec3(nextDir, prevDir);
         if (prevUp && dotVec3(prevUp, up) < 0) {
             up = crossVec3(prevDir, nextDir);
         }
-        up = normalizeVec3Object(up);
+        up = normalizeVec3(up);
         ups.push(up);
         prevUp = up;
     }
@@ -150,9 +150,9 @@ export function buildTrackFrames(points: readonly Vec3[], ringCount = RING_COUNT
         const ratio = ratios[i] ?? i / ringCount;
         const nextPos = sampleLoop(points, ratio);
         const rawUp = sampleLoop(ups, ratio);
-        const dir = normalizeVec3Object(subVec3(nextPos, currentPos));
-        const right = normalizeVec3Object(crossVec3(dir, rawUp));
-        const up = normalizeVec3Object(crossVec3(right, dir));
+        const dir = normalizeVec3(subtractVec3(nextPos, currentPos));
+        const right = normalizeVec3(crossVec3(dir, rawUp));
+        const up = normalizeVec3(crossVec3(right, dir));
         curveRatios.push(dotVec3(currentDir, dir));
         frames.push({ pos: currentPos, dir, up, right });
         currentPos = nextPos;
@@ -195,7 +195,7 @@ export function computeTrackBoundsInto(frames: readonly TrackFrame[], min: [numb
 
 /** Local (right, up, forward) coordinates of `worldPos` relative to a segment frame. */
 export function frameLocalCoords(frame: TrackFrame, worldPos: Vec3): Vec3 {
-    const rel = subVec3(worldPos, frame.pos);
+    const rel = subtractVec3(worldPos, frame.pos);
     return { x: dotVec3(rel, frame.right), y: dotVec3(rel, frame.up), z: dotVec3(rel, frame.dir) };
 }
 

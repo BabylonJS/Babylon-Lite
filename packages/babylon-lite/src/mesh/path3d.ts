@@ -9,8 +9,8 @@
 import type { Vec3 } from "../math/types.js";
 import { crossVec3 } from "../math/cross-vec3.js";
 import { lengthVec3 } from "../math/length-vec3.js";
-import { normalizeVec3 } from "../math/normalize-vec3-object.js";
-import { subVec3 } from "../math/sub-vec3.js";
+import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { subtractVec3 } from "../math/subtract-vec3.js";
 import { vec3 } from "../math/vec3-ctor.js";
 
 const EPSILON = 0.001;
@@ -21,20 +21,20 @@ function withinEpsilon(a: number, b: number, eps: number): boolean {
 
 function getFirstNonNullVector(curve: Vec3[], index: number): Vec3 {
     let i = 1;
-    let v = subVec3(curve[index + i]!, curve[index]!);
+    let v = subtractVec3(curve[index + i]!, curve[index]!);
     while (lengthVec3(v) === 0 && index + i + 1 < curve.length) {
         i++;
-        v = subVec3(curve[index + i]!, curve[index]!);
+        v = subtractVec3(curve[index + i]!, curve[index]!);
     }
     return v;
 }
 
 function getLastNonNullVector(curve: Vec3[], index: number): Vec3 {
     let i = 1;
-    let v = subVec3(curve[index]!, curve[index - i]!);
+    let v = subtractVec3(curve[index]!, curve[index - i]!);
     while (lengthVec3(v) === 0 && index > i + 1) {
         i++;
-        v = subVec3(curve[index]!, curve[index - i]!);
+        v = subtractVec3(curve[index]!, curve[index - i]!);
     }
     return v;
 }
@@ -83,7 +83,7 @@ export function computePath3D(curve: Vec3[], firstNormal: Vec3 | null = null): P
     }
 
     tangents[0] = normalizeVec3(getFirstNonNullVector(curve, 0));
-    tangents[l - 1] = normalizeVec3(subVec3(curve[l - 1]!, curve[l - 2]!));
+    tangents[l - 1] = normalizeVec3(subtractVec3(curve[l - 1]!, curve[l - 2]!));
 
     const pp0 = normalizeVec3(normalVector(tangents[0]!, firstNormal));
     normals[0] = pp0;
@@ -97,7 +97,7 @@ export function computePath3D(curve: Vec3[], firstNormal: Vec3 | null = null): P
             const sum = { x: prev.x + cur.x, y: prev.y + cur.y, z: prev.z + cur.z };
             tangents[i] = normalizeVec3(sum);
         }
-        distances[i] = distances[i - 1]! + lengthVec3(subVec3(curve[i]!, curve[i - 1]!));
+        distances[i] = distances[i - 1]! + lengthVec3(subtractVec3(curve[i]!, curve[i - 1]!));
 
         const curTang = tangents[i]!;
         const prevBinor = binormals[i - 1]!;

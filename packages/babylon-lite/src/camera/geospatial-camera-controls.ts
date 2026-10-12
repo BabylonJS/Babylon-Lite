@@ -4,7 +4,7 @@ import { flyGeospatialCameraToAsync } from "./geospatial-camera-fly.js";
 import { clampZoomDistance, GEO_EPSILON } from "./geospatial-limits.js";
 import { getViewProjectionMatrix } from "./camera.js";
 import { createPickingRay } from "../picking/ray.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Vec3, Mat4, Mat4Storage } from "../math/types.js";
 import { REFERENCE_FRAME_RATE, integrateInertialVelocity, computePanSpeedMultiplier, computeZoomSpeedMultiplier } from "./geospatial-movement.js";
@@ -199,7 +199,7 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         localToEcef[14] = dragPlaneOriginEcef.z;
         localToEcef[15] = 1;
 
-        const ecefToLocal = mat4Invert(localToEcef as unknown as Mat4);
+        const ecefToLocal = invertMat4(localToEcef as unknown as Mat4);
         if (!ecefToLocal) {
             return;
         }

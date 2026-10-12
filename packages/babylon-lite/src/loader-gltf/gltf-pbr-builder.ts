@@ -7,7 +7,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
+import { getPbrGroupBuilder } from "../material/pbr/pbr-group-builder.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../math/color.js";

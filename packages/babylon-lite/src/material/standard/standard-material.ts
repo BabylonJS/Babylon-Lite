@@ -1,9 +1,7 @@
-/** StandardMaterial — Blinn-Phong material types and scene uniform helpers.
+/** StandardMaterial — Blinn-Phong material types and compatibility exports.
  *
- *  Pipeline creation is handled by standard-pipeline.ts (dynamic permutation system).
- *  This module owns the shared types and the scene UBO update function.
- *
- *  Scene UBO uses the canonical SCENE_UBO layout (shared with PBR).
+ *  Runtime consumers import feature detection, material creation, and group building
+ *  from their concrete modules rather than introducing cycles through this facade.
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
@@ -11,7 +9,6 @@ import type { CubeTexture } from "../../texture/cube-texture.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
-import { DIFFUSE_USES_UV2, DISABLE_LIGHTING, DOUBLE_SIDED, HAS_DIFFUSE_TEXTURE, MATERIAL_ALPHA_BLEND, _getStdExts } from "./standard-flags.js";
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
@@ -97,47 +94,6 @@ export interface StandardMaterialProps extends Material {
     disableLighting: boolean;
 }
 
-/** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable.
- *
- *  Only bits for features that are ALWAYS present live here. Every optional texture
- *  feature contributes its own bits through its registered ext's `_detect`, so both the
- *  detection branch and the fragment it gates stay out of the always-loaded core. A
- *  material that never opts in registers no ext, so the loop below is a no-op. */
-export function _computeStandardMaterialFeatures(m: StandardMaterialProps): number {
-    let f = 0;
-    if (m.diffuseTexture) {
-        f |= HAS_DIFFUSE_TEXTURE;
-        if (m.diffuseCoordIndex === 1) {
-            f |= DIFFUSE_USES_UV2;
-        }
-    }
-    if (!m.backFaceCulling) {
-        f |= DOUBLE_SIDED;
-    }
-    if (m.disableLighting) {
-        f |= DISABLE_LIGHTING;
-    }
-    if (m.alpha < 1) {
-        f |= MATERIAL_ALPHA_BLEND;
-    }
-    for (const ext of _getStdExts().values()) {
-        if (ext._detect) {
-            f |= ext._detect(m);
-        }
-    }
-    return f;
-}
-
-/** @internal Key for Standard shader features, including mesh/pass features. */
-export function _standardFeatureKey(features: number, meshFeatures: number, sceneFeatures: number, variant = ""): string {
-    return variant ? `${features}:${meshFeatures}:${sceneFeatures}:${variant}` : `${features}:${meshFeatures}:${sceneFeatures}`;
-}
-
-/** @internal Key for Standard scene-driven shader variants not encoded in feature bits. */
-export function _standardShaderVariantKey(shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" | "csm" }[]): string {
-    return shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : "e"}`).join(",");
-}
-
 /** Fog configuration — plain data. */
 export interface FogConfig {
     mode: 0 | 1 | 2 | 3; // 0=off, 1=exp, 2=exp2, 3=linear
@@ -158,3 +114,4 @@ export interface StandardSceneShaderContext {
 export { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 export { createStandardMaterial } from "./create-standard-material.js";
 export { getStandardGroupBuilder } from "./standard-group-builder.js";
+export { _computeStandardMaterialFeatures } from "./standard-material-features.js";

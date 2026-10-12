@@ -19,7 +19,7 @@ import {
 import type { AudioGraphHost } from "../../../../packages/babylon-lite/src/audio/host-types.js";
 import { createAudioSignal } from "../../../../packages/babylon-lite/src/audio/audio-signal.js";
 import { MockAudioBuffer } from "./web-audio-mock.js";
-import { mat4Translation } from "../../../../packages/babylon-lite/src/math/mat4-translation.js";
+import { createTranslationMat4 } from "../../../../packages/babylon-lite/src/math/create-translation-mat4.js";
 
 const asGain = (node: unknown) => node as unknown as MockGainNode;
 const asPanner = (node: unknown) => node as unknown as MockPannerNode;
@@ -126,7 +126,7 @@ describe("spatial", () => {
         expect(asGain(spatial._attenuationNode).gain.value).toBeCloseTo(0, 5);
 
         // Attach by rotation only, so the attacher never drives the position.
-        attachSpatialTarget(sound, { worldMatrix: mat4Translation(0, 0, 0) }, "rotation");
+        attachSpatialTarget(sound, { worldMatrix: createTranslationMat4(0, 0, 0) }, "rotation");
         // Move the listener next to the source (distance 1 = minDistance → gain 1).
         setSpatialListenerPosition(engine, { x: 99, y: 0, z: 0 });
         updateSpatialAudio(engine);
@@ -150,7 +150,7 @@ describe("spatial", () => {
     it("attaches a sound to a world transform and follows it on update", async () => {
         const engine = await makeEngine();
         const sound = await makeSound(engine);
-        const target: SpatialTarget = { worldMatrix: mat4Translation(4, 5, 6) };
+        const target: SpatialTarget = { worldMatrix: createTranslationMat4(4, 5, 6) };
 
         attachSpatialTarget(sound, target, "position");
         expect(engine._spatialUpdaters.size).toBe(1);
@@ -165,7 +165,7 @@ describe("spatial", () => {
 
     it("attaches the listener to a world transform", async () => {
         const engine = await makeEngine();
-        const target: SpatialTarget = { worldMatrix: mat4Translation(7, 8, 9) };
+        const target: SpatialTarget = { worldMatrix: createTranslationMat4(7, 8, 9) };
 
         attachSpatialTarget(engine, target, "position");
         updateSpatialAudio(engine);
@@ -180,7 +180,7 @@ describe("spatial", () => {
     it("detaches from a world transform", async () => {
         const engine = await makeEngine();
         const sound = await makeSound(engine);
-        attachSpatialTarget(sound, { worldMatrix: mat4Translation(1, 1, 1) });
+        attachSpatialTarget(sound, { worldMatrix: createTranslationMat4(1, 1, 1) });
         expect(engine._spatialUpdaters.size).toBe(1);
         detachSpatialTarget(sound);
         expect(engine._spatialUpdaters.size).toBe(0);
@@ -191,7 +191,7 @@ describe("spatial", () => {
         const engine = await makeEngine();
         const sound = await makeSound(engine);
         const onDispose = createAudioSignal<unknown>();
-        attachSpatialTarget(sound, { worldMatrix: mat4Translation(2, 2, 2), onDispose });
+        attachSpatialTarget(sound, { worldMatrix: createTranslationMat4(2, 2, 2), onDispose });
         expect(engine._spatialUpdaters.size).toBe(1);
         onDispose._notify(undefined);
         expect(engine._spatialUpdaters.size).toBe(0);
@@ -226,7 +226,7 @@ describe("spatial", () => {
         const engine = await makeEngine();
         const sound = await makeSound(engine);
         setSpatialListenerPosition(engine, { x: 1, y: 0, z: 0 });
-        attachSpatialTarget(sound, { worldMatrix: mat4Translation(1, 1, 1) });
+        attachSpatialTarget(sound, { worldMatrix: createTranslationMat4(1, 1, 1) });
         expect(engine._spatialUpdaters.size).toBe(1);
 
         disposeAudioEngine(engine);

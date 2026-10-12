@@ -24,8 +24,8 @@
 import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
 import {
     addThinInstance,
-    mat4Compose,
-    mat4Identity,
+    composeMat4,
+    createIdentityMat4,
     createBox,
     createMeshFromData,
     createStandardMaterial,
@@ -186,7 +186,7 @@ export function allocInstance(r: PartRenderer, opts?: AllocOptions): InstanceHan
     const s = r._state;
     const poolId: PoolId = opts?.shape === "wedge" ? "wedge" : opts?.receiverOnly ? "receiver" : "caster";
     const pool = s.pools[poolId];
-    const slot = addThinInstance(pool.mesh, mat4Identity());
+    const slot = addThinInstance(pool.mesh, createIdentityMat4());
 
     // Grow the colors mirror alongside the engine's capacity doubling.
     if ((slot + 1) * 4 > pool.colors.length) {
@@ -270,7 +270,7 @@ export function writeInstance(
         return;
     }
     const slot = pool.handleToSlot.get(handle)!;
-    const m = mat4Compose(pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w, size[0], size[1], size[2]);
+    const m = composeMat4(pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w, size[0], size[1], size[2]);
     setThinInstanceMatrix(pool.mesh, slot, m);
 
     // Local +Y in world space = rotation matrix basis column 1 (unscaled).

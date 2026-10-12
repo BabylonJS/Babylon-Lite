@@ -108,14 +108,27 @@ describe("Observable", () => {
         expect(seen).toEqual([3]);
     });
 
-    it("does not replay an undefined last notification, matching Babylon.js", () => {
+    it("replays an undefined last notification to late subscribers", () => {
         const obs = new Observable<void>(undefined, true);
         const cb = vi.fn();
 
         obs.notifyObservers();
         obs.add(cb);
 
-        expect(cb).not.toHaveBeenCalled();
+        expect(cb).toHaveBeenCalledOnce();
+        expect(cb).toHaveBeenCalledWith(undefined);
+    });
+
+    it("removes a late addOnce subscriber after replaying an undefined notification", () => {
+        const obs = new Observable<void>(undefined, true);
+        const cb = vi.fn();
+
+        obs.notifyObservers();
+        obs.addOnce(cb);
+        obs.notifyObservers();
+
+        expect(cb).toHaveBeenCalledOnce();
+        expect(obs.hasObservers()).toBe(false);
     });
 
     it("clears the last notified state", () => {

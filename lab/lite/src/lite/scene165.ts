@@ -4,10 +4,11 @@
 // and the repaired GPU-culling path (?culling).
 
 import { addToScene, createArcRotateCamera, createBox, createEngine, createSceneContext, createShaderMaterial, enableThinInstanceGpuCulling, registerScene, setThinInstanceColors, setThinInstances, startEngine } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vColor:vec4<f32>,};
+const vertexSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vColor:vec4<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;let iw=mat4x4<f32>(input.world0,input.world1,input.world2,input.world3);out.position=shaderSystem.viewProjection*(shaderSystem.world*iw)*vec4<f32>(input.position,1.0);out.vColor=input.instanceColor;return out;}`;
-const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vColor:vec4<f32>,};
+const fragmentSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vColor:vec4<f32>,};
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{return input.vColor;}`;
 
 async function main(): Promise<void> {

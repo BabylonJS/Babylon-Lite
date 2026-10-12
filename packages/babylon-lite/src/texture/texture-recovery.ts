@@ -3,7 +3,9 @@ import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
 import type { DeviceLostRecoveryState } from "../engine/device-lost-recovery.js";
-import { getOrCreateSampler, acquireTexture, _isTextureReleased, _textureOwners } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { _isTextureReleased, _textureOwners } from "../resource/texture-owner-state.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
@@ -142,9 +144,7 @@ function recoverCapturedSampler(engine: EngineContext, tex: Texture2D): GPUSampl
     if (!desc) {
         return undefined;
     }
-    // `samplerKey` does not include lodMaxClamp, so a clamped sampler would take an unclamped
-    // sampler's slot in the dedupe cache.
-    const sampler = desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+    const sampler = getOrCreateSampler(engine, desc);
     descriptors!.set(sampler, desc);
     return sampler;
 }
@@ -209,6 +209,32 @@ async function rebuildFromSource(engine: EngineContext, tex: Texture2D, source: 
             format: source.format,
             usage: TU.TEXTURE_BINDING | TU.RENDER_ATTACHMENT | TU.COPY_DST,
         });
+        tex.texture = texture;
+        tex.view = texture.createView();
+        tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+        tex.width = source.width;
+        tex.height = source.height;
+        return;
+    }
+    if (source.kind === "external") {
+        if (!source.bitmap) {
+            throw new Error("Cannot recover a released external-image texture");
+        }
+        const texture = engine._device.createTexture({
+            size: { width: source.width, height: source.height },
+            format: source.format,
+            mipLevelCount: source.levels,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+        });
+        engine._device.queue.copyExternalImageToTexture(
+            { source: source.bitmap, flipY: source.flipY },
+            { texture, premultipliedAlpha: source.premultipliedAlpha },
+            { width: source.width, height: source.height }
+        );
+        if (source.levels > 1) {
+            const { generateMipmaps } = await import("./generate-mipmaps.js");
+            generateMipmaps(engine, texture);
+        }
         tex.texture = texture;
         tex.view = texture.createView();
         tex.sampler = getOrCreateSampler(engine, source.samplerDesc);

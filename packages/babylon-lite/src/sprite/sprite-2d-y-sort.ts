@@ -1,9 +1,7 @@
 /** Optional stable Y-sort for the GPU representation of a pure Sprite2D layer. */
 import { F32, F64, U32 } from "../engine/typed-arrays.js";
-import type { Sprite2DLayer } from "./sprite-2d.js";
-import { _markSprite2DDirty } from "./sprite-2d.js";
-import type { Sprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
-import { _registerSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
+import type { Sprite2DLayer, Sprite2DYSortHook } from "./sprite-2d.js";
+import { _markSprite2DDirty, _registerSprite2DYSortHook } from "./sprite-2d.js";
 
 /** Options validated on every enable call and applied when creating Y-sort state. */
 export interface Sprite2DYSortOptions {

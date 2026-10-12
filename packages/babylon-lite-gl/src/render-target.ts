@@ -25,7 +25,7 @@
  * (BYO) color texture lives in the engine's `_textures` registry and is restored
  * there first; the RT then re-attaches its freshly-swapped handle.
  */
-import { bindTextureForUpload, pickSizedInternalFormat, type GLTexture } from "./texture.js";
+import { bindTextureForUpload, pickSizedInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */
@@ -513,10 +513,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
             rt.texture.handle = texHandle;
             bindTextureForUpload(engine, texHandle);
             gl.texImage2D(gl.TEXTURE_2D, 0, c.internalFormat, rt.width, rt.height, 0, c.format, c.type, null);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, c.minFilter);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, c.magFilter);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, c.wrapS);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, c.wrapT);
+            setBoundTextureParams(gl, c.minFilter, c.magFilter, c.wrapS, c.wrapT);
             rt.texture.isReady = true;
             rt.texture._wasReady = true;
         }

@@ -5,6 +5,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import { _setDerivedTexture2DHook } from "../texture/texture-2d.js";
+import { _setTextureReleaseHook } from "../resource/texture-allocation-release.js";
 
 /** Smallest tracked-texture count worth compacting; below this, scanning costs more than it saves. */
 const TEXTURE_PRUNE_FLOOR = 64;
@@ -65,6 +66,14 @@ function trackDerivedTexture(base: Texture2D, derived: Texture2D): void {
     }
 }
 
+function releaseCapturedTexture(tex: Texture2D): void {
+    const source = tex._recoverySource;
+    if (source?.kind === "external") {
+        source.bitmap?.close();
+        source.bitmap = null;
+    }
+}
+
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
     const owner = new WeakRef(state);
@@ -76,8 +85,33 @@ function attachRecoveryCapture(engine: EngineContext): void {
     // capture and left in place — clearing it when one engine releases capture would stop tracking
     // for any other engine still capturing.
     _setDerivedTexture2DHook(trackDerivedTexture);
+    _setTextureReleaseHook(releaseCapturedTexture);
     engine._dlr = {
         t: stamp,
+        async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload): Promise<Texture2D> {
+            const bitmap = await createImageBitmap(source, {
+                premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",
+                colorSpaceConversion: "none",
+            });
+            try {
+                const tex = await upload(bitmap);
+                stamp(tex, {
+                    kind: "external",
+                    bitmap,
+                    width,
+                    height,
+                    format,
+                    levels,
+                    samplerDesc,
+                    flipY,
+                    premultipliedAlpha,
+                });
+                return tex;
+            } catch (error) {
+                bitmap.close();
+                throw error;
+            }
+        },
         d: trackDerivedTexture,
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
             stamp(tex, { kind: "url", url, opts: { ...opts } });
@@ -106,16 +140,17 @@ function attachRecoveryCapture(engine: EngineContext): void {
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
             stamp(tex, { kind: "render", width, height, format, samplerDesc });
         },
-        w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
+        w(tex: Texture2D, data: ArrayBufferView, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
             const source = tex._recoverySource;
             if (source?.kind !== "pixels") {
                 return;
             }
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
             const rowBytes = width * 4;
             for (let row = 0; row < height; row++) {
                 const srcStart = dataOffset + row * bytesPerRow;
                 const dstStart = ((y + row) * source.width + x) * 4;
-                source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
+                source.data.set(bytes.subarray(srcStart, srcStart + rowBytes), dstStart);
             }
         },
         m(

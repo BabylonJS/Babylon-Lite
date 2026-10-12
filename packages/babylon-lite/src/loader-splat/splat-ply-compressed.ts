@@ -311,6 +311,10 @@ export function convertCompressedPlyToParsedSplat(data: ArrayBuffer): ParsedSpla
     }
 
     const isCompressed = header.chunkCount > 0;
+    const needsChunk = header.vertexProps.some((prop) => prop.name === "packed_position" || prop.name === "packed_scale" || prop.name === "packed_color");
+    if (needsChunk && header.chunkCount < Math.ceil(header.vertexCount / 256)) {
+        throw new Error("Invalid compressed PLY: packed vertex properties require chunk metadata for every vertex");
+    }
     const dv = new DV(data, header.dataStart);
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * header.vertexCount);
 

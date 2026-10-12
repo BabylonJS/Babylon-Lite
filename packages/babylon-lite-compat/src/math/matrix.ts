@@ -6,7 +6,7 @@
  * (`v' = v · M`). `multiply(other)` applies `this` first, then `other`.
  */
 
-import { maximizeMat4InPlace } from "babylon-lite";
+import { maximizeMat4InPlace, setMat4Translation } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
 import { Quaternion } from "./quaternion.js";
@@ -27,6 +27,12 @@ export class Matrix {
 
     public copyFrom(source: Matrix): this {
         this.m.set(source.m);
+        return this;
+    }
+
+    /** Set only this matrix's translation components. */
+    public setTranslationFromFloats(x: number, y: number, z: number): this {
+        setMat4Translation(this.m, x, y, z);
         return this;
     }
 
@@ -145,7 +151,7 @@ export class Matrix {
      * TRS matrix into its scale, rotation (quaternion), and translation parts,
      * writing into any provided out-params. Returns `false` (matching BJS) when a
      * scale axis is zero. The rotation extraction is backed by Lite's
-     * `quatFromRotationMatrix` (via `Quaternion.FromRotationMatrixToRef`); the
+     * `createQuatFromRotationMat4` (via `Quaternion.FromRotationMatrixToRef`); the
      * negative-determinant `scale.y` flip matches Babylon.js exactly.
      */
     public decompose(scale?: Vector3, rotation?: Quaternion, translation?: Vector3): boolean {

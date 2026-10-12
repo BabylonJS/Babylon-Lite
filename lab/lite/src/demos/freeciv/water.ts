@@ -37,6 +37,7 @@ import {
 } from "babylon-lite";
 import { TILE_H, TILE_W, isoCentre } from "./iso.js";
 import type { GameMap } from "./worldgen.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 export interface Water {
     /** The shimmer layer — caller adds it to the panned/zoomed map layers. */
@@ -60,7 +61,7 @@ function hash2(x: number, y: number): number {
  * auto-accumulated), and `L.opacityMul`. Minimal whitespace: the prod build
  * minifies inline WGSL.
  */
-const CAUSTIC_FRAGMENT = `let cell = vec2<f32>(${TILE_W}.0, ${TILE_H}.0) / 3.0;
+const CAUSTIC_FRAGMENT = wgsl`let cell = vec2<f32>(${TILE_W}.0, ${TILE_H}.0) / 3.0;
 let uvq = (floor(in.uv * cell) + 0.5) / cell;
 let p = uvq * 2.0 - 1.0;
 let d = abs(p.x) + abs(p.y);

@@ -4,6 +4,7 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_DEPTH_EMISSIVE_TEXTURE, HAS_EMISSIVE_TEXTURE } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -19,7 +20,7 @@ export function createStdEmissiveFragment(depthTexture: boolean): ShaderFragment
             { _name: "eS", _type: { _kind: "sampler", _samplerType: depthTexture ? "sampler_non_filtering" : "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            AT: `emissiveContrib = mat.ec + textureSample(eT, eS, input.vu).rgb * mat.tl;`,
+            AT: wgsl`emissiveContrib = mat.ec + textureSample(eT, eS, input.vu).rgb * mat.tl;`,
         },
     };
 }

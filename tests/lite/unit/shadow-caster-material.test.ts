@@ -116,9 +116,17 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
         });
 
-        it("leaves a previously unseen material to the incremental caster path", () => {
-            const material = fakeMaterial("new-caster");
-            expect(shadowCasterMaterialChanged(material, new Map(), new Map())).toBe(false);
+        it("treats a material missing from the snapshot as changed", () => {
+            const seen = fakeMaterial("seen");
+            const unseen = fakeMaterial("unseen");
+            const terminals = new Map<Material, Material>();
+            const generations = new Map<Material, number | undefined>();
+            snapshotShadowCasterMaterial(seen, terminals, generations);
+
+            // No view was ever built for `unseen`: a caster that switched to it would keep casting through the
+            // view of its previous material, so the snapshot must not vouch for it.
+            expect(shadowCasterMaterialChanged(unseen, terminals, generations)).toBe(true);
+            expect(shadowCasterMaterialChanged(seen, terminals, generations)).toBe(false);
         });
     });
 

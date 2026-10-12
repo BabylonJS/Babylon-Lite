@@ -46,6 +46,7 @@ import {
 import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
+import type { Vector4 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
 import { Color3, Color4 } from "../math/color.js";
@@ -53,7 +54,7 @@ import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
-import { Material as CompatMaterialBase } from "../materials/materials.js";
+import { adoptMaterialScene, attachMaterialToScene, Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
@@ -284,6 +285,23 @@ export class TransformNode extends Node {
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
         this._node.parent = liteNodeOf(parent);
     }
+
+    /** @internal Remove this wrapper's node without letting Lite recurse for `dispose(true)`. */
+    protected override _disposeSelf(doNotRecurse: boolean): void {
+        if (!this._scene) {
+            return;
+        }
+        if (!doNotRecurse) {
+            removeFromScene(this._scene._lite, this._node);
+            return;
+        }
+
+        for (const child of this._node.children) {
+            child.parent = null;
+        }
+        this._node.children.length = 0;
+        removeFromScene(this._scene._lite, this._node);
+    }
 }
 
 /**
@@ -295,6 +313,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    private _meshBlendingTag = 0;
     protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
@@ -329,16 +348,21 @@ export class AbstractMesh extends TransformNode {
         this._material = value;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
-        if (renderMaterial && scene?._hasStarted) {
-            // The mesh already entered the scene, so the boot-time build (which
-            // normally calls `_ensureRenderable` via `addPrimitive`) has run. Finalize
-            // the material's GPU-facing resources now — PBR solid textures and any
-            // resolved texture handles — before rebinding, so Lite's material-swap
-            // rebuild (enqueued by the `_lite.material` reassignment below) sees
-            // complete props. Adopt the scene so a still-loading texture assigned to
-            // this material can reconcile itself on readiness.
-            (renderMaterial as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
-            renderMaterial._ensureRenderable(engineOf(scene));
+        if (renderMaterial && scene) {
+            if (scene._hasStarted) {
+                // The mesh already entered the scene, so the boot-time build (which
+                // normally calls `_ensureRenderable` via `registerMeshAtStart`) has run. Finalize
+                // the material's GPU-facing resources now — PBR solid textures and any
+                // resolved texture handles — before rebinding, so Lite's material-swap
+                // rebuild (enqueued by the `_lite.material` reassignment below) sees
+                // complete props.
+                attachMaterialToScene(renderMaterial, scene);
+            } else {
+                // Before startup only ownership is settled here; finalization waits for the engine. Not every
+                // pre-start assignment is followed by a registration callback that sees this material (an
+                // imported mesh has none at all), so ownership cannot wait for one.
+                adoptMaterialScene(renderMaterial, scene);
+            }
         }
         if (renderMaterial?._lite) {
             this._lite.material = renderMaterial._lite as never;
@@ -368,6 +392,17 @@ export class AbstractMesh extends TransformNode {
     }
     public set receiveShadows(value: boolean) {
         this._lite.receiveShadows = value;
+    }
+
+    public get meshBlendingTag(): number {
+        return this._meshBlendingTag ?? 0;
+    }
+    public set meshBlendingTag(value: number) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xff || (value !== 0 && (value & 0x3f) === 0)) {
+            throw new RangeError("Mesh-blending tag must be 0 or contain a group ID between 1 and 63.");
+        }
+        this._meshBlendingTag = value;
+        this._lite.meshBlendingTag = value;
     }
 
     protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
@@ -693,13 +728,6 @@ export class AbstractMesh extends TransformNode {
         this._bakeMatrix(transform);
         return this;
     }
-
-    public override dispose(): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
-        }
-        super.dispose();
-    }
 }
 
 /** Babylon.js `Mesh` — a concrete renderable mesh with geometry. */
@@ -817,6 +845,39 @@ export class Mesh extends AbstractMesh {
         return MeshBuilder.CreateTorus(name, { diameter, thickness, tessellation }, scene);
     }
 
+    /** Legacy `Mesh.CreatePolygon(name, shape, scene, holes?, updatable?, sideOrientation?, earcutInjection?)`. */
+    public static CreatePolygon(
+        _name: string,
+        _shape: Vector3[],
+        _scene: Scene,
+        _holes?: Vector3[][],
+        _updatable?: boolean,
+        _sideOrientation?: number,
+        _earcutInjection?: unknown
+    ): never {
+        return unsupported(
+            "Mesh.CreatePolygon",
+            "Polygon creation requires a triangulation dependency plus hole, side-orientation, UV, and normal-generation policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    }
+
+    /** Legacy `Mesh.ExtrudePolygon(name, shape, depth, scene, holes?, updatable?, sideOrientation?, earcutInjection?)`. */
+    public static ExtrudePolygon(
+        _name: string,
+        _shape: Vector3[],
+        _depth: number,
+        _scene: Scene,
+        _holes?: Vector3[][],
+        _updatable?: boolean,
+        _sideOrientation?: number,
+        _earcutInjection?: unknown
+    ): never {
+        return unsupported(
+            "Mesh.ExtrudePolygon",
+            "Polygon extrusion requires a triangulation dependency plus hole, cap, side-wall, UV, and smoothing policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    }
+
     /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
     public createInstance(): never {
         return unsupported("Mesh.createInstance", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
@@ -896,6 +957,7 @@ export class Mesh extends AbstractMesh {
             if (wrapper instanceof Mesh && source instanceof Mesh) {
                 wrapper.material = source.material;
                 wrapper.isVisible = source.isVisible;
+                wrapper.meshBlendingTag = source.meshBlendingTag;
             }
         }
         if (!skipChildren) {
@@ -1193,6 +1255,11 @@ export class VertexData {
     public colors: number[] | Float32Array | null = null;
     public indices: number[] | Uint32Array | Uint16Array | null = null;
 
+    /** Deprecated Babylon.js polygon vertex-data entry point. */
+    public static CreatePolygon(polygon: Mesh, sideOrientation: number, faceUV?: Vector4[], faceColors?: Color4[], frontUVs?: Vector4, backUVs?: Vector4, wrap?: boolean): never {
+        return CreatePolygonVertexData(polygon, sideOrientation, faceUV, faceColors, frontUVs, backUVs, wrap);
+    }
+
     /**
      * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
      * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite
@@ -1302,12 +1369,23 @@ function engineOf(scene: Scene): EngineContext {
  * (via `scene._deferAdd`) to let those assignments settle.
  */
 function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
+    return registerMeshAtStart(mesh, scene, afterAdd);
+}
+
+/**
+ * @internal The deferred registration shared by every compat path that builds a mesh before engine start
+ * (primitives, legacy CSG results, the navigation debug mesh): at startup, finalize the mesh's EFFECTIVE
+ * material — its own, or `scene.defaultMaterial` as it is by then — rebind its Lite handle and add the mesh.
+ */
+export function registerMeshAtStart(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
         if (mesh.isDisposed()) {
             return;
         }
-        const mat = mesh.material;
-        mat?._ensureRenderable(engineOf(scene));
+        const mat = mesh.material ?? scene.defaultMaterial;
+        if (mat) {
+            attachMaterialToScene(mat, scene);
+        }
         // Re-bind in case the material's Lite handle resolved late (async-parsed
         // NodeMaterial, or a texture map that loaded after `mesh.material = …`).
         if (mat?._lite) {
@@ -1534,6 +1612,20 @@ export const MeshBuilder = {
             "Tiled plane geometry is not implemented in Babylon Lite. Its per-tile UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
         );
     },
+
+    CreatePolygon(_name: string, _options: PolygonBuilderOptions, _scene?: Scene | null, _earcutInjection?: unknown): never {
+        return unsupported(
+            "MeshBuilder.CreatePolygon",
+            "Polygon creation requires a triangulation dependency plus hole, side-orientation, UV, and normal-generation policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    },
+
+    ExtrudePolygon(_name: string, _options: PolygonBuilderOptions, _scene?: Scene | null, _earcutInjection?: unknown): never {
+        return unsupported(
+            "MeshBuilder.ExtrudePolygon",
+            "Polygon extrusion requires a triangulation dependency plus hole, cap, side-wall, UV, and smoothing policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    },
 };
 
 // ── Standalone builder functions (Babylon.js `@babylonjs/core/Meshes/Builders/*`) ──
@@ -1600,3 +1692,55 @@ export function CreateTiledBox(name?: string, options?: object, scene?: Scene): 
 export function CreateTiledPlane(name?: string, options?: object, scene?: Scene): never {
     return MeshBuilder.CreateTiledPlane(name, options, scene);
 }
+
+interface PolygonBuilderOptions {
+    shape: Vector3[];
+    holes?: Vector3[][];
+    depth?: number;
+    smoothingThreshold?: number;
+    faceUV?: Vector4[];
+    faceColors?: Color4[];
+    updatable?: boolean;
+    sideOrientation?: number;
+    frontUVs?: Vector4;
+    backUVs?: Vector4;
+    wrap?: boolean;
+}
+
+/** Babylon.js `CreatePolygon(name, options, scene?, earcutInjection?)` — throwing stub (see `MeshBuilder.CreatePolygon`). */
+export function CreatePolygon(name: string, options: PolygonBuilderOptions, scene?: Scene | null, earcutInjection?: unknown): never {
+    return MeshBuilder.CreatePolygon(name, options, scene, earcutInjection);
+}
+
+/** Babylon.js `ExtrudePolygon(name, options, scene?, earcutInjection?)` — throwing stub (see `MeshBuilder.ExtrudePolygon`). */
+export function ExtrudePolygon(name: string, options: PolygonBuilderOptions, scene?: Scene | null, earcutInjection?: unknown): never {
+    return MeshBuilder.ExtrudePolygon(name, options, scene, earcutInjection);
+}
+
+/** Babylon.js `CreatePolygonVertexData` — the polygon geometry generator requires the unsupported polygon subsystem. */
+export function CreatePolygonVertexData(
+    _polygon: Mesh,
+    _sideOrientation: number,
+    _faceUV?: Vector4[],
+    _faceColors?: Color4[],
+    _frontUVs?: Vector4,
+    _backUVs?: Vector4,
+    _wrap?: boolean
+): never {
+    return unsupported(
+        "CreatePolygonVertexData",
+        "Polygon vertex generation requires triangulated polygon topology and its cap, side-wall, UV, and normal policies; Babylon Lite has no polygon geometry subsystem to supply that input."
+    );
+}
+
+/** Babylon.js polygon-builder namespace object. */
+export const PolygonBuilder = {
+    ExtrudePolygon,
+    CreatePolygon,
+};
+
+/**
+ * Babylon.js side-effect registration shim. Compat defines the corresponding
+ * methods directly, so importing or calling this function requires no mutation.
+ */
+export function RegisterPolygonBuilder(): void {}

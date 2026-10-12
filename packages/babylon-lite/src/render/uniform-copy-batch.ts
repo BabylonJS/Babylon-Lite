@@ -1,34 +1,32 @@
 import { U8 } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
-import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import type { DrawBatchState } from "./draw-update-batches.js";
 import type { DrawUpdateBatch } from "./renderable.js";
 
 interface UniformCopy {
     buffer: GPUBuffer;
     data: ArrayBufferView<ArrayBufferLike>;
     offset: number;
+    /** @internal Byte offset in the packed upload image, assigned while queueing. */
+    _uploadOffset: number;
     /** @internal Byte view over `data`, cached across frames. Callers queue the SAME staging array every
      *  frame (a material's uniform image, a packet's system block), so rebuilding this view per copy per
      *  frame was hundreds of throwaway allocations per frame in a material-heavy scene. Rebuilt only when
      *  `data` itself is a different object. */
     _u8?: Uint8Array;
-    /** @internal The `data` object `_u8` was built from. */
-    _for?: ArrayBufferView<ArrayBufferLike>;
 }
 
 /** @internal Per-render-task staging state for batched uniform uploads. */
 export interface UniformCopyBatch extends DrawUpdateBatch {
     /** @internal */
     readonly _copies: UniformCopy[];
-    /** @internal */
-    _count: number;
-    /** @internal */
-    _buffer: GPUBuffer | null;
-    /** @internal */
-    _device: GPUDevice | null;
-    /** @internal */
-    _bytes: Uint8Array;
+    /** @internal Unavailable for reuse once its generation has been released. */
+    _retired: boolean;
+    /** @internal Specialized collector installed for this cached generation. */
+    _collector?: NonNullable<RenderTargetSignature["_collectBatches"]>;
+    /** Queue a fixed-size internal uniform image; its contents are read when the batch flushes. */
     queue(buffer: GPUBuffer, data: ArrayBufferView<ArrayBufferLike>, offset?: number): void;
 }
 
@@ -37,108 +35,117 @@ let _batches: WeakMap<RenderTargetSignature, UniformCopyBatch> | null = null;
 /** @internal Return the task-local batch associated with one render-target signature. */
 export function getUniformCopyBatch(signature: RenderTargetSignature): UniformCopyBatch {
     _batches ??= new WeakMap();
-    const batch = _batches.get(signature);
-    if (batch) {
-        return batch;
+    const cached = _batches.get(signature);
+    if (cached && !cached._retired) {
+        return cached;
     }
+    const copies: UniformCopy[] = [];
+    let count = 0;
+    let totalBytes = 0;
+    let buffer: GPUBuffer | null = null;
+    let device: GPUDevice | null = null;
+    let bytes = new U8(0);
     const created: UniformCopyBatch = {
-        _copies: [],
-        _count: 0,
-        _buffer: null,
-        _device: null,
-        _bytes: new U8(0),
+        _copies: copies,
+        _retired: false,
         reset(): void {
-            created._count = 0;
+            count = totalBytes = 0;
         },
         flush(engine): void {
-            flushUniformCopyBatch(engine, created);
-        },
-        destroy(): void {
-            created._buffer?.destroy();
-            created._buffer = null;
-            created._device = null;
-            created._bytes = new U8(0);
-            created._copies.length = 0;
-            created._count = 0;
-            _batches?.delete(signature);
-        },
-        queue(buffer, data, offset = 0): void {
-            const index = created._count++;
-            const copy = created._copies[index];
-            if (copy) {
-                copy.buffer = buffer;
-                copy.data = data;
-                copy.offset = offset;
-            } else {
-                created._copies.push({ buffer, data, offset });
+            if (!count) {
+                return;
+            }
+            if (device !== engine._device) {
+                buffer?.destroy();
+                buffer = null;
+                device = engine._device;
+                bytes = new U8(0);
+            }
+            if (!buffer || bytes.byteLength < totalBytes) {
+                let capacity = bytes.byteLength || 256;
+                while (capacity < totalBytes) {
+                    capacity *= 2;
+                }
+                buffer?.destroy();
+                buffer = engine._device.createBuffer({
+                    label: "render-task-uniform-upload",
+                    size: capacity,
+                    usage: BU.COPY_SRC | BU.COPY_DST,
+                });
+                bytes = new U8(capacity);
+            }
+            for (let i = 0; i < count; i++) {
+                const copy = copies[i]!;
+                const u8 = (copy._u8 ??= new U8(copy.data.buffer, copy.data.byteOffset, copy.data.byteLength));
+                bytes.set(u8, copy._uploadOffset);
+            }
+            engine._device.queue.writeBuffer(buffer, 0, bytes.buffer, bytes.byteOffset, totalBytes);
+            for (let i = 0; i < count; i++) {
+                const copy = copies[i]!;
+                engine._currentEncoder.copyBufferToBuffer(buffer, copy._uploadOffset, copy.buffer, copy.offset, copy.data.byteLength);
             }
         },
+        destroy(): void {
+            created._retired = true;
+            try {
+                buffer?.destroy();
+            } catch (error) {
+                console.error("GPU resource retirement failed.", error);
+            }
+            buffer = null;
+            device = null;
+            bytes = new U8(0);
+            copies.length = 0;
+            count = totalBytes = 0;
+        },
+        queue(destination, data, offset = 0): void {
+            if ((data.byteLength | offset) & 3) {
+                throw new Error("Uniform copies require 4-byte-aligned sizes and destination offsets.");
+            }
+            const copy = copies[count++];
+            if (copy) {
+                if (copy.data !== data) {
+                    copy._u8 = undefined;
+                }
+                copy.buffer = destination;
+                copy.data = data;
+                copy.offset = offset;
+                copy._uploadOffset = totalBytes;
+            } else {
+                copies.push({ buffer: destination, data, offset, _uploadOffset: totalBytes });
+            }
+            totalBytes += data.byteLength;
+        },
     };
+    if (!signature._collectBatches || signature._collectBatches === cached?._collector) {
+        const state: DrawBatchState = {
+            _batches: [created],
+            _reset: created.reset,
+            _flush: created.flush,
+            _select(lists): DrawBatchState | undefined {
+                for (const list of lists) {
+                    for (const binding of list) {
+                        if (binding._updateBatches?.includes(created)) {
+                            return state;
+                        }
+                    }
+                }
+                return undefined;
+            },
+            _release(engine, retained): void {
+                if (created._retired || retained?.some((state) => state?._batches.includes(created))) {
+                    return;
+                }
+                created._retired = true;
+                if (engine) {
+                    retireGpuResources(engine, created.destroy);
+                } else {
+                    created.destroy();
+                }
+            },
+        };
+        signature._collectBatches = created._collector = (previous, binding) => previous ?? (binding._updateBatches?.includes(created) ? state : undefined);
+    }
     _batches.set(signature, created);
     return created;
-}
-
-function flushUniformCopyBatch(engine: EngineContext, batch: UniformCopyBatch): void {
-    const copies = batch._copies;
-    const count = batch._count;
-    if (count === 0) {
-        return;
-    }
-    let totalBytes = 0;
-    for (let i = 0; i < count; i++) {
-        const copy = copies[i]!;
-        if ((copy.data.byteLength & 3) !== 0 || (copy.offset & 3) !== 0) {
-            throw new Error("Uniform copies require 4-byte-aligned sizes and destination offsets.");
-        }
-        totalBytes = align4(totalBytes) + copy.data.byteLength;
-    }
-    ensureCapacity(engine, batch, totalBytes);
-    const bytes = batch._bytes;
-    let cursor = 0;
-    for (let i = 0; i < count; i++) {
-        const copy = copies[i]!;
-        cursor = align4(cursor);
-        let u8 = copy._u8;
-        if (!u8 || copy._for !== copy.data) {
-            u8 = copy._u8 = new U8(copy.data.buffer, copy.data.byteOffset, copy.data.byteLength);
-            copy._for = copy.data;
-        }
-        bytes.set(u8, cursor);
-        cursor += copy.data.byteLength;
-    }
-    engine._device.queue.writeBuffer(batch._buffer!, 0, bytes.buffer, bytes.byteOffset, totalBytes);
-    cursor = 0;
-    for (let i = 0; i < count; i++) {
-        const copy = copies[i]!;
-        cursor = align4(cursor);
-        engine._currentEncoder.copyBufferToBuffer(batch._buffer!, cursor, copy.buffer, copy.offset, copy.data.byteLength);
-        cursor += copy.data.byteLength;
-    }
-}
-
-function ensureCapacity(engine: EngineContext, batch: UniformCopyBatch, requiredBytes: number): void {
-    if (batch._device !== engine._device) {
-        batch._buffer?.destroy();
-        batch._buffer = null;
-        batch._device = engine._device;
-        batch._bytes = new U8(0);
-    }
-    if (batch._buffer && batch._bytes.byteLength >= requiredBytes) {
-        return;
-    }
-    let capacity = Math.max(256, batch._bytes.byteLength);
-    while (capacity < requiredBytes) {
-        capacity *= 2;
-    }
-    batch._buffer?.destroy();
-    batch._buffer = engine._device.createBuffer({
-        label: "render-task-uniform-upload",
-        size: capacity,
-        usage: BU.COPY_SRC | BU.COPY_DST,
-    });
-    batch._bytes = new U8(capacity);
-}
-
-function align4(value: number): number {
-    return (value + 3) & ~3;
 }

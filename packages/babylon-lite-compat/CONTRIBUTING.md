@@ -48,16 +48,17 @@ It tracks three things:
 ## The `update-compat-layer` skill
 
 [`.github/copilot/skills/update-compat-layer.md`](../../.github/copilot/skills/update-compat-layer.md)
-is the skill that advances the layer. Every run makes progress on three fronts:
+is the skill that advances the layer. Each run covers three tasks:
 
-| Task                                      | Goal                                                                   | Tracked in `COMPAT-STATUS.md` by                                                    |
-| ----------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| **1 — Upstream diffs**                    | React to what changed in Babylon.js + Babylon Lite since the last sync | the `Last synced BJS commit` / `Last synced Lite commit` / `Last sync date` markers |
-| **2 — Lab-scene coverage** (required win) | Land **at least one** more oracle scene at MAD ≈ 0                     | the _Lab scene coverage_ section                                                    |
-| **3 — API parity**                        | Add/upgrade core + loaders symbols (real impl or honest stub)          | the per-area status matrix                                                          |
+| Task                                     | Goal                                                                                         | Tracked in `COMPAT-STATUS.md` by                                                    |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **1 — Upstream diffs**                   | React to what changed in Babylon.js + Babylon Lite since the last sync                       | the `Last synced BJS commit` / `Last synced Lite commit` / `Last sync date` markers |
+| **2 — Lab-scene coverage** (conditional) | When a newly landed Lite change unblocks a skipped oracle scene, drive that scene to MAD ≈ 0 | the _Lab scene coverage_ section                                                    |
+| **3 — API parity**                       | Add/upgrade core + loaders symbols (real impl or honest stub)                                | the per-area status matrix                                                          |
 
-Task 2 is the headline deliverable of every run: a run that ships zero new working
-scenes is considered incomplete.
+Task 2 runs only when Task 1 identifies a newly landed Lite feature or change that
+clears a previously skipped scene's blocker. When nothing was unblocked, Task 2 has
+no deliverable: zero scene work is correct and does not make the sync incomplete.
 
 When you change the surface, keep the layer **honest**: an unsupported API should
 throw `LiteCompatError` (via the `unsupported()` helper) rather than silently

@@ -278,7 +278,7 @@ The private Multiply shader keeps its vertex WGSL local while reusing `makeBillb
 
 - Camera: `camera/camera.ts`.
 - Engine type: `engine/engine.ts`.
-- Math: `math/types.ts`, `math/random-range.ts`, `math/mat4-identity.ts`, `math/mat4-invert.ts`, `math/mat4-invert-to-ref.ts`, `math/mat4-transform.ts`, and `math/mat4-translation.ts`.
+- Math: `math/types.ts`, `math/random-range.ts`, `math/create-identity-mat4.ts`, `math/invert-mat4.ts`, `math/invert-mat4-to-ref-or-identity.ts`, `math/mat4-transform.ts`, and `math/create-translation-mat4.ts`.
 - Scene: `scene/scene.ts` and `scene/scene-core.ts`.
 - Texture: `texture/texture-2d.ts`.
 - Sprite: `sprite/shared/sprite-atlas.ts`, `sprite/billboard-sprite.ts`, `sprite/billboard-blend.ts`, `sprite/billboard-scene.ts`, `sprite/billboard-custom-shader.ts`, `sprite/billboard-pipeline.ts`, `sprite/billboard-renderable.ts`, `sprite/sprite-2d.ts`, `sprite/sprite-blend.ts`, `sprite/sprite-custom-shader.ts`, and `sprite/sprite-renderer.ts`.
@@ -961,7 +961,7 @@ z = sampleRadius * sin(angle)
 
 Explicit direction uses component ranges and avoids matrix inversion. The world module transforms it; the local module writes it directly.
 
-For implicit direction, each evaluator computes `mat4Invert(emitterWorldMatrix)` during build and substitutes a new identity matrix when the determinant magnitude is below `1e-10`. It appends stable `{ inverse }` state to `emitterInverseWorldMatrices`. The opt-in provider refreshes every listed inverse in place before each started simulation call, again substituting identity for a singular current matrix. Per birth it:
+For implicit direction, each evaluator computes `invertMat4(emitterWorldMatrix)` during build and substitutes a new identity matrix when the determinant magnitude is below `1e-10`. It appends stable `{ inverse }` state to `emitterInverseWorldMatrices`. The opt-in provider refreshes every listed inverse in place before each started simulation call, again substituting identity for a singular current matrix. Per birth it:
 
 1. Forms transformed birth position minus emitter translation and conditionally normalizes it.
 2. Applies `transformNormal` with the inverse matrix into scratch.
@@ -1944,11 +1944,11 @@ The Phase 3B run originally measured `43,936` raw bytes while the same 2,924-byt
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, and 305 as sprite users. Scenes 262 through 284, 302, and 305 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. CI-published baselines and generated bundle-info are comparison inputs, and no per-scene manifest is committed.
 
-Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `mat4-invert-to-ref.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `mat4-invert.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, either graph-plumbing module, or either Sprite2D bridge/render path. The final filtered build measures `56,705` raw bytes (`55.4 KB`) and `22,761` gzip bytes (`22.2 KB`). The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
+Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `invert-mat4-to-ref-or-identity.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `invert-mat4.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, either graph-plumbing module, or either Sprite2D bridge/render path. The final filtered build measures `56,705` raw bytes (`55.4 KB`) and `22,761` gzip bytes (`22.2 KB`). The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
 
 The particle bundle-content test applies the general unused-feature rejection list to the nine canonical billboard parity scenes. Each canonical scene must have a nonempty runtime chunk list, and its fetched chunks are rejected when they match unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU or embedded texture source, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, or optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime` and `embedded-texture-source-block`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
-When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, `embedded-texture-source-block` outside scene 281, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
+When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, `embedded-texture-source-block` outside scene 281, and `math/invert-mat4.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
 `npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every configured particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other configured particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; generated runtime chunk manifests, fetched-module checks, and provider isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
 
@@ -2105,11 +2105,11 @@ These files are imported directly by particle source files or define the package
 packages/babylon-lite/src/camera/camera.ts
 packages/babylon-lite/src/engine/engine.ts
 packages/babylon-lite/src/math/_matrix-allocator.ts
-packages/babylon-lite/src/math/mat4-identity.ts
-packages/babylon-lite/src/math/mat4-invert.ts
-packages/babylon-lite/src/math/mat4-invert-to-ref.ts
+packages/babylon-lite/src/math/create-identity-mat4.ts
+packages/babylon-lite/src/math/invert-mat4.ts
+packages/babylon-lite/src/math/invert-mat4-to-ref-or-identity.ts
 packages/babylon-lite/src/math/mat4-transform.ts
-packages/babylon-lite/src/math/mat4-translation.ts
+packages/babylon-lite/src/math/create-translation-mat4.ts
 packages/babylon-lite/src/math/random-range.ts
 packages/babylon-lite/src/math/types.ts
 packages/babylon-lite/src/scene/scene-core.ts

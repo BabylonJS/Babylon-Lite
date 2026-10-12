@@ -132,7 +132,12 @@ describe("_computeCsmCascades zero-allocation", () => {
             _vpAspect: -1,
             worldMatrix: worldMat,
         } as any;
-        const light = { direction: { x: 0.3, y: -0.9, z: 0.1 } } as any;
+        const lightWorld = new Float32Array(16);
+        lightWorld[0] = 1;
+        lightWorld[5] = 1;
+        lightWorld[10] = 1;
+        lightWorld[15] = 1;
+        const light = { direction: { x: 0.3, y: -0.9, z: 0.1 }, worldMatrix: lightWorld } as any;
         const scene = { surface: { scRT: { _width: 800, _height: 600 } } } as any;
         const cfg = {
             _numCascades: numCascades,

@@ -18,7 +18,7 @@ import { F32 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { setThinInstances } from "../mesh/thin-instance.js";
 import { enableThinInstanceWorldBounds } from "../mesh/enable-thin-instance-world-bounds.js";
 
@@ -46,7 +46,7 @@ function buildInstanceMatrices(translation: Float32Array | null, rotation: Float
         const sx = scale ? scale[i * 3]! : 1;
         const sy = scale ? scale[i * 3 + 1]! : 1;
         const sz = scale ? scale[i * 3 + 2]! : 1;
-        mat4ComposeInto(matrices, i * 16, tx, ty, tz, qx, qy, qz, qw, sx, sy, sz);
+        composeMat4IntoBuffer(matrices, i * 16, tx, ty, tz, qx, qy, qz, qw, sx, sy, sz);
     }
     return matrices;
 }

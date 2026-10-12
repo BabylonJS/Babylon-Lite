@@ -9,7 +9,7 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Vec3, Mat4, Vec2, Color4 } from "../../math/types.js";
-import { mat4Translation } from "../../math/mat4-translation.js";
+import { createTranslationMat4 } from "../../math/create-translation-mat4.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 import type { ParticleBuffer } from "../particle-buffer.js";
@@ -116,7 +116,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             mat4GetTranslationToRef(emitterWorldMatrix, emitter);
         } else {
             const e = options.emitter ?? { x: 0, y: 0, z: 0 };
-            emitterWorldMatrix = mat4Translation(e.x, e.y, e.z);
+            emitterWorldMatrix = createTranslationMat4(e.x, e.y, e.z);
             emitter.x = e.x;
             emitter.y = e.y;
             emitter.z = e.z;

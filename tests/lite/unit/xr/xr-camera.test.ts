@@ -60,8 +60,8 @@ function makeView(eye: XREye, pose: Float32Array, proj: Float32Array): XRView {
     } as unknown as XRView;
 }
 
-function mat4Multiply(a: Float32Array, b: Float32Array): Float32Array {
-    // out = a * b, column-major (matches mat4MultiplyInto semantics: proj * view)
+function multiplyMat4(a: Float32Array, b: Float32Array): Float32Array {
+    // out = a * b, column-major (matches multiplyMat4IntoBuffer semantics: proj * view)
     const out = new Float32Array(16);
     for (let col = 0; col < 4; col++) {
         for (let row = 0; row < 4; row++) {
@@ -165,7 +165,7 @@ describe("xr-camera matrix injection", () => {
 
         const view = getViewMatrix(cam) as unknown as Float32Array;
         const projConv = getProjectionMatrix(cam, aspect) as unknown as Float32Array;
-        const expected = mat4Multiply(projConv, view);
+        const expected = multiplyMat4(projConv, view);
         const vp = getViewProjectionMatrix(cam, aspect) as unknown as Mat4Storage;
         for (let i = 0; i < 16; i++) {
             expect(vp[i]).toBeCloseTo(expected[i]!, 4);

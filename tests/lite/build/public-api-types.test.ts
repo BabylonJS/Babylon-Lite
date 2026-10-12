@@ -35,6 +35,469 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes voxel collision through the root API without GPU types", () => {
+        const probePath = resolve(BUILD_DIR, "voxel-collision.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { loadSplatVoxelCollision, parseSplatVoxelCollision, moveSplatVoxelCamera, type SplatVoxelCollision } from "./index.js";
+declare const metadata: unknown;
+declare const buffer: ArrayBuffer;
+const collision: SplatVoxelCollision = parseSplatVoxelCollision(metadata, buffer);
+const position: [number, number, number] = moveSplatVoxelCamera(collision, [1, 2, 3], [4, 5, 6], 0.2);
+const loaded: Promise<SplatVoxelCollision> = loadSplatVoxelCollision("https://example.test/scene.voxel.json", new AbortController().signal);
+void [position, loaded];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes frame graph texture tasks through the root API with typed output aliases", () => {
+        const probePath = resolve(BUILD_DIR, "frame-graph-texture-tasks.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createClearTextureTask, createGenerateMipMapsTask, createMipMappedRenderTarget,
+    createTextureRenderTarget, disposeRenderTarget,
+    type ClearTextureTask, type ClearTextureTaskConfig,
+    type GenerateMipMapsTask, type GenerateMipMapsTaskConfig,
+    type EngineContext, type RenderTarget, type Texture2D,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const texture: Texture2D;
+const wrapper: RenderTarget = createTextureRenderTarget(engine, texture, { layer: 0, mipLevel: 0 });
+disposeRenderTarget(wrapper);
+const target = createMipMappedRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
+const config: ClearTextureTaskConfig = {
+    targetTexture: [target], depthTexture: target,
+    color: { r: 0.2, g: 0.2, b: 0.3, a: 1 },
+    clearColor: true, convertColorToLinearSpace: false,
+    clearDepth: true, clearStencil: false, stencilValue: 0,
+};
+const clear: ClearTextureTask = createClearTextureTask(config, engine);
+const colorOutput: RenderTarget | undefined = clear.outputTexture;
+const depthOutput: RenderTarget | undefined = clear.outputDepthTexture;
+const mipConfig: GenerateMipMapsTaskConfig<RenderTarget> = { targetTexture: target };
+const mips: GenerateMipMapsTask<RenderTarget> = createGenerateMipMapsTask(mipConfig, engine);
+const mipOutput: RenderTarget = mips.outputTexture;
+const sampledOutput: Texture2D = createGenerateMipMapsTask({ targetTexture: texture }, engine).outputTexture;
+clear.executionEnabled = false;
+// @ts-expect-error Outputs are read-only aliases.
+clear.outputTexture = target;
+// @ts-expect-error Outputs are read-only aliases.
+mips.outputTexture = target;
+// @ts-expect-error GPU allocation state is internal.
+target._colorTexture;
+// @ts-expect-error GPU sampling views are internal.
+target._colorSamplingView;
+void [colorOutput, depthOutput, mipOutput, sampledOutput];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes conditional material rebuild completion", () => {
+        const probePath = resolve(BUILD_DIR, "material-rebuild-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    rebuildMaterial,
+    type Material,
+    type MaterialView,
+    type RebuildMaterialOptions,
+    type SceneContext,
+} from "./index.js";
+// @ts-expect-error Completion policy is represented by the return value, not an options type.
+import type { AwaitedRebuildMaterialOptions } from "./index.js";
+
+declare const scene: SceneContext;
+declare const material: Material;
+declare const view: MaterialView;
+declare const options: RebuildMaterialOptions;
+
+const defaultResult: void | Promise<void> = rebuildMaterial(scene, material);
+const configuredResult: void | Promise<void> = rebuildMaterial(scene, view, {
+    rebuildViews: true,
+    rebuildFrameGraph: true,
+});
+const variableResult: void | Promise<void> = rebuildMaterial(scene, view, options);
+// @ts-expect-error Rebuild completion is conditional.
+const promiseOnly: Promise<void> = rebuildMaterial(scene, material);
+// @ts-expect-error Rebuild completion is conditional.
+const voidOnly: void = rebuildMaterial(scene, material);
+
+void [defaultResult, configuredResult, variableResult, promiseOnly, voidOnly];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes graph-specific Node block loaders only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "node-block-loader.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder,
+    nodePbrMetallicRoughnessBlockFull, type ParseNodeMaterialOptions, type NodeMaterialBlock,
+} from "./index.js";
+const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder];
+const options: ParseNodeMaterialOptions = { blockLoader: createNodeMaterialBlockLoader(blocks) };
+createNodeMaterialBlockLoader([nodePbrMetallicRoughnessBlockFull]);
+// @ts-expect-error Implementation callbacks are internal, not public GPU/compiler API.
+nodeInputBlock._load();
+void options;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("requires at least one source for separate-file KTX2 arrays", () => {
+        const probePath = resolve(BUILD_DIR, "ktx2-array-sources.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    loadKtx2Texture2DArrayFromUrls,
+    uploadKtx2Texture2DArrayFromBuffers,
+    type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const buffer: ArrayBuffer;
+uploadKtx2Texture2DArrayFromBuffers(engine, [buffer]);
+loadKtx2Texture2DArrayFromUrls(engine, ["layer.ktx2"]);
+// @ts-expect-error Separate-file KTX2 arrays require at least one buffer.
+uploadKtx2Texture2DArrayFromBuffers(engine, []);
+// @ts-expect-error Separate-file KTX2 arrays require at least one URL.
+loadKtx2Texture2DArrayFromUrls(engine, []);
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes standalone tasks, opt-in RTTs, and storage-backed geometry", () => {
+        const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
+    createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
+    createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
+    enableShaderMaterialVisiblePacketUpdates,
+    prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
+    type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
+    type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const mesh: Mesh;
+const fixed = createRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: { width: 32, height: 32 },
+});
+const fixedDepth = createRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
+}, withSampledDepthTexture);
+const surface = createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", dFormat: "depth32float",
+    depthClearValue: 1, depthCompare: "less-equal",
+    samples: 1, size: engine,
+}, withSampledDepthTexture);
+const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: engine,
+}, withSampledDepthTexture);
+const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
+createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: scaledSize,
+});
+const dynamicSize = Math.random() > 0.5 ? engine : scaledSize;
+const forwardedDescriptor: Parameters<typeof createSurfaceRenderTargetTexture>[1] = {
+    format: "rgba8unorm", samples: 1, size: dynamicSize,
+};
+createSurfaceRenderTargetTexture(engine, forwardedDescriptor);
+const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
+addMeshToTask(task, mesh);
+// @ts-expect-error Task mesh population is a tree-shakable standalone API.
+task.addMesh(mesh);
+onRenderTargetTextureResize(surface, () => {})();
+onRenderTargetTextureResize(surfaceDepth, () => {})();
+fixedDepth.texture satisfies typeof fixedDepth.depthTexture;
+const storageOptions: StorageBufferOptions = { writable: true, vertex: true, indirect: true };
+const storage = createStorageBuffer(engine, 1024, storageOptions);
+const indices = createStorageBuffer(engine, new Uint32Array([0, 1, 2]), { index: true });
+const geometryOptions: MeshFromStorageOptions = {
+    storage, indices, indexCount: 3, indexFormat: "uint32",
+    vertexCount: 3, arrayStride: 16, baseVertex: 2,
+    boundMin: [-1, -1, -1], boundMax: [1, 1, 1],
+};
+const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptions);
+// @ts-expect-error Storage-backed attribute offsets do not support skinning streams.
+const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
+void unsupportedOffsets;
+const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+enableShaderMaterialVisiblePacketUpdates(shader);
+// @ts-expect-error The packet seam is internal, not a public material property.
+shader._deferPacketUpdate;
+// @ts-expect-error The policy requires a ShaderMaterial.
+enableShaderMaterialVisiblePacketUpdates({});
+setShaderAttributeFormats(shader, { position: "float32x4" });
+storageMesh.material = shader;
+const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
+const preparedForTask: Promise<void> = prepareShaderMaterialPipelineForTask(task, shader, "mesh", storageMesh);
+void prepared;
+void preparedForTask;
+const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
+const rangedReadback: Promise<ArrayBuffer> = readStorageBuffer(storage, 4, 8);
+void readback;
+void rangedReadback;
+// @ts-expect-error GPU allocation handles remain internal.
+storage._buffer;
+resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+const vertices: MeshGeometryRange = { offset: 1, count: 3 };
+const range: MeshDrawRange = { vertices, indices: { offset: 3, count: 3 } };
+setMeshDrawRange(engine, mesh, range);
+// @ts-expect-error Draw ranges are immutable inputs, not mesh-owned mutable state.
+range.vertices.count = 4;
+declare const geometry: MeshGPU;
+const activeIndexCount: number = geometry.indexCount;
+void activeIndexCount;
+// @ts-expect-error Geometry counts remain readonly public observations.
+geometry.indexCount = 3;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes the complete compute scheduling and immediate-data surface", () => {
+        const probePath = resolve(BUILD_DIR, "compute-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    addComputeDispatch, armComputeOneShot, computeStorageBufferBinding, computeUniformBufferBinding,
+    createComputeBindingSet, createComputeDispatch, createComputeImmediateShader, createComputeIndirectDispatch,
+    createComputeOneShot, createComputePipelineVariant, createComputeTask, createComputeUniformArena,
+    createComputeUniformLayout, createComputeUniformWriter, createEngineWithFeatures, createStorageBuffer, createUniformBuffer,
+    isComputeImmediatesSupported, prepareComputeTask, setComputeDispatchDynamicOffset,
+    setComputeDispatchImmediates, setComputeUniformF32, submitComputeTasks,
+    type ComputeImmediateData, type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const canvas: OffscreenCanvas;
+const featuredEngine: Promise<EngineContext> = createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
+void featuredEngine;
+const uniforms = createUniformBuffer(engine, 256);
+const storage = createStorageBuffer(engine, 256, { writable: true, indirect: true });
+const shader = createComputeImmediateShader(engine, {
+    computeSource: "requires immediate_address_space; var<immediate> value: vec4f; @compute @workgroup_size(1) fn main() {}",
+    immediateByteLength: 16,
+    bindings: [
+        computeUniformBufferBinding("params", { group: 0, binding: 0, dynamicOffset: true, minBindingSize: 16 }),
+        computeStorageBufferBinding("data", { group: 0, binding: 1, access: "read-write" }),
+    ],
+});
+const bindings = createComputeBindingSet(shader, { params: { buffer: uniforms, size: 16 }, data: storage });
+const dispatch = createComputeDispatch(shader, bindings, { size: { x: 1 } });
+const immediateData: ComputeImmediateData = new Float32Array(4);
+setComputeDispatchImmediates(dispatch, immediateData);
+setComputeDispatchDynamicOffset(dispatch, "params", 0);
+const variant = createComputePipelineVariant(shader, { width: 4 });
+void variant;
+const indirect = createComputeIndirectDispatch(shader, bindings, { buffer: storage });
+setComputeDispatchImmediates(indirect, new Uint32Array(4));
+const task = createComputeTask(engine);
+addComputeDispatch(task, dispatch);
+addComputeDispatch(task, indirect);
+const arena = createComputeUniformArena(task, 16, 1);
+const layout = createComputeUniformLayout([{ name: "time", type: "f32" }]);
+const writer = createComputeUniformWriter(arena, 0, layout);
+setComputeUniformF32(writer, "time", 1);
+const shot = createComputeOneShot(task);
+const armed: Promise<void> = armComputeOneShot(shot);
+const prepared: Promise<void> = prepareComputeTask(task);
+submitComputeTasks([task]);
+void armed;
+void prepared;
+isComputeImmediatesSupported() satisfies boolean;
+// @ts-expect-error GPU pipeline handles remain internal.
+shader._pipeline;
+// @ts-expect-error GPU allocation handles remain internal.
+uniforms._buffer;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks cleanly with no references to internal-only types", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
@@ -97,6 +560,128 @@ describe("build/index.d.ts", () => {
         expect(result.status).toBe(0);
     }, 300_000);
 
+    it("supports public enum values with verbatimModuleSyntax", () => {
+        const probePath = resolve(BUILD_DIR, "public-enums-verbatim.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    CharacterSupportedState,
+    FgAnimationValueType,
+    FgBlockType,
+    FgEventType,
+    FgType,
+    PhysicsConstraintAxis,
+    PhysicsConstraintType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsShapeType,
+} from "./index.js";
+
+const publicEnumValues = [
+    CharacterSupportedState.SUPPORTED,
+    FgAnimationValueType.Quaternion,
+    FgBlockType.NoOp,
+    FgEventType.Start,
+    FgType.Number,
+    PhysicsConstraintAxis.LINEAR_X,
+    PhysicsConstraintType.HINGE,
+    PhysicsMotionType.DYNAMIC,
+    PhysicsPrestepType.TELEPORT,
+    PhysicsShapeType.SPHERE,
+] as const;
+void publicEnumValues;
+`
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--verbatimModuleSyntax",
+                    "true",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("accepts public and mutable matrix representations", () => {
+        const probePath = resolve(BUILD_DIR, "public-matrix-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { createIdentityMat4, setMat4Translation } from "./index.js";
+
+const liteMatrix = createIdentityMat4();
+const float32Matrix = new Float32Array(16);
+const float64Matrix = new Float64Array(16);
+
+const liteResult = setMat4Translation(liteMatrix, 1, 2, 3);
+const float32Result = setMat4Translation(float32Matrix, 1, 2, 3);
+const float64Result = setMat4Translation(float64Matrix, 1, 2, 3);
+
+liteResult satisfies typeof liteMatrix;
+float32Result satisfies Float32Array;
+float64Result satisfies Float64Array;
+`,
+                "utf-8"
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("does not reference any external (npm) modules", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
@@ -123,6 +708,186 @@ describe("build/index.d.ts", () => {
         // consumers never need to install any of our build-time dependencies.
         const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
+    });
+
+    it("exports the WGSL tag while stripping the source brand so consumers can pass plain strings", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).not.toContain("WgslSource");
+        expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("declare function wgsl(");
+        expect(dts).toContain("readonly vertexSource: string;");
+        expect(dts).toContain("readonly fragmentSource: string;");
+
+        const probePath = resolve(BUILD_DIR, "wgsl-source-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { wgsl, type ShaderMaterialOptions } from "./index.js";
+const options: ShaderMaterialOptions = {
+    vertexSource: wgsl\`tagged consumer vertex WGSL\`,
+    fragmentSource: "plain consumer fragment WGSL",
+    attributes: [],
+};
+void options;
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes the root zero-argument pipeline-sharing enabler without its internal setter or cache type", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("declare function enableShaderMaterialPipelineSharing(): void;");
+        expect(dts).not.toContain("declare function _setSharedShaderPipelineCache");
+        expect(dts).not.toContain("interface ShaderPipelineCache");
+        expect(dts).not.toContain("declare function _getShaderDeviceCache");
+        expect(dts).not.toContain("declare function _setShaderVertexBuffersKey");
+        expect(dts).not.toContain("declare function _serializeShaderVertexBuffers");
+        expect(dts).not.toContain("_shaderPipelineCache");
+        expect(dts).not.toContain("_shaderModuleMemo");
+
+        const probePath = resolve(BUILD_DIR, "shader-pipeline-sharing.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { enableShaderMaterialPipelineSharing } from "./index.js";
+enableShaderMaterialPipelineSharing();
+// @ts-expect-error The public enabler does not accept an engine, cache, or options.
+enableShaderMaterialPipelineSharing({});
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes external video textures without exposing WebGPU handles", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("interface ExternalTexture");
+        expect(dts).toContain("readonly video: HTMLVideoElement;");
+        expect(dts).toContain("declare function createExternalTexture");
+        expect(dts).toContain("declare function setShaderExternalTexture");
+        expect(dts).not.toContain("GPUExternalTexture");
+
+        const probePath = resolve(BUILD_DIR, "external-texture-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createExternalTexture,
+    createShaderMaterial,
+    getShaderExternalTexture,
+    isExternalTextureReady,
+    setShaderExternalTexture,
+    type ExternalTexture,
+    type ShaderMaterialOptions,
+} from "./index.js";
+
+declare const video: HTMLVideoElement;
+const externalTexture: ExternalTexture = createExternalTexture(video);
+const options: ShaderMaterialOptions = {
+    vertexSource: "",
+    fragmentSource: "",
+    attributes: ["position"],
+    externalTextures: ["videoSampler"],
+};
+const material = createShaderMaterial(options);
+setShaderExternalTexture(material, "videoSampler", externalTexture);
+const current: ExternalTexture | null = getShaderExternalTexture(material, "videoSampler");
+const ready: boolean = isExternalTextureReady(externalTexture);
+// @ts-expect-error Browser video elements must be wrapped before binding.
+setShaderExternalTexture(material, "videoSampler", video);
+void [current, ready];
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("exposes only the build-time moving-emitter provider API", () => {
@@ -152,6 +917,175 @@ describe("build/index.d.ts", () => {
         expect(dts).toContain('type PhysicsRotationAxis = "x" | "y" | "z"');
         expect(dts).toMatch(/lockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
         expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
+    });
+
+    it("exposes deferred absolute world-space bone poses", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/setBoneWorldPoseDeferred\(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number\): void/);
+        expect(dts).toMatch(/@public\s*\*\/\s*export declare function setBoneWorldPoseDeferred/);
+    });
+
+    it("exposes readonly rendering-context introspection without internal registries", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/getRenderingContextKind\(context: RenderingContext(?:_\d+)?\): string/);
+        expect(dts).toMatch(/getRenderingContexts\(surface: SurfaceContext\): readonly RenderingContext(?:_\d+)?\[\]/);
+        expect(dts).not.toMatch(/\btype RenderingContextKind\b/);
+        expect(dts).not.toMatch(/declare interface RenderingContext(?:_\d+)? \{[^}]*\bkind:/s);
+        expect(dts).not.toContain("_renderingContextKind");
+        expect(dts).not.toMatch(/^\s*_renderingContexts:/m);
+        expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
+    });
+
+    it("exposes readonly material texture introspection without internal slots", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/getMaterialTextures\(material: Material(?:_\d+)?\): readonly Texture2D(?:_\d+)?\[\]/);
+        expect(dts).not.toMatch(/^\s*_textureSlots:/m);
+    });
+
+    it("exposes root-only material and texture domain accessors", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).not.toMatch(/\b\w*Inspection\w*\b/);
+        expect(dts).not.toMatch(/\bMaterialTextureBinding\w*\b/);
+
+        const requiredSymbols = [
+            "getMaterialSource",
+            "isMaterialView",
+            "getMaterialFamily",
+            "getMaterialTextures",
+            "getStandardEmissiveTexture",
+            "getStandardBumpTexture",
+            "getStandardSpecularTexture",
+            "getStandardAmbientTexture",
+            "getStandardLightmapTexture",
+            "getStandardOpacityTexture",
+            "getStandardReflectionTexture",
+            "getStandardReflectionCubeTexture",
+            "getPbrAlphaCutoff",
+            "getPbrEmissiveColor",
+            "getPbrMetallicReflectance",
+            "getPbrClearCoat",
+            "getPbrSheen",
+            "getPbrIridescence",
+            "getPbrAnisotropy",
+            "getPbrSubsurface",
+            "getPbrTransmission",
+            "getPbrDispersion",
+            "isPbrGammaAlbedo",
+            "getPbrUnlit",
+            "isPbrSkybox",
+            "getShadowOnly",
+            "hasMaterialUvTransform",
+            "getShaderUniform",
+            "getShaderTexture",
+            "getTextureMetadata",
+            "getTextureTransform",
+            "setTextureTransform",
+            "getTextureCoordinateIndex",
+            "hasTextureTransform",
+            "TextureMetadata",
+            "TextureTransform",
+        ] as const;
+        const missingSymbols = requiredSymbols.filter((symbol) => !new RegExp(`\\b(?:function|interface|type) ${symbol}\\b`).test(dts));
+        expect(missingSymbols, "Missing domain accessor root exports").toEqual([]);
+
+        const probePath = resolve(BUILD_DIR, "domain-accessor-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getMaterialSource, isMaterialView, getMaterialFamily, getMaterialTextures,
+    getStandardEmissiveTexture, getStandardReflectionCubeTexture,
+    getPbrClearCoat, getPbrSubsurface, getPbrUnlit, getShadowOnly,
+    hasMaterialUvTransform, getShaderUniform, getShaderTexture,
+    getTextureMetadata, getTextureTransform, setTextureTransform,
+    getTextureCoordinateIndex, hasTextureTransform,
+    type ClearCoatProps, type Material, type MaterialView, type PbrMaterialProps, type ShaderMaterial,
+    type SubSurfaceProps,
+    type StandardMaterialProps, type Texture2D, type TextureMetadata, type TextureTransform,
+} from "./index.js";
+// @ts-expect-error The Inspector-shaped dispatcher was removed from Lite.
+import { inspectMaterial } from "./index.js";
+
+declare const material: Material;
+declare const view: MaterialView;
+declare const standard: StandardMaterialProps;
+declare const pbr: PbrMaterialProps;
+declare const shader: ShaderMaterial;
+declare const texture: Texture2D;
+declare const transform: TextureTransform;
+declare function consumeFloat32Array(value: Float32Array): void;
+
+const source: Material = getMaterialSource(view);
+const viewFlag: boolean = isMaterialView(material);
+const family: string | undefined = getMaterialFamily(material);
+const materialTextures: readonly Texture2D[] = getMaterialTextures(view);
+const standardTexture: Texture2D | null | undefined = getStandardEmissiveTexture(standard);
+getStandardReflectionCubeTexture(standard);
+const clearCoat: Readonly<ClearCoatProps> | undefined = getPbrClearCoat(pbr);
+const subsurface: Readonly<SubSurfaceProps> | undefined = getPbrSubsurface(pbr);
+const unlit: readonly [number, number, number] | undefined = getPbrUnlit(pbr);
+const shadowOnly = getShadowOnly(pbr);
+const hasUv: boolean = hasMaterialUvTransform(view);
+const uniform: number | Float32Array = getShaderUniform(shader, "color");
+const shaderTexture: Texture2D | null = getShaderTexture(shader, "colorMap");
+const metadata: TextureMetadata | undefined = getTextureMetadata(texture);
+const textureTransform: TextureTransform | undefined = getTextureTransform(texture);
+const changed: boolean = setTextureTransform(texture, transform);
+const coordinateIndex: 0 | 1 = getTextureCoordinateIndex(texture);
+const hasTransform: boolean = hasTextureTransform(texture);
+if (clearCoat) {
+    // @ts-expect-error Getter configuration objects are compile-time readonly.
+    clearCoat.roughness = 1;
+}
+if (unlit) {
+    // @ts-expect-error Getter tuples are compile-time readonly.
+    unlit[0] = 1;
+}
+if (typeof uniform !== "number") {
+    const nativeArray: Float32Array = uniform;
+    const view: Float32Array = uniform.subarray();
+    consumeFloat32Array(uniform);
+    void [nativeArray, view, uniform.buffer];
+}
+// @ts-expect-error Metadata never exposes the backing GPU texture.
+metadata?.texture;
+// @ts-expect-error Metadata never exposes the backing texture view.
+metadata?.view;
+void [
+    inspectMaterial, source, viewFlag, family, materialTextures, standardTexture,
+    clearCoat, subsurface, unlit, shadowOnly, hasUv, uniform, shaderTexture,
+    metadata, textureTransform, changed, coordinateIndex, hasTransform,
+];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("rejects invalid emitter fields while preserving extended provider options", () => {

@@ -18,7 +18,7 @@ import { ObservableVec3 } from "../../math/observable-vec3.js";
 import { ObservableQuat } from "../../math/observable-quat.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../../scene/world-matrix-state.js";
 import { createEulerProxy } from "../../scene/scene-node.js";
-import { eulerToQuat } from "../../math/quat-euler.js";
+import { eulerXYZToQuatTuple } from "../../math/quat-euler.js";
 import { buildSplatGeometry, type SplatGeometry, type ParsedSplat } from "../../loader-splat/splat-data.js";
 
 /** Names of the four WGSL slots a `GsShaderFragment` may inject into the
@@ -351,7 +351,7 @@ export function disposeGaussianSplattingMesh(mesh: GaussianSplattingMesh): void 
 function initSplatTransform(node: GaussianSplattingMesh): void {
     const wm = createWorldMatrixState(() => composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling));
     const onDirty = (): void => wm.markLocalDirty();
-    const [iqx, iqy, iqz, iqw] = eulerToQuat(0, 0, 0);
+    const [iqx, iqy, iqz, iqw] = eulerXYZToQuatTuple(0, 0, 0);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onDirty);
     (node as unknown as Record<string, unknown>).rotationQuaternion = rq;
     (node as unknown as Record<string, unknown>).rotation = createEulerProxy(rq);

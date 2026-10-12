@@ -63,7 +63,7 @@ async function main(): Promise<void> {
         scene,
     );
 
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, MODEL_URL).then((asset) => addToScene(scene, asset)),

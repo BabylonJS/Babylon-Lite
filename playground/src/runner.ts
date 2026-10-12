@@ -3,6 +3,8 @@ import { rebaseAssetReferences, withBase } from "./base";
 export type RunnerMessage =
     | { type: "ready" }
     | { type: "ran" }
+    | { type: "engine-ready" }
+    | { type: "inspector"; open: boolean }
     | { type: "console"; level: "log" | "info" | "warn" | "error"; text: string }
     | { type: "error"; text: string }
     | { type: "stats"; fps: number };
@@ -15,11 +17,13 @@ export type RunnerMessage =
 export class Runner {
     private readonly host: HTMLElement;
     private readonly onMessage: (message: RunnerMessage) => void;
+    private readonly onTeardown: () => void;
     private frame: HTMLIFrameElement | null = null;
 
-    constructor(host: HTMLElement, onMessage: (message: RunnerMessage) => void) {
+    constructor(host: HTMLElement, onMessage: (message: RunnerMessage) => void, onTeardown: () => void) {
         this.host = host;
         this.onMessage = onMessage;
+        this.onTeardown = onTeardown;
         window.addEventListener("message", this.handleMessage);
     }
 
@@ -39,15 +43,20 @@ export class Runner {
     };
 
     /** Replace the iframe with a fresh one and run the given transpiled module code. */
-    async run(code: string, engineUrl?: string): Promise<void> {
+    async run(code: string, engineUrl?: string, inspectorUrl?: string): Promise<void> {
         const frame = document.createElement("iframe");
         frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
         const ready = this.waitForReady(frame);
-        frame.src = engineUrl ? withBase(`runner.html?engine=${encodeURIComponent(engineUrl)}`) : withBase("runner.html");
-
-        if (this.frame) {
-            this.frame.remove();
+        const params = new URLSearchParams();
+        if (engineUrl) {
+            params.set("engine", engineUrl);
         }
+        if (inspectorUrl) {
+            params.set("inspector", inspectorUrl);
+        }
+        frame.src = withBase(`runner.html${params.size > 0 ? `?${params}` : ""}`);
+
+        this.dispose();
         this.frame = frame;
         this.host.appendChild(frame);
 
@@ -58,11 +67,17 @@ export class Runner {
         frame.contentWindow?.postMessage({ type: "run", code: rebaseAssetReferences(code) }, window.location.origin);
     }
 
+    /** Toggle Inspector v2 for the engine created by the current snippet. */
+    toggleInspector(): void {
+        this.frame?.contentWindow?.postMessage({ type: "toggle-inspector" }, window.location.origin);
+    }
+
     /** Tear down the current runner iframe, stopping its engine and render loop. */
     dispose(): void {
         if (this.frame) {
             this.frame.remove();
             this.frame = null;
+            this.onTeardown();
         }
     }
 

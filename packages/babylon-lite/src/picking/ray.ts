@@ -1,5 +1,5 @@
 import type { Mat4 } from "../math/types.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 
 /** A ray defined by origin, direction, and length. */
 export interface Ray {
@@ -13,7 +13,7 @@ export interface Ray {
  * Uses left-handed coordinates with WebGPU reverse-Z 0-to-1 depth range.
  */
 export function createPickingRay(x: number, y: number, vpMatrix: Mat4, width: number, height: number): Ray | null {
-    const invVP = mat4Invert(vpMatrix);
+    const invVP = invertMat4(vpMatrix);
     if (!invVP) {
         return null;
     }

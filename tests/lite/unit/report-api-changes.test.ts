@@ -12,6 +12,75 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual([]);
     });
 
+    it("treats trailing optional parameters on multiline functions as additive", () => {
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            " export function prepareShaderMaterialPipeline(",
+            "     engine: EngineContext,",
+            "     material: ShaderMaterial,",
+            "     layout: ShaderMaterialPipelineLayout,",
+            "-    target: RenderTarget | RenderTask",
+            "+    target: RenderTarget | RenderTask,",
+            "+    mesh?: Mesh",
+            " ): Promise<void>;",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("flags trailing required parameters on multiline functions as breaking", () => {
+        const removed = "target: RenderTarget | RenderTask";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            " export function prepareShaderMaterialPipeline(",
+            "-    target: RenderTarget | RenderTask",
+            "+    target: RenderTarget | RenderTask,",
+            "+    mesh: Mesh",
+            " ): Promise<void>;",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("flags multiline parameter type changes even when an optional parameter is appended", () => {
+        const removed = "target: RenderTarget | RenderTask";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            " export function prepareShaderMaterialPipeline(",
+            "-    target: RenderTarget | RenderTask",
+            "+    target: RenderTarget,",
+            "+    mesh?: Mesh",
+            " ): Promise<void>;",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("does not let an optional parameter in another hunk excuse a comma change", () => {
+        const removed = "target: RenderTarget | RenderTask";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@ -1,2 +1,2 @@",
+            "-    target: RenderTarget | RenderTask",
+            "+    target: RenderTarget | RenderTask,",
+            "@@ -20,1 +20,2 @@",
+            "+    mesh?: Mesh",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
     it("treats trailing rest parameters as additive", () => {
         const diff = apiDiff("export declare function setDefines(name: string): void;", "export declare function setDefines(name: string, ...defines: string[]): void;");
 
@@ -34,6 +103,15 @@ describe("API report breaking-change classifier", () => {
         const diff = apiDiff(
             "export declare function removeFromScene(scene: SceneContext, mesh: Mesh): void;",
             "export declare function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera): void;"
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("treats the storage-buffer input and options widening as additive", () => {
+        const diff = apiDiff(
+            "export function createStorageBuffer(engine: EngineContext, data: ArrayBufferView, label?: string): StorageBuffer;",
+            "export function createStorageBuffer(engine: EngineContext, source: ArrayBufferView | number, labelOrOptions?: string | StorageBufferOptions): StorageBuffer;"
         );
 
         expect(breakingApiLines(diff)).toEqual([]);
@@ -158,6 +236,56 @@ describe("API report breaking-change classifier", () => {
         ].join("\n");
 
         expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("ignores API Extractor moving undocumented comments onto declarations", () => {
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            " export interface ShaderMaterial extends Material {",
+            "     // (undocumented)",
+            "-    readonly attributes: readonly ShaderAttributeName[];",
+            "-    // (undocumented)",
+            "-    readonly blend?: GPUBlendState;",
+            "+    readonly attributes: readonly ShaderAttributeName[]; // (undocumented)",
+            "+    readonly blend?: GPUBlendState; // (undocumented)",
+            " }",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("still flags a member type change when an undocumented comment also moves", () => {
+        const removed = "readonly blend?: GPUBlendState;";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            "-    readonly blend?: GPUBlendState;",
+            "-    // (undocumented)",
+            "+    readonly blend?: GPUColorTargetState; // (undocumented)",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("still flags an actual member removal amid undocumented comment churn", () => {
+        const removed = "readonly removedValue: string;";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            "-    readonly removedValue: string;",
+            "-    readonly stableValue: number;",
+            "-    // (undocumented)",
+            "+    readonly stableValue: number; // (undocumented)",
+        ].join("\n");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
     });
 
     it("treats overloads collapsed into one widened union signature as additive", () => {

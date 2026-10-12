@@ -12,6 +12,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import { SCENE88_NME_JSON } from "../shared/scene88-nme.js";
+import { createBlockLoader } from "../shared/scene88-block-loader.js";
 
 async function main(): Promise<void> {
     const initStart = performance.now();
@@ -26,7 +27,7 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE88_NME_JSON });
+    const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE88_NME_JSON, blockLoader: createBlockLoader() });
     const plane = createPlane(engine, { width: 3.2, height: 2.2 });
     plane.material = material;
     addToScene(scene, plane);

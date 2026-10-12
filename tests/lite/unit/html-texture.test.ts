@@ -5,6 +5,7 @@ import {
     requestHtmlTextureUpdate,
     disposeHtmlTexture,
     isHtmlInCanvasSupported,
+    whenHtmlTextureReady,
 } from "../../../packages/babylon-lite/src/texture/html-texture";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
@@ -209,6 +210,52 @@ describe("createHtmlTexture (native path)", () => {
         expect(cap.submits).toBe(1);
     });
 
+    it("resolves readiness only after the first successful paint upload", async () => {
+        const host = makeHost({ withRequestPaint: false });
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const tex = createHtmlTexture(engine, makeElement(), {});
+        let ready = false;
+        void whenHtmlTextureReady(tex).then(() => {
+            ready = true;
+        });
+
+        await Promise.resolve();
+        expect(ready).toBe(false);
+        host.dispatchPaint();
+        await whenHtmlTextureReady(tex);
+        expect(ready).toBe(true);
+    });
+
+    it("keeps readiness pending after a transient native upload failure and resolves after retry", async () => {
+        const host = makeHost({ withRequestPaint: false });
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const queue = engine._device.queue as unknown as { copyElementImageToTexture: () => void };
+        const failure = new Error("native upload failed");
+        queue.copyElementImageToTexture = (): void => {
+            throw failure;
+        };
+        const tex = createHtmlTexture(engine, makeElement(), { invertY: false });
+        const ready = whenHtmlTextureReady(tex);
+        let settled = false;
+        void ready.finally(() => {
+            settled = true;
+        });
+
+        expect(() => host.dispatchPaint()).toThrow(failure);
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        queue.copyElementImageToTexture = (): void => {
+            cap.copyExternalCalls++;
+        };
+        host.dispatchPaint();
+        await ready;
+        expect(settled).toBe(true);
+        expect(cap.copyExternalCalls).toBe(1);
+    });
+
     it("copies straight into the texture (no flip blit) when invertY:false", () => {
         const host = makeHost();
         const cap = newCap();
@@ -319,6 +366,20 @@ describe("disposeHtmlTexture", () => {
         expect(cap.copyElementCalls).toHaveLength(count);
     });
 
+    it("rejects pending readiness and cannot upload after disposal", async () => {
+        const host = makeHost({ withRequestPaint: false });
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const tex = createHtmlTexture(engine, makeElement(), {});
+        const ready = whenHtmlTextureReady(tex);
+
+        disposeHtmlTexture(tex);
+        host.dispatchPaint();
+
+        await expect(ready).rejects.toThrow(/disposed before its first upload/);
+        expect(cap.copyElementCalls).toHaveLength(0);
+    });
+
     it("restores the element to its original parent when it had one", () => {
         const host = makeHost();
         const engine = makeEngine(host, newCap());
@@ -408,8 +469,8 @@ describe("SVG fallback path", () => {
         const cap = newCap();
         const engine = makeEngine(host, cap, { native: false });
 
-        createHtmlTexture(engine, makeElement(), { useSvgFallback: true });
-        await new Promise((r) => setTimeout(r, 0));
+        const tex = createHtmlTexture(engine, makeElement(), { useSvgFallback: true });
+        await whenHtmlTextureReady(tex);
 
         // No native copy; the fallback uploaded through copyExternalImageToTexture.
         expect(cap.copyElementCalls).toHaveLength(0);
@@ -423,13 +484,32 @@ describe("SVG fallback path", () => {
         const engine = makeEngine(host, cap, { native: false });
         const el = makeElement();
 
-        createHtmlTexture(engine, el, { useSvgFallback: false });
-        await new Promise((r) => setTimeout(r, 0));
+        const tex = createHtmlTexture(engine, el, { useSvgFallback: false });
+        await expect(whenHtmlTextureReady(tex)).rejects.toThrow(/no supported HTML upload path/);
 
         expect(cap.copyExternalCalls).toBe(0);
         // With no update path the element must not be hosted or the DOM mutated.
         expect(host.children).not.toContain(el);
         expect(host.layoutSubtree).toBe(false);
         expect(writable(el).inert).toBe(false);
+    });
+
+    it("rejects readiness when SVG rasterisation fails", async () => {
+        const g = globalThis as Record<string, unknown>;
+        g.XMLSerializer = class {
+            serializeToString(): string {
+                return "<div>hi</div>";
+            }
+        };
+        g.Image = class {
+            onload: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+            set src(_value: string) {
+                queueMicrotask(() => this.onerror?.());
+            }
+        };
+        const tex = createHtmlTexture(makeEngine(makeHost({ withRequestPaint: false }), newCap(), { native: false }), makeElement(), { useSvgFallback: true });
+
+        await expect(whenHtmlTextureReady(tex)).rejects.toThrow(/failed to rasterise/);
     });
 });

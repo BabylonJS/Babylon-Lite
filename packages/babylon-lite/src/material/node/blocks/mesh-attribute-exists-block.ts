@@ -9,6 +9,7 @@
  */
 
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function attributeFlag(attributeType: number): string | null {
     switch (attributeType) {
@@ -44,7 +45,7 @@ export const emitter: BlockEmitter = {
         const fallback = ctx.cast(ctx.resolve(block, "fallback", stage, state), input.type);
         const expr = ctx.temp(state, "attr");
         const s = stage === "vertex" ? state.vertex : state.fragment;
-        s.body.push(`let ${expr} = select(${fallback.expr}, ${input.expr}, ${flag} > 0.5);`);
+        s.body.push(wgsl`let ${expr} = select(${fallback.expr}, ${input.expr}, ${flag} > 0.5);`);
         return { expr, type: input.type } as NodeExpr;
     },
 };

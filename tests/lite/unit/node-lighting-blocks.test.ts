@@ -1,6 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { parseNodeMaterialSource, findBlockByClassName } from "../../../packages/babylon-lite/src/material/node/node-parser";
 import { emitGraph, loadGraphEmitters } from "../../../packages/babylon-lite/src/material/node/node-emitter";
+import { createNodeLightingFeature } from "../../../packages/babylon-lite/src/material/node/node-lighting";
+import { parseNodeMaterialFromSnippet } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { clearNodePipelineCache, compileNodePipeline } from "../../../packages/babylon-lite/src/material/node/node-pipeline";
+import { loadBlockEmitter } from "../../../packages/babylon-lite/src/material/node/node-registry";
+import type { BlockEmitter } from "../../../packages/babylon-lite/src/material/node/node-types";
+
+function engineFixture(): EngineContext {
+    const device = {
+        createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout),
+        createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
+        createShaderModule: vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule),
+        createRenderPipeline: vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline),
+    } as unknown as GPUDevice;
+    return { _device: device, format: "rgba8unorm", msaaSamples: 1 } as unknown as EngineContext;
+}
 
 async function compile(source: any, includeVertex = false) {
     const graph = parseNodeMaterialSource(source);
@@ -47,6 +63,25 @@ describe("NME lighting blocks", () => {
         // exactly one call in the body (helper signature is `fn nme_computeLighting(`)
         const calls = r.fragmentWgsl.match(/= nme_computeLighting\(/g) || [];
         expect(calls).toHaveLength(1);
+
+        const compiled = compileNodePipeline(r.state, r.vertexWgsl, r.fragmentWgsl, {
+            _engine: engineFixture(),
+            _format: "rgba8unorm",
+            _msaaSamples: 1,
+        });
+        expect(r.state._meshFeature).toBeTypeOf("function");
+        expect(compiled._meshUboFloats).toBe(40);
+        expect(compiled._writeMeshFeature).toBeTypeOf("function");
+        expect(compiled._wgsl).toContain("    lc: u32,");
+        expect(compiled._wgsl).toContain("    li: array<vec4<u32>, 4>,");
+        expect(compiled._wgsl).toContain("fn nli(i: u32) -> u32");
+        expect(compiled._wgsl).toContain("var<uniform> nmeLights: lightsUniforms;");
+        const meshData = new Float32Array(40);
+        compiled._writeMeshFeature!({ id: "mesh" } as never, [{ _writeLightUbo: vi.fn() }] as never, meshData);
+        const meshWords = new Uint32Array(meshData.buffer);
+        expect(meshWords[20]).toBe(1);
+        expect(meshWords[24]).toBe(0);
+        clearNodePipelineCache();
     });
 
     it("FogBlock injects fogFactor helper and mixes with fogColor", async () => {
@@ -106,6 +141,38 @@ describe("NME lighting blocks", () => {
         };
         const r = await compile(g);
         expect(r.fragmentWgsl).toContain("nmeLights.lights[nli(2u)].vLightDiffuse.rgb");
+    });
+
+    it("preserves flag-only custom lighting emitter compatibility at the public parse boundary", async () => {
+        const graph = {
+            blocks: [
+                { customType: "BABYLON.CustomLightBlock", id: 1, name: "custom", inputs: [], outputs: [{ name: "color" }] },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 2,
+                    name: "out",
+                    inputs: [{ name: "rgb", targetBlockId: 1, targetConnectionName: "color" }],
+                    outputs: [],
+                },
+            ],
+            outputNodes: [2],
+        };
+        const customLight: BlockEmitter = {
+            className: "CustomLightBlock",
+            emit(_block, _outputName, _stage, state) {
+                state.usesLightsUbo = true;
+                return { expr: "vec3<f32>(1.0)", type: "vec3f" };
+            },
+        };
+        const blockLoader = async (className: string): Promise<BlockEmitter> => (className === "CustomLightBlock" ? customLight : loadBlockEmitter(className));
+
+        const material = await parseNodeMaterialFromSnippet(engineFixture(), "", { json: graph, blockLoader });
+
+        expect(material._state._meshFeature).toBe(createNodeLightingFeature);
+        expect(material._compile._meshUboFloats).toBe(40);
+        expect(material._compile._writeMeshFeature).toBeTypeOf("function");
+        expect(material._compile._wgsl).toContain("var<uniform> nmeLights: lightsUniforms;");
+        clearNodePipelineCache();
     });
 
     it("PerturbNormalBlock injects helper and strength default", async () => {

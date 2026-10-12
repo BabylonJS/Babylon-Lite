@@ -1,4 +1,5 @@
 import {
+    addMeshToTask,
     addTask,
     addTaskAtStart,
     addToScene,
@@ -106,8 +107,8 @@ async function main(): Promise<void> {
         material.specularColor = [0, 0, 0];
         box.material = material;
         addToScene(scene, box);
-        sourceTask.addMesh(box);
-        leftTask.addMesh(box);
+        addMeshToTask(sourceTask, box);
+        addMeshToTask(leftTask, box);
     }
 
     // Final post-process passes composite (via viewports) directly into the engine

@@ -1,17 +1,18 @@
 import type { BlockEmitter, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function scalar(type: NodeValueType, value: string): string {
     if (type === "f32") {
         return value;
     }
     if (type === "vec2f") {
-        return `vec2<f32>(${value})`;
+        return wgsl`vec2<f32>(${value})`;
     }
     if (type === "vec3f") {
-        return `vec3<f32>(${value})`;
+        return wgsl`vec3<f32>(${value})`;
     }
     if (type === "vec4f") {
-        return `vec4<f32>(${value})`;
+        return wgsl`vec4<f32>(${value})`;
     }
     throw new Error(`NodeMaterial: WaveBlock does not support ${type}`);
 }

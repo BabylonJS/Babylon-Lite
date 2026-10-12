@@ -78,7 +78,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "event/onStart": { block: FgBlockType.SceneStart, flowOutputs: { out: "done" } },
     "event/onTick": { block: FgBlockType.SceneTick, outputValues: { timeSinceLastTick: "deltaTime" }, flowOutputs: { out: "done" } },
 
-    "flow/branch": { block: FgBlockType.Branch, valueInputs: { condition: "condition" }, flowOutputs: { true: "onTrue", false: "onFalse" } },
+    "flow/branch": { block: FgBlockType.Branch, flowOutputs: { true: "onTrue", false: "onFalse" } },
     "flow/sequence": { block: FgBlockType.Sequence, dynamicSequence: true },
 
     // ─── Phase 3h control-flow ops ────────────────────────────────────────────
@@ -100,17 +100,17 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "flow/setDelay": { block: FgBlockType.SetDelay, flowOutputs: { err: "error" }, outputValues: { lastDelay: "lastDelayIndex" } },
     "flow/cancelDelay": { block: FgBlockType.CancelDelay, valueInputs: { delay: "delayIndex" } },
 
-    "math/add": { block: FgBlockType.Add, valueInputs: { a: "a", b: "b" } },
-    "math/sub": { block: FgBlockType.Subtract, valueInputs: { a: "a", b: "b" } },
-    "math/mul": { block: FgBlockType.Multiply, valueInputs: { a: "a", b: "b" } },
-    "math/div": { block: FgBlockType.Divide, valueInputs: { a: "a", b: "b" } },
-    "math/rem": { block: FgBlockType.Modulo, valueInputs: { a: "a", b: "b" } },
-    "math/abs": { block: FgBlockType.Abs, valueInputs: { a: "a" } },
-    "math/floor": { block: FgBlockType.Floor, valueInputs: { a: "a" } },
-    "math/lt": { block: FgBlockType.LessThan, valueInputs: { a: "a", b: "b" } },
-    "math/clamp": { block: FgBlockType.Clamp, valueInputs: { a: "a", b: "b", c: "c" } },
-    "math/combine2": { block: FgBlockType.CombineVector2, valueInputs: { a: "a", b: "b" } },
-    "math/extract2": { block: FgBlockType.ExtractVector2, valueInputs: { a: "a" }, outputValues: { "0": "x", "1": "y" } },
+    "math/add": { block: FgBlockType.Add },
+    "math/sub": { block: FgBlockType.Subtract },
+    "math/mul": { block: FgBlockType.Multiply },
+    "math/div": { block: FgBlockType.Divide },
+    "math/rem": { block: FgBlockType.Modulo },
+    "math/abs": { block: FgBlockType.Abs },
+    "math/floor": { block: FgBlockType.Floor },
+    "math/lt": { block: FgBlockType.LessThan },
+    "math/clamp": { block: FgBlockType.Clamp },
+    "math/combine2": { block: FgBlockType.CombineVector2 },
+    "math/extract2": { block: FgBlockType.ExtractVector2, outputValues: { "0": "x", "1": "y" } },
     // ─── Phase 3 math (pass-through a/b/c sockets) ───────────────────────────
     "math/neg": { block: FgBlockType.Negation },
     "math/sign": { block: FgBlockType.Sign },
@@ -167,12 +167,10 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "math/smoothStep": { block: FgBlockType.SmoothStep },
     "math/rgbToOkLCh": {
         block: FgBlockType.RGBToOkLCh,
-        valueInputs: { r: "r", g: "g", b: "b" },
         outputValues: { l: "l", c: "c", h: "h" },
     },
     "math/rgbFromOkLCh": {
         block: FgBlockType.RGBFromOkLCh,
-        valueInputs: { l: "l", c: "c", h: "h" },
         outputValues: { r: "r", g: "g", b: "b" },
     },
     "math/quatSlerp": { block: FgBlockType.MathSlerp },
@@ -194,7 +192,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     // ─── Phase 3 math (custom socket / output mapping) ───────────────────────
     "math/extract3": { block: FgBlockType.ExtractVector3, outputValues: { "0": "x", "1": "y", "2": "z" } },
     "math/extract4": { block: FgBlockType.ExtractVector4, outputValues: { "0": "x", "1": "y", "2": "z", "3": "w" } },
-    "math/rotate2D": { block: FgBlockType.Rotate2D, valueInputs: { a: "a", angle: "b" } },
+    "math/rotate2D": { block: FgBlockType.Rotate2D, valueInputs: { angle: "b" } },
     "math/select": { block: FgBlockType.Conditional, valueInputs: { condition: "condition", a: "onTrue", b: "onFalse" } },
     // math/switch: data switch; cases array from glTF configuration.
     "math/switch": { block: FgBlockType.DataSwitch, configArrayKeys: { cases: "cases" } },
@@ -298,21 +296,21 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "variable/set": { block: FgBlockType.SetVariable, configArrayKeys: { variables: "variables" } },
 
     "pointer/get": { block: FgBlockType.GetProperty, pointer: true },
-    "pointer/set": { block: FgBlockType.SetProperty, pointer: true, valueInputs: { value: "value" }, flowOutputs: { err: "error" } },
+    "pointer/set": { block: FgBlockType.SetProperty, pointer: true, flowOutputs: { err: "error" } },
 
     "animation/start": {
         block: FgBlockType.PlayAnimation,
-        valueInputs: { animation: "animation", speed: "speed", startTime: "from", endTime: "to" },
+        valueInputs: { startTime: "from", endTime: "to" },
         valueTransform: { startTime: FPS, endTime: FPS },
         connectedValueScale: { startTime: 60, endTime: 60 },
         flowOutputs: { err: "error" },
     },
-    "animation/stop": { block: FgBlockType.StopAnimation, valueInputs: { animation: "animation" }, flowOutputs: { err: "error" } },
+    "animation/stop": { block: FgBlockType.StopAnimation, flowOutputs: { err: "error" } },
     // animation/stopAt: defers the stop until playback reaches `stopAtFrame`.
     // glTF `stopTime` (seconds) → `stopAtFrame` via the FPS transform.
     "animation/stopAt": {
         block: FgBlockType.StopAnimation,
-        valueInputs: { animation: "animation", stopTime: "stopAtFrame" },
+        valueInputs: { stopTime: "stopAtFrame" },
         valueTransform: { stopTime: FPS },
         connectedValueScale: { stopTime: 60 },
         flowOutputs: { err: "error" },
@@ -328,8 +326,8 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "event/send": { block: FgBlockType.SendCustomEvent, configKeys: { event: "eventId" } },
     // glTF flow key `out` maps to the Lite `done` signal (BJS convention).
     "event/receive": { block: FgBlockType.ReceiveCustomEvent, configKeys: { event: "eventId" }, flowOutputs: { out: "done" } },
-    "event/stopPropagation": { block: FgBlockType.StopEventPropagation, valueInputs: { event: "event", stopImmediate: "stopImmediate" } },
-    "ref/eq": { block: FgBlockType.Equality, valueInputs: { a: "a", b: "b" } },
+    "event/stopPropagation": { block: FgBlockType.StopEventPropagation },
+    "ref/eq": { block: FgBlockType.Equality },
 
     // ─── Phase 3i interpolation ops ───────────────────────────────────────────
     // Interpolation blocks write directly to their variable/pointer target on
@@ -351,7 +349,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
 
 /** Babylon-extension ops (`declaration.extension === "BABYLON"`). */
 const BABYLON_OPS: Readonly<Record<string, FgOpMapping>> = {
-    "flow/log": { block: FgBlockType.ConsoleLog, valueInputs: { message: "message" } },
+    "flow/log": { block: FgBlockType.ConsoleLog },
 };
 
 /** KHR_node_selectability ops (`declaration.extension === "KHR_node_selectability"`). */

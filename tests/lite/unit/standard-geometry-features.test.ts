@@ -10,13 +10,12 @@ import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/s
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
-import { buildStandardMeshRenderables, type StandardRebuildContext } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
+import { buildStandardMeshRenderables, type StandardGeometryContext, type StandardRebuildContext } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
 import { STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
 import { _installStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
-import { buildStandardGeometryRenderable, disposeStandardGeometryViewResources } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
-import { disposeNodeGeometryViewResources } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
+import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
 import { createStandardGeometryMaterialView } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import type { StandardGeometryMaterialView } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import { createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
@@ -62,7 +61,27 @@ function makeStdMesh(gpu: object = {}): Mesh {
 
 // ── Blocker 4: the singleton Standard builder must not cross-contaminate scenes ──
 describe("Standard per-scene rebuild context", () => {
-    it("stores an independent engine/fog rebuild context on each scene and does not let a later build clobber an earlier scene's", () => {
+    it("rejects a rebuild in an uninitialized scene rather than using the originating scene's device", () => {
+        const engineA = makeMockEngine();
+        const engineB = makeMockEngine();
+        const sceneA = createSceneContext(engineA, { defaultRenderTask: false });
+        const sceneB = createSceneContext(engineB, { defaultRenderTask: false });
+        const { rebuildSingle } = buildStandardMeshRenderables(sceneA, [], {
+            sceneShader: { _features: STD_SCENE_FOG, _fragments: [createStandardFogFragment()] },
+        });
+        const foreignAllocation = vi.spyOn(engineA._device, "createBuffer");
+        try {
+            expect(() => rebuildSingle(sceneB, makeStdMesh())).toThrow(/initial build in this scene/);
+            expect(foreignAllocation).not.toHaveBeenCalled();
+            buildStandardMeshRenderables(sceneB, [], { sceneShader: null });
+            expect(() => rebuildSingle(sceneB, makeStdMesh())).not.toThrow();
+            expect(foreignAllocation).not.toHaveBeenCalled();
+        } finally {
+            foreignAllocation.mockRestore();
+        }
+    });
+
+    it("keeps factories scene-local and resolves the rebuilding scene's engine", () => {
         const engA = makeMockEngine();
         const engB = makeMockEngine();
         const sceneA = createSceneContext(engA, { defaultRenderTask: false }) as SceneContext;
@@ -75,19 +94,22 @@ describe("Standard per-scene rebuild context", () => {
         buildStandardMeshRenderables(sceneA, [meshA], { sceneShader: fogCtx });
         const ctxA = (sceneA as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext!;
         expect(ctxA._factories.sceneShader).toBe(fogCtx);
-        expect(ctxA._engine).toBe(engA);
+        expect((sceneA as SceneContext & { _standardGeometryContext?: StandardGeometryContext })._standardGeometryContext).toBe(ctxA._factories);
 
         // Scene B builds WITHOUT fog on a DIFFERENT device — the singleton builder
         // must not overwrite scene A's captured fog/engine context.
-        buildStandardMeshRenderables(sceneB, [meshB], { sceneShader: null });
+        const { rebuildSingle } = buildStandardMeshRenderables(sceneB, [meshB], { sceneShader: null });
         const ctxB = (sceneB as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext!;
         expect(ctxB._factories.sceneShader).toBeNull();
-        expect(ctxB._engine).toBe(engB);
 
         // Scene A's context is still its own (fog + engine A) after B built.
         expect(ctxA._factories.sceneShader).toBe(fogCtx);
-        expect(ctxA._engine).toBe(engA);
         expect(ctxA).not.toBe(ctxB);
+        const allocateA = vi.spyOn(engA._device, "createBuffer");
+        const allocateB = vi.spyOn(engB._device, "createBuffer");
+        rebuildSingle(sceneA, meshA);
+        expect(allocateA).toHaveBeenCalled();
+        expect(allocateB).not.toHaveBeenCalled();
     });
 });
 
@@ -244,8 +266,9 @@ function buildGeoRenderable(scene: SceneContext, camera: Camera | null) {
         visible: true,
         _gpu: {},
     } as unknown as Mesh;
-    const renderable = buildStandardGeometryRenderable(scene, mesh, view);
-    return { renderable, mesh };
+    const resources = { _lifetimeDisposers: [] as (() => void)[] };
+    const renderable = buildStandardGeometryRenderable(scene, mesh, view, resources);
+    return { renderable, mesh, resources };
 }
 
 describe("Standard geometry task-camera floating-origin", () => {
@@ -400,100 +423,43 @@ describe("PBR geometry override-camera floating-origin shadow receiving", () => 
     });
 });
 
-describe("Standard geometry aux-disposer drain safety", () => {
-    it("does not skip sibling packets and is idempotent when the aux array is drained live", () => {
+describe("Standard geometry task ownership", () => {
+    it("routes cleanup only through the task owner sink and remains idempotent", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
-        const { mesh } = buildGeoRenderable(scene, null);
+        const { renderable, mesh, resources } = buildGeoRenderable(scene, null);
 
-        const auxList = scene._meshAuxDisposables.get(mesh)!;
-        expect(auxList).toHaveLength(1); // the real per-mesh geometry disposer
-
-        // A second packet (e.g. another geometry task) on the same mesh.
-        const sibling = vi.fn();
-        auxList.push(sibling);
-
-        // Simulate the scene-remove / scene-core drain: iterate the LIVE array.
-        for (const fn of auxList) {
-            fn();
-        }
-        // The real disposer must NOT self-remove — otherwise the sibling at index 1
-        // would be skipped when index 0 splices itself out mid-iteration.
-        expect(sibling).toHaveBeenCalledOnce();
-        expect(auxList).toHaveLength(2);
-
-        // Idempotent: running the real disposer again is a safe no-op (no double free).
-        expect(() => auxList[0]!()).not.toThrow();
-    });
-
-    it("wires the Standard geometry renderable's _geometryDispose onto _meshAuxDisposables (never _meshDisposables) so material swaps cannot invalidate it", () => {
-        const engine = makeMockEngine();
-        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
-        const { renderable, mesh } = buildGeoRenderable(scene, null);
-
-        expect(typeof renderable._geometryDispose).toBe("function");
-        // The disposer registered on the aux list IS the renderable's _geometryDispose.
-        expect(scene._meshAuxDisposables.get(mesh)).toContain(renderable._geometryDispose);
-        // A MAIN-material swap drains _meshDisposables; the geometry packet must NOT be there.
+        expect(renderable.mesh).toBe(mesh);
+        expect(resources._lifetimeDisposers.length).toBeGreaterThan(0);
         expect(scene._meshDisposables.has(mesh)).toBe(false);
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
     });
 });
 
-// ── Blocker 2: per-mesh + per-view ownership across all three geometry families ──
-// Every family registers its per-mesh geometry resources on `scene._meshAuxDisposables`
-// (NOT `_meshDisposables`) as an idempotent disposer also assigned to the renderable's
-// `_geometryDispose`, so the owning geometry task can retire both on re-record/dispose
-// without a material swap ever destroying live geometry bindings. Node additionally
-// exposes a per-view `_disposeGeometryResources` for its shared node UBO.
-describe("Geometry view resource disposal (per family)", () => {
-    it("Standard: destroys the shared material + UV UBOs once and is idempotent", () => {
-        const matUBO = { destroy: vi.fn() };
-        const upUBO = { destroy: vi.fn() };
-        const cache = new Map([["variant", { _matUBO: matUBO, _upUBO: upUBO }]]);
-        const view = { _geometry: cache } as unknown as StandardGeometryMaterialView;
-
-        disposeStandardGeometryViewResources(view);
-        expect(matUBO.destroy).toHaveBeenCalledOnce();
-        expect(upUBO.destroy).toHaveBeenCalledOnce();
-        expect(cache.size).toBe(0);
-
-        // Idempotent: cleared cache → no further destroys.
-        disposeStandardGeometryViewResources(view);
-        expect(matUBO.destroy).toHaveBeenCalledOnce();
-    });
-
-    it("PBR: shared per-view cache holds only GC-managed objects, so the view exposes no per-view disposer", () => {
+describe("Geometry views do not take an implicit ownership lease", () => {
+    it("leaves Standard, PBR, and Node resource ownership to their renderable task entries", () => {
         const src = { _renderFeatures: { features: 0, features2: 0 } };
         const cfg = { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false } as const;
+        const standardView = createStandardGeometryMaterialView(src as never, cfg) as unknown as { _disposeGeometryResources?: () => void };
         const pbrView = createPbrGeometryMaterialView(src as never, cfg) as unknown as PbrGeometryMaterialView & { _disposeGeometryResources?: () => void };
-        // PBR's per-variant cache is composed WGSL + pipelines/BGLs/modules (GC-reclaimed);
-        // the per-mesh mesh/material UBOs are freed by the renderable's `_geometryDispose`.
-        // So there is nothing to explicitly free per view — no disposer is exposed.
-        expect(pbrView._disposeGeometryResources).toBeUndefined();
-    });
-
-    it("Node: destroys the shared node UBO once, clears the compile cache, and is idempotent", () => {
-        const nodeUBO = { destroy: vi.fn() };
-        const compileBySig = new Map([["sig", {}]]);
-        const res = { _nodeUBO: nodeUBO, _nodeUBOReady: true, _compileBySig: compileBySig };
-        const view = { _geometry: res } as unknown as import("../../../packages/babylon-lite/src/material/node/node-geometry-view").NodeGeometryMaterialView;
-
-        disposeNodeGeometryViewResources(view);
-        expect(nodeUBO.destroy).toHaveBeenCalledOnce();
-        expect(res._nodeUBO).toBeNull();
-        expect(res._nodeUBOReady).toBe(false);
-        expect(compileBySig.size).toBe(0);
-        expect((view as unknown as { _geometry: unknown })._geometry).toBeUndefined();
-
-        // Idempotent: the cache reference was dropped, so a second call is a no-op.
-        disposeNodeGeometryViewResources(view);
-        expect(nodeUBO.destroy).toHaveBeenCalledOnce();
-    });
-
-    it("Node view exposes a _disposeGeometryResources closure from its factory (its shared node UBO needs an explicit free)", () => {
-        const src = { _renderFeatures: { features: 0, features2: 0 } };
-        const cfg = { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false } as const;
         const nodeView = createNodeGeometryMaterialView(src as never, cfg) as unknown as { _disposeGeometryResources?: () => void };
-        expect(typeof nodeView._disposeGeometryResources).toBe("function");
+        expect(standardView._disposeGeometryResources).toBeUndefined();
+        expect(pbrView._disposeGeometryResources).toBeUndefined();
+        expect(nodeView._disposeGeometryResources).toBeUndefined();
+    });
+
+    it("requires a task-owned resource sink for every geometry family rebuild", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const mesh = {} as Mesh;
+        const cfg = { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false } as const;
+        const standardView = createStandardGeometryMaterialView(createStandardMaterial(), cfg);
+        const pbrView = createPbrGeometryMaterialView({ _renderFeatures: { features: 0, features2: 0 } } as never, cfg);
+        const nodeView = createNodeGeometryMaterialView({ _renderFeatures: { features: 0 } } as never, cfg);
+
+        expect(() => standardView._buildGroup._rebuildSingle!(scene, mesh, standardView)).toThrow("standard-geometry rebuild requires task-owned resources");
+        expect(() => pbrView._buildGroup._rebuildSingle!(scene, mesh, pbrView)).toThrow("pbr-geometry rebuild requires task-owned resources");
+        expect(() => nodeView._buildGroup._rebuildSingle!(scene, mesh, nodeView)).toThrow("node-geometry rebuild requires task-owned resources");
     });
 });

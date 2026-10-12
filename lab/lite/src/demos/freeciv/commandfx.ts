@@ -29,6 +29,7 @@ import {
     type SpriteRenderer,
 } from "babylon-lite";
 import { TILE_H, TILE_W, isoCentre } from "./iso.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Render order: above the hover highlight (15) so command feedback reads on top. */
 const FX_ORDER = 16;
@@ -70,7 +71,7 @@ export interface CommandFx {
  * distance `r = length(uv - 0.5)`: a circle in quad space, which on the tile-sized
  * (2:1) quad renders as a flat ellipse hugging the iso ground — a round selector.
  */
-const FX_FRAGMENT = `
+const FX_FRAGMENT = wgsl`
 let mode = in.tint.x;
 let phase = in.tint.y;
 let strength = in.tint.z;

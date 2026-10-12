@@ -10,7 +10,7 @@ export function scaleBoundsFromCenterToRef<TMin extends Vec3, TMax extends Vec3>
     factor: number,
     resultMinimum: TMin,
     resultMaximum: TMax
-): { minimum: TMin; maximum: TMax } {
+): void {
     const dx = maximum.x - minimum.x;
     const dy = maximum.y - minimum.y;
     const dz = maximum.z - minimum.z;
@@ -27,6 +27,4 @@ export function scaleBoundsFromCenterToRef<TMin extends Vec3, TMax extends Vec3>
     resultMaximum.x = center.x + rx;
     resultMaximum.y = center.y + ry;
     resultMaximum.z = center.z + rz;
-
-    return { minimum: resultMinimum, maximum: resultMaximum };
 }

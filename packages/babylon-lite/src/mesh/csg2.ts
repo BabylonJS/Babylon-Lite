@@ -4,8 +4,8 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { normalizeVec3TupleOrUp } from "../math/normalize-vec3-tuple-or-up.js";
 import { createMeshFromData } from "./mesh-factories.js";
 
 declare const csg2SolidBrand: unique symbol;
@@ -111,9 +111,9 @@ function transformPoint(m: Mat4, x: number, y: number, z: number): [number, numb
 
 function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: number): [number, number, number] {
     if (inv) {
-        return normalizeVec3(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
+        return normalizeVec3TupleOrUp(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
     }
-    return normalizeVec3(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
+    return normalizeVec3TupleOrUp(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
 }
 
 function requireCpuGeometry(mesh: Mesh): GeometryBuffers {
@@ -151,7 +151,7 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     const numProp = 8;
     const vertProperties = new F32(vertexCount * numProp);
     const world = mesh.worldMatrix;
-    const invWorld = mat4Invert(world);
+    const invWorld = invertMat4(world);
 
     for (let i = 0; i < vertexCount; i++) {
         const p = i * 3;

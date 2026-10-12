@@ -112,7 +112,7 @@ const feature: GltfFeature = {
 
             // glTF cameras look down their local -Z axis with +Y up. createFreeCamera's lookAt
             // builder reproduces exactly that local orientation for an eye at the origin
-            // looking toward (0,0,-1) — mat4LookAtWorldLHToRef: "+Z points from eye to target".
+            // looking toward (0,0,-1) — writeLookAtWorldMat4LHIntoBuffer: "+Z points from eye to target".
             const cam = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });
             cam.name = name;
             cam.parent = fixupNode;

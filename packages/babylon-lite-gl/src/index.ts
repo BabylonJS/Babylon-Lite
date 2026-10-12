@@ -41,6 +41,7 @@ export {
     createEffect,
     useEffect,
     isEffectReady,
+    getEffectCompilationError,
     executeWhenCompiled,
     disposeEffect,
     setEffectFloat,
@@ -60,6 +61,8 @@ export {
     setEffectIntArray,
 } from "./effect.js";
 export type { GLEffectOptions, GLEffect } from "./effect.js";
+export { waitForEffect } from "./effect-ready.js";
+export type { GLEffectWaitOptions } from "./effect-ready.js";
 
 // ─── Effect renderer (fullscreen quad) ───────────────────────────────
 export { createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, disposeEffectWrapper } from "./effect-renderer.js";
@@ -79,6 +82,18 @@ export {
     createTextureFromHandle,
 } from "./texture.js";
 export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export { createTextureFromSource } from "./texture-source.js";
+export type { GLTextureSourceOptions } from "./texture-source.js";
+export {
+    createTexture3DFromPixels,
+    bindTexture3D,
+    setEffectTexture3D,
+    generateTexture3DMipMaps,
+    updateTexture3DSamplingMode,
+    updateTexture3DWrapMode,
+    disposeTexture3D,
+} from "./texture-3d.js";
+export type { GLPixelsTexture3DOptions, GLTexture3D } from "./texture-3d.js";
 
 // ─── Dynamic textures ────────────────────────────────────────────────
 export { createDynamicTexture, updateDynamicTexture, clearDynamicTextureSource } from "./dynamic-texture.js";

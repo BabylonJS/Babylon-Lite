@@ -17,6 +17,7 @@ import { _registerPbrExt, type PbrExt } from "../../../packages/babylon-lite/src
 import { _computePbrMaterialFeatures } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
 import { createPbrTemplateExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-template-ext";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 const PBR_HAS_CLUSTERED_LIGHTS = 1 << 13;
 const PBR_HAS_CLUSTERED_SPOTS = 1 << 14;
@@ -242,7 +243,7 @@ describe("PBR lightmap extension", () => {
                 return {
                     _id: id,
                     _fragmentSlots: {
-                        BL: `directDiffuse+=vec3<f32>(${contribution});`,
+                        BL: wgsl`directDiffuse+=vec3<f32>(${contribution});`,
                     },
                 };
             },

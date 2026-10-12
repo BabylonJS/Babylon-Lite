@@ -8,20 +8,21 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { getBilinearSampler } from "../../resource/samplers.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
-import { createMappedBuffer } from "../../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../../resource/mapped-buffer.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
 //    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──
 
 /** Image processing: exposure → Reinhard tonemap → gamma → contrast. */
-const WGSL_IMAGE_PROCESSING = `
+const WGSL_IMAGE_PROCESSING = wgsl`
 fn applyImageProcessing(result: vec4<f32>) -> vec4<f32> {
 var rgb = result.rgb;
 rgb *= scene.vImageInfos.x;

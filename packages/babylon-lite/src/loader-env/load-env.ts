@@ -1,6 +1,7 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene.js";
-import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
+import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
+import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
 import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { parseEnvFile } from "./env-parse.js";
 import { computeSceneSize } from "../material/pbr/scene-size.js";

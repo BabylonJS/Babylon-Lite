@@ -40,6 +40,7 @@ export const enum GeometryTextureType {
     WORLD_NORMAL = 8,
     ALBEDO = 9,
     LINEAR_VELOCITY = 10,
+    MESH_BLEND_TAG = 11,
 }
 
 export type GeometryClearValue = GPUColor;
@@ -82,6 +83,7 @@ export interface GeometryRendererTask extends Task {
     readonly geometryWorldNormalTexture: RenderTarget | null;
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
+    readonly geometryMeshBlendTagTexture: RenderTarget | null;
     excludeFromVelocity(mesh: Mesh): void;
     includeInVelocity(mesh: Mesh): void;
 }
@@ -143,6 +145,23 @@ The task accepts up to 8 attachments (the WebGPU max). Each
 `GEOMETRY_TEXTURE_DESCRIPTIONS[type].defaultFormat` and can be overridden per
 attachment.
 
+`MESH_BLEND_TAG` is the exception to the general format override rule: it is
+always single-sample `r8uint`, clears to unsigned integer zero, and rejects any
+other format or nonzero clear. Standard, PBR, and Node geometry views emit a
+typed `u32` `FragmentOutput` member for its MRT slot while all other slots
+remain `vec4<f32>`. Integer targets omit blend state. The uploaded tag is the
+validated source-mesh tag, so source-backed clones/regular instances and thin
+instances use their source draw's tag.
+
+`createMeshBlendingPostProcessTask` installs this opt-in output support. The
+geometry task may be created first, but the post-process task must exist before
+the frame graph preloads its tasks.
+
+Alpha-blended meshes participate by default, matching Babylon.js geometry
+rendering. Callers that need an opaque-only pass provide a filtered `meshes`
+array. Alpha-tested materials remain supported because their existing material
+shader discards rejected fragments before any geometry output is written.
+
 When more than two HDR (`rgba16float`) attachments are stacked the request can
 exceed WebGPU's default `maxColorAttachmentBytesPerSample` cap of 32 bytes.
 Callers raise that cap through `EngineOptions.requiredLimits`:
@@ -169,6 +188,107 @@ The frame graph rebuilds and re-records when scene inputs change, so callers
 never have to worry about stale caches. The same `record()`-vs-`execute()`
 split is used by `RenderPassTask`, `CopyToTextureTask`, and the post-process
 tasks.
+
+### Resource ownership and failed rebuilds
+
+Every geometry binding owns a `MeshRebuildResources` lifetime sink. The task creates it before
+calling the Standard/PBR/Node geometry rebuilder and stamps it onto the returned renderable
+before binding. Builders require that owner and register releases before later fallible work.
+The bound list publishes only after every rebuild and bind succeeds; a failure synchronously
+releases all candidate sinks, including the failing entry, without changing the previous draw
+list or any entry it carries. A sync builds views in its own copy of the task's view cache, which
+replaces the cache only when the list publishes, so a failed sync also leaves the cache as the last
+publish left it; the views it created are dropped with that copy (their variants' buffers went
+with the released sinks).
+
+Replaced or disposed live entries retire their detached lifetime batches behind submitted GPU
+work. Shared Standard/Node view resources are retained by each renderable and destroyed only
+when the last owner releases; an old callback cannot evict a replacement cache entry. There is
+no implicit view lease or scene auxiliary-disposer map.
+
+Shader modules are not generation-owned. Standard and PBR geometry resolve them through a private
+per-family memo keyed weakly by device and by the exact composed WGSL, so a re-record, a
+renderable-version rebuild, a republished forward PBR context, and materials with identical
+composition reuse one module per code string instead of compiling it again. Each memo entry counts
+the renderables drawing with it: a renderable acquires its vertex and fragment entries when built
+and releases them in its idempotent per-mesh lifetime packet, so a candidate generation, built
+before the old one retires, still hits, and an entry leaves the memo with its last holder (a
+superseded plugin or material variant, a removed mesh, a rolled-back candidate, a disposed task).
+A renderable records only the acquisitions that succeeded, and a release never compiles or creates
+an entry, so a candidate whose vertex or fragment compile throws rolls back exactly what it holds
+and still destroys its mesh UBO.
+A `GPUShaderModule` has no `destroy()`, so dropping an entry never invalidates a module that older
+pipelines still reference. Composition, BGLs, pipeline layouts, and pipelines stay per view
+resource. A device replaced by device-lost recovery compiles its own modules. Node geometry
+already shares modules through its code-keyed pipeline cache.
+
+### Incremental re-sync
+
+`record()` and every `scene._renderableVersion` change re-sync the bound list, but only the
+entries a mutation touched are rebuilt, like the forward `RenderTask` resync. Each Standard or
+PBR entry remembers the forward renderable the scene tracked for its mesh when it was built
+(`scene._renderables` for Standard, the group's tracked output for PBR). While the mesh still
+draws the same source material through that same forward renderable, the entry is carried as
+is: same renderable, binding, update state (including velocity history) and lifetime sink.
+Everything an entry captures either forces a forward rebuild when it changes (material
+features and textures, mesh capabilities and vertex layout, the PBR context and light/shadow
+request), is constant for the task, or is read live each frame (world, light selection,
+material UBO version, vertex/index buffers, thin-instance counts). A resize or frame-graph
+rebuild therefore rebuilds nothing, and a Standard material swap, material rebuild or new mesh
+rebuilds only its meshes. PBR follows its forward pass: a per-mesh forward rebuild (a material
+swap through the group's rebuild closure, `markMeshRenderableDirty`) rebuilds only that entry,
+but a full PBR group rebuild (`rebuildMaterial` on a PBR material, a PBR mesh whose group must
+widen or be built at runtime, `rebuildScenePbrPipelines`) replaces every PBR forward renderable
+and publishes a new PBR context, so every PBR geometry entry is rebuilt and every PBR view
+composes a variant set for the new context; Standard entries are still carried. The PBR
+forward-generation gate (`isPbrForwardBuildCurrent`) runs first, so a PBR mesh whose forward
+rebuild is pending is dropped, never carried. Only superseded entries are retired.
+
+Standard/PBR views, with the variants compiled on them, persist across syncs while the source
+keeps its `_renderFeatures` object; the view map is pruned to the drawn materials at each
+publish. A new Standard mesh of an already drawn material compiles nothing. A PBR view keeps
+one variant set per forward PBR context it composed against, weakly keyed by the context: the
+context supplies the composer, scene features and shadow layout, while each entry binds env and
+shadow textures from its own mesh's context, so a variant is never shared across contexts.
+Several contexts can be live for one view: a full PBR group rebuild publishes a new scene
+context, and a PBR mesh runtime-built into a group that was built after it was requested
+(several meshes of a never-built PBR group built in one drain before the scene's first build
+completes) keeps its own context until the next full rebuild. Meshes on different contexts
+never evict each other's set, so a later rebuild of any of them compiles nothing. A new PBR
+mesh compiles nothing when its context already has a set on the view; otherwise it composes
+its own variant, as its forward build did. A batch that first binds K meshes on K per-mesh
+contexts therefore composes K variants, not one per material. Node entries and views are
+rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
+once; a Node view is stamped with a per-sync token that holds no view, so a published Node view
+keeps no earlier Node material or view alive. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
+sync too. A sync that sees a different device, camera or `config.reverseCulling` than the last
+publish carries nothing and reuses no view, so a camera or culling change, or a device-loss
+recovery (whose `record()` also recreates the task's own buffers), rebuilds the whole pass as
+before. The camera is stamped as two elements, both compared by identity: the override as a view
+captures it (`config.camera ?? null`, so an omitted and a null override are the same choice) and
+the camera the pass draws with (`config.camera`, else `scene.camera`). Both matter under a
+floating origin. The override decides what an entry packs its world against and whose version
+re-packs it: the override itself, or whatever `scene.camera` is at each pack (it also decides
+whether a PBR entry receives shadows). Without it, moving one camera between `scene.camera` and
+`config.camera` would keep the effective camera and carry entries that then follow the wrong
+origin once `scene.camera` changes. The effective camera catches `scene.camera` replaced for a
+task without an override: its entries re-pack only when the version they compare moves, and the
+new camera's version can equal the old one. A sync only sees the camera of that moment, so under
+a floating origin `execute()` clears the stamp once a frame draws with another camera than the
+stamped one: `scene.camera` can then pass through other cameras and return to the stamped one
+with the version an entry compared last, leaving it packed against another camera's origin, and
+the next sync carries nothing. Clearing instead of rebuilding keeps a camera switch between
+frames free of pass rebuilds. If a sync against a changed configuration fails and the previous
+configuration is restored, the next sync carries the published entries and views, none of the
+failed sync's views.
+
+The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
+immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
+off-scene inputs and allows a mesh to rejoin after it is added back to the scene.
+
+The task creates group 0 during recording, not once in the factory and again during recording.
+Immutable color clear/load/store state is initialized with the attachments; per-record work
+only refreshes changing views, dimensions, and depth attachments.
 
 ### Bundle isolation
 
@@ -272,10 +392,12 @@ emitColor (owned by the view)
 
 `meshFeatures` includes morph, skeleton, 8-bone skeleton, vertex color, UV2,
 thin instances, and instance color. The resource stored under that key owns
-the composed shader, mesh BGL, shader modules, and its per-render-target
-pipeline map. The pipeline map remains keyed by the complete MRT target
-signature. A fog and non-fog scene sharing one device cannot reuse the same
-Standard geometry color shader when `targetTexture` requests lit color.
+the composed shader, mesh BGL, and its per-render-target pipeline map; its
+shader modules come from the per-device memo keyed by exact WGSL (see
+"Resource ownership and failed rebuilds"), so equal code shares one module.
+The pipeline map remains keyed by the complete MRT target signature. A fog
+and non-fog scene sharing one device cannot reuse the same Standard geometry
+color shader when `targetTexture` requests lit color.
 
 #### Standard geometry binding and draw order
 
@@ -359,11 +481,20 @@ execution paths chosen in `record()`:
 
 - **Fast path** — `GPUCommandEncoder.copyTextureToTexture`. Eligible when
   there is no viewport, source and target are single-sampled and share a
-  format, the source mip dimensions match the target's mip-0 dimensions, the
+  format, the source mip dimensions match the target attachment's dimensions, the
   target is not the swapchain, and the source/target textures were created
   with `COPY_SRC`/`COPY_DST`. Frame-graph render targets carry both copy usages
   by default; external/eager textures without the required usage fall back to
-  the blit path.
+  the blit path. Texture-backed color wrappers retain `_colorSubresource` so
+  encoder-copy destinations use the attachment's selected `mipLevel` and layer
+  (`origin.z`) rather than the whole allocation's default mip/layer. Targets
+  without this metadata retain the ordinary mip-zero, layer-zero destination.
+  A source wrapper likewise supplies the physical source mip and `origin.z`.
+  Its view exposes exactly one mip: `lodLevel` is view-relative and clamps to
+  zero, so the copy uses its selected-mip dimensions without another shift.
+  Ordinary sources retain their existing source-LOD selection. If the selected
+  source dimensions differ from the target dimensions, the blit path samples
+  the wrapper's selected view instead.
 
 - **Blit path** — full-screen triangle samples the source. MSAA sources
   resolve per-sample with `textureLoad`. Lod level is applied via
@@ -420,6 +551,38 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 - Standard geometry composition with vertex color modulates albedo and alpha
   before discard/write masking and binds the color buffer.
 - Morph/skeleton/vertex-color bits participate in the geometry resource key.
+- Re-recording the task, a renderable-version rebuild, and a forward PBR
+  rebuild that republishes an equivalent context compile no new Standard or
+  PBR geometry shader modules; materials that compose identical WGSL share
+  one module pair; a task writing a different attachment compiles only its
+  new fragment module and shares the identical vertex module; and a replaced
+  device compiles its own.
+- Retired PBR plugin variants and Standard material variants leave the memo
+  while the live variant stays shared; a disposed task releases only the
+  modules no other task draws with, and its last holder empties the entry.
+- A candidate whose vertex or fragment module fails to compile releases only
+  the modules it acquired, creates no entry, takes no count from a stage a
+  live generation holds, and destroys its mesh UBO; a retry compiles the
+  missing stages once.
+- A re-sync keeps the entries of meshes whose forward renderable is unchanged (new mesh,
+  re-record, unrelated swap) and rebuilds only the touched ones, including when driven by the
+  scene's own producers (material setter, `markMeshRenderableDirty`, `rebuildMaterial`,
+  `addToScene`); a new mesh of a drawn material reuses the cached view and variant; a shared
+  Standard variant's material UBO survives deferred retirements until its last owner releases
+  it; a failed replacement leaves every carried entry intact; a failed sync, incremental or
+  against a changed camera or culling direction, leaves the view cache as published, so a
+  restored configuration rebuilds a refreshed entry on its own view; Node entries rebuild on
+  every sync, and a Node material swapped over several syncs leaves no earlier material or view
+  reachable from the published views.
+- Under a floating origin, a tracked mesh is packed against the camera the pass draws with: after
+  `scene.camera` is replaced (with an equal world-matrix version) for a task without an override,
+  after its camera becomes `config.camera` and `scene.camera` then moves on, after
+  `config.camera` is removed while it is the scene camera and `scene.camera` then moves on, and
+  on the record after frames drawn with other scene cameras end on the stamped one again.
+- A PBR geometry variant composed against a superseded forward PBR context is not reused.
+- A PBR view keeps one variant set per live forward context: after meshes on a scene context
+  and on per-mesh runtime-build contexts are bound (one variant per context), per-mesh and
+  batch refreshes of any of them compile nothing.
 
 ## Future extensions
 

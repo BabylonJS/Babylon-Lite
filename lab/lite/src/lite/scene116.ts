@@ -6,6 +6,7 @@
 // are displayed on unlit planes in the main pass.
 
 import {
+    addMeshToTask,
     addTaskAtStart,
     addToScene,
     attachControl,
@@ -29,6 +30,7 @@ import {
     registerScene,
     setPbrUnlit,
     startEngine,
+    withSampledDepthTexture,
 } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -46,18 +48,26 @@ async function main(): Promise<void> {
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-    const { rt: standardDepthRT, texture: standardDepthTexture } = createRenderTargetTexture(engine, {
-        lbl: "standard-shadow-depth",
-        dFormat: "depth24plus-stencil8",
-        samples: 1,
-        size: { width: 512, height: 512 },
-    });
-    const { rt: pbrDepthRT, texture: pbrDepthTexture } = createRenderTargetTexture(engine, {
-        lbl: "pbr-shadow-depth",
-        dFormat: "depth24plus-stencil8",
-        samples: 1,
-        size: { width: 512, height: 512 },
-    });
+    const { rt: standardDepthRT, texture: standardDepthTexture } = createRenderTargetTexture(
+        engine,
+        {
+            lbl: "standard-shadow-depth",
+            dFormat: "depth24plus-stencil8",
+            samples: 1,
+            size: { width: 512, height: 512 },
+        },
+        withSampledDepthTexture
+    );
+    const { rt: pbrDepthRT, texture: pbrDepthTexture } = createRenderTargetTexture(
+        engine,
+        {
+            lbl: "pbr-shadow-depth",
+            dFormat: "depth24plus-stencil8",
+            samples: 1,
+            size: { width: 512, height: 512 },
+        },
+        withSampledDepthTexture
+    );
 
     const standardMesh = createTorus(engine, { diameter: 1.6, thickness: 0.45, tessellation: 48 });
     standardMesh.position.x = -2.25;
@@ -121,7 +131,7 @@ async function main(): Promise<void> {
         engine,
         scene
     );
-    standardDepthTask.addMesh(standardMesh, { material: standardDepthView });
+    addMeshToTask(standardDepthTask, standardMesh, { material: standardDepthView });
     addTaskAtStart(scene, standardDepthTask);
 
     const pbrDepthCamera = createFreeCamera({ x: 2.25, y: 1.0, z: -4.0 }, { x: 2.25, y: 1.0, z: 0 });
@@ -132,7 +142,7 @@ async function main(): Promise<void> {
         engine,
         scene
     );
-    pbrDepthTask.addMesh(pbrMesh, { material: pbrDepthView });
+    addMeshToTask(pbrDepthTask, pbrMesh, { material: pbrDepthView });
     addTaskAtStart(scene, pbrDepthTask);
 
     await registerScene(scene);

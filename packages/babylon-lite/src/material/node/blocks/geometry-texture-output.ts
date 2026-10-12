@@ -16,6 +16,7 @@
 
 import { GeometryTextureType } from "../../../frame-graph/geometry-types.js";
 import type { BlockEmitter, NodeBuildState, NodeExpr, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 /** input name → (geometry texture type, cast target) */
 const INPUTS: ReadonlyArray<readonly [string, GeometryTextureType, NodeValueType]> = [
@@ -51,7 +52,7 @@ export const emitter: BlockEmitter = {
                 // Stash via an SSA temp so the geometry write site references a
                 // single stable identifier rather than re-evaluating the chain.
                 const t = ctx.temp(state, "geom");
-                state.fragment.body.push(`let ${t} = ${value.expr};`);
+                state.fragment.body.push(wgsl`let ${t} = ${value.expr};`);
                 out.set(type, { expr: t, type: value.type });
             }
         }

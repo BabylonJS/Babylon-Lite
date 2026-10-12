@@ -9,7 +9,7 @@
  */
 
 import type { Quat, Vec3 } from "babylon-lite";
-import { crossVec3ToRef, dotVec3, lerpVec3ToRef, normalizeVec3ToRef, quatFromLookDirectionRH, scaleVec3ToRef, subVec3ToRef } from "babylon-lite";
+import { crossVec3ToRef, dotVec3, lerpVec3ToRef, normalizeVec3ToRef, createQuatFromLookDirectionRH, scaleVec3ToRef, subtractVec3ToRef } from "babylon-lite";
 
 import { advanceSegment, frameLocalCoordsToRef, frameToWorld, frameToWorldToRef, type TrackData } from "./track.js";
 import {
@@ -209,7 +209,7 @@ export function createShipState(track: TrackData, spawnSegment: number, lateral:
         lastBonusSegment: LAST_BONUS_SEGMENT_INIT,
         tiltZ: 0,
         wobble: { x: 0, y: WOBBLE_Y_OFFSET, z: 0 },
-        orientationQuat: quatFromLookDirectionRH(frame.dir, frame.up),
+        orientationQuat: createQuatFromLookDirectionRH(frame.dir, frame.up),
         trailIntensity: 0,
         cameraOffsetIndex: 0,
         _emitterPoint: { x: 0, y: 0, z: 0 },
@@ -320,12 +320,12 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     let desiredYaw = 0;
     let go = false;
     if (ship.isAI) {
-        subVec3ToRef(frames[(seg + AI_AIM_LOOKAHEAD) % count]!.pos, ship.worldPos, sc.aim);
+        subtractVec3ToRef(frames[(seg + AI_AIM_LOOKAHEAD) % count]!.pos, ship.worldPos, sc.aim);
         normalizeVec3ToRef(sc.aim, sc.aim);
         let d = dotVec3(sc.right, sc.aim);
         const ahead = firstShipAhead(ships, ships.indexOf(ship), AI_AVOID_LIMIT, count);
         if (ahead) {
-            subVec3ToRef(ahead.worldPos, ship.worldPos, sc.aheadDelta);
+            subtractVec3ToRef(ahead.worldPos, ship.worldPos, sc.aheadDelta);
             normalizeVec3ToRef(sc.aheadDelta, sc.aheadDelta);
             const ds = dotVec3(sc.right, sc.aheadDelta);
             if (Math.abs(d - ds) < AI_AVOID_TOLERANCE) {

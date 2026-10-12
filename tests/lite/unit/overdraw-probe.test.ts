@@ -122,7 +122,7 @@ describe("render-task overdraw probe", () => {
             _height: 32,
         } as RenderTarget;
         const depthTarget = {
-            _descriptor: { dFormat: "depth32float", _depthClearValue: 1, samples: 1, size: { width: 64, height: 32 } },
+            _descriptor: { dFormat: "depth32float", depthClearValue: 1, samples: 1, size: { width: 64, height: 32 } },
         } as RenderTarget;
         const far = makeBinding("far", 5, drawOrders);
         const hidden = makeBinding("hidden", 4, drawOrders, false);
@@ -132,10 +132,15 @@ describe("render-task overdraw probe", () => {
         const task = {
             _config: { rt: colorTarget, depth: depthTarget, cam: camera },
             _targetSignature: { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 },
+            _renderables: [],
             _opaqueBindings: [far, hidden, near],
             _directBindings: [direct],
             _transparentBindings: [transparent],
+            _ob: [],
+            _lastVersion: 0,
+            _lastVis: 0,
             _sceneBG: {},
+            _updateContext: { targetWidth: 64, targetHeight: 32 },
             scene: { camera: null },
         } as unknown as RenderTask;
 

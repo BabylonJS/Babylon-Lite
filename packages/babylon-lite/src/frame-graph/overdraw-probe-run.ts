@@ -128,6 +128,10 @@ export async function _measureRenderTaskOverdrawCost(engine: EngineContext, task
     if (bindings.length === 0) {
         throw new Error("overdraw probe: task has no draw bindings (has the task rendered yet?)");
     }
+    const sceneBG = task._sceneBG;
+    if (!sceneBG) {
+        throw new Error("overdraw probe: task scene bindings have not been recorded");
+    }
 
     // Front-to-back variant: non-transparent draws sorted nearest-first with the same view-space-z
     // convention as the task's transparent sort; a binding without a world center falls back to its
@@ -169,7 +173,7 @@ export async function _measureRenderTaskOverdrawCost(engine: EngineContext, task
         usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
     const hasStencil = depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8";
-    const depthClearValue = depthTarget._descriptor._depthClearValue ?? 0;
+    const depthClearValue = depthTarget._descriptor.depthClearValue ?? 0;
 
     // 6 timestamps per repeat: A, B, and C begin/end pairs.
     const querySet = device.createQuerySet({ type: "timestamp", count: repeats * 6 });
@@ -194,7 +198,7 @@ export async function _measureRenderTaskOverdrawCost(engine: EngineContext, task
             pass.setViewport(x, y, w, h, 0, 1);
             pass.setScissorRect(x, y, w, h);
         }
-        pass.setBindGroup(0, task._sceneBG);
+        pass.setBindGroup(0, sceneBG);
         let lastPipeline: GPURenderPipeline | null = null;
         for (const b of list) {
             if (b.pipeline !== lastPipeline) {

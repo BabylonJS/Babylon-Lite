@@ -13,12 +13,21 @@ type ShaderMaterialPipelineLayout = "mesh" | "thin-instances" | "thin-instances-
 
 function enableAsyncShaderPipelineCompilation(engine: EngineContext): void;
 
-function prepareShaderMaterialPipeline(engine: EngineContext, material: ShaderMaterial, layout: ShaderMaterialPipelineLayout, target: RenderTarget | RenderTask): Promise<void>;
+function prepareShaderMaterialPipeline(
+    engine: EngineContext,
+    material: ShaderMaterial,
+    layout: ShaderMaterialPipelineLayout,
+    target: RenderTarget | RenderTask,
+    mesh?: Mesh
+): Promise<void>;
 
-function prepareShaderMaterialPipelineForTask(task: RenderTask, material: ShaderMaterial, layout: ShaderMaterialPipelineLayout): Promise<void>;
+function prepareShaderMaterialPipelineForTask(task: RenderTask, material: ShaderMaterial, layout: ShaderMaterialPipelineLayout, mesh?: Mesh): Promise<void>;
 ```
 
-`enableAsyncShaderPipelineCompilation` is idempotent. It must be called before ShaderMaterial renderables are built when automatic scene-registration preparation is desired. `prepareShaderMaterialPipeline` and `prepareShaderMaterialPipelineForTask` are explicit preparation queries and do not require a renderable or a prior `addMesh`.
+`enableAsyncShaderPipelineCompilation` is idempotent. It must be called before ShaderMaterial renderables are built when automatic scene-registration preparation is desired. `prepareShaderMaterialPipeline` and `prepareShaderMaterialPipelineForTask` are explicit preparation queries and do not require a renderable or a prior `addMeshToTask`.
+Pass `mesh` when preparing storage-backed or other noncanonical packing. Its validated stride,
+offsets, missing-stream defaults, and pipeline-key suffix are prepared exactly as at binding.
+Omitting `mesh` preserves canonical-layout preparation.
 
 The layout values mean:
 
@@ -34,7 +43,12 @@ No public API accepts a `GPUDevice`, `GPURenderPipelineDescriptor`, shader modul
 
 This guarantees that both paths derive the same variant key, shader modules, final cache key, and complete `GPURenderPipelineDescriptor` without adding a branch or descriptor abstraction to the ordinary first-bind path. Both publish the result into the same `ShaderPipelineBindings.pipelines` map.
 
-Automatic thin-instance registration records the mesh plus its logical matrix-only or matrix-and-color layout in the parent ShaderMaterial builder before the lazy thin module is loaded. Preparation resolves that logical layout inside the opt-in module. Explicit preparation uses the same resolver. Scenes that do not import the enabler retain none of the registrar branch, explicit resolver, or descriptor-capture code.
+Automatic thin-instance registration records the mesh and its resolved vertex layout through
+the callback supplied by the parent ShaderMaterial builder. The lazy thin-instance builder
+resolves it once and shares it with registration and binding. Preparation appends the logical
+matrix-only or matrix-and-color layout inside the opt-in module. Explicit preparation uses
+the same mesh resolver. Scenes that do not import the enabler retain none of the registrar
+branch, explicit resolver, or descriptor-capture code.
 
 Each bindings object may lazily own an internal pending-pipeline map. It is allocated only when async preparation is used. One promise is retained per final pipeline key. Concurrent requests for the same key await that promise. The entry is removed on fulfillment or rejection. A synchronous bind remains available throughout; if it wins a race, its pipeline remains authoritative in the shared completed cache.
 
@@ -112,7 +126,7 @@ Focused tests must prove:
 3. duplicate recipes and duplicate tasks call `createRenderPipelineAsync` once per final key;
 4. rejection removes the pending entry and a later synchronous bind still creates its pipeline;
 5. registration awaits preparation after task preloads and before `FrameGraph.build()`;
-6. explicit preparation works before any renderable or `addMesh` exists;
+6. explicit preparation works before any renderable or `addMeshToTask` call exists;
 7. RenderTarget and RenderTask target signatures select the intended color, depth, comparison, and sample state;
 8. PCF, ESM, default CSM, and cached CSM internal tasks are traversed, including `_tasks` and `_staticTasks`;
 9. plain registration does not materialize unused shadow states;

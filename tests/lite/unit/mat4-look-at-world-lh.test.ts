@@ -1,18 +1,18 @@
 /**
- * `mat4LookAtWorldLHToRef` replaces the "build a view matrix with `mat4LookAtLH`, then
+ * `writeLookAtWorldMat4LHIntoBuffer` replaces the "build a view matrix with `createLookAtMat4LH`, then
  * transpose its rotation back out and overwrite its translation with the eye" round-trip that
  * every camera factory used to do. These pin it to that former path element for element,
  * including both degenerate fallbacks, so the refactor cannot move a single pixel.
  */
 import { describe, expect, it } from "vitest";
 
-import { mat4LookAtLH } from "../../../packages/babylon-lite/src/math/mat4-look-at-lh";
-import { mat4LookAtWorldLHToRef } from "../../../packages/babylon-lite/src/math/mat4-look-at-world-lh";
+import { createLookAtMat4LH } from "../../../packages/babylon-lite/src/math/create-look-at-mat4-lh";
+import { writeLookAtWorldMat4LHIntoBuffer } from "../../../packages/babylon-lite/src/math/write-look-at-world-mat4-lh-into-buffer";
 import type { Mat4Storage, Vec3 } from "../../../packages/babylon-lite/src/math/types";
 
 /** The exact code the camera factories used to inline. */
 function legacyCameraWorld(eye: Vec3, target: Vec3, up: Vec3): Float32Array {
-    const v = mat4LookAtLH(eye, target, up);
+    const v = createLookAtMat4LH(eye, target, up);
     const m = new Float32Array(16);
     m[0] = v[0]!;
     m[1] = v[4]!;
@@ -37,13 +37,13 @@ function build(eye: Vec3, target: Vec3, up: Vec3): Float32Array {
     // Float32 storage, as `allocateMat4()` hands out for a non-HPM engine — so the
     // comparison against the (Float32-rounded) legacy path is exact.
     const out = new Float32Array(16).fill(-999);
-    mat4LookAtWorldLHToRef(out as unknown as Mat4Storage, eye, target, up);
+    writeLookAtWorldMat4LHIntoBuffer(out as unknown as Mat4Storage, eye, target, up);
     return out;
 }
 
 const UP: Vec3 = { x: 0, y: 1, z: 0 };
 
-describe("mat4LookAtWorldLHToRef", () => {
+describe("writeLookAtWorldMat4LHIntoBuffer", () => {
     const cases: [string, Vec3, Vec3, Vec3][] = [
         ["axis-aligned", { x: 0, y: 0, z: -10 }, { x: 0, y: 0, z: 0 }, UP],
         ["arbitrary orbit position", { x: 3.5, y: 7.25, z: -2.125 }, { x: -1, y: 0.5, z: 4 }, UP],
@@ -94,8 +94,8 @@ describe("mat4LookAtWorldLHToRef", () => {
 
     it("leaves no stale rotation behind when a later call degenerates", () => {
         const out = new Float32Array(16) as unknown as Mat4Storage;
-        mat4LookAtWorldLHToRef(out, { x: 3, y: 4, z: 5 }, { x: -2, y: 1, z: 0 }, UP);
-        mat4LookAtWorldLHToRef(out, { x: 0, y: 10, z: 0 }, { x: 0, y: 0, z: 0 }, UP);
+        writeLookAtWorldMat4LHIntoBuffer(out, { x: 3, y: 4, z: 5 }, { x: -2, y: 1, z: 0 }, UP);
+        writeLookAtWorldMat4LHIntoBuffer(out, { x: 0, y: 10, z: 0 }, { x: 0, y: 0, z: 0 }, UP);
         expect(Array.from(out as unknown as Float32Array)).toEqual([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 10, 0, 1]);
     });
 });

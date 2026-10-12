@@ -15,7 +15,8 @@
 
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { SceneContext } from "../scene/scene.js";
-import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
+import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
+import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
 import { assembleEnvironmentTextures } from "../loader-env/env-helpers.js";
 import { parseRGBE, computeSHFromEquirect } from "./hdr-parser.js";
 import { equirectToCubemapGPU, prefilterCubemapGPU, generateBrdfLut, HDR_LOD_GENERATION_SCALE } from "./hdr-ibl-pipeline.js";

@@ -16,7 +16,7 @@ export const pbrExt: PbrExt = {
         return createSkeletonFragment((ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0);
     },
     bind(ctx, entries, b) {
-        const mesh = ctx._mesh as { skeleton?: { boneTexture: GPUTexture } } | undefined;
+        const mesh = ctx._mesh as { skeleton?: { boneTexture: GPUTexture } } | null | undefined;
         if (!(ctx._meshFeatures & MSH_HAS_SKELETON) || !mesh?.skeleton) {
             return b;
         }

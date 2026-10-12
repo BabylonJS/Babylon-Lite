@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mat4Decompose } from "../../../packages/babylon-lite/src/math/mat4-decompose";
-import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
+import { decomposeMat4 } from "../../../packages/babylon-lite/src/math/decompose-mat4";
+import { composeMat4 } from "../../../packages/babylon-lite/src/math/compose-mat4";
+import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createSceneNode, createSceneNodeFromMatrix } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
+import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 /** Snapshot a world matrix by value — the engine reuses the backing storage in place. */
@@ -24,7 +26,7 @@ function quatAxisAngle(x: number, y: number, z: number, angle: number): [number,
 }
 
 /**
- * `mat4Decompose` must preserve reflections. The glTF loader's synthetic `__root__` carries
+ * `decomposeMat4` must preserve reflections. The glTF loader's synthetic `__root__` carries
  * `scaling = (-1, 1, 1)` for the RH→LH conversion, so a decomposition that returns only
  * non-negative scales silently un-mirrors any model reparented with `setParent`.
  *
@@ -32,7 +34,7 @@ function quatAxisAngle(x: number, y: number, z: number, angle: number): [number,
  * matching Babylon.js `Matrix.decompose`), so the contract under test is that recomposing the
  * result reproduces the original matrix — not that the original per-axis signs come back.
  */
-describe("mat4Decompose — mirrored (negative determinant) matrices", () => {
+describe("decomposeMat4 — mirrored (negative determinant) matrices", () => {
     const [qx, qy, qz, qw] = quatAxisAngle(0.3, 1, -0.7, 0.9);
 
     const cases: { name: string; scale: [number, number, number] }[] = [
@@ -46,37 +48,37 @@ describe("mat4Decompose — mirrored (negative determinant) matrices", () => {
 
     for (const { name, scale } of cases) {
         it(`round-trips a matrix with ${name}`, () => {
-            const source = mat4Compose(4, -3, 11, qx, qy, qz, qw, scale[0], scale[1], scale[2]);
+            const source = composeMat4(4, -3, 11, qx, qy, qz, qw, scale[0], scale[1], scale[2]);
             const expected = snapshot(source);
 
-            const { translation, rotation, scale: outScale } = mat4Decompose(source);
+            const { translation, rotation, scale: outScale } = decomposeMat4(source);
 
             // The reflection must survive: an odd number of negative scale components.
             const negatives = [outScale.x, outScale.y, outScale.z].filter((s) => s < 0).length;
             const sourceNegatives = scale.filter((s) => s < 0).length;
             expect(negatives % 2).toBe(sourceNegatives % 2);
 
-            const recomposed = mat4Compose(translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, outScale.x, outScale.y, outScale.z);
+            const recomposed = composeMat4(translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, outScale.x, outScale.y, outScale.z);
             expectMatrixClose(recomposed, expected);
         });
     }
 
     it("folds the reflection onto Y, matching Babylon.js Matrix.decompose", () => {
-        const { scale } = mat4Decompose(mat4Compose(0, 0, 0, 0, 0, 0, 1, -1, 1, 1));
+        const { scale } = decomposeMat4(composeMat4(0, 0, 0, 0, 0, 0, 1, -1, 1, 1));
         expect(scale.x).toBeGreaterThan(0);
         expect(scale.y).toBeLessThan(0);
         expect(scale.z).toBeGreaterThan(0);
     });
 
     it("leaves positive-determinant matrices with non-negative scales", () => {
-        const { scale } = mat4Decompose(mat4Compose(1, 2, 3, qx, qy, qz, qw, 2, 0.5, 3));
+        const { scale } = decomposeMat4(composeMat4(1, 2, 3, qx, qy, qz, qw, 2, 0.5, 3));
         expect(scale.x).toBeCloseTo(2, 5);
         expect(scale.y).toBeCloseTo(0.5, 5);
         expect(scale.z).toBeCloseTo(3, 5);
     });
 
     it("tolerates a degenerate axis: the result stays finite (documented contract)", () => {
-        const { rotation, scale } = mat4Decompose(mat4Compose(0, 0, 0, qx, qy, qz, qw, 1, 0, 1));
+        const { rotation, scale } = decomposeMat4(composeMat4(0, 0, 0, qx, qy, qz, qw, 1, 0, 1));
         expect(Math.abs(scale.y)).toBeLessThan(1e-7);
         for (const c of [rotation.x, rotation.y, rotation.z, rotation.w]) {
             expect(Number.isFinite(c)).toBe(true);
@@ -147,11 +149,16 @@ describe("setParent — mirrored child", () => {
 describe("setParent — matrix-backed node", () => {
     /** glTF Node_NegativeScale_01 "Node1": diag(-1, 1, 1) mirror plus a translation. */
     const MIRROR_MATRIX = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1];
+    const createMatrixNode = () => {
+        const matrix = MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1];
+        const { translation, rotation, scale } = decomposeMat4(matrix);
+        return createSceneNodeFromMatrix("Node1", matrix, translation, rotation, scale);
+    };
 
     it("preserves the world matrix of a mirrored matrix node under a transformed parent", () => {
         const [qx, qy, qz, qw] = quatAxisAngle(0, 1, 0, -Math.PI / 9);
         const parent = createSceneNode("newRoot", -2, 0, 5, qx, qy, qz, qw, 0.85, 0.85, 0.85);
-        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        const node = createMatrixNode();
         const before = snapshot(node.worldMatrix);
 
         setParent(node, parent);
@@ -160,7 +167,7 @@ describe("setParent — matrix-backed node", () => {
     });
 
     it("becomes TRS-driven after reparenting, so later transform writes take effect", () => {
-        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        const node = createMatrixNode();
         setParent(node, createSceneNode("newRoot"));
 
         node.position.set(7, -1, 4);
@@ -173,7 +180,7 @@ describe("setParent — matrix-backed node", () => {
     });
 
     it("carries its subtree along when reparented", () => {
-        const node = createSceneNodeFromMatrix("Node1", MIRROR_MATRIX as unknown as Parameters<typeof createSceneNodeFromMatrix>[1]);
+        const node = createMatrixNode();
         const child = createSceneNode("mesh", 1, 0, 0);
         child.parent = node;
         const before = snapshot(child.worldMatrix);
@@ -181,5 +188,50 @@ describe("setParent — matrix-backed node", () => {
         setParent(node, createSceneNode("newRoot", 3, 0, 0, 0, 0, 0, 1, 2, 2, 2));
 
         expectMatrixClose(child.worldMatrix, before, 1e-4);
+    });
+
+    it("does not alias a detached local matrix to the mutable world cache", () => {
+        const parent = createSceneNode("parent", 10, 0, 0);
+        const node = createSceneNode("node", 1, 0, 0);
+        node.parent = parent;
+
+        setParent(node, null);
+        node.parent = parent;
+        expect(node.worldMatrix[12]).toBeCloseTo(21);
+
+        parent.position.x = 20;
+        expect(node.worldMatrix[12]).toBeCloseTo(31);
+    });
+});
+
+describe("setParent — mesh transform", () => {
+    it("preserves an exact affine transform until a later TRS edit", () => {
+        const parent = createSceneNode("parent", 3, -2, 5, 0, Math.SQRT1_2, 0, Math.SQRT1_2, 2, 1, 0.5);
+        const mesh = initMeshTransform({ name: "mesh" }, 1, 2, 3, 0.4, -0.2, 0.3);
+        const before = snapshot(mesh.worldMatrix);
+
+        setParent(mesh, parent);
+
+        expectMatrixClose(mesh.worldMatrix, before, 1e-4);
+        expect(mesh._localMatrix).toBeDefined();
+
+        mesh.position.x++;
+
+        expect(mesh._localMatrix).toBeUndefined();
+        expect(snapshot(mesh.worldMatrix)).not.toEqual(before);
+    });
+
+    it("copies the preserved affine matrix independently when cloned", () => {
+        const parent = createSceneNode("parent", 3, -2, 5, 0, Math.SQRT1_2, 0, Math.SQRT1_2, 2, 1, 0.5);
+        const mesh = initMeshTransform({ name: "mesh", _gpu: undefined }, 1, 2, 3, 0.4, -0.2, 0.3);
+        setParent(mesh, parent);
+
+        const clone = cloneTransformNode(mesh);
+        clone.parent = parent;
+
+        expect("_gpu" in clone).toBe(true);
+        expect(clone._localMatrix).toBeDefined();
+        expect(clone._localMatrix).not.toBe(mesh._localMatrix);
+        expectMatrixClose(clone.worldMatrix, snapshot(mesh.worldMatrix), 1e-4);
     });
 });

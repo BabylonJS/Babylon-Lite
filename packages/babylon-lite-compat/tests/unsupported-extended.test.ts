@@ -11,6 +11,11 @@ import {
     GeometryBufferRenderer,
     BoundingBoxRenderer,
     PostProcess,
+    Effect,
+    EffectWrapper,
+    FrameGraphMinMaxReducerTask,
+    NodeRenderGraphMinMaxReducerBlock,
+    RegisterMinMaxReducerBlock,
     BlackAndWhitePostProcess,
     BlurPostProcess,
     BloomEffect,
@@ -32,6 +37,9 @@ import {
     OBJFileLoader,
     STLFileLoader,
     FBXFileLoader,
+    FBXFileLoaderMetadata,
+    FBXConstraintBehavior,
+    FBXConstraintSolver,
     BVHFileLoader,
     SpriteMap,
     SpritePackedManager,
@@ -50,6 +58,10 @@ describe("Extended unsupported stubs throw on construction", () => {
         ["GeometryBufferRenderer", () => new GeometryBufferRenderer()],
         ["BoundingBoxRenderer", () => new BoundingBoxRenderer()],
         ["PostProcess", () => new PostProcess()],
+        ["Effect", () => new Effect()],
+        ["EffectWrapper", () => new EffectWrapper({ onError: () => undefined })],
+        ["FrameGraphMinMaxReducerTask", () => new FrameGraphMinMaxReducerTask()],
+        ["NodeRenderGraphMinMaxReducerBlock", () => new NodeRenderGraphMinMaxReducerBlock()],
         ["BlackAndWhitePostProcess", () => new BlackAndWhitePostProcess()],
         ["BlurPostProcess", () => new BlurPostProcess()],
         ["BloomEffect", () => new BloomEffect()],
@@ -71,6 +83,33 @@ describe("Extended unsupported stubs throw on construction", () => {
         ["OBJFileLoader", () => new OBJFileLoader()],
         ["STLFileLoader", () => new STLFileLoader()],
         ["FBXFileLoader", () => new FBXFileLoader()],
+        [
+            "FBXConstraintBehavior",
+            () =>
+                new FBXConstraintBehavior(
+                    {
+                        id: 1,
+                        name: "constraint",
+                        type: "parent",
+                        typeName: "Parent-Child",
+                        targets: [],
+                        weight: 1,
+                        active: true,
+                        affectTranslation: [true, true, true],
+                        affectRotation: [true, true, true],
+                        affectScale: [true, true, true],
+                        offsetTranslation: [0, 0, 0],
+                        offsetRotation: [0, 0, 0],
+                        offsetScale: [1, 1, 1],
+                        aimVector: [1, 0, 0],
+                        upVector: [0, 1, 0],
+                        worldUpVector: [0, 1, 0],
+                        worldUpType: 0,
+                        ikPoleVector: [0, 1, 0],
+                    },
+                    {} as never
+                ),
+        ],
         ["BVHFileLoader", () => new BVHFileLoader()],
         ["SpriteMap", () => new SpriteMap()],
         ["SpritePackedManager", () => new SpritePackedManager()],
@@ -81,5 +120,20 @@ describe("Extended unsupported stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+
+    it("exposes the FBX metadata and solver entry point", () => {
+        expect(FBXFileLoaderMetadata).toEqual({ name: "fbx", extensions: { ".fbx": { isBinary: true } } });
+        expect(() => FBXConstraintSolver.Get({} as never)).toThrow(LiteCompatError);
+        expect(() => FBXConstraintSolver.Get({} as never)).toThrow(/FBXConstraintSolver\.Get/);
+    });
+
+    it("exports the min/max node registration stub with its structural blocker", () => {
+        expect(() => RegisterMinMaxReducerBlock()).toThrow(LiteCompatError);
+        expect(() => RegisterMinMaxReducerBlock()).toThrow(/FrameGraph handles/);
+    });
+
+    it("keeps Effect callbacks structurally usable before construction throws", () => {
+        expect(() => new EffectWrapper({ onError: (effect) => effect.getCompilationError(), onCompiled: null })).toThrow(LiteCompatError);
     });
 });

@@ -32,6 +32,36 @@ async function main(): Promise<void> {
 main().catch(console.error);
 ```
 
+## OpenUSD
+
+`loadUsd()` loads `.usd`, `.usda`, `.usdc`, and `.usdz` with the same
+protocol-versioned OpenUSD WebAssembly extractor used by Babylon.js, then
+materializes the command/data buffers as native Lite entities:
+
+```ts
+import { addToScene, loadUsd } from "@babylonjs/lite";
+
+const asset = await loadUsd(engine, "/assets/model.usdz");
+addToScene(scene, asset);
+```
+
+For composed stages, pass every external layer, payload, and texture through
+the virtual `files` map while preserving authored paths:
+
+```ts
+const asset = await loadUsd(engine, rootLayer, {
+    rootFileName: "Package/Scenes/Main.usda",
+    files: {
+        "Package/Layers/Geometry.usdc": geometryLayer,
+        "Package/Textures/Albedo.png": albedo,
+    },
+});
+```
+
+The worker, glue, WASM, and data bundle default to the Babylon.js CDN. Set
+`runtimeBaseUrl` to a directory containing all four protocol-v5 files to
+self-host them.
+
 ## Documentation
 
 Full documentation is available at

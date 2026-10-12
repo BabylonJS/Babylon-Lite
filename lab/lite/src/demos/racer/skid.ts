@@ -10,7 +10,7 @@
  */
 
 import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
-import { addToScene, createGround, createStandardMaterial, mat4Compose, setThinInstanceColors, setThinInstanceMatrix, setThinInstances } from "babylon-lite";
+import { addToScene, createGround, createStandardMaterial, composeMat4, setThinInstanceColors, setThinInstanceMatrix, setThinInstances } from "babylon-lite";
 
 const CAP = 512; // max simultaneous marks (ring buffer, shared across the rear wheels)
 const DRIFT_THRESHOLD = 0.25; // matches the drift-smoke gate (kit `drift_intensity > 0.25`)
@@ -58,7 +58,7 @@ export class SkidMarks {
         // Keep the full fixed-capacity ring active so any recycled slot can be
         // overwritten without changing the draw count or invalidating cached render
         // bundles. Unused slots stay parked as degenerate matrices and emit no fragments.
-        const hidden = mat4Compose(0, -1000, 0, 0, 0, 0, 1, 0, 0, 0);
+        const hidden = composeMat4(0, -1000, 0, 0, 0, 0, 1, 0, 0, 0);
         const matrices = new Float32Array(CAP * 16);
         for (let i = 0; i < CAP; i++) {
             matrices.set(hidden, i * 16);
@@ -124,7 +124,7 @@ export class SkidMarks {
     private _stamp(x: number, z: number, yaw: number): void {
         const qy = Math.sin(yaw / 2);
         const qw = Math.cos(yaw / 2);
-        const m = mat4Compose(x, MARK_Y, z, 0, qy, 0, qw, STAMP_WIDTH, 1, STAMP_LEN);
+        const m = composeMat4(x, MARK_Y, z, 0, qy, 0, qw, STAMP_WIDTH, 1, STAMP_LEN);
         const idx = this._head;
         setThinInstanceMatrix(this._mesh, idx, m);
         this._spawn[idx] = this._clock;

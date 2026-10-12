@@ -120,6 +120,12 @@ When the flag is set:
 
 Exact binding slot indices shift depending on which optional entries are present.
 
+### NodeMaterial Opt-In Path
+
+NodeMaterial keeps its morph implementation in the lazily reached `material/node/node-morph.ts` feature module. The built-in `MorphTargetsBlock` emitter installs a typed compiler/binding seam that preserves the Node binding order: node UBO and declared textures first, morph delta and weight storage buffers next, then environment and shadow resources. The feature also owns the per-engine zero-target fallback allocation used when a compatible mesh has no `morphTargets` data. Because the zero count prevents delta reads, one 24-byte read-only storage buffer containing `(count=0, vertexCount=1)` is safely shared by both morph bindings.
+
+`ParseNodeMaterialOptions.blockLoader` may return a custom emitter written against the earlier flag-only contract. If that emitter sets `NodeBuildState.usesMorphTargets` without installing the private feature seam, `parseNodeMaterialFromSnippet()` dynamically loads and installs the same morph feature before compilation. Static Node graphs do not execute that import and retain none of the morph WGSL, binding construction, or fallback allocation.
+
 ---
 
 ## Shader Logic

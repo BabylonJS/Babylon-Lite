@@ -6,6 +6,7 @@
  *  materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
 import type { LiteMetadata } from "../metadata.js";
+import type { MaterialPlugin } from "./plugin/material-plugin.js";
 
 /** Base material interface — the polymorphic anchor shared by every concrete
  *  material kind (Standard, PBR, Shader, Node). Concrete materials add their own
@@ -21,8 +22,10 @@ export interface Material {
     metadata?: LiteMetadata;
     /** @internal Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
     _renderFeatures?: MaterialRenderFeatures;
-    /** @internal PBR material-plugin shader variant, kept outside native feature bitfields. */
+    /** @internal Stable material-plugin shader variant, kept outside native feature bitfields. */
     _pi?: number;
+    /** @internal Enabled, priority-sorted material plugins prepared when the material signature is baked. */
+    _preparedPlugins?: readonly MaterialPlugin[];
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
     /** @internal Monotonic CSM material-view generation. */
@@ -35,6 +38,8 @@ export interface Material {
      *  mirror. The shadow pass takes the override's own no-colour view (so an alpha-clip caster can still set
      *  depthOnlyFragment). Honoured by the CSM + PCF caster passes (the ESM exponential path has its own shadow views). */
     _shadowCasterMaterial?: Material;
+    /** @internal Explicit vertex encodings declared by a material, also used to validate default picking. */
+    _attributeFormats?: Readonly<Partial<Record<string, GPUVertexFormat>>>;
 }
 
 /** Exact material render-feature override used by MaterialView.

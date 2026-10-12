@@ -14,6 +14,7 @@ import { build } from "vite";
 import { resolve, dirname } from "path";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
+import { libDir, litePackageResolverPlugin } from "./bundle-scenes-core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
         publicDir: false,
         logLevel: "warn",
         plugins: [
+            litePackageResolverPlugin(libDir),
             visualizer({
                 filename: jsonPath,
                 template: "raw-data",
@@ -87,6 +89,9 @@ async function main(): Promise<void> {
                 gzipSize: true,
             }),
         ],
+        resolve: {
+            dedupe: ["@babylonjs/core"],
+        },
         build: {
             outDir: `/tmp/${scene}-analyze`,
             emptyOutDir: true,

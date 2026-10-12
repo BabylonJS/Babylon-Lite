@@ -1,0 +1,57 @@
+{
+    "schemaVersion": 1,
+    "sourceRevision": "d22ce23ef308e28d1f8b6598b4c72ea944205925",
+    "model": "cube",
+    "cohorts": [
+        {
+            "name": "source-matching-stack-control",
+            "batchKey": "cubeStack/000/cube",
+            "instanceIndices": [0, 20, 39],
+            "task1Expectation": "matches-source-before-physics"
+        },
+        {
+            "name": "known-placement-regression",
+            "batchKey": "cubes/003/cube",
+            "instanceIndices": [0, 13, 26],
+            "task1Expectation": "fails-source-before-physics"
+        }
+    ],
+    "checkpoints": [
+        {
+            "name": "geometry-only-output",
+            "owner": "task1",
+            "required": ["baked vertices", "indices", "normals", "tangent handedness", "shape-local center"]
+        },
+        {
+            "name": "gpu-consumed-matrix-and-vertices",
+            "owner": "task1",
+            "required": ["carrier matrix", "instance matrix", "combined world vertices"]
+        },
+        {
+            "name": "immediately-before-native-body-creation",
+            "owner": "later-physics-task",
+            "required": ["carrier matrix", "instance matrix", "shape-local center", "scale-stripped body transform"]
+        },
+        {
+            "name": "after-native-creation-before-step",
+            "owner": "later-physics-task",
+            "required": ["native body transform", "native shape transform", "render matrix unchanged"]
+        },
+        {
+            "name": "first-zero-gravity-zero-motion-sync",
+            "owner": "later-physics-task",
+            "required": ["native body transform", "write-back matrix", "linear velocity", "angular velocity"]
+        },
+        {
+            "name": "first-gravity-contact",
+            "owner": "later-physics-task",
+            "required": ["native body transform", "write-back matrix", "contact state", "linear velocity", "angular velocity"]
+        }
+    ],
+    "invariants": [
+        "Apply carrier and instance transforms exactly once.",
+        "Strip render scale exactly once when creating or synchronizing a thin-instance body.",
+        "Keep shape-local center separate from authored placement translation.",
+        "Do not tune collider gaps to compensate for a render-placement mismatch."
+    ]
+}

@@ -34,6 +34,7 @@ import {
     createNullEngine,
     stepScene,
     uploadImageToArrayLayer,
+    onEngineDeviceLost,
     VERSION,
 } from "babylon-lite";
 import type { EngineContext, EngineOptions, RenderCanvas, Texture2DArray } from "babylon-lite";
@@ -42,6 +43,15 @@ import { LiteCompatError, unsupported } from "../error.js";
 import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
+
+/** Babylon.js `WebGPUEngineOptions` subset accepted by the compat engine. */
+export interface WebGPUEngineOptions extends EngineOptions {
+    antialias?: boolean;
+    adaptToDeviceRatio?: boolean;
+    useLargeWorldRendering?: boolean;
+    canvasToneMapping?: GPUCanvasToneMapping;
+    canvasColorSpace?: PredefinedColorSpace;
+}
 
 /**
  * Late work (utility-layer registration) is best-effort: it must never fail engine startup, and it
@@ -91,6 +101,11 @@ export abstract class AbstractEngine {
     protected _initialized = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
+
+    /** @internal Whether scene registration and the first engine start have completed. */
+    public get _hasStarted(): boolean {
+        return this._startupComplete;
+    }
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
 
@@ -102,6 +117,12 @@ export abstract class AbstractEngine {
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-loss signal, forwarded from Lite's device-loss subscription. */
+    public readonly onContextLostObservable = new Observable<AbstractEngine>();
+    /** Babylon.js context-restored signal. Lite does not expose a completed-recovery event, so this remains shape-only. */
+    public readonly onContextRestoredObservable = new Observable<AbstractEngine>();
+    /** @internal Device-loss unsubscriber installed by `initAsync`. */
+    private _unsubscribeDeviceLost: (() => void) | null = null;
 
     /** @internal Babylon.js hardware-scaling level. Babylon Lite manages device-pixel-ratio itself; stored for parity. */
     private _hardwareScalingLevel = 1;
@@ -125,17 +146,32 @@ export abstract class AbstractEngine {
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
 
-    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | boolean) {
+    public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts = typeof options === "object" ? { ...options } : undefined;
+        const opts: WebGPUEngineOptions | undefined = typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        if (opts) {
+            if (opts.canvasToneMapping !== undefined || opts.canvasColorSpace !== undefined) {
+                unsupported(
+                    "WebGPUEngineOptions.canvasToneMapping/canvasColorSpace",
+                    "Supporting WebGPU canvas presentation options requires changing Lite's existing surface configuration hot path; it cannot be added as an independently tree-shakeable compat capability."
+                );
+            }
+            const antialias = opts.antialias;
+            delete opts.antialias;
+            delete opts.canvasToneMapping;
+            delete opts.canvasColorSpace;
+            if (antialias === false) {
+                opts.msaaSamples = 1;
+            }
+        }
         // Babylon.js exposes floating-origin / large-world rendering through a
         // single `useLargeWorldRendering` flag. Babylon Lite splits it into
         // `useHighPrecisionMatrix` + `useFloatingOrigin` (the latter requires the
         // former). Translate so compat scenes that pass the BJS flag light up LWR.
-        if (opts && (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering) {
-            delete (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering;
+        if (opts?.useLargeWorldRendering) {
+            delete opts.useLargeWorldRendering;
             opts.useHighPrecisionMatrix = true;
             opts.useFloatingOrigin = true;
         }
@@ -148,6 +184,7 @@ export abstract class AbstractEngine {
             return;
         }
         this._lite = await createEngine(this._canvas, this._options);
+        this._unsubscribeDeviceLost = onEngineDeviceLost(this._lite, () => this.onContextLostObservable.notifyObservers(this));
         this._initialized = true;
     }
 
@@ -361,6 +398,8 @@ export abstract class AbstractEngine {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
         }
+        this._unsubscribeDeviceLost?.();
+        this._unsubscribeDeviceLost = null;
         if (this._initialized) {
             disposeEngine(this._lite);
         }
@@ -376,29 +415,42 @@ export abstract class AbstractEngine {
         return unsupported("WebGPUEngine.endFrame", "Babylon Lite's frame graph owns the frame loop; drive rendering with `runRenderLoop`.");
     }
 
-    /**
-     * Babylon.js `engine.currentSampleCount` — the MSAA sample count of the current render target.
-     * Babylon Lite manages MSAA internally and exposes no public sample-count accessor, so this
-     * needs a tree-shakeable Lite core addition before it can report a real value.
-     */
-    public get currentSampleCount(): never {
-        return unsupported("AbstractEngine.currentSampleCount", "Babylon Lite manages MSAA internally and exposes no public sample-count accessor.");
+    /** Babylon.js `engine.currentSampleCount` — the active surface's MSAA sample count. */
+    public get currentSampleCount(): number {
+        return this._headless ? 1 : this._lite.msaaSamples;
     }
 
     /**
-     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Babylon Lite does not
-     * expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Lite's API is scoped to
+     * individual material/sprite/text pipeline owners, not the engine-wide state BJS exposes.
      */
     public getAlphaToCoverage(): never {
-        return unsupported("AbstractEngine.getAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.getAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
     }
 
     /**
-     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Babylon Lite does
-     * not expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Lite's target-
+     * scoped API cannot reproduce the engine-wide state without a pipeline-owner lifecycle policy.
      */
     public setAlphaToCoverage(_enable: boolean): never {
-        return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.setAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
+    }
+
+    /**
+     * Babylon.js `engine.isOcclusionQueryVisible(query)` — Lite does not expose
+     * occlusion-query allocation, render-pass encoding, or asynchronous result state.
+     */
+    public isOcclusionQueryVisible(_query: unknown): never {
+        return unsupported(
+            "AbstractEngine.isOcclusionQueryVisible",
+            "Lite has no occlusion-query subsystem; supporting this requires query allocation, render-pass encoding, and asynchronous result-lifetime policy."
+        );
     }
 
     /**
@@ -437,6 +489,7 @@ export abstract class AbstractEngine {
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             scene._buildClusteredContainers();
+            await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
@@ -454,6 +507,9 @@ export abstract class AbstractEngine {
         // layers are overlays and can join on a subsequent frame; awaiting them
         // here would deadlock any registration path that depends on the first frame.
         await startEngine(this._lite);
+        do {
+            await Promise.all(this._scenes.map((scene) => scene._reconcilePendingMaterialPlugins()));
+        } while (this._scenes.some((scene) => scene._hasPendingMaterialPluginReconciliations));
         this._startupComplete = true;
         // Late work now runs after the main render loop has started.
         // Late work is explicitly allowed to fail without taking startup with it: a rejection here

@@ -1,4 +1,5 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function tryResolve(block: NodeBlock, inputName: string, stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr | null {
     const input = block.inputs.get(inputName);
@@ -11,7 +12,7 @@ function tryResolve(block: NodeBlock, inputName: string, stage: Stage, state: No
 function ensureRgb2HslHelper(state: NodeBuildState, stage: Stage): void {
     state[stage].helpers.set(
         "nme_rgb2hsl",
-        `fn nme_rgb2hsl(color: vec3<f32>) -> vec3<f32> {
+        wgsl`fn nme_rgb2hsl(color: vec3<f32>) -> vec3<f32> {
     let r = color.x;
     let g = color.y;
     let b = color.z;
@@ -48,7 +49,7 @@ function ensureRgb2HslHelper(state: NodeBuildState, stage: Stage): void {
 function ensureHsl2RgbHelper(state: NodeBuildState, stage: Stage): void {
     state[stage].helpers.set(
         "nme_hue2rgb",
-        `fn nme_hue2rgb(p: f32, q: f32, tt: f32) -> f32 {
+        wgsl`fn nme_hue2rgb(p: f32, q: f32, tt: f32) -> f32 {
     var t = tt;
     if (t < 0.0) {
         t = t + 1.0;
@@ -70,7 +71,7 @@ function ensureHsl2RgbHelper(state: NodeBuildState, stage: Stage): void {
     );
     state[stage].helpers.set(
         "nme_hsl2rgb",
-        `fn nme_hsl2rgb(hsl: vec3<f32>) -> vec3<f32> {
+        wgsl`fn nme_hsl2rgb(hsl: vec3<f32>) -> vec3<f32> {
     let h = hsl.x;
     let s = hsl.y;
     let l = hsl.z;
