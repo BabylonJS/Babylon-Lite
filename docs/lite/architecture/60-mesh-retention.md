@@ -96,10 +96,13 @@ preparation produces an empty result and does not recreate its targets.
    hook when that engine has no remaining leased meshes, and schedules fenced
    teardown. The callback rechecks all current scene/retention ownership before
    disposing geometry, then releases the captured texture claims. While device
-   recovery still has a pending ownership top-up for a replaced texture, the
-   claim is transferred out of that pending count instead: the replacement has
-   no restored claims yet, so releasing it would destroy a texture that surviving
-   leases and its creator still own, and the later top-up would restore the claim.
+   recovery still has a pending ownership top-up for a replaced texture, retention
+   keeps that pending total equal to the claims still owed from before the loss
+   plus the claims currently live. A claim acquired in that window is live and
+   also raises the total, so settlement keeps it instead of absorbing it into the
+   pre-loss count. A released claim lowers the total and drops a live claim only
+   when nothing is still owed. Otherwise, releasing the replacement would destroy a
+   texture that surviving leases and its creator still own.
 7. Engine teardown revokes tokens, marks the feature engine disposed, clears its
    admission hook, and force-disposes retained resource claims. Scene teardown
    alone does not revoke leases. Explicit `disposeMeshGpu` remains force-disposal.
@@ -149,7 +152,10 @@ implementation or asset is copied.
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `retained-shared-recovery-retirement.test.ts`: releasing one of two shared-texture
   leases after texture replacement but before ownership settles keeps the survivor's
-  texture live, and its final teardown destroys it exactly once.
+  texture live, and its final teardown destroys it exactly once. A clone retained
+  after replacement keeps its own claim through settlement and pre-loss release;
+  releasing it before settlement neither debits pre-loss owners nor leaks once every
+  owed claim has been re-acquired.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
   fresh identity/order, filter selection, disposal cancellation, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.

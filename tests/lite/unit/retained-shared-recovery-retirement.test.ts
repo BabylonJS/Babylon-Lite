@@ -4,6 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose.js";
 import { retainMeshResources, releaseMeshResources } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
+import type { MeshResourceLease } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
@@ -249,6 +250,79 @@ describe("shared replacement retirement during registered scene recovery", () =>
         await waitForGpuResourceRetirements(engine);
         expect(second._disposed).toBe(true);
         expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    async function retainAfterReplacement(
+        duringWindow?: (claims: { engine: EngineContext; shared: Texture2D; lease: MeshResourceLease; lateLease: MeshResourceLease }) => Promise<void>
+    ) {
+        const { engine, mesh } = fixture();
+        const gpuTexture = (): GPUTexture => stub<GPUTexture>({ destroy: vi.fn() });
+        const shared: Texture2D = { texture: gpuTexture(), view: stub<GPUTextureView>({}), sampler: stub<GPUSampler>({}), width: 1, height: 1 };
+        acquireTexture(shared);
+        const material = createStandardMaterial();
+        material.diffuseTexture = shared;
+        mesh.material = material;
+        const lease = retainMeshResources(engine, mesh);
+        expect(_textureOwners(shared)).toBe(2);
+        const state = stub<DeviceLostRecoveryState>({ _pendingOwnership: [[shared, _textureOwners(shared)]] });
+        shared.texture = gpuTexture();
+        engine._deviceLostRecovery = state;
+        const { entered, resume } = gateEnvironment();
+        const recovery = rebuildRegisteredScenes(engine);
+        await entered;
+        let late!: Mesh;
+        let lateLease!: MeshResourceLease;
+        try {
+            late = cloneTransformNode(mesh) as Mesh;
+            expect(late.material).toBe(material);
+            lateLease = retainMeshResources(engine, late);
+            await duringWindow?.({ engine, shared, lease, lateLease });
+            expect(shared.texture.destroy).not.toHaveBeenCalled();
+        } finally {
+            resume();
+        }
+        await recovery;
+        settleRebuiltTextureOwnership(state);
+        return { engine, shared, lease, late, lateLease };
+    }
+
+    it("keeps a texture claim acquired after replacement once pre-loss owners release", async () => {
+        const { engine, shared, lease, late, lateLease } = await retainAfterReplacement();
+        expect(_textureOwners(shared)).toBe(3);
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        expect(releaseTexture(shared)).toBe(false);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(late.material).toMatchObject({ diffuseTexture: shared });
+        releaseMeshResources(lateLease);
+        await waitForGpuResourceRetirements(engine);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("does not debit pre-loss ownership when a post-replacement claim is released before settlement", async () => {
+        const { engine, shared, lease } = await retainAfterReplacement(async ({ engine, lateLease }) => {
+            releaseMeshResources(lateLease);
+            await waitForGpuResourceRetirements(engine);
+        });
+        expect(_textureOwners(shared)).toBe(2);
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("releases a live claim when every owed claim was already re-acquired before settlement", async () => {
+        const { shared } = await retainAfterReplacement(async ({ engine, shared, lease, lateLease }) => {
+            // A recovery handler re-acquires the creator's pre-loss claim.
+            acquireTexture(shared);
+            releaseMeshResources(lease);
+            releaseMeshResources(lateLease);
+            await waitForGpuResourceRetirements(engine);
+        });
+        expect(_textureOwners(shared)).toBe(1);
         expect(releaseTexture(shared)).toBe(true);
         expect(shared.texture.destroy).toHaveBeenCalledOnce();
     });

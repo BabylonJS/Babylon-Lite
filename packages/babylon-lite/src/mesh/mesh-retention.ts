@@ -9,6 +9,7 @@ import { removeMeshFromScene } from "../scene/scene-remove.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { registerManagedResourceDisposer } from "../resource/managed-resource-hooks.js";
 import { acquireTexture, releaseTexture } from "../resource/texture-references.js";
+import { _textureOwners } from "../resource/texture-owner-state.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Material } from "../material/material.js";
 import { getMaterialTextures } from "../material/material-textures.js";
@@ -75,7 +76,7 @@ function collectTextures(state: Retention, material: Material): void {
     // Enumerate completely before acquiring: a plugin error must not leave partial ownership.
     for (const [allocation, texture] of found) {
         if (!state.textures.has(allocation)) {
-            acquireTexture(texture);
+            acquireRetainedTexture(state.engine, texture);
             state.textures.set(allocation, texture);
         }
     }
@@ -175,17 +176,34 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     }
 }
 
-/** Device recovery replaces texture handles before scene handlers run but restores their pre-loss
- *  ownership only after every handler finishes. A retention claim released inside that window is
- *  still part of the pending count, so transfer it out there instead of releasing the replacement,
- *  which would destroy it before surviving owners regain their claims. */
-function releaseRetainedTexture(engine: EngineContext, texture: Texture2D): void {
-    const pending = engine._deviceLostRecovery?._pendingOwnership?.find(([candidate, owners]) => owners > 0 && candidate.texture === texture.texture);
+/** Device recovery replaces texture handles before scene handlers run, then tops each replacement's
+ *  live count up to its queued pending total only after every handler finishes. Retention keeps that
+ *  total equal to owed pre-loss claims plus live claims, so the top-up adds back exactly what is owed:
+ *  a claim acquired in this window is live and also raises the total, and a released claim lowers
+ *  the total, dropping a live claim only when nothing is owed. Releasing the replacement while claims
+ *  are still owed would destroy it before surviving owners regain them. */
+function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number] | undefined {
+    return engine._deviceLostRecovery?._pendingOwnership?.find(([candidate]) => candidate.texture === texture.texture);
+}
+
+function acquireRetainedTexture(engine: EngineContext, texture: Texture2D): void {
+    const pending = pendingTextureOwnership(engine, texture);
     if (pending) {
-        pending[1]--;
-    } else {
-        releaseTexture(texture);
+        pending[1]++;
     }
+    acquireTexture(texture);
+}
+
+function releaseRetainedTexture(engine: EngineContext, texture: Texture2D): void {
+    const pending = pendingTextureOwnership(engine, texture);
+    if (pending) {
+        const owed = pending[1] - _textureOwners(texture);
+        pending[1]--;
+        if (owed > 0) {
+            return;
+        }
+    }
+    releaseTexture(texture);
 }
 
 /** Release one lease idempotently. Last unowned mesh disposal is GPU-fenced. */
