@@ -27,7 +27,7 @@
 // TAA pay nothing.
 
 import { F32 } from "../engine/typed-arrays.js";
-import { _cameraChangeKey } from "../camera/camera.js";
+import { _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
@@ -81,6 +81,8 @@ interface TaaTaskInternal extends TaaPostProcessTask {
     _jitterScratch: Float32Array;
     _firstUpdate: boolean;
     _lastCamVer: number;
+    /** Camera seen last frame; replacing it is a camera move even when the versions match. */
+    _lastCam?: Camera | null;
     _factor: number;
 }
 
@@ -204,8 +206,9 @@ export function createTaaPostProcessTask(config: TaaPostProcessTaskConfig, engin
         execute(): number {
             const cam = task._sourceRenderTask.scene.camera;
             const camVer = cam ? _cameraChangeKey(cam) : 0;
-            const moved = camVer !== task._lastCamVer;
+            const moved = camVer !== task._lastCamVer || cam !== task._lastCam;
             task._lastCamVer = camVer;
+            task._lastCam = cam;
 
             // factor=1 on the first frame and on camera-move reset: take the current
             // (un-jittered) frame verbatim, discarding stale history.

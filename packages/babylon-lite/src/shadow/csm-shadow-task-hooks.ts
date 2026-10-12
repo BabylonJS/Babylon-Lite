@@ -69,6 +69,9 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
+    /** @internal Camera the cascades were last fit against. A replacement camera can report the same
+     *  change key, so identity is part of the refit key. */
+    _lastCamera?: Camera;
     /** @internal Effective aspect ratio the cascades were last fit against. */
     _lastCamAspect: number;
     /** @internal */
@@ -490,6 +493,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         casterVersion === state._lastCasterVersion &&
         lightVersion === state._lastLightVersion &&
         camVersion === state._lastCamVersion &&
+        camera === state._lastCamera &&
         camAspect === state._lastCamAspect
     ) {
         return 0;
@@ -519,6 +523,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastCamVersion = camVersion;
+    state._lastCamera = camera;
     state._lastCamAspect = camAspect;
     return state._task.execute?.() ?? 0;
 }

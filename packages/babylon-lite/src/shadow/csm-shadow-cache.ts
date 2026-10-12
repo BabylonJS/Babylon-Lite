@@ -383,7 +383,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     }
     const camVersion = _cameraChangeKey(camera);
     const camAspect = csmCameraAspect(cached._scene, camera);
-    const cameraChanged = camVersion !== cached._lastCamVersion || camAspect !== cached._lastCamAspect;
+    const cameraChanged = camVersion !== cached._lastCamVersion || camera !== cached._lastCamera || camAspect !== cached._lastCamAspect;
     const light = sg._light as DirectionalLight;
     // A caster's DEPTH can change without its transform changing: a procedural mesh re-uploads its
     // geometry, a mesh set is re-registered, buffers are reallocated. `_renderableVersion` is the
@@ -421,6 +421,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     if (decision.refit) {
         cached._pendingCascades = _computeCsmCascades(cached._scene, camera, sg._light as DirectionalLight, cfg, cached._casterMeshes, cached._cascadeScratch);
         cached._lastCamVersion = camVersion;
+        cached._lastCamera = camera;
         cached._lastCamAspect = camAspect;
         cached._cachedContentVersion = cached._scene._renderableVersion;
         scheduler.arm(cached._gate._lastRefitDriftOnly() && !scheduler.pending());

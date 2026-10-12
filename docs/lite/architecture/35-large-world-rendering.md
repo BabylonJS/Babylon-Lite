@@ -94,11 +94,14 @@ The mesh UBO encodes `worldMatrix - foOffset`. Its contents depend on **two inde
 ```typescript
 export function wrapRenderableForFO(inner: () => void, scene: SceneContext, invalidate: () => void): () => void {
     let _lastCameraVersion = -1;
+    let _lastCamera: Camera | null | undefined;
     return (): void => {
-        const cv = scene.camera ? scene.camera.worldMatrixVersion : -1;
-        if (cv !== _lastCameraVersion) {
+        const cam = scene.camera;
+        const cv = cam ? cam.worldMatrixVersion : -1;
+        if (cv !== _lastCameraVersion || cam !== _lastCamera) {
             invalidate();
             _lastCameraVersion = cv;
+            _lastCamera = cam;
         }
         inner();
     };
@@ -109,9 +112,11 @@ export function wrapRenderableForFO(inner: () => void, scene: SceneContext, inva
 
 Without this, a camera move — which changes the offset but does NOT change `mesh.worldMatrixVersion` — would leave every mesh UBO holding stale `world - oldOffset` bytes, visible as a per-frame displacement of every mesh.
 
+Camera identity is part of the key because `worldMatrixVersion` is a per-camera counter: replacing `scene.camera` (directly or through `addToScene(scene, camera)`) with an untouched camera at another position can report the same version. Every cache derived from the active camera's offset follows the same rule — `lightFoVersion` advances a per-scene monotonic counter whenever the camera's identity or version changes (a monotonic key cannot cancel against the summed light versions), and the PCF/ESM shadow gates store the floating-origin camera alongside its version.
+
 ### Scene state
 
-LWR stores no mirror fields on `SceneContext`: the offset is the active camera's world position, read on demand, and invalidation rides that camera's `worldMatrixVersion`. Non-LWR scenes therefore carry no inert zeroed offset/version state.
+LWR stores no mirror fields on `SceneContext`: the offset is the active camera's world position, read on demand, and invalidation rides that camera's identity and `worldMatrixVersion`. Non-LWR scenes therefore carry no inert zeroed offset/version state.
 
 `scene/scene-core.ts` does retain the LWR lifecycle, and it is the only writer of it. Inside `_update`, the first frame with FO on stamps the flag `getViewMatrix` reads and drops the stale view caches:
 
