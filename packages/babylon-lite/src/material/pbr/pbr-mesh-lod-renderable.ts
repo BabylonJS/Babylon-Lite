@@ -277,59 +277,70 @@ function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: Ren
     return pipeline;
 }
 
+function cpuStorageCapacity(engine: EngineContext, current: number, required: number, stride: number, label: string): number {
+    const limits = engine._device.limits;
+    const maximum = Math.floor(Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize) / stride);
+    if (required > maximum) {
+        throw createMeshLoDError("MLOD_DEVICE_LIMIT", `MeshLoD ${label} exceeds the device storage-buffer limit`, { expected: maximum * stride, actual: required * stride });
+    }
+    let capacity = Math.max(current, 1);
+    while (capacity < required) {
+        capacity = Math.min(capacity * 2, maximum);
+    }
+    return capacity;
+}
+
 /** Grow the CPU draw-vertex buffer + scratch (make-before-break) so the streamed
  *  refinement's expanded vertices fit. Rebuilds the group-1 bind group against the new
  *  buffer and retires the old one after the next submitted frame drains. No-op while the
  *  selection fits the current capacity (the coarse-only case never grows). */
-function ensureCpuDrawCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, neededVertices: number): void {
-    if (neededVertices <= packet.maxDrawVertices) {
+function ensureCpuDrawCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, capacity: number): void {
+    if (capacity <= packet.maxDrawVertices) {
         return;
-    }
-    let capacity = packet.maxDrawVertices;
-    while (capacity < neededVertices) {
-        capacity *= 2;
     }
     const runtime = batch.asset._runtime;
     const oldBuffer = packet.drawVertexBuffer;
-    packet.drawVertexBuffer = engine._device.createBuffer({ label: "mesh-lod-draw-vertices", size: capacity * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
-    packet.drawScratch = new Uint32Array(capacity * 4);
-    packet.maxDrawVertices = capacity;
-    packet.bindGroup = buildBindGroup(
+    const drawScratch = new Uint32Array(capacity * 4);
+    const drawVertexBuffer = engine._device.createBuffer({ label: "mesh-lod-draw-vertices", size: capacity * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+    const bindGroup = buildBindGroup(
         engine,
         packet.bindGroupLayout,
         packet.textures,
-        packet.drawVertexBuffer,
+        drawVertexBuffer,
         packet.instanceBuffer,
         runtime.gpu.arena.buffer,
         packet.materialUbo,
         packet.environment
     );
+    packet.drawVertexBuffer = drawVertexBuffer;
+    packet.drawScratch = drawScratch;
+    packet.maxDrawVertices = capacity;
+    packet.bindGroup = bindGroup;
     retireGpuResources(engine, () => oldBuffer.destroy());
 }
 
 /** Grow CPU instance storage without invalidating the in-flight render bundle. */
-function ensureCpuInstanceCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, neededInstances: number): void {
-    if (neededInstances <= packet.maxInstances) {
+function ensureCpuInstanceCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, capacity: number): void {
+    if (capacity <= packet.maxInstances) {
         return;
     }
-    let capacity = packet.maxInstances;
-    while (capacity < neededInstances) {
-        capacity *= 2;
-    }
     const oldBuffer = packet.instanceBuffer;
-    packet.instanceBuffer = engine._device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
-    packet.instanceScratch = new Float32Array(capacity * (INSTANCE_STRIDE / 4));
-    packet.maxInstances = capacity;
-    packet.bindGroup = buildBindGroup(
+    const instanceScratch = new Float32Array(capacity * (INSTANCE_STRIDE / 4));
+    const instanceBuffer = engine._device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+    const bindGroup = buildBindGroup(
         engine,
         packet.bindGroupLayout,
         packet.textures,
         packet.drawVertexBuffer,
-        packet.instanceBuffer,
+        instanceBuffer,
         batch.asset._runtime.gpu.arena.buffer,
         packet.materialUbo,
         packet.environment
     );
+    packet.instanceBuffer = instanceBuffer;
+    packet.instanceScratch = instanceScratch;
+    packet.maxInstances = capacity;
+    packet.bindGroup = bindGroup;
     retireGpuResources(engine, () => oldBuffer.destroy());
 }
 
@@ -368,7 +379,6 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
     const selections = selectMeshLoDBatch(batch, context);
     // Feed this frame's fine-page demand + frame references to the streaming engine.
     driveMeshLoDStreaming(batch, selections);
-    ensureCpuInstanceCapacity(engine, batch, packet, selections.length);
     // Grow the draw-vertex buffer if streamed refinement expands past the coarse bound.
     let neededVertices = 0;
     for (const selection of selections) {
@@ -376,7 +386,10 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
             neededVertices += runtime.clusters[clusterId]!.triangleCount * 3;
         }
     }
-    ensureCpuDrawCapacity(engine, batch, packet, neededVertices);
+    const drawCapacity = cpuStorageCapacity(engine, packet.maxDrawVertices, neededVertices, DRAW_VERTEX_STRIDE, "draw vertices");
+    const instanceCapacity = cpuStorageCapacity(engine, packet.maxInstances, selections.length, INSTANCE_STRIDE, "instances");
+    ensureCpuInstanceCapacity(engine, batch, packet, instanceCapacity);
+    ensureCpuDrawCapacity(engine, batch, packet, drawCapacity);
     const draw = packet.drawScratch;
     const inst = packet.instanceScratch;
     let vertexCount = 0;
@@ -466,6 +479,7 @@ function buildGpuFrame(batch: MeshLoDSceneBatch, camera: Camera, context: DrawUp
     return {
         cameraPos: selectionCamera.position,
         verticalFov: selectionCamera.verticalFov,
+        perspectivePixelScale: selectionCamera.perspectivePixelScale,
         near: selectionCamera.near,
         targetWidth: selectionCamera.targetWidth,
         targetHeight: selectionCamera.targetHeight,
@@ -557,14 +571,6 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
     const boundTextures = [batch.material.baseColorTexture, batch.material.normalTexture, batch.material.ormTexture, batch.material.emissiveTexture].filter(
         (texture): texture is Texture2D => texture !== undefined
     );
-    const fb = getFallbacks(engine);
-    const textures: MeshLoDMaterialTextures = {
-        base: batch.material.baseColorTexture ?? fb.white,
-        normal: batch.material.normalTexture ?? fb.normal,
-        orm: batch.material.ormTexture ?? fb.white,
-        emissive: batch.material.emissiveTexture ?? fb.black,
-    };
-
     const maxInstances = Math.max(batch.instances.length, 1);
     let maxDrawVertices = 3;
     if (runtime.selectionMode === "cpu") {
@@ -576,8 +582,17 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         }
         maxDrawVertices = Math.max(coarseVertices * maxInstances, 3);
     }
+    cpuStorageCapacity(engine, maxDrawVertices, maxDrawVertices, DRAW_VERTEX_STRIDE, "draw vertices");
+    cpuStorageCapacity(engine, maxInstances, maxInstances, INSTANCE_STRIDE, "instances");
 
     const device = engine._device;
+    const fb = getFallbacks(engine);
+    const textures: MeshLoDMaterialTextures = {
+        base: batch.material.baseColorTexture ?? fb.white,
+        normal: batch.material.normalTexture ?? fb.normal,
+        orm: batch.material.ormTexture ?? fb.white,
+        emissive: batch.material.emissiveTexture ?? fb.black,
+    };
     const materialUbo = createEmptyUniformBuffer(engine, MATERIAL_UBO_BYTES, "mesh-lod-material");
     const materialState: MeshLoDMaterialState = { scratch: new Float32Array(MATERIAL_UBO_BYTES / 4), version: batch.material._uboVersion, debugMode: 0 };
     packMaterialUbo(batch.material, features, materialState.scratch);

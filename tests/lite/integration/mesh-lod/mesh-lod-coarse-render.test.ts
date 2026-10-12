@@ -10,12 +10,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, addMeshLoDToScene, removeMeshLoDFromScene, setMeshLoDSelectionMode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { buildMeshLoDBatchRenderable } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-renderable.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
-import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAsset, MeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { cloneTransformNode, createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -42,6 +43,9 @@ function fakeCamera(): Camera {
         farPlane: 100,
         worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -10, 1]),
         worldMatrixVersion: 1,
+        _projCache: new Float32Array(16),
+        _viewCache: new Float32Array(16),
+        _vpCache: new Float32Array(16),
     } as unknown as Camera;
 }
 
@@ -157,6 +161,144 @@ describe("MeshLoD coarse indirect rendering", () => {
         expect(asset.diagnostics.renderedTriangleCount).toBeGreaterThan(0);
         expect(asset.diagnostics.residentPageCount).toBe(asset.metadata.pinnedPageCount);
     });
+
+    it.each(["cpu", "gpu"] as const)("registers hierarchy clones independently in %s mode", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = { doubleSided: true } as PbrMaterialProps;
+        const parent = createTransformNode("parent", 1, 2, 3);
+        const source = createMeshLoDInstance(asset, material, { screenSpaceError: 0.5 });
+        source.parent = parent;
+        parent.children.push(source);
+        const clone = cloneTransformNode(parent).children[0]! as MeshLoDInstance;
+        const scene = fakeScene(engine);
+        addMeshLoDToScene(scene, source);
+        await scene._deferredBuilders[0]!();
+        scene._built = true;
+        addMeshLoDToScene(scene, clone);
+        const batch = scene._meshLoDRegistry!.batches[0]!;
+        expect(batch.instances).toEqual([source, clone]);
+        expect(clone._instanceId).not.toBe(source._instanceId);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        const update = () => {
+            binding._updateBatches?.[0]?.reset();
+            binding.update!(CONTEXT);
+            binding._updateBatches?.[0]?.flush(engine);
+        };
+        update();
+        const uploaded = [...mock.device.buffers].reverse().find((buffer) => buffer.label === "mesh-lod-instances" && buffer.data.length === 2 * 128)!;
+        const ids = new Uint32Array(uploaded.data.buffer);
+        expect([ids[30], ids[32 + 30]]).toEqual([source._instanceId, clone._instanceId]);
+        const pass = createMockRenderPass();
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        removeMeshLoDFromScene(scene, source);
+        update();
+        expect(batch.instances).toEqual([clone]);
+        const secondScene = fakeScene(engine);
+        addMeshLoDToScene(secondScene, source);
+        await secondScene._deferredBuilders[0]!();
+        expect(secondScene._meshLoDRegistry!.batches[0]!.instances).toEqual([source]);
+        expect(batch.instances).toEqual([clone]);
+    });
+
+    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("rejects an oversized initial CPU allocation before material resources (%s)", async (limitingField) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const scene = fakeScene(engine);
+        const material = { doubleSided: true } as PbrMaterialProps;
+        for (let i = 0; i < 3; i++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        }
+        const requiredBytes = coarseTriangleCount(asset) * 9 * 16;
+        mock.device.limits[limitingField] = requiredBytes - 1;
+        const createTexture = vi.spyOn(mock.device, "createTexture");
+        const allocationCount = mock.device.buffers.length;
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_DEVICE_LIMIT", actual: requiredBytes });
+        expect(mock.device.buffers).toHaveLength(allocationCount);
+        expect(createTexture).not.toHaveBeenCalled();
+        expect(scene._renderables).toHaveLength(0);
+    });
+
+    for (const initialMode of ["cpu", "gpu"] as const) {
+        for (const limitingField of ["maxStorageBufferBindingSize", "maxBufferSize"] as const) {
+            it(`caps ${initialMode}-to-CPU growth at ${limitingField} when the complete cut fits`, async () => {
+                const mock = createMockEngine();
+                engine = mock.engine;
+                const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: initialMode });
+                const material = { doubleSided: true } as PbrMaterialProps;
+                const scene = await buildScene(asset, engine, material, 1);
+                const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+                if (initialMode === "gpu") {
+                    binding._updateBatches![0]!.reset();
+                    binding.update!(CONTEXT);
+                    binding._updateBatches![0]!.flush(engine);
+                }
+                const packet = scene._meshLoDRegistry!.batches[0]!._packet as {
+                    drawVertexBuffer: MockBuffer;
+                    bindGroup: { entries: readonly GPUBindGroupEntry[] };
+                    maxDrawVertices: number;
+                };
+                const previousDraw = packet.drawVertexBuffer;
+                for (let i = 0; i < 2; i++) {
+                    addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+                }
+                const requiredVertices = coarseTriangleCount(asset) * 9;
+                const limitBytes = requiredVertices * 16 + 15;
+                mock.device.limits[limitingField] = limitBytes;
+                setMeshLoDSelectionMode(asset, "cpu");
+                binding.update!(CONTEXT);
+                expect(packet.maxDrawVertices).toBe(requiredVertices);
+                expect(packet.drawVertexBuffer.size).toBe(requiredVertices * 16);
+                expect(packet.drawVertexBuffer).not.toBe(previousDraw);
+                expect(previousDraw.destroyed).toBe(false);
+                expect(asset.diagnostics.renderedTriangleCount).toBe(requiredVertices / 3);
+                const drawBinding = packet.bindGroup.entries.find((entry) => entry.binding === 10);
+                expect(drawBinding?.resource).toEqual({ buffer: packet.drawVertexBuffer });
+                const pass = createMockRenderPass();
+                expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            });
+
+            it(`rejects an oversized ${initialMode}-to-CPU cut before replacing resources (${limitingField})`, async () => {
+                const mock = createMockEngine();
+                engine = mock.engine;
+                const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: initialMode });
+                const material = { doubleSided: true } as PbrMaterialProps;
+                const scene = await buildScene(asset, engine, material, 1);
+                const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+                if (initialMode === "gpu") {
+                    binding._updateBatches![0]!.reset();
+                    binding.update!(CONTEXT);
+                    binding._updateBatches![0]!.flush(engine);
+                }
+                const packet = scene._meshLoDRegistry!.batches[0]!._packet as {
+                    drawVertexBuffer: MockBuffer;
+                    instanceBuffer: MockBuffer;
+                    bindGroup: GPUBindGroup;
+                    maxDrawVertices: number;
+                };
+                const before = { ...packet };
+                for (let i = 0; i < 2; i++) {
+                    addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+                }
+                const requiredBytes = coarseTriangleCount(asset) * 9 * 16;
+                mock.device.limits[limitingField] = requiredBytes - 1;
+                setMeshLoDSelectionMode(asset, "cpu");
+                const allocationCount = mock.device.buffers.length;
+                expect(() => binding.update!(CONTEXT)).toThrowError(
+                    expect.objectContaining({ code: "MLOD_DEVICE_LIMIT", actual: requiredBytes, expected: Math.floor((requiredBytes - 1) / 16) * 16 })
+                );
+                expect(mock.device.buffers).toHaveLength(allocationCount);
+                expect(packet.drawVertexBuffer).toBe(before.drawVertexBuffer);
+                expect(packet.instanceBuffer).toBe(before.instanceBuffer);
+                expect(packet.bindGroup).toBe(before.bindGroup);
+                expect(packet.maxDrawVertices).toBe(before.maxDrawVertices);
+                expect(before.drawVertexBuffer.destroyed).toBe(false);
+                expect(before.instanceBuffer.destroyed).toBe(false);
+            });
+        }
+    }
 
     it("rejects an unsupported material through the PBR module (MLOD_UNSUPPORTED_MATERIAL)", async () => {
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });

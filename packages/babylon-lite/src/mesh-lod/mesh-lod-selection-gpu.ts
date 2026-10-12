@@ -264,6 +264,7 @@ export function packInstanceRecord(
 export interface MeshLoDGpuSelectionParams {
     readonly cameraPos: readonly [number, number, number];
     readonly verticalFov: number;
+    readonly perspectivePixelScale?: number;
     readonly near: number;
     readonly targetWidth: number;
     readonly targetHeight: number;
@@ -354,7 +355,7 @@ function groupPagesResident(input: MeshLoDGpuSelectionModelInput, firstPageRef: 
  *  append order (ascending instance, then ascending cluster). */
 export function runMeshLoDGpuSelection(input: MeshLoDGpuSelectionModelInput): MeshLoDGpuSelectionModelResult {
     const { params, groupCount, clusterCount, nodeCount, wordsPerInstance } = input;
-    const pixelScale = perspectivePixelScale(params.targetHeight, params.verticalFov);
+    const pixelScale = Math.fround(params.perspectivePixelScale ?? perspectivePixelScale(params.targetHeight, params.verticalFov));
     const refineMultiplier = Math.fround(1 + params.lodHysteresis);
     const coarsenMultiplier = Math.fround(1 - params.lodHysteresis);
     const maxSelected = input.maxSelected ?? Number.POSITIVE_INFINITY;
@@ -1497,6 +1498,7 @@ export function applyMeshLoDGpuReadback(
 export interface MeshLoDGpuFrameParams {
     readonly cameraPos: readonly [number, number, number];
     readonly verticalFov: number;
+    readonly perspectivePixelScale?: number;
     readonly near: number;
     readonly targetWidth: number;
     readonly targetHeight: number;
@@ -1536,7 +1538,7 @@ function writeSelectionParams(
     f[27] = frame.near;
     f[28] = frame.targetWidth;
     f[29] = frame.targetHeight;
-    f[30] = perspectivePixelScale(frame.targetHeight, frame.verticalFov);
+    f[30] = frame.perspectivePixelScale ?? perspectivePixelScale(frame.targetHeight, frame.verticalFov);
     f[31] = frame.orthographicHeight ?? 0;
     f[32] = frame.screenSpaceError;
     f[33] = Math.fround(1 + frame.lodHysteresis);

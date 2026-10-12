@@ -22,6 +22,8 @@ export type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 export interface MeshLoDCamera {
     readonly position: readonly [number, number, number];
     readonly verticalFov: number;
+    /** Perspective pixel scale from the active projection. FOV is used only when omitted. */
+    readonly perspectivePixelScale?: number;
     readonly near: number;
     readonly targetWidth: number;
     readonly targetHeight: number;
@@ -98,7 +100,7 @@ function groupResident(input: MeshLoDSelectionInput, group: MeshLoDGroup): boole
 export function selectMeshLoDCpu(input: MeshLoDSelectionInput): MeshLoDSelectionResult {
     const groupCount = input.groups.length;
     const worldScale = conservativeWorldScale(input.worldMatrix);
-    const pixelScale = perspectivePixelScale(input.camera.targetHeight, input.camera.verticalFov);
+    const pixelScale = Math.fround(input.camera.perspectivePixelScale ?? perspectivePixelScale(input.camera.targetHeight, input.camera.verticalFov));
     const refineBoundary = fmul(input.screenSpaceError, fadd(1, input.lodHysteresis));
     const coarsenBoundary = fmul(input.screenSpaceError, fsub(1, input.lodHysteresis));
 

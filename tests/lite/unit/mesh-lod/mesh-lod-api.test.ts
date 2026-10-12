@@ -20,9 +20,12 @@ import {
     setMeshLoDStreamingPaused,
     type MeshLoDAsset,
     type MeshLoDDiagnostics,
+    type MeshLoDInstance,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { cloneTransformNode, createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node.js";
+import { createTranslationMat4 } from "../../../../packages/babylon-lite/src/math/create-translation-mat4.js";
 
 const MIB = 1024 * 1024;
 
@@ -139,6 +142,54 @@ describe("createMeshLoDInstance", () => {
         } catch (error) {
             expect(isMeshLoDError(error) && error.code).toBe("MLOD_UNSUPPORTED_MATERIAL");
         }
+    });
+
+    it.each([false, true])("clones a hierarchy without losing MeshLoD state (raw matrix=%s)", (rawMatrix) => {
+        const asset = makeFakeAsset();
+        const material = {} as PbrMaterialProps;
+        const root = createTransformNode("root", 10, 20, 30);
+        const source = createMeshLoDInstance(asset, material, { name: "statue", visible: false, screenSpaceError: 0.5 });
+        source.position.set(1, 2, 3);
+        source.rotationQuaternion.set(0.2, 0.3, 0.4, Math.sqrt(0.71));
+        source.scaling.set(-2, 3, 4);
+        if (rawMatrix) {
+            source._localMatrix = createTranslationMat4(4, 5, 6);
+            source._localMatrixLocked = true;
+        }
+        source._selectionVersion = 5;
+        source.parent = root;
+        root.children.push(source);
+        source.children.push(createTransformNode("child", 7, 8, 9));
+
+        const clonedRoot = cloneTransformNode(root);
+        const clone = clonedRoot.children[0]! as MeshLoDInstance;
+        expect(clone.asset).toBe(asset);
+        expect(clone._asset).toBe(asset);
+        expect(clone.material).toBe(material);
+        expect(clone._material).toBe(material);
+        expect(clone.name).toBe("statue_clone");
+        expect(clone.visible).toBe(false);
+        expect(clone.screenSpaceError).toBe(0.5);
+        expect(clone._instanceId).toBe(1);
+        expect(clone._selectionVersion).toBeUndefined();
+        expect(clone.parent).toBe(clonedRoot);
+        expect(Array.from(clone.worldMatrix)).toEqual(Array.from(source.worldMatrix));
+        expect(clone.position).not.toBe(source.position);
+        expect(clone.rotationQuaternion).not.toBe(source.rotationQuaternion);
+        expect(clone.scaling).not.toBe(source.scaling);
+        if (rawMatrix) {
+            expect(clone._localMatrix).not.toBe(source._localMatrix);
+            expect(Array.from(clone._localMatrix!)).toEqual(Array.from(source._localMatrix!));
+            expect(clone._localMatrixLocked).toBe(true);
+        }
+        expect(clone.children).toHaveLength(1);
+        expect(clone.children[0]).not.toBe(source.children[0]);
+        expect(clone.children[0]!.parent).toBe(clone);
+        const second = cloneTransformNode(clone) as MeshLoDInstance;
+        expect(second._instanceId).toBe(2);
+        expect(second.asset).toBe(asset);
+        clone.position.x = 99;
+        expect(source.position.x).toBe(1);
     });
 
     it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid instance SSE %s before incrementing ids", (screenSpaceError) => {

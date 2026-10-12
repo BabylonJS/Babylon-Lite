@@ -22,6 +22,7 @@ import type { MetallicReflectanceOptions } from "../../../../packages/babylon-li
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { createMockEngine } from "./fixtures/gpu-mock.js";
+import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
 
 function fakeScene(): SceneContext {
     return { _deferredBuilders: [], surface: { engine: createMockEngine().engine } } as unknown as SceneContext;
@@ -106,6 +107,18 @@ describe("MeshLoD scene registry — batching", () => {
 });
 
 describe("MeshLoD selection camera", () => {
+    it.each([0.75, 3])("uses injected XR projection scale %s instead of the advisory FOV", (verticalScale) => {
+        const camera = createXrCamera("left");
+        const projection = new Float32Array([1, 0, 0, 0, 0, verticalScale, 0, 0, 0.2, -0.1, -1, -1, 0, 0, -0.1, 0]);
+        const pose = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4, 5, -6, 1]);
+        const viewport = { x: 0.25, y: 0.125, width: 0.5, height: 0.75 };
+        updateXrCameraForView(camera, { transform: { matrix: pose }, projectionMatrix: projection } as unknown as XRView, 800, 600, viewport);
+        expect(camera.fov).toBe(1);
+        const selected = getMeshLoDSelectionCamera(camera, { targetWidth: 800, targetHeight: 600, _camera: camera });
+        expect(selected).toMatchObject({ position: [4, 5, 6], targetWidth: 400, targetHeight: 450, perspectivePixelScale: Math.fround((450 * verticalScale) / 2) });
+        expect(camera._projCache[5]).toBe(verticalScale);
+    });
+
     it("uses the effective orthographic vertical extent and viewport pixels", () => {
         const camera = {
             worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4, 5, 6, 1],

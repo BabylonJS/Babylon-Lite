@@ -33,6 +33,8 @@ import {
     runMeshLoDGpuSelection,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDGpuSelectionModelInput, MeshLoDGpuSelectionParams } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
+import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
+import { getMeshLoDSelectionCamera } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 
 const IDENTITY: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -140,6 +142,7 @@ function modelParams(s: Scenario, levelCount: number): MeshLoDGpuSelectionParams
     return {
         cameraPos: s.camera.position,
         verticalFov: s.camera.verticalFov,
+        perspectivePixelScale: s.camera.perspectivePixelScale,
         near: s.camera.near,
         targetWidth: s.camera.targetWidth,
         targetHeight: s.camera.targetHeight,
@@ -180,6 +183,44 @@ function modelInput(h: FixtureHierarchy, s: Scenario, prior: Uint32Array): MeshL
 
 const sortedUnique = (ids: { clusterId: number; instanceId: number }[]): number[] => Array.from(normalizeMeshLoDSelectedClusterIds(ids));
 const fineFromPrior = (prior: Uint32Array, groupCount: number): number[] => Array.from({ length: groupCount }, (_, g) => ((prior[g >>> 5]! & (1 << (g & 31))) !== 0 ? 1 : 0));
+
+describe("MeshLoD selection equivalence — injected XR projections", () => {
+    const fixture = load("selection-lod.json") as { hierarchy: FixtureHierarchy };
+    for (const verticalScale of [0.75, 3]) {
+        it.each([false, true])(`selects from vertical scale ${verticalScale}, including page demand (fine resident=%s)`, (fineResident) => {
+            const camera = createXrCamera("left");
+            const projection = new Float32Array([1, 0, 0, 0, 0, verticalScale, 0, 0, 0.2, -0.1, -1, -1, 0, 0, -0.1, 0]);
+            const pose = new Float32Array(IDENTITY);
+            pose[14] = -3000;
+            updateXrCameraForView(camera, { transform: { matrix: pose }, projectionMatrix: projection } as unknown as XRView, 800, 600, {
+                x: 0.25,
+                y: 0.125,
+                width: 0.5,
+                height: 0.75,
+            });
+            const scenario: Scenario = {
+                camera: getMeshLoDSelectionCamera(camera, { targetWidth: 800, targetHeight: 600, _camera: camera }),
+                frustumPlanes: [],
+                resident: fineResident ? [0, 1] : [0],
+                wasFineRequired: [0, 0],
+                screenSpaceError: 1,
+                lodHysteresis: 0,
+            };
+            const cpu = selectMeshLoDCpu(oracleInput(fixture.hierarchy, scenario));
+            const gpuInput = modelInput(fixture.hierarchy, scenario, new Uint32Array(1));
+            const gpu = runMeshLoDGpuSelection(gpuInput);
+            const refines = verticalScale === 3;
+            expect(cpu.fineRequired[1]).toBe(refines ? 1 : 0);
+            expect(Array.from(cpu.selectedClusterIds)).toEqual(refines && fineResident ? [2, 3] : [0, 1]);
+            expect(cpu.desiredPages.map((page) => page.pageId)).toEqual(refines && !fineResident ? [1] : []);
+            expect(sortedUnique(gpu.selected)).toEqual(Array.from(cpu.selectedClusterIds));
+            expect(gpu.desiredPages).toEqual(cpu.desiredPages);
+            expect(fineFromPrior(gpuInput.priorState, 2)).toEqual(Array.from(cpu.fineRequired));
+            expect(gpu.maximumSelectedErrorPixels).toBe(cpu.maximumSelectedErrorPixels);
+            expect(gpu.maximumUnmetErrorPixels).toBe(cpu.maximumUnmetErrorPixels);
+        });
+    }
+});
 
 describe("MeshLoD selection equivalence — jittered hysteresis sequence", () => {
     const fixture = load("selection-jitter.json") as {

@@ -38,6 +38,7 @@ function cameraAt(dist: number): Camera {
         farPlane: 1000,
         worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -dist, 1]),
         worldMatrixVersion: 1,
+        _projCache: new Float32Array(16),
     } as unknown as Camera;
 }
 

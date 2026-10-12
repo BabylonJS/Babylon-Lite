@@ -18,7 +18,8 @@ import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { MeshLoDAssetRuntime, MeshLoDEffectiveSettings } from "./mesh-lod-runtime.js";
 import type * as MeshLoDRuntimeModule from "./mesh-lod-runtime.js";
 import type { MeshLoDError } from "./mesh-lod-errors.js";
-import { createSceneNode } from "../scene/scene-node.js";
+import type { Mat4, Mat4Storage } from "../math/types.js";
+import { initSceneNodeTransform } from "../scene/scene-node.js";
 import { createMeshLoDError } from "./mesh-lod-errors.js";
 
 export { isMeshLoDError } from "./mesh-lod-errors.js";
@@ -285,17 +286,35 @@ export function createMeshLoDInstance(asset: MeshLoDAsset, material: PbrMaterial
         });
     }
 
-    type MeshLoDInstanceMutable = { -readonly [K in keyof MeshLoDInstance]: MeshLoDInstance[K] };
-    const instance = createSceneNode(options?.name ?? "meshLoD") as unknown as MeshLoDInstanceMutable;
-    instance.asset = asset;
-    instance._asset = asset;
-    instance.material = material;
-    instance._material = material;
-    instance.visible = options?.visible ?? true;
-    instance.screenSpaceError = screenSpaceError;
-    instance._instanceId = asset._runtime.nextInstanceId;
+    const instance = initSceneNodeTransform<MeshLoDInstance>({
+        name: options?.name ?? "meshLoD",
+        children: [],
+        asset,
+        _asset: asset,
+        material,
+        _material: material,
+        visible: options?.visible ?? true,
+        screenSpaceError,
+        _instanceId: asset._runtime.nextInstanceId,
+        _cloneNode: () => {
+            const clone = createMeshLoDInstance(instance._asset, instance._material, {
+                name: instance.name + "_clone",
+                visible: instance.visible,
+                screenSpaceError: instance.screenSpaceError,
+            });
+            clone.position.copyFrom(instance.position);
+            clone.rotationQuaternion.copyFrom(instance.rotationQuaternion);
+            clone.scaling.copyFrom(instance.scaling);
+            clone.metadata = instance.metadata;
+            if (instance._localMatrix) {
+                clone._localMatrix = (instance._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4;
+                clone._localMatrixLocked = instance._localMatrixLocked;
+            }
+            return clone;
+        },
+    });
     asset._runtime.nextInstanceId += 1;
-    return instance as MeshLoDInstance;
+    return instance;
 }
 
 /** Register an instance into a scene. Idempotent for the same scene/instance;

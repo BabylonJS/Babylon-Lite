@@ -811,6 +811,7 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
             const pose = new Float32Array(world);
             pose[14] = 10; // XR's right-handed eye pose.
             const projection = new Float32Array(getProjectionMatrix(camera, 800 / 600));
+            projection[5] = eye === 0 ? 3 : 0.75;
             // Undo LH/reverse-Z so updateXrCameraForView applies the real XR boundary.
             for (let column = 0; column < 4; column++) {
                 const row2 = column * 4 + 2;
@@ -837,6 +838,8 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
             const f = new Float32Array(buffer.data.buffer);
             const u = new Uint32Array(buffer.data.buffer);
             expect(f[24]).toBe(eye === 0 ? -1000 : 1000);
+            const projectionScale = xr ? (eye === 0 ? 3 : 0.75) : getProjectionMatrix(cameras[eye]!, 800 / 600)[5]!;
+            expect(f[30]).toBe(Math.fround((600 * projectionScale) / 2));
             const records = new Float32Array(transforms[eye]!.data.buffer);
             const model = runMeshLoDGpuSelection({
                 nodes: packHierarchyNodes(runtime.hierarchyNodes),
@@ -857,6 +860,7 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
                 params: {
                     cameraPos: [f[24]!, f[25]!, f[26]!],
                     verticalFov: cameras[eye]!.fov,
+                    perspectivePixelScale: f[30]!,
                     near: f[27]!,
                     targetWidth: f[28]!,
                     targetHeight: f[29]!,

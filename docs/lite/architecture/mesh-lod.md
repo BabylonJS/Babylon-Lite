@@ -77,6 +77,13 @@ cache budget, streaming pause, debug view, and selection mode at runtime;
 disposing its asset uses the corresponding root API. The current types and
 exact signatures live in `mesh-lod.ts`.
 
+`cloneTransformNode` preserves MeshLoD instances through their specialized
+SceneNode clone hook, including instances nested under ordinary transforms.
+The clone shares the asset/material, copies visibility, the error override,
+TRS and any raw local matrix, and receives a fresh asset-local instance ID.
+Its transform storage and selection history are independent; it starts
+unregistered and can be added to the same or another scene separately.
+
 ## 4. Ownership and frame flow
 
 ```text
@@ -165,7 +172,14 @@ non-additive `totalDurationMs` from `getRenderTaskGpuTimings`.
 
 `mesh-lod-selection-math.ts` mirrors comparison-sensitive operations with
 `Math.fround` in the CPU oracle and GPU model. For perspective cameras the
-pixel scale is `viewportHeight / (2 * tan(verticalFov / 2))`; geometric
+pixel scale is `viewportHeight * abs(projection[5]) / 2`, rounded to float32
+and passed unchanged through the shared camera/selection contract to CPU
+selection, the GPU model, and the selection UBO. The projection is resolved
+at the render target's viewport-adjusted aspect, so XR uses its injected
+per-eye projection rather than the advisory camera `fov`. For symmetric
+perspective this equals `viewportHeight / (2 * tan(verticalFov / 2))`;
+direct oracle fixtures without a projection-derived scale retain that FOV
+formula. Geometric
 error is transformed by the instance scale and divided by the distance
 from the camera to the bounding sphere surface (clamped by the near plane).
 The shared scale bound is `sqrt(max row sum(abs(A^T A)))`, rounded upward
@@ -293,6 +307,14 @@ cannot fit, the whole draw is suppressed rather than drawing a partial cut,
 and a device-limit error is surfaced after GPU readback. In GPU mode, the
 material packet keeps only a minimal placeholder for its unused CPU draw
 stream; GPU selection owns the actual draw buffer.
+CPU draw and instance storage are checked against the smaller of
+`maxStorageBufferBindingSize` and `maxBufferSize`, including initial allocation
+and GPU-to-CPU switches. Geometric growth is capped at the largest complete
+record that fits those limits. Both required capacities are prevalidated before
+replacing either buffer; an oversized selected cut throws `MLOD_DEVICE_LIMIT`
+with required/allowed bytes instead of allocating an invalid binding. Valid
+growth publishes its replacement buffer, scratch and bind group together,
+then retires the previous buffer behind the frame fence.
 Each render binding owns independent selection parameters, hysteresis, and
 draw buffers, including the two stereo-eye bindings recorded before a single
 submission. Immutable asset metadata and material resources remain shared.
@@ -498,3 +520,9 @@ The demo workflow verifies the cache slider's lower/upper bounds, clamping
 above the advertised maximum, and agreement between the label and aggregate
 effective budget. A forced out-of-capacity input verifies that rejection leaves
 the accepted value intact and reports an error; a subsequent valid input clears it.
+CPU storage regressions cover both device limits, bounded growth, initial
+allocation, and GPU-to-CPU switches, including rejected cuts without resource
+replacement. Injected XR projection regressions require both selectors to use
+the actual vertical scale, agree on refinement/page demand, and upload that
+same scale per eye. Hierarchy cloning tests preserve MeshLoD state, independent
+TRS/raw matrix storage, fresh IDs, and separate registration/drawing.

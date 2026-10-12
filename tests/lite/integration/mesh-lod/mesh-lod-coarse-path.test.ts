@@ -68,6 +68,7 @@ function fakeCamera(): Camera {
         farPlane: 100,
         worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -12, 1]),
         worldMatrixVersion: 1,
+        _projCache: new Float32Array(16),
     } as unknown as Camera;
 }
 

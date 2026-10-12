@@ -14,7 +14,7 @@ import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Renderable, DrawUpdateContext } from "../render/renderable.js";
 import type { Camera } from "../camera/camera.js";
-import { getCameraPosition } from "../camera/camera.js";
+import { getCameraPosition, getEffectiveAspectRatio, getProjectionMatrix } from "../camera/camera.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { validateMeshLoDMaterial } from "../material/pbr/pbr-mesh-lod-material.js";
 import type { MeshLoDAsset, MeshLoDInstance } from "./mesh-lod.js";
@@ -229,16 +229,20 @@ export interface MeshLoDInstanceSelection {
     readonly result: MeshLoDSelectionResult;
 }
 
-/** @internal Resolve the effective viewport and orthographic view height for both selectors. */
+/** @internal Resolve viewport pixels and the active projection's SSE scale for both selectors. */
 export function getMeshLoDSelectionCamera(camera: Camera, context: DrawUpdateContext): MeshLoDCamera {
     const position = getCameraPosition(camera);
     const ortho = camera.ortho;
+    const targetHeight = context.targetHeight * (camera.viewport?.height ?? 1);
     return {
         position: [position.x, position.y, position.z],
         verticalFov: camera.fov,
+        perspectivePixelScale: ortho
+            ? undefined
+            : Math.fround((targetHeight * Math.abs(getProjectionMatrix(camera, getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight))[5]!)) / 2),
         near: camera.nearPlane,
         targetWidth: context.targetWidth * (camera.viewport?.width ?? 1),
-        targetHeight: context.targetHeight * (camera.viewport?.height ?? 1),
+        targetHeight,
         orthographicHeight: ortho ? (ortho.top ?? ortho.halfHeight) - (ortho.bottom ?? -ortho.halfHeight) : undefined,
     };
 }
