@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Storage mesh indexed indirect acceptance</title>
+        <style>
+            body {
+                background: #222;
+                color: white;
+                font-family: sans-serif;
+            }
+            canvas {
+                display: block;
+                width: 256px;
+                height: 128px;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas" width="256" height="128"></canvas>
+        <button id="one">GPU: one right triangle</button>
+        <button id="two">GPU: two triangles</button>
+        <button id="none">GPU: zero triangles</button>
+        <button id="replace">Borrow second allocation (one left triangle)</button>
+        <button id="unbind">Restore CPU draw</button>
+        <script type="module" src="/lite/src/indexed-indirect-test.ts"></script>
+    </body>
+</html>

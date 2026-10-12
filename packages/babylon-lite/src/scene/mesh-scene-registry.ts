@@ -15,6 +15,12 @@ import type { SceneContext } from "./scene-core.js";
  *  `scene-remove` reaching back into `scene-core`. (This is organizational only — the package
  *  is side-effect-free, so symbol-level tree-shaking applies regardless of file boundaries.) */
 let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
+let _materialValidator: ((mesh: Mesh, material: Mesh["material"]) => void) | null = null;
+
+/** @internal Install optional validation of material transitions for a borrowed consumer. */
+export function _installMeshMaterialValidator(validate: (mesh: Mesh, material: Mesh["material"]) => void): void {
+    _materialValidator = validate;
+}
 
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
@@ -42,6 +48,11 @@ export function markMeshRenderableDirty(mesh: Mesh): void {
     }
 }
 
+/** @internal Read subscriptions without storing scene references on a mesh. */
+export function _getMeshScenes(mesh: Mesh): ReadonlySet<SceneContext> | undefined {
+    return _meshScenes?.get(mesh);
+}
+
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
  *  rebuild in EVERY scene the mesh currently belongs to. Installed exactly once per mesh. The
  *  setter looks the subscriber set up from `_meshScenes` on each write rather than capturing
@@ -55,6 +66,7 @@ function installMaterialSetter(mesh: Mesh): void {
         },
         set(v) {
             if (v !== _mat) {
+                _materialValidator?.(mesh, v);
                 _mat = v;
                 const scenes = _meshScenes?.get(mesh);
                 if (scenes) {
@@ -82,6 +94,7 @@ export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
     if (mesh._disposed) {
         throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
     }
+    _materialValidator?.(mesh, mesh.material);
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {

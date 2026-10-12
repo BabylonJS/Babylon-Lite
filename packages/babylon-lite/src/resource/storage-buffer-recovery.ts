@@ -17,11 +17,13 @@ export function getCpuStorageRecoveryLimits(engine: EngineContext): Record<strin
     return undefined;
 }
 
-/** @internal Existing CPU-backed storage restoration, kept behind the recovery runner. */
+/** @internal Existing CPU-backed storage restoration, kept behind the recovery runner.
+ *  GPU-role allocations have no shadow to rebuild from; dropping their old-device handle
+ *  makes every bind path reject them instead of submitting a handle from the lost device. */
 export function rebuildCpuStorageBuffers(engine: EngineContext): void {
     for (const buffer of engine._storageBuffers ?? []) {
-        if (!buffer._destroyed && buffer._data) {
-            buffer._buffer = createMappedBuffer(engine, buffer._data, BU.STORAGE, buffer._label);
+        if (!buffer._destroyed) {
+            buffer._buffer = buffer._data ? createMappedBuffer(engine, buffer._data, BU.STORAGE, buffer._label) : null;
         }
     }
 }
