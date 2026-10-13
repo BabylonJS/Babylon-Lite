@@ -6,6 +6,7 @@ import { enableDeviceLostSpriteRecovery } from "../../../packages/babylon-lite/s
 import { createTexture2DFromPixels, createRenderTexture2D } from "../../../packages/babylon-lite/src/texture/pixels-texture";
 import { createSprite2DLayer, addSprite2DIndex } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
+import { enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex } from "../../../packages/babylon-lite/src/sprite/sprite-2d-instance-params";
 import { createGridSpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import { createSpriteRenderer, registerSpriteRenderer, setSpriteRendererTarget } from "../../../packages/babylon-lite/src/sprite/sprite-renderer";
 import { rebuildRegisteredSpriteRenderers } from "../../../packages/babylon-lite/src/sprite/sprite-recovery";
@@ -157,6 +158,10 @@ describe("SpriteRenderer device-lost recovery", () => {
         });
         const layer = createSprite2DLayer(atlas, { customShader: shader });
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [16, 16], frame: 0 });
+        enableSprite2DInstanceParams(layer);
+        setSprite2DInstanceParamsIndex(layer, 0, [1, 2, 3, 4]);
+        const instanceData = layer._instanceData;
+        const extension = layer._vertexExtension;
         const renderer = createSpriteRenderer(engine, { layers: [layer], clear: false });
         setSpriteRendererTarget(renderer, target);
         registerSpriteRenderer(renderer);
@@ -191,6 +196,11 @@ describe("SpriteRenderer device-lost recovery", () => {
         expect(renderer._targetView).toBe(target.view);
         expect(renderer.layers).toEqual([layer]);
         expect(layer.count).toBe(1);
+        expect(layer._instanceData).toBe(instanceData);
+        expect(layer._vertexExtension).toBe(extension);
+        expect(Array.from(layer._instanceData.slice(13, 17))).toEqual([1, 2, 3, 4]);
+        const createShaderModule = vi.mocked(newProbe.device.createShaderModule);
+        expect(createShaderModule.mock.calls.some(([descriptor]) => descriptor.code.includes("out.instanceParams = in.instanceParams;"))).toBe(true);
         expect(renderer._clear).toBe(false);
         expect(other.touched).toBe(false);
         expect(newProbe.bufferWrites.find((write) => write.label === "sprite-layer-fx-ubo")?.firstFloat).toBeCloseTo(0.05);

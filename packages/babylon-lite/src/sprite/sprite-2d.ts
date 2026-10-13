@@ -12,6 +12,7 @@ import { F32 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
+import type { SpriteVertexExtension } from "./sprite-fx-hook.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DYSortState } from "./sprite-2d-y-sort.js";
 import type { SpriteBlendDescriptor } from "./sprite-blend.js";
@@ -111,6 +112,8 @@ export interface Sprite2DLayer {
      * "is wide" flag (drives the shader permutation key + the prologue `+ in.iUvOffset`).
      */
     _uvScrollAttr?: GPUVertexAttribute;
+    /** @internal Optional instance-layout descriptor installed by an opt-in extension. */
+    _vertexExtension?: SpriteVertexExtension;
     /**
      * @internal Opt-in coverage-gamma value (glyph "stem darkening"); set only via
      * {@link setSprite2DCoverageGamma}. **Absent** (`undefined`, treated as `1` = no-op) on plain
@@ -128,9 +131,9 @@ export interface Sprite2DLayer {
     /** @internal Capacity of the per-instance buffer (in sprites). */
     _capacity: number;
     /** @internal Per-instance stride in floats; 13 for pure-2D, 14 for depth-hosted. */
-    readonly _instanceFloatsPerSprite: number;
+    _instanceFloatsPerSprite: number;
     /** @internal Per-instance stride in bytes; 52 for pure-2D, 56 for depth-hosted. */
-    readonly _instanceStrideBytes: number;
+    _instanceStrideBytes: number;
     /** @internal Per-instance CPU staging buffer; layout = `_instanceFloatsPerSprite` per sprite. */
     _instanceData: Float32Array;
     /**
@@ -520,6 +523,7 @@ export function addSprite2DIndex(layer: Sprite2DLayer, props: Sprite2DProps): nu
         growCapacity(layer, idx + 1);
     }
     writeInstance(layer, idx, props, null);
+    layer._vertexExtension?._initInstance(layer._instanceData, idx * layer._instanceFloatsPerSprite);
     _setSprite2DCount(layer, layer.count + 1);
     _getSprite2DYSortHook()?.add(layer, idx);
     markDirty(layer, idx, idx + 1);

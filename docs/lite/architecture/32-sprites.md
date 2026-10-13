@@ -38,6 +38,11 @@
 
 ## Purpose
 
+The optional [Sprite2D instance-parameter extension](sprite-instance-params.md)
+adds a per-sprite flat vec4 input to custom fragments. It preserves ordinary
+layouts and keeps color, UV scroll, layer-wide shader parameters and depth
+independent.
+
 Lite's design rule is "build things on top of previous things." Sprites are
 2D quads. World-anchored ("2.5D") labels are 2D quads whose pixel position
 is computed each frame from a 3D anchor. Camera-facing world-sized
