@@ -1,14 +1,16 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Eight parallel jobs:
+# Runs on every PR targeting master. Ten parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
 #   2. API Report       — public API diff comment + breaking-change validation
 #   3. Unit Tests       — vitest + plumbing (Playwright)
 #   4. Bundle Size      — ceiling checks
 #   5. Perf Regression  — Lite vs Stable on BrowserStack
 #   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   7. Lint             — ESLint + TypeScript type-check
-#   8. Playground Snapshot — per-PR playground deploy + PR comment
+#   7. Shado macOS Probe — focused Dawn/Metal diagnostics (PR #803 only)
+#   8. Lint             — ESLint + TypeScript type-check
+#   9. Compat Layer     — source, build, and unit validation
+#  10. Playground Snapshot — per-PR playground deploy + PR comment
 #
 
 trigger: none
@@ -486,6 +488,7 @@ stages:
             variables:
                 ArtifactsSafe: "false"
                 ReportUploaded: "false"
+                ShadoArtifactsSafe: "false"
             steps:
                 - checkout: self
                   fetchDepth: 0
@@ -628,7 +631,91 @@ stages:
                       reportType: parity
 
           # ──────────────────────────────────────────────────────────────
-          # Job 6: Lint
+          # Job 6: Shado macOS/Metal Probe (PR #803 only)
+          # ──────────────────────────────────────────────────────────────
+          - job: ShadoMacOSProbe
+            displayName: "Shado Probe (macOS/Metal)"
+            timeoutInMinutes: 90
+            continueOnError: true
+            condition: eq(variables['System.PullRequest.PullRequestNumber'], '803')
+            pool:
+                vmImage: "macOS-latest"
+            variables:
+                ShadoMacArtifactsSafe: "false"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # Each representative scene gets a fresh Dawn instance. This
+                # distinguishes Metal/backend behavior from accumulated native
+                # resources in a long-lived process.
+                - script: |
+                      set -euo pipefail
+                      pnpm build:lib
+                      test_status=0
+                      report_dir="test-results/shado-macos-blob-$(Build.BuildId)"
+                      mkdir -p "$report_dir"
+                      scenes="73 79 102 103 104 105 114 115 117 143 165 166 167 178 179 212 226 250 263 265 277 278 280 281 315"
+                      for scene in $scenes; do
+                          if ! SHADO_SCENES="$scene" PLAYWRIGHT_BLOB_OUTPUT_FILE="$report_dir/scene-$scene.zip" pnpm exec playwright test --config config/playwright.parity-shado.config.ts --reporter=list,blob; then
+                              test_status=1
+                          fi
+                      done
+                      PLAYWRIGHT_HTML_OUTPUT_DIR="test-results/shado-macos-report" pnpm exec playwright merge-reports --reporter=html "$report_dir"
+                      PLAYWRIGHT_JUNIT_OUTPUT_FILE="test-results/shado-macos-junit.xml" pnpm exec playwright merge-reports --reporter=junit "$report_dir"
+                      exit "$test_status"
+                  displayName: "Run focused Shado scenes on macOS"
+                  continueOnError: true
+                  env:
+                      REUSE_BROWSER: "1"
+
+                - script: |
+                      set -euo pipefail
+                      if [ ! -f test-results/shado-macos-junit.xml ] || [ ! -d test-results/shado-macos-report ]; then
+                          echo "No complete macOS Shado report was produced; skipping publication."
+                          exit 0
+                      fi
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/shado-macos-junit.xml test-results/shado-macos-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/shado-macos-junit.xml test-results/shado-macos-report
+                      echo "##vso[task.setvariable variable=ShadoMacArtifactsSafe]true"
+                  condition: always()
+                  displayName: "Sanitize and verify macOS Shado artifacts"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ShadoMacArtifactsSafe'], 'true'))
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "test-results/shado-macos-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Parity (Shado/macOS)"
+                      publishRunAttachments: false
+                  continueOnError: true
+
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['ShadoMacArtifactsSafe'], 'true'))
+                  inputs:
+                      targetPath: "test-results/shado-macos-report"
+                      artifactName: "shado-macos-parity-report"
+                      publishLocation: "pipeline"
+                  continueOnError: true
+                  displayName: "Publish macOS Shado HTML report"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 7: Lint
           # ──────────────────────────────────────────────────────────────
           - job: Lint
             displayName: "Lint & Type Check"
@@ -696,7 +783,7 @@ stages:
                   displayName: "Feature-comparison doc in sync"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 7: Compat Layer (@babylonjs/lite-compat)
+          # Job 8: Compat Layer (@babylonjs/lite-compat)
           # ──────────────────────────────────────────────────────────────
           # Type-checks, builds, and unit-tests the opt-in compatibility layer so
           # regressions are caught in PR CI. NOTE: this job intentionally does NOT
@@ -752,7 +839,7 @@ stages:
                   continueOnError: true
 
           # ──────────────────────────────────────────────────────────────
-          # Job 8: PR Playground Snapshot
+          # Job 9: PR Playground Snapshot
           # ──────────────────────────────────────────────────────────────
           # Builds the Lite Playground from THIS PR's source — the self-hosted
           # engine is bundled from the same commit, so the runner executes the PR's

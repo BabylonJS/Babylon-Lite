@@ -176,10 +176,13 @@ describe("Pipeline artifact publication gates", () => {
     it("sets artifact safety variables only after sanitize and verify commands", () => {
         const safetySteps = pipeline.split(/\n(?= {16}- (?:script|task|template):)/).filter((step) => step.includes("npx tsx scripts/redact-secrets.ts sanitize"));
 
-        expect(safetySteps).toHaveLength(3);
+        expect(safetySteps).toHaveLength(4);
         expect(safetySteps.filter((step) => step.includes("variable=ArtifactsSafe]true"))).toHaveLength(2);
         expect(safetySteps.filter((step) => step.includes("variable=ShadoArtifactsSafe]true"))).toHaveLength(1);
-        expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(2);
+        expect(safetySteps.filter((step) => step.includes("variable=ShadoMacArtifactsSafe]true"))).toHaveLength(1);
+        expect(pipeline.match(/^\s+ArtifactsSafe: "false"$/gm)).toHaveLength(2);
+        expect(pipeline).toContain('ShadoArtifactsSafe: "false"');
+        expect(pipeline).toContain('ShadoMacArtifactsSafe: "false"');
         for (const step of safetySteps) {
             expect(step).toContain("redact-secrets.ts verify");
             expect(step).not.toContain("continueOnError");

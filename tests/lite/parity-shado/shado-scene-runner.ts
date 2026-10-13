@@ -131,6 +131,14 @@ let serverOrigin = "";
 let originalFetch: typeof fetch | null = null;
 let previousDracoDecoderDescriptor: PropertyDescriptor | undefined;
 
+type DiagnosticAdapterInfo = GPUAdapterInfo & {
+    readonly isFallbackAdapter?: boolean;
+};
+
+interface DiagnosticGpu {
+    requestAdapter(options?: GPURequestAdapterOptions): Promise<GPUAdapter | null>;
+}
+
 function bindMember(target: object, property: PropertyKey): unknown {
     const value = Reflect.get(target, property);
     return typeof value === "function" ? value.bind(target) : value;
@@ -366,6 +374,28 @@ export async function startShadoSceneRunner(): Promise<void> {
         return;
     }
     headlessGpu = await installHeadlessWebGpu();
+    const diagnosticGpu = headlessGpu.gpu as DiagnosticGpu;
+    const requestAdapter = diagnosticGpu.requestAdapter.bind(diagnosticGpu);
+    let loggedAdapter = false;
+    diagnosticGpu.requestAdapter = async (options) => {
+        const adapter = await requestAdapter(options);
+        if (!loggedAdapter) {
+            loggedAdapter = true;
+            const info = adapter?.info as DiagnosticAdapterInfo | undefined;
+            console.log(
+                `[shado] Dawn adapter: ${JSON.stringify({
+                    platform: process.platform,
+                    architecture: process.arch,
+                    vendor: info?.vendor,
+                    gpuArchitecture: info?.architecture,
+                    device: info?.device,
+                    description: info?.description,
+                    isFallbackAdapter: info?.isFallbackAdapter,
+                })}`
+            );
+        }
+        return adapter;
+    };
     await installHeadlessKtx2Transcoder();
     installImageDecoder(async (bytes) => {
         const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
