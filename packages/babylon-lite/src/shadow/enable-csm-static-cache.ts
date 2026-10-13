@@ -12,6 +12,15 @@ export interface CsmStaticCacheOptions {
      *  of one long frame. Refits caused by the camera, the content or the caster membership still
      *  re-render every cascade in their own frame. 0 or omitted keeps the single-frame re-render. */
     staticCascadesPerFrame?: number;
+    /** Opt-in camera-coverage refit, for stabilized cascades only. Each cascade's bounding sphere is widened by this
+     *  fraction (0.2 = 20 % wider, so 1/1.2 of the texel density), and a camera move no longer refits every cascade:
+     *  a cascade is refit and re-rendered, alone and in that same frame, only when the camera's current slice leaves
+     *  the area its published map covers (outside the unit disc of its shadow clip space, or outside its light-depth
+     *  range). A change of field of view, near/far plane or aspect still refits every cascade. 0 or omitted keeps
+     *  the historical behaviour: every camera change refits and re-renders all cascades. A positive value must be at
+     *  least 2 / mapSize: texel snapping shifts a fit by up to sqrt(2) / mapSize of its radius, and a smaller padding
+     *  would leave a FRESH fit failing its own coverage test (refit every frame). */
+    cascadeCoveragePadding?: number;
 }
 
 let enabling: WeakMap<ShadowGenerator, Promise<void>> | null = null;
@@ -34,6 +43,17 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
     if (!Number.isInteger(staticCascadesPerFrame) || staticCascadesPerFrame < 0) {
         return Promise.reject(new RangeError("enableCsmStaticCache requires a non-negative integer staticCascadesPerFrame"));
     }
+    const cascadeCoveragePadding = options.cascadeCoveragePadding ?? 0;
+    if (!Number.isFinite(cascadeCoveragePadding) || cascadeCoveragePadding < 0 || cascadeCoveragePadding > 1) {
+        return Promise.reject(new RangeError("enableCsmStaticCache requires a cascadeCoveragePadding between 0 and 1"));
+    }
+    if (cascadeCoveragePadding > 0 && !(sg._config as import("./csm-shadow-task-hooks.js").CsmConfig)._stabilizeCascades) {
+        return Promise.reject(new Error("enableCsmStaticCache cascadeCoveragePadding requires stabilizeCascades"));
+    }
+    // A fresh fit reaches 1 / (1 + padding) + sqrt(2) / mapSize of its disc (texel snap); 2 / mapSize keeps that below 1.
+    if (cascadeCoveragePadding > 0 && cascadeCoveragePadding < 2 / sg._config._mapSize) {
+        return Promise.reject(new RangeError("enableCsmStaticCache requires a cascadeCoveragePadding of at least 2 / mapSize"));
+    }
     if (sg._shadowTaskState || sg._csmReceiverTexture || engine.surfaces.some((surface) => surface._renderingContexts.length > 0)) {
         return Promise.reject(new Error("enableCsmStaticCache must run before scene registration and receiver texture access"));
     }
@@ -51,7 +71,12 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
         format: "depth32float",
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    sg._csmCache = { _refitAngle: options.refitAngle, _refitMaxIntervalMs: options.refitMaxIntervalMs ?? 0, _staticCascadesPerFrame: staticCascadesPerFrame };
+    sg._csmCache = {
+        _refitAngle: options.refitAngle,
+        _refitMaxIntervalMs: options.refitMaxIntervalMs ?? 0,
+        _staticCascadesPerFrame: staticCascadesPerFrame,
+        _cascadeCoveragePadding: cascadeCoveragePadding,
+    };
     oldTexture.destroy();
     const promise = import("./csm-shadow-cache.js").then((module) => {
         sg._csmCache!._loaded = true;

@@ -72,6 +72,8 @@ export interface ShadowGenerator {
         _refitMaxIntervalMs: number;
         /** @internal Static cascades re-rendered per frame after a drift-only refit; 0 = all in one frame. */
         _staticCascadesPerFrame?: number;
+        /** @internal Camera-coverage refit padding (`cascadeCoveragePadding`); 0 or undefined = every camera change refits. */
+        _cascadeCoveragePadding?: number;
         /** @internal */
         _loaded?: boolean;
     };
