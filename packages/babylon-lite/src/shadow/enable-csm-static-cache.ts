@@ -1,5 +1,6 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import type { CsmConfig, CsmTaskState } from "./csm-shadow-task-hooks.js";
 
 /** Options for {@link enableCsmStaticCache}. */
 export interface CsmStaticCacheOptions {
@@ -47,7 +48,7 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
     if (!Number.isFinite(cascadeCoveragePadding) || cascadeCoveragePadding < 0 || cascadeCoveragePadding > 1) {
         return Promise.reject(new RangeError("enableCsmStaticCache requires a cascadeCoveragePadding between 0 and 1"));
     }
-    if (cascadeCoveragePadding > 0 && !(sg._config as import("./csm-shadow-task-hooks.js").CsmConfig)._stabilizeCascades) {
+    if (cascadeCoveragePadding > 0 && !(sg._config as CsmConfig)._stabilizeCascades) {
         return Promise.reject(new Error("enableCsmStaticCache cascadeCoveragePadding requires stabilizeCascades"));
     }
     // A fresh fit reaches 1 / (1 + padding) + sqrt(2) / mapSize of its disc (texel snap); 2 / mapSize keeps that below 1.
@@ -80,14 +81,13 @@ export function enableCsmStaticCache(engine: EngineContext, sg: ShadowGenerator,
     oldTexture.destroy();
     const promise = import("./csm-shadow-cache.js").then((module) => {
         sg._csmCache!._loaded = true;
-        const config = sg._config as import("./csm-shadow-task-hooks.js").CsmConfig;
+        const config = sg._config as CsmConfig;
         const ensure: NonNullable<ShadowGenerator["_ensureShadowTaskState"]> = (eng, scene, casterMeshes) => {
             const state = module.ensureCsmShadowCacheState(eng, scene, sg, config, casterMeshes, sg._shadowTaskState ?? null);
             sg._shadowTaskState = state;
             return state;
         };
-        const render: NonNullable<ShadowGenerator["_renderShadowMap"]> = (eng, state) =>
-            module.renderCsmShadowMapCached(eng, sg, state as import("./csm-shadow-task-hooks.js").CsmTaskState, config);
+        const render: NonNullable<ShadowGenerator["_renderShadowMap"]> = (eng, state) => module.renderCsmShadowMapCached(eng, sg, state as CsmTaskState, config);
         if (sg._replaceShadowTaskHooks) {
             sg._replaceShadowTaskHooks(ensure, render);
         } else {
