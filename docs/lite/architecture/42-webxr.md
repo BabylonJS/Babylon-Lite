@@ -193,12 +193,11 @@ compositor returns fresh `GPUTexture`s from a double/triple-buffered swap chain)
 
 ### Depth handling
 
-The single eager RT carries **both** color and depth (its descriptor has `format`
-
-- `dFormat`); there is no separate `config.depth`. A `config.depth` combined with
-  `_eager` would force `loadOp: "load"`, but XR needs `"clear"` each frame. With
-  depth on the color RT and no `config.depth`, `_depthLoadOp` is undefined and
-  defaults to `"clear"`. Correct.
+The single eager RT carries **both** color and depth (its descriptor has
+`format + dFormat`); there is no separate `config.depth`. A `config.depth`
+combined with `_eager` would force `loadOp: "load"`, but XR needs `"clear"` each
+frame. With depth on the color RT and no `config.depth`, `_depthLoadOp` is
+undefined and defaults to `"clear"`. Correct.
 
 ---
 
