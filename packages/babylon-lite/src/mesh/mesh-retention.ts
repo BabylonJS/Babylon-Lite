@@ -2,6 +2,7 @@ import type { Mesh } from "./mesh.js";
 import { disposeMeshGpu } from "./mesh-dispose.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _notifySceneChange, _runSceneChange } from "../scene/scene-core.js";
 import { installMeshRetention, isMeshUnowned, meshSceneEngine, observeMeshMaterial, hasMeshScene } from "../scene/mesh-scene-registry.js";
 import { installSceneAdmission } from "../scene/scene-admission.js";
 import type { LightBase } from "../light/types.js";
@@ -242,8 +243,17 @@ export function detachMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     if (!scene.meshes.includes(mesh)) {
         return;
     }
-    captureTextures(state, mesh.material);
-    removeMeshFromScene(scene, mesh, true);
+    const detach = (): void => {
+        captureTextures(state, mesh.material);
+        removeMeshFromScene(scene, mesh, true);
+        // Membership changed, so `onSceneChange` subscribers see the mesh leave; its children stay.
+        _notifySceneChange(scene, mesh, "removed");
+    };
+    if (scene._sceneChanges && !scene._sceneChanges.depth) {
+        _runSceneChange(scene, detach);
+    } else {
+        detach();
+    }
 }
 
 function assertMesh(mesh: Mesh): void {

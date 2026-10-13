@@ -475,6 +475,34 @@ function splitUnionMembers(rhs: string): string[] {
     return members.filter((m) => m.length > 0);
 }
 
+function collectSimpleUnionAliases(report: string): Map<string, Set<string>> {
+    const aliases = new Map<string, Set<string>>();
+    for (const line of report.split(/\r?\n/)) {
+        const match = TYPE_ALIAS_PATTERN.exec(normalizeApiLine(line));
+        if (!match) {
+            continue;
+        }
+        const members = splitUnionMembers(match[2]!);
+        if (members.length < 2 || members.some((member) => !/^[A-Za-z_$][\w$]*$/.test(member) || member === match[1])) {
+            continue;
+        }
+        aliases.set(match[1]!, new Set(members));
+    }
+    return aliases;
+}
+
+function isEquivalentSimpleUnionAlias(removedType: string, addedType: string, aliases: Map<string, Set<string>>): boolean {
+    if (!/^[A-Za-z_$][\w$]*$/.test(addedType)) {
+        return false;
+    }
+    const aliasMembers = aliases.get(addedType);
+    const removedMembers = splitUnionMembers(removedType);
+    if (!aliasMembers || removedMembers.length < 2 || removedMembers.length !== aliasMembers.size) {
+        return false;
+    }
+    return removedMembers.every((member) => /^[A-Za-z_$][\w$]*$/.test(member) && aliasMembers.has(member));
+}
+
 /**
  * Treat an exported type alias whose only change is a UNION GAINING members (none removed,
  * none re-spelled) as non-breaking — e.g.
@@ -498,18 +526,19 @@ function isNonBreakingUnionWidening(removedLine: string, addedLine: string): boo
     return removedMembers.every((member) => addedMembers.has(member));
 }
 
-/** Split a single parameter declaration into its optional flag and type, ignoring the
- *  parameter name. Returns `undefined` for rest params (`...x: T[]`) and anything that
- *  doesn't look like `name: Type` — those are left to other classifiers / stay breaking. */
-function splitParameterType(parameter: string): { optional: boolean; type: string } | undefined {
+/** Split a single parameter declaration into its optional flag, runtime position, and type.
+ *  Ordinary parameter names are not part of the call contract, but TypeScript's special `this`
+ *  parameter is not a runtime argument and must remain distinct. Returns `undefined` for rest
+ *  params (`...x: T[]`) and anything that doesn't look like `name: Type`. */
+function splitParameterType(parameter: string): { optional: boolean; thisParameter: boolean; type: string } | undefined {
     if (parameter.startsWith("...")) {
         return undefined;
     }
-    const match = /^[A-Za-z_$][\w$]*(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
+    const match = /^([A-Za-z_$][\w$]*)(\?)?\s*:\s*([\s\S]+)$/.exec(parameter);
     if (!match) {
         return undefined;
     }
-    return { optional: match[1] === "?", type: match[2]!.trim() };
+    return { optional: match[2] === "?", thisParameter: match[1] === "this", type: match[3]!.trim() };
 }
 
 interface InterfaceMember {
@@ -695,6 +724,10 @@ function isNonBreakingInterfaceSubstitution(removedType: string, addedType: stri
     return true;
 }
 
+function isPlainExportedFunctionPrefix(prefix: string): boolean {
+    return /^export (?:declare )?function [A-Za-z_$][\w$]*$/.test(prefix);
+}
+
 /**
  * Treat a function/method whose only change is one or more parameters WIDENING their
  * type to a union superset — every previous top-level union member is still accepted —
@@ -712,7 +745,7 @@ function isNonBreakingInterfaceSubstitution(removedType: string, addedType: stri
  * A parameter whose interface type gains only optional members is also accepted, via
  * {@link isNonBreakingInterfaceSubstitution}, when the interface index is available.
  */
-function isNonBreakingParameterWidening(removedLine: string, addedLine: string, declarations: Map<string, InterfaceDeclaration>): boolean {
+function isNonBreakingParameterWidening(removedLine: string, addedLine: string, declarations: Map<string, InterfaceDeclaration>, aliases: Map<string, Set<string>>): boolean {
     const removedSignature = parseCallableSignature(removedLine);
     const addedSignature = parseCallableSignature(addedLine);
     if (!removedSignature || !addedSignature) {
@@ -724,11 +757,13 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
     if (removedSignature.parameters.length === 0 || removedSignature.parameters.length !== addedSignature.parameters.length) {
         return false;
     }
+    const canResolveAlias = isPlainExportedFunctionPrefix(removedSignature.prefix);
+    const canResolveInterface = !removedSignature.prefix.includes("<");
     let widenedAtLeastOne = false;
     for (let index = 0; index < removedSignature.parameters.length; index += 1) {
         const removedParam = splitParameterType(removedSignature.parameters[index]!);
         const addedParam = splitParameterType(addedSignature.parameters[index]!);
-        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional) {
+        if (!removedParam || !addedParam || removedParam.optional !== addedParam.optional || removedParam.thisParameter !== addedParam.thisParameter) {
             return false;
         }
         if (removedParam.type === addedParam.type) {
@@ -737,7 +772,8 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
         const addedMembers = new Set(splitUnionMembers(addedParam.type));
         if (
             !splitUnionMembers(removedParam.type).every((member) => addedMembers.has(member)) &&
-            !isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations)
+            !(canResolveAlias && isEquivalentSimpleUnionAlias(removedParam.type, addedParam.type, aliases)) &&
+            !(canResolveInterface && isNonBreakingInterfaceSubstitution(removedParam.type, addedParam.type, declarations))
         ) {
             return false; // a member was dropped/replaced → genuine breaking type change
         }
@@ -745,6 +781,34 @@ function isNonBreakingParameterWidening(removedLine: string, addedLine: string, 
     }
     // Require an actual widening so a pure parameter rename isn't silently reclassified.
     return widenedAtLeastOne;
+}
+
+function isNonBreakingVoidToUnsubscribe(removedLine: string, addedLine: string): boolean {
+    const removedSignature = parseCallableSignature(removedLine);
+    const addedSignature = parseCallableSignature(addedLine);
+    if (
+        !removedSignature ||
+        !addedSignature ||
+        removedSignature.prefix !== addedSignature.prefix ||
+        !isPlainExportedFunctionPrefix(removedSignature.prefix) ||
+        removedSignature.suffix !== ": void;" ||
+        addedSignature.suffix !== ": () => void;" ||
+        removedSignature.parameters.length !== addedSignature.parameters.length
+    ) {
+        return false;
+    }
+
+    return removedSignature.parameters.every((parameter, index) => {
+        const removedParam = splitParameterType(parameter);
+        const addedParam = splitParameterType(addedSignature.parameters[index]!);
+        return (
+            !!removedParam &&
+            !!addedParam &&
+            removedParam.optional === addedParam.optional &&
+            removedParam.thisParameter === addedParam.thisParameter &&
+            removedParam.type === addedParam.type
+        );
+    });
 }
 
 /**
@@ -809,6 +873,7 @@ export function breakingApiLines(diff: string, currentReport = ""): string[] {
     const hunks = collectChangedApiHunks(diff);
     const addedLines = hunks.flatMap((hunk) => hunk.addedLines);
     const declarations = collectInterfaceDeclarations(currentReport);
+    const aliases = collectSimpleUnionAliases(currentReport);
 
     return hunks.flatMap((hunk) =>
         hunk.removedLines.filter(
@@ -818,7 +883,8 @@ export function breakingApiLines(diff: string, currentReport = ""): string[] {
                 !addedLines.some(
                     (addedLine) =>
                         isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
-                        isNonBreakingParameterWidening(removedLine, addedLine, declarations) ||
+                        isNonBreakingParameterWidening(removedLine, addedLine, declarations, aliases) ||
+                        isNonBreakingVoidToUnsubscribe(removedLine, addedLine) ||
                         isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
                         isNonBreakingUnionWidening(removedLine, addedLine) ||
                         isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)

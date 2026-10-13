@@ -91,6 +91,9 @@ preparation produces an empty result and does not recreate its targets.
 3. Every retain issues a frozen token and adds it to the mesh's lease set.
 4. Detach captures current textures, evicts only the requested scene membership,
    and leaves geometry alive across retirement fences and zero attached scenes.
+   It publishes one `removed` event for that mesh to `onSceneChange` subscribers;
+   reinsertion through `addToScene` publishes `added`, and admission-rejected
+   descendants that never left publish nothing.
 5. Release removes one token. Other leases or scene owners preserve resources.
 6. Final release removes the retention and engine mesh entry, clears the admission
    hook when that engine has no remaining leased meshes, and schedules fenced
@@ -152,7 +155,8 @@ implementation or asset is copied.
   multiple scenes/leases, clones/refcounts, unique/shared updates, duplicate slots,
   engine/scene teardown, queued-release reacquisition, cross-engine errors,
   detached recovery, independent mesh-local draw selection recovery,
-  material/texture swaps, reentrancy, and independent engine hooks.
+  material/texture swaps, reentrancy, independent engine hooks, and scene-change
+  events for detach/reinsertion without echoing retained children.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `retained-shared-recovery-retirement.test.ts`: releasing one of two shared-texture

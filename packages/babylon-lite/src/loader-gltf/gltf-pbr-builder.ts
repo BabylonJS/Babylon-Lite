@@ -127,8 +127,8 @@ export async function applyGltfOptInPbrFeatures(props: PbrMaterialProps, mat: Gl
  *  Emissive is applied by the caller — see `needsGltfEmissive`. */
 export function assemblePbrProps(
     mat: GltfMaterialData,
-    baseColorTexture: Texture2D,
-    ormTexture: Texture2D,
+    baseColorTexture: Texture2D | undefined,
+    ormTexture: Texture2D | undefined,
     normalTexture: Texture2D | undefined,
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
@@ -158,23 +158,36 @@ function isDefaultBaseColorFactor(f: readonly number[]): boolean {
     return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }
 
-/** Build the always-present default textures (base color + ORM) from a parsed glTF material.
+/** Build the default textures (base color + ORM) from a parsed glTF material.
  *  Fast-path version: no wrapTex, no occlusion-on-uv2 handling. The slow path lives
- *  in gltf-pbr-builder-ext.ts and is lazy-loaded only when needed. */
+ *  in gltf-pbr-builder-ext.ts and is lazy-loaded only when needed.
+ *
+ *  `extLayers` are the material features' fragments, resolved first. A slot they supply — base
+ *  color from KHR_texture_basisu or KHR_materials_pbrSpecularGlossiness, ORM from ORM compositing
+ *  or KHR_texture_basisu — wins in assembly, so nothing is uploaded for it (neither the core image
+ *  nor the 1×1 factor fallback) and it is returned `undefined`. An upload made anyway would be
+ *  unreachable from every material, so no release would ever destroy it. */
 export function buildDefaultPbrTextures(
     engine: EngineContext,
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
-    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
-): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
-    const baseColorTexture = mat._baseColorImage ? getCachedTex(mat._baseColorImage, true) : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
+    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D,
+    extLayers: Partial<PbrMaterialProps> | undefined
+): { baseColorTexture: Texture2D | undefined; ormTexture: Texture2D | undefined; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
+    const baseColorTexture = extLayers?.baseColorTexture
+        ? undefined
+        : mat._baseColorImage
+          ? getCachedTex(mat._baseColorImage, true)
+          : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
     const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
     const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true) : undefined;
 
     const single = mat._metallicRoughnessImage ?? mat._occlusionImage;
-    let ormTexture: Texture2D;
-    if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
+    let ormTexture: Texture2D | undefined;
+    if (extLayers?.ormTexture) {
+        ormTexture = undefined;
+    } else if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         ormTexture = getCachedTex(single, false);
     } else if (!single) {
         ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);

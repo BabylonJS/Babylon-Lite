@@ -4,7 +4,8 @@ import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { initMeshTransform, uploadMeshToGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { retainMeshResources, releaseMeshResources, detachMeshFromScene } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
-import { addToScene, disposeScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import { addToScene, disposeScene, type SceneChangeEvent, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import { onSceneChange } from "../../../packages/babylon-lite/src/scene/scene-change.js";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove.js";
 import { createTransformNode, cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import { pickWithRay } from "../../../packages/babylon-lite/src/picking/ray-pick.js";
@@ -330,6 +331,26 @@ describe("retained mesh scene membership", () => {
         expect(scene.meshes).toEqual([child, mesh]);
         expect(child.parent).toBe(mesh);
         expect(scene.lights).toEqual([light]);
+        releaseMeshResources(lease);
+    });
+
+    it("publishes detach and reinsertion to scene-change subscribers without echoing retained children", () => {
+        const { engine, scene, mesh } = fixture();
+        const child = fixture().mesh;
+        child.parent = mesh;
+        mesh.children.push(child);
+        const light = createHemisphericLight([0, 1, 0], 1);
+        mesh.children.push(light);
+        addToScene(scene, mesh);
+        const lease = retainMeshResources(engine, mesh);
+        const events: SceneChangeEvent[] = [];
+        const unsubscribe = onSceneChange(scene, (event) => events.push(event));
+        detachMeshFromScene(scene, mesh);
+        expect(events).toEqual([{ type: "removed", entity: mesh }]);
+        events.length = 0;
+        addToScene(scene, mesh);
+        expect(events).toEqual([{ type: "added", entity: mesh }]);
+        unsubscribe();
         releaseMeshResources(lease);
     });
 
