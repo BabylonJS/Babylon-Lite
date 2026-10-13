@@ -76,6 +76,7 @@ function makeRig(options: RigOptions) {
     counters.executes.clear();
     counters.fits = 0;
     let nowMs = 0;
+    let receiverCalls = 0;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
     const camera = createArcRotateCamera(0, 0.95, 170, { x: 0, y: 3, z: 0 });
     camera.nearPlane = 0.5;
@@ -107,6 +108,8 @@ function makeRig(options: RigOptions) {
         _shadowUBO: {},
         _version: 0,
         _depthTexture: fakeTexture,
+        // One `onCsmReceiverUpdate` subscriber, counting the frames it is invoked on.
+        _onReceiverData: [() => receiverCalls++],
         _csmCache: {
             _refitAngle: 0.0015,
             _refitMaxIntervalMs: options.refitMaxIntervalMs ?? 100,
@@ -193,7 +196,7 @@ function makeRig(options: RigOptions) {
         renderCsmShadowMapCached(engine as never, sg as never, state, cfg as never);
         nowMs += FRAME_MS;
     };
-    return { camera, light, scene, state, frame, staticCount, perCascade, publishedReach, texelWorld, fits: () => counters.fits };
+    return { camera, light, scene, state, frame, staticCount, perCascade, publishedReach, texelWorld, fits: () => counters.fits, receiverCalls: () => receiverCalls };
 }
 
 type Rig = ReturnType<typeof makeRig>;
@@ -430,5 +433,35 @@ describe("CSM static cache camera-coverage refit (cascadeCoveragePadding)", () =
             rig.frame();
         }
         expect(rig.staticCount() - before).toBe(300);
+    });
+
+    it("keeps the receiver callbacks per-frame while the camera key changes, and adds none for a still camera", () => {
+        // `onCsmReceiverUpdate` is documented as per-frame: without the option every camera change refits and invokes
+        // it, and consumers re-upload camera-dependent terms from it. The coverage refit must keep that cadence even on
+        // frames that redraw no cascade, and must not add callbacks the default path would not make.
+        const callbacks = (padding: number, path: Path): number => {
+            const rig = makeRig({ padding });
+            for (let f = 0; f < 200; f++) {
+                path(rig, f);
+                rig.frame();
+            }
+            const before = rig.receiverCalls();
+            for (let f = 200; f < 320; f++) {
+                path(rig, f);
+                rig.frame();
+            }
+            return rig.receiverCalls() - before;
+        };
+        // The pose is essentially still but the camera key changes every frame.
+        const keyEveryFrame: Path = (rig, f) => {
+            rig.camera.alpha += f % 2 ? 1e-9 : -1e-9;
+        };
+        const still: Path = () => {};
+        expect(callbacks(0, keyEveryFrame)).toBe(120);
+        expect(callbacks(0.1, keyEveryFrame)).toBe(120);
+        expect(callbacks(0.1, orbit(60))).toBe(callbacks(0, orbit(60)));
+        // A still camera: only the refits (the 100 ms floor, spread one cascade per frame) invoke them, as by default.
+        expect(callbacks(0.1, still)).toBe(callbacks(0, still));
+        expect(callbacks(0.1, still)).toBeLessThan(120);
     });
 });
