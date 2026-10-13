@@ -27,6 +27,7 @@ import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
+import type { SceneChangeState } from "./scene-change.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -110,6 +111,37 @@ export interface SceneMeshGroup extends Array<Mesh> {
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
 
+/** Values accepted by {@link addToScene} and `removeFromScene`. */
+export type SceneEntity = Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer;
+
+/** A committed scene-membership change. */
+export interface SceneChangeEvent {
+    readonly type: "added" | "removed";
+    readonly entity: SceneEntity;
+}
+
+/** Receives committed scene-membership changes. */
+export type SceneChangeListener = (event: SceneChangeEvent) => void;
+
+interface SceneChangeHook {
+    run(scene: SceneContext, mutation: () => void): void;
+    record(scene: SceneContext, entity: SceneEntity, type: SceneChangeEvent["type"]): void;
+    dispose(scene: SceneContext): void;
+}
+
+let _sceneChangeHook: SceneChangeHook | undefined;
+let _sceneDisposeHook: ((scene: SceneContext, cleanup: () => void) => void) | undefined;
+
+/** @internal Install the optional generic scene-change seam. */
+export function _setSceneChangeHook(hook: SceneChangeHook): void {
+    _sceneChangeHook = hook;
+}
+
+/** @internal Install the optional generic scene-disposal seam. */
+export function _setSceneDisposeHook(hook: (scene: SceneContext, cleanup: () => void) => void): void {
+    _sceneDisposeHook = hook;
+}
+
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
     /** @internal */
@@ -179,6 +211,8 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
+    _sceneChanges?: SceneChangeState;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
@@ -376,10 +410,19 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
     (scene as SceneContext)._beforeRender.unshift(cb);
 }
 
-/** Register a callback to run when `disposeScene` is called. Used to tie
- *  user-owned GPU resources (e.g. a `SpriteRenderer`) to the scene's lifetime. */
-export function onSceneDispose(scene: SceneContext, cb: () => void): void {
-    (scene as SceneContext)._disposables.push(cb);
+/** @internal Whether the generic scene-change seam has an installed subscriber. */
+export function _hasSceneChangeHook(): boolean {
+    return _sceneChangeHook !== undefined;
+}
+
+/** @internal Run one canonical mutation through the installed generic scene-change seam. */
+export function _runSceneChange(scene: SceneContext, mutation: () => void): void {
+    _sceneChangeHook?.run(scene, mutation);
+}
+
+/** @internal Publish one committed membership fact through the installed generic scene-change seam. */
+export function _notifySceneChange(scene: SceneContext, entity: SceneEntity, type: SceneChangeEvent["type"]): void {
+    _sceneChangeHook?.record(scene, entity, type);
 }
 
 /** Get the scene's frame graph. Always non-null — created in `createSceneContext`. */
@@ -422,7 +465,11 @@ export function addDeferredSceneRenderables(
  * state is touched; when adding a hierarchy or asset container, entities processed before the
  * offending mesh stay added.
  */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+export function addToScene(scene: SceneContext, entity: SceneEntity): void {
+    if (_sceneChangeHook && scene._sceneChanges && scene._sceneChanges.depth === 0) {
+        _sceneChangeHook.run(scene, () => addToScene(scene, entity));
+        return;
+    }
     const ctx = scene as SceneContext;
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
@@ -451,6 +498,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         // Feature-owned scene wiring runs synchronously before registerScene() builds
         // renderables. Lazy features also own any cleanup registration they require.
         result._sceneSetup?.(ctx, result);
+        _notifySceneChange(ctx, entity, "added");
         return;
     }
     if ("_gpu" in entity && "material" in entity) {
@@ -492,12 +540,13 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
     }
+    _notifySceneChange(ctx, entity, "added");
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
     if (kids?.length) {
         for (const child of kids) {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
-            addToScene(scene, child);
+            addToScene(scene, child as SceneEntity);
         }
     }
 }
@@ -553,7 +602,12 @@ export function disposeScene(scene: SceneContext): void {
         ctx.shadowGenerators.length = 0;
         ctx.camera = null;
     };
-    cleanup();
+    _sceneChangeHook?.dispose(ctx);
+    if (_sceneDisposeHook) {
+        _sceneDisposeHook(ctx, cleanup);
+    } else {
+        cleanup();
+    }
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
