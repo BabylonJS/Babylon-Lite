@@ -13,12 +13,13 @@
  */
 
 import { unsupported } from "../error.js";
+import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, encodeIdToColor, getGaussianSplattingMaxPartCount, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
 import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
-import type { ShaderLanguage } from "../misc/engine-constants.js";
+import { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
@@ -26,13 +27,15 @@ import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
 import type { TransformNode } from "../meshes/meshes.js";
 import type { Vector3 } from "../math/vector.js";
+import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
 
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
 const DITHERED_TILE_FADE_UNSUPPORTED =
     "Lite's material-plugin bridge supports shared shader injection, but not Babylon.js per-draw mesh uniforms, hardware-instance bounds, or custom thin-instance attributes/varyings. Adding those requires an opt-in per-renderable plugin-data design.";
-
+const GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED =
+    "Lite's Gaussian-splat renderable fixes shader fragments and render state at load time and exposes no post-load material replacement or pipeline-rebuild lifecycle. Supporting Babylon.js GaussianSplattingMaterial plugins requires an opt-in Lite splat-material lifecycle design.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -253,6 +256,166 @@ export interface IDitheredTileFadeBounds {
     upperBound: number;
 }
 
+export interface IGaussianSplattingDebugOptions {
+    clippingBox: { min: Vector3; max: Vector3 } | null;
+    opacityCulling: { min: number; max: number } | null;
+    sizeCulling: { min: number; max: number } | null;
+    opacityScale: number;
+    opacitySaturate: boolean;
+    shDc: boolean;
+    shOrder1: boolean;
+    shOrder2: boolean;
+    shOrder3: boolean;
+    shOrder4: boolean;
+}
+
+export const GaussianSplattingMaxPartCount = GAUSSIAN_SPLATTING_MAX_PART_COUNT;
+
+export function GetGaussianSplattingMaxPartCount(engine: AbstractEngine): number {
+    return getGaussianSplattingMaxPartCount(engine._lite);
+}
+
+export function GetPartIndexVaryingDeclaration(shaderLanguage: ShaderLanguage): string {
+    return getGaussianSplattingPartIndexVaryingDeclaration(shaderLanguage === ShaderLanguage.WGSL);
+}
+
+export class GaussianSplattingMaterial extends PushMaterial {
+    /** @internal The unsupported material has no Lite backing. */
+    public get _lite(): never {
+        return unsupported("GaussianSplattingMaterial._lite", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public constructor(name: string, scene?: Scene) {
+        super(name);
+        void scene;
+        unsupported("GaussianSplattingMaterial", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public override clone(_name: string): GaussianSplattingMaterial {
+        return unsupported("GaussianSplattingMaterial.clone", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingDebugMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingDebug", 200, {}, false);
+        unsupported("GaussianSplattingDebugMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingGpuPickingMaterialPlugin extends MaterialPluginBase {
+    public static EncodeIdToColor(id: number): [number, number, number] {
+        return encodeIdToColor(id);
+    }
+
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial, _maxPartCount?: number) {
+        super(material, "GaussianSplatGpuPicking", 230, {}, false);
+        unsupported("GaussianSplattingGpuPickingMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingSolidColorMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial, _partColors: Color3[], _maxPartCount?: number) {
+        super(material, "GaussianSplatSolidColor", 200, {}, false);
+        unsupported("GaussianSplattingSolidColorMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingSizeMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingSize", 210, {}, false);
+        unsupported("GaussianSplattingSizeMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get isEnabled(): boolean {
+        return unsupported("GaussianSplattingSizeMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set isEnabled(_value: boolean) {
+        unsupported("GaussianSplattingSizeMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get sizeScale(): number {
+        return unsupported("GaussianSplattingSizeMaterialPlugin.sizeScale", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set sizeScale(_value: number) {
+        unsupported("GaussianSplattingSizeMaterialPlugin.sizeScale", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingOverdrawMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingOverdraw", 220, {}, false);
+        unsupported("GaussianSplattingOverdrawMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get isEnabled(): boolean {
+        return unsupported("GaussianSplattingOverdrawMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set isEnabled(_value: boolean) {
+        unsupported("GaussianSplattingOverdrawMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get intensity(): number {
+        return unsupported("GaussianSplattingOverdrawMaterialPlugin.intensity", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set intensity(_value: number) {
+        unsupported("GaussianSplattingOverdrawMaterialPlugin.intensity", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export function RegisterGaussianSplattingDebugMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingDebugMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingGpuPickingMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingGpuPickingMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingSolidColorMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingSolidColorMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingSizeMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingSizeMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingOverdrawMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingOverdrawMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingMaterial(): void {
+    unsupported("RegisterGaussianSplattingMaterial", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
 export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
     public static readonly Name = "DitheredTileFade";
 
@@ -262,7 +425,7 @@ export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
     }
 
     public constructor(material: DitheredTileFadeSupportedMaterial) {
-        super(material, DitheredTileFadeMaterialPlugin.Name, 190);
+        super(material, DitheredTileFadeMaterialPlugin.Name, 190, {}, false);
         unsupported("DitheredTileFadeMaterialPlugin", DITHERED_TILE_FADE_UNSUPPORTED);
     }
 
