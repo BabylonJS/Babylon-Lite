@@ -307,6 +307,20 @@ export interface SceneContextOptions {
     defaultRenderTask?: boolean;
 }
 
+/** Match the scene camera's floating-origin mode to its engine. A camera can arrive fresh or from an
+ *  engine with the opposite mode: `getViewMatrix` zeroes the view translation only under the flag. The
+ *  view cache resets, and clearing the projection snapshot re-arms `_cameraChangeKey` (as on a fresh
+ *  camera) so its next call advances `_projRev`: the view-projection cache and every change-key
+ *  consumer (scene UBO, text, CSM, TAA, …) rewrite in this frame. */
+function syncCameraFloatingOrigin(scene: SceneContext, fo: boolean | undefined): void {
+    const cam = scene.camera;
+    if (cam && !cam._useFloatingOrigin !== !fo) {
+        cam._useFloatingOrigin = fo;
+        cam._viewVer = -1;
+        cam._projFov = undefined;
+    }
+}
+
 /** Create an empty scene context bound to the given `surface`. The default render task
  *  is built against the surface's format, MSAA configuration, and swapchain RT — the
  *  scene is permanently bound to that surface. Pass `engine` directly (since
@@ -348,22 +362,14 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
             const encoder = eng._currentEncoder;
             let draws = 0;
+            // Match the active camera's floating-origin mode to this engine before the callbacks (so the
+            // matrices they read are in the frame the engine renders) and again after them (they may
+            // install a camera), before any pre-pass, uniform update or record reads its view.
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             for (const cb of ctx._beforeRender) {
                 cb(d);
             }
-            // Match the active camera's floating-origin mode to this engine, after callbacks (which may
-            // install a camera) and before any pre-pass, uniform update or record reads its view. A camera
-            // can arrive fresh or from an engine with the opposite mode: `getViewMatrix` zeroes the view
-            // translation only under the flag. The view cache resets, and clearing the projection snapshot
-            // re-arms `_cameraChangeKey` (as on a fresh camera) so its next call advances `_projRev`: the
-            // view-projection cache and every change-key consumer (scene UBO, text, CSM, TAA, …) rewrite in
-            // this frame.
-            const cam = ctx.camera;
-            if (cam && !cam._useFloatingOrigin !== !eng.useFloatingOrigin) {
-                cam._useFloatingOrigin = eng.useFloatingOrigin;
-                cam._viewVer = -1;
-                cam._projFov = undefined;
-            }
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             if (ctx._materialSwapQueue.length) {
                 void processMaterialSwaps(ctx);
             }

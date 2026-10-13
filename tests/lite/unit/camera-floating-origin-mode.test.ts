@@ -10,7 +10,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
-import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { getViewMatrix, getViewProjectionMatrix, type Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { getFloatingOriginOffset } from "../../../packages/babylon-lite/src/large-world/floating-origin";
 import { _writePassSceneUBO, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { addToScene, onBeforeRender, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -102,6 +103,35 @@ describe("installed camera floating-origin mode", () => {
         expect(viewTranslation()).toEqual([0, 0, 0]);
 
         frame();
+        expect(viewTranslation()).toEqual([0, 0, 0]);
+    });
+
+    it("exposes eye-relative matrices to onBeforeRender on an installed camera's first frame", () => {
+        const { scene, frame, viewTranslation } = makeScene(true);
+        const camera = farCamera();
+        addToScene(scene, camera);
+
+        let view: number[] = [];
+        let clip: number[] = [];
+        onBeforeRender(scene, () => {
+            if (view.length) {
+                return;
+            }
+            const v = getViewMatrix(camera);
+            view = [v[12]! + 0, v[13]! + 0, v[14]! + 0];
+            // A point 10 units ahead of the camera, expressed relative to the floating origin as FO
+            // world data is: it must land in the centre of the view.
+            const origin = getFloatingOriginOffset(scene);
+            const m = getViewProjectionMatrix(camera, 800 / 600);
+            const p = [FAR - origin.x, 0 - origin.y, 20 - origin.z];
+            const w = m[3]! * p[0]! + m[7]! * p[1]! + m[11]! * p[2]! + m[15]!;
+            clip = [(m[0]! * p[0]! + m[4]! * p[1]! + m[8]! * p[2]! + m[12]!) / w, (m[1]! * p[0]! + m[5]! * p[1]! + m[9]! * p[2]! + m[13]!) / w];
+        });
+
+        frame();
+        expect(view).toEqual([0, 0, 0]);
+        expect(clip[0]).toBeCloseTo(0, 6);
+        expect(clip[1]).toBeCloseTo(0, 6);
         expect(viewTranslation()).toEqual([0, 0, 0]);
     });
 
