@@ -20,6 +20,7 @@ import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
+import { _stdSceneLightingSource } from "./standard-flags.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
@@ -108,7 +109,7 @@ export function composeStandardShader(
             _noColorOutput: has(NO_COLOR_OUTPUT),
             _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
             _hasMorph: !!(_meshFeatures & MSH_HAS_MORPH_TARGETS),
-            _lightingFunction: sceneShader?._lightingFunction,
+            _lightingFunction: _stdSceneLightingSource?.(sceneShader?._lightingFunction),
         },
         esmShadowDepthCode
     );

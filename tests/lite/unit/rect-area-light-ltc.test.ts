@@ -45,6 +45,24 @@ afterEach(() => {
 });
 
 describe("area LTC data and lifetime", () => {
+    it("rejects public dispose-before-first-enable without creating an owner, disposer, fetch, or GPU texture", async () => {
+        const { createSceneContext, disposeScene } = await import("../../../packages/babylon-lite/src/scene/scene.js");
+        const { enableRectAreaLights } = await import("../../../packages/babylon-lite/src/light/enable-rect-area-lights.js");
+        const { prepareAreaLightLtc, hasAreaLightLtcOwner } = await import("../../../packages/babylon-lite/src/light/area-light-ltc.js");
+        const { engine, device } = fixture();
+        Object.assign(engine, { engine, _renderingContexts: [] });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const fetcher = vi.fn();
+        vi.stubGlobal("fetch", fetcher);
+        disposeScene(scene);
+        expect(scene._z).toBe(true);
+        await expect(enableRectAreaLights(scene)).rejects.toThrow(/disposed/);
+        await expect(prepareAreaLightLtc(scene)).rejects.toThrow(/disposed/);
+        expect(hasAreaLightLtcOwner(scene)).toBe(false);
+        expect(scene._disposables).toHaveLength(0);
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(device.createTexture).not.toHaveBeenCalled();
+    });
     it("deinterleaves exact little-endian uint16 words, including the final texel", async () => {
         const { decodeAreaLightLtc } = await import("../../../packages/babylon-lite/src/light/area-light-ltc.js");
         const [a, b] = decodeAreaLightLtc(payload());

@@ -50,6 +50,10 @@ export interface _PbrFragCtx {
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
+    /** @internal Opaque scene resource identity. */
+    _lightingId?: number;
+    /** @internal Binding-owned cleanup, including auxiliary material generations. */
+    _disposers?: (() => void)[];
     /** @internal */
     readonly _engine: EngineContext;
     /** @internal */

@@ -32,21 +32,16 @@ export function rectAreaPbrFeatures(lights: readonly LightBase[], meshId: string
     return RECT_AREA_PBR_SCENE;
 }
 
-const AREA_PBR_CONTRIBUTION = wgsl`
+function areaPbrContribution(evaluation: string): string {
+    return wgsl`
 let areaEntry = lights.lights[lightIndex];
-let area = evaluateAreaLtc(N,V,input.worldPos,areaEntry,roughness);
+let area = ${evaluation};
 let areaColor = areaEntry.vLightSpecular.rgb;
 let areaFresnel = colorF0 * areaColor * area.fresnel.x + (vec3<f32>(1.0) - areaColor) * area.fresnel.y * colorF90;
 directDiffuse += surfaceAlbedo * areaEntry.vLightDiffuse.rgb * area.diffuse * material.directIntensity;
 directSpecular += areaColor * areaFresnel * area.specular * material.directIntensity;
 `;
-
-const AREA_PBR_LOOP = wgsl`
-if (u32(lights.lights[lightIndex].vLightData.w) == 4u) {
-${AREA_PBR_CONTRIBUTION}
-continue;
 }
-`;
 
 const AREA_PBR_WRAPPER = wgsl`
 fn computeRectPbrLight(entry: LightEntry, N: vec3<f32>, P: vec3<f32>, falloff: f32) -> PbrLightResult {
@@ -58,15 +53,22 @@ return computePbrLight(entry,N,P,falloff);
 `;
 
 /** @internal Keep the existing punctual light loop; the area branch consumes only area entries. */
-export function rectAreaMultiLightSource(): MultiLightShaderSource {
+export function rectAreaMultiLightSource(evaluation = "evaluateAreaLtc(N,V,input.worldPos,areaEntry,roughness)"): MultiLightShaderSource {
     return {
         _helpers: MULTI_LIGHT_STRUCTS() + COMPUTE_PBR_LIGHT + AREA_PBR_WRAPPER,
-        _loop: getMultiLightLoop(AREA_PBR_LOOP, "computeRectPbrLight"),
+        _loop: getMultiLightLoop(
+            wgsl`
+if (u32(lights.lights[lightIndex].vLightData.w) == 4u) {
+${areaPbrContribution(evaluation)}
+continue;
+}`,
+            "computeRectPbrLight"
+        ),
     };
 }
 
 /** @internal A true selected-single-area path, independent of the punctual single-light fallback. */
-export function rectAreaSingleLightSource(type: string): SingleLightShaderSource | undefined {
+export function rectAreaSingleLightSource(type: string, evaluation = "evaluateAreaLtc(N,V,input.worldPos,areaEntry,roughness)"): SingleLightShaderSource | undefined {
     if (type !== "rectArea") {
         return undefined;
     }
@@ -76,7 +78,7 @@ export function rectAreaSingleLightSource(type: string): SingleLightShaderSource
 var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 let lightIndex = mli(0u);
-${AREA_PBR_CONTRIBUTION}
+${areaPbrContribution(evaluation)}
 let L = N;
 let NdotL = 0.0;
 let lightColor = areaEntry.vLightSpecular.rgb;
@@ -94,6 +96,9 @@ export const rectAreaPbrExt: PbrExt = {
     phase: "fragment",
     frag(ctx) {
         if (!((ctx._sceneFeatures ?? 0) & RECT_AREA_PBR_SCENE) || ctx._lightMode === 0 || ctx._features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) {
+            return null;
+        }
+        if ((ctx._sceneFeatures ?? 0) & (1 << 8)) {
             return null;
         }
         // These optional layered BRDFs require their own polygon integration, not a punctual surrogate.

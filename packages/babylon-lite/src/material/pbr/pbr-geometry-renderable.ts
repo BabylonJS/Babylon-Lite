@@ -50,7 +50,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2 } from "./pbr-flags.js";
-import { createPbrMeshBindGroup } from "./pbr-pipeline.js";
+import { createPbrMeshBindGroup, _pbrBindingIdentity, _createPbrBindingDisposers } from "./pbr-pipeline.js";
 import type { _PbrGeometryContext } from "./pbr-renderable.js";
 import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
@@ -220,11 +220,13 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     // candidate rolled back after a failed compile releases exactly what it acquired.
     const heldModules: string[] = [];
     let perMeshDisposed = false;
+    const bindingDisposers = _createPbrBindingDisposers?.();
     const _disposePerMesh = (): void => {
         if (perMeshDisposed) {
             return;
         }
         perMeshDisposed = true;
+        bindingDisposers?.splice(0).forEach((dispose) => dispose());
         _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
         materialUBO?.destroy();
@@ -255,7 +257,19 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
     let materialBindGroupStatic: GPUBindGroup;
     try {
-        materialBindGroupStatic = createPbrMeshBindGroup(engine, _wrapBindings(res), composed, meshUBO, materialUBO, view as unknown as PbrMaterialProps, ctx._envTextures, mesh);
+        materialBindGroupStatic = createPbrMeshBindGroup(
+            engine,
+            _wrapBindings(res),
+            composed,
+            meshUBO,
+            materialUBO,
+            view as unknown as PbrMaterialProps,
+            ctx._envTextures,
+            mesh,
+            undefined,
+            _pbrBindingIdentity?.(scene._lighting?._bindingId),
+            bindingDisposers
+        );
     } finally {
         _setActivePbrGeometryAttachments(prev);
     }

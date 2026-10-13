@@ -18,7 +18,7 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
-import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache } from "./pbr-pipeline.js";
+import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache, _pbrBindingIdentity } from "./pbr-pipeline.js";
 import {
     _registerPbrExt,
     _getPbrExts,
@@ -356,7 +356,21 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
-        const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
+        const materialBindGroupStatic = needsTaskRefraction
+            ? null
+            : createPbrMeshBindGroup(
+                  engine,
+                  bindings,
+                  composed,
+                  meshUBO,
+                  materialUBO,
+                  mat,
+                  envTextures ?? null,
+                  mesh,
+                  undefined,
+                  _pbrBindingIdentity?.(s._lighting?._bindingId),
+                  disposers
+              );
 
         const shadowBindGroup = receiveShadows && bindings._shadowBGL ? shadowBindings!(bindings._shadowBGL) : null;
 
@@ -491,7 +505,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             bind(eng, sig) {
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
-                    ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
+                    ? createPbrMeshBindGroup(
+                          engine,
+                          bindings,
+                          composed,
+                          meshUBO,
+                          materialUBO,
+                          mat,
+                          envTextures ?? null,
+                          mesh,
+                          sig._transmissionTexture,
+                          _pbrBindingIdentity?.(s._lighting?._bindingId),
+                          disposers
+                      )
                     : materialBindGroupStatic!;
                 // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
                 const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update, sig);

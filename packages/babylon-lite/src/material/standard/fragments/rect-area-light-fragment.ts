@@ -1,5 +1,5 @@
 import type { StdExt } from "../standard-flags.js";
-import { STD_SCENE_FOG } from "../standard-flags.js";
+import { STD_SCENE_FOG, _installStandardLightingSource } from "../standard-flags.js";
 import type { StandardSceneShaderContext } from "../standard-material.js";
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import { standardLightingFunction } from "../standard-template.js";
@@ -12,6 +12,7 @@ const RECT_AREA_STD_SCENE = 1 << 1;
 
 /** @internal Scene context carries lighting code and the extension's material feature bit. */
 export function rectAreaStandardContext(fog: ShaderFragment | null): StandardSceneShaderContext {
+    _installStandardLightingSource();
     return {
         _features: RECT_AREA_STD_SCENE | (fog ? STD_SCENE_FOG : 0),
         _fragments: fog ? [fog] : [],

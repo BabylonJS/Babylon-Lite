@@ -113,6 +113,9 @@ function upload(engine: EngineContext, pixels: LtcPixels): LtcAllocation {
 
 /** @internal Prepare scene-owned LUT resources, retrying failures and replacing stale-device allocations. */
 export function prepareAreaLightLtc(scene: SceneContext): Promise<void> {
+    if (scene._z) {
+        return Promise.reject(new Error("RectAreaLight: scene was disposed before LTC preparation"));
+    }
     const registry = (owners ??= new WeakMap());
     let owner = registry.get(scene);
     if (!owner) {
@@ -137,7 +140,7 @@ export function prepareAreaLightLtc(scene: SceneContext): Promise<void> {
     const state = owner;
     const request = loadPixels()
         .then(async (pixels) => {
-            if (state.disposed) {
+            if (state.disposed || scene._z) {
                 throw new Error("RectAreaLight: scene was disposed while loading LTC data");
             }
             releaseOwner(state);
@@ -155,7 +158,7 @@ export function prepareAreaLightLtc(scene: SceneContext): Promise<void> {
             state.allocation = allocation;
             try {
                 await allocation.ready;
-                if (state.disposed) {
+                if (state.disposed || scene._z) {
                     throw new Error("RectAreaLight: scene was disposed during LTC upload");
                 }
                 if (engine._device !== device) {

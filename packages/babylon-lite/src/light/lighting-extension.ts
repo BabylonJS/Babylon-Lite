@@ -17,6 +17,8 @@ export interface MultiLightShaderSource {
 
 /** @internal Optional, scene-owned material lighting extension. */
 export interface SceneLightingExtension {
+    /** @internal Opaque scalar used by material-owned binding extensions. */
+    _bindingId?: number;
     /** @internal */
     _prepare(): Promise<void>;
     /** @internal */

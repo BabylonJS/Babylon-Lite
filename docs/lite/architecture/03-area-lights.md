@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Opt-in, single-sided, solid-color rectangular emitters using the exact Babylon.js LTC lookup tables and lighting equations. No point-light surrogate, custom baked LUT, photometric conversion, emitter texture, or area shadow map is used. Light objects know nothing about scenes or GPU resources.
+Opt-in, single-sided rectangular emitters, optionally textured, using the exact Babylon.js LTC lookup tables and lighting equations. No point-light surrogate, custom baked LUT, photometric conversion, or area shadow map is used. Light objects know nothing about scenes or GPU resources.
 
 This specification precedes implementation. Source inspection covers Babylon.js PRs [16078](https://github.com/BabylonJS/Babylon.js/pull/16078), [16123](https://github.com/BabylonJS/Babylon.js/pull/16123), [16577](https://github.com/BabylonJS/Babylon.js/pull/16577), [16723](https://github.com/BabylonJS/Babylon.js/pull/16723), and [18605](https://github.com/BabylonJS/Babylon.js/pull/18605). Spector.GPU is unavailable in this environment: source-derived mathematics and focused tests are not claimed to be live GPU captures. New-scene visual validation is an integration responsibility.
 
@@ -20,9 +20,11 @@ interface RectAreaLight extends LightBase {
     diffuse: [number, number, number];
     specular: [number, number, number];
     intensity: number;
+    emissionTexture: Texture2D | null;
 }
 function createRectAreaLight(position: [number, number, number], width: number, height: number, intensity?: number): RectAreaLight;
 function enableRectAreaLights(scene: SceneContext): Promise<void>;
+function processAreaLightTexture(engine: EngineContext, source: Texture2D): Promise<Texture2D>;
 ```
 
 Defaults: white diffuse/specular and intensity 1. Dimensions must be finite and nonnegative; zero produces no contribution. Intensity must be finite and nonnegative. Position uses ordinary SceneNode local coordinates. Emission is along **local -Z**. Rotation, quaternion, scaling, parenting, visibility, metadata, and mesh inclusion/exclusion are ordinary SceneNode/LightBase state. Changes to dimensions, intensity, and color (including tuple element writes) bump the light version.
@@ -52,7 +54,7 @@ Every light retains the existing four-vec4 **64-byte** entry and the existing co
 
 For column-major world matrix W, the center is W[12..14]; half-width is `(W[0],W[1],W[2]) × width/2`; half-height is `(W[4],W[5],W[6]) × height/2`. Do not normalize either axis: nonuniform scaling, parent rotation, and shear must affect the quadrilateral geometry. Mirrored transforms follow the transformed vertex winding. The floating-origin path may subtract the active camera offset from the center only.
 
-The factory installs the standard `_cloneNode` callback. `cloneTransformNode(source: SceneNode): SceneNode` invokes it for specialized nodes and deep-clones children. Clones reconstruct from the actual local position, width, height, and intensity before copying common transform/filter state. Color tuples are independent. A cloned subtree reassigns each cloned child to its cloned parent; a standalone clone has no parent. No Lite scene serialization framework exists for this feature; no serializer is invented. PR18605's position and zero-photometric-scale regressions are prevented by preserving state and using intensity directly. Its emission-texture serialization work is explicitly deferred with textured emission.
+The factory installs the standard `_cloneNode` callback. `cloneTransformNode(source: SceneNode): SceneNode` invokes it for specialized nodes and deep-clones children. Clones reconstruct from the actual local position, width, height, and intensity before copying common transform/filter state. Color tuples copy caller input before tracking and are independent between clones. Emission image wrappers are borrowed/shared by light clones without acquiring scene-specific resource ownership. A cloned subtree reassigns each cloned child to its cloned parent; a standalone clone has no parent. No Lite scene serialization framework exists for this feature; no serializer is invented. PR18605's position and zero-photometric-scale regressions are prevented by preserving state and using intensity directly.
 
 ### Optional material seam
 
@@ -113,24 +115,62 @@ CPU payload cache is lazy, shares one in-flight fetch, retains decoded Uint16 ar
 
 GPU resources are lazy, cached per GPUDevice and reference-owned by enabled scenes. Use the existing texture acquire/release and sampler pool. Device identity must be checked before using cached views. A scene owns an idempotent disposal closure registered before any await; if it dies during loading, no handles are installed. On device change it releases its old allocation ownership and acquires replacement-device resources. Last release destroys both textures and removes that cache entry; other scenes retain theirs. A failed partial upload destroys allocated textures and surfaces the error. Each allocation carries a readiness promise for a WebGPU validation error scope; validation failure rejects preparation and releases every waiting scene's allocation claim. Disposal during that promise destroys its ownership and causes preparation to reject. A device replacement during validation retries preparation against the replacement device. No public GPU handles, top-level Map/WeakMap allocations, or import-time registration.
 
-Area shadows and emission textures are unsupported. Node lighting is rejected in scenes containing area lights. Layered PBR direct-light BRDFs are rejected only when an area light is selected for that mesh. Errors are actionable. Arbitrary ShaderMaterial code remains caller-owned. Changing scene lighting topology requires the existing scene rebuild/registration path. Material-group preparation replaces device-specific LTC allocations when the engine's device changes; no stale bind group is valid across device replacement.
+Area shadows are unsupported. Node lighting is rejected in scenes containing area lights. Layered PBR direct-light BRDFs are rejected only when an area light is selected for that mesh. Errors are actionable. Arbitrary ShaderMaterial code remains caller-owned. Changing scene lighting topology requires the existing scene rebuild/registration path. Material-group preparation replaces device-specific LTC allocations when the engine's device changes; no stale bind group is valid across device replacement.
+
+## Textured emission specification
+
+### Preprocessing, orientation, and ownership
+
+`processAreaLightTexture(engine, source)` is standalone, asynchronous, scene-free, and root-exported. It accepts a live, single-sampled, sampleable color `Texture2D` on the engine's current device. Depth, integer, unfilterable, array/3D, malformed size, released resource, and wrong-device resources reject explicitly. Ordinary raster textures should use `srgb:false`: Babylon's preprocessing works in the sampled RGB byte domain, with no extra gamma conversion. Source UV transforms are not applied, matching the upstream fullscreen processor. `invertY` is respected for top-origin codec/pixel sources; the ordinary raster-upload flip already supplies Babylon Y-up texels.
+
+Create a 1024×1024 `rgba8unorm` render attachment, with COPY_SRC/COPY_DST/TEXTURE_BINDING and 11 mip levels. Render a fullscreen triangle whose storage row 0 samples Y-up source V=0, using UV `(uv-0.125)/0.75`, mirror-repeat U/V, and implicit source LOD from pixel derivatives. Retain the source's pooled min/mag/mip/anisotropy settings; ordinary raster sources are trilinear. The existing sampler pool's canonical descriptor key supplies these settings without a second retained metadata cache; an unknown sampler falls back to trilinear. This creates the same orientation as the upstream effect render followed by its raw-texture update: processed storage rows are sampled directly, without an additional V flip in the LTC helper. The processor owns its sampler rather than modifying any source fields.
+
+Read the scaled level-zero bytes with a MAP_READ staging buffer. For each output pixel `(x,y)`, exterior distance is `max(128-x,128-y,x-896,y-896,0)`. The separable Gaussian has length `7+2*distance`, sigma `length/4`, and half-length `floor(length/2)`. Compute each exponential in double precision, store it into Float32, sum the original doubles, then divide the stored Float32 coefficients by that sum and store back into Float32. Each axis convolves RGB in double precision and rounds to nearest byte with `Math.round`, clamps to [0,255], and copies alpha unchanged. Reflect indices about boundary texel centers (`-i` below zero and `2046-i` above 1023). The second axis reads the first axis's rounded bytes. Upload the final bytes and use the existing GPU mipmap blitter for the complete chain. The returned sampler is linear min/mag/mip with clamp-to-edge.
+
+Source ownership remains with the caller. The source is borrowed only for the synchronous scale submission, before the processor's first await; WebGPU retains already-submitted resource references for that work. The processor creates no transient ordinary ownership claim that device recovery could incorrectly transfer to a replacement facade. It snapshots the source allocation and rejects if that allocation is released or the facade/device is replaced during any await, without releasing or touching a replacement resource. It retains no source, GPU pipeline, kernel library, or promise after completion. The returned wrapper owns one ordinary caller reference (`releaseTexture(result)`); it has internal device provenance and processed-image identity shared by `cloneTexture2D`. Assignments and light clones borrow/share this wrapper, never acquire or release GPU resources. Scene preparation acquires its snapshot's processed images, so callers may release their result reference after successful enable. Releasing before enable or assigning an ordinary unprocessed texture is an actionable error. Disposing the source's last caller claim during the await rejects the operation rather than publishing an abandoned result. Device replacement during preprocessing rejects and cleans staging/partial output; reprocess on the new device. WebGPU validation errors, readback failures, and upload failures reject. No new public API exposes a raw GPU handle.
+
+### Compact binding and synchronization
+
+Successful preprocessing installs a module-local preparation seam; only the scene enabler invokes it. When preprocessing is not consumed, the setter, preparation seam, and complete emission import graph tree-shake away from solid consumers. The lazy scene setup detects packed emission maps and dynamically imports textured runtime/material modules only when such maps are present. Assigning an ordinary texture without preprocessing rejects during enable, rather than silently using a solid shader. Solid scenes never load preprocessing or emission-sampling modules. They retain their existing shaders, four LTC bindings, and 64-byte light entries.
+
+The emission runtime owns a scene snapshot: current GPUDevice, packed-light identities (writers only, capped at MAX_LIGHTS), unique processed GPUTexture images, a compact 1024×1024×N 2D array with 11 mips, and a mapping uniform. Copy all mip levels directly from each processed image into a distinct array layer; no resampling or sampler mutation. Two wrappers sharing an image share a layer; different images at identical light positions remain different layers. Mapping is by packed scene slot, not mesh selection order, world position, or mutable per-light scene fields. A slot maps to layer+1, with zero meaning solid/punctual. The uniform is an array of vec4<u32>, padded to `ceil(MAX_LIGHTS/4)` vectors. Selected-single and multilight shaders use the existing `mli` packed indices to resolve it, so filters and changes to slot order remain correct.
+
+Bind three extra entries only for textured variants: `texture_2d_array<f32>`, one filtering sampler, and the mapping uniform. All textured-light counts therefore consume one additional texture and sampler, rather than MAX_LIGHTS pairs. PBR binds through a generic scalar scene-binding ID and an optional disposal collection; Standard already receives its scene and disposer collection. The ID has no feature meaning in shared modules. Binding owners retain snapshot allocations independently of scene ownership: old forward/geometry materials remain valid while replacements are built. Last allocation owner destroys its array and mapping buffer and releases the acquired image snapshots. Disposed scenes delete their scalar ID registry entry; no promise or scene is retained indefinitely.
+
+The async preparation hooks run for both PBR and Standard groups. They validate image provenance/current device and rebuild snapshots when packed identities or assignments change. Enable detects whether textured variants are needed and atomically publishes the new scene shader seam only after successful preparation; cached variants distinguish solid and textured feature bits. Cross-scene snapshots never share mappings or mutable indices. Initial use is preprocess → assign → await enable → register. For assignment/clear/add/remove/reorder after registration, stop rendering, mutate state, `await enableRectAreaLights(scene)`, then `await rebuildSceneRenderables(scene)`, and resume. This existing full-group rebuild path synchronizes forward, geometry, selection, and shader context. Do not change lighting topology midway through an awaited rebuild. A preparation that observes a changed topology during await rejects with a rebuild-again diagnostic rather than installing a stale snapshot. Clear-to-solid releases the scene's emission owner, while old bound materials release theirs through normal rebuilding/disposal.
+
+Standard scene preparation/context resolution is installed explicitly through a module-local generic seam: when the enabler is absent those optional calls fold away, avoiding the PR806 scene103 footprint regression. Standard lighting-source transport and extra helper parameters/arguments similarly have nullable installers; no extra string fields are read when the relevant enablers are absent. The emission Standard module supplies the packed-index scalar for its exact helper identity. It compares known helper string values, never parses emitted WGSL and never passes a branch-gating object. PBR also transports its scalar scene binding ID and binding-owned disposer collection only through lazily installed callbacks; auxiliary ownership collections are never allocated when the binding extension is absent. The scene/material core contains no emission semantics. Textured extension ID `rect-area-emission` does not overlap the solid `rect-area-light` ID: PBR's existing hierarchical prefix binding dispatch must not accidentally select the solid binder for the textured fragment.
+
+Reject disposed scenes before creating an LTC/emission owner or registering any disposer, and recheck disposal after every asynchronous resource phase. A public `disposeScene(scene)` before the first enable must create no resources and install no owner.
+
+### Textured LTC mathematics
+
+Use the existing back-face/degenerate checks, normal-view tangent fallback, LTC lookup, and corrected diffuse/F0/specular-color multiplication. Textured results change diffuse/specular from scalars to RGB vectors. For each diffuse identity-basis transform and each specular inverse-LTC transform, transform corners first; sample emission before normalizing corner directions. Solid slots return RGB one times the existing form factor.
+
+For transformed corners q0,q1,q2,q3, take axes X=q1-q0 and Y=q3-q0, normal n=cross(X,Y), squared area a=dot(n,n), and h=dot(n,q0). Project the origin onto the light plane: p=h*n/a-q0. Remove the component of Y along X: Y'=Y-X*dot(X,Y)/dot(X,X). Solve v=dot(Y',p)/dot(Y',Y'), u=dot(X,p)/dot(X,X)-dot(X,Y)/dot(X,X)*v. This explicitly handles nonorthogonal transformed axes. UV is `0.125+0.75*(u,v)` with X flipped. Distance d=abs(h)/pow(a,0.75); LOD=`log(2048*d)/log(3)`. Clamp the zero-distance case to LOD zero rather than computing log(0). Degenerate transformed axes produce zero; finite valid rectangles use the exact reference equations. Trilinear clamp sampling supplies RGB. Compute diffuse and specular samples separately; never reuse the diffuse projection for specular.
+
+### Focused verification
+
+Upstream-derived, independently expressed numeric oracles verify Float32 kernel normalization, boundary reflection, exterior-radius selection, per-axis byte rounding, unchanged alpha, asymmetric image orientation, full mip descriptors, and projection/LOD with nonorthogonal axes. Mock device tests cover sampler nonmutation, invalid/unprocessed/released/wrong-device images, GPU/map failures, disposal/device changes during awaits, cleanup and retry. Mapping/binding tests cover multiple maps at identical positions, shared maps/clones, mixed punctual/solid/textured lights, filters, MAX_LIGHTS, reordered slots, clear/rebind, cross-scene isolation, and forward/geometry paths. Build tests ensure root-only declarations and tree-shaken emission modules for solid/no-area consumers. Integration owns real-GPU comparisons and scoped runtime-byte measurements; existing ceilings and goldens are untouched.
 
 Allocation replacement and cleanup are unit-tested with distinct mock GPUDevices, and ordinary native WebGPU rendering is integration-tested. The complete opt-in device-lost recovery orchestrator has not been exercised end-to-end for area lights; no claim of verified full recovery is made.
 
 ## Babylon.js equivalence map
 
-| Reference                                        | Lite responsibility                                                                   |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `rectAreaLight.pure.ts`                          | local -Z rectangle, transformed center and scaled half axes                           |
-| `LTC/ltcTextureTool.ts`                          | exact interleaved, little-endian rgba16float data                                     |
-| WGSL `ltcHelperFunctions.fx`                     | tangent basis, matrix orientation, edges, clipping, Fresnel lookup                    |
-| `pbrDirectLighting{SetupFunctions,Functions}.fx` | material F0/F90 and area diffuse/specular                                             |
-| `lightFragment.fx`, `lightsFragmentFunctions.fx` | Standard roughness and material multiplication                                        |
-| PR16078                                          | untextured/no-shadow initial scope                                                    |
-| PR16123                                          | transform scale and independent diffuse/specular, explicit Node contract              |
-| PR16577                                          | declarations coupled to shared helper                                                 |
-| PR16723                                          | metallic/albedo/F0-correct contributions                                              |
-| PR18605                                          | preserve position/dimensions/intensity and unity photometric scale; textures deferred |
+| Reference                                        | Lite responsibility                                                                           |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `rectAreaLight.pure.ts`                          | local -Z rectangle, transformed center and scaled half axes                                   |
+| `LTC/ltcTextureTool.ts`                          | exact interleaved, little-endian rgba16float data                                             |
+| WGSL `ltcHelperFunctions.fx`                     | tangent basis, matrix orientation, edges, clipping, Fresnel lookup                            |
+| `pbrDirectLighting{SetupFunctions,Functions}.fx` | material F0/F90 and area diffuse/specular                                                     |
+| `lightFragment.fx`, `lightsFragmentFunctions.fx` | Standard roughness and material multiplication                                                |
+| PR16078                                          | untextured/no-shadow initial scope                                                            |
+| PR16123                                          | transform scale and independent diffuse/specular, explicit Node contract                      |
+| PR16577                                          | declarations coupled to shared helper                                                         |
+| PR16723                                          | metallic/albedo/F0-correct contributions                                                      |
+| PR18605                                          | preserve position/dimensions/intensity, unity photometric scale, shared emission image clones |
+| `areaLightsTextureTools.ts`, WGSL processing     | exact scale/mirror-repeat, varying Gaussian, byte quantization, full mips                     |
+| WGSL `FetchDiffuseFilteredTexture`               | nonorthogonal plane projection, X flip, distance-based mip selection                          |
 
 ## Dependencies
 
@@ -146,10 +186,17 @@ Focused unit tests cover packing bounds, dirty dimensions/colors/intensity, pare
 - `light/enable-rect-area-lights.ts`: public opt-in and generic seam installation.
 - `light/area-light-ltc.ts`: binary decoding, request and GPU ownership.
 - `light/area-light-wgsl.ts`: shared LTC mathematics and binding declarations.
+- `light/process-area-light-texture.ts`, `light/area-light-blur.ts`, `light/area-light-image.ts`: standalone processing, exact CPU Gaussian math and processed-image validation/provenance.
+- `light/area-light-emission.ts`, `light/area-light-emission-wgsl.ts`: scene snapshots, compact array ownership/mapping, transformed projection and emission sampling.
+- `light/area-light-emission-setup.ts`: lazy scene preparation/extension registration installed by successful preprocessing.
+- `texture/read-texture-pixels.ts`, `effect/effect-renderer.ts`: generic standalone fullscreen recording and alpha-preserving texture readback; reuse existing mipmap generation.
+- `resource/texture-sampler-pool.ts`: recover ordinary pooled sampler settings without a second cache.
+- `material/{pbr,standard}/fragments/rect-area-light-emission-fragment.ts`: lazy textured material declarations/bindings and scalar selected-slot transport.
 - `light/lighting-extension.ts`: generic internal seam types only.
 - `material/pbr/fragments/rect-area-light-fragment.ts`: PbrExt and light-source contributions.
 - `material/standard/fragments/rect-area-light-fragment.ts`: StdExt and area Standard lighting.
 - Existing scene/material builders and flags: generic transport/optional calls and bit reservations only.
 - `index.ts`: root exports.
 - `tests/lite/unit/rect-area-light*.test.ts`: focused state, lifecycle, shader tests.
+- `tests/lite/unit/area-light-{texture-processing,texture-lifetime,emission-runtime,emission-opt-in}.test.ts`: exact preprocessing math, failure cleanup, real texture recovery and fresh-runtime opt-in rejection, real forward/geometry/full-scene rebuild binding lifetimes.
 - `tests/lite/build/rect-area-light-treeshake.test.ts`: in-memory Rollup consumption of shipped ESM and AST verification of trimmed public declarations; no temporary directories or scene builds.

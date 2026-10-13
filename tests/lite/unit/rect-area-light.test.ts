@@ -9,6 +9,26 @@ import { applyLightFoOffset } from "../../../packages/babylon-lite/src/large-wor
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene.js";
 
 describe("RectAreaLight data", () => {
+    it("copies caller-owned color tuples before tracking and preserves same-value writes", () => {
+        const light = createRectAreaLight([0, 0, 0], 2, 2);
+        const diffuse: [number, number, number] = [0.2, 0.3, 0.4];
+        const specular: [number, number, number] = [0.5, 0.6, 0.7];
+        light.diffuse = diffuse;
+        light.specular = specular;
+        const version = light._lightVersion;
+        diffuse[0] = 9;
+        specular[0] = 8;
+        expect(light.diffuse).toEqual([0.2, 0.3, 0.4]);
+        expect(light.specular).toEqual([0.5, 0.6, 0.7]);
+        expect(light._lightVersion).toBe(version);
+        light.diffuse[0] = 0.2;
+        const sameSpecular = light.specular;
+        light.specular = sameSpecular;
+        expect(light._lightVersion).toBe(version);
+        light.diffuse[0] = 0.1;
+        expect(light._lightVersion).toBe(version + 1);
+        expect(light._cloneNode!().diffuse).not.toBe(light.diffuse);
+    });
     it("packs center, independent colors, intensity and six half-axis scalars into exactly 64 bytes", () => {
         const light = createRectAreaLight([3, 4, 5], 6, 8, 2);
         light.diffuse = [0.2, 0.4, 0.6];

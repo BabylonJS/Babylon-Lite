@@ -1096,7 +1096,7 @@
         "slug": "scene103-thin-instance-raycast",
         "name": "Scene 103 — Thin-Instance Raycast Picking",
         "maxMad": 0.5,
-        "maxRawKB": 64.1,
+        "maxRawKB": 64.2,
         "maxGzipKB": 26,
         "description": "Havok Physics V2 thin-instanced wall + raycast instance picking (port of PG #I6AR8X). A 10×6×3 wall of thin-instanced cylinders with seeded per-instance colors. One STATIC thin-instance BOX aggregate creates 180 native bodies; raycast bodyIndex identifies the hit instance and is matched between Lite and Babylon.js for deterministic rays. A green indicator sphere marks the last hit.",
         "tags": ["std", "procedural", "physics", "thin-instance"],
@@ -2820,6 +2820,26 @@
         "maxRawKB": 100,
         "description": "A rotated, nonuniformly scaled parent and light-local rotation exercise rectangular dimensions; white/tinted dielectrics and metals cover albedo weighting, alongside Standard receivers, point/hemi fill, and a back-facing magenta emitter.",
         "tags": ["pbr", "std", "procedural", "area-light", "ltc", "transforms", "metallic", "albedo"],
+        "skipPerf": true
+    },
+    {
+        "id": 319,
+        "slug": "scene319-textured-rect-area-lights-standard",
+        "name": "Scene 319 — Textured Rect Area Lights Standard",
+        "maxMad": 0.05,
+        "maxRawKB": 95,
+        "description": "Upstream Textured - Area Lights - Standard Material (#T7FXR8#103): a scaled, rotated cyberpunk-image emitter illuminates two Standard spheres and a shared ground with independent LTC roughness.",
+        "tags": ["std", "procedural", "area-light", "ltc", "texture", "emission"],
+        "skipPerf": true
+    },
+    {
+        "id": 320,
+        "slug": "scene320-textured-rect-area-lights-pbr",
+        "name": "Scene 320 — Textured Rect Area Lights PBR",
+        "maxMad": 0.05,
+        "maxRawKB": 110,
+        "description": "Upstream Textured - Area Lights - PBR (#T7FXR8#102): three scaled, rotated emitters use distinct white, cyberpunk-image, and grey processed emission maps to illuminate a glossy grey dielectric ground.",
+        "tags": ["pbr", "std", "procedural", "area-light", "ltc", "texture", "emission"],
         "skipPerf": true
     }
 ]

@@ -1,6 +1,7 @@
 import type { LightBase } from "./types.js";
 import { applyLightBase, copyLightBase, createLightBase } from "./light-base.js";
 import type { SceneLightingExtension } from "./lighting-extension.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 
 /** A single-sided rectangular emitter, shining along its SceneNode's local -Z axis. */
 export interface RectAreaLight extends LightBase {
@@ -13,6 +14,8 @@ export interface RectAreaLight extends LightBase {
     specular: [number, number, number];
     /** Direct intensity multiplier, without photometric conversion. */
     intensity: number;
+    /** Preprocessed emitter image, or null for solid emission. Changes require a scene lighting rebuild. */
+    emissionTexture: Texture2D | null;
     /** @internal Specialized clone constructor consumed by cloneTransformNode. */
     _cloneNode?: () => RectAreaLight;
 }
@@ -38,6 +41,7 @@ export function createRectAreaLight(position: [number, number, number], width: n
             intensity,
             diffuse: [1, 1, 1],
             specular: [1, 1, 1],
+            emissionTexture: null,
             _validateLighting: (extension: SceneLightingExtension | undefined) => {
                 if (light.shadowGenerator) {
                     throw new Error("RectAreaLight: area-light shadows are not supported yet");
@@ -50,6 +54,7 @@ export function createRectAreaLight(position: [number, number, number], width: n
                 const clone = createRectAreaLight([light.position.x, light.position.y, light.position.z], light.width, light.height, light.intensity);
                 clone.diffuse = [...light.diffuse];
                 clone.specular = [...light.specular];
+                clone.emissionTexture = light.emissionTexture;
                 copyLightBase(light, clone);
                 return clone;
             },
@@ -93,7 +98,7 @@ export function createRectAreaLight(position: [number, number, number], width: n
     }
     for (const key of ["diffuse", "specular"] as const) {
         const track = (tuple: [number, number, number]): [number, number, number] =>
-            new Proxy(tuple, {
+            new Proxy([...tuple], {
                 set(target, property, value: unknown): boolean {
                     const previous: unknown = Reflect.get(target, property);
                     const changed = Reflect.set(target, property, value);
@@ -115,5 +120,19 @@ export function createRectAreaLight(position: [number, number, number], width: n
             },
         });
     }
+    let emission: Texture2D | null = null;
+    Object.defineProperty(light, "emissionTexture", {
+        enumerable: true,
+        get: () => emission,
+        set: (next: Texture2D | null) => {
+            if (next !== null && typeof next !== "object") {
+                throw new Error("RectAreaLight: emissionTexture must be a Texture2D or null");
+            }
+            if (emission !== next) {
+                emission = next;
+                lvs.b();
+            }
+        },
+    });
     return light;
 }
