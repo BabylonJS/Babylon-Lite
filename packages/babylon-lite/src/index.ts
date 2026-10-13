@@ -754,6 +754,8 @@ export type { SplatVoxelCollision } from "./collision/splat-voxel-collision.js";
 export type { GaussianSplatStream, GaussianSplatStreamOptions, GaussianSplatStreamPhase, GaussianSplatStreamStats } from "./loader-splat-stream/splat-stream-types.js";
 export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";
+export { GAUSSIAN_SPLATTING_MAX_PART_COUNT, getGaussianSplattingPartIndexVaryingDeclaration } from "./material/gaussian-splatting-plugin-helpers.js";
+export { getGaussianSplattingMaxPartCount } from "./material/gaussian-splatting-part-count.js";
 export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { createProceduralGaussianSplattingMesh } from "./mesh/GaussianSplatting/create-gaussian-splatting-mesh.js";
 export { gsLinearDepthFragment, gsAlphaBlendedDepthFragment } from "./mesh/GaussianSplatting/gs-depth-fragments.js";
