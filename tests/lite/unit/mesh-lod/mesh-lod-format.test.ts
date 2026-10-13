@@ -21,7 +21,7 @@ import {
     toMeshLoDMetadata,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import { isMeshLoDError, type MeshLoDErrorCode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
-import { buildMinimalContainer, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
+import { buildMinimalContainer, corruptFineGroupPageRefs, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
 
 describe("parseMeshLoDContainer — minimal valid container", () => {
     it("parses exact metadata and records", () => {
@@ -186,6 +186,18 @@ describe("parseMeshLoDContainer — committed statue assets", () => {
             expect(parsed.provenance.cgltfRevision.length).toBeGreaterThan(0);
         });
     }
+});
+
+describe.each([false, true])("parseMeshLoDContainer — group-page membership (full file: %s)", (fullFile) => {
+    it.each(["empty", "pinned"] as const)("rejects CRC-correct %s fine-group references", (mutation) => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const { bootstrapBytes, byteOffset, omittedPageId } = corruptFineGroupPageRefs(bytes, mutation);
+        const source = fullFile ? bytes : bytes.subarray(0, bootstrapBytes);
+        expect(source.length).toBe(fullFile ? bytes.length : bootstrapBytes);
+        expect(bootstrapBytes).toBeLessThan(bytes.length);
+        expect(() => parseMeshLoDContainer(source)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", pageId: omittedPageId, byteOffset }));
+    });
 });
 
 describe("parseMeshLoDContainer — mutation matrix", () => {

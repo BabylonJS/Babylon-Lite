@@ -126,6 +126,18 @@ options are maintained in MegameshCLI. Hierarchy nodes begin with one root
 per level; the parser rejects cycles, shared children, unreachable nodes,
 and out-of-range group/page/cluster references before selection.
 
+Every group's page-reference slice must include every page containing a cluster
+whose `groupId` identifies that group. Slice bounds and in-range page IDs alone
+are insufficient: an empty list or references to an unrelated resident page must
+not make unfetched fine geometry appear resident. Metadata validation collects
+each group's cluster-owning page IDs in a set, then removes the IDs covered by
+its bounded reference slice. Temporary membership storage is bounded by the
+cluster ownership records, not by potentially overlapping reference slices.
+A remaining page fails explicitly with
+`MLOD_INVALID_HIERARCHY`, the omitted page ID, and the group's page-reference
+field offset. This runs for full files and coarse bootstraps before any page
+decode or GPU allocation, without fetching fine-page bodies.
+
 Directory and metadata spans must fit both the supplied bytes and the declared
 coarse bootstrap before CRC scans or record reads. Only the page-data section
 may extend beyond the bootstrap into the unfetched remainder of the file.
@@ -545,3 +557,7 @@ Both pass orders retain each camera's own history and fine-page demand (includin
 zero-priority demand with zero cancellation grace). Rebinding preserves history;
 remove/reinsert without an intervening update resets it, and binding retirement
 clears only the retired packet's history/observations behind its task fence.
+CRC-resealed page-membership regressions reject a nonempty fine group with no
+page references and an in-range list replaced by the pinned page. Both complete
+files and coarse-only bootstraps fail with `MLOD_INVALID_HIERARCHY`; public CPU/GPU
+loads reject after the two bootstrap requests with no page decode or GPU upload.

@@ -788,6 +788,7 @@ function validateRecordReferences(
             throw fail("MLOD_INVALID_HIERARCHY", "group page refs are out of range", { byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.firstPageRef });
         }
     }
+    const missingPages = groups.map(() => new Set<number>());
     for (let c = 0; c < clusters.length; c++) {
         const cluster = clusters[c]!;
         const page = pages[cluster.pageId]!;
@@ -800,6 +801,20 @@ function validateRecordReferences(
         }
         if (cluster.indexOffset + cluster.triangleCount * 3 > page.localIndexCount) {
             throw fail("MLOD_INVALID_HIERARCHY", "cluster local indices exceed their page", { byteOffset: base + CR.firstLocalIndex });
+        }
+        missingPages[cluster.groupId]!.add(cluster.pageId);
+    }
+    for (let g = 0; g < groups.length; g++) {
+        const group = groups[g]!;
+        const missing = missingPages[g]!;
+        for (let r = group.firstPageRef; r < group.firstPageRef + group.pageRefCount && missing.size > 0; r++) {
+            missing.delete(refs[r]!);
+        }
+        if (missing.size > 0) {
+            throw fail("MLOD_INVALID_HIERARCHY", "group page refs omit a cluster's owning page", {
+                pageId: missing.values().next().value!,
+                byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.firstPageRef,
+            });
         }
     }
 }

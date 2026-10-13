@@ -7,7 +7,16 @@
  *  flipped byte always breaks the stored checksum; the parser's agreement with
  *  the native writer is proven separately against the committed statue assets. */
 
-import { crc32c, HEADER_SIZE, PAGE_ALIGNMENT, SECTION_ENTRY_SIZE } from "../../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
+import {
+    crc32c,
+    GROUP_RECORD_SIZE,
+    HEADER_SIZE,
+    PAGE_ALIGNMENT,
+    SECTION_ENTRY_SIZE,
+    SECTION_GROUPS,
+    SECTION_GROUP_PAGE_REFS,
+    parseMeshLoDContainer,
+} from "../../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 
 const FLT_MAX = 3.4028234663852886e38;
 
@@ -290,4 +299,32 @@ export function resealContainer(bytes: Uint8Array): void {
     wU32(232, crc32c(bytes, directoryOffset, directoryOffset + directoryBytes));
     wU32(228, 0);
     wU32(228, crc32c(bytes, 0, HEADER_SIZE));
+}
+
+/** Omit a real fine group's geometry pages while keeping its references in range
+ *  and all checksums valid. Fine-page payloads are unchanged. */
+export function corruptFineGroupPageRefs(bytes: Uint8Array, mutation: "empty" | "pinned"): { bootstrapBytes: number; byteOffset: number; omittedPageId: number } {
+    const parsed = parseMeshLoDContainer(bytes);
+    const groupId = parsed.groups.findIndex((group) => !group.pinned && group.clusterCount > 0 && group.simplifiedError > 0);
+    const pinnedPageId = parsed.pageRecords.findIndex((page) => page.pinned);
+    if (groupId === -1 || pinnedPageId === -1) {
+        throw new Error("fixture requires a nonempty fine group and a pinned page");
+    }
+    const group = parsed.groups[groupId]!;
+    const groupOffset = parsed.sections[SECTION_GROUPS - 1]!.offset + groupId * GROUP_RECORD_SIZE;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (mutation === "empty") {
+        view.setUint16(groupOffset + 36, 0, true);
+    } else {
+        const refOffset = parsed.sections[SECTION_GROUP_PAGE_REFS - 1]!.offset;
+        for (let r = group.firstPageRef; r < group.firstPageRef + group.pageRefCount; r++) {
+            view.setUint32(refOffset + r * 4, pinnedPageId, true);
+        }
+    }
+    resealContainer(bytes);
+    return {
+        bootstrapBytes: parsed.header.bootstrapBytes,
+        byteOffset: groupOffset + 32,
+        omittedPageId: parsed.clusters[group.firstCluster]!.pageId,
+    };
 }

@@ -14,6 +14,7 @@ import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/me
 import { parseMeshLoDContainer } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import { createFillDecoder, createMockDevice, createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { corruptFineGroupPageRefs } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 
@@ -90,6 +91,28 @@ describe("loadMeshLoD — pinned residency", () => {
         expect(asset.diagnostics.gpuCacheCapacityBytes).toBe(16 * 1024 * 1024);
         expect(asset._runtime.settings.screenSpaceError).toBe(3);
     });
+});
+
+describe("loadMeshLoD — group-page membership", () => {
+    for (const selectionMode of ["cpu", "gpu"] as const) {
+        it.each(["empty", "pinned"] as const)(`rejects CRC-correct %s fine-group references before decode or upload (${selectionMode})`, async (mutation) => {
+            const bytes = statueBytes();
+            const { byteOffset, omittedPageId } = corruptFineGroupPageRefs(bytes, mutation);
+            const server = rangeServer(bytes);
+            const { engine, device } = createMockEngine();
+            const decoder = createFillDecoder();
+            _setMeshLoDPageDecoder(decoder.decoder);
+            await expect(loadMeshLoD(engine, "https://cdn.test/statue.mlod", { selectionMode, request: { fetch: server.fetch } })).rejects.toMatchObject({
+                code: "MLOD_INVALID_HIERARCHY",
+                pageId: omittedPageId,
+                byteOffset,
+            });
+            expect(server.calls).toBe(2);
+            expect(decoder.modes).toEqual([]);
+            expect(device.buffers).toHaveLength(0);
+            expect(device.writes).toHaveLength(0);
+        });
+    }
 });
 
 describe("loadMeshLoD — budget and limit boundaries", () => {
