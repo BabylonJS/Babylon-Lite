@@ -331,6 +331,40 @@ describe("shared replacement retirement during registered scene recovery", () =>
         }
     });
 
+    it("keeps a late clone on a uniquely recovered replacement instead of uploading it again", async () => {
+        const { engine, scene, mesh, clone, createBuffer } = fixture();
+        scene.meshes.length = 0;
+        disposeMeshGpu(clone);
+        const lease = retainMeshResources(engine, mesh);
+        const { entered, resume } = gateEnvironment();
+        const recovery = rebuildRegisteredScenes(engine);
+        await entered;
+        const replacement = mesh._gpu;
+        expect(replacement._recoverShared).toBeUndefined();
+        let late!: Mesh;
+        try {
+            late = cloneTransformNode(mesh) as Mesh;
+            scene.meshes.push(late);
+            expect(replacement._refCount).toBe(2);
+        } finally {
+            resume();
+        }
+        await recovery;
+        expect(createBuffer).toHaveBeenCalledTimes(4);
+        expect(late._gpu).toBe(replacement);
+        expect(mesh._gpu).toBe(replacement);
+        expect(replacement._refCount).toBe(2);
+        disposeMeshGpu(late);
+        for (const buffer of buffers(replacement)) {
+            expect(buffer.destroy).not.toHaveBeenCalled();
+        }
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        for (const buffer of buffers(replacement)) {
+            expect(buffer.destroy).toHaveBeenCalledTimes(1);
+        }
+    });
+
     it("keeps a shared texture alive when one lease is released before recovered ownership settles", async () => {
         const { engine } = fixture();
         const gpuTexture = (): GPUTexture => stub<GPUTexture>({ destroy: vi.fn() });

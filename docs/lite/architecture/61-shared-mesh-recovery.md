@@ -119,7 +119,8 @@ Babylon-style scene API or a clone/disposal implementation.
 - `device-lost-recovery.test.ts`: surrounding replacement-device sequencing and errors.
 - `retained-shared-recovery-retirement.test.ts`: controlled environment awaits,
   retirement after upload/before adoption, failed and overlapping scene recovery,
-  late clones, clones of the recovered source admitted before the scene sweep
+  late clones of shared and uniquely recovered sources (kept on the live
+  replacement with two claims, not uploaded again), clones of the recovered source admitted before the scene sweep
   (counted once), individual/shared resize, capacity growth and in-place
   geometry/attribute/draw-range edits of the first owner before a sibling adopts
   the cache, and exactly-once final destruction.

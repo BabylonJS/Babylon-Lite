@@ -117,7 +117,10 @@ preparation produces an empty result and does not recreate its targets.
 
 Recovery rebuilds retained identities before registered scenes using one seen
 set, preserving detached buffers on the replacement device and avoiding duplicate
-identity rebuilds. Shared allocation replacement uses
+identity rebuilds. The set also records each allocation recovery rebuilt, so a mesh
+cloned from an already recovered mesh while recovery awaits — including a uniquely
+owned source that never received a shared-recovery hook — keeps its claim on that
+live replacement instead of being uploaded again. Shared allocation replacement uses
 [shared mesh recovery](61-shared-mesh-recovery.md). Replacement-device allocation
 is expected and is not part of the detach/reinsert allocation-reuse measurement.
 Recovery rechecks disposal after loading shared recovery support, before installing

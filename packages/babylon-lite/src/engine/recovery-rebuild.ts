@@ -53,7 +53,7 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
     // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
     engine._pbrFallbackTex = undefined;
-    const seen = new WeakSet<Mesh>();
+    const seen = new WeakSet<object>();
     await rebuildMeshResources(engine, engine._retainedMeshes ?? [], seen);
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
@@ -69,7 +69,7 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     }
 }
 
-async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen: WeakSet<Mesh>): Promise<void> {
+async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen: WeakSet<object>): Promise<void> {
     // The environment and shadow rebuild logic each live in their own module, reached only
     // through these lazy imports so recovery-enabled scenes that use neither carry neither.
     if (scene._envTextures) {
@@ -175,7 +175,11 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
     await rebuildMeshResources(engine, scene.meshes, new WeakSet());
 }
 
-async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh>, seen: WeakSet<Mesh>): Promise<void> {
+/** `seen` holds both visited meshes and the allocations this recovery rebuilt on the replacement
+ *  device. A mesh cloned from an already recovered mesh while recovery awaits already holds a claim
+ *  on that live replacement, so uploading it again would orphan that claim and duplicate the
+ *  geometry; it keeps the replacement instead. */
+async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh>, seen: WeakSet<object>): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
 
@@ -184,7 +188,7 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             continue;
         }
         seen.add(mesh);
-        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
+        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices && !seen.has(mesh._gpu)) {
             if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared && !hasMeshLocalDrawRange(mesh._gpu)) {
                 const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
                 if (mesh._disposed) {
@@ -194,6 +198,7 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             }
             const recoverShared = hasMeshLocalDrawRange(mesh._gpu) ? undefined : mesh._gpu._recoverShared;
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
+            seen.add(mesh._gpu);
         }
         if (mesh.skeleton) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
