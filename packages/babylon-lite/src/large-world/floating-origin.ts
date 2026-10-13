@@ -61,7 +61,7 @@ export function lightFoVersion(scene: SceneContext): number {
 }
 
 /** @internal Subtract the active-camera floating-origin offset from the
- *  positional (point = type tag 0, spot = type tag 2) light entries already
+ *  positional light entries already
  *  laid out in the lights UBO scratch by `fillLightsData`. Direction-only
  *  entries (directional = 1, hemispheric = 3) are left untouched.
  *
@@ -95,7 +95,7 @@ export function applyLightFoOffset(data: Float32Array, scene: SceneContext): voi
         }
         const o = 4 + count * LIGHT_ENTRY_FLOATS; // header (4 floats) + entry offset
         const type = data[o + 3];
-        if (type === 0 || type === 2) {
+        if (type !== 1 && type !== 3) {
             const lw = light.worldMatrix;
             data[o] = lw[12]! - ox;
             data[o + 1] = lw[13]! - oy;

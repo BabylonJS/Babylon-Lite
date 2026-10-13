@@ -20,6 +20,10 @@ export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
 export interface _PbrFragCtx {
+    /** @internal Scene-owned extension feature bits. */
+    readonly _sceneFeatures?: number;
+    /** @internal Effective per-mesh light path; zero means no light declarations are emitted. */
+    readonly _lightMode?: number;
     /** @internal */
     readonly _features: number;
     /** @internal */

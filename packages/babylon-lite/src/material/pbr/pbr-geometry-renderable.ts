@@ -170,8 +170,21 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
     const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey, mesh._gpu._vbLayout, mesh._gpu._vbKey ?? "");
+    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh.id) ?? 0);
+    const variantKey = `${sceneFeatures}:` + _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
+    const res = _ensureViewResources(
+        view,
+        engine,
+        ctx,
+        sceneFeatures,
+        meshFeatures,
+        lightMode,
+        singleLightType,
+        pluginIndex,
+        variantKey,
+        mesh._gpu._vbLayout,
+        mesh._gpu._vbKey ?? ""
+    );
     // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
     // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
     // topology bits this mirrors, so a cached variant only ever sees one value here.
@@ -428,6 +441,7 @@ function _ensureViewResources(
     view: PbrGeometryMaterialView,
     engine: EngineContext,
     ctx: _PbrGeometryContext,
+    sceneFeatures: number,
     meshFeatures: number,
     lightMode: 0 | 1 | 2,
     singleLightType: string,
@@ -460,7 +474,6 @@ function _ensureViewResources(
 
     const features = view._renderFeatures.features;
     const features2 = view._renderFeatures.features2 ?? 0;
-    const sceneFeatures = ctx._sceneFeatures;
     const source = view.source as PbrMaterialProps;
     const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
@@ -601,7 +614,7 @@ function _getOrCreateGeometryPipeline(
 
 // ─── Helpers cribbed from pbr-renderable (no static cycle) ─────────────
 
-function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): "hemispheric" | "directional" | "spot" | "point" {
+function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): string {
     let packed = 0;
     for (const light of lights) {
         if (!light._writeLightUbo) {
@@ -609,7 +622,7 @@ function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: 
         }
         if (packed === packedIndex) {
             const t = light.lightType;
-            return t === "hemispheric" || t === "directional" || t === "spot" ? t : "point";
+            return t;
         }
         packed++;
     }

@@ -44,6 +44,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         return _standardGroupBuilder;
     }
     const builder: MeshGroupBuilder = async (scene, meshes) => {
+        await scene._lighting?._prepare();
         const hasTI = meshes.some((m) => !!m.thinInstances);
         const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
         const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
@@ -111,7 +112,8 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         }
 
         const renderableMod = await import("./standard-renderable.js");
-        const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;
+        const sceneShader: StandardSceneShaderContext | null =
+            scene._lighting?._standard?.(fogFragment) ?? (scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null);
         const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadow, morphFragment, cull, sceneShader });
         // Wire the per-mesh rebuild closure used by material swap + per-pass override.
         builder._rebuildSingle = result.rebuildSingle;

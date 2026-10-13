@@ -45,6 +45,7 @@ export const VERTEX_ALPHA = 1 << 24;
 export const HAS_SKELETON = 1 << 26;
 /** Skinned mesh has a second JOINTS/WEIGHTS set. */
 export const HAS_SKELETON_8 = 1 << 27;
+// Bit 28 is rect-area-light-local (fragments/rect-area-light-fragment.ts).
 
 // ─── Standard Scene Features ───────────────────────────────────────
 
@@ -82,6 +83,8 @@ export interface StdExt {
     _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */
     _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
+    /** @internal Write extension-owned material UBO state. */
+    _writeUbo?(data: Float32Array, mat: StandardMaterialProps): void;
 }
 
 export interface ShadowLightSlotLite {

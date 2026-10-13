@@ -20,8 +20,11 @@ const STAGE_FRAGMENT = 0x2;
 
 // ── Lighting function (always present unless disableLighting) ───
 
-const LIGHTING_FN = wgsl`
+/** @internal Extend the default lighting helper without shader parsing or feature semantics. */
+export function standardLightingFunction(extraLight = ""): string {
+    return wgsl`
 fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>) -> array<vec3<f32>, 2> {
+${extraLight}
 var lv: vec3<f32>;
 var a: f32 = 1.0;
 let t = u32(L.vLightData.w);
@@ -51,6 +54,7 @@ s = pow(s, max(1.0, g));
 return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 }
 `;
+}
 
 export interface StandardTemplateConfig {
     /** @internal */
@@ -69,6 +73,8 @@ export interface StandardTemplateConfig {
     readonly _esmShadowOutput?: boolean;
     /** @internal Has morph targets — switches the vertex shader to morphedPos/morphedNorm (defined by the morph fragment's VR slot). */
     readonly _hasMorph?: boolean;
+    /** @internal Material-owned lighting helper contribution. */
+    readonly _lightingFunction?: string;
 }
 
 /**
@@ -199,7 +205,7 @@ _1: f32,
 };
 `;
 
-    const helpers = _disableLighting ? "" : LIGHTING_FN;
+    const helpers = _disableLighting ? "" : (config._lightingFunction ?? standardLightingFunction());
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly

@@ -108,6 +108,7 @@ export function composeStandardShader(
             _noColorOutput: has(NO_COLOR_OUTPUT),
             _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
             _hasMorph: !!(_meshFeatures & MSH_HAS_MORPH_TARGETS),
+            _lightingFunction: sceneShader?._lightingFunction,
         },
         esmShadowDepthCode
     );
@@ -439,4 +440,7 @@ export function writeStdMaterialData(data: Float32Array, mat: StandardMaterialPr
     data[19] = mat.alphaCutOff;
     data[20] = mat.reflectionLevel;
     data[21] = mat.reflectionCoordMode;
+    for (const ext of _getStdExtsSorted()) {
+        ext._writeUbo?.(data, mat);
+    }
 }

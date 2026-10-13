@@ -2,9 +2,11 @@
  *
  *  Each light type provides pipeline integration callbacks.
  *  PBR + Standard both consume the shared lights UBO (render/lights-ubo.ts);
- *  light type is encoded in vLightData.w (1=dir, 2=spot, 3=hemi, other=point). */
+ *  light type is encoded by its factory in vLightData.w; material extensions
+ *  own any additional packed interpretations. */
 
 import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneLightingExtension } from "./lighting-extension.js";
 
 /** Shared base for all light types.
  *  Provides pipeline integration callbacks so render pipelines are light-agnostic. */
@@ -26,6 +28,8 @@ export interface LightBase extends SceneNode {
     readonly _lightVersion: number;
     /** @internal Bumps `_lightVersion` after direct mutation of scalar/array light fields. */
     readonly _bumpLightVersion?: (() => void) | undefined;
+    /** @internal Verify an explicitly enabled material lighting implementation before scene build. */
+    readonly _validateLighting?: (extension: SceneLightingExtension | undefined) => void;
 }
 
 /** Maximum number of scene lights packed into the shared lights UBO.
