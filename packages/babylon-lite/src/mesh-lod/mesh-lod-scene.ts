@@ -100,25 +100,38 @@ async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneC
             validateMeshLoDMaterial(batch.material);
         }
     }
-    for (const batch of registry.batches) {
-        if (batch.asset.state === "failed" || batch.asset._runtime.disposed) {
-            continue;
-        }
-        const rebuild = (): Renderable | null => {
-            recoverMeshLoDAssets(engine, scene);
-            const next = pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
-            batch.renderable = next ?? undefined;
-            if (next) {
-                next._rebuild = rebuild;
+    const staged: Array<{ batch: MeshLoDSceneBatch; packet: unknown; renderable: Renderable | undefined }> = [];
+    try {
+        for (const batch of registry.batches) {
+            if (batch.asset.state === "failed" || batch.asset._runtime.disposed) {
+                continue;
             }
-            return next;
-        };
-        const renderable = pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
-        if (renderable) {
-            renderable._rebuild = rebuild;
-            batch.renderable = renderable;
-            renderables.push(renderable);
+            const rebuild = async (): Promise<Renderable | null> => {
+                recoverMeshLoDAssets(engine, scene);
+                const next = await pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
+                batch.renderable = next ?? undefined;
+                if (next) {
+                    next._rebuild = rebuild;
+                }
+                return next;
+            };
+            staged.push({ batch, packet: batch._packet, renderable: batch.renderable });
+            const renderable = await pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
+            if (renderable) {
+                renderable._rebuild = rebuild;
+                batch.renderable = renderable;
+                renderables.push(renderable);
+            }
         }
+    } catch (error) {
+        for (const previous of staged) {
+            if (previous.batch._packet !== previous.packet) {
+                (previous.batch as { _packet?: { dispose?: () => void } })._packet?.dispose?.();
+            }
+            previous.batch._packet = previous.packet;
+            previous.batch.renderable = previous.renderable;
+        }
+        throw error;
     }
     return renderables;
 }

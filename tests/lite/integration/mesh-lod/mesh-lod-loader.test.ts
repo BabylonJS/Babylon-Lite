@@ -11,10 +11,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadMeshLoD } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
-import { parseMeshLoDContainer } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
+import { parseMeshLoDContainer, PAGE_TABLE_RECORD_SIZE, SECTION_PAGE_TABLE } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import { createFillDecoder, createMockDevice, createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import { corruptFineGroupPageRefs } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
+import { corruptFineGroupPageRefs, resealContainer } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 
@@ -94,6 +94,22 @@ describe("loadMeshLoD — pinned residency", () => {
 });
 
 describe("loadMeshLoD — group-page membership", () => {
+    it.each([true, false])("rejects an unaligned decoded allocation before decode/upload (pinned=%s)", async (pinned) => {
+        const bytes = statueBytes();
+        const parsed = parseMeshLoDContainer(bytes);
+        const pageId = parsed.pageRecords.findIndex((page) => page.pinned === pinned);
+        const offset = parsed.sections[SECTION_PAGE_TABLE - 1]!.offset + pageId * PAGE_TABLE_RECORD_SIZE;
+        new DataView(bytes.buffer).setUint32(offset + 16, 65535, true);
+        resealContainer(bytes);
+        const server = rangeServer(bytes);
+        const { engine, device } = createMockEngine();
+        const decoder = createFillDecoder();
+        _setMeshLoDPageDecoder(decoder.decoder);
+        await expect(loadMeshLoD(engine, "https://cdn.test/statue.mlod", { request: { fetch: server.fetch } })).rejects.toMatchObject({ code: "MLOD_INVALID_LAYOUT", pageId });
+        expect(server.calls).toBe(2);
+        expect(decoder.modes).toEqual([]);
+        expect(device.buffers).toHaveLength(0);
+    });
     for (const selectionMode of ["cpu", "gpu"] as const) {
         it.each(["empty", "pinned"] as const)(`rejects CRC-correct %s fine-group references before decode or upload (${selectionMode})`, async (mutation) => {
             const bytes = statueBytes();

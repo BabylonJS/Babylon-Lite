@@ -233,7 +233,7 @@ export interface MeshLoDAssetRuntime {
     readonly source: MeshLoDRangeSource;
     /** Bytes covering `[0, bootstrapBytes)`: header, directory, metadata, and the
      *  pinned coarse pages. The complete file for in-memory/200 sources. */
-    readonly coarseBytes: Uint8Array;
+    coarseBytes: Uint8Array;
     readonly header: MeshLoDHeader;
     readonly sections: readonly MeshLoDSectionEntry[];
     readonly groups: readonly MeshLoDGroup[];
@@ -1014,6 +1014,8 @@ export function _disposeMeshLoDScheduler(runtime: MeshLoDAssetRuntime): void {
  *  non-drawable), so retained CPU page bytes and decoded indices are released now.
  *  Idempotent-safe: repeated disposal is guarded by the caller. */
 export function _disposeMeshLoDResources(runtime: MeshLoDAssetRuntime): void {
+    runtime.source.dispose();
+    runtime.coarseBytes = new Uint8Array(0);
     runtime._frameSnapshots.clear();
     const coordinator = _meshLoDFrameCoordinators?.get(runtime.engine);
     coordinator?.tracked.delete(runtime);

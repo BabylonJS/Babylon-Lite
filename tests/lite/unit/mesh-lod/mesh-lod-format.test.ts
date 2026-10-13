@@ -16,6 +16,8 @@ import {
     PAGE_TABLE_RECORD_SIZE,
     HEADER_SIZE,
     SECTION_PAGE_TABLE,
+    SECTION_GROUPS,
+    GROUP_RECORD_SIZE,
     crc32c,
     parseMeshLoDContainer,
     toMeshLoDMetadata,
@@ -189,6 +191,20 @@ describe("parseMeshLoDContainer — committed statue assets", () => {
 });
 
 describe.each([false, true])("parseMeshLoDContainer — group-page membership (full file: %s)", (fullFile) => {
+    it.each([1, 2])("rejects incomplete pinned coverage of a fallback group (flags=%s)", (flags) => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const parsed = parseMeshLoDContainer(bytes);
+        const groupId = parsed.groups.findIndex((group) => !group.terminal && !group.pinned);
+        const byteOffset = parsed.sections[SECTION_GROUPS - 1]!.offset + groupId * GROUP_RECORD_SIZE;
+        const pageId = parsed.groupPageRefs[parsed.groups[groupId]!.firstPageRef]!;
+        expect(parsed.pageRecords[0]!.pinned).toBe(true);
+        expect(parsed.pageRecords[pageId]!.pinned).toBe(false);
+        new DataView(bytes.buffer).setUint16(byteOffset + 38, flags, true);
+        resealContainer(bytes);
+        const source = fullFile ? bytes : bytes.subarray(0, parsed.header.bootstrapBytes);
+        expect(() => parseMeshLoDContainer(source)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", pageId, byteOffset: byteOffset + 32 }));
+    });
     it.each(["empty", "pinned"] as const)("rejects CRC-correct %s fine-group references", (mutation) => {
         const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
         const bytes = new Uint8Array(readFileSync(path));
@@ -307,12 +323,22 @@ describe("parseMeshLoDContainer — mutation matrix", () => {
             resealContainer(b);
         }, "MLOD_INVALID_LAYOUT"));
 
-    it.each([0, PAGE_MAX_BYTES + 1, 1024 * 1024 * 1024])("rejects CRC-correct decoded page allocation %i before decoding", (decodedBytes) =>
+    it.each([0, 65535, PAGE_MAX_BYTES + 1, 1024 * 1024 * 1024])("rejects CRC-correct decoded page allocation %i before decoding", (decodedBytes) =>
         expectParseError((bytes, layout) => {
             dv(bytes).setUint32(layout.pageTableOffset + 16, decodedBytes, true);
             resealContainer(bytes);
         }, "MLOD_INVALID_LAYOUT")
     );
+
+    it("rejects an unpinned terminal fallback from a CRC-correct bootstrap", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        const view = dv(bytes);
+        view.setUint32(184, 0, true);
+        view.setUint32(layout.pageTableOffset + 48, 2, true);
+        view.setBigUint64(48, BigInt(layout.pageDataOffset), true);
+        resealContainer(bytes);
+        expect(() => parseMeshLoDContainer(bytes.subarray(0, layout.pageDataOffset))).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY" }));
+    });
 
     it("accepts the maximum decoded page allocation", () => {
         const { bytes, layout } = buildMinimalContainer();

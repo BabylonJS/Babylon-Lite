@@ -8,6 +8,7 @@ import { createPbrTemplate } from "../../../../packages/babylon-lite/src/materia
 import { StandardToneMapping, type ToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/tone-mapping.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import { SCENE_UBO_BYTES } from "../../../../packages/babylon-lite/src/shader/scene-uniforms-size.js";
+import * as fog from "../../../../packages/babylon-lite/src/material/pbr/pbr-fog-wgsl.js";
 
 const features: MeshLoDShaderFeatures = {
     hasNormalMap: false,
@@ -59,6 +60,14 @@ function verifyOutput(shader: string, toneMapping?: ToneMapping): void {
 
 describe.each([false, true])("MeshLoD %s image processing", (unlit) => {
     const variant = { ...features, unlit };
+
+    it("shares ordinary PBR fog before image processing and keys its presence", () => {
+        const shader = composeMeshLoDWgsl({ ...variant, fog }, StandardToneMapping);
+        expect(shader).toContain(fog.PBR_FOG_HELPER);
+        expect(shader).toContain(`${fog.PBR_FOG_BLOCK}\n${StandardToneMapping.callWGSL}`);
+        expect(meshLoDShaderKey({ ...variant, fog })).not.toBe(meshLoDShaderKey(variant));
+        expect(composeMeshLoDWgsl(variant)).not.toContain("calcFogFactor");
+    });
 
     it("shares ordinary PBR exposure, display gamma and contrast for live exposure 0.8 / contrast 1.2", () => {
         const shader = composeMeshLoDWgsl(variant, StandardToneMapping);

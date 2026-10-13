@@ -49,6 +49,14 @@ async function expectReadError(read: () => Promise<unknown>, code: MeshLoDErrorC
 }
 
 describe("createMeshLoDRangeSource — in-memory sources", () => {
+    it.each(["buffer", "blob"] as const)("releases %s backing storage and rejects disposed reads", async (kind) => {
+        const src = await createMeshLoDRangeSource(kind === "blob" ? new Blob([bufferOf(file)]) : bufferOf(file));
+        src.dispose();
+        expect(src.completeBytes).toBeNull();
+        expect(src.totalBytes).toBe(file.length);
+        await expectReadError(() => src.read(0, 15), "MLOD_DISPOSED");
+        src.dispose();
+    });
     it("treats an ArrayBuffer as a complete file", async () => {
         const src = await createMeshLoDRangeSource(bufferOf(file));
         expect(src.completeBytes).not.toBeNull();
@@ -66,6 +74,32 @@ describe("createMeshLoDRangeSource — in-memory sources", () => {
 });
 
 describe("createMeshLoDRangeSource — URL source", () => {
+    it.each(["fetch", "body"] as const)("does not restore full-file storage after a late %s response", async (stage) => {
+        let release!: () => void;
+        const pending = new Promise<void>((resolve) => (release = resolve));
+        const response = new Response(bufferOf(file), { status: 200 });
+        if (stage === "body") {
+            response.arrayBuffer = async () => {
+                await pending;
+                return bufferOf(file);
+            };
+        }
+        const src = await createMeshLoDRangeSource("https://cdn.test/a.mlod", {
+            fetch: async () => {
+                if (stage === "fetch") {
+                    await pending;
+                }
+                return response;
+            },
+        });
+        const read = src.read(0, 15);
+        await Promise.resolve();
+        src.dispose();
+        release();
+        await expectReadError(() => read, "MLOD_DISPOSED");
+        expect(src.completeBytes).toBeNull();
+        expect(src.totalBytes).toBeNull();
+    });
     it("serves 206 ranges and tracks totals and downloaded bytes", async () => {
         const server = rangeServer();
         const src = await createMeshLoDRangeSource("https://cdn.test/a.mlod", { fetch: server.fetch });

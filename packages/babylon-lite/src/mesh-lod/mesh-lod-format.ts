@@ -696,11 +696,11 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
         if (offset % PAGE_ALIGNMENT !== 0 || storedBytes % PAGE_ALIGNMENT !== 0 || storedBytes < PAGE_ALIGNMENT || storedBytes > PAGE_MAX_BYTES) {
             throw fail("MLOD_INVALID_LAYOUT", "page violates 64-256 KiB alignment", { pageId: p, byteOffset: base });
         }
-        if (decodedBytes === 0 || decodedBytes > PAGE_MAX_BYTES) {
+        if (decodedBytes === 0 || decodedBytes > PAGE_MAX_BYTES || decodedBytes % 4 !== 0) {
             throw fail("MLOD_INVALID_LAYOUT", "decoded page allocation is outside the format limits", {
                 pageId: p,
                 byteOffset: base + PT.decodedBytes,
-                expected: `1-${PAGE_MAX_BYTES} bytes`,
+                expected: `4-${PAGE_MAX_BYTES} bytes, divisible by 4`,
                 actual: decodedBytes,
             });
         }
@@ -782,10 +782,29 @@ function validateRecordReferences(
     groupOffset: number,
     clusterOffset: number
 ): void {
+    if (clusters.length > 0 && !groups.some((group) => group.terminal && group.clusterCount > 0)) {
+        throw fail("MLOD_INVALID_HIERARCHY", "nonempty hierarchy has no terminal fallback");
+    }
+    for (let p = 0; p < pages.length; p++) {
+        if (pages[p]!.coarse && !pages[p]!.pinned) {
+            throw fail("MLOD_INVALID_HIERARCHY", "coarse page is not in the pinned prefix", { pageId: p });
+        }
+    }
+    const lastUnpinnedRef = new Uint32Array(refs.length + 1);
+    for (let r = 0; r < refs.length; r++) {
+        lastUnpinnedRef[r + 1] = pages[refs[r]!]!.pinned ? lastUnpinnedRef[r]! : r + 1;
+    }
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g]!;
         if (group.firstPageRef + group.pageRefCount > refs.length) {
             throw fail("MLOD_INVALID_HIERARCHY", "group page refs are out of range", { byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.firstPageRef });
+        }
+        const unpinnedRef = lastUnpinnedRef[group.firstPageRef + group.pageRefCount]!;
+        if ((group.terminal || group.pinned) && unpinnedRef > group.firstPageRef) {
+            throw fail("MLOD_INVALID_HIERARCHY", "fallback group references an unpinned page", {
+                pageId: refs[unpinnedRef - 1]!,
+                byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.firstPageRef,
+            });
         }
     }
     const missingPages = groups.map(() => new Set<number>());

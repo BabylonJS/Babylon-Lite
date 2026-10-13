@@ -24,6 +24,8 @@ export interface MeshLoDRangeSource {
     /** Read the inclusive byte range `[start, end]`. Returns exactly the requested
      *  bytes, or fewer only when the range reaches end of file. */
     read(start: number, end: number, signal?: AbortSignal): Promise<Uint8Array>;
+    /** Release retained backing bytes and reject future or outstanding reads. */
+    dispose(): void;
 }
 
 /** @internal Throw `MLOD_ABORTED` if the signal is already aborted. */
@@ -59,14 +61,27 @@ function parseContentRange(value: string | null): { start: number; end: number; 
     return Number.isSafeInteger(start) && Number.isSafeInteger(end) && Number.isSafeInteger(total) && total > 0 ? { start, end, total } : null;
 }
 
-function createMemorySource(bytes: Uint8Array): MeshLoDRangeSource {
+function throwIfSourceDisposed(disposed: boolean): void {
+    if (disposed) {
+        throw createMeshLoDError("MLOD_DISPOSED", "range source has been disposed");
+    }
+}
+
+function createMemorySource(input: Uint8Array): MeshLoDRangeSource {
+    let bytes: Uint8Array | null = input;
     return {
-        totalBytes: bytes.length,
-        completeBytes: bytes,
+        totalBytes: input.length,
+        get completeBytes() {
+            return bytes;
+        },
         downloadedBytes: 0,
-        read(start, end, signal) {
+        async read(start, end, signal) {
+            throwIfSourceDisposed(bytes === null);
             throwIfAborted(signal);
-            return Promise.resolve(sliceRange(bytes, start, end));
+            return sliceRange(bytes!, start, end);
+        },
+        dispose() {
+            bytes = null;
         },
     };
 }
@@ -76,11 +91,13 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
     let totalBytes: number | null = null;
     let completeBytes: Uint8Array | null = null;
     let downloadedBytes = 0;
+    let disposed = false;
 
     async function readBody(response: Response, signal: AbortSignal | undefined): Promise<Uint8Array> {
         try {
             return new Uint8Array(await response.arrayBuffer());
         } catch (cause) {
+            throwIfSourceDisposed(disposed);
             if (isAbortError(cause) || signal?.aborted) {
                 throw createMeshLoDError("MLOD_ABORTED", "range response body aborted", { url, cause });
             }
@@ -89,6 +106,7 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
     }
 
     async function read(start: number, end: number, signal?: AbortSignal): Promise<Uint8Array> {
+        throwIfSourceDisposed(disposed);
         throwIfAborted(signal);
         if (completeBytes) {
             return sliceRange(completeBytes, start, end);
@@ -104,11 +122,13 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
         try {
             response = await fetchImpl(url, init);
         } catch (cause) {
+            throwIfSourceDisposed(disposed);
             if (isAbortError(cause) || signal?.aborted) {
                 throw createMeshLoDError("MLOD_ABORTED", "range request aborted", { url, cause });
             }
             throw createMeshLoDError("MLOD_HTTP_STATUS", "range request failed", { url, cause });
         }
+        throwIfSourceDisposed(disposed);
 
         if (response.status !== 200 && response.status !== 206) {
             throw createMeshLoDError("MLOD_HTTP_STATUS", response.status === 304 ? "unexpected 304 Not Modified" : "unexpected response status", {
@@ -142,6 +162,7 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "Content-Range total changed between requests", { url, expected: totalBytes, actual: range.total });
             }
             const body = await readBody(response, signal);
+            throwIfSourceDisposed(disposed);
             if (body.length !== range.end - range.start + 1) {
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "response length disagrees with Content-Range", { url, expected: range.end - range.start + 1, actual: body.length });
             }
@@ -151,6 +172,7 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
         }
 
         const body = await readBody(response, signal);
+        throwIfSourceDisposed(disposed);
         downloadedBytes += body.length;
         if (totalBytes !== null && totalBytes !== body.length) {
             throw createMeshLoDError("MLOD_HTTP_RANGE", "full response length disagrees with the known total", { url, expected: totalBytes, actual: body.length });
@@ -171,6 +193,10 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
             return downloadedBytes;
         },
         read,
+        dispose() {
+            disposed = true;
+            completeBytes = null;
+        },
     };
 }
 

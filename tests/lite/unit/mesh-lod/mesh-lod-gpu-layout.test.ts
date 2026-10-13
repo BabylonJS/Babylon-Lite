@@ -18,6 +18,7 @@ import {
     PAGE_STATE_WORDS,
     buildPageStateData,
     createMeshLoDGpuInstanceState,
+    ensureMeshLoDInstanceCapacity,
     getMeshLoDGpuAssetBuffers,
     packClusters,
     packGroups,
@@ -454,6 +455,48 @@ describe("MeshLoD GPU instance state", () => {
         expect(state.scratchF32[19]).toBe(0);
         uploadMeshLoDInstances(engine, state, [original]);
         expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 2);
+    });
+
+    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("caps instance and prior-state growth at complete records (%s)", (field) => {
+        for (const groupCount of [2, 2048]) {
+            const { engine, device } = createMockEngine();
+            const state = createMeshLoDGpuInstanceState(groupCount);
+            ensureMeshLoDInstanceCapacity(engine, state, 2);
+            const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4);
+            device.limits[field] = stride * 5 + 3;
+            ensureMeshLoDInstanceCapacity(engine, state, 5);
+            expect(state.capacity).toBe(5);
+            expect((state.instanceBuffer as unknown as MockBuffer).size).toBeLessThanOrEqual(device.limits[field]);
+            expect((state.priorStateBuffer as unknown as MockBuffer).size).toBeLessThanOrEqual(device.limits[field]);
+            const before = { ...state };
+            const buffers = device.buffers.length;
+            expect(() => ensureMeshLoDInstanceCapacity(engine, state, 6)).toThrowError(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
+            expect(device.buffers).toHaveLength(buffers);
+            expect(state.instanceBuffer).toBe(before.instanceBuffer);
+            expect(state.priorStateBuffer).toBe(before.priorStateBuffer);
+            expect(state.capacity).toBe(before.capacity);
+        }
+    });
+
+    it("keeps the old state and destroys a partial replacement when prior-state allocation throws", () => {
+        const { engine, device } = createMockEngine();
+        const state = createMeshLoDGpuInstanceState(2);
+        ensureMeshLoDInstanceCapacity(engine, state, 2);
+        const previous = { ...state };
+        const start = device.buffers.length;
+        const allocate = device.createBuffer;
+        const failure = new Error("injected prior-state allocation failure");
+        device.createBuffer = (desc) => {
+            if (desc.label === "mesh-lod-prior-state") {
+                throw failure;
+            }
+            return allocate(desc);
+        };
+        expect(() => ensureMeshLoDInstanceCapacity(engine, state, 3)).toThrow(failure);
+        expect(state).toEqual(previous);
+        expect(device.buffers.slice(start).every((buffer) => buffer.destroyed)).toBe(true);
+        expect((state.instanceBuffer as unknown as MockBuffer).destroyed).toBe(false);
+        expect((state.priorStateBuffer as unknown as MockBuffer).destroyed).toBe(false);
     });
 
     it("grows make-before-break, copying prior-state bits and retiring old buffers", () => {

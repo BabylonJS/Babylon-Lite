@@ -48,6 +48,7 @@ import {
     queueMeshLoDGpuSelection,
 } from "../../mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDShaderFeatures } from "./pbr-mesh-lod-compose.js";
+import type * as PbrFog from "./pbr-fog-wgsl.js";
 import { composeMeshLoDWgsl, meshLoDShaderKey } from "./pbr-mesh-lod-compose.js";
 import { StandardToneMapping } from "./tone-mapping.js";
 import { meshLoDClusterDebugAttr, meshLoDConeDebugAttr, meshLoDDebugModeCode, meshLoDPageRequestCode, meshLoDPageResidencyCode } from "./pbr-mesh-lod-debug.js";
@@ -139,6 +140,7 @@ interface MeshLoDMaterialTextures {
 }
 
 interface MeshLoDBatchPacket {
+    readonly fog?: typeof PbrFog;
     features: MeshLoDShaderFeatures;
     readonly textures: MeshLoDMaterialTextures;
     readonly environment: EnvironmentTextures | null;
@@ -248,9 +250,13 @@ function meshLoDBindGroupLayout(engine: EngineContext, hasIbl: boolean): GPUBind
 }
 
 function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: RenderTargetSignature, scene: SceneContext, material: PbrMaterialProps): GPURenderPipeline {
+    if (scene.fog && !packet.fog) {
+        throw createMeshLoDError("MLOD_INVALID_OPTION", "configure MeshLoD fog before registering the scene");
+    }
+    const fog = scene.fog ? packet.fog : undefined;
     const hasSpecularAA = material.enableSpecularAA === true && !packet.features.unlit;
-    if (packet.features.hasSpecularAA !== hasSpecularAA) {
-        packet.features = { ...packet.features, hasSpecularAA };
+    if (packet.features.hasSpecularAA !== hasSpecularAA || packet.features.fog !== fog) {
+        packet.features = { ...packet.features, hasSpecularAA, fog };
     }
     const toneMapping = scene.imageProcessing?.toneMappingEnabled ? (scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
     const shaderKey = meshLoDShaderKey(packet.features, toneMapping);
@@ -561,7 +567,7 @@ function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: M
 
 /** Build the single indirect-draw `Renderable` for one MeshLoD batch, or `null`
  *  when the batch has no instances. */
-export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: SceneContext, batch: MeshLoDSceneBatch): Renderable | null {
+export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: SceneContext, batch: MeshLoDSceneBatch): Promise<Renderable | null> {
     validateMeshLoDEngine(engine);
     if (batch.instances.length === 0) {
         return null;
@@ -585,6 +591,11 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
     }
     cpuStorageCapacity(engine, maxDrawVertices, maxDrawVertices, DRAW_VERTEX_STRIDE, "draw vertices");
     cpuStorageCapacity(engine, maxInstances, maxInstances, INSTANCE_STRIDE, "instances");
+    const fog = _scene.fog ? await import("./pbr-fog-wgsl.js") : undefined;
+    if (runtime.disposed) {
+        return null;
+    }
+    const shaderFeatures = { ...features, fog };
 
     const device = engine._device;
     const fb = getFallbacks(engine);
@@ -594,137 +605,150 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         orm: batch.material.ormTexture ?? fb.white,
         emissive: batch.material.emissiveTexture ?? fb.black,
     };
-    const materialUbo = createEmptyUniformBuffer(engine, MATERIAL_UBO_BYTES, "mesh-lod-material");
-    const materialState: MeshLoDMaterialState = { scratch: new Float32Array(MATERIAL_UBO_BYTES / 4), version: batch.material._uboVersion, debugMode: 0 };
-    packMaterialUbo(batch.material, features, materialState.scratch);
-    device.queue.writeBuffer(materialUbo, 0, materialState.scratch);
+    const allocated: GPUBuffer[] = [];
+    try {
+        const materialUbo = createEmptyUniformBuffer(engine, MATERIAL_UBO_BYTES, "mesh-lod-material");
+        allocated.push(materialUbo);
+        const materialState: MeshLoDMaterialState = { scratch: new Float32Array(MATERIAL_UBO_BYTES / 4), version: batch.material._uboVersion, debugMode: 0 };
+        packMaterialUbo(batch.material, features, materialState.scratch);
+        device.queue.writeBuffer(materialUbo, 0, materialState.scratch);
 
-    const drawVertexBuffer = device.createBuffer({ label: "mesh-lod-draw-vertices", size: maxDrawVertices * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
-    const instanceBuffer = device.createBuffer({ label: "mesh-lod-instances", size: maxInstances * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
-    const indirectBuffer = device.createBuffer({ label: "mesh-lod-indirect", size: 16, usage: BU.INDIRECT | BU.COPY_DST });
+        const drawVertexBuffer = device.createBuffer({ label: "mesh-lod-draw-vertices", size: maxDrawVertices * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+        allocated.push(drawVertexBuffer);
+        const instanceBuffer = device.createBuffer({ label: "mesh-lod-instances", size: maxInstances * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+        allocated.push(instanceBuffer);
+        const indirectBuffer = device.createBuffer({ label: "mesh-lod-indirect", size: 16, usage: BU.INDIRECT | BU.COPY_DST });
+        allocated.push(indirectBuffer);
 
-    const bindGroupLayout = meshLoDBindGroupLayout(engine, features.hasIbl);
-    const toneMapping = _scene.imageProcessing?.toneMappingEnabled ? (_scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
-    const shaderKey = meshLoDShaderKey(features, toneMapping);
-    const shaderModule = device.createShaderModule({ label: `mesh-lod-${shaderKey}`, code: composeMeshLoDWgsl(features, toneMapping) });
+        const bindGroupLayout = meshLoDBindGroupLayout(engine, features.hasIbl);
+        const toneMapping = _scene.imageProcessing?.toneMappingEnabled ? (_scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
+        const shaderKey = meshLoDShaderKey(shaderFeatures, toneMapping);
+        const shaderModule = device.createShaderModule({ label: `mesh-lod-${shaderKey}`, code: composeMeshLoDWgsl(shaderFeatures, toneMapping) });
 
-    const packet: MeshLoDBatchPacket = {
-        features,
-        textures,
-        environment,
-        shaderModule,
-        shaderKey,
-        bindGroupLayout,
-        bindGroup: buildBindGroup(engine, bindGroupLayout, textures, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
-        pipelines: new Map(),
-        drawVertexBuffer,
-        instanceBuffer,
-        indirectBuffer,
-        materialUbo,
-        materialState,
-        arena: runtime.gpu.arena.buffer,
-        drawScratch: new Uint32Array(maxDrawVertices * 4),
-        instanceScratch: new Float32Array(maxInstances * (INSTANCE_STRIDE / 4)),
-        indirectScratch: new Uint32Array(4),
-        maxDrawVertices,
-        maxInstances,
-        lastVertexCount: 0,
-        disposed: false,
-        disposedHandled: false,
-        cpuHistory: new Map(),
-        gpuInstanceState: null,
-        gpuBatchState: null,
-        gpuBindGroup: null,
-        gpuBoundDrawVertices: null,
-        gpuBoundInstances: null,
-        activeBindGroup: null,
-        activeIndirectBuffer: null,
-        dispose: () => {
-            if (sceneDisposed) {
-                return;
-            }
-            sceneDisposed = true;
-            for (const release of bindingPackets.values()) {
-                release();
-            }
-            disposeDrawPacket(batch, packet);
-            retireGpuResources(engine, () => {
-                materialUbo.destroy();
-                for (const texture of boundTextures) {
-                    releaseTexture(texture);
+        const packet: MeshLoDBatchPacket = {
+            features: shaderFeatures,
+            fog,
+            textures,
+            environment,
+            shaderModule,
+            shaderKey,
+            bindGroupLayout,
+            bindGroup: buildBindGroup(engine, bindGroupLayout, textures, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
+            pipelines: new Map(),
+            drawVertexBuffer,
+            instanceBuffer,
+            indirectBuffer,
+            materialUbo,
+            materialState,
+            arena: runtime.gpu.arena.buffer,
+            drawScratch: new Uint32Array(maxDrawVertices * 4),
+            instanceScratch: new Float32Array(maxInstances * (INSTANCE_STRIDE / 4)),
+            indirectScratch: new Uint32Array(4),
+            maxDrawVertices,
+            maxInstances,
+            lastVertexCount: 0,
+            disposed: false,
+            disposedHandled: false,
+            cpuHistory: new Map(),
+            gpuInstanceState: null,
+            gpuBatchState: null,
+            gpuBindGroup: null,
+            gpuBoundDrawVertices: null,
+            gpuBoundInstances: null,
+            activeBindGroup: null,
+            activeIndirectBuffer: null,
+            dispose: () => {
+                if (sceneDisposed) {
+                    return;
                 }
-            });
-        },
-    };
-    const bindingPackets = new Map<MeshLoDBatchPacket, () => void>();
-    const packetByTarget = new WeakMap<RenderTargetSignature, { packet: MeshLoDBatchPacket; updateBatch: MeshLoDUpdateBatch }>();
-    let sceneDisposed = false;
-    let firstBinding = true;
-    for (const texture of boundTextures) {
-        acquireTexture(texture);
-    }
-    (batch as { _packet?: unknown })._packet = packet;
+                sceneDisposed = true;
+                for (const release of bindingPackets.values()) {
+                    release();
+                }
+                disposeDrawPacket(batch, packet);
+                retireGpuResources(engine, () => {
+                    materialUbo.destroy();
+                    for (const texture of boundTextures) {
+                        releaseTexture(texture);
+                    }
+                });
+            },
+        };
+        const bindingPackets = new Map<MeshLoDBatchPacket, () => void>();
+        const packetByTarget = new WeakMap<RenderTargetSignature, { packet: MeshLoDBatchPacket; updateBatch: MeshLoDUpdateBatch }>();
+        let sceneDisposed = false;
+        let firstBinding = true;
+        for (const texture of boundTextures) {
+            acquireTexture(texture);
+        }
+        (batch as { _packet?: unknown })._packet = packet;
 
-    const renderable: Renderable = {
-        order: 100,
-        isTransparent: false,
-        bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
-            if (sceneDisposed) {
-                throw createMeshLoDError("MLOD_DISPOSED", "MeshLoD renderable has been disposed");
-            }
-            validateMeshLoDEngine(eng);
-            // A binding is a render pass/camera (including an XR eye). Never let a
-            // later recorded view overwrite an earlier view's uniforms or draw state.
-            const updateBatch = getMeshLoDUpdateBatch(sig);
-            const cached = packetByTarget.get(sig);
-            let drawPacket = cached?.updateBatch === updateBatch ? cached.packet : undefined;
-            if (!drawPacket) {
-                drawPacket = firstBinding ? packet : createBindingPacket(eng, batch, packet);
-                firstBinding = false;
-                const ownedPacket = drawPacket;
-                packetByTarget.set(sig, { packet: ownedPacket, updateBatch });
-                const release = (): void => {
-                    unregister();
-                    bindingPackets.delete(ownedPacket);
-                    if (packetByTarget.get(sig)?.packet === ownedPacket) {
-                        packetByTarget.delete(sig);
-                    }
-                    disposeDrawPacket(batch, ownedPacket);
+        const renderable: Renderable = {
+            order: 100,
+            isTransparent: false,
+            bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
+                if (sceneDisposed) {
+                    throw createMeshLoDError("MLOD_DISPOSED", "MeshLoD renderable has been disposed");
+                }
+                validateMeshLoDEngine(eng);
+                // A binding is a render pass/camera (including an XR eye). Never let a
+                // later recorded view overwrite an earlier view's uniforms or draw state.
+                const updateBatch = getMeshLoDUpdateBatch(sig);
+                const cached = packetByTarget.get(sig);
+                let drawPacket = cached?.updateBatch === updateBatch ? cached.packet : undefined;
+                if (!drawPacket) {
+                    drawPacket = firstBinding ? packet : createBindingPacket(eng, batch, packet);
+                    firstBinding = false;
+                    const ownedPacket = drawPacket;
+                    packetByTarget.set(sig, { packet: ownedPacket, updateBatch });
+                    const release = (): void => {
+                        unregister();
+                        bindingPackets.delete(ownedPacket);
+                        if (packetByTarget.get(sig)?.packet === ownedPacket) {
+                            packetByTarget.delete(sig);
+                        }
+                        disposeDrawPacket(batch, ownedPacket);
+                    };
+                    const unregister = updateBatch.addDisposer(release);
+                    bindingPackets.set(ownedPacket, release);
+                }
+                const passPacket = drawPacket;
+                let pipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
+                return {
+                    renderable,
+                    get pipeline() {
+                        return pipeline;
+                    },
+                    update: (context: DrawUpdateContext) => {
+                        if (passPacket.disposed || updateBatch._retired) {
+                            return;
+                        }
+                        const nextPipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
+                        if (pipeline !== nextPipeline) {
+                            pipeline = nextPipeline;
+                            invalidateRenderBundles(eng);
+                        }
+                        updatePacket(eng, batch, passPacket, context, updateBatch);
+                    },
+                    draw: (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
+                        if (passPacket.disposed || batch.asset._runtime.disposed || !passPacket.activeBindGroup || !passPacket.activeIndirectBuffer) {
+                            return 0;
+                        }
+                        pass.setBindGroup(1, passPacket.activeBindGroup);
+                        pass.drawIndirect(passPacket.activeIndirectBuffer, 0);
+                        return 1;
+                    },
+                    _updateBatches: [updateBatch],
                 };
-                const unregister = updateBatch.addDisposer(release);
-                bindingPackets.set(ownedPacket, release);
-            }
-            const passPacket = drawPacket;
-            let pipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
-            return {
-                renderable,
-                get pipeline() {
-                    return pipeline;
-                },
-                update: (context: DrawUpdateContext) => {
-                    if (passPacket.disposed || updateBatch._retired) {
-                        return;
-                    }
-                    const nextPipeline = getPipeline(eng, passPacket, sig, _scene, batch.material);
-                    if (pipeline !== nextPipeline) {
-                        pipeline = nextPipeline;
-                        invalidateRenderBundles(eng);
-                    }
-                    updatePacket(eng, batch, passPacket, context, updateBatch);
-                },
-                draw: (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-                    if (passPacket.disposed || batch.asset._runtime.disposed || !passPacket.activeBindGroup || !passPacket.activeIndirectBuffer) {
-                        return 0;
-                    }
-                    pass.setBindGroup(1, passPacket.activeBindGroup);
-                    pass.drawIndirect(passPacket.activeIndirectBuffer, 0);
-                    return 1;
-                },
-                _updateBatches: [updateBatch],
-            };
-        },
-    };
-    return renderable;
+            },
+        };
+        return renderable;
+    } catch (error) {
+        for (const buffer of allocated) {
+            buffer.destroy();
+        }
+        throw error;
+    }
 }
 
 function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, shared: MeshLoDBatchPacket): MeshLoDBatchPacket {

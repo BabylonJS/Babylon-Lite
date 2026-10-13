@@ -87,6 +87,26 @@ afterEach(() => {
 });
 
 describe("MeshLoD disposal", () => {
+    it("releases an HTTP 200 full file and bootstrap while its scene stays alive", async () => {
+        const engine = createMockEngine().engine;
+        const asset = await loadMeshLoD(engine, "https://cdn.test/a.mlod", {
+            request: { fetch: async () => new Response(statueSource(), { status: 200 }) },
+        });
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, {} as PbrMaterialProps));
+        const runtime = asset._runtime;
+        const metadata = asset.metadata;
+        const downloaded = runtime.source.downloadedBytes;
+        expect(runtime.source.completeBytes!.byteLength).toBeGreaterThan(0);
+        expect(runtime.coarseBytes.byteLength).toBeGreaterThan(0);
+        disposeMeshLoDAsset(asset);
+        expect(scene._meshLoDRegistry!.byAsset.has(asset)).toBe(true);
+        expect(runtime.source.completeBytes).toBeNull();
+        expect(runtime.coarseBytes.byteLength).toBe(0);
+        expect(runtime.source.downloadedBytes).toBe(downloaded);
+        expect(asset.metadata).toBe(metadata);
+        await expect(runtime.source.read(0, 15)).rejects.toMatchObject({ code: "MLOD_DISPOSED" });
+    });
     it("marks disposed, bumps generation, and releases CPU residency immediately", async () => {
         const { asset } = await setup("gpu");
         const runtime = asset._runtime;

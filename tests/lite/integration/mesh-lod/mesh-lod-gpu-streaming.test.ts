@@ -12,7 +12,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { arenaUsedBytes } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
@@ -88,6 +88,8 @@ interface GpuHarness {
     instances: MeshLoDInstance[];
     batchState(): MeshLoDGpuBatchState;
     flush(): void;
+    abandon(flushed?: boolean, cancel?: boolean): void;
+    reset(): void;
     submit(): void;
     settle(): Promise<void>;
     drawBuffers(): number;
@@ -125,7 +127,22 @@ async function setup(options: { limitBytes?: number; instanceCount?: number; vis
             binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
             engine._finishOptionalFrame?.(true);
         },
+        reset(): void {
+            updateBatch.reset();
+        },
+        abandon(flushed = false, cancel = true): void {
+            updateBatch.reset();
+            binding.update!(CONTEXT);
+            if (flushed) {
+                updateBatch.flush(engine);
+            }
+            if (cancel) {
+                engine._gpuTaskTimerResolve?.(engine._currentEncoder, false);
+            }
+            engine._finishOptionalFrame?.(false);
+        },
         submit(): void {
+            engine._gpuTaskTimerResolve?.(engine._currentEncoder, true);
             const retirements = engine._retirements;
             engine._retirements = null;
             retirements?.forEach((retire) => retire());
@@ -167,9 +184,45 @@ beforeEach(() => {
 });
 afterEach(() => {
     _setMeshLoDPageDecoder(null);
+    vi.unstubAllGlobals();
 });
 
 describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () => {
+    it("returns unflushed reservations on reset and streams after repeated abandoned frames without rebinding", async () => {
+        harness = await setup();
+        for (let attempt = 0; attempt < 4; attempt++) {
+            harness.abandon(false, false);
+            harness.reset();
+            expect(harness.batchState().readbackSlots.every((slot) => !slot.busy)).toBe(true);
+            harness.abandon();
+            expect(harness.batchState().readbackSlots.every((slot) => !slot.busy)).toBe(true);
+        }
+        harness.flush();
+        const state = harness.batchState();
+        const slot = state.readbackSlots.find((candidate) => candidate.busy)!;
+        const finePageId = harness.runtime.pageRecords.findIndex((page) => !page.pinned);
+        const control = syntheticControl(state, finePageId, 2048, { count: 0, visible: 1, triangles: 1, fallback: 0 });
+        const mapAsync = vi.fn(async () => undefined);
+        Object.assign(slot.buffer, { mapAsync, getMappedRange: () => control.buffer, unmap: vi.fn() });
+        vi.stubGlobal("GPUMapMode", { READ: 1 });
+        expect(mapAsync).not.toHaveBeenCalled();
+        harness.reset();
+        expect(slot.busy).toBe(true);
+        harness.submit();
+        await harness.settle();
+        expect(mapAsync).toHaveBeenCalledTimes(1);
+        expect(slot.busy).toBe(false);
+        expect(harness.runtime.gpu.pages[finePageId]!.state).toBe("gpu-resident");
+    });
+
+    it("returns copied-but-unsubmitted slots without mapping on frame cancellation", async () => {
+        harness = await setup();
+        for (let attempt = 0; attempt < 4; attempt++) {
+            harness.abandon(true);
+            expect(harness.batchState().readbackSlots.every((slot) => !slot.busy)).toBe(true);
+        }
+        expect(harness.batchState().readbackSlots).toHaveLength(1);
+    });
     it("ages only selected fine pages and retires unused GPU-resident pages after the last in-flight fence", async () => {
         harness = await setup({ residencyHoldFrames: 1 });
         const runtime = harness.runtime;

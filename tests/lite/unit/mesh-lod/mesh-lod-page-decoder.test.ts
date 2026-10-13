@@ -131,7 +131,7 @@ describe("decodeMeshLoDPage", () => {
         expect(calls).toHaveLength(0);
     });
 
-    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, PAGE_MAX_BYTES + 1])("rejects invalid decoded allocation %s without invoking the codec", (decodedBytes) => {
+    it.each([0, -1, 0.5, 65535, Number.NaN, Number.POSITIVE_INFINITY, PAGE_MAX_BYTES + 1])("rejects invalid decoded allocation %s without invoking the codec", (decodedBytes) => {
         const storedPage = buildStoredPage();
         const { decoder, calls } = mockDecoder();
         expectCode(() => decodeMeshLoDPage(storedPage, { ...pageFor(storedPage), decodedBytes }, decoder), "MLOD_PAGE_INTEGRITY");

@@ -42,7 +42,8 @@ import type { DrawUpdateBatch } from "../../../../packages/babylon-lite/src/rend
 import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
 import { getProjectionMatrix } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import { meshLoDDebugModeCode } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-debug.js";
-import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { createFillDecoder, createMockDevice, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { buildMinimalContainer } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
 import { AcesToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/pbr-aces-wgsl.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
@@ -68,6 +69,8 @@ import { _createAutomaticRenderTask } from "../../../../packages/babylon-lite/sr
 import { flushGpuResourceRetirements, waitForGpuResourceRetirements } from "../../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { releaseTexture } from "../../../../packages/babylon-lite/src/resource/texture-release.js";
 import { getTextureReferenceStore } from "../../../../packages/babylon-lite/src/resource/texture-reference-store.js";
+import { setFog } from "../../../../packages/babylon-lite/src/scene/scene-ubo-extras.js";
+import { PBR_FOG_BLOCK } from "../../../../packages/babylon-lite/src/material/pbr/pbr-fog-wgsl.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -667,6 +670,90 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const fullUploads = writeBuffer.mock.calls.filter(([buffer, offset]) => buffer === ubo && offset === 0);
         expect(fullUploads).toHaveLength(3);
         expect(fullUploads.every((call) => call[2] === fullUploads[0]![2])).toBe(true);
+    });
+
+    it("draws a two-cluster GPU batch whose required instances fit but power-of-two reservation would exceed the binding limit", async () => {
+        const limit = 150 * 1024;
+        const mock = createMockEngine(createMockDevice(limit));
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, buildMinimalContainer().bytes.slice().buffer, { selectionMode: "gpu", cacheCapacityBytes: 65536 });
+        const scene = await build(asset, createPbrMaterial(), 1025);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        const buffers = mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-instances");
+        expect(buffers).toHaveLength(2);
+        expect(buffers[1]!.size).toBe(Math.floor(limit / 128) * 128);
+        expect(mock.device.buffers.every((buffer) => buffer.size <= limit)).toBe(true);
+        expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it.each(["cpu", "gpu"] as const)("uses shared PBR fog in configured lit scenes (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const shaders = vi.spyOn(mock.device, "createShaderModule");
+        const scene = fakeScene(engine);
+        setFog(scene, { mode: 3, start: 12, end: 60, density: 0, color: [0.7, 0.75, 0.82] });
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        await build(asset, createPbrMaterial(), 1, scene);
+        const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+        flush(binding);
+        const shader = shaders.mock.calls.find(([desc]) => desc.label?.startsWith("mesh-lod-"))![0].code;
+        expect(shader).toContain(PBR_FOG_BLOCK);
+        expect(shader.indexOf(PBR_FOG_BLOCK)).toBeLessThan(shader.indexOf("color*=scene.vImageInfos.x;"));
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it.each(["limit", "allocation"] as const)("rolls back earlier packets and texture references when a later CPU batch fails (%s)", async (failure) => {
+        const mock = createMockEngine();
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        const first = createPbrMaterial({ baseColorTexture: texture });
+        const second = createPbrMaterial();
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
+        const coarse = asset._runtime.clusters.filter((cluster) => asset._runtime.pageRecords[cluster.pageId]!.pinned).reduce((sum, cluster) => sum + cluster.triangleCount * 3, 0);
+        if (failure === "limit") {
+            mock.device.limits.maxStorageBufferBindingSize = Math.max(coarse * 16, 128);
+        }
+        const allocate = vi.spyOn(mock.device, "createBindGroup");
+        const allocationError = new Error("injected bind-group allocation failure");
+        if (failure === "allocation") {
+            allocate
+                .mockImplementationOnce((desc) => desc as object)
+                .mockImplementationOnce(() => {
+                    throw allocationError;
+                });
+        }
+        const start = mock.device.buffers.length;
+        const refs = getTextureReferenceStore();
+        const initialRefs = refs.get(texture.texture) ?? 0;
+        if (failure === "limit") {
+            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_DEVICE_LIMIT" });
+        } else {
+            await expect(scene._deferredBuilders[0]!()).rejects.toBe(allocationError);
+        }
+        expect(scene._renderables).toHaveLength(0);
+        expect(scene._disposables).toHaveLength(0);
+        expect(scene._meshLoDRegistry!.batches.every((batch) => !batch._packet && !batch.renderable)).toBe(true);
+        const staged = mock.device.buffers.slice(start);
+        flushGpuResourceRetirements(engine);
+        await waitForGpuResourceRetirements(engine);
+        expect(staged.every((buffer) => buffer.destroyed)).toBe(true);
+        expect(refs.get(texture.texture) ?? 0).toBe(initialRefs);
+        mock.device.limits.maxStorageBufferBindingSize *= 2;
+        allocate.mockRestore();
+        await scene._deferredBuilders[0]!();
+        expect(scene._renderables).toHaveLength(2);
+        expect(refs.get(texture.texture)).toBe(initialRefs + 1);
+        scene._disposables.forEach((dispose) => dispose());
+        flushGpuResourceRetirements(engine);
+        await waitForGpuResourceRetirements(engine);
+        expect(refs.get(texture.texture) ?? 0).toBe(initialRefs);
     });
 
     it.each(["baseColorTexture", "normalTexture"] as const)("rejects %s transforms introduced after scene registration", async (channel) => {

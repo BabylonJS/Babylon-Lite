@@ -15,6 +15,7 @@ import { MAX_LIGHTS } from "../../light/types.js";
 import type { ToneMapping } from "./tone-mapping.js";
 import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
 import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "./pbr-brdf-wgsl.js";
+import type * as PbrFog from "./pbr-fog-wgsl.js";
 
 /** Detected features for the guaranteed opaque metallic-roughness subset. */
 export interface MeshLoDShaderFeatures {
@@ -24,11 +25,12 @@ export interface MeshLoDShaderFeatures {
     readonly hasSpecularAA: boolean;
     readonly doubleSided: boolean;
     readonly unlit: boolean;
+    readonly fog?: typeof PbrFog;
 }
 
 /** Stable pipeline cache key for a feature set. */
 export function meshLoDShaderKey(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
-    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.hasSpecularAA ? "a" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}:${toneMapping?.id ?? "off"}`;
+    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.hasSpecularAA ? "a" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}${f.fog ? "f" : ""}:${toneMapping?.id ?? "off"}`;
 }
 
 const IBL_DECLS = `@group(1) @binding(12) var brdfLUT: texture_2d<f32>;
@@ -255,6 +257,7 @@ var emissive = material.emissive.rgb;
 ${emissiveTex}
 ${ibl}
 var color = diffuseIbl + specIbl + directDiffuse + directSpecular * energyConservation + emissive;
+${f.fog?.PBR_FOG_BLOCK ?? ""}
 ${toneMapping?.callWGSL ?? PBR_EXPOSURE_WGSL}
 ${PBR_DISPLAY_OUTPUT_WGSL}
 // Debug-view override AFTER all texture sampling (textureSample requires uniform
@@ -265,10 +268,11 @@ return vec4<f32>(color, 1.0);
 }`;
 }
 
-function unlitFragment(toneMapping?: ToneMapping): string {
+function unlitFragment(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
     return `@fragment fn fs(input: VOut) -> @location(0) vec4<f32> {
 let baseSample = textureSample(baseColorTexture, baseColorSampler, input.uv);
 var color = baseSample.rgb * material.baseColorFactor.rgb;
+${f.fog?.PBR_FOG_BLOCK ?? ""}
 ${toneMapping?.callWGSL ?? PBR_EXPOSURE_WGSL}
 ${PBR_DISPLAY_OUTPUT_WGSL}
 let dbg = mlodDebugColor(u32(material.misc.y + 0.5), input.clusterId, input.dbgAttr);
@@ -279,9 +283,9 @@ return vec4<f32>(color, 1.0);
 
 /** Compose the full MeshLoD WGSL module (vertex `vs` + fragment `fs`) for a feature set. */
 export function composeMeshLoDWgsl(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
-    const parts = [SCENE_UBO_WGSL, COMMON_DECLS, VERTEX_MAIN, DEBUG_HELPERS, toneMapping?.helpersWGSL ?? ""];
+    const parts = [SCENE_UBO_WGSL, COMMON_DECLS, VERTEX_MAIN, DEBUG_HELPERS, f.fog?.PBR_FOG_HELPER ?? "", toneMapping?.helpersWGSL ?? ""];
     if (f.unlit) {
-        parts.push(unlitFragment(toneMapping));
+        parts.push(unlitFragment(f, toneMapping));
     } else {
         parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_BRDF_WGSL, PBR_HELPERS);
         if (f.hasIbl) {

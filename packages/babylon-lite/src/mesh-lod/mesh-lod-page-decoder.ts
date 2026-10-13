@@ -90,9 +90,9 @@ export function decodeMeshLoDPage(storedPage: Uint8Array, page: MeshLoDPageRecor
     if (storedPage.length < STORED_PAGE_HEADER_SIZE) {
         throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "truncated stored page header");
     }
-    if (!Number.isInteger(page.decodedBytes) || page.decodedBytes <= 0 || page.decodedBytes > PAGE_MAX_BYTES) {
+    if (!Number.isInteger(page.decodedBytes) || page.decodedBytes <= 0 || page.decodedBytes > PAGE_MAX_BYTES || page.decodedBytes % 4 !== 0) {
         throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "decoded page allocation is outside the format limits", {
-            expected: `1-${PAGE_MAX_BYTES} bytes`,
+            expected: `4-${PAGE_MAX_BYTES} bytes, divisible by 4`,
             actual: page.decodedBytes,
         });
     }

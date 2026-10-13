@@ -307,7 +307,7 @@ describe("MeshLoD coarse indirect rendering", () => {
         const instance = createMeshLoDInstance(asset, {} as PbrMaterialProps);
         const batch = { asset, material, instances: [instance] };
         try {
-            buildMeshLoDBatchRenderable(engine, scene, batch as never);
+            await buildMeshLoDBatchRenderable(engine, scene, batch as never);
             throw new Error("expected rejection");
         } catch (error) {
             expect(isMeshLoDError(error) && error.code).toBe("MLOD_UNSUPPORTED_MATERIAL");

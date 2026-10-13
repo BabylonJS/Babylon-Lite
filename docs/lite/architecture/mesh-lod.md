@@ -142,6 +142,17 @@ Directory and metadata spans must fit both the supplied bytes and the declared
 coarse bootstrap before CRC scans or record reads. Only the page-data section
 may extend beyond the bootstrap into the unfetched remainder of the file.
 Metadata entries cannot masquerade as page data to bypass these bounds.
+Decoded page allocations must be positive, no larger than 256 KiB, and divisible
+by four for WebGPU uploads. The decoder independently enforces the same alignment.
+Nonempty hierarchies must contain a terminal group; every terminal/pinned group's
+referenced pages and every coarse page must belong to the pinned prefix, ensuring
+a complete resident fallback before the loader reports `ready`.
+A prefix table of the last unpinned reference validates each fallback slice in
+constant time, including overlapping slices, without repeatedly scanning it.
+
+Deferred scene builds stage packets transactionally. If any later batch fails,
+all staged packets are disposed and their previous packet/renderable markers
+restored, so retry cannot orphan buffers or acquired texture references.
 
 One output file contains one primitive hierarchy. A multi-primitive
 conversion gives each output a deterministic `.meshNNN.primNNN.mlod`
@@ -398,6 +409,12 @@ the enabled scene tone-mapping algorithm, display gamma, then contrast.
 Bindings refresh their shader/pipeline keys before drawing when tone mapping
 is enabled, disabled, or its algorithm changes; exposure/contrast remain live
 scene UBO values and require no shader rebuild.
+Fog configured with `setFog` before scene registration dynamically imports the
+ordinary PBR fog helper/blend. Its presence participates in the shader key.
+Lit and unlit color mixes the linearized fog color and factor before tone
+mapping; the scene UBO supplies live fog modes/parameters. Introducing fog after
+a non-fog packet was built rejects with `MLOD_INVALID_OPTION` rather than
+silently rendering unfogged; configure it before registration, as ordinary PBR.
 Hemispheric and other lights differ only in diffuse evaluation; both contribute
 GGX specular using the shared light result's direction, attenuation, and unmixed
 specular color. Metallic-roughness clamps roughness to `[0, 1]`, without a smooth
@@ -447,6 +464,17 @@ the cached bundle before the next draw.
 
 ## 14. Resource lifetime
 
+GPU instance/prior-state capacity is bounded by complete records under both
+`maxStorageBufferBindingSize` and `maxBufferSize`. Fitting growth caps geometric
+reservations at that limit; oversized requirements fail before replacement.
+Transient group-state/selected-list growth uses the already bounded capacity,
+validates all required buffer sizes first, and publishes replacements together.
+
+Each reserved GPU readback belongs to its frame encoder. A frame-scoped
+post-submit hook maps it only after successful submission; cancellation or a
+reset before flush returns the slot immediately. Reset after flush must not
+release a slot whose map is still pending. Aborted frames never exhaust the ring.
+
 ### 14.1 Frame references
 
 Frame references protect pages in use. CPU selection holds selected pages;
@@ -456,6 +484,12 @@ LRU age. Holds and buffer replacement retire only after submitted frames
 drain. Recovery and disposal invalidate late readbacks.
 
 ### 14.2 Disposal
+
+Disposal releases range-source full-file backing storage and replaces
+`runtime.coarseBytes` with an empty array immediately, including HTTP 200
+fallbacks retained by still-live scene registries. Range sources reject later
+reads with `MLOD_DISPOSED` and cannot restore backing bytes from a late response.
+Public metadata and transferred-byte diagnostics remain available.
 
 Disposal aborts outstanding work and clears draw state. Once disposed,
 an asset cannot be rendered again.

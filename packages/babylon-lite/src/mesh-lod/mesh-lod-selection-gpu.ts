@@ -18,6 +18,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
+import { addFramePostSubmitHook } from "../engine/frame-post-submit.js";
 import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
 import type { DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
@@ -664,14 +665,18 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
 
 // ─── Device-limit-checked storage buffers ────────────────────────────
 
-function checkedStorageBuffer(engine: EngineContext, byteLength: number, label: string, extraUsage = 0): GPUBuffer {
+function checkedStorageSize(engine: EngineContext, byteLength: number, label: string): number {
     const size = Math.max(byteLength, 4);
     const limits = engine._device.limits;
     const cap = Math.min(limits?.maxStorageBufferBindingSize ?? size, limits?.maxBufferSize ?? size);
     if (size > cap) {
         throw createMeshLoDError("MLOD_DEVICE_LIMIT", `MeshLoD ${label} exceeds the device storage-buffer limit`, { expected: cap, actual: size });
     }
-    return engine._device.createBuffer({ label, size, usage: BU.STORAGE | BU.COPY_DST | extraUsage });
+    return size;
+}
+
+function checkedStorageBuffer(engine: EngineContext, byteLength: number, label: string, extraUsage = 0): GPUBuffer {
+    return engine._device.createBuffer({ label, size: checkedStorageSize(engine, byteLength, label), usage: BU.STORAGE | BU.COPY_DST | extraUsage });
 }
 
 /** Cheap content-sensitive signature over (generation, per-page residency + arena
@@ -849,52 +854,66 @@ export function createMeshLoDGpuInstanceState(groupCount: number): MeshLoDGpuIns
  *  fully repopulates the new instance buffer. */
 export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: MeshLoDGpuInstanceState, count: number): void {
     const device = engine._device;
-    if (state.device !== device) {
-        // Device change: drop stale handles; caches auto-invalidate.
-        state.instanceBuffer = null;
-        state.priorStateBuffer = null;
-        state.capacity = 0;
-        state.instanceCount = 0;
-        state.slotId = new Int32Array(0);
-        state.slotSelectionVersion = new Uint32Array(0);
-        state.device = device;
+    const sameDevice = state.device === device;
+    const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4);
+    const maximum = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / stride);
+    if (count > maximum) {
+        throw createMeshLoDError("MLOD_DEVICE_LIMIT", "MeshLoD instance/prior-state records exceed the device storage-buffer limit", {
+            expected: maximum * stride,
+            actual: count * stride,
+        });
     }
-    if (count <= state.capacity && state.instanceBuffer && state.priorStateBuffer) {
+    if (sameDevice && count <= state.capacity && state.instanceBuffer && state.priorStateBuffer) {
         return;
     }
 
-    let capacity = Math.max(state.capacity, 1);
+    let capacity = Math.max(sameDevice ? state.capacity : 0, 1);
     while (capacity < count) {
-        capacity *= 2;
+        capacity = Math.min(capacity * 2, maximum);
     }
 
     const oldInstance = state.instanceBuffer;
     const oldPrior = state.priorStateBuffer;
-    const oldCapacity = state.capacity;
-    const oldIds = state.slotId;
-    const oldVersions = state.slotSelectionVersion;
-
-    const newInstance = device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_BYTES, usage: BU.STORAGE | BU.COPY_DST });
-    const priorBytes = capacity * state.wordsPerInstance * 4;
-    const newPrior = device.createBuffer({ label: "mesh-lod-prior-state", size: Math.max(priorBytes, 4), usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC });
-
-    // Preserve resident hysteresis bits for the slots that already existed.
-    if (oldPrior && oldCapacity > 0) {
-        engine._currentEncoder.copyBufferToBuffer(oldPrior, 0, newPrior, 0, oldCapacity * state.wordsPerInstance * 4);
+    const oldCapacity = sameDevice ? state.capacity : 0;
+    const scratchF32 = new Float32Array(capacity * INSTANCE_WORDS);
+    const scratchU32 = new Uint32Array(scratchF32.buffer);
+    const slotVersion = new Int32Array(capacity).fill(-1);
+    const slotId = new Int32Array(capacity).fill(-1);
+    const slotSelectionVersion = new Uint32Array(capacity);
+    const slotVisible = new Uint8Array(capacity);
+    const slotThreshold = new Float32Array(capacity);
+    if (sameDevice) {
+        slotId.set(state.slotId);
+        slotSelectionVersion.set(state.slotSelectionVersion);
     }
 
+    const newInstance = device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_BYTES, usage: BU.STORAGE | BU.COPY_DST });
+    let newPrior: GPUBuffer | null = null;
+    try {
+        newPrior = device.createBuffer({ label: "mesh-lod-prior-state", size: capacity * state.wordsPerInstance * 4, usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC });
+        if (oldPrior && oldCapacity > 0) {
+            engine._currentEncoder.copyBufferToBuffer(oldPrior, 0, newPrior, 0, oldCapacity * state.wordsPerInstance * 4);
+        }
+    } catch (error) {
+        newInstance.destroy();
+        newPrior?.destroy();
+        throw error;
+    }
+
+    state.device = device;
+    if (!sameDevice) {
+        state.instanceCount = 0;
+    }
     state.instanceBuffer = newInstance;
     state.priorStateBuffer = newPrior;
     state.capacity = capacity;
-    state.scratchF32 = new Float32Array(capacity * INSTANCE_WORDS);
-    state.scratchU32 = new Uint32Array(state.scratchF32.buffer);
-    state.slotVersion = new Int32Array(capacity).fill(-1);
-    state.slotId = new Int32Array(capacity).fill(-1);
-    state.slotId.set(oldIds);
-    state.slotSelectionVersion = new Uint32Array(capacity);
-    state.slotSelectionVersion.set(oldVersions);
-    state.slotVisible = new Uint8Array(capacity);
-    state.slotThreshold = new Float32Array(capacity);
+    state.scratchF32 = scratchF32;
+    state.scratchU32 = scratchU32;
+    state.slotVersion = slotVersion;
+    state.slotId = slotId;
+    state.slotSelectionVersion = slotSelectionVersion;
+    state.slotVisible = slotVisible;
+    state.slotThreshold = slotThreshold;
 
     if (oldInstance || oldPrior) {
         retireGpuResources(engine, () => {
@@ -1224,6 +1243,12 @@ function ensureMeshLoDBatchBuffers(
     assetBuffers: MeshLoDGpuAssetBuffers
 ): void {
     const device = engine._device;
+    // The persistent instance state already chose a fitting geometric capacity.
+    const capacity = Math.max(state.device === device ? state.instanceCapacity : 0, instanceCapacity, 1);
+    const selectedCapacity = Math.max(assetBuffers.clusterCount * capacity, 1);
+    checkedStorageSize(engine, Math.max(capacity * assetBuffers.groupCount, 1) * 4, "mesh-lod-group-state");
+    checkedStorageSize(engine, (selectedCapacity * 2 + 1) * 4, "mesh-lod-selected");
+    checkedStorageSize(engine, drawVertexCapacity * 16, "mesh-lod-draw-vertices");
     if (state.device !== device) {
         state.groupStateBuffer = state.selectedBuffer = state.controlBuffer = state.paramsBuffer = null;
         state.drawVertexBuffer = state.drawArgsBuffer = null;
@@ -1264,24 +1289,36 @@ function ensureMeshLoDBatchBuffers(
     if (!growInstances && !growDraw) {
         return;
     }
-    let capacity = Math.max(state.instanceCapacity, 1);
-    while (capacity < instanceCapacity) {
-        capacity *= 2;
-    }
     const oldGroupState = state.groupStateBuffer;
     const oldSelected = state.selectedBuffer;
     const oldDrawVertex = state.drawVertexBuffer;
+    let groupState: GPUBuffer | null = null;
+    let selected: GPUBuffer | null = null;
+    let drawVertex: GPUBuffer | null = null;
+    try {
+        if (growInstances) {
+            groupState = checkedStorageBuffer(engine, Math.max(capacity * assetBuffers.groupCount, 1) * 4, "mesh-lod-group-state");
+            selected = checkedStorageBuffer(engine, (selectedCapacity * 2 + 1) * 4, "mesh-lod-selected");
+        }
+        if (growDraw) {
+            drawVertex = checkedStorageBuffer(engine, drawVertexCapacity * 16, "mesh-lod-draw-vertices");
+        }
+    } catch (error) {
+        groupState?.destroy();
+        selected?.destroy();
+        drawVertex?.destroy();
+        throw error;
+    }
     if (growInstances) {
-        const selectedCapacity = Math.max(assetBuffers.clusterCount * capacity, 1);
-        state.groupStateBuffer = device.createBuffer({ label: "mesh-lod-group-state", size: Math.max(capacity * assetBuffers.groupCount, 1) * 4, usage: BU.STORAGE | BU.COPY_DST });
-        state.selectedBuffer = checkedStorageBuffer(engine, (selectedCapacity * 2 + 1) * 4, "mesh-lod-selected");
+        state.groupStateBuffer = groupState;
+        state.selectedBuffer = selected;
         state.instanceCapacity = capacity;
         state.selectedCapacity = selectedCapacity;
         state.bindGroup = null;
         state.expandBindGroup = null;
     }
     if (growDraw) {
-        state.drawVertexBuffer = checkedStorageBuffer(engine, drawVertexCapacity * 16, "mesh-lod-draw-vertices");
+        state.drawVertexBuffer = drawVertex;
         state.drawVertexCapacity = drawVertexCapacity;
         state.expandBindGroup = null;
     }
@@ -1392,6 +1429,8 @@ interface MeshLoDReadbackJob {
     readonly slot: MeshLoDReadbackSlot;
     readonly bytes: number;
     readonly apply: (control: Uint32Array) => void;
+    copied: boolean;
+    cancel?: () => void;
 }
 
 /** Reserve a free MAP_READ staging slot from the batch's small ring (growing it up to
@@ -1417,13 +1456,10 @@ function acquireMeshLoDReadbackSlot(engine: EngineContext, state: MeshLoDGpuBatc
     return slot;
 }
 
-/** Map the staging copy after the frame submits, decode it, and release the slot. The
- *  `await Promise.resolve()` lets the frame's encoder submit first (a buffer with a
- *  pending map cannot be used by an in-flight submit — see engine/screenshot-readback.ts). */
+/** Map the staging copy only after the owning frame has actually submitted. */
 async function pumpMeshLoDReadback(job: MeshLoDReadbackJob): Promise<void> {
     const { slot } = job;
     try {
-        await Promise.resolve();
         await slot.buffer.mapAsync(GPUMapMode.READ, 0, job.bytes);
         try {
             job.apply(new Uint32Array(slot.buffer.getMappedRange(0, job.bytes)));
@@ -1645,6 +1681,13 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
     const batch: MeshLoDUpdateBatch = {
         _retired: false,
         reset(): void {
+            for (let i = 0; i < count; i++) {
+                const readback = jobs[i]!.readback;
+                if (readback && !readback.copied) {
+                    readback.cancel?.();
+                }
+            }
+            jobs.length = 0;
             count = 0;
         },
         flush(engine): void {
@@ -1676,13 +1719,14 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
                 const rb = jobs[i]!.readback;
                 if (rb) {
                     encoder.copyBufferToBuffer(rb.control, 0, rb.slot.buffer, 0, rb.bytes);
-                    void pumpMeshLoDReadback(rb);
+                    rb.copied = true;
                 }
             }
-        },
-        destroy(): void {
             jobs.length = 0;
             count = 0;
+        },
+        destroy(): void {
+            batch.reset();
             batch._retired = true;
             if (_updateBatches?.get(signature) === batch) {
                 _updateBatches.delete(signature);
@@ -1771,6 +1815,9 @@ export function queueMeshLoDGpuSelection(
     const groupInvocations = Math.ceil((batchState.groupCount * instanceCount) / SELECTION_WORKGROUP);
     const nodeInvocations = Math.ceil((batchState.nodeCount * instanceCount) / SELECTION_WORKGROUP);
     const clusterInvocations = Math.ceil((batchState.clusterCount * instanceCount) / SELECTION_WORKGROUP);
+    const nodeWorkgroups = meshLoDDispatchSize(nodeInvocations, limits.maxComputeWorkgroupsPerDimension);
+    const groupWorkgroups = meshLoDDispatchSize(groupInvocations, limits.maxComputeWorkgroupsPerDimension);
+    const clusterWorkgroups = meshLoDDispatchSize(clusterInvocations, limits.maxComputeWorkgroupsPerDimension);
 
     // Reserve a staging slot and build the demand/diagnostics readback for this frame.
     // Skipped only when every ring slot still has a map in flight.
@@ -1785,6 +1832,7 @@ export function queueMeshLoDGpuSelection(
               control: batchState.controlBuffer!,
               slot: readbackSlot,
               bytes: readbackBytes,
+              copied: false,
               apply: (control) => applyMeshLoDGpuReadback(runtime, batchState, control, pageCount, generation, sourceFrame, selectionEpoch),
           }
         : undefined;
@@ -1798,10 +1846,10 @@ export function queueMeshLoDGpuSelection(
             { buffer: batchState.drawArgsBuffer!, offset: 16, size: 4 }, // expansion overflow = 0
         ],
         pass1Steps: [
-            { pipeline: pipelines.traverse, bindGroup, workgroups: meshLoDDispatchSize(nodeInvocations, limits.maxComputeWorkgroupsPerDimension) },
-            { pipeline: pipelines.evaluate, bindGroup, workgroups: meshLoDDispatchSize(groupInvocations, limits.maxComputeWorkgroupsPerDimension) },
-            { pipeline: pipelines.select, bindGroup, workgroups: meshLoDDispatchSize(clusterInvocations, limits.maxComputeWorkgroupsPerDimension) },
-            { pipeline: pipelines.demand, bindGroup, workgroups: meshLoDDispatchSize(groupInvocations, limits.maxComputeWorkgroupsPerDimension) },
+            { pipeline: pipelines.traverse, bindGroup, workgroups: nodeWorkgroups },
+            { pipeline: pipelines.evaluate, bindGroup, workgroups: groupWorkgroups },
+            { pipeline: pipelines.select, bindGroup, workgroups: clusterWorkgroups },
+            { pipeline: pipelines.demand, bindGroup, workgroups: groupWorkgroups },
             // Clamp the selected count so the expansion pass's indirect dispatch stays within capacity.
             { pipeline: pipelines.clamp, bindGroup, workgroups: [1, 1, 1] },
         ],
@@ -1812,6 +1860,27 @@ export function queueMeshLoDGpuSelection(
         ],
         readback,
     };
+    if (readback) {
+        const release = (): void => {
+            readback.slot.busy = false;
+        };
+        const unregister = addFramePostSubmitHook(
+            engine,
+            "frame",
+            () => {
+                if (readback.copied) {
+                    void pumpMeshLoDReadback(readback);
+                } else {
+                    release();
+                }
+            },
+            release
+        );
+        readback.cancel = () => {
+            unregister();
+            release();
+        };
+    }
     updateBatch.queue(job);
 
     return {
