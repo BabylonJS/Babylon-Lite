@@ -60,6 +60,13 @@ Reentrant enumeration, retention, or release during capture throws explicitly.
 This module creates no pipelines, shader modules, or bind groups. Detach reuses
 the scene-removal machinery: evict all mesh slots, standalone renderables,
 material-group outputs, queued swaps/builds, and task bindings; preserve parenting.
+Task bindings include explicit render-task admissions still queued for their first
+recording, so a later recording cannot restore the detached draw. Shadow generators'
+nested caster tasks never see scene removal, so detach also records the mesh as
+detached from that scene: the caster set each shadow dispatcher reads for the scene
+omits it (a stable filtered array, so the task rebuilds once and the map re-renders),
+without mutating the caller's array. Reinsertion restores the original array; a mesh
+retired while detached stays excluded.
 Actual mutations invalidate scene renderable versions. A repeated detach does not.
 
 Reinsertion builds ordinary fresh scene-local renderables and appends normal
@@ -81,7 +88,9 @@ removed readback identities and restarts all lazy preparation when membership
 changes before encoding, including advanced draw closures.
 Preparation is bounded to 16 attempts: continued scene/device churn rejects the
 request explicitly without poisoning the serialized queue. Picker disposal during
-preparation produces an empty result and does not recreate its targets.
+preparation produces an empty result and does not recreate its targets; requests
+already queued when it is disposed resolve empty too. Requests capture an explicit
+disposal generation at enqueue, which automatic device replacement does not bump.
 
 ## State Machine / Lifecycle
 
@@ -110,7 +119,10 @@ preparation produces an empty result and does not recreate its targets.
    when nothing is still owed. Otherwise, releasing the replacement would destroy a
    texture that surviving leases and its creator still own. A total released to
    zero with no live claim retires the replacement at settlement instead of
-   leaking it.
+   leaking it. A texture with no owner at the loss (a mipmapped glTF texture
+   before its meshes first bind) is queued too, so claims taken during its rebuild
+   are carried; the entry records whether the texture was ever owned, so a
+   never-owned texture keeps its replacement while one released back to zero retires it.
 7. Engine teardown revokes tokens, marks the feature engine disposed, clears its
    admission hook, and force-disposes retained resource claims. Scene teardown
    alone does not revoke leases. Explicit `disposeMeshGpu` remains force-disposal.
@@ -129,6 +141,11 @@ phantom replacement ownership claim.
 Meshes with opt-in mesh-local draw-range source windows recover independently,
 even when a clone initially shares their allocation. Reusing a replacement handle
 would couple mutable active selections; ordinary shared geometry still recovers once.
+Skeleton and morph-target objects shared by a detached source and its attached clone
+are rebuilt once per recovery through the same seen set, so the replacement handles
+stay under their existing owner counts. A registered scene whose material group was
+emptied by detach drops that group and its runtime base instead of invoking the
+builder; reinsertion builds a fresh group.
 
 Forgotten leases remain explicit ownership until engine teardown. Independently
 owned storage/render-target/external/cube resources, producer controllers, and
@@ -157,7 +174,8 @@ implementation or asset is copied.
 - `mesh-retention.test.ts`: 1,000 fenced cycles, mesh-only parenting/visibility,
   multiple scenes/leases, clones/refcounts, unique/shared updates, duplicate slots,
   engine/scene teardown, queued-release reacquisition, cross-engine errors,
-  detached recovery, independent mesh-local draw selection recovery,
+  detached recovery, independent mesh-local draw selection recovery, dropping a
+  queued explicit render-task admission, shadow-caster exclusion until reinsertion,
   material/texture swaps, reentrancy, independent engine hooks, and scene-change
   events for detach/reinsertion without echoing retained children.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
@@ -171,9 +189,15 @@ implementation or asset is copied.
   replacement, a lease acquired mid-fetch survives the creator's and the pre-loss
   lease's release; a fenced release mid-fetch is not restored at settlement; and
   releasing the last lease claim mid-fetch retires the replacement. Each final
-  teardown destroys the replacement exactly once.
+  teardown destroys the replacement exactly once. With a controlled mipmap import
+  paused in a zero-owner bitmap rebuild, two leases taken mid-rebuild are both
+  restored, the survivor stays live, and final teardown destroys it once; a
+  never-owned texture keeps its replacement. A registered scene emptied by detach
+  skips its PBR-style group builder, and deformation shared by a detached source
+  and attached clone is uploaded once and torn down once.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,
-  fresh identity/order, filter selection, disposal cancellation, and queue recovery.
+  fresh identity/order, filter selection, disposal cancellation of preparing and
+  queued picks, and queue recovery.
 - `gpu-picker-retry.test.ts`: bounded unstable retries and subsequent queue use.
 - `scene-retained-admission.test.ts` and `scene-retained-admission.spec.ts`:
   duplicate parents still admit missing descendants, preserve source parent
@@ -197,6 +221,9 @@ is inferred from geometry reuse.
 - `packages/babylon-lite/src/scene/scene-admission.ts`
 - `packages/babylon-lite/src/engine/engine.ts`
 - `packages/babylon-lite/src/engine/recovery-rebuild.ts`
+- `packages/babylon-lite/src/texture/texture-recovery.ts`
+- `packages/babylon-lite/src/frame-graph/shadow-inputs.ts`
+- `packages/babylon-lite/src/frame-graph/render-task-base.ts`
 - `packages/babylon-lite/src/picking/gpu-picker.ts`
 - `tests/lite/unit/mesh-retention.test.ts`
 - `tests/lite/unit/gpu-picker-membership.test.ts`

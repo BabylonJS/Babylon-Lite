@@ -60,10 +60,12 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     // Queued before the first await, keyed by the outgoing handle as well as the wrapper, so
     // retention lease acquisitions and releases made while a url fetch is still in flight —
     // before the handle is replaced or adopted by sibling wrappers — adjust the carried total
-    // instead of being overwritten by this stale snapshot at settlement.
-    const state = owners > 0 ? engine._deviceLostRecovery : undefined;
+    // instead of being overwritten by this stale snapshot at settlement. A texture with no owner yet
+    // (a mipmapped glTF texture before its meshes first bind) is queued too, so claims taken during
+    // the window are carried; its flag stays false until one is, keeping a never-owned replacement.
+    const state = engine._deviceLostRecovery;
     if (state) {
-        (state._pendingOwnership ??= []).push([tex, owners, tex.texture]);
+        (state._pendingOwnership ??= []).push([tex, owners, tex.texture, owners > 0]);
     }
     // Recorded before the first await so a wrapper visited while this rebuild is still running
     // finds it and waits, rather than starting a second one.
@@ -106,11 +108,12 @@ export function settleRebuiltTextureOwnership(state: DeviceLostRecoveryState): v
     if (!pending) {
         return;
     }
-    for (const [tex, owners, outgoing] of pending) {
+    for (const [tex, owners, outgoing, owned] of pending) {
         let held = _textureOwners(tex);
         // Every owner released during the rebuild: retire the unowned replacement as the last
-        // release would have, instead of leaving it allocated with nothing left to release it.
-        if (!owners && !held && tex.texture !== outgoing) {
+        // release would have, instead of leaving it allocated with nothing left to release it. A
+        // texture nothing ever owned keeps its replacement, as it kept its allocation before the loss.
+        if (owned && !owners && !held && tex.texture !== outgoing) {
             acquireTexture(tex);
             releaseTexture(tex);
         }

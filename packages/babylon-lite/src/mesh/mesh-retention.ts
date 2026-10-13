@@ -7,6 +7,7 @@ import { installMeshRetention, isMeshUnowned, meshSceneEngine, observeMeshMateri
 import { installSceneAdmission } from "../scene/scene-admission.js";
 import type { LightBase } from "../light/types.js";
 import { removeMeshFromScene } from "../scene/scene-remove.js";
+import { _setShadowCasterFilter } from "../frame-graph/shadow-inputs.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { registerManagedResourceDisposer } from "../resource/managed-resource-hooks.js";
 import { acquireTexture, releaseTexture } from "../resource/texture-references.js";
@@ -35,6 +36,45 @@ let leases: WeakMap<MeshResourceLease, Retention> | undefined;
 let issuedLeases: WeakSet<MeshResourceLease> | undefined;
 let disposedEngines: WeakSet<EngineContext> | undefined;
 let capturing: WeakSet<Mesh> | undefined;
+/** Meshes detached from each scene and not since reinserted there. They stay excluded from that scene's shadow casters
+ *  even after their final lease retires the geometry, so a caller's unchanged caster array cannot draw destroyed buffers. */
+let detachedMeshes: WeakMap<SceneContext, Set<Mesh>> | undefined;
+/** Per scene and caller caster array, the last filtered array. Reusing it keeps the identity stable across frames,
+ *  since shadow hooks rebuild their nested task (and re-render the map) whenever the array identity changes. */
+let filteredCasters: WeakMap<SceneContext, WeakMap<readonly Mesh[], readonly Mesh[]>> | undefined;
+
+function filterShadowCasters(scene: SceneContext, casters: readonly Mesh[]): readonly Mesh[] {
+    const gone = detachedMeshes?.get(scene);
+    if (gone) {
+        // Reinsertion goes through addToScene, which re-registers membership even after the last lease is gone.
+        for (const mesh of gone) {
+            if (hasMeshScene(scene, mesh)) {
+                gone.delete(mesh);
+            }
+        }
+    }
+    if (!gone?.size) {
+        return casters;
+    }
+    const kept = casters.filter((caster) => !gone.has(caster));
+    if (kept.length === casters.length) {
+        return casters;
+    }
+    let cache = filteredCasters!.get(scene);
+    if (!cache) {
+        filteredCasters!.set(scene, (cache = new WeakMap()));
+    }
+    const cached = cache.get(casters);
+    if (cached && sameMeshes(cached, kept)) {
+        return cached;
+    }
+    cache.set(casters, kept);
+    return kept;
+}
+
+function sameMeshes(a: readonly Mesh[], b: readonly Mesh[]): boolean {
+    return a.length === b.length && a.every((mesh, index) => mesh === b[index]);
+}
 
 function captureTextures(state: Retention, material: Material): void {
     if (capturing?.has(state.mesh)) {
@@ -185,7 +225,7 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
  *  a claim acquired in this window is live and also raises the total, and a released claim lowers
  *  the total, dropping a live claim only when nothing is owed. Releasing the replacement while claims
  *  are still owed would destroy it before surviving owners regain them. */
-function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number, GPUTexture] | undefined {
+function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number, GPUTexture, boolean] | undefined {
     return engine._deviceLostRecovery?._pendingOwnership?.find(([candidate, , outgoing]) => candidate.texture === texture.texture || outgoing === texture.texture);
 }
 
@@ -193,6 +233,7 @@ function acquireRetainedTexture(engine: EngineContext, texture: Texture2D): void
     const pending = pendingTextureOwnership(engine, texture);
     if (pending) {
         pending[1]++;
+        pending[3] = true;
     }
     acquireTexture(texture);
 }
@@ -246,6 +287,16 @@ export function detachMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     const detach = (): void => {
         captureTextures(state, mesh.material);
         removeMeshFromScene(scene, mesh, true);
+        if (!detachedMeshes) {
+            detachedMeshes = new WeakMap();
+            filteredCasters = new WeakMap();
+            _setShadowCasterFilter(filterShadowCasters);
+        }
+        let gone = detachedMeshes.get(scene);
+        if (!gone) {
+            detachedMeshes.set(scene, (gone = new Set()));
+        }
+        gone.add(mesh);
         // Membership changed, so `onSceneChange` subscribers see the mesh leave; its children stay.
         _notifySceneChange(scene, mesh, "removed");
     };

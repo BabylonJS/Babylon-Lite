@@ -1,8 +1,10 @@
 import type { Mesh } from "../mesh/mesh.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 
 let shadowTaskInputs: WeakMap<ShadowGenerator, readonly Mesh[]> | null = null;
 let shadowTaskInputPreloader: ((shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]) => Promise<void>) | null = null;
+let shadowCasterFilter: ((scene: SceneContext, casters: readonly Mesh[]) => readonly Mesh[]) | undefined;
 
 function getShadowTaskInputs(): WeakMap<ShadowGenerator, readonly Mesh[]> {
     shadowTaskInputs ??= new WeakMap<ShadowGenerator, readonly Mesh[]>();
@@ -22,9 +24,17 @@ export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, cast
     void shadowTaskInputPreloader(shadowGenerator, casterMeshes).catch((error: unknown) => console.error(error));
 }
 
-/** @internal */
-export function _getShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator): readonly Mesh[] | undefined {
-    return shadowTaskInputs?.get(shadowGenerator);
+/** @internal Effective caster set for a generator in `scene`: the registered array, narrowed by the optional
+ *  scene filter (installed by mesh retention) so meshes detached from that scene stop casting. */
+export function _getShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, scene?: SceneContext): readonly Mesh[] | undefined {
+    const casters = shadowTaskInputs?.get(shadowGenerator);
+    return casters && scene && shadowCasterFilter ? shadowCasterFilter(scene, casters) : casters;
+}
+
+/** @internal Install the scene caster filter. It must return `casters` itself when nothing is excluded and a stable
+ *  array identity while the exclusion is unchanged: shadow hooks rebuild their tasks on a new identity. */
+export function _setShadowCasterFilter(filter: (scene: SceneContext, casters: readonly Mesh[]) => readonly Mesh[]): void {
+    shadowCasterFilter = filter;
 }
 
 /**

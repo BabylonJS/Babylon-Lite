@@ -103,6 +103,13 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
     }
 
     for (const [build, meshes] of scene._groups) {
+        // Emptied by removal or detach. Builders such as PBR read `meshes[0]`, and the group's pre-loss
+        // output and base target the lost device, so drop it: reinsertion builds a fresh group.
+        if (!meshes.length) {
+            scene._groups.delete(build);
+            scene._runtimeBuilds?.dropBase(build);
+            continue;
+        }
         const result = await runRecoveryStep("rebuilding material groups", () => build(scene, meshes));
         if (scene._z) {
             return;
@@ -200,7 +207,9 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
             seen.add(mesh._gpu);
         }
-        if (mesh.skeleton) {
+        // A detached source and its attached clone share these objects: rebuild each once per recovery, or the
+        // second rebuild overwrites the first replacement's handles and leaves them outside owner teardown.
+        if (mesh.skeleton && !seen.has(mesh.skeleton)) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
             if (mesh._disposed) {
                 continue;
@@ -208,8 +217,9 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             const old = mesh.skeleton;
             const rebuilt = skeletonFactory(engine, old.joints, old.weights, old.boneCount, old.boneMatrices, old.joints1, old.weights1);
             Object.assign(old as MutableSkeleton, rebuilt);
+            seen.add(old);
         }
-        if (mesh.morphTargets) {
+        if (mesh.morphTargets && !seen.has(mesh.morphTargets)) {
             morphFactory ??= (await import("../morph/create-morph-targets.js")).createMorphTargets;
             if (mesh._disposed) {
                 continue;
@@ -222,6 +232,7 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
                 Array.from(old.weights)
             );
             Object.assign(old as MutableMorphTargets, rebuilt);
+            seen.add(old);
         }
     }
 }

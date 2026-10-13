@@ -46,6 +46,9 @@ export interface GpuPicker {
     _contributors: Map<PickSource, PickContributor> | null;
     /** @internal Tail of the serialized pick queue for this picker — see pickAsync(). */
     _pending: Promise<void> | null;
+    /** @internal Explicit `disposePicker` calls so far. A queued request captures it, so one made before a
+     *  disposal is cancelled rather than recreating targets; device replacement does not count. */
+    _disposals: number;
 }
 
 interface PickTargets1x1 {
@@ -77,6 +80,7 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
         _sceneBG: null,
         _contributors: null,
         _pending: null,
+        _disposals: 0,
     };
 }
 
@@ -85,7 +89,7 @@ function ensurePickerDevice(engine: EngineContext, picker: GpuPicker): void {
         return;
     }
     if (picker._device) {
-        disposePicker(picker);
+        releasePickerResources(picker);
     }
     picker._device = engine._device;
 }
@@ -622,8 +626,11 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     return info;
 }
 
-async function pickStableMembership(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
+async function pickStableMembership(picker: GpuPicker, generation: number, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     for (let attempt = 0; attempt < 16; attempt++) {
+        if (picker._disposals !== generation) {
+            return createEmptyPickingInfo();
+        }
         const result = await pickAsyncImpl(picker, x, y, options);
         if (result) {
             return result;
@@ -645,13 +652,15 @@ async function pickStableMembership(picker: GpuPicker, x: number, y: number, opt
  *
  * Membership/device changes during lazy preparation restart the entire preparation before encoding.
  * After 16 unstable attempts this request rejects explicitly; later queued requests still run.
- * Disposing the picker during preparation cancels that request with an empty result.
+ * Disposing the picker during preparation cancels that request with an empty result, and so does
+ * disposing it while a request is still queued; requests made after the disposal run normally.
  */
 export function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const prior = picker._pending ?? Promise.resolve();
+    const generation = picker._disposals;
     const run = prior.then(
-        () => pickStableMembership(picker, x, y, options),
-        () => pickStableMembership(picker, x, y, options) // a prior pick's rejection must not wedge the queue for this caller
+        () => pickStableMembership(picker, generation, x, y, options),
+        () => pickStableMembership(picker, generation, x, y, options) // a prior pick's rejection must not wedge the queue for this caller
     );
     // Swallow so a rejection here doesn't propagate into the NEXT caller's chain (each caller gets its own
     // `run` promise and observes the real rejection via the returned promise, not via `_pending`).
@@ -662,8 +671,13 @@ export function pickAsync(picker: GpuPicker, x: number, y: number, options?: Pic
     return run;
 }
 
-/** Dispose GPU resources owned by this picker. */
+/** Dispose GPU resources owned by this picker. Picks still queued or preparing resolve empty. */
 export function disposePicker(picker: GpuPicker): void {
+    picker._disposals++;
+    releasePickerResources(picker);
+}
+
+function releasePickerResources(picker: GpuPicker): void {
     if (picker._rt) {
         for (const resource of [
             picker._rt.colorTex,

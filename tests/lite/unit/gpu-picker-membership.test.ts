@@ -199,15 +199,21 @@ describe("GPU pick preparation membership", () => {
         releaseMeshResources(f.lease);
     });
 
-    it("cancels preparation when the picker is disposed without recording or reviving its targets", async () => {
+    it("cancels preparing and queued picks when the picker is disposed without recording or reviving its targets", async () => {
         const f = fixture();
         const pending = pickAsync(f.picker, 16, 16, f.options);
+        const queued = pickAsync(f.picker, 16, 16, f.options);
         await f.entered.promise;
         disposePicker(f.picker);
         f.resume.resolve();
-        expect((await pending).hit).toBe(false);
+        const results = await Promise.all([pending, queued]);
+        expect(results.map((result) => result.hit)).toEqual([false, false]);
         expect(f.engine._device.createCommandEncoder).not.toHaveBeenCalled();
         expect(f.picker._rt).toBeNull();
+        expect(f.picker._device).toBeNull();
+        // A request made after the disposal is new work, not a cancelled one.
+        expect((await pickAsync(f.picker, 16, 16, f.options)).pickedMesh).toBe(f.mesh);
+        disposePicker(f.picker);
         releaseMeshResources(f.lease);
     });
 

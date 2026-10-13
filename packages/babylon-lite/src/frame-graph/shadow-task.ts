@@ -31,7 +31,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             const loads: Promise<void>[] = [];
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg, scene) : null;
                 if (sg?._preloadShadowTask && casterMeshes) {
                     // Registration awaits this preload, but the scene is already `_built` by then: a rebuild
                     // the application triggers during the await (material swap, mesh added) runs
@@ -47,7 +47,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             task._passes.length = 0;
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg, scene) : null;
                 if (sg?._ensureShadowTaskState && casterMeshes && !sg._preloadPending) {
                     shadowGenerators.add(sg);
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
@@ -61,7 +61,7 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
             let draws = 0;
             for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
-                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
+                const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg, scene) : null;
                 // A caster set supplied at runtime may still be importing the no-colour material views for
                 // a family it just introduced. Skip the generator until that lands — the shadow map keeps
                 // its previous contents for a frame instead of the pass throwing on an unassigned factory.

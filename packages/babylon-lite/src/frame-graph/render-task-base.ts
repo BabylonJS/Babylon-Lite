@@ -319,12 +319,22 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
     return task;
 }
 
-/** Remove a mesh from this task's renderable + binding lists. Idempotent. */
+/** Remove a mesh from this task's queued requests, renderable and binding lists. Idempotent. */
 export function _removeMeshFromRenderTask(task: RenderTaskBase, mesh: object): void {
     // Not a renderable-bearing task (e.g. a post/effect task that also carries `_config`): nothing to
     // remove. Guard keeps callers that scan all frame-graph tasks (removeFromScene) shape-safe.
     if (!task._renderables) {
         return;
+    }
+    // An explicit request queued before the task's first recording would otherwise materialize the
+    // removed mesh later (against destroyed geometry once its owner retires).
+    const pending = (task as RenderTask)._pendingMeshes;
+    if (pending) {
+        for (let i = pending.length - 1; i >= 0; i--) {
+            if (pending[i]!.mesh === mesh) {
+                pending.splice(i, 1);
+            }
+        }
     }
     task._removeMesh?.(mesh);
     let removed = false;
