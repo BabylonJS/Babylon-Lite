@@ -212,6 +212,11 @@ stays at or below 1 from `2 / mapSize`. It is a worst-case bound, not a measured
 - **Floating origin.** Under a floating origin the camera view-projection is eye-relative
   (`getViewMatrix`), so a pure translation moves no slice corner; the option then falls back
   to refitting every cascade on every camera change.
+- **Receiver callbacks.** `onCsmReceiverUpdate` callbacks keep the per-frame cadence they have
+  without the option: they are invoked on every frame the camera's change key moves, with the
+  current receiver data, even when that frame redraws no cascade (consumers re-upload their own
+  camera-dependent terms from them). A still camera invokes them only on the frames that publish
+  cascades, as without the option.
 - **Owned matrices.** Published cascades keep owned copies of their light view and caster
   view-projection, because a shadow camera holds references to the arrays it is given and a
   coverage refit recomputes the shared fit scratch while other cascades stay published.
@@ -630,7 +635,8 @@ yaw jumps that publish spread cascades late; that texels widen by the padding fa
 still camera costs only the interval floor; that a coverage miss re-renders only the missed
 cascades, once, while the others keep their camera matrices; and that a field-of-view change,
 a swap to a camera sharing the previous one's projection revision, or a floating origin
-refits every cascade.
+refits every cascade. It also checks that the receiver callbacks fire on every frame the camera
+key changes, as without the option, and that a still camera adds none beyond the default path.
 
 `tests/lite/unit/light-version.test.ts` validates that direct scalar light mutations
 can bump the light UBO version without dirtying the world matrix.

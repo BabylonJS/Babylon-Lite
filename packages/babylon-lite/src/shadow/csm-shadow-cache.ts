@@ -71,6 +71,11 @@ interface CsmCoverageState {
      *  first, so every cascade published while the camera moves is fit to the pose it is shown with. */
     _fitCamera: Camera | null;
     _fitPose: number;
+    /** Camera change key the receiver callbacks were last invoked for. `onCsmReceiverUpdate` promises a callback
+     *  every frame the cascades are recomputed, and without the option that is every frame the camera changes;
+     *  consumers rely on that cadence (some re-upload their own camera terms from it). A camera change that refits
+     *  no cascade therefore still invokes them, with the unchanged receiver data. */
+    _notifiedCamVersion: number;
     /** Per-cascade OWNED copies of the published light view and biased caster view-projection. A shadow camera keeps
      *  references to the arrays it is given (`updateShadowCameraBase`), and a coverage refit recomputes the shared
      *  cascade scratch while the other cascades stay published, so they must not alias that scratch. */
@@ -462,7 +467,14 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         coverage._poseVersion = camera.worldMatrixVersion;
         missed = cascadesLeavingCoverage(cached, camera, camAspect, coverage);
     }
+    const notifyCamera = coverageRefit && camVersion !== coverage._notifiedCamVersion;
+    if (coverage) {
+        coverage._notifiedCamVersion = camVersion;
+    }
     if (!decision.renderDynamic && !hadPending && !missed) {
+        if (notifyCamera) {
+            notifyReceivers(sg, cached._uboData);
+        }
         return 0;
     }
     let draws = 0;
@@ -532,6 +544,8 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         if (!scheduler.pending()) {
             cached._pendingCascades = null;
         }
+    } else if (notifyCamera) {
+        notifyReceivers(sg, cached._uboData);
     }
     // A dynamic-caster change requires clearing and redrawing every live layer. Otherwise a spread
     // frame touches only the cascades whose static depth and receiver transform were just advanced.
@@ -604,6 +618,15 @@ function publishCsmCascades(
     }
 }
 
+function notifyReceivers(sg: ShadowGenerator, data: Float32Array): void {
+    const receiverCbs = sg._onReceiverData;
+    if (receiverCbs) {
+        for (let i = 0; i < receiverCbs.length; i++) {
+            receiverCbs[i]!(data);
+        }
+    }
+}
+
 function createCoverageState(cascadeCount: number, padding: number): CsmCoverageState {
     const views: Float32Array[] = [];
     const transforms: Float32Array[] = [];
@@ -618,6 +641,7 @@ function createCoverageState(cascadeCount: number, padding: number): CsmCoverage
         _poseVersion: -1,
         _fitCamera: null,
         _fitPose: -1,
+        _notifiedCamVersion: -1,
         _views: views,
         _transforms: transforms,
         _invViewProj: new Float32Array(16),
