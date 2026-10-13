@@ -11,8 +11,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
-import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { loadMeshLoD, createMeshLoDInstance, disposeMeshLoDAsset, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type { MeshLoDCpuInstanceHistory } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { selectMeshLoDCpu } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
 import {
@@ -98,6 +99,10 @@ const SIG: RenderTargetSignature = { _colorFormat: "rgba8unorm", _depthStencilFo
 const CONTEXT = { targetWidth: 800, targetHeight: 600, _camera: fakeCamera() };
 const STENCIL_CASES: readonly StencilState[] = [{ compare: "equal" }, { compare: "always", passOp: "increment-clamp" }];
 const LOCAL_ENVIRONMENT_CASES = ["override", "box", "sphere", "probes"] as const;
+
+interface CpuHistoryPacket {
+    readonly cpuHistory: Map<number, MeshLoDCpuInstanceHistory>;
+}
 
 function fakeEnvironment(): EnvironmentTextures {
     return {
@@ -682,6 +687,8 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const renderable = scene._renderables[0]!;
         const main = renderable.bind(engine, { ...SIG });
         flush(main);
+        const mainPacket = selectionMode === "cpu" ? ([...asset._runtime._frameSnapshots.keys()][0] as CpuHistoryPacket) : undefined;
+        const mainHistory = mainPacket?.cpuHistory.get(scene._meshLoDRegistry!.batches[0]!.instances[0]!._instanceId);
         const liveBuffers = () => mock.device.buffers.filter((buffer) => !buffer.destroyed).length;
         const baseline = liveBuffers();
         for (let cycle = 0; cycle < 6; cycle++) {
@@ -706,28 +713,49 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
             finishFence();
             await waitForGpuResourceRetirements(engine);
             expect(liveBuffers()).toBe(baseline);
+            if (mainPacket) {
+                expect(asset._runtime._frameSnapshots.has(mainPacket)).toBe(true);
+                expect(asset._runtime._frameSnapshots.size).toBe(1);
+                expect([...mainPacket.cpuHistory.values()]).toEqual([mainHistory]);
+            }
             const pass = createMockRenderPass();
             expect(main.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
         }
         scene._disposables.forEach((dispose) => dispose());
     });
 
-    it("keeps a replacement packet alive when the same target is rebound before an older fence drains", async () => {
+    it.each(["cpu", "gpu"] as const)("keeps a replacement packet alive when the same target is rebound before an older fence drains (%s)", async (selectionMode) => {
         const mock = createMockEngine();
         engine = mock.engine;
-        const asset = await loadMeshLoD(engine, statueSource());
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
         const scene = await build(asset, createPbrMaterial(), 1);
         const renderable = scene._renderables[0]!;
         const target = { ...SIG };
         const first = renderable.bind(engine, target);
         const firstState = target._collectBatches!(undefined, first)!;
         flush(first);
+        const firstPacket = selectionMode === "cpu" ? ([...asset._runtime._frameSnapshots.keys()][0] as CpuHistoryPacket) : undefined;
+        if (firstPacket) {
+            expect(firstPacket.cpuHistory.size).toBe(1);
+        }
         firstState._release(engine);
         const replacement = renderable.bind(engine, target);
         flush(replacement);
+        const replacementPacket = selectionMode === "cpu" ? ([...asset._runtime._frameSnapshots.keys()][1] as CpuHistoryPacket) : undefined;
+        if (firstPacket && replacementPacket) {
+            expect(firstPacket.cpuHistory).not.toBe(replacementPacket.cpuHistory);
+            expect(firstPacket.cpuHistory.size).toBe(1); // retirement has not drained yet
+            expect(replacementPacket.cpuHistory.size).toBe(1);
+        }
         expect(replacement._updateBatches![0]).not.toBe(first._updateBatches![0]);
         Object.assign(mock.device.queue, { onSubmittedWorkDone: () => Promise.resolve() });
         await waitForGpuResourceRetirements(engine);
+        if (firstPacket && replacementPacket) {
+            expect(firstPacket.cpuHistory.size).toBe(0);
+            expect(asset._runtime._frameSnapshots.has(firstPacket)).toBe(false);
+            expect(replacementPacket.cpuHistory.size).toBe(1);
+            expect(asset._runtime._frameSnapshots.has(replacementPacket)).toBe(true);
+        }
         expect(renderable.bind(engine, target)._updateBatches![0]).toBe(replacement._updateBatches![0]);
         const pass = createMockRenderPass();
         expect(replacement.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
@@ -789,6 +817,105 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         }
         expect(persistentBufferCount()).toBe(bufferCount);
         expect(scene._renderableVersion).toBe(version);
+    });
+
+    it.each([false, true])("keeps opposite CPU camera histories inside the hysteresis band (reverse order=%s)", async (reverseOrder) => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu", obsoleteRequestGraceFrames: 0 });
+        const runtime = asset._runtime;
+        const scene = await build(asset, { doubleSided: true } as PbrMaterialProps, 1);
+        try {
+            const groupId = runtime.clusters.find((cluster) => runtime.pageRecords[cluster.pageId]!.pinned && cluster.refinedGroupId !== -1)!.refinedGroupId;
+            const group = runtime.groups[groupId]!;
+            const finePages = [...runtime.groupPageRefs.slice(group.firstPageRef, group.firstPageRef + group.pageRefCount)];
+            expect(finePages.every((id) => !runtime.pageRecords[id]!.pinned)).toBe(true);
+            const cameraAtError = (pixels: number): Camera => {
+                const camera = fakeCamera();
+                const scale = (600 * getProjectionMatrix(camera, 800 / 600)[5]!) / 2;
+                const world = new Float32Array(camera.worldMatrix);
+                world[12] = group.center[0];
+                world[13] = group.center[1];
+                world[14] = group.center[2] - group.radius - (group.simplifiedError * scale) / pixels;
+                Object.assign(camera, { worldMatrix: world });
+                return camera;
+            };
+            const renderable = scene._renderables[0]!;
+            const targets = [{ ...SIG }, { ...SIG }];
+            const first = renderable.bind(engine, targets[0]!);
+            first.update!({ ...CONTEXT, _camera: cameraAtError(2.4) });
+            const second = renderable.bind(engine, targets[1]!);
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.5) });
+            engine._finishOptionalFrame?.(true);
+            const batch = scene._meshLoDRegistry!.batches[0]!;
+            const instance = batch.instances[0]!;
+            const instanceId = instance._instanceId;
+            const histories = [...runtime._frameSnapshots.keys()].map((producer) => producer as CpuHistoryPacket);
+            for (let frame = 0; frame < 5; frame++) {
+                const snapshots = [...runtime._frameSnapshots.entries()];
+                const order = reverseOrder ? [1, 0] : [0, 1];
+                for (const eye of order) {
+                    // A render-task rebind must retain the history of this target.
+                    renderable.bind(engine, targets[eye]!).update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+                }
+                const demand = [...runtime._frameSnapshots.values()].flatMap((snapshot) => snapshot.demand);
+                expect(finePages.every((pageId) => demand.some((page) => page.pageId === pageId))).toBe(true);
+                expect(runtime._frameSnapshots.size).toBe(2);
+                expect(histories[0]!.cpuHistory).not.toBe(histories[1]!.cpuHistory);
+                expect(histories.map((packet) => packet.cpuHistory.get(instanceId)!.fineRequired[groupId])).toEqual([1, 0]);
+                const firstDemand = runtime._frameSnapshots.get(snapshots[0]![0])!.demand;
+                const secondDemand = runtime._frameSnapshots.get(snapshots[1]![0])!.demand;
+                expect(finePages.every((pageId) => firstDemand.some((page) => page.pageId === pageId && page.priority === 0))).toBe(true);
+                expect(finePages.every((pageId) => secondDemand.every((page) => page.pageId !== pageId))).toBe(true);
+                engine._finishOptionalFrame?.(true);
+                expect(finePages.every((pageId) => runtime.scheduler!.requests.get(pageId)?.lastDemandFrame === runtime.frameIndex)).toBe(true);
+            }
+            first.update!({ ...CONTEXT, _camera: cameraAtError(1.5) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            expect(histories.map((packet) => packet.cpuHistory.get(instanceId)!.fineRequired[groupId])).toEqual([0, 0]);
+            engine._finishOptionalFrame?.(true);
+
+            const retained = createMeshLoDInstance(asset, batch.material);
+            addMeshLoDInstanceToScene(scene, retained);
+            first.update!({ ...CONTEXT, _camera: cameraAtError(2.4) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.5) });
+            engine._finishOptionalFrame?.(true);
+            removeMeshLoDInstanceFromScene(scene, instance); // retained moves from slot 1 to slot 0
+            first.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            for (const packet of histories) {
+                expect([...packet.cpuHistory.keys()]).toEqual([retained._instanceId]);
+            }
+            expect(histories.map((packet) => packet.cpuHistory.get(retained._instanceId)!.fineRequired[groupId])).toEqual([1, 0]);
+            engine._finishOptionalFrame?.(true);
+
+            retained.visible = false;
+            first.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            expect(histories.map((packet) => packet.cpuHistory.get(retained._instanceId)!.fineRequired[groupId])).toEqual([1, 0]);
+            engine._finishOptionalFrame?.(true);
+            retained.visible = true;
+            first.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            expect(histories.map((packet) => packet.cpuHistory.get(retained._instanceId)!.fineRequired[groupId])).toEqual([1, 0]);
+            engine._finishOptionalFrame?.(true);
+
+            removeMeshLoDInstanceFromScene(scene, retained);
+            addMeshLoDInstanceToScene(scene, retained); // no selection/pruning between removal and reinsertion
+            first.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            second.update!({ ...CONTEXT, _camera: cameraAtError(1.9) });
+            for (const packet of histories) {
+                expect(packet.cpuHistory.get(retained._instanceId)!.selectionVersion).toBe(retained._selectionVersion);
+                expect(packet.cpuHistory.get(retained._instanceId)!.fineRequired[groupId]).toBe(0);
+            }
+            engine._finishOptionalFrame?.(true);
+            removeMeshLoDInstanceFromScene(scene, retained);
+            first.update!(CONTEXT);
+            second.update!(CONTEXT);
+            expect(histories.map((packet) => packet.cpuHistory.size)).toEqual([0, 0]);
+            engine._finishOptionalFrame?.(true);
+        } finally {
+            scene._disposables.forEach((dispose) => dispose());
+            disposeMeshLoDAsset(asset);
+        }
     });
 
     it.each([false, true])("isolates two disjoint camera cuts recorded before one submission (XR=%s)", async (xr) => {

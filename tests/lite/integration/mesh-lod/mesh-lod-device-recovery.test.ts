@@ -164,7 +164,7 @@ describe("MeshLoD device recovery", () => {
         expect(asset._runtime.gpuDevice).toBe(engine._device);
         expect(() => addMeshLoDInstanceToScene(scene, instance)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
         expect(batch.instances).toHaveLength(0);
-        expect(batch.priorFineRequired.size).toBe(0);
+        expect(instance._selectionVersion).toBe(1);
         expect(scene._meshLoDRegistry).toBe(registry);
         expect(registry.batches).toEqual([batch]);
         expect(registry.byAsset.get(asset)?.get(instance.material)).toBe(batch);

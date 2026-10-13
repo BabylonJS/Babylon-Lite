@@ -305,7 +305,7 @@ describe("MeshLoD coarse indirect rendering", () => {
         const scene = fakeScene(engine);
         const material = { _clearCoat: { isEnabled: true } } as unknown as PbrMaterialProps;
         const instance = createMeshLoDInstance(asset, {} as PbrMaterialProps);
-        const batch = { asset, material, instances: [instance], priorFineRequired: new Map() };
+        const batch = { asset, material, instances: [instance] };
         try {
             buildMeshLoDBatchRenderable(engine, scene, batch as never);
             throw new Error("expected rejection");

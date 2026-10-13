@@ -215,10 +215,10 @@ per-page demand bitset alongside benefit accumulators and selected-page use.
 `mesh-lod-scheduler.ts` deduplicates requests by page, bounds concurrency
 (default four), and cancels obsolete work after a two-frame grace period.
 Each rendered engine frame contributes one merged demand snapshot per asset,
-regardless of the number of scene/material batches or GPU readbacks. Per-page
-priority is the maximum from all active batches; page-ID order breaks ties.
-An asynchronous GPU readback updates its batch's latest snapshot and may
-refresh scheduling at the already submitted frame index, but never advances
+regardless of the number of scene/material batches, render bindings, or GPU
+readbacks. Per-page priority is the maximum from all active bindings; page-ID
+order breaks ties. An asynchronous GPU readback updates its binding's latest
+snapshot and may refresh scheduling at the already submitted frame index, but never advances
 the asset clock. While readback is pending, the last successful snapshot is
 retained for batches that still render; an explicit empty result clears it.
 Frames without a contributing batch submit empty demand until outstanding
@@ -318,11 +318,24 @@ then retires the previous buffer behind the frame fence.
 Each render binding owns independent selection parameters, hysteresis, and
 draw buffers, including the two stereo-eye bindings recorded before a single
 submission. Immutable asset metadata and material resources remain shared.
+CPU hysteresis lives in each binding packet, never in the scene-batch registry.
+Its `cpuHistory` map keys stable instance IDs and stores
+`{ selectionVersion: number, fineRequired: Uint8Array }`; the version is the
+instance's removal/reinsertion selection version, defaulting to zero. An unmatched version
+or group count starts from zero; removed IDs are pruned on the next binding
+update, including an empty batch. Rebinding a live target reuses that history;
+a new or retired/replaced binding starts independently. GPU hysteresis retains
+its existing per-binding state.
+CPU streaming observations are likewise keyed by the binding packet, so one
+camera's empty/coarse selection cannot replace another camera's fine demand.
+The frame coordinator merges those active observations once per submission.
 The render task's stable target-signature identity keys these resources;
 rebinding that target reuses them without allocating or invalidating bundles.
 Each packet registers cleanup with the target's MeshLoD update batch. Task
 retirement releases the packet behind the existing GPU fence and removes
 its strong reference, without destroying shared material or asset resources.
+Packet disposal clears its CPU history and deletes its CPU/GPU streaming
+observations without disturbing other live bindings.
 Hysteresis rows follow stable instance identity when slots move: retained rows
 are copied into a zero-initialized replacement, never overlapping in place.
 A removal/re-registration version resets a reused identity, even when removal
@@ -526,3 +539,9 @@ replacement. Injected XR projection regressions require both selectors to use
 the actual vertical scale, agree on refinement/page demand, and upload that
 same scale per eye. Hierarchy cloning tests preserve MeshLoD state, independent
 TRS/raw matrix storage, fresh IDs, and separate registration/drawing.
+Two-camera CPU regressions establish opposite refinement histories at 2.4/1.5 px,
+then repeatedly hold both at 1.9 px with the default 2 px / 0.15 hysteresis.
+Both pass orders retain each camera's own history and fine-page demand (including
+zero-priority demand with zero cancellation grace). Rebinding preserves history;
+remove/reinsert without an intervening update resets it, and binding retirement
+clears only the retired packet's history/observations behind its task fence.

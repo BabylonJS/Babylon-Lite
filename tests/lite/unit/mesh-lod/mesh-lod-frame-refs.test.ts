@@ -83,22 +83,26 @@ describe("MeshLoD frame references (§14.1)", () => {
         const scene = fakeScene(engine);
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, {} as PbrMaterialProps));
         const batch = scene._meshLoDRegistry!.batches[0]!;
-        driveMeshLoDStreaming(batch, [
-            {
-                instance: batch.instances[0]!,
-                result: {
-                    selectedClusterIds: new Uint32Array([clusterId]),
-                    desiredPages: [{ pageId: 1, priority: 1 }],
-                    fineRequired: new Uint8Array(0),
-                    visibleGroupCount: 1,
-                    fallbackGroupCount: 0,
-                    renderedTriangleCount: 1,
-                    selectedMeshletCount: 1,
-                    maximumSelectedErrorPixels: 0,
-                    maximumUnmetErrorPixels: 0,
+        driveMeshLoDStreaming(
+            batch,
+            [
+                {
+                    instance: batch.instances[0]!,
+                    result: {
+                        selectedClusterIds: new Uint32Array([clusterId]),
+                        desiredPages: [{ pageId: 1, priority: 1 }],
+                        fineRequired: new Uint8Array(0),
+                        visibleGroupCount: 1,
+                        fallbackGroupCount: 0,
+                        renderedTriangleCount: 1,
+                        selectedMeshletCount: 1,
+                        maximumSelectedErrorPixels: 0,
+                        maximumUnmetErrorPixels: 0,
+                    },
                 },
-            },
-        ]);
+            ],
+            {}
+        );
         expect(page.lastUsedFrame).toBe(1);
         engine._finishOptionalFrame?.(false);
         expect(page.lastUsedFrame).toBe(0);
@@ -175,7 +179,7 @@ describe("MeshLoD frame references (§14.1)", () => {
                     maximumUnmetErrorPixels: 0,
                 },
             };
-            driveMeshLoDStreaming(batch, [selection]);
+            driveMeshLoDStreaming(batch, [selection], batch);
         };
         for (let i = 0; i < 3; i++) {
             contribute(batches[i]!, fine[i]!, 3 - i);

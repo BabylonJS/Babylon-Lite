@@ -33,9 +33,6 @@ export interface MeshLoDSceneBatch {
     readonly asset: MeshLoDAsset;
     readonly material: PbrMaterialProps;
     readonly instances: MeshLoDInstance[];
-    /** Prior per-instance `wasFineRequired` bitsets keyed by stable instance id, for
-     *  hysteresis continuity across frames. */
-    readonly priorFineRequired: Map<number, Uint8Array>;
     /** Material-owned indirect renderable, attached by the PBR module at build time. */
     renderable?: Renderable;
     /** @internal Feature-owned per-batch GPU/CPU state, owned by the PBR module. */
@@ -70,7 +67,7 @@ function getOrCreateBatch(registry: MeshLoDSceneRegistry, asset: MeshLoDAsset, m
     }
     let batch = byMaterial.get(material);
     if (!batch) {
-        batch = { asset, material, instances: [], priorFineRequired: new Map() };
+        batch = { asset, material, instances: [] };
         byMaterial.set(material, batch);
         registry.batches.push(batch);
     }
@@ -218,7 +215,6 @@ export function removeMeshLoDInstanceFromScene(scene: SceneContext, instance: Me
     const index = batch.instances.indexOf(instance);
     if (index !== -1) {
         batch.instances.splice(index, 1);
-        batch.priorFineRequired.delete(instance._instanceId);
         instance._selectionVersion = (instance._selectionVersion ?? 0) + 1;
     }
 }
@@ -227,6 +223,12 @@ export function removeMeshLoDInstanceFromScene(scene: SceneContext, instance: Me
 export interface MeshLoDInstanceSelection {
     readonly instance: MeshLoDInstance;
     readonly result: MeshLoDSelectionResult;
+}
+
+/** CPU hysteresis for one stable instance ID in a single render binding. */
+export interface MeshLoDCpuInstanceHistory {
+    readonly selectionVersion: number;
+    readonly fineRequired: Uint8Array;
 }
 
 /** @internal Resolve viewport pixels and the active projection's SSE scale for both selectors. */
@@ -250,8 +252,14 @@ export function getMeshLoDSelectionCamera(camera: Camera, context: DrawUpdateCon
 /** Run the deterministic CPU selection oracle for every visible instance in a
  *  batch. Coarse-only Phase 4 leaves frustum culling disabled (empty plane list);
  *  GPU selection adds it. Returns one result per visible instance, updating each
- *  instance's prior hysteresis state. */
-export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdateContext): MeshLoDInstanceSelection[] {
+ *  instance's prior hysteresis state in the caller's binding-owned map. */
+export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdateContext, history: Map<number, MeshLoDCpuInstanceHistory>): MeshLoDInstanceSelection[] {
+    const registeredIds = new Set(batch.instances.map((instance) => instance._instanceId));
+    for (const id of history.keys()) {
+        if (!registeredIds.has(id)) {
+            history.delete(id);
+        }
+    }
     const camera = context._camera;
     if (!camera || batch.instances.length === 0) {
         return [];
@@ -266,10 +274,9 @@ export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdate
         if (!instance.visible) {
             continue;
         }
-        let prior = batch.priorFineRequired.get(instance._instanceId);
-        if (!prior || prior.length !== groupCount) {
-            prior = new Uint8Array(groupCount);
-        }
+        const selectionVersion = instance._selectionVersion ?? 0;
+        const prior = history.get(instance._instanceId);
+        const wasFineRequired = prior?.selectionVersion === selectionVersion && prior.fineRequired.length === groupCount ? prior.fineRequired : new Uint8Array(groupCount);
         const result = selectMeshLoDCpu({
             groups: runtime.groups,
             clusters: runtime.clusters,
@@ -283,10 +290,10 @@ export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdate
             screenSpaceError: instance.screenSpaceError ?? runtime.settings.screenSpaceError,
             lodHysteresis: runtime.settings.lodHysteresis,
             isPageResident,
-            wasFineRequired: prior,
+            wasFineRequired,
             coneCull: batch.material.doubleSided !== true,
         });
-        batch.priorFineRequired.set(instance._instanceId, result.fineRequired);
+        history.set(instance._instanceId, { selectionVersion, fineRequired: result.fineRequired });
         selections.push({ instance, result });
     }
     return selections;
@@ -297,8 +304,9 @@ export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdate
  *  highest per-page priority), collects the pages every selected cluster references (so
  *  they hold a frame reference and are never evicted while the built frame is in flight),
  *  and publishes the visible/fallback/error selection diagnostics. Called once per frame
- *  by the material renderable after selection, before it writes the draw stream. */
-export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: readonly MeshLoDInstanceSelection[]): void {
+ *  by each material binding after selection, before it writes the draw stream.
+ *  The producer is that binding's packet, not the shared scene batch. */
+export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: readonly MeshLoDInstanceSelection[], producer: object): void {
     const runtime: MeshLoDAssetRuntime = batch.asset._runtime;
     const priorityByPage = new Map<number, number>();
     const referenced = new Set<number>();
@@ -327,6 +335,6 @@ export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: read
     }
     demand.sort((a, b) => (b.priority !== a.priority ? b.priority - a.priority : a.pageId - b.pageId));
     const stats: MeshLoDStreamSelectionStats = { visibleGroupCount, fallbackGroupCount, maximumSelectedErrorPixels, maximumUnmetErrorPixels };
-    const frame = queueMeshLoDFrame(runtime, batch, "cpu", demand, stats);
+    const frame = queueMeshLoDFrame(runtime, producer, "cpu", demand, stats);
     holdMeshLoDPages(runtime, [...referenced], frame, true);
 }

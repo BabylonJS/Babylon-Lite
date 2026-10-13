@@ -30,7 +30,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { validateMeshLoDMaterial } from "./pbr-mesh-lod-material.js";
-import type { MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
+import type { MeshLoDCpuInstanceHistory, MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
 import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch, validateMeshLoDEngine } from "../../mesh-lod/mesh-lod-scene.js";
 import { queueMeshLoDFrame } from "../../mesh-lod/mesh-lod-runtime.js";
 import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
@@ -166,6 +166,7 @@ interface MeshLoDBatchPacket {
     disposed: boolean;
     /** True once a disposed asset has re-recorded the cached bundle to drop its draw. */
     disposedHandled: boolean;
+    readonly cpuHistory: Map<number, MeshLoDCpuInstanceHistory>;
     // ── GPU selection/expansion path (created lazily on first GPU-mode frame) ──
     gpuInstanceState: MeshLoDGpuInstanceState | null;
     gpuBatchState: MeshLoDGpuBatchState | null;
@@ -376,9 +377,9 @@ function syncMaterialUbo(engine: EngineContext, packet: MeshLoDBatchPacket, mate
 function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext): void {
     const runtime = batch.asset._runtime;
     const debugMode = meshLoDDebugModeCode(runtime.debugView);
-    const selections = selectMeshLoDBatch(batch, context);
+    const selections = selectMeshLoDBatch(batch, context, packet.cpuHistory);
     // Feed this frame's fine-page demand + frame references to the streaming engine.
-    driveMeshLoDStreaming(batch, selections);
+    driveMeshLoDStreaming(batch, selections, packet);
     // Grow the draw-vertex buffer if streamed refinement expands past the coarse bound.
     let neededVertices = 0;
     for (const selection of selections) {
@@ -630,6 +631,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         lastVertexCount: 0,
         disposed: false,
         disposedHandled: false,
+        cpuHistory: new Map(),
         gpuInstanceState: null,
         gpuBatchState: null,
         gpuBindGroup: null,
@@ -642,7 +644,6 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                 return;
             }
             sceneDisposed = true;
-            runtime._frameSnapshots.delete(batch);
             for (const release of bindingPackets.values()) {
                 release();
             }
@@ -740,6 +741,7 @@ function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, sh
         drawScratch: new Uint32Array(shared.maxDrawVertices * 4),
         instanceScratch: new Float32Array(shared.maxInstances * INSTANCE_WORDS),
         indirectScratch: new Uint32Array(4),
+        cpuHistory: new Map(),
         disposed: false,
         gpuInstanceState: null,
         gpuBatchState: null,
@@ -758,6 +760,8 @@ function disposeDrawPacket(batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket)
         return;
     }
     packet.disposed = true;
+    packet.cpuHistory.clear();
+    batch.asset._runtime._frameSnapshots.delete(packet);
     if (packet.gpuBatchState) {
         batch.asset._runtime._frameSnapshots.delete(packet.gpuBatchState);
         disposeMeshLoDGpuBatchState(packet.gpuBatchState);
