@@ -2,6 +2,7 @@ import type { BindingDecl } from "../shader/fragment-types.js";
 import { MAX_LIGHTS } from "./types.js";
 import { areaLightWgsl } from "./area-light-wgsl.js";
 import { wgsl } from "../shader/wgsl.js";
+import type { WgslSource } from "../shader/wgsl.js";
 
 /** @internal Constant binding count regardless of the number of textured lights. */
 export function areaLightEmissionBindings(): BindingDecl[] {
@@ -13,7 +14,6 @@ export function areaLightEmissionBindings(): BindingDecl[] {
 }
 
 const EMISSION_HELPERS = wgsl`
-struct areaEmissionSlotsUniforms { slots: array<vec4<u32>, ${Math.ceil(MAX_LIGHTS / 4)}> };
 fn areaEmissionForm(m: mat3x3<f32>, p0: vec3<f32>, p1: vec3<f32>, p2: vec3<f32>, p3: vec3<f32>, lightIndex: u32) -> vec3<f32> {
 let a = m*p0;
 let b = m*p1;
@@ -43,5 +43,15 @@ return emission*areaSphereForm(a,b,c,d);
 }
 `;
 
-/** @internal Project diffuse/specular separately before normalizing any transformed corner. */
-export const AREA_LIGHT_EMISSION_WGSL = /* @__PURE__ */ areaLightWgsl("vec3<f32>", "areaEmissionForm", ", lightIndex: u32", ", lightIndex", EMISSION_HELPERS);
+/** @internal Generate at composition time to match the prepared light capacity. */
+export function areaLightEmissionWgsl(): WgslSource {
+    return areaLightWgsl(
+        "vec3<f32>",
+        "areaEmissionForm",
+        ", lightIndex: u32",
+        ", lightIndex",
+        wgsl`
+struct areaEmissionSlotsUniforms { slots: array<vec4<u32>, ${Math.ceil(MAX_LIGHTS / 4)}> };
+${EMISSION_HELPERS}`
+    );
+}

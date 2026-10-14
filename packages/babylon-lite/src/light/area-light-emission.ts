@@ -10,6 +10,7 @@ import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import { validateAreaLightImage } from "./area-light-image.js";
 
 interface Snapshot {
+    capacity: number;
     lights: LightBase[];
     images: (Texture2D | null)[];
 }
@@ -32,10 +33,11 @@ let owners: WeakMap<SceneContext, Owner> | null = null;
 let nextId = 0;
 
 function snapshot(scene: SceneContext): Snapshot {
+    const capacity = MAX_LIGHTS;
     const lights: LightBase[] = [];
     const images: (Texture2D | null)[] = [];
     for (const light of scene.lights) {
-        if (lights.length === MAX_LIGHTS) {
+        if (lights.length === capacity) {
             break;
         }
         if (light._writeLightUbo) {
@@ -43,11 +45,11 @@ function snapshot(scene: SceneContext): Snapshot {
             images.push(light.lightType === "rectArea" ? (light as RectAreaLight).emissionTexture : null);
         }
     }
-    return { lights, images };
+    return { capacity, lights, images };
 }
 
 function same(a: Snapshot, b: Snapshot): boolean {
-    return a.lights.length === b.lights.length && a.lights.every((light, i) => light === b.lights[i] && a.images[i] === b.images[i]);
+    return a.capacity === b.capacity && a.lights.length === b.lights.length && a.lights.every((light, i) => light === b.lights[i] && a.images[i] === b.images[i]);
 }
 
 function release(allocation: Allocation): void {
@@ -103,7 +105,7 @@ export async function prepareAreaLightEmission(scene: SceneContext): Promise<num
     }
     const request = (async (): Promise<void> => {
         const sources: Texture2D[] = [];
-        const slots = new Uint32Array(Math.ceil(MAX_LIGHTS / 4) * 4);
+        const slots = new Uint32Array(Math.ceil(selected.capacity / 4) * 4);
         const layers = new Map<GPUTexture, number>();
         for (let i = 0; i < selected.images.length; i++) {
             const image = selected.images[i];
@@ -174,7 +176,7 @@ export async function prepareAreaLightEmission(scene: SceneContext): Promise<num
                 throw new Error("RectAreaLight: device changed during emission preparation; preprocess on the current engine");
             }
             if (!same(selected, snapshot(scene))) {
-                throw new Error("RectAreaLight: emission assignments/topology changed during preparation; enable and rebuild again");
+                throw new Error("RectAreaLight: emission capacity/assignments/topology changed during preparation; enable and rebuild again");
             }
             const allocation: Allocation = { device, texture, mapping, sources, snapshot: selected, owners: 1 };
             clearAreaLightEmission(scene);
@@ -209,6 +211,9 @@ export function bindAreaLightEmission(id: number | undefined, device: GPUDevice,
     const allocation = id === undefined ? undefined : registry?.get(id)?.allocation;
     if (!allocation || allocation.device !== device || !disposers) {
         throw new Error("RectAreaLight: prepare the owning scene's emission resources and rebuild its material groups before binding");
+    }
+    if (allocation.snapshot.capacity !== MAX_LIGHTS) {
+        throw new Error("RectAreaLight: emission light capacity changed; enable and rebuild again before binding");
     }
     if (!disposers.some((dispose) => dispose === allocationRelease(allocation))) {
         allocation.owners++;

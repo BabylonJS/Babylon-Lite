@@ -1,7 +1,7 @@
 import type { PbrExt } from "../pbr-flags.js";
 import type { SingleLightShaderSource, MultiLightShaderSource } from "../../../light/lighting-extension.js";
 import { areaLightBindings } from "../../../light/area-light-wgsl.js";
-import { areaLightEmissionBindings, AREA_LIGHT_EMISSION_WGSL } from "../../../light/area-light-emission-wgsl.js";
+import { areaLightEmissionBindings, areaLightEmissionWgsl } from "../../../light/area-light-emission-wgsl.js";
 import { bindAreaLightLtc } from "../../../light/area-light-ltc.js";
 import { bindAreaLightEmission } from "../../../light/area-light-emission.js";
 import { rectAreaPbrExt, rectAreaSingleLightSource, rectAreaMultiLightSource } from "./rect-area-light-fragment.js";
@@ -37,7 +37,7 @@ export const rectAreaEmissionPbrExt: PbrExt = {
             return null;
         }
         const solid = rectAreaPbrExt.frag!({ ...ctx, _sceneFeatures: (ctx._sceneFeatures ?? 0) & ~RECT_AREA_PBR_EMISSION });
-        return solid ? { _id: "rect-area-emission", _bindings: [...areaLightBindings(), ...areaLightEmissionBindings()], _helperFunctions: AREA_LIGHT_EMISSION_WGSL } : null;
+        return solid ? { _id: "rect-area-emission", _bindings: [...areaLightBindings(), ...areaLightEmissionBindings()], _helperFunctions: areaLightEmissionWgsl() } : null;
     },
     bind(ctx, entries, binding) {
         binding = bindAreaLightLtc(ctx._engine, entries, binding);

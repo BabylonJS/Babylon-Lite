@@ -3,14 +3,14 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import type { Material } from "../../../packages/babylon-lite/src/material/material.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
-import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene.js";
+import { addToScene, createSceneContext, disposeScene, registerScene } from "../../../packages/babylon-lite/src/scene/scene.js";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import { createRectAreaLight } from "../../../packages/babylon-lite/src/light/rect-area-light.js";
 import { createPointLight } from "../../../packages/babylon-lite/src/light/point-light.js";
 import { enableRectAreaLights, _installRectAreaEmission } from "../../../packages/babylon-lite/src/light/enable-rect-area-lights.js";
 import { prepareEmissionLighting } from "../../../packages/babylon-lite/src/light/process-area-light-texture.js";
 import { prepareAreaLightEmission, clearAreaLightEmission, bindAreaLightEmission } from "../../../packages/babylon-lite/src/light/area-light-emission.js";
-import { MAX_LIGHTS } from "../../../packages/babylon-lite/src/light/types.js";
+import { MAX_LIGHTS, setMaxLights } from "../../../packages/babylon-lite/src/light/types.js";
 import { acquireTexture } from "../../../packages/babylon-lite/src/resource/texture-acquire.js";
 import { releaseTexture } from "../../../packages/babylon-lite/src/resource/texture-release.js";
 import { _textureOwners } from "../../../packages/babylon-lite/src/resource/texture-owner-state.js";
@@ -27,6 +27,8 @@ import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types.js";
 import { rebuildSceneRenderables } from "../../../packages/babylon-lite/src/scene/scene-rebuild.js";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
+
+const originalCapacity = MAX_LIGHTS;
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -61,7 +63,7 @@ function fixture() {
         }),
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             const data = new ArrayBuffer(Number(descriptor.size));
-            return { destroy: vi.fn(), getMappedRange: vi.fn(() => data), unmap: vi.fn() };
+            return { size: Number(descriptor.size), label: descriptor.label, destroy: vi.fn(), getMappedRange: vi.fn(() => data), unmap: vi.fn() };
         }),
         createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => ({ descriptor })),
         createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor),
@@ -106,7 +108,10 @@ function receiver(material: Material, id: string): Mesh {
     return Object.assign(createTransformNode(id), { id, material, receiveShadows: false, morphTargets: null, _gpu }) as unknown as Mesh;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    setMaxLights(originalCapacity);
+    vi.unstubAllGlobals();
+});
 
 describe("scene-local compact emission image mapping and ownership", () => {
     it("maps solid/punctual/shared/distinct images by packed slot, never by position or receiver order", async () => {
@@ -208,6 +213,78 @@ describe("scene-local compact emission image mapping and ownership", () => {
         releaseTexture(beyond.emissionTexture);
     });
 
+    it("invalidates unchanged packed lists on capacity growth/shrink, including equal padded sizes, without retiring bound generations", async () => {
+        setMaxLights(16);
+        const f = fixture();
+        const image = f.image();
+        const light = createRectAreaLight([0, 0, 1], 1, 1);
+        light.emissionTexture = image;
+        f.scene.lights.push(light);
+        try {
+            const id = await prepareAreaLightEmission(f.scene);
+            let disposers: (() => void)[] = [];
+            let entries: GPUBindGroupEntry[] = [];
+            bindAreaLightEmission(id, f.engine._device, entries, 0, disposers);
+            for (const capacity of [32, 20, 19, 16]) {
+                const previousTexture = f.device.createTexture.mock.results.at(-1)!.value;
+                const previousMapping = (entries[2]!.resource as GPUBufferBinding).buffer;
+                setMaxLights(capacity);
+                expect(await prepareAreaLightEmission(f.scene)).toBe(id);
+                const nextEntries: GPUBindGroupEntry[] = [];
+                const nextDisposers: (() => void)[] = [];
+                bindAreaLightEmission(id, f.engine._device, nextEntries, 0, nextDisposers);
+                const nextMapping = (nextEntries[2]!.resource as GPUBufferBinding).buffer;
+                expect(nextMapping).not.toBe(previousMapping);
+                expect(nextMapping.size).toBe(Math.ceil(capacity / 4) * 16);
+                expect(f.slots()).toEqual([1, ...Array<number>(Math.ceil(capacity / 4) * 4 - 1).fill(0)]);
+                expect(previousTexture.destroy).not.toHaveBeenCalled();
+                expect(previousMapping.destroy).not.toHaveBeenCalled();
+                expect(_textureOwners(image)).toBe(3);
+                disposers.forEach((dispose) => dispose());
+                expect(previousTexture.destroy).toHaveBeenCalledTimes(1);
+                expect(previousMapping.destroy).toHaveBeenCalledTimes(1);
+                expect(_textureOwners(image)).toBe(2);
+                entries = nextEntries;
+                disposers = nextDisposers;
+            }
+            const finalMapping = (entries[2]!.resource as GPUBufferBinding).buffer;
+            disposeScene(f.scene);
+            expect(finalMapping.destroy).not.toHaveBeenCalled();
+            disposers.forEach((dispose) => dispose());
+            expect(finalMapping.destroy).toHaveBeenCalledTimes(1);
+            expect(_textureOwners(image)).toBe(1);
+        } finally {
+            disposeScene(f.scene);
+            releaseTexture(image);
+        }
+    });
+
+    it("rejects binding an allocation prepared at a different capacity before acquiring a binding owner", async () => {
+        setMaxLights(16);
+        const f = fixture();
+        const image = f.image();
+        const light = createRectAreaLight([0, 0, 1], 1, 1);
+        light.emissionTexture = image;
+        f.scene.lights.push(light);
+        try {
+            const id = await prepareAreaLightEmission(f.scene);
+            const entries: GPUBindGroupEntry[] = [];
+            const disposers: (() => void)[] = [];
+            setMaxLights(20);
+            expect(() => bindAreaLightEmission(id, f.engine._device, entries, 0, disposers)).toThrow(/capacity.*enable.*rebuild/);
+            expect(entries).toHaveLength(0);
+            expect(disposers).toHaveLength(0);
+            setMaxLights(16);
+            expect(bindAreaLightEmission(id, f.engine._device, entries, 0, disposers)).toBe(3);
+            disposeScene(f.scene);
+            disposers.forEach((dispose) => dispose());
+            expect(_textureOwners(image)).toBe(1);
+        } finally {
+            disposeScene(f.scene);
+            releaseTexture(image);
+        }
+    });
+
     it("tracks texture assignment/clear once, shares cloned light images without ownership, and leaves light state scene-free", () => {
         const f = fixture();
         const texture = f.image();
@@ -227,7 +304,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
         disposeScene(f.scene);
     });
 
-    it.each(["validation", "disposed", "device", "topology"] as const)(
+    it.each(["validation", "disposed", "device", "topology", "capacity-growth", "capacity-shrink"] as const)(
         "rejects %s during awaited upload, cleans all candidates, and doesn't retain pending work",
         async (failure) => {
             const f = fixture();
@@ -239,7 +316,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
             f.device.popErrorScope.mockReturnValueOnce(wait.promise);
             const work = prepareAreaLightEmission(f.scene);
             const rejected = expect(work).rejects.toThrow(
-                failure === "validation" ? /array upload failed/ : failure === "topology" ? /changed during preparation/ : failure === "device" ? /device changed/ : /disposed/
+                failure === "validation" ? /array upload failed/ : failure === "device" ? /device changed/ : failure === "disposed" ? /disposed/ : /changed during preparation/
             );
             if (failure === "disposed") {
                 disposeScene(f.scene);
@@ -247,14 +324,19 @@ describe("scene-local compact emission image mapping and ownership", () => {
                 f.engine._device = fixture().engine._device;
             } else if (failure === "topology") {
                 light.emissionTexture = null;
+            } else if (failure === "capacity-growth" || failure === "capacity-shrink") {
+                setMaxLights(failure === "capacity-growth" ? 32 : 12);
             }
             wait.resolve(failure === "validation" ? ({ message: "bad array" } as GPUError) : null);
             await rejected;
             const candidate = f.device.createTexture.mock.results.at(-1)!.value;
             expect(candidate.destroy).toHaveBeenCalledTimes(1);
+            expect(f.device.createBuffer.mock.results.at(-1)!.value.destroy).toHaveBeenCalledTimes(1);
             expect(_textureOwners(texture)).toBe(1);
-            if (failure === "validation") {
+            if (failure === "validation" || failure === "capacity-growth" || failure === "capacity-shrink") {
                 await expect(prepareAreaLightEmission(f.scene)).resolves.toBeTypeOf("number");
+                expect(f.slots()).toHaveLength(Math.ceil(MAX_LIGHTS / 4) * 4);
+                expect(f.slots()[0]).toBe(1);
             }
             disposeScene(f.scene);
             releaseTexture(texture);
@@ -281,6 +363,68 @@ describe("scene-local compact emission image mapping and ownership", () => {
 });
 
 describe("textured area bindings through real material builders", () => {
+    it.each([20, 32])("pairs Standard and mixed PBR shaders/bindings after initial preparation at 16 then growth to %i before first compilation", async (capacity) => {
+        setMaxLights(16);
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => new Response(new ArrayBuffer(65536)))
+        );
+        const f = fixture();
+        const image = f.image();
+        const emitter = createRectAreaLight([0, 0, 1], 2, 2);
+        emitter.emissionTexture = image;
+        addToScene(f.scene, emitter);
+        try {
+            await enableRectAreaLights(f.scene);
+            expect(f.slots()).toEqual([1, ...Array<number>(15).fill(0)]);
+            expect(f.device.createShaderModule).not.toHaveBeenCalled();
+            expect(f.device.createRenderPipeline).not.toHaveBeenCalled();
+            setMaxLights(capacity);
+            f.scene.lights.unshift(...Array.from({ length: 16 }, () => createPointLight([0, 0, 1])));
+            const standard = receiver(createStandardMaterial(), "standard");
+            const pbr = receiver(createPbrMaterial(), "mixed-pbr");
+            addToScene(f.scene, standard);
+            addToScene(f.scene, pbr);
+            await registerScene(f.scene);
+            expect(f.scene._renderables).toHaveLength(2);
+            for (const renderable of f.scene._renderables) {
+                renderable.bind(f.engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 });
+            }
+            const shaders = f.device.createShaderModule.mock.calls.map(([descriptor]) => descriptor.code).filter((code) => code.includes("@fragment"));
+            expect(shaders).toHaveLength(2);
+            for (const code of shaders) {
+                const declaredVectors = code.match(/struct areaEmissionSlotsUniforms\s*\{\s*slots:\s*array<vec4<u32>,\s*(\d+)>/);
+                expect(Number(declaredVectors?.[1])).toBe(Math.ceil(capacity / 4));
+                expect(code).toMatch(new RegExp(`lights:\\s*array<LightEntry,\\s*${capacity}>`));
+                expect(code).toContain("areaEmissionSlots.slots[lightIndex / 4u][lightIndex % 4u]");
+            }
+            expect(shaders.some((code) => code.includes("let lightIndex = mli(li)"))).toBe(true);
+            expect(shaders.some((code) => code.includes("input.vp, lightIndex)"))).toBe(true);
+            const slots = f.slots();
+            expect(slots).toHaveLength(Math.ceil(capacity / 4) * 4);
+            expect(slots[16]).toBe(1);
+            expect(slots.filter(Boolean)).toEqual([1]);
+            for (const mesh of [standard, pbr]) {
+                const selection = new Float32Array(20 + capacity);
+                expect(writeMeshLightSelection(mesh, f.scene.lights, selection)).toBe(-17);
+                expect(Array.from(new Uint32Array(selection.buffer).slice(20, 37))).toEqual(Array.from({ length: 17 }, (_, i) => i));
+            }
+            const mapping = f.device.createBuffer.mock.results.map((result) => result.value).filter((buffer) => buffer.label === "rect-area-emission-slots");
+            expect(mapping.map((buffer) => buffer.size)).toEqual([64, Math.ceil(capacity / 4) * 16]);
+            const upload = f.device.queue.writeBuffer.mock.calls.find(([buffer]) => buffer === mapping[1]);
+            expect(upload![2]).toEqual(new Uint32Array(slots));
+            expect((upload![2] as Uint32Array).byteLength).toBe(mapping[1]!.size);
+            const emissionGroups = f.device.createBindGroup.mock.calls
+                .map(([descriptor]) => Array.from(descriptor.entries))
+                .filter((entries) => (entries.at(-1)?.resource as GPUBufferBinding).buffer === mapping[1]);
+            expect(emissionGroups.map((entries) => entries.length).sort((a, b) => a - b)).toEqual([9, 13]);
+            expect(f.copies).toHaveBeenCalledTimes(22);
+        } finally {
+            disposeScene(f.scene);
+            releaseTexture(image);
+        }
+    });
+
     it("public full-scene rebuild synchronizes Standard and PBR groups through textured/solid/replace transitions", async () => {
         vi.stubGlobal(
             "fetch",

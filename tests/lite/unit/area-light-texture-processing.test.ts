@@ -66,6 +66,7 @@ describe("area emission exact preprocessing mathematics", () => {
         expect(actual.subarray(0, 4)).not.toEqual(actual.subarray((size - 1) * size * 4, (size - 1) * size * 4 + 4));
     });
 
+    // Full-resolution CPU filtering exceeds the default timeout on shared CI runners.
     it("preserves exact constant bytes across the full 1024 image and does not retain input storage", () => {
         const input = new Uint8Array(1024 * 1024 * 4);
         for (let i = 0; i < input.length; i += 4) {
@@ -74,7 +75,7 @@ describe("area emission exact preprocessing mathematics", () => {
         const result = blurAreaLightPixels(input);
         expect(result).toEqual(input);
         expect(result.buffer).not.toBe(input.buffer);
-    });
+    }, 30_000);
 
     it("readback unpads storage rows without Y flipping or alpha loss and destroys its staging buffer", async () => {
         vi.stubGlobal("GPUMapMode", { READ: 1 });

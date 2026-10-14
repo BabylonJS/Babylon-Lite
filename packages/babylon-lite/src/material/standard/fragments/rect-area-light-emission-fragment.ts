@@ -4,7 +4,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import { standardLightingFunction, _installStandardLightingArgumentsResolver, _installStandardLightingParametersResolver } from "../standard-template.js";
 import { rectAreaStandardContext } from "./rect-area-light-fragment.js";
 import { areaLightBindings } from "../../../light/area-light-wgsl.js";
-import { areaLightEmissionBindings, AREA_LIGHT_EMISSION_WGSL } from "../../../light/area-light-emission-wgsl.js";
+import { areaLightEmissionBindings, areaLightEmissionWgsl } from "../../../light/area-light-emission-wgsl.js";
 import { bindAreaLightLtc } from "../../../light/area-light-ltc.js";
 import { bindAreaLightEmission } from "../../../light/area-light-emission.js";
 import { wgsl } from "../../../shader/wgsl.js";
@@ -45,7 +45,7 @@ export const rectAreaEmissionStdExt: StdExt = {
     _phase: "mesh",
     _feature: RECT_AREA_STD_EMISSION,
     _frag() {
-        return { _id: "rect-area-emission", _bindings: [...areaLightBindings(), ...areaLightEmissionBindings()], _helperFunctions: AREA_LIGHT_EMISSION_WGSL };
+        return { _id: "rect-area-emission", _bindings: [...areaLightBindings(), ...areaLightEmissionBindings()], _helperFunctions: areaLightEmissionWgsl() };
     },
     _writeUbo(data, material) {
         data[22] = material.roughness ?? 0;
