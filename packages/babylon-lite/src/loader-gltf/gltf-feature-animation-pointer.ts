@@ -127,7 +127,7 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
                 // omits it for untextured/default materials).
                 if (baseColorAnimated.has(matIdx) && !pm.baseColorFactor) {
                     const bcf = def?.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
-                    pm.baseColorFactor = [bcf[0] ?? 1, bcf[1] ?? 1, bcf[2] ?? 1, bcf[3] ?? 1];
+                    pm.baseColorFactor = [bcf[0] ?? 1, bcf[1] ?? 1, bcf[2] ?? 1, 1];
                 }
                 // Force the per-texture UV-transform machinery when a pointer animates a
                 // texture transform that is identity at load (so the matrices exist for the

@@ -403,6 +403,55 @@ at load time.
 
 sRGB textures use `rgba8unorm-srgb` format so the GPU performs exact sRGB→linear conversion on sample. All textures get full mip chains via `generateMipmaps()`.
 
+**Static textured base-color factor ownership.** For a PNG/JPG base-color image, both the fast
+and slow PBR assemblers apply the linear RGB factor through
+`baseColorFactor = [r, g, b, 1]`; white RGB omits this optional uniform even when the
+source alpha is non-default. BLEND and MASK carry the source factor alpha only in
+the material's `alpha`, so the opacity before specular-over-alpha is
+`textureAlpha * factorAlpha`, not `textureAlpha * factorAlpha²`. MASK compares that
+single product with `alphaCutoff`. This mirrors the KTX2 base-color extension and
+applies equally to sampler-aware loading, UV transforms and material variants.
+
+`KHR_materials_unlit` only enables the unlit shader; it must not apply the glTF
+factor a second time through `_unlitColor`. The base-color sample already receives
+the RGB uniform for an image, the factor baked into the existing 1×1 fallback for
+an untextured material, or the factor supplied by the KTX2 extension. User-authored
+`setPbrUnlit(material, tint)` remains a separate, explicit extra tint.
+
+An untextured static base-color fallback stores the RGB factor as sRGB bytes but
+keeps its alpha byte at 255. BLEND/MASK already apply the factor alpha through the
+material, so baking it into that fallback would apply it twice as well. Factors
+0, 0.5 and 1 must produce those exact material opacities without 8-bit alpha
+quantization; their RGB fallback bytes and texture ownership stay unchanged.
+
+`gltf-displaced-fallback-texture.test.ts` exercises the loaded material state for
+all four paths, including a real non-identity UV transform, white/default factors,
+BLEND opacity, MASK cutoff and unlit PNG/KTX2/factor-only materials. These CPU
+tests do not replace GPU capture or scene parity qualification; reference images
+and thresholds remain unchanged.
+
+For a textured white-RGB material with an animated `baseColorFactor`,
+`gltf-feature-animation-pointer.ts` seeds the missing factor slot in
+`materialMap` before groups are created and before rendering computes PBR
+features. The GLB regression checks that feature bit, the same array across
+keyframes, interpolation, `_uboVersion` and production material-UBO writes.
+The animated factor also follows single alpha ownership: its uniform stores
+`[r, g, b, 1]`, while BLEND/MASK store the current keyframe/interpolated alpha in
+`material.alpha`. OPAQUE keeps that property absent and ignores factor alpha.
+The pointer writer updates the existing factor array and material alpha together,
+then increments `_uboVersion` once.
+
+`animation-pointer-basecolor.ts` supplies a white fallback for an untextured
+animated factor. It saves the original RGB and BLEND/MASK alpha in the extension
+layer before replacing the parsed factor with white, so neither the initial load
+nor subsequent frames double the color or reset opacity. Missing textured slots
+are likewise seeded with alpha 1 rather than the source alpha.
+
+The real-GLB tests cover PNG, KTX2 and untextured fallback, OPAQUE/BLEND/MASK,
+colored/white initial RGB, load-time values, keyframes and interpolation. Factor
+alpha visits 0, 0.5 and 1 without changing the RGB-slot identity or bypassing the
+production UBO writer. They qualify CPU state only, not rendered pixels.
+
 ORM packing follows glTF convention:
 
 - **R** = Ambient Occlusion

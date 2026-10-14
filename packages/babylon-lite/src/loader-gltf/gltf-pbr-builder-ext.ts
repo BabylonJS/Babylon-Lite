@@ -11,7 +11,7 @@ import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-group-builder.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
-import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
+import { getGltfBaseColorRgbFactor, uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
 
 export interface PbrTexturesExt {
     /** `undefined` only when `extLayers` supply the slot and it had no core image. */
@@ -189,6 +189,7 @@ export async function applyGltfUvTransform(props: PbrMaterialProps, tex: PbrText
  *  UV-transform and emissive are applied by the caller — see `applyGltfUvTransform`
  *  above and `needsGltfEmissive` in gltf-pbr-builder.ts. */
 export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
+    const baseColorFactor = mat._baseColorImage ? getGltfBaseColorRgbFactor(mat._baseColorFactor) : undefined;
     // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
     // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.
     // Bit literals are a private contract with createPbrTemplateExt's decode (baseColor=1, orm=2,
@@ -208,7 +209,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
         emissiveTexture: tex.emissiveTexture,
-        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
+        ...(baseColorFactor ? { baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._occlusionTexCoord ? { occlusionTexCoord: mat._occlusionTexCoord } : undefined),
@@ -225,8 +226,4 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         _uboVersion: 0,
     } as PbrMaterialProps;
     return props;
-}
-
-function isDefaultBaseColorFactor(f: readonly number[]): boolean {
-    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }

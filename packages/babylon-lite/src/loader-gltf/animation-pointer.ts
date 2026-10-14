@@ -37,6 +37,8 @@ export interface PointerMaterial {
     _emissiveColor?: [number, number, number];
     /** Runtime base-color factor (linear RGBA). */
     baseColorFactor?: [number, number, number, number];
+    /** BLEND/MASK factor opacity; absent on an OPAQUE glTF material. */
+    alpha?: number;
     roughnessFactor?: number;
     /** @internal Runtime dielectric F0 scale (KHR_materials_ior / _specular). */
     _metallicF0Factor?: number;
@@ -321,7 +323,10 @@ const _registry: [RegExp, PointerFactory][] = [
                     mat.baseColorFactor![0] = out[off]!;
                     mat.baseColorFactor![1] = out[off + 1]!;
                     mat.baseColorFactor![2] = out[off + 2]!;
-                    mat.baseColorFactor![3] = out[off + 3]!;
+                    mat.baseColorFactor![3] = 1;
+                    if (mat.alpha !== undefined) {
+                        mat.alpha = out[off + 3]!;
+                    }
                     mat._uboVersion++;
                 },
             };

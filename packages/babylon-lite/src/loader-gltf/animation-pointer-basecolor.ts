@@ -28,13 +28,14 @@ export function collectBaseColorDefs(json: any): void {
 /** For an UNTEXTURED material whose baseColorFactor is animated, the loader would bake the
  *  (initial) factor into the 1×1 base-colour fallback AND multiply the animated factor in
  *  the shader — doubling colour and alpha. Bake a WHITE fallback instead and route the
- *  factor through the (animatable) baseColorFactor uniform. */
+ *  RGB through the (animatable) baseColorFactor uniform, with alpha owned by the
+ *  BLEND/MASK material rather than the texture or factor uniform. */
 export function whiteFallback(mat: GltfMaterialData): Partial<PbrMaterialProps> | null {
     if (mat._rawMatDef && _animBaseColorDefs?.has(mat._rawMatDef) && !mat._baseColorImage) {
         const f = mat._baseColorFactor;
-        const real: [number, number, number, number] = [f[0]!, f[1]!, f[2]!, f[3]!];
+        const real: [number, number, number, number] = [f[0]!, f[1]!, f[2]!, 1];
         mat._baseColorFactor = [1, 1, 1, 1];
-        return { baseColorFactor: real };
+        return { baseColorFactor: real, ...(mat._alphaMode === "BLEND" || mat._alphaMode === "MASK" ? { alpha: f[3] } : undefined) };
     }
     return null;
 }
