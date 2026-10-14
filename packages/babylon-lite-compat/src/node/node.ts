@@ -130,7 +130,6 @@ export interface IAccessibilityTag {
     description?: string;
     eventHandler?: { [K in keyof HTMLElementEventMap]: (event?: Event) => void };
     role?: AccessibilityRole;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exact Babylon.js public declaration
     aria?: { [K in AccessibilityAria]: any };
 }
 
@@ -220,9 +219,7 @@ export abstract class Node {
 
     /** @internal Translate the Babylon.js tag into Lite's metadata-only shape. */
     private _toLiteAccessibilityTag(value: IAccessibilityTag): AccessibilityTag {
-        const aria = value.aria
-            ? Object.fromEntries(Object.entries(value.aria).map(([key, entry]) => [key, toLiteAriaValue(entry)]))
-            : undefined;
+        const aria = value.aria ? Object.fromEntries(Object.entries(value.aria).map(([key, entry]) => [key, toLiteAriaValue(entry)])) : undefined;
         return {
             description: value.description,
             role: value.role,
