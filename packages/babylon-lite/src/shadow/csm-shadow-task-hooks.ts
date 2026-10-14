@@ -69,9 +69,9 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
-    /** @internal Camera the cascades were last fit against. A replacement camera can report the same
-     *  change key, so identity is part of the refit key. */
-    _lastCamera?: Camera;
+    /** @internal Camera the cascades were last fit for. `_lastCamVersion` sums counters kept on each camera, so two
+     *  cameras can share it: a camera swap is detected by identity. */
+    _lastCamera: Camera | null;
     /** @internal Effective aspect ratio the cascades were last fit against. */
     _lastCamAspect: number;
     /** @internal */
@@ -244,6 +244,7 @@ export function ensureCsmShadowTaskState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamera: null,
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
