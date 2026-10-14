@@ -21,8 +21,12 @@ import type { SpriteLayerFx } from "./custom-shader-core.js";
 
 /** @internal Opaque instance-layout extension owned by an opt-in sprite module. */
 export interface SpriteVertexExtension {
+    /** @internal Identity of the module that owns this extension. */
+    readonly _owner: object;
     /** @internal */
     readonly _key: string;
+    /** @internal Shader identity independent of the instance-buffer attribute offset. */
+    readonly _shaderKey: string;
     /** @internal */
     readonly _attribute: GPUVertexAttribute;
     /** @internal */

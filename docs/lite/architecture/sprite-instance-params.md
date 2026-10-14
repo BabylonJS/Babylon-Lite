@@ -25,9 +25,13 @@ function setSprite2DInstanceParams(handle: Sprite2DHandle, params: Sprite2DInsta
 ```
 
 Enable explicitly during setup, after creating a layer with `customShader` and
-before rendering its fragment's first use of `in.instanceParams`. Enabling a
-non-custom layer throws. Repeated enable calls are idempotent. Existing instances
-receive `[0, 0, 0, 0]`; newly added instances also start at zero.
+before rendering its fragment's first use of `in.instanceParams`. For depth-hosted
+layers, enable before `addDepthHostedSpriteLayer`; changing their layout after
+registration is unsupported because their draw bindings cache the pipeline.
+Only the pure-2D `SpriteRenderer` supports enabling after earlier frames.
+Enabling a non-custom layer or a layer with a different vertex extension throws.
+Repeated calls for this extension are idempotent. Existing and new instances
+receive `[0, 0, 0, 0]`.
 
 Setters require an enabled layer, a live integer index (or a live stable handle),
 exactly four components, and values finite after Float32 conversion. Invalid
@@ -46,8 +50,11 @@ The tree-shakable `sprite-2d-instance-params.ts` enabler owns all parameter
 semantics, validation, attribute construction and WGSL extension text.
 
 The optional internal `layer._vertexExtension` is absent on ordinary layers.
-It contains an opaque pipeline key, one precomputed `GPUVertexAttribute`, vertex
-input/output/assignment text, and an instance-initialization callback. Core code
+It contains an owner identity, separate pipeline and shader keys, one precomputed
+`GPUVertexAttribute`, vertex input/output/assignment text, and an
+instance-initialization callback. This module uses its enabler function as the
+owner identity: enable and setters reject a descriptor owned by another extension,
+before changing data, layout or dirty state. Core code
 only consumes this data or calls the optional callback on insertion. Public
 declaration trimming removes the internal descriptor and all GPU types.
 
@@ -84,15 +91,19 @@ There is no new draw, buffer binding, texture or UBO. The sprite FX hook supplie
 the optional precomputed attribute to the existing pipeline builder; the
 ordinary pipeline has no extra attribute.
 
-The custom pipeline key and per-device custom shader module key incorporate the
-opaque extension key, including the attribute offset. Depth and UV-scroll
-permutations remain distinct. Layer-wide shader descriptors may be shared by
-enabled and non-enabled layers without mutating the descriptor.
+The custom pipeline key incorporates the opaque extension key, including the
+attribute offset. The per-device shader module key uses the extension's shader
+identity, not its buffer offset: both UV enable orders share identical WGSL and
+therefore share a shader module, while retaining separate pipelines. Depth,
+UV-scroll and extension shader permutations remain distinct. Layer-wide shader
+descriptors may be shared without mutating the descriptor.
 
-Both SpriteRenderer and depth-hosted renderables already resolve the pipeline
-per target, grow GPU buffers by required byte size, and upload full records after
-reallocation. Their existing pipeline/buffer invalidation covers late enabling.
-No renderer-specific parameter branch is introduced.
+Both paths grow GPU buffers by required byte size and upload full records after
+reallocation. The pure-2D SpriteRenderer resolves its pipeline each frame, so late
+enablement replaces the buffer and pipeline and re-records its render bundle.
+Depth-hosted bindings resolve their pipeline only when the frame graph rebuilds;
+enable both layout extensions during setup before adding the layer to the scene.
+No renderer-specific parameter branch or new depth-hosted invalidation is added.
 
 ## Shader Logic
 
@@ -160,11 +171,16 @@ No scene back-reference, import-time registry mutation or GPU allocation.
 - Handle swap-remove and stale-handle errors; Y-sort packed identity.
 - Atomic validation failures; repeated setters reuse storage with no typed-array
   allocation/view creation; bounded dirty uploads and no unchanged-frame upload.
-- Pipeline/module separation for shared custom descriptors; location 8 vec4,
-  flat location 2 varying; device-keyed recompilation and buffer replacement.
-- CI GPU witness: two instances with identical RGBA/UV and different vec4 values
-  produce distinct expected pixels for pure 2D and depth-hosted paths. Parameter
-  transport mutations must break the witness.
+- Reject foreign vertex-extension ownership without layout/data/dirty mutation.
+- Distinct pipelines but shared modules for identical WGSL across UV enable orders;
+  location 8 vec4, flat location 2 varying; device-keyed recompilation.
+- Pure-2D late enablement: capacity-sized 68-byte records replace the old buffer,
+  switch pipelines and re-record the render bundle without steady-state churn.
+- CI GPU witness: two non-black instances with identical non-white RGBA/UV and
+  different vec4 values produce expected pixels. UV contributes to a pixel channel,
+  so its attribute offset is observable in both enable orders. Missing the first
+  instance, zeroing parameters, using tint as parameters or misaddressing UV must
+  independently break the witness.
 - Focused bundle ceilings and absence of the enabler in ordinary scenes.
 - Qualified CI/user performance evidence for allocation, dirty bytes and buffer
   size. Agents do not run local performance or visual/parity campaigns.
@@ -173,10 +189,12 @@ No scene back-reference, import-time registry mutation or GPU allocation.
 production pipeline builder, instance-buffer widening and dirty uploader on a
 real WebGPU device. It reads an offscreen RGBA8 render target directly, without
 screenshots or new goldens, for all three depth modes and all three UV enable
-orders (none, before parameters, after parameters). Identical tint/UV instances
-carry distinct vec4 values; two samples per quad verify the expected output.
-Counterfactuals independently zero the varying or fetch the tint attribute as
-parameters; both must change the witness pixels without GPU validation errors.
+orders (none, before parameters, after parameters). Identical non-white tint/UV
+instances carry distinct, non-black vec4 values. The fragment adds weighted UV to
+the blue channel; opaque blending preserves all four output channels. Independent
+pixel-center calculations verify two samples per quad. Counterfactuals zero the
+varying, fetch tint as parameters, omit the first instance, or fetch parameters as
+UV. Each must change the pixels without GPU validation errors.
 
 The same CI witness measures exact CPU/GPU buffer sizes, full versus coalesced
 single-record dirty writes, and no writes on unchanged frames. It instruments

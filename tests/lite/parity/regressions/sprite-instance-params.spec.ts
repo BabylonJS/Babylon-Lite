@@ -49,10 +49,12 @@ for (const depth of ["none", "test", "test-write"] as const) {
                         invokeWrite(buffer, offset, data, dataOffset, size);
                     };
                     try {
-                        const shader = lite.createSprite2DCustomShader({ fragment: "return in.instanceParams * in.tint;" });
-                        const layer = lite.createSprite2DLayer(atlas, { depth, capacity: 2, customShader: shader });
-                        lite.addSprite2DIndex(layer, { positionPx: [16, 16], sizePx: [32, 32], z: 0.5 });
-                        lite.addSprite2DIndex(layer, { positionPx: [48, 16], sizePx: [32, 32], z: 0.5 });
+                        const shader = lite.createSprite2DCustomShader({
+                            fragment: "return in.instanceParams * in.tint + vec4f(0, 0, in.uv.x * 0.125 + in.uv.y * 0.25, 0);",
+                        });
+                        const layer = lite.createSprite2DLayer(atlas, { depth, capacity: 2, customShader: shader, blendMode: lite.spriteBlendOpaque });
+                        lite.addSprite2DIndex(layer, { positionPx: [16, 16], sizePx: [32, 32], color: [0.5, 0.75, 0.5, 0.5], z: 0.5 });
+                        lite.addSprite2DIndex(layer, { positionPx: [48, 16], sizePx: [32, 32], color: [0.5, 0.75, 0.5, 0.5], z: 0.5 });
                         const oldBuffer = helpers.createSpriteInstanceBuffer(device, layer);
                         resources.push(oldBuffer);
                         if (uvOrder === "before") {
@@ -64,8 +66,8 @@ for (const depth of ["none", "test", "test-write"] as const) {
                             lite.setSprite2DUvOffset(layer, 0, [0.25, 0.5]);
                             lite.setSprite2DUvOffset(layer, 1, [0.25, 0.5]);
                         }
-                        lite.setSprite2DInstanceParamsIndex(layer, 0, [0, 0, 0, 1]);
-                        const values = new NativeF32([1, 0.5, 0, 0.5]);
+                        lite.setSprite2DInstanceParamsIndex(layer, 0, [0.5, 0.25, 0.5, 0.5]);
+                        const values = new NativeF32([1, 0.5, 1, 1]);
                         lite.setSprite2DInstanceParamsIndex(layer, 1, values);
                         const grown = helpers.ensureSpriteInstanceBuffer(device, layer, oldBuffer, 2);
                         instanceBuffer = grown.buffer;
@@ -105,14 +107,21 @@ for (const depth of ["none", "test", "test-write"] as const) {
                         const cache = helpers.createSpritePipelineCache();
                         const sceneLayout = device.createBindGroupLayout({ entries: [] });
                         const originalExtension = layer._vertexExtension!;
+                        const originalUvAttribute = layer._uvScrollAttr;
                         const pixels: number[][][] = [];
-                        for (const mutation of ["none", "zero-varying", "color-offset"]) {
+                        const mutations = ["none", "zero-varying", "color-offset", "missing-first-instance"];
+                        if (originalUvAttribute) {
+                            mutations.push("uv-offset");
+                        }
+                        for (const mutation of mutations) {
                             layer._vertexExtension = {
                                 ...originalExtension,
                                 _key: originalExtension._key + mutation,
+                                _shaderKey: originalExtension._shaderKey + (mutation === "zero-varying" ? ":zero" : ""),
                                 _assignment: mutation === "zero-varying" ? "out.instanceParams = vec4f(0);" : originalExtension._assignment,
                                 _attribute: mutation === "color-offset" ? { ...originalExtension._attribute, offset: 36 } : originalExtension._attribute,
                             };
+                            layer._uvScrollAttr = mutation === "uv-offset" ? { ...originalUvAttribute!, offset: originalExtension._attribute.offset } : originalUvAttribute;
                             device.pushErrorScope("validation");
                             const pipeline = helpers.getOrCreateSpritePipeline(
                                 engine,
@@ -152,7 +161,7 @@ for (const depth of ["none", "test", "test-write"] as const) {
                             pass.setBindGroup(depth === "none" ? 0 : 1, bindGroup);
                             pass.setVertexBuffer(0, instanceBuffer);
                             pass.setIndexBuffer(indices, "uint16");
-                            pass.drawIndexed(6, 2);
+                            pass.drawIndexed(6, mutation === "missing-first-instance" ? 1 : 2, 0, 0, mutation === "missing-first-instance" ? 1 : 0);
                             pass.end();
                             encoder.copyTextureToBuffer({ texture: output }, { buffer: readback, bytesPerRow: 256 }, [64, 32]);
                             device.queue.submit([encoder.finish()]);
@@ -191,19 +200,22 @@ for (const depth of ["none", "test", "test-write"] as const) {
                 },
                 { liteUrl, pipelineUrl, depth, uvOrder }
             );
-            const expected = [
-                [0, 0, 0, 255],
-                [0, 0, 0, 255],
-                [128, 64, 0, 255],
-                [128, 64, 0, 255],
-            ];
+            // Independent pixel-center UVs: quads occupy x=[0,32] and [32,64], y=[0,32].
+            const expected = [8, 24, 40, 56].map((x) => {
+                const u = ((x % 32) + 0.5) / 32 + (uvOrder === "none" ? 0 : 0.25);
+                const v = 16.5 / 32 + (uvOrder === "none" ? 0 : 0.5);
+                const multiplier = x < 32 ? 0.5 : 1;
+                return [0.5 * multiplier, 0.375 * multiplier, 0.5 * multiplier + u * 0.125 + v * 0.25, 0.5 * multiplier].map((channel) => Math.round(channel * 255));
+            });
             for (let pixel = 0; pixel < expected.length; pixel++) {
                 for (let channel = 0; channel < 4; channel++) {
                     expect(Math.abs(result.pixels[0]![pixel]![channel]! - expected[pixel]![channel]!)).toBeLessThanOrEqual(1);
                 }
             }
-            expect(result.pixels[1]).not.toEqual(result.pixels[0]);
-            expect(result.pixels[2]).not.toEqual(result.pixels[0]);
+            expect(result.pixels).toHaveLength(uvOrder === "none" ? 4 : 5);
+            for (const mutant of result.pixels.slice(1)) {
+                expect(mutant).not.toEqual(result.pixels[0]);
+            }
             expect(result.reallocated).toBe(true);
             expect(result.stagingRetained).toBe(true);
             const stride = (depth === "none" ? 13 : 14) * 4 + 16 + (uvOrder === "none" ? 0 : 8);

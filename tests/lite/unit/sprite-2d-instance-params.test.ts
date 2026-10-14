@@ -87,6 +87,25 @@ describe("Sprite2D instance parameters", () => {
         expect(layer._instanceData.byteLength).toBe(2 * 68);
     });
 
+    it("rejects a foreign extension before changing layout, data or dirty state", () => {
+        const donor = customLayer();
+        enableSprite2DInstanceParams(donor);
+        const layer = customLayer();
+        addSprite2DIndex(layer, { positionPx: [10, 20] });
+        const extension = { ...donor._vertexExtension!, _owner: {} };
+        layer._vertexExtension = extension;
+        const data = layer._instanceData;
+        const before = data.slice();
+        const dirtyBefore = [layer._version, layer._dirtyMin, layer._dirtyMax];
+        expect(() => enableSprite2DInstanceParams(layer)).toThrow(/another instance extension/);
+        expect(() => setSprite2DInstanceParamsIndex(layer, 0, [1, 2, 3, 4])).toThrow(/called first/);
+        expect(layer._vertexExtension).toBe(extension);
+        expect(layer._instanceData).toBe(data);
+        expect(layer._instanceData).toEqual(before);
+        expect(layer._instanceStrideBytes).toBe(52);
+        expect([layer._version, layer._dirtyMin, layer._dirtyMax]).toEqual(dirtyBefore);
+    });
+
     it("copies and Float32-rounds values without changing color, UV, Z or caller storage", () => {
         const layer = customLayer("test");
         addSprite2DIndex(layer, { positionPx: [0, 0], color: [0.25, 0.5, 0.75, 1], z: 0.4 });

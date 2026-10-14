@@ -147,7 +147,7 @@ export function createSprite2DCustomShader(options: Sprite2DCustomShaderOptions)
         // `spriteGroupIndex = hasDepth ? 1 : 0`: depth-hosted layers put the scene UBO at group 0, so the
         // sprite resources (atlas, extras, fx) shift to group 1; pure-2D layers keep them at group 0.
         _getShaderModule: (engine, hasDepth, uvScroll, extension) =>
-            moduleCache(engine, `${hasDepth ? "1" : "0"}:${uvScroll ? "u" : "-"}:${extension?._key ?? ""}`, () =>
+            moduleCache(engine, `${hasDepth ? "1" : "0"}:${uvScroll ? "u" : "-"}:${extension?._shaderKey ?? ""}`, () =>
                 makeCustomSpriteWgsl(hasDepth, hasDepth ? 1 : 0, extraTextures, fragment, uvScroll, extension)
             ),
         _layoutEntries: (startBinding) => makeCustomShaderLayoutEntries(extraTextures, startBinding),

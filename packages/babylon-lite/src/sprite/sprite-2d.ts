@@ -130,9 +130,9 @@ export interface Sprite2DLayer {
 
     /** @internal Capacity of the per-instance buffer (in sprites). */
     _capacity: number;
-    /** @internal Per-instance stride in floats; 13 for pure-2D, 14 for depth-hosted. */
+    /** @internal Per-instance stride in floats; base 13/14 plus enabled extensions. */
     _instanceFloatsPerSprite: number;
-    /** @internal Per-instance stride in bytes; 52 for pure-2D, 56 for depth-hosted. */
+    /** @internal Per-instance stride in bytes; base 52/56 plus enabled extensions. */
     _instanceStrideBytes: number;
     /** @internal Per-instance CPU staging buffer; layout = `_instanceFloatsPerSprite` per sprite. */
     _instanceData: Float32Array;
@@ -234,12 +234,15 @@ export interface Sprite2DProps {
  * ```
  *
  * The opt-in per-sprite UV-scroll feature (`setSprite2DUvOffset`, see `sprite-2d-uvscroll.ts`)
- * appends two more floats (`uvOffset.xy`) *after* the base layout, orthogonally to depth:
+ * appends two more floats (`uvOffset.xy`) after the current layout, orthogonally to depth.
+ * Without instance parameters:
  * ```
  *   pure-2D + uvScroll  (15 floats = 60 bytes):  [13..14] uvOffset.xy (float32x2 @ offset 52)
  *   depth   + uvScroll  (16 floats = 64 bytes):  [14..15] uvOffset.xy (float32x2 @ offset 56)
  * ```
- * The depth Z stays at slot [13]; uvOffset is appended after it. Non-scroll layers carry no
+ * With instance parameters enabled first, UV starts at byte offset 68/72 and the combined
+ * stride is 76/80 bytes. If UV is enabled first, its offset stays 52/56 and parameters append
+ * after it. `_uvScrollAttr.offset` is authoritative. Depth Z stays at slot [13]. Non-scroll layers carry no
  * uvOffset slot and ship none of the widening (the wide layout lives entirely in the opt-in module).
  *
  * Visibility (`visible: false`) is implemented by zeroing slots [2..3]; the sprite's true

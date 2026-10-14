@@ -13,17 +13,24 @@ export type Sprite2DInstanceParams = readonly [number, number, number, number] |
  * Enable per-instance parameters on a custom-shader layer. Existing and newly added sprites
  * start at zero. Idempotent; ordinary layers retain their layout until explicitly enabled.
  * The engine transports these values without interpreting them or changing color, UV or depth.
+ * Enable depth-hosted layers before `addDepthHostedSpriteLayer`. Late enablement is supported
+ * only by the pure-2D SpriteRenderer, which refreshes its pipeline each frame.
  */
 export function enableSprite2DInstanceParams(layer: Sprite2DLayer): void {
     if (!layer.customShader) {
         throw new Error("enableSprite2DInstanceParams: layer requires a customShader.");
     }
     if (layer._vertexExtension) {
-        return;
+        if (layer._vertexExtension._owner === enableSprite2DInstanceParams) {
+            return;
+        }
+        throw new Error("enableSprite2DInstanceParams: another instance extension is already installed.");
     }
     const offset = _appendSprite2DInstanceData(layer, 4);
     layer._vertexExtension = {
+        _owner: enableSprite2DInstanceParams,
         _key: `:ip${offset}`,
+        _shaderKey: "instance-params",
         _attribute: { shaderLocation: 8, offset: offset * 4, format: "float32x4" },
         _input: wgsl`,@location(8) instanceParams: vec4f`,
         _output: wgsl`@location(2) @interpolate(flat) instanceParams: vec4f,`,
@@ -43,7 +50,7 @@ export function enableSprite2DInstanceParams(layer: Sprite2DLayer): void {
  */
 export function setSprite2DInstanceParamsIndex(layer: Sprite2DLayer, index: number, params: Sprite2DInstanceParams): void {
     const extension = layer._vertexExtension;
-    if (!extension) {
+    if (extension?._owner !== enableSprite2DInstanceParams) {
         throw new Error("setSprite2DInstanceParamsIndex: enableSprite2DInstanceParams must be called first.");
     }
     if (!Number.isInteger(index) || index < 0 || index >= layer.count) {

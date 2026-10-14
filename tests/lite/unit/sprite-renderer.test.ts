@@ -51,9 +51,9 @@ import { getRenderingContextKind, type EngineContext } from "../../../packages/b
 // ── Mock GPU device ───────────────────────────────────────────────
 
 interface MockBuffer {
-    destroy: ReturnType<typeof vi.fn>;
-    getMappedRange: ReturnType<typeof vi.fn>;
-    unmap: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn<() => undefined>>;
+    getMappedRange: ReturnType<typeof vi.fn<() => ArrayBuffer>>;
+    unmap: ReturnType<typeof vi.fn<() => undefined>>;
     _destroyed: boolean;
 }
 
@@ -73,9 +73,10 @@ function mockBuffer(counters: MockCounters): MockBuffer {
                 buf._destroyed = true;
                 counters.buffersDestroyed++;
             }
+            return undefined;
         }),
         getMappedRange: vi.fn(() => new ArrayBuffer(64)),
-        unmap: vi.fn(),
+        unmap: vi.fn(() => undefined),
     };
     return buf;
 }
@@ -727,7 +728,7 @@ describe("Sprite2D instance-parameter pipeline", () => {
         setSprite2DUvOffset(layers[3]!, 0, [0.25, 0.5]);
         const pipelines = layers.map((layer) => getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer));
         expect(new Set(pipelines).size).toBe(4);
-        expect(counters.shaderModules).toBe(4);
+        expect(counters.shaderModules).toBe(3);
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const layouts = device.createRenderPipeline.mock.calls.map((call) => ((call[0] as GPURenderPipelineDescriptor).vertex.buffers as GPUVertexBufferLayout[])[0]!);
         expect(layouts.map((layout) => layout.arrayStride)).toEqual([52, 68, 76, 76]);
@@ -740,7 +741,64 @@ describe("Sprite2D instance-parameter pipeline", () => {
         expect(codes[1]).toContain("out.instanceParams = in.instanceParams;");
         expect(shader._composeWgsl(false, 0, false)).not.toContain("instanceParams");
         expect(getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layers[1]!)).toBe(pipelines[1]);
-        expect(counters.shaderModules).toBe(4);
+        expect(counters.shaderModules).toBe(3);
+    });
+
+    it("replaces the buffer and pipeline and re-records the bundle when enabled after a pure-2D frame", () => {
+        const { engine, counters } = makeMockEngine();
+        vi.mocked(engine._device.createBuffer, { partial: true }).mockImplementation((descriptor) => Object.assign(mockBuffer(counters), { size: descriptor.size }));
+        const bundleEncoder = {
+            setIndexBuffer: vi.fn(),
+            setPipeline: vi.fn<(pipeline: GPURenderPipeline) => void>(),
+            setBindGroup: vi.fn(),
+            setVertexBuffer: vi.fn<(slot: number, buffer: GPUBuffer) => void>(),
+            drawIndexed: vi.fn(),
+            finish: vi.fn(() => ({}) as GPURenderBundle),
+        };
+        const createBundleEncoder = vi.fn(() => bundleEncoder);
+        Object.assign(engine._device, { createRenderBundleEncoder: createBundleEncoder });
+        Object.assign(engine._currentEncoder, { beginRenderPass: vi.fn(() => ({ executeBundles: vi.fn(), end: vi.fn() })) });
+        const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 2, customShader: createSprite2DCustomShader({ fragment: "return in.tint;" }) });
+        addSprite2DIndex(layer, { positionPx: [10, 10] });
+        addSprite2DIndex(layer, { positionPx: [40, 10] });
+        const sr = createSpriteRenderer(engine, { layers: [layer] });
+        try {
+            sr._update();
+            sr._record();
+            const gpu = sr._layerGpu.get(layer)!;
+            const oldBuffer = gpu.instanceBuffer;
+            const oldPipeline = gpu.pipeline;
+            const oldBundle = gpu.renderBundle;
+            expect(oldBuffer.size).toBe(2 * 52);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(1);
+
+            enableSprite2DInstanceParams(layer);
+            sr._update();
+            expect(oldBuffer.destroy).toHaveBeenCalledOnce();
+            expect(gpu.instanceBuffer).not.toBe(oldBuffer);
+            expect(gpu.instanceBuffer.size).toBe(2 * 68);
+            expect(gpu.renderBundle).toBeNull();
+            sr._record();
+            expect(gpu.pipeline).not.toBe(oldPipeline);
+            expect(gpu.renderBundle).not.toBe(oldBundle);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(2);
+            expect(bundleEncoder.setPipeline).toHaveBeenLastCalledWith(gpu.pipeline);
+            expect(bundleEncoder.setVertexBuffer).toHaveBeenLastCalledWith(0, gpu.instanceBuffer);
+            const descriptor = vi.mocked(engine._device.createRenderPipeline).mock.calls.at(-1)![0];
+            expect(Array.from(descriptor.vertex.buffers!)[0]!.arrayStride).toBe(68);
+
+            const buffers = counters.buffersCreated;
+            const pipelines = counters.pipelinesBuilt;
+            const bundle = gpu.renderBundle;
+            sr._update();
+            sr._record();
+            expect(counters.buffersCreated).toBe(buffers);
+            expect(counters.pipelinesBuilt).toBe(pipelines);
+            expect(gpu.renderBundle).toBe(bundle);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(2);
+        } finally {
+            disposeSpriteRenderer(sr);
+        }
     });
 
     it.each(["test", "test-write"] as const)("keeps Z and resource groups unchanged on %s layers", (depth) => {

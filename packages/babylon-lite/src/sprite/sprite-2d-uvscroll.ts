@@ -17,8 +17,9 @@
  * Unlike the create-time option it replaces, scroll is enabled **lazily on the first call**: the
  * layer is created and populated with the narrow layout, then the first `setSprite2DUvOffset`
  * widens the existing sprites in place (an O(count) re-stride) and flips it to the wide layout.
- * Calling it during setup (right after the first adds) is cheapest; calling it later is also safe —
- * the renderer reallocates the GPU instance buffer (its byte size grew) and re-uploads next frame.
+ * Calling it during setup (right after the first adds) is cheapest. Pure-2D SpriteRenderer layers
+ * also support late enablement: the renderer replaces the buffer and pipeline next frame.
+ * Depth-hosted layers must enable before `addDepthHostedSpriteLayer`, whose bindings cache pipelines.
  */
 import type { Sprite2DLayer } from "./sprite-2d.js";
 import { _markSprite2DDirty } from "./sprite-2d.js";
@@ -52,6 +53,7 @@ function ensureWide(layer: Sprite2DLayer): void {
  * two floats per sprite (re-striding existing sprites once) and flips it to the wide layout;
  * subsequent calls just write the offset. There is no create-time option — a layer is always
  * created narrow and opts into scroll the first time this setter is used.
+ * For depth-hosted layers, make the first call before `addDepthHostedSpriteLayer`.
  *
  * @param layer - The sprite layer to scroll.
  * @param index - Index of the sprite within the layer.
