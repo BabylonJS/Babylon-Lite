@@ -170,6 +170,8 @@ export abstract class Node {
     protected _disposed = false;
     /** @internal Babylon.js preserves the assigned tag object rather than returning Lite's immutable snapshot. */
     protected _accessibilityTag: IAccessibilityTag | null = null;
+    /** @internal Monotonic guard preventing a re-entrant observer assignment from being overwritten in Lite. */
+    private _accessibilityTagAssignment = 0;
 
     protected constructor(name: string, scene?: Scene) {
         this.name = name;
@@ -203,18 +205,29 @@ export abstract class Node {
                 "Lite's HTML-twin renderer does not expose an event-listener registration and disposal seam; adding one requires changing its existing DOM lifecycle."
             );
         }
+        const assignment = ++this._accessibilityTagAssignment;
         this._accessibilityTag = value;
         this.onAccessibilityTagChangedObservable.notifyObservers(value);
-        const source = this._accessibilitySource();
-        if (source) {
-            setAccessibilityTag(source, value ? this._toLiteAccessibilityTag(value) : null);
+        if (assignment === this._accessibilityTagAssignment) {
+            this._syncAccessibilityTag();
         }
     }
 
     /** @internal Resolve the plain Lite scene object owned by the concrete wrapper. */
-    private _accessibilitySource(): object | null {
+    protected _accessibilitySource(): object | null {
         const wrapper = this as unknown as { _node?: object; _lite?: object };
         return wrapper._node ?? wrapper._lite ?? null;
+    }
+
+    /** @internal Forward the current tag when a deferred wrapper acquires or changes its Lite source. */
+    protected _syncAccessibilityTag(previousSource?: object | null): void {
+        const source = this._accessibilitySource();
+        if (previousSource && previousSource !== source) {
+            setAccessibilityTag(previousSource, null);
+        }
+        if (source) {
+            setAccessibilityTag(source, this._accessibilityTag ? this._toLiteAccessibilityTag(this._accessibilityTag) : null);
+        }
     }
 
     /** @internal Translate the Babylon.js tag into Lite's metadata-only shape. */

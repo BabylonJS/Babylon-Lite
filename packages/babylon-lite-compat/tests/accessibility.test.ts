@@ -4,11 +4,16 @@ const { setAccessibilityTagMock } = vi.hoisted(() => ({
     setAccessibilityTagMock: vi.fn(),
 }));
 
-vi.mock("babylon-lite", async (importActual) => ({
-    ...(await importActual<typeof import("babylon-lite")>()),
-    setAccessibilityTag: setAccessibilityTagMock,
-}));
+vi.mock("babylon-lite", async (importActual) => {
+    const actual = await importActual<typeof import("babylon-lite")>();
+    setAccessibilityTagMock.mockImplementation(actual.setAccessibilityTag);
+    return {
+        ...actual,
+        setAccessibilityTag: setAccessibilityTagMock,
+    };
+});
 
+import { getAccessibilityTag } from "babylon-lite";
 import { LiteCompatError } from "../src/error";
 import type { IAccessibilityTag } from "../src/node/node";
 import { Node } from "../src/node/node";
@@ -85,5 +90,17 @@ describe("Node accessibility", () => {
         }).toThrow("Lite rejected metadata");
         expect(node.accessibilityTag).toBe(tag);
         expect(changes).toEqual([tag]);
+    });
+
+    it("does not let a superseded re-entrant assignment overwrite Lite metadata", () => {
+        const node = new BackedNode();
+        node.onAccessibilityTagChangedObservable.addOnce(() => {
+            node.accessibilityTag = null;
+        });
+
+        node.accessibilityTag = { description: "Superseded" };
+
+        expect(node.accessibilityTag).toBeNull();
+        expect(getAccessibilityTag(node._lite)).toBeNull();
     });
 });
