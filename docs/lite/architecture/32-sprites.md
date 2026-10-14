@@ -38,6 +38,11 @@
 
 ## Purpose
 
+The optional [Sprite2D instance-parameter extension](sprite-instance-params.md)
+adds a per-sprite flat vec4 input to custom fragments. It preserves ordinary
+layouts and keeps color, UV scroll, layer-wide shader parameters and depth
+independent.
+
 Lite's design rule is "build things on top of previous things." Sprites are
 2D quads. World-anchored ("2.5D") labels are 2D quads whose pixel position
 is computed each frame from a 3D anchor. Camera-facing world-sized
@@ -1102,7 +1107,8 @@ export function createBillboardCustomShader(options: BillboardCustomShaderOption
 ```
 
 The supplied `fragment` body has in scope: `in: VOut` (a 2D layer exposes `uv: vec2<f32>` and
-`tint: vec4<f32>`; a billboard additionally exposes `viewDist` / `worldPos`); the layer atlas as
+`tint: vec4<f32>`, plus flat `in.instanceParams: vec4<f32>` after
+`enableSprite2DInstanceParams`; a billboard additionally exposes `viewDist` / `worldPos`); the layer atlas as
 `atlasTex` / `atlasSamp` at bindings 1/2; each extra texture as `<name>Tex` / `<name>Samp`; the
 `fx` UBO (`fx.time`, `fx.params`); and the `L` layer UBO (e.g. `L.opacityMul`). It must
 `return vec4<f32>(...)` and may `discard`; the body owns all alpha handling (no per-layer opacity
@@ -1132,24 +1138,27 @@ contract.
 
 `uvScroll` is a **structural** opt-in, not a per-sprite value: enabling it changes the GPU data
 layout and the compiled shader, so it follows the same pay-for-use gate as `depth`. When a layer
-is created with `uvScroll: true`, every sprite gains two extra instance floats (`uvOffset.xy`)
+first calls `setSprite2DUvOffset`, every sprite gains two extra instance floats (`uvOffset.xy`)
 that are added to the sampled UV in the vertex stage — enabling parallax / infinite-scroll
 backgrounds without re-uploading texture coordinates. The offset is set per sprite via
-`Sprite2DProps.uvOffset` (on add) or `setSprite2DUvOffset(layer, index, uvOffset)` (live).
+`setSprite2DUvOffset(layer, index, uvOffset)`. Enable during setup before
+`addDepthHostedSpriteLayer` for depth-hosted layers; only the pure-2D SpriteRenderer
+supports late layout changes.
 
 Enabling the flag (1) widens the instance stride by two floats, (2) adds a
 `@location(7) iUvOffset: vec2<f32>` vertex attribute, (3) selects a distinct WGSL variant
 (`let uv = mix(...) + in.iUvOffset`), and (4) adds a `:uv${uvKey}` segment to the pipeline key so
-variants don't collide. The widening is orthogonal to depth and lands _after_ the base layout:
+variants don't collide. The widening is orthogonal to depth and appends to the
+current layout. Without instance parameters, its offsets are:
 
 ```text
 pure-2D + uvScroll  (15 floats = 60 bytes):  [13..14] uvOffset.xy (float32x2 @ byte offset 52)
 depth   + uvScroll  (16 floats = 64 bytes):  [14..15] uvOffset.xy (float32x2 @ byte offset 56)
 ```
 
-(Source constants: `PURE_2D_UVSCROLL_STRIDE_BYTES`, `DEPTH_UVSCROLL_STRIDE_BYTES`,
-`SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52`, `SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56`.) Layers
-created without `uvScroll` keep the narrow 13/14-float layout, the base attributes, and the base
+If instance parameters were enabled first, UV instead starts at byte offset 68/72;
+combined strides are 76/80 bytes. The precomputed `_uvScrollAttr.offset` is authoritative.
+Layers without either extension keep the narrow 13/14-float layout, the base attributes, and the base
 WGSL — they ship none of the widening. The feature pairs naturally with a tileable atlas sampled
 in `repeat` wrap mode
 (`loadSpriteAtlas(..., { textureOptions: { addressModeU: "repeat", addressModeV: "repeat" } })`).
@@ -1444,15 +1453,17 @@ frame `if (sprite.kind === ...)`. The two families have separate composers,
 separate renderables, separate WGSL. The unification happens at the
 **scene** layer, not at the sprite-shader layer. The `AnchorSource`
 projection is a CPU step on a sparse per-layer map; it writes into the
-owning layer's already-fixed instance layout (52 B for pure-2D, 56 B for
-depth-hosted).
+owning layer's base instance fields (52 B for pure-2D, 56 B for depth-hosted);
+optional extensions append fields without moving these base slots.
 
 ### Per-Instance GPU Layout
 
-`Sprite2DLayer` fixes its instance stride at creation from `depth`.
+`Sprite2DLayer` chooses its base instance stride at creation from `depth`.
 `depth: "none"` uses 52 bytes / 13 floats and has no Z lane. `depth:
 "test" | "test-write"` uses 56 bytes / 14 floats and exposes slot [13]
-as the per-instance depth attribute. Anchor data lives off-instance in a
+as the per-instance depth attribute. UV scroll and instance parameters append
+8 and 16 bytes respectively; see [instance parameters](sprite-instance-params.md)
+for both enable orders. Anchor data lives off-instance in a
 sparse JS map. Per-layer constants (view, screen size, pivot, opacity)
 live in a separate 48-byte UBO bound at `@group(0) @binding(0)` for the
 pure renderer and `@group(1) @binding(0)` for the depth-hosted scene
@@ -1479,14 +1490,18 @@ Depth-hosted layers use the same first 52 bytes, plus:
 
 #### Sprite2DLayer `uvScroll` extension (opt-in; +8 B = +2 floats)
 
-Layers created with `uvScroll: true` append two more floats (`uvOffset.xy`) _after_ the base
-layout, orthogonally to depth. The wider stride, the extra `@location(7)` attribute, and the
-`+ iUvOffset` WGSL are gated on the per-layer flag, so non-scroll scenes ship none of it.
+The first `setSprite2DUvOffset` appends two floats (`uvOffset.xy`) after the current
+layout, orthogonally to depth. The wider stride, `@location(7)` attribute and
+`+ iUvOffset` WGSL are gated on `_uvScrollAttr` presence. The base-only offsets are:
 
 | Layout               | Stride       | Slot     | Field      | Vertex attr          | Notes                                  |
 | -------------------- | ------------ | -------- | ---------- | -------------------- | -------------------------------------- |
 | pure-2D + `uvScroll` | 60 B / 15 fl | [13..14] | `uvOffset` | `@location(7)` f32×2 | `uvOffset.xy` at byte offset 52        |
 | depth + `uvScroll`   | 64 B / 16 fl | [14..15] | `uvOffset` | `@location(7)` f32×2 | base 56 B + `uvOffset.xy` at offset 56 |
+
+With parameters enabled first, the UV slots are [17..18]/[18..19], at offsets
+68/72; combined strides are 76/80 bytes. If UV is enabled first, its offsets stay
+52/56 and parameters append after it. Always use the descriptor's actual offset.
 
 The vertex stage adds `in.iUvOffset` to the sampled UV (`let uv = mix(uvMin, uvMax, corner) + in.iUvOffset`),
 and the pipeline key gains a `:uv${uvKey}` segment so scroll/non-scroll variants never collide.

@@ -1102,6 +1102,8 @@ export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisi
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
+export type { Sprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
+export { enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";

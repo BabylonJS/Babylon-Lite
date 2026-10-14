@@ -328,3 +328,63 @@ describe("glTF material textures displaced by a material feature", () => {
         expect(baseColor[0]!._hasUvTx).toBe(true);
     });
 });
+
+describe("glTF baseColorFactor on a KHR_texture_basisu base color", () => {
+    const FACTOR = [0.5, 0.25, 0.125, 0.75];
+    const RGB_ONLY = [0.5, 0.25, 0.125, 1];
+    const subject = (baseColorFactor: number[] | undefined, alphaMode?: "BLEND" | "MASK") => ({
+        ...(alphaMode ? { alphaMode } : {}),
+        pbrMetallicRoughness: { baseColorTexture: { index: 0 }, ...(baseColorFactor ? { baseColorFactor } : {}) },
+    });
+    const loadKtx2 = (baseColorFactor: number[] | undefined, alphaMode: "BLEND" | "MASK" | undefined, path: Path) =>
+        load({ extensionsUsed: [BASISU], subject: subject(baseColorFactor, alphaMode), textures: [ktx2(0)], images: ["ktx2"] }, path);
+
+    // The factor multiplies the base color texture, so a KTX2 texture must carry its RGB exactly like a
+    // decoded PNG does — the extension strips the textureInfo, so the core sees no base color image.
+    it.each(PATHS)("multiplies a non-default factor's RGB into the KTX2 texture like a PNG one (%s path)", async (path) => {
+        const { subjects: ktx2Subjects } = await loadKtx2(FACTOR, undefined, path);
+        const { subjects: pngSubjects } = await load({ extensionsUsed: [], subject: subject(FACTOR), textures: [png(0)], images: ["png"] }, path);
+
+        expect(pngSubjects[0]!.baseColorFactor?.slice(0, 3)).toEqual(RGB_ONLY.slice(0, 3));
+        expect(ktx2Subjects.length).toBeGreaterThan(0);
+        for (const material of ktx2Subjects) {
+            expect(material.baseColorTexture?.width).toBe(4);
+            // OPAQUE ignores alpha, so the factor alpha is not forwarded.
+            expect(material.baseColorFactor).toEqual(RGB_ONLY);
+        }
+    });
+
+    // The shader multiplies the factor alpha into the texel alpha and then by the material `alpha`,
+    // which BLEND/MASK already set to the factor alpha. Forwarding it in the factor too would square it.
+    it.each((["BLEND", "MASK"] as const).flatMap((mode) => PATHS.map((path) => [mode, path] as const)))(
+        "applies the factor alpha once, as the material alpha (%s, %s path)",
+        async (mode, path) => {
+            const { subjects } = await loadKtx2(FACTOR, mode, path);
+
+            expect(subjects.length).toBeGreaterThan(0);
+            for (const material of subjects) {
+                expect(material.alpha).toBe(0.75);
+                expect(material.baseColorFactor).toEqual(RGB_ONLY);
+            }
+        }
+    );
+
+    it.each(PATHS)("adds no factor for the default white (%s path)", async (path) => {
+        const { subjects } = await loadKtx2(undefined, undefined, path);
+
+        expect(subjects.length).toBeGreaterThan(0);
+        for (const material of subjects) {
+            expect(material.baseColorFactor).toBeUndefined();
+        }
+    });
+
+    it.each(PATHS)("adds no factor for a white RGB with a non-default alpha (%s path)", async (path) => {
+        const { subjects } = await loadKtx2([1, 1, 1, 0.5], "BLEND", path);
+
+        expect(subjects.length).toBeGreaterThan(0);
+        for (const material of subjects) {
+            expect(material.alpha).toBe(0.5);
+            expect(material.baseColorFactor).toBeUndefined();
+        }
+    });
+});
