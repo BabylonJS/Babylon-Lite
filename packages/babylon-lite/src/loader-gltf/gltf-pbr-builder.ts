@@ -112,6 +112,7 @@ export async function applyGltfOptInPbrFeatures(props: PbrMaterialProps, mat: Gl
         const { setPbrAlphaCutoff } = await import("../material/pbr/set-alpha-cutoff.js");
         setPbrAlphaCutoff(props, mat._alphaCutoff);
     }
+    mat._onMaterialCreated?.(props);
 }
 
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded

@@ -164,7 +164,9 @@ _installPointerHandlers((ptr, c, nodeMap, json, meshes) => {
         return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
     }
     // Only build the material map when a non-node pointer is actually present.
-    const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
+    const resolved = _BASE_COLOR_POINTER_RE.test(ptr)
+        ? _baseColorMod!.resolveBaseColorPointer(ptr, json)
+        : resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
     if (!resolved) {
         return null;
     }
@@ -231,10 +233,9 @@ const feature: GltfFeature = {
             _uvTransformMod = await import("../material/pbr/enable-material-uv-transform.js");
         }
     },
-    // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the
-    // factor isn't double-applied; the logic lives in the lazy base-color module loaded above.
+    // Prepare animated slots and track all built copies; untextured factors need white fallbacks.
     async applyMaterial(mat) {
-        return _baseColorMod?.whiteFallback(mat) ?? null;
+        return _baseColorMod?.prepareMaterial(mat) ?? null;
     },
 };
 export default feature;

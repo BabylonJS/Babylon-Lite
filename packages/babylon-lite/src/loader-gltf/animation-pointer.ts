@@ -70,6 +70,20 @@ export interface PointerMaterial {
     _animEmissiveStrength?: number;
 }
 
+export type BaseColorPointerMaterial = Pick<PointerMaterial, "_uboVersion" | "baseColorFactor" | "alpha">;
+
+/** Apply one base-color sample without sharing or modifying the raw glTF factor. */
+export function _writeBaseColorFactor(mat: BaseColorPointerMaterial, out: Float32Array, off: number): void {
+    mat.baseColorFactor![0] = out[off]!;
+    mat.baseColorFactor![1] = out[off + 1]!;
+    mat.baseColorFactor![2] = out[off + 2]!;
+    mat.baseColorFactor![3] = 1;
+    if (mat.alpha !== undefined) {
+        mat.alpha = out[off + 3]!;
+    }
+    mat._uboVersion++;
+}
+
 /** Recompute the emissive color = factor × strength after either input animates, then
  *  flag the material UBO for re-upload. */
 function applyEmissive(mat: PointerMaterial): void {
@@ -319,16 +333,7 @@ const _registry: [RegExp, PointerFactory][] = [
             }
             return {
                 arity: 4,
-                writer: (out, off) => {
-                    mat.baseColorFactor![0] = out[off]!;
-                    mat.baseColorFactor![1] = out[off + 1]!;
-                    mat.baseColorFactor![2] = out[off + 2]!;
-                    mat.baseColorFactor![3] = 1;
-                    if (mat.alpha !== undefined) {
-                        mat.alpha = out[off + 3]!;
-                    }
-                    mat._uboVersion++;
-                },
+                writer: (out, off) => _writeBaseColorFactor(mat, out, off),
             };
         },
     ],

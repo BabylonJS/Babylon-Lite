@@ -430,16 +430,27 @@ BLEND opacity, MASK cutoff and unlit PNG/KTX2/factor-only materials. These CPU
 tests do not replace GPU capture or scene parity qualification; reference images
 and thresholds remain unchanged.
 
-For a textured white-RGB material with an animated `baseColorFactor`,
-`gltf-feature-animation-pointer.ts` seeds the missing factor slot in
-`materialMap` before groups are created and before rendering computes PBR
-features. The GLB regression checks that feature bit, the same array across
-keyframes, interpolation, `_uboVersion` and production material-UBO writes.
+For every material with an animated `baseColorFactor`,
+`animation-pointer-basecolor.ts` supplies its factor slot during material
+assembly, including white RGB and materials used only by a variant. This runs
+before rendering computes PBR features. The GLB regression checks that feature
+bit, the same array across keyframes, interpolation, `_uboVersion` and production
+material-UBO writes.
 The animated factor also follows single alpha ownership: its uniform stores
 `[r, g, b, 1]`, while BLEND/MASK store the current keyframe/interpolated alpha in
 `material.alpha`. OPAQUE keeps that property absent and ignores factor alpha.
-The pointer writer updates the existing factor array and material alpha together,
-then increments `_uboVersion` once.
+The pointer writer updates each runtime copy's existing factor array and material
+alpha together, then increments that copy's `_uboVersion` once.
+
+Animated material definitions own weakly keyed groups of runtime material copies.
+The animation feature installs an optional `_onMaterialCreated` callback on parsed
+material data; the shared PBR post-assembly helper invokes it for both default and
+variant materials. Pointer channels capture the live group, not one default
+material. Variant assembly and animation parsing run concurrently, so the group
+may still be empty when a variant-only pointer resolves and fills before the
+loaded asset is returned. Subsequent selection uses the current animated values,
+and an already-selected copy receives UBO invalidation on every animation write.
+The raw glTF factor tuple is neither shared with runtime slots nor modified.
 
 `animation-pointer-basecolor.ts` supplies a white fallback for an untextured
 animated factor. It saves the original RGB and BLEND/MASK alpha in the extension
@@ -448,8 +459,9 @@ nor subsequent frames double the color or reset opacity. Missing textured slots
 are likewise seeded with alpha 1 rather than the source alpha.
 
 The real-GLB tests cover PNG, KTX2 and untextured fallback, OPAQUE/BLEND/MASK,
-colored/white initial RGB, load-time values, keyframes and interpolation. Factor
-alpha visits 0, 0.5 and 1 without changing the RGB-slot identity or bypassing the
+colored/white initial RGB, load-time values, keyframes and interpolation, including
+all runtime copies and actual variant selection before and after advancement.
+Factor alpha visits 0, 0.5 and 1 without changing the RGB-slot identity or bypassing the
 production UBO writer. They qualify CPU state only, not rendered pixels.
 
 ORM packing follows glTF convention:

@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container.js";
 import { goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { collectBaseColorDefs, prepareMaterial, resolveBaseColorPointer } from "../../../packages/babylon-lite/src/loader-gltf/animation-pointer-basecolor.js";
+import { assembleMaterial } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
+import { applyGltfOptInPbrFeatures, assemblePbrProps } from "../../../packages/babylon-lite/src/loader-gltf/gltf-pbr-builder.js";
 import { loadGltf } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf.js";
+import { resetVariant, selectVariant } from "../../../packages/babylon-lite/src/loader-gltf/material-variants.js";
 import { collectPbrBoundTextures } from "../../../packages/babylon-lite/src/material/pbr/collect-pbr-bound-textures.js";
 import { writeUnlitUBO } from "../../../packages/babylon-lite/src/material/pbr/fragments/unlit-fragment.js";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -74,6 +78,7 @@ interface Scenario {
     textures: Record<string, unknown>[];
     images: ("ktx2" | "png")[];
     baseColorAnimation?: readonly [readonly number[], readonly number[], ...(readonly number[][])];
+    subjectOnlyInVariants?: boolean;
 }
 
 function makeGlb(scenario: Scenario, path: Path): ArrayBuffer {
@@ -119,7 +124,7 @@ function makeGlb(scenario: Scenario, path: Path): ArrayBuffer {
             {
                 name: "mesh",
                 primitives: [
-                    { attributes, indices: 3, material: 0 },
+                    { attributes, indices: 3, material: scenario.subjectOnlyInVariants ? 1 : 0 },
                     {
                         attributes,
                         indices: 3,
@@ -253,6 +258,7 @@ async function load(
     unowned: string[];
     fallbackPixels: Map<GPUTexture, Uint8Array>;
     animationGroups: AssetContainer["animationGroups"];
+    container: AssetContainer;
 }> {
     const { engine, created, fallbackPixels } = makeMockEngine();
     const container = await loadGltf(engine, makeGlb(scenario, path));
@@ -267,6 +273,7 @@ async function load(
         unowned: created.filter(({ texture }) => !bound.has(texture)).map(({ label }) => label),
         fallbackPixels,
         animationGroups: container.animationGroups,
+        container,
     };
 }
 
@@ -610,7 +617,7 @@ describe("glTF animated white PNG retains its base-color uniform", () => {
     it.each((["BLEND", "MASK"] as const).flatMap((mode) => PATHS.map((path) => [mode, path] as const)))(
         "seeds the slot before rendering and updates its RGB (%s, %s path)",
         async (mode, path) => {
-            const { subjects, animationGroups } = await load(
+            const { subjects, animationGroups, container } = await load(
                 {
                     extensionsUsed: [],
                     subject: {
@@ -633,15 +640,17 @@ describe("glTF animated white PNG retains its base-color uniform", () => {
                 path
             );
 
-            const material = subjects[0]!;
-            expect(material.baseColorTexture?.width).toBe(IMAGE_SIZE);
-            expect(material.baseColorFactor).toBeDefined();
-            expect(_computePbrMaterialFeatures(material).features2 & PBR2_HAS_BASE_COLOR_FACTOR).toBe(PBR2_HAS_BASE_COLOR_FACTOR);
+            expect(subjects).toHaveLength(path === "variants" ? 2 : 1);
+            for (const material of subjects) {
+                expect(material.baseColorTexture?.width).toBe(IMAGE_SIZE);
+                expect(material.baseColorFactor).toBeDefined();
+                expect(_computePbrMaterialFeatures(material).features2 & PBR2_HAS_BASE_COLOR_FACTOR).toBe(PBR2_HAS_BASE_COLOR_FACTOR);
+            }
             expect(animationGroups).toHaveLength(1);
             const group = animationGroups![0]!;
             group.loopAnimation = false;
-            const factor = material.baseColorFactor;
-            const version = material._uboVersion;
+            const factors = subjects.map((material) => material.baseColorFactor);
+            const versions = subjects.map((material) => material._uboVersion);
             const spec = computeUboLayout([
                 { _name: "environmentIntensity", _type: "f32" },
                 { _name: "directIntensity", _type: "f32" },
@@ -657,28 +666,108 @@ describe("glTF animated white PNG retains its base-color uniform", () => {
                 [60, [0.5, 0.25, 0.125]],
             ] as const) {
                 goToFrame(group, frame);
-                expect(material.baseColorFactor).toBe(factor);
-                expect(material.baseColorFactor!.slice(0, 3)).toEqual(rgb);
-                _writeMaterialData(data, material, spec);
-                expect([...data.slice(offset, offset + 3)]).toEqual(rgb);
+                for (const [index, material] of subjects.entries()) {
+                    expect(material.baseColorFactor).toBe(factors[index]);
+                    expect(material.baseColorFactor!.slice(0, 3)).toEqual(rgb);
+                    _writeMaterialData(data, material, spec);
+                    expect([...data.slice(offset, offset + 3)]).toEqual(rgb);
+                }
+                if (path === "variants") {
+                    selectVariant(container, "subject");
+                    for (const entry of container.materialVariants!.variants.subject!) {
+                        const selected = subjects.find((material) => material === entry.mesh.material);
+                        expect(selected).toBe(entry.material);
+                        _writeMaterialData(data, selected!, spec);
+                        expect([...data.slice(offset, offset + 4)]).toEqual([...rgb, 1]);
+                        expect(data[3]).toBe(0.5);
+                    }
+                }
             }
-            expect(material._uboVersion).toBeGreaterThan(version);
+            subjects.forEach((material, index) => expect(material._uboVersion).toBeGreaterThan(versions[index]!));
         }
     );
 });
 
 describe("glTF animated base-color alpha is applied once", () => {
+    it("keeps the raw glTF factor unchanged while writing every runtime copy", async () => {
+        const factor: [number, number, number, number] = [0.5, 0.25, 0.125, 0.5];
+        const pointer = "/materials/0/pbrMetallicRoughness/baseColorFactor";
+        const json = {
+            materials: [{ alphaMode: "BLEND", pbrMetallicRoughness: { baseColorFactor: factor } }],
+            animations: [{ channels: [{ target: { extensions: { KHR_animation_pointer: { pointer } } } }] }],
+        };
+        collectBaseColorDefs(json);
+        const resolved = resolveBaseColorPointer(pointer, json)!;
+        const copies: PbrMaterialProps[] = [];
+        for (let i = 0; i < 2; i++) {
+            const parsed = await assembleMaterial(json, new DataView(new ArrayBuffer(0)), 0, "", []);
+            const layer = prepareMaterial(parsed)!;
+            const material = assemblePbrProps(parsed, undefined, undefined, undefined, undefined, layer);
+            await applyGltfOptInPbrFeatures(material, parsed);
+            copies.push(material);
+        }
+        resolved.writer(new Float32Array([0.25, 0.5, 0.75, 0]), 0);
+        expect(json.materials[0]!.pbrMetallicRoughness.baseColorFactor).toBe(factor);
+        expect(factor).toEqual([0.5, 0.25, 0.125, 0.5]);
+        expect(copies[0]!.baseColorFactor).not.toBe(copies[1]!.baseColorFactor);
+        for (const material of copies) {
+            expect(material.baseColorFactor).toEqual([0.25, 0.5, 0.75, 1]);
+            expect(material.alpha).toBe(0);
+            expect(material._uboVersion).toBe(1);
+        }
+    });
+
+    it("keeps runtime target groups isolated between loaded assets", async () => {
+        const scenario = (rgb: number[], alpha: number): Scenario => ({
+            extensionsUsed: [],
+            subject: { alphaMode: "BLEND", pbrMetallicRoughness: { baseColorFactor: [...rgb, alpha], baseColorTexture: { index: 0 } } },
+            textures: [png(0)],
+            images: ["png"],
+            baseColorAnimation: [
+                [...rgb, alpha],
+                [0.25, 0.5, 0.75, 0],
+            ],
+        });
+        const first = await load(scenario([0.5, 0.25, 0.125], 0.5), "variants");
+        const second = await load(scenario([1, 1, 1], 0.75), "variants");
+        const secondVersions = second.subjects.map((material) => material._uboVersion);
+        first.animationGroups![0]!.loopAnimation = false;
+        goToFrame(first.animationGroups![0]!, 60);
+        for (const material of first.subjects) {
+            expect(material.baseColorFactor).toEqual([0.25, 0.5, 0.75, 1]);
+            expect(material.alpha).toBe(0);
+        }
+        for (const [index, material] of second.subjects.entries()) {
+            expect(material.baseColorFactor).toEqual([1, 1, 1, 1]);
+            expect(material.alpha).toBe(0.75);
+            expect(material._uboVersion).toBe(secondVersions[index]);
+        }
+        const firstVersions = first.subjects.map((material) => material._uboVersion);
+        second.animationGroups![0]!.loopAnimation = false;
+        goToFrame(second.animationGroups![0]!, 60);
+        for (const [index, material] of first.subjects.entries()) {
+            expect(material._uboVersion).toBe(firstVersions[index]);
+        }
+        for (const material of second.subjects) {
+            expect(material.baseColorFactor).toEqual([0.25, 0.5, 0.75, 1]);
+            expect(material.alpha).toBe(0);
+        }
+    });
+
     const cases = (["PNG", "KTX2", "factor-only"] as const).flatMap((source) =>
         (["OPAQUE", "BLEND", "MASK"] as const).flatMap((mode) =>
             (["colored", "white"] as const).flatMap((initial) =>
-                (source === "factor-only" ? PATHS.filter((path) => path === "fast" || path === "variants") : PATHS).map((path) => [source, mode, initial, path] as const)
+                (source === "factor-only" ? PATHS.filter((path) => path === "fast" || path === "variants") : PATHS).flatMap((path) =>
+                    (path === "variants" ? [false, true] : [false]).map((subjectOnlyInVariants) => [source, mode, initial, path, subjectOnlyInVariants] as const)
+                )
             )
         )
     );
-    it.each(cases)("preserves alpha through load and interpolation (%s, %s, %s, %s path)", async (source, mode, initial, path) => {
+    it.each(cases)("preserves alpha through load and interpolation (%s, %s, %s, %s path, variant-only %s)", async (source, mode, initial, path, subjectOnlyInVariants) => {
         const initialRgb = initial === "colored" ? [0.5, 0.25, 0.125] : [1, 1, 1];
-        const { subjects, animationGroups, fallbackPixels, unowned } = await load(
+        const { subjects, animationGroups, fallbackPixels, unowned, container } = await load(
             {
+                subjectOnlyInVariants,
                 extensionsUsed: source === "KTX2" ? [BASISU] : [],
                 subject: {
                     alphaMode: mode,
@@ -707,21 +796,23 @@ describe("glTF animated base-color alpha is applied once", () => {
         );
 
         expect(unowned).toEqual([]);
-        const material = subjects[0]!;
-        expect(material.baseColorFactor).toEqual([...initialRgb, 1]);
-        expect(material.alpha).toBe(mode === "OPAQUE" ? undefined : 0.5);
-        expect(_computePbrMaterialFeatures(material).features2 & PBR2_HAS_BASE_COLOR_FACTOR).toBe(PBR2_HAS_BASE_COLOR_FACTOR);
-        expect(material.baseColorTexture?.width).toBe(source === "factor-only" ? 1 : source === "KTX2" ? 4 : IMAGE_SIZE);
-        if (source === "factor-only") {
-            expect([...fallbackPixels.get(material.baseColorTexture!.texture)!]).toEqual([255, 255, 255, 255]);
-        }
-        if (mode === "MASK") {
-            expect(material._alphaCutOff).toBe(0.3);
+        expect(subjects).toHaveLength(path === "variants" && !subjectOnlyInVariants ? 2 : 1);
+        for (const material of subjects) {
+            expect(material.baseColorFactor).toEqual([...initialRgb, 1]);
+            expect(material.alpha).toBe(mode === "OPAQUE" ? undefined : 0.5);
+            expect(_computePbrMaterialFeatures(material).features2 & PBR2_HAS_BASE_COLOR_FACTOR).toBe(PBR2_HAS_BASE_COLOR_FACTOR);
+            expect(material.baseColorTexture?.width).toBe(source === "factor-only" ? 1 : source === "KTX2" ? 4 : IMAGE_SIZE);
+            if (source === "factor-only") {
+                expect([...fallbackPixels.get(material.baseColorTexture!.texture)!]).toEqual([255, 255, 255, 255]);
+            }
+            if (mode === "MASK") {
+                expect(material._alphaCutOff).toBe(0.3);
+            }
         }
         expect(animationGroups).toHaveLength(1);
         const group = animationGroups![0]!;
         group.loopAnimation = false;
-        const factor = material.baseColorFactor;
+        const factors = subjects.map((material) => material.baseColorFactor);
         const spec = computeUboLayout([
             { _name: "environmentIntensity", _type: "f32" },
             { _name: "directIntensity", _type: "f32" },
@@ -731,8 +822,8 @@ describe("glTF animated base-color alpha is applied once", () => {
         ]);
         const data = new Float32Array(spec._totalBytes / 4);
         const offset = spec._offsets.get("baseColorFactor")! / 4;
-        const verify = (rgb: readonly number[], alpha: number) => {
-            expect(material.baseColorFactor).toBe(factor);
+        const verify = (material: PbrMaterialProps, rgb: readonly number[], alpha: number) => {
+            expect(material.baseColorFactor).toBe(factors[subjects.indexOf(material)]);
             expect(material.baseColorFactor).toEqual([...rgb, 1]);
             expect(material.alpha).toBe(mode === "OPAQUE" ? undefined : alpha);
             _writeMaterialData(data, material, spec);
@@ -745,7 +836,7 @@ describe("glTF animated base-color alpha is applied once", () => {
                 }
             }
         };
-        verify(initialRgb, 0.5);
+        subjects.forEach((material) => verify(material, initialRgb, 0.5));
         for (const [frame, rgb, alpha] of [
             [0, initialRgb, 0.5],
             [30, initialRgb.map((value, i) => (value + [0.25, 0.5, 0.75][i]!) / 2), 0.25],
@@ -753,10 +844,26 @@ describe("glTF animated base-color alpha is applied once", () => {
             [90, [0.625, 0.75, 0.875], 0.5],
             [120, [1, 1, 1], 1],
         ] as const) {
-            const version = material._uboVersion;
+            const versions = subjects.map((material) => material._uboVersion);
             goToFrame(group, frame);
-            verify(rgb, alpha);
-            expect(material._uboVersion).toBeGreaterThan(version);
+            for (const [index, material] of subjects.entries()) {
+                verify(material, rgb, alpha);
+                expect(material._uboVersion).toBeGreaterThan(versions[index]!);
+            }
+            if (path === "variants") {
+                selectVariant(container, "subject");
+                for (const entry of container.materialVariants!.variants.subject!) {
+                    const selected = subjects.find((material) => material === entry.mesh.material);
+                    expect(selected).toBe(entry.material);
+                    verify(selected!, rgb, alpha);
+                }
+            }
+        }
+        if (path === "variants") {
+            resetVariant(container);
+            for (const entry of container.materialVariants!.originals) {
+                expect(entry.mesh.material).toBe(entry.material);
+            }
         }
     });
 });
