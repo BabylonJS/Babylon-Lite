@@ -27,6 +27,7 @@ vi.mock("babylon-lite", async (importActual) => {
 
 import { ClusteredLightContainer } from "../src/lights/clustered-light-container";
 import { PointLight, DirectionalLight, SpotLight } from "../src/lights/lights";
+import { ShadowGenerator } from "../src/shadows/shadow-generator";
 import { Vector3 } from "../src/math/vector";
 import { Color3 } from "../src/math/color";
 import { NullEngine } from "../src/engine/engine";
@@ -45,6 +46,8 @@ function makeFakeScene(headless: boolean, id = "fake-scene"): { scene: Scene; re
         _registerLight: (l: object) => registered.push(l),
         _registerClusteredLightContainer: () => {},
         _unregisterClusteredLightContainer: () => {},
+        _registerShadowGenerator: () => {},
+        _registerBeforeRenderFlush: () => () => {},
         _unregisterNode: (n: object) => unregistered.push(n),
         getEngine: () => ({ _headless: headless }),
     } as unknown as Scene;
@@ -100,9 +103,13 @@ describe("ClusteredLightContainer.IsLightSupported", () => {
     });
 
     it("rejects point lights that already own a shadow generator", () => {
-        const point = new PointLight("p", new Vector3(1, 2, 3));
-        point._lite.shadowGenerator = {} as never;
+        const { scene } = makeFakeScene(false);
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        const shadowGenerator = new ShadowGenerator(1024, point);
         expect(ClusteredLightContainer.IsLightSupported(point)).toBe(false);
+
+        shadowGenerator.dispose();
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(true);
     });
 
     it("rejects point lights on a device-less engine", () => {

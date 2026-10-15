@@ -5,7 +5,13 @@
  * Babylon Lite `{ x, y, z, w }` quaternion shape used on transform nodes.
  */
 
-import { writeMat4FromQuatIntoBuffer, createQuatFromRotationMat4, writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "babylon-lite";
+import {
+    writeMat4FromQuatIntoBuffer,
+    createQuatFromRotationMat4,
+    writeMat4FromLookDirectionLHIntoBuffer,
+    writeMat4FromLookDirectionRHIntoBuffer,
+    writeQuatFromRotationMat4IntoRef,
+} from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
@@ -184,12 +190,7 @@ export class Quaternion {
     }
 
     private static _FromRotationStorageToRef<T extends Quaternion>(matrix: Float32Array, result: T): T {
-        const q = createQuatFromRotationMat4(matrix as unknown as Mat4);
-        result.x = q.x;
-        result.y = q.y;
-        result.z = q.z;
-        result.w = q.w;
-        return result;
+        return writeQuatFromRotationMat4IntoRef(matrix as unknown as Mat4, result);
     }
 
     public static FromEulerAngles(x: number, y: number, z: number): Quaternion {

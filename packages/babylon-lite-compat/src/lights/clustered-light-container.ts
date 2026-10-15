@@ -34,7 +34,7 @@ function isSupportedPointLight(light: Light): light is PointLight {
     if (light.getScene()?.getEngine()._headless) {
         return false;
     }
-    return light._lite.shadowGenerator === undefined;
+    return light._shadowGenerator === null && light._lite.shadowGenerator === undefined;
 }
 
 /**

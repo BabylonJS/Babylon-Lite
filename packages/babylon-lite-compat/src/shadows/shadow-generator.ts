@@ -72,6 +72,7 @@ export class ShadowGenerator {
     public constructor(mapSize: number, light: Light) {
         this._mapSize = mapSize;
         this._light = light;
+        light._shadowGenerator = this;
         const scene = light.getScene();
         if (scene) {
             scene._registerShadowGenerator(this);
@@ -209,6 +210,9 @@ export class ShadowGenerator {
         this._casterSyncDirty = false;
         this._liteGen = undefined;
         this._light._lite.shadowGenerator = undefined;
+        if (this._light._shadowGenerator === this) {
+            this._light._shadowGenerator = null;
+        }
     }
 
     /**
