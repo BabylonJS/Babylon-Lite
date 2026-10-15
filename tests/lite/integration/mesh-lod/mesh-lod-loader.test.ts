@@ -94,6 +94,29 @@ describe("loadMeshLoD — pinned residency", () => {
 });
 
 describe("loadMeshLoD — group-page membership", () => {
+    for (const pinned of [true, false]) {
+        it.each([32, 36])("rejects a CRC-resealed stream offset at page-table field %s before decode/upload (pinned=" + pinned + ")", async (field) => {
+            const bytes = statueBytes();
+            const parsed = parseMeshLoDContainer(bytes);
+            const pageId = parsed.pageRecords.findIndex((page) => page.pinned === pinned);
+            const byteOffset = parsed.sections[SECTION_PAGE_TABLE - 1]!.offset + pageId * PAGE_TABLE_RECORD_SIZE + field;
+            const view = new DataView(bytes.buffer);
+            view.setUint32(byteOffset, view.getUint32(byteOffset, true) + 1, true);
+            resealContainer(bytes);
+            const server = rangeServer(bytes);
+            const { engine, device } = createMockEngine();
+            const decoder = createFillDecoder();
+            _setMeshLoDPageDecoder(decoder.decoder);
+            await expect(loadMeshLoD(engine, "https://cdn.test/statue.mlod", { request: { fetch: server.fetch } })).rejects.toMatchObject({
+                code: "MLOD_INVALID_LAYOUT",
+                pageId,
+                byteOffset,
+            });
+            expect(server.calls).toBe(2);
+            expect(decoder.modes).toEqual([]);
+            expect(device.buffers).toHaveLength(0);
+        });
+    }
     it.each([true, false])("rejects an unaligned decoded allocation before decode/upload (pinned=%s)", async (pinned) => {
         const bytes = statueBytes();
         const parsed = parseMeshLoDContainer(bytes);

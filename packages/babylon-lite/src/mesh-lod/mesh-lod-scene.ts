@@ -16,6 +16,8 @@ import type { Renderable, DrawUpdateContext } from "../render/renderable.js";
 import type { Camera } from "../camera/camera.js";
 import { getCameraPosition, getEffectiveAspectRatio, getProjectionMatrix } from "../camera/camera.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { Material } from "../material/material.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { validateMeshLoDMaterial } from "../material/pbr/pbr-mesh-lod-material.js";
 import type { MeshLoDAsset, MeshLoDInstance } from "./mesh-lod.js";
 import type { MeshLoDAssetRuntime, MeshLoDStreamSelectionStats } from "./mesh-lod-runtime.js";
@@ -48,6 +50,8 @@ export interface MeshLoDSceneRegistry {
     readonly batches: MeshLoDSceneBatch[];
     /** True once the single deferred builder has been registered on the scene. */
     builderRegistered: boolean;
+    /** Serializes material packet replacement without blocking unrelated scenes. */
+    materialRebuild?: Promise<void>;
 }
 
 function getOrCreateRegistry(scene: SceneContext): MeshLoDSceneRegistry {
@@ -55,6 +59,19 @@ function getOrCreateRegistry(scene: SceneContext): MeshLoDSceneRegistry {
     if (!registry) {
         registry = { byAsset: new Map(), batches: [], builderRegistered: false };
         scene._meshLoDRegistry = registry;
+        const owned = registry;
+        scene._materialRebuild = (matches) => {
+            const build = (): Promise<void> => rebuildMeshLoDMaterials(scene, matches);
+            const pending = owned.materialRebuild ? owned.materialRebuild.then(build, build) : build();
+            owned.materialRebuild = pending;
+            const clear = (): void => {
+                if (owned.materialRebuild === pending) {
+                    owned.materialRebuild = undefined;
+                }
+            };
+            void pending.then(clear, clear);
+            return pending;
+        };
     }
     return registry;
 }
@@ -87,22 +104,21 @@ async function getPbrMeshLoDModule(): Promise<typeof PbrMeshLoDModule> {
 }
 
 /** Build each material-owned indirect renderable and attach a device-recovery thunk. */
-async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneContext): Promise<Renderable[]> {
-    const registry = scene._meshLoDRegistry;
+async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneContext, batches = scene._meshLoDRegistry?.batches ?? []): Promise<Renderable[]> {
     const renderables: Renderable[] = [];
-    if (!registry) {
-        return renderables;
-    }
     const pbr = await getPbrMeshLoDModule();
+    if (scene._z) {
+        throw createMeshLoDError("MLOD_DISPOSED", "scene was disposed during the MeshLoD build");
+    }
     validateMeshLoDEngine(engine);
-    for (const batch of registry.batches) {
+    for (const batch of batches) {
         if (batch.instances.length && batch.asset.state !== "failed" && !batch.asset._runtime.disposed) {
             validateMeshLoDMaterial(batch.material);
         }
     }
-    const staged: Array<{ batch: MeshLoDSceneBatch; packet: unknown; renderable: Renderable | undefined }> = [];
+    const staged: Array<{ batch: MeshLoDSceneBatch; candidate: MeshLoDSceneBatch }> = [];
     try {
-        for (const batch of registry.batches) {
+        for (const batch of batches) {
             if (batch.asset.state === "failed" || batch.asset._runtime.disposed) {
                 continue;
             }
@@ -115,29 +131,58 @@ async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneC
                 }
                 return next;
             };
-            staged.push({ batch, packet: batch._packet, renderable: batch.renderable });
-            const renderable = await pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
+            const candidate: MeshLoDSceneBatch = { ...batch, _packet: undefined, renderable: undefined };
+            staged.push({ batch, candidate });
+            const renderable = await pbr.buildMeshLoDBatchRenderable(engine, scene, candidate);
             if (renderable) {
                 renderable._rebuild = rebuild;
-                batch.renderable = renderable;
+                candidate.renderable = renderable;
                 renderables.push(renderable);
             }
         }
+        if (scene._z) {
+            throw createMeshLoDError("MLOD_DISPOSED", "scene was disposed during the MeshLoD build");
+        }
     } catch (error) {
-        for (const previous of staged) {
-            if (previous.batch._packet !== previous.packet) {
-                (previous.batch as { _packet?: { dispose?: () => void } })._packet?.dispose?.();
-            }
-            previous.batch._packet = previous.packet;
-            previous.batch.renderable = previous.renderable;
+        for (const { candidate } of staged) {
+            (candidate as { _packet?: { dispose?: () => void } })._packet?.dispose?.();
         }
         throw error;
+    }
+    for (const { batch, candidate } of staged) {
+        batch._packet = candidate._packet;
+        batch.renderable = candidate.renderable;
     }
     return renderables;
 }
 
+async function rebuildMeshLoDMaterials(scene: SceneContext, matches: (material: Material) => boolean): Promise<void> {
+    if (!scene._built || scene._z) {
+        return;
+    }
+    const batches = scene._meshLoDRegistry!.batches.filter((batch) => batch.renderable && !batch.asset._runtime.disposed && matches(batch.material));
+    if (!batches.length) {
+        return;
+    }
+    const previous = batches.map((batch) => ({ renderable: batch.renderable!, packet: batch._packet as { dispose?: () => void } | undefined }));
+    const engine = scene.surface.engine;
+    await buildMeshLoDBatchRenderables(engine, scene, batches);
+    for (let i = 0; i < batches.length; i++) {
+        const old = previous[i]!;
+        const renderable = batches[i]!.renderable;
+        const index = scene._renderables.indexOf(old.renderable);
+        if (index >= 0) {
+            scene._renderables.splice(index, 1, ...(renderable ? [renderable] : []));
+        }
+        retireGpuResources(engine, () => old.packet?.dispose?.());
+    }
+    scene._renderableVersion++;
+    scene._materialEpoch++;
+}
+
 /** Dispose every batch's material-owned GPU packet (scene teardown). Idempotent. */
 function disposeMeshLoDBatchPackets(scene: SceneContext): void {
+    scene._materialRebuild = undefined;
     const registry = scene._meshLoDRegistry;
     if (!registry) {
         return;
@@ -177,10 +222,19 @@ function recoverMeshLoDAssets(engine: EngineContext, scene: SceneContext): void 
 }
 
 function registerDeferredBuilder(scene: SceneContext): void {
-    addDeferredSceneRenderables(scene, async (engine, sc) => ({
-        renderables: await buildMeshLoDBatchRenderables(engine, sc),
-        dispose: () => disposeMeshLoDBatchPackets(scene),
-    }));
+    addDeferredSceneRenderables(scene, async (engine, sc) => {
+        try {
+            return {
+                renderables: await buildMeshLoDBatchRenderables(engine, sc),
+                dispose: () => disposeMeshLoDBatchPackets(scene),
+            };
+        } catch (error) {
+            if (!scene._z) {
+                registerDeferredBuilder(scene);
+            }
+            throw error;
+        }
+    });
 }
 
 /** @internal Register an instance into its scene-owned batch. Idempotent for the

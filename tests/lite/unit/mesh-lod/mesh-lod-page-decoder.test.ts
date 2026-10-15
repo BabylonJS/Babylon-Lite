@@ -146,6 +146,20 @@ describe("decodeMeshLoDPage", () => {
         expect(calls.map((call) => call.targetLength)).toEqual([DEC_VERTEX_BYTES, DEC_INDEX_BYTES]);
     });
 
+    it.each([
+        { vertexByteOffset: 2, indexByteOffset: DEC_VERTEX_BYTES + 4 },
+        { vertexByteOffset: -4 },
+        { vertexByteOffset: Number.NaN },
+        { indexByteOffset: DEC_VERTEX_BYTES + 1 },
+        { indexByteOffset: -2 },
+        { indexByteOffset: Number.POSITIVE_INFINITY },
+    ])("rejects invalid decoded offsets %o before invoking the codec", (offsets) => {
+        const storedPage = buildStoredPage();
+        const { decoder, calls } = mockDecoder();
+        expectCode(() => decodeMeshLoDPage(storedPage, { ...pageFor(storedPage), ...offsets }, decoder), "MLOD_PAGE_INTEGRITY");
+        expect(calls).toHaveLength(0);
+    });
+
     it("rejects a bad magic before invoking the decoder", () => {
         const storedPage = buildStoredPage();
         storedPage[0] = 0x58; // resealed below, so CRC passes and magic fails

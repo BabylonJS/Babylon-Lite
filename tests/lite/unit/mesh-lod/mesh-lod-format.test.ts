@@ -191,6 +191,21 @@ describe("parseMeshLoDContainer — committed statue assets", () => {
 });
 
 describe.each([false, true])("parseMeshLoDContainer — group-page membership (full file: %s)", (fullFile) => {
+    for (const pinned of [false, true]) {
+        it.each([32, 36])(`rejects misaligned decoded stream offsets at page-table field %s (pinned=${pinned})`, (field) => {
+            const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+            const bytes = new Uint8Array(readFileSync(path));
+            const parsed = parseMeshLoDContainer(bytes);
+            const pageId = parsed.pageRecords.findIndex((page) => page.pinned === pinned);
+            const byteOffset = parsed.sections[SECTION_PAGE_TABLE - 1]!.offset + pageId * PAGE_TABLE_RECORD_SIZE + field;
+            const view = new DataView(bytes.buffer);
+            view.setUint32(byteOffset, view.getUint32(byteOffset, true) + 1, true);
+            resealContainer(bytes);
+            expect(() => parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, parsed.header.bootstrapBytes))).toThrowError(
+                expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", pageId, byteOffset })
+            );
+        });
+    }
     it.each([1, 2])("rejects incomplete pinned coverage of a fallback group (flags=%s)", (flags) => {
         const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
         const bytes = new Uint8Array(readFileSync(path));

@@ -21,6 +21,7 @@ import {
     getMeshLoDCpuPage,
     putMeshLoDCpuPage,
     reserveMeshLoDArenaRun,
+    retireMeshLoDToBudget,
     setMeshLoDCpuCacheBudget,
     type MeshLoDEvictionPolicy,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
@@ -191,6 +192,42 @@ describe("MeshLoD GPU cache — reservation & eviction", () => {
 });
 
 describe("MeshLoD GPU cache — trim to a reduced budget", () => {
+    it("retires only one held cold allocation under replacement pressure, including rounded pending frees", () => {
+        const f = buildFixture(4, [
+            { blocks: 1, pinned: true },
+            { blocks: 1, lastUsedFrame: 10, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 20, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 299, frameRefCount: 2 },
+        ]);
+        f.pages[1]!.arenaBytes = 4;
+        const evicted: number[] = [];
+        expect(reserveMeshLoDArenaRun(f.arena, f.pages, f.records, BLOCK, policy(300, 4), evicted)).toBeNull();
+        for (let retry = 0; retry < 3; retry++) {
+            retireMeshLoDToBudget(f.arena, f.pages, f.records, policy(300, 4), evicted, BLOCK);
+            expect(f.pages.map((page) => page.state)).toEqual(["gpu-resident", "evicting", "gpu-resident", "gpu-resident"]);
+            expect(arenaUsedBytes(f.arena)).toBe(4 * BLOCK);
+            expect(evicted).toEqual([]);
+        }
+    });
+
+    it("accounts for fragmentation after pending fences without retiring pinned, current, or young pages", () => {
+        const f = buildFixture(6, [
+            { blocks: 1, pinned: true },
+            { blocks: 1, lastUsedFrame: 10, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 30, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 20, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 300, frameRefCount: 2 },
+            { blocks: 1, lastUsedFrame: 299, frameRefCount: 2 },
+        ]);
+        const evicted: number[] = [];
+        for (let retry = 0; retry < 2; retry++) {
+            retireMeshLoDToBudget(f.arena, f.pages, f.records, policy(300, 6), evicted, 2 * BLOCK);
+            expect(f.pages.map((page) => page.state)).toEqual(["gpu-resident", "evicting", "evicting", "evicting", "gpu-resident", "gpu-resident"]);
+        }
+        expect(evicted).toEqual([]);
+        expect(arenaUsedBytes(f.arena)).toBe(6 * BLOCK);
+    });
+
     it("evicts eligible victims until committed residency fits a lowered budget", () => {
         const f = buildFixture(10, [
             { blocks: 1, pinned: true },

@@ -144,6 +144,10 @@ may extend beyond the bootstrap into the unfetched remainder of the file.
 Metadata entries cannot masquerade as page data to bypass these bounds.
 Decoded page allocations must be positive, no larger than 256 KiB, and divisible
 by four for WebGPU uploads. The decoder independently enforces the same alignment.
+Decoded vertex offsets must be multiples of four and decoded index offsets
+multiples of two. Metadata rejects misaligned offsets with `MLOD_INVALID_LAYOUT`
+before fetching fine pages or allocating the arena; direct decoder calls recheck
+them with `MLOD_PAGE_INTEGRITY` before allocation or codec invocation.
 Nonempty hierarchies must contain a terminal group; every terminal/pinned group's
 referenced pages and every coarse page must belong to the pinned prefix, ensuring
 a complete resident fallback before the loader reports `ready`.
@@ -153,6 +157,10 @@ constant time, including overlapping slices, without repeatedly scanning it.
 Deferred scene builds stage packets transactionally. If any later batch fails,
 all staged packets are disposed and their previous packet/renderable markers
 restored, so retry cannot orphan buffers or acquired texture references.
+If the deferred build rejects, it re-arms exactly one feature-owned builder in
+the scene queue. A repaired `registerScene`/`buildScene` call drains that work
+normally; successful batches are not appended twice, and disposed scenes do
+not re-arm asynchronous work.
 
 One output file contains one primitive hierarchy. A multi-primitive
 conversion gives each output a deterministic `.meshNNN.primNNN.mlod`
@@ -278,9 +286,15 @@ the page-state buffer is consumed), and released behind that submission's
 fence; it does not update the page's last-used frame. Only pages actually
 selected by a completed GPU pass update LRU age, using the source frame
 rather than readback completion time. A cold page still referenced by prior
-GPU submissions can be marked evicting under a lowered budget: future
+GPU submissions can be marked evicting under a lowered budget or allocation
+pressure from a demanded replacement: future
 selection excludes it, but its allocation is reclaimed only after the last
-in-flight reference drains. Capacity and effective budget cannot be smaller
+in-flight reference drains. Replacement-pressure retirement considers both the
+rounded byte budget and a prospective contiguous run after existing retiring
+pages drain. It retires only enough eligible cold victims, retaining pinned,
+young, and current-frame-selected pages. Demand can then commit the replacement
+while other submissions remain in flight; no queue-idle interval is required.
+Capacity and effective budget cannot be smaller
 than the pinned allocation.
 
 ### 11.5 CPU page cache
@@ -428,6 +442,19 @@ The AA flag participates in every target's shader/pipeline key, including
 changes on existing bindings.
 
 ### 13.2 Bind groups
+
+`rebuildMaterial(scene, material, options)` reaches MeshLoD through an opt-in
+scene material-rebuild hook; the generic rebuild path contains no MeshLoD
+imports or semantics. The hook shares the caller's material/view matching and
+serializes rebuilds in the feature registry. It builds every matching live
+batch transactionally, preserves unrelated renderables, and publishes packet
+and renderable replacements only on success. Scene renderable/material epochs
+invalidate task bindings even without `rebuildFrameGraph`; that option rebuilds
+the graph after all material work completes. Failed replacements roll back
+without dropping the old draw. Old packets/texture leases retire behind their
+submission fence. Scene disposal during an asynchronous build discards candidates.
+Texture replacements and structural flags such as `doubleSided` require this
+rebuild; UBO-only edits continue to use `markMaterialUboDirty`.
 
 Scene bindings occupy group 0. The material's group 1 binds its UBO, four
 optional texture/sampler pairs, and three storage buffers (arena, draw

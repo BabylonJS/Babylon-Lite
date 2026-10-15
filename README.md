@@ -69,6 +69,12 @@ const instance = createMeshLoDInstance(asset, sourcePrimitive.material);
 addMeshLoDToScene(scene, instance);
 ```
 
+After registration, texture/sampler replacements and structural material changes
+such as `doubleSided` require `await rebuildMaterial(scene, material)`, imported
+from the same root package. MeshLoD replaces matching batches transactionally
+and retires their old GPU resources and texture references behind a queue fence.
+UBO-only scalar/vector edits use `markMaterialUboDirty(material)` instead.
+
 The CLI converts **geometry**, not materials or textures. The demo fetches the
 original GLB from BabylonJS/Assets for those properties and uses the three
 checked-in MLOD sidecars for streaming geometry; the source GLB is not kept in

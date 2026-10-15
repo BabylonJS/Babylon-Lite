@@ -136,8 +136,17 @@ export function decodeMeshLoDPage(storedPage: Uint8Array, page: MeshLoDPageRecor
         throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "encoded streams overlap");
     }
     // Decoded layout: vertices then indices, both inside the page's allocation.
-    if (page.vertexByteOffset + decVertexBytes > page.indexByteOffset || page.indexByteOffset + decIndexBytes > page.decodedBytes) {
-        throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "decoded layout exceeds the page allocation");
+    if (
+        !Number.isInteger(page.vertexByteOffset) ||
+        page.vertexByteOffset < 0 ||
+        page.vertexByteOffset % 4 !== 0 ||
+        !Number.isInteger(page.indexByteOffset) ||
+        page.indexByteOffset < 0 ||
+        page.indexByteOffset % 2 !== 0 ||
+        page.vertexByteOffset + decVertexBytes > page.indexByteOffset ||
+        page.indexByteOffset + decIndexBytes > page.decodedBytes
+    ) {
+        throw createMeshLoDError("MLOD_PAGE_INTEGRITY", "decoded stream layout is misaligned or outside the page allocation");
     }
 
     const decoded = new Uint8Array(page.decodedBytes);

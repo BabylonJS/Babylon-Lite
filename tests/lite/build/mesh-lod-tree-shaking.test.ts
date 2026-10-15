@@ -70,8 +70,8 @@ describe("MeshLoD is opt-in and tree-shakable", () => {
     it("retains zero MeshLoD code when only unrelated APIs are imported", async () => {
         const code = allCode(
             await bundleChunks(
-                `import { createEngine, createSceneContext, createPbrMaterial, createHemisphericLight } from ${JSON.stringify(SRC_ENTRY)};\n` +
-                    `console.log(createEngine, createSceneContext, createPbrMaterial, createHemisphericLight);\n`
+                `import { createEngine, createSceneContext, createPbrMaterial, createHemisphericLight, rebuildMaterial } from ${JSON.stringify(SRC_ENTRY)};\n` +
+                    `console.log(createEngine, createSceneContext, createPbrMaterial, createHemisphericLight, rebuildMaterial);\n`
             )
         );
         for (const sentinel of [...MESHLOD_SENTINELS, ...FACADE_SENTINELS]) {

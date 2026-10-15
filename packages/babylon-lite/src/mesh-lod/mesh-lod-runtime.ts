@@ -630,6 +630,9 @@ function commitStreamedPage(runtime: MeshLoDAssetRuntime, pageId: number, bytes:
     };
     const evicted: number[] = [];
     const offset = reserveMeshLoDArenaRun(runtime.gpu.arena, runtime.gpu.pages, runtime.pageRecords, record.decodedBytes, policy, evicted);
+    if (offset === null) {
+        retireMeshLoDToBudget(runtime.gpu.arena, runtime.gpu.pages, runtime.pageRecords, policy, evicted, record.decodedBytes);
+    }
     applyStreamedEvictions(runtime, evicted);
     if (offset === null) {
         // No run fits without evicting protected pages; re-demand on a later frame.

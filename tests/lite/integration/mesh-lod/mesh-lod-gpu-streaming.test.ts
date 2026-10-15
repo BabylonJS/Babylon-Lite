@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
-import { arenaUsedBytes } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
+import { arenaUsedBytes, roundPageAllocation } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import {
@@ -188,6 +188,61 @@ afterEach(() => {
 });
 
 describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () => {
+    it("replaces a cold fine page under a tight budget while GPU submission fences continue overlapping", async () => {
+        harness = await setup({ residencyHoldFrames: 1 });
+        const { runtime, engine } = harness;
+        const firstId = runtime.pageRecords.findIndex((record) => !record.pinned);
+        const nextId = runtime.pageRecords.findIndex((record, id) => id > firstId && record.decodedBytes <= runtime.pageRecords[firstId]!.decodedBytes);
+        expect(nextId).toBeGreaterThan(firstId);
+        const pinned = arenaUsedBytes(runtime.gpu.arena);
+        setMeshLoDCacheBudget(harness.asset, pinned + roundPageAllocation(runtime.pageRecords[firstId]!.decodedBytes));
+        const fences: Array<Array<() => void>> = [];
+        const overlap = (): void => {
+            fences.push(engine._retirements ?? []);
+            engine._retirements = null;
+            if (fences.length > 2) {
+                fences.shift()!.forEach((retire) => retire());
+            }
+        };
+        const demand = (id: number): void => {
+            const state = harness.batchState();
+            applyMeshLoDGpuReadback(
+                runtime,
+                state,
+                syntheticControl(state, id, 2048, { count: 1, visible: 1, triangles: 1, fallback: 0 }),
+                runtime.gpu.pages.length,
+                runtime.generation,
+                runtime.frameIndex
+            );
+        };
+        harness.flush();
+        demand(firstId);
+        await harness.settle();
+        overlap();
+        const first = runtime.gpu.pages[firstId]!;
+        const next = runtime.gpu.pages[nextId]!;
+        expect(first.state).toBe("gpu-resident");
+        harness.flush();
+        overlap();
+        harness.flush();
+        demand(nextId);
+        await harness.settle();
+        expect(first.frameRefCount).toBeGreaterThan(0);
+        expect(first.state).toBe("evicting");
+        expect(next.state).not.toBe("gpu-resident");
+        overlap();
+        for (let frame = 0; frame < 8 && next.state !== "gpu-resident"; frame++) {
+            harness.flush();
+            demand(nextId);
+            await harness.settle();
+            overlap();
+            expect(fences).toHaveLength(2);
+        }
+        expect(first.state).toBe("unrequested");
+        expect(next.state).toBe("gpu-resident");
+        expect(arenaUsedBytes(runtime.gpu.arena)).toBeLessThanOrEqual(runtime.settings.cacheBudgetBytes);
+        fences.flat().forEach((retire) => retire());
+    });
     it("returns unflushed reservations on reset and streams after repeated abandoned frames without rebinding", async () => {
         harness = await setup();
         for (let attempt = 0; attempt < 4; attempt++) {

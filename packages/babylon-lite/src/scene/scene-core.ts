@@ -28,6 +28,7 @@ import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
 import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
+import type { Material } from "../material/material.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -271,6 +272,8 @@ export interface SceneContext extends RenderingContext {
      *  MeshLoD feature's `addMeshLoDToScene`; absent (and zero-cost) for every scene
      *  that never uses MeshLoD. */
     _meshLoDRegistry?: MeshLoDSceneRegistry;
+    /** @internal Opt-in material rebuild work for scene-owned non-mesh renderables. */
+    _materialRebuild?: (matches: (material: Material) => boolean) => Promise<void>;
 }
 
 /** Options passed to the scene-context factory. */

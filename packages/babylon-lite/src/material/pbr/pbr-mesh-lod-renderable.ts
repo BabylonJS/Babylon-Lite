@@ -573,6 +573,10 @@ export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene:
         return null;
     }
     const runtime = batch.asset._runtime;
+    const fog = _scene.fog ? await import("./pbr-fog-wgsl.js") : undefined;
+    if (runtime.disposed) {
+        return null;
+    }
     const environment = batch.material._unlit === true ? null : (_scene._envTextures ?? null);
     const features = detectFeatures(batch.material, environment !== null);
     const boundTextures = [batch.material.baseColorTexture, batch.material.normalTexture, batch.material.ormTexture, batch.material.emissiveTexture].filter(
@@ -591,10 +595,6 @@ export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene:
     }
     cpuStorageCapacity(engine, maxDrawVertices, maxDrawVertices, DRAW_VERTEX_STRIDE, "draw vertices");
     cpuStorageCapacity(engine, maxInstances, maxInstances, INSTANCE_STRIDE, "instances");
-    const fog = _scene.fog ? await import("./pbr-fog-wgsl.js") : undefined;
-    if (runtime.disposed) {
-        return null;
-    }
     const shaderFeatures = { ...features, fog };
 
     const device = engine._device;

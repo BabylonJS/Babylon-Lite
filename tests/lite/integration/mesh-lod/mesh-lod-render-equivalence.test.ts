@@ -32,7 +32,7 @@ import {
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
-import { createSceneContext, disposeScene } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
+import { createSceneContext, disposeScene, registerScene } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -51,6 +51,8 @@ import { setPbrLightmap } from "../../../../packages/babylon-lite/src/material/p
 import { setPbrMetallicReflectance } from "../../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance.js";
 import { buildPbrRenderables } from "../../../../packages/babylon-lite/src/material/pbr/pbr-renderable.js";
 import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
+import { rebuildMaterial } from "../../../../packages/babylon-lite/src/material/material-rebuild.js";
+import { createMaterialView } from "../../../../packages/babylon-lite/src/material/material-view.js";
 import { enableMaterialStencil } from "../../../../packages/babylon-lite/src/material/enable-material-stencil.js";
 import type { StencilState } from "../../../../packages/babylon-lite/src/material/material.js";
 import {
@@ -708,11 +710,13 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const mock = createMockEngine();
         Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
         engine = mock.engine;
+        Object.assign(engine, { engine, _disposables: [] });
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
         const texture = createSolidTexture2D(engine, 1, 1, 1);
         const first = createPbrMaterial({ baseColorTexture: texture });
         const second = createPbrMaterial();
-        const scene = fakeScene(engine);
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const initialDisposables = scene._disposables.length;
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, first));
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, second));
@@ -733,12 +737,13 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         const refs = getTextureReferenceStore();
         const initialRefs = refs.get(texture.texture) ?? 0;
         if (failure === "limit") {
-            await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_DEVICE_LIMIT" });
+            await expect(registerScene(scene)).rejects.toMatchObject({ code: "MLOD_DEVICE_LIMIT" });
         } else {
-            await expect(scene._deferredBuilders[0]!()).rejects.toBe(allocationError);
+            await expect(registerScene(scene)).rejects.toBe(allocationError);
         }
+        expect(scene._deferredBuilders).toHaveLength(1);
         expect(scene._renderables).toHaveLength(0);
-        expect(scene._disposables).toHaveLength(0);
+        expect(scene._disposables).toHaveLength(initialDisposables);
         expect(scene._meshLoDRegistry!.batches.every((batch) => !batch._packet && !batch.renderable)).toBe(true);
         const staged = mock.device.buffers.slice(start);
         flushGpuResourceRetirements(engine);
@@ -747,13 +752,168 @@ describe("MeshLoD render equivalence — one indirect draw per batch key", () =>
         expect(refs.get(texture.texture) ?? 0).toBe(initialRefs);
         mock.device.limits.maxStorageBufferBindingSize *= 2;
         allocate.mockRestore();
-        await scene._deferredBuilders[0]!();
+        await registerScene(scene);
+        await registerScene(scene);
         expect(scene._renderables).toHaveLength(2);
+        expect(scene._deferredBuilders).toHaveLength(0);
         expect(refs.get(texture.texture)).toBe(initialRefs + 1);
         scene._disposables.forEach((dispose) => dispose());
         flushGpuResourceRetirements(engine);
         await waitForGpuResourceRetirements(engine);
         expect(refs.get(texture.texture) ?? 0).toBe(initialRefs);
+    });
+
+    for (const selectionMode of ["cpu", "gpu"] as const) {
+        it.each([false, true])(`rebuilds replaced textures and culling after an initial draw (${selectionMode}, rebuildFrameGraph=%s)`, async (rebuildFrameGraph) => {
+            const mock = createMockEngine();
+            engine = mock.engine;
+            Object.assign(engine, { engine, _disposables: [] });
+            const pipelines = vi.spyOn(mock.device, "createRenderPipeline");
+            const scene = createSceneContext(engine, { defaultRenderTask: false });
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+            const original = createSolidTexture2D(engine, 1, 0, 0);
+            const replacement = createSolidTexture2D(engine, 0, 1, 0);
+            const material = createPbrMaterial({ baseColorTexture: original });
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+            await registerScene(scene);
+            const before = scene._renderables[0]!;
+            const first = before.bind(engine, { ...SIG });
+            flush(first);
+            expect(pipelines.mock.calls.at(-1)![0]).toMatchObject({ primitive: { cullMode: "back" } });
+            const refs = getTextureReferenceStore();
+            const version = scene._renderableVersion;
+            const oldBuffers = mock.device.buffers.filter(
+                (buffer) => ["mesh-lod-material", "mesh-lod-draw-vertices", "mesh-lod-instances", "mesh-lod-indirect"].includes(buffer.label ?? "") && !buffer.destroyed
+            );
+            material.baseColorTexture = replacement;
+            material.doubleSided = true;
+            await rebuildMaterial(scene, material, { rebuildFrameGraph });
+            expect(scene._renderables).toHaveLength(1);
+            expect(scene._renderables[0]).not.toBe(before);
+            expect(scene._renderableVersion).toBeGreaterThan(version);
+            const binding = scene._renderables[0]!.bind(engine, { ...SIG });
+            flush(binding);
+            expect(pipelines.mock.calls.at(-1)![0]).toMatchObject({ primitive: { cullMode: "none" } });
+            const batch = scene._meshLoDRegistry!.batches[0]!;
+            expect(batch._packet).toMatchObject({ textures: { base: replacement } });
+            expect(refs.get(original.texture)).toBe(2);
+            expect(refs.get(replacement.texture)).toBe(2);
+            oldBuffers.forEach((buffer) => expect(buffer.destroyed).toBe(false));
+            const pass = createMockRenderPass();
+            const groups = vi.spyOn(pass, "setBindGroup");
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            expect(groups).toHaveBeenCalledWith(1, expect.objectContaining({ entries: expect.arrayContaining([{ binding: 1, resource: replacement.view }]) }));
+            Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
+            flushGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+            expect(refs.get(original.texture)).toBe(1);
+            expect(refs.get(replacement.texture)).toBe(2);
+            oldBuffers.forEach((buffer) => expect(buffer.destroyed).toBe(true));
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            disposeScene(scene);
+            flushGpuResourceRetirements(engine);
+            await waitForGpuResourceRetirements(engine);
+            expect(refs.get(replacement.texture)).toBe(1);
+        });
+    }
+
+    it("matches source/views without rebuilding unrelated batches and honors rebuildViews=false", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        Object.assign(engine, { engine, _disposables: [] });
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const source = createPbrMaterial();
+        const view = createMaterialView(source, { features: 0 });
+        for (const material of [source, view, createPbrMaterial()]) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        }
+        await registerScene(scene);
+        const original = scene._renderables.slice();
+        await rebuildMaterial(scene, view, { rebuildViews: false });
+        expect(scene._renderables[0]).toBe(original[0]);
+        expect(scene._renderables[1]).not.toBe(original[1]);
+        expect(scene._renderables[2]).toBe(original[2]);
+        const firstView = scene._renderables[1];
+        await Promise.all([rebuildMaterial(scene, source), rebuildMaterial(scene, source)]);
+        expect(scene._renderables).toHaveLength(3);
+        expect(scene._renderables[0]).not.toBe(original[0]);
+        expect(scene._renderables[1]).not.toBe(firstView);
+        expect(scene._renderables[2]).toBe(original[2]);
+        disposeScene(scene);
+        await waitForGpuResourceRetirements(engine);
+    });
+
+    it("rolls back a failed material rebuild and keeps old packets drawable until a repaired retry", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        Object.assign(engine, { engine, _disposables: [] });
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        const material = createPbrMaterial({ baseColorTexture: texture });
+        for (let i = 0; i < 2; i++) {
+            const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        }
+        await registerScene(scene);
+        const original = scene._renderables.slice();
+        const packets = scene._meshLoDRegistry!.batches.map((batch) => batch._packet);
+        const bindings = original.map((renderable) => renderable.bind(engine, { ...SIG }));
+        bindings.forEach((binding) => flush(binding));
+        const previousRefs = getTextureReferenceStore().get(texture.texture);
+        const previousVersion = scene._renderableVersion;
+        const firstAllocation = mock.device.buffers.length;
+        const failure = new Error("injected material bind-group failure");
+        const allocate = vi
+            .spyOn(mock.device, "createBindGroup")
+            .mockImplementationOnce((desc) => desc as object)
+            .mockImplementationOnce(() => {
+                throw failure;
+            });
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+        expect(log).toHaveBeenCalledWith(failure);
+        expect(scene._renderables).toEqual(original);
+        expect(scene._meshLoDRegistry!.batches.map((batch) => batch._packet)).toEqual(packets);
+        expect(scene._renderableVersion).toBe(previousVersion);
+        bindings.forEach((binding) => {
+            flush(binding);
+            expect(binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        });
+        await waitForGpuResourceRetirements(engine);
+        expect(mock.device.buffers.slice(firstAllocation).every((buffer) => buffer.destroyed)).toBe(true);
+        expect(getTextureReferenceStore().get(texture.texture)).toBe(previousRefs);
+        allocate.mockRestore();
+        log.mockRestore();
+        await rebuildMaterial(scene, material);
+        expect(scene._renderables).toHaveLength(2);
+        scene._renderables.forEach((renderable, i) => expect(renderable).not.toBe(original[i]));
+        disposeScene(scene);
+        await waitForGpuResourceRetirements(engine);
+        expect(getTextureReferenceStore().get(texture.texture)).toBe(1);
+    });
+
+    it("does not publish or re-arm MeshLoD work after scene disposal during a material rebuild", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        Object.assign(engine, { engine, _disposables: [] });
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: async () => undefined });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const material = createPbrMaterial();
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        await registerScene(scene);
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const completion = rebuildMaterial(scene, material);
+        disposeScene(scene);
+        await expect(completion).rejects.toMatchObject({ code: "MLOD_DISPOSED" });
+        await waitForGpuResourceRetirements(engine);
+        expect(scene._renderables).toHaveLength(0);
+        expect(scene._deferredBuilders).toHaveLength(0);
+        expect(scene._materialRebuild).toBeUndefined();
+        log.mockRestore();
     });
 
     it.each(["baseColorTexture", "normalTexture"] as const)("rejects %s transforms introduced after scene registration", async (channel) => {

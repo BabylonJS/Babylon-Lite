@@ -281,23 +281,32 @@ export function evictMeshLoDToBudget(
     }
 }
 
-/** Stop advertising cold pages when a lowered budget cannot reclaim their arena runs
- *  yet. A page still held by submitted GPU work remains allocated until its last
- *  frame reference retires; it must not be selected by any subsequent frame. */
+/** Stop advertising cold pages until the budget and an optional replacement run
+ *  fit after pending retirements. Submitted GPU references fence actual reclamation. */
 export function retireMeshLoDToBudget(
     arena: MeshLoDArena,
     pages: readonly MeshLoDPageRuntime[],
     records: readonly MeshLoDPageRecord[],
     policy: MeshLoDEvictionPolicy,
-    evicted: number[]
+    evicted: number[],
+    requiredBytes = 0
 ): void {
+    const newBytes = requiredBytes > 0 ? roundPageAllocation(requiredBytes) : 0;
+    if (newBytes > PAGE_MAX_BYTES || arena.pinnedCount * ARENA_BLOCK_BYTES + newBytes > policy.budgetBytes) {
+        return;
+    }
+    // Simulate pending frees only under allocation pressure, not on the frame hot path.
+    const available = newBytes ? { ...arena, blocks: arena.blocks.slice(), pinnedBlocks: arena.pinnedBlocks.slice() } : null;
     let retiringBytes = 0;
     for (const page of pages) {
         if (page.state === "evicting") {
-            retiringBytes += page.arenaBytes;
+            retiringBytes += roundPageAllocation(page.arenaBytes);
+            if (available) {
+                freeArenaRun(available, page.arenaOffset, page.arenaBytes);
+            }
         }
     }
-    while (arenaUsedBytes(arena) - retiringBytes > policy.budgetBytes) {
+    while (arenaUsedBytes(arena) - retiringBytes + newBytes > policy.budgetBytes || (available && allocateArenaRun(available, requiredBytes, false) === null)) {
         let victim: MeshLoDPageRuntime | null = null;
         for (const page of pages) {
             if (
@@ -314,9 +323,12 @@ export function retireMeshLoDToBudget(
         if (!victim) {
             return;
         }
+        if (available) {
+            freeArenaRun(available, victim.arenaOffset, victim.arenaBytes);
+        }
         if (victim.frameRefCount > 0) {
             victim.state = "evicting";
-            retiringBytes += victim.arenaBytes;
+            retiringBytes += roundPageAllocation(victim.arenaBytes);
         } else {
             evictMeshLoDPage(arena, victim, evicted);
         }

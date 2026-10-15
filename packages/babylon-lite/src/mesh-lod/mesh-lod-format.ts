@@ -692,6 +692,8 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
         const flags = reader.u32(base + PT.flags);
         const firstCluster = reader.u32(base + PT.firstCluster);
         const clusterCount = reader.u32(base + PT.clusterCount);
+        const vertexByteOffset = reader.u32(base + PT.vertexByteOffset);
+        const indexByteOffset = reader.u32(base + PT.indexByteOffset);
 
         if (offset % PAGE_ALIGNMENT !== 0 || storedBytes % PAGE_ALIGNMENT !== 0 || storedBytes < PAGE_ALIGNMENT || storedBytes > PAGE_MAX_BYTES) {
             throw fail("MLOD_INVALID_LAYOUT", "page violates 64-256 KiB alignment", { pageId: p, byteOffset: base });
@@ -702,6 +704,12 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
                 byteOffset: base + PT.decodedBytes,
                 expected: `4-${PAGE_MAX_BYTES} bytes, divisible by 4`,
                 actual: decodedBytes,
+            });
+        }
+        if (vertexByteOffset % 4 !== 0 || indexByteOffset % 2 !== 0) {
+            throw fail("MLOD_INVALID_LAYOUT", "decoded stream offset is misaligned", {
+                pageId: p,
+                byteOffset: base + (vertexByteOffset % 4 !== 0 ? PT.vertexByteOffset : PT.indexByteOffset),
             });
         }
         if (!rangeWithin(offset, storedBytes, size) || offset !== previousPageEnd) {
@@ -742,8 +750,8 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
             crc,
             vertexCount: reader.u32(base + PT.vertexCount),
             localIndexCount: reader.u32(base + PT.localIndexCount),
-            vertexByteOffset: reader.u32(base + PT.vertexByteOffset),
-            indexByteOffset: reader.u32(base + PT.indexByteOffset),
+            vertexByteOffset,
+            indexByteOffset,
             firstCluster,
             clusterCount,
             pinned,
