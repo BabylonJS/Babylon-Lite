@@ -17,14 +17,7 @@
  * stored for shape parity but does not re-bin lights.
  */
 
-import {
-    addToScene,
-    createClusteredLightContainer,
-    createClusteredPointLight,
-    addClusteredLightContainer,
-    markClusteredLightContainerDirty,
-    removeFromScene,
-} from "babylon-lite";
+import { addToScene, createClusteredLightContainer, createClusteredPointLight, addClusteredLightContainer, markClusteredLightContainerDirty, removeFromScene } from "babylon-lite";
 import type { ClusteredLightContainer as LiteClusteredLightContainer, ClusteredPointLight as LiteClusteredPointLight, LightBase } from "babylon-lite";
 
 import { Light, PointLight } from "./lights.js";
@@ -164,7 +157,10 @@ export class ClusteredLightContainer extends Light {
         if (this._built) {
             // Lite bakes clustered capacity and point/spot layout into GPU state.
             // Growing after registration needs a Lite-owned rebuild lifecycle.
-            unsupported("ClusteredLightContainer.addLight after engine start", "Lite bakes clustered-light capacity and layout into GPU state; dynamic growth needs a Lite-owned rebuild lifecycle.");
+            unsupported(
+                "ClusteredLightContainer.addLight after engine start",
+                "Lite bakes clustered-light capacity and layout into GPU state; dynamic growth needs a Lite-owned rebuild lifecycle."
+            );
         }
         light._clusteredContainer = this;
         const position = light.position;

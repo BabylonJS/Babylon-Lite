@@ -5,12 +5,7 @@
  * Babylon Lite `{ x, y, z, w }` quaternion shape used on transform nodes.
  */
 
-import {
-    writeMat4FromQuatIntoBuffer,
-    createQuatFromRotationMat4,
-    writeMat4FromLookDirectionLHIntoBuffer,
-    writeMat4FromLookDirectionRHIntoBuffer,
-} from "babylon-lite";
+import { writeMat4FromQuatIntoBuffer, createQuatFromRotationMat4, writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "babylon-lite";
 import type { Mat4 } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";

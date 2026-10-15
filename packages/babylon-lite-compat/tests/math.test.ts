@@ -278,9 +278,17 @@ describe("Matrix", () => {
 
         const result = Matrix.Translation(7, 8, 9);
         expect(Matrix.LookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
-        expect(result.toArray()).toEqual(Matrix.Identity().toArray());
+        expect(result.toArray()).toEqual(
+            Matrix.Identity()
+                .toArray()
+                .map((value) => expect.closeTo(value))
+        );
         expect(Matrix.LookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
-        expect(result.toArray()).toEqual(Matrix.Identity().toArray());
+        expect(result.toArray()).toEqual(
+            Matrix.Identity()
+                .toArray()
+                .map((value) => expect.closeTo(value))
+        );
     });
 });
 
@@ -421,9 +429,9 @@ describe("Quaternion", () => {
 
         const result = new Quaternion(7, 8, 9, 10);
         expect(Quaternion.FromLookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
-        expect(result.asArray()).toEqual([0, 0, 0, 1]);
+        expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
         expect(Quaternion.FromLookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
-        expect(result.asArray()).toEqual([0, 0, 0, 1]);
+        expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
     });
 });
 

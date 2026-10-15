@@ -25,18 +25,7 @@ export function writeMat4FromLookDirectionRHIntoBuffer<T extends Float32Array | 
     return writeBasis(out, leftX, leftY, leftZ, up.x, up.y, up.z, backX, backY, backZ);
 }
 
-function writeBasis<T extends Float32Array | Float64Array>(
-    out: T,
-    x0: number,
-    x1: number,
-    x2: number,
-    y0: number,
-    y1: number,
-    y2: number,
-    z0: number,
-    z1: number,
-    z2: number
-): T {
+function writeBasis<T extends Float32Array | Float64Array>(out: T, x0: number, x1: number, x2: number, y0: number, y1: number, y2: number, z0: number, z1: number, z2: number): T {
     out[0] = x0;
     out[1] = x1;
     out[2] = x2;

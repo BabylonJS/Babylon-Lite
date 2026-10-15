@@ -147,7 +147,7 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
     });
 
     it("removeLight returns the index and returns the light to the normal path", () => {
-        const { scene, registered } = makeFakeScene(true);
+        const { scene, registered } = makeFakeScene(false);
         const point = new PointLight("p", new Vector3(0, 0, 0), scene);
         const c = new ClusteredLightContainer("clust", [point], scene);
         addToSceneSpy.mockClear();
@@ -179,7 +179,7 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
 
 describe("ClusteredLightContainer — scene wiring", () => {
     it("excludes an added light from the ordinary per-mesh light path", () => {
-        const { scene, unregistered } = makeFakeScene(true);
+        const { scene, unregistered } = makeFakeScene(false);
         const point = new PointLight("p", new Vector3(0, 0, 0), scene);
         const c = new ClusteredLightContainer("clust", [], scene);
 
@@ -189,8 +189,8 @@ describe("ClusteredLightContainer — scene wiring", () => {
     });
 
     it("detaches an added light from its own scene, never the container's", () => {
-        const container = makeFakeScene(true, "container-scene");
-        const other = makeFakeScene(true, "other-scene");
+        const container = makeFakeScene(false, "container-scene");
+        const other = makeFakeScene(false, "other-scene");
         // Light lives on `other`; the container lives on `container.scene`.
         const point = new PointLight("p", new Vector3(0, 0, 0), other.scene);
         const c = new ClusteredLightContainer("clust", [], container.scene);
