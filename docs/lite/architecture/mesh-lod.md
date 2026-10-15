@@ -135,6 +135,11 @@ any nonempty group without a reachable leaf fails with
 CRC-resealed full-file, bootstrap, and public URL-load regressions cover
 both omitted pinned groups and omitted fine groups before decode/allocation.
 
+Hierarchy, group, and cluster sphere centers must contain only finite float32
+values, and their radii must be finite and nonnegative. Metadata parsing rejects
+invalid components with `MLOD_INVALID_HIERARCHY`, the section type, and the exact
+field byte offset before decode or GPU allocation. Zero-radius spheres remain valid.
+
 Every group's page-reference slice must include every page containing a cluster
 whose `groupId` identifies that group. Slice bounds and in-range page IDs alone
 are insufficient: an empty list or references to an unrelated resident page must
@@ -255,6 +260,12 @@ finite float32 rather than overflowing a fixed-point u32 and wrapping a highly
 demanded page to zero. Readback decodes the float and divides by stored bytes;
 the CPU oracle and deterministic GPU model share float32 benefit math and
 saturating accumulation matching the shader's operation order.
+The CPU selector also returns its unnormalized per-page benefit map. A CPU
+render binding adds those benefits across all demanding instances with the same
+finite-float32 saturation, then divides each total by that page's stored bytes.
+Only the subsequent merge across distinct render bindings takes the maximum;
+sharing a missing page within one binding must increase its request priority
+equally in CPU and GPU selection.
 
 ### 11.2 Request scheduling
 
@@ -289,6 +300,11 @@ owns decoding and residency commits.
 ### 11.4 GPU arena
 
 The immutable allocation has a default 128 MiB capacity and budget.
+After device-limit clamping and block rounding, effective settings and diagnostics
+use the actual arena capacity; the effective residency budget is capped at that
+capacity. The public budget setter rejects values above the allocated arena,
+not the originally requested capacity. Replacement-device recovery reconciles
+both effective settings and diagnostics with its new arena before returning.
 Decoded page data occupies rounded 64 KiB slots. Every page must declare
 a positive decoded allocation no larger than
 256 KiB. Metadata validation rejects larger declarations even when the
@@ -498,6 +514,13 @@ references acquired for an earlier one.
 
 The pipeline is an opaque triangle list with target-specific depth and
 multisampling. Front faces are CCW; culling respects `doubleSided`.
+Normal-mapped materials use ordinary PBR's scale-invariant cotangent frame:
+`det = max(dot(T, T), dot(B, B))` and
+`invmax = select(inverseSqrt(det), 0, det == 0)`. No additive epsilon may attenuate
+the tangent columns relative to the geometric normal. A degenerate UV frame
+has zero tangent columns; otherwise normalization is independent of world
+scale, projection, and viewport size. Production-shader float readbacks compare
+ordinary PBR and MeshLoD over multiple projected sizes and a zero-UV case.
 
 ### 13.4 Indirect draw
 

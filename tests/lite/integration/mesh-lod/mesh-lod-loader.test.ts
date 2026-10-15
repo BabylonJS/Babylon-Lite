@@ -8,13 +8,20 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMeshLoD } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { parseMeshLoDContainer, PAGE_TABLE_RECORD_SIZE, SECTION_PAGE_TABLE } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import { createFillDecoder, createMockDevice, createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import { corruptFineGroupPageRefs, corruptHierarchyGroupCoverage, resealContainer } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
+import {
+    corruptFineGroupPageRefs,
+    corruptHierarchyGroupCoverage,
+    corruptSpatialSphere,
+    INVALID_SPATIAL_SPHERE_FIELDS,
+    SPATIAL_SPHERE_SECTIONS,
+    resealContainer,
+} from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 
@@ -170,7 +177,55 @@ describe("loadMeshLoD — group-page membership", () => {
     }
 });
 
+for (const selectionMode of ["cpu", "gpu"] as const) {
+    describe.each(SPATIAL_SPHERE_SECTIONS)(`loadMeshLoD — spatial sphere section %s (${selectionMode})`, (sectionType) => {
+        it.each(INVALID_SPATIAL_SPHERE_FIELDS)("rejects CRC-resealed field %s = %s before decoding or allocation", async (fieldOffset, value) => {
+            const bytes = statueBytes();
+            const { byteOffset } = corruptSpatialSphere(bytes, sectionType, fieldOffset, value);
+            const server = rangeServer(bytes);
+            const { engine, device } = createMockEngine();
+            const decoder = createFillDecoder();
+            _setMeshLoDPageDecoder(decoder.decoder);
+            await expect(loadMeshLoD(engine, "https://cdn.test/statue.mlod", { selectionMode, request: { fetch: server.fetch } })).rejects.toMatchObject({
+                code: "MLOD_INVALID_HIERARCHY",
+                sectionType,
+                byteOffset,
+            });
+            expect(server.calls).toBe(2);
+            expect(decoder.modes).toEqual([]);
+            expect(device.buffers).toEqual([]);
+            expect(device.writes).toEqual([]);
+        });
+    });
+}
+
 describe("loadMeshLoD — budget and limit boundaries", () => {
+    it.each([
+        [128 * 1024, 1024 * 1024],
+        [160 * 1024, 1024 * 1024],
+        [1024 * 1024, 160 * 1024],
+    ])("bounds effective settings and public budget changes by the actual arena (device=%s, requested=%s)", async (limit, requested) => {
+        const { engine } = createMockEngine(createMockDevice(limit));
+        const asset = await loadMeshLoD(engine, sourceBuffer(statueBytes()), { cacheCapacityBytes: requested, cacheBudgetBytes: requested });
+        const capacity = 128 * 1024;
+        expect(asset.diagnostics.gpuCacheCapacityBytes).toBe(capacity);
+        expect(asset.diagnostics.gpuCacheBudgetBytes).toBe(capacity);
+        expect(asset._runtime.settings.cacheCapacityBytes).toBe(capacity);
+        expect(asset._runtime.settings.cacheBudgetBytes).toBe(capacity);
+        setMeshLoDCacheBudget(asset, capacity);
+        expect(() => setMeshLoDCacheBudget(asset, capacity + 1)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+        expect(asset.diagnostics.gpuCacheBudgetBytes).toBe(capacity);
+        setMeshLoDCacheBudget(asset, 64 * 1024);
+        expect(asset.diagnostics.gpuCacheBudgetBytes).toBe(64 * 1024);
+    });
+
+    it("preserves a requested budget below the device-clamped capacity", async () => {
+        const { engine } = createMockEngine(createMockDevice(160 * 1024));
+        const asset = await loadMeshLoD(engine, sourceBuffer(statueBytes()), { cacheCapacityBytes: 1024 * 1024, cacheBudgetBytes: 96 * 1024 });
+        expect(asset.diagnostics.gpuCacheCapacityBytes).toBe(128 * 1024);
+        expect(asset.diagnostics.gpuCacheBudgetBytes).toBe(96 * 1024);
+    });
+
     it("rejects a budget below the pinned allocation with MLOD_BUDGET_TOO_SMALL", async () => {
         const bytes = statueBytes();
         const probe = await loadMeshLoD(createMockEngine().engine, sourceBuffer(bytes));

@@ -73,6 +73,8 @@ export interface MeshLoDSelectionResult {
     readonly selectedClusterIds: Uint32Array;
     /** Missing demanded pages, sorted by descending priority then ascending id. */
     readonly desiredPages: readonly MeshLoDDesiredPage[];
+    /** Unnormalized float32 benefits, retained for saturating within-binding sums. */
+    readonly pageBenefits: ReadonlyMap<number, number>;
     /** Updated per-group `wasFineRequired` bits for the next frame. */
     readonly fineRequired: Uint8Array;
     readonly visibleGroupCount: number;
@@ -232,6 +234,7 @@ export function selectMeshLoDCpu(input: MeshLoDSelectionInput): MeshLoDSelection
     return {
         selectedClusterIds: Uint32Array.from(selected),
         desiredPages,
+        pageBenefits: demandShare,
         fineRequired,
         visibleGroupCount,
         fallbackGroupCount: demandedGroups.size,

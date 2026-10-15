@@ -12,7 +12,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { finishMeshLoDFrame, queueMeshLoDFrame, stepMeshLoDStreaming } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
-import { addMeshLoDInstanceToScene, driveMeshLoDStreaming } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { addMeshLoDInstanceToScene, driveMeshLoDStreaming, selectMeshLoDBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { addMeshLoDPageBenefit } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-math.js";
 import type { MeshLoDInstanceSelection, MeshLoDSceneBatch } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import {
@@ -74,6 +75,62 @@ afterEach(() => {
 });
 
 describe("MeshLoD frame references (§14.1)", () => {
+    it("sums actual CPU instance benefits before normalizing a shared binding's demand", async () => {
+        const engine = createMockEngine().engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu", screenSpaceError: 0.001 });
+        const scene = fakeScene(engine);
+        const material = {} as PbrMaterialProps;
+        for (let instance = 0; instance < 2; instance++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        }
+        const batch = scene._meshLoDRegistry!.batches[0]!;
+        const selections = selectMeshLoDBatch(batch, CONTEXT, new Map());
+        expect(selections).toHaveLength(2);
+        const first = selections[0]!.result;
+        expect(first.desiredPages.length).toBeGreaterThan(0);
+        const producer = {};
+        driveMeshLoDStreaming(batch, selections, producer);
+        const expected = [...first.pageBenefits].map(([pageId, benefit]) => ({
+            pageId,
+            priority: addMeshLoDPageBenefit(benefit, benefit) / asset._runtime.pageRecords[pageId]!.storedBytes,
+        }));
+        expected.sort((a, b) => b.priority - a.priority || a.pageId - b.pageId);
+        expect(asset._runtime._frameSnapshots.get(producer)!.demand).toEqual(expected);
+    });
+
+    it("orders competing pages by summed benefit while retaining zero-benefit demand", async () => {
+        const engine = createMockEngine().engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const material = {} as PbrMaterialProps;
+        const batch: MeshLoDSceneBatch = {
+            asset,
+            material,
+            instances: [createMeshLoDInstance(asset, material), createMeshLoDInstance(asset, material)],
+        };
+        const selections = selectMeshLoDBatch(batch, CONTEXT, new Map()).map(({ instance, result }, index) => {
+            const pageBenefits = new Map([
+                [1, 10 * asset._runtime.pageRecords[1]!.storedBytes],
+                [2, (index === 0 ? 15 : 0) * asset._runtime.pageRecords[2]!.storedBytes],
+                [3, 0],
+            ]);
+            return {
+                instance,
+                result: {
+                    ...result,
+                    pageBenefits,
+                    desiredPages: [...pageBenefits].map(([pageId, benefit]) => ({ pageId, priority: benefit / asset._runtime.pageRecords[pageId]!.storedBytes })),
+                },
+            };
+        });
+        const producer = {};
+        driveMeshLoDStreaming(batch, selections, producer);
+        expect(asset._runtime._frameSnapshots.get(producer)!.demand).toEqual([
+            { pageId: 1, priority: 20 },
+            { pageId: 2, priority: 15 },
+            { pageId: 3, priority: 0 },
+        ]);
+    });
+
     it("discards an aborted frame's demand and CPU usage without advancing the asset clock", async () => {
         const engine = createMockEngine().engine;
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
@@ -91,6 +148,7 @@ describe("MeshLoD frame references (§14.1)", () => {
                     result: {
                         selectedClusterIds: new Uint32Array([clusterId]),
                         desiredPages: [{ pageId: 1, priority: 1 }],
+                        pageBenefits: new Map([[1, asset._runtime.pageRecords[1]!.storedBytes]]),
                         fineRequired: new Uint8Array(0),
                         visibleGroupCount: 1,
                         fallbackGroupCount: 0,
@@ -170,6 +228,7 @@ describe("MeshLoD frame references (§14.1)", () => {
                 result: {
                     selectedClusterIds: new Uint32Array([0]),
                     desiredPages: [{ pageId, priority }],
+                    pageBenefits: new Map([[pageId, priority * asset._runtime.pageRecords[pageId]!.storedBytes]]),
                     fineRequired: new Uint8Array(0),
                     visibleGroupCount: 1,
                     fallbackGroupCount: 0,

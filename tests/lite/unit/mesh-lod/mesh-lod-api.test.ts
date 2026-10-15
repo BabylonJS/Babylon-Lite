@@ -30,7 +30,7 @@ import { createTranslationMat4 } from "../../../../packages/babylon-lite/src/mat
 const MIB = 1024 * 1024;
 
 function makeFakeAsset(): MeshLoDAsset {
-    const settings = _resolveMeshLoDLoadOptions();
+    const settings = _resolveMeshLoDLoadOptions({ cacheCapacityBytes: 4 * MIB });
     const diagnostics = { streamingPaused: false } as unknown as MeshLoDDiagnostics;
     return {
         metadata: {} as MeshLoDAsset["metadata"],
@@ -203,12 +203,12 @@ describe("asset setters and lifecycle", () => {
     it("mutates runtime settings/flags", () => {
         const asset = makeFakeAsset();
         setMeshLoDScreenSpaceError(asset, 8);
-        setMeshLoDCacheBudget(asset, 16 * MIB);
+        setMeshLoDCacheBudget(asset, 2 * MIB);
         setMeshLoDStreamingPaused(asset, true);
         setMeshLoDDebugView(asset, "lod-depth");
         setMeshLoDSelectionMode(asset, "cpu");
         expect(asset._runtime.settings.screenSpaceError).toBe(8);
-        expect(asset._runtime.settings.cacheBudgetBytes).toBe(16 * MIB);
+        expect(asset._runtime.settings.cacheBudgetBytes).toBe(2 * MIB);
         expect(asset._runtime.streamingPaused).toBe(true);
         expect(asset._runtime.debugView).toBe("lod-depth");
         expect(asset._runtime.selectionMode).toBe("cpu");
@@ -219,6 +219,13 @@ describe("asset setters and lifecycle", () => {
         expect(() => setMeshLoDScreenSpaceError(asset, 0)).toThrowError();
         expect(() => setMeshLoDCacheBudget(asset, 999 * MIB)).toThrowError();
         expect(() => setMeshLoDSelectionMode(asset, "auto" as unknown as "cpu")).toThrowError();
+    });
+
+    it("bounds the budget by the actual arena even when capacity settings are stale", () => {
+        const asset = makeFakeAsset();
+        asset._runtime.settings.cacheCapacityBytes = 128 * MIB;
+        expect(() => setMeshLoDCacheBudget(asset, 4 * MIB + 1)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+        expect(asset._runtime.settings.cacheBudgetBytes).toBe(4 * MIB);
     });
 
     it("rejects budgets below pinned residency without mutating the effective budget", () => {

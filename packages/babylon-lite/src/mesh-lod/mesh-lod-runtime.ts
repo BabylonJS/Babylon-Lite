@@ -326,6 +326,11 @@ function createDiagnostics(
     };
 }
 
+function reconcileArenaSettings(settings: MeshLoDEffectiveSettings, capacityBytes: number): void {
+    settings.cacheCapacityBytes = capacityBytes;
+    settings.cacheBudgetBytes = Math.min(settings.cacheBudgetBytes, capacityBytes);
+}
+
 /** Decode, upload, and mark GPU-resident every pinned coarse page, and allocate the
  *  immutable geometry arena. Runs after metadata validation and before the asset is
  *  registerable. Fine pages are left `unrequested`. Throws before any GPU allocation
@@ -451,8 +456,10 @@ export async function _loadMeshLoD(
     const gpu = await prepareCoarseResidency(engine, parsed, coarseBytes, settings, signal);
     try {
         throwIfAborted(signal);
+        reconcileArenaSettings(settings, gpu.arena.capacityBytes);
         diagnostics.residentPageCount = gpu.residentPageCount;
         diagnostics.gpuCacheUsedBytes = arenaUsedBytes(gpu.arena);
+        diagnostics.gpuCacheBudgetBytes = settings.cacheBudgetBytes;
         diagnostics.gpuCacheCapacityBytes = gpu.arena.capacityBytes;
         diagnostics.downloadedBytes = src.downloadedBytes;
 
@@ -1117,6 +1124,7 @@ export function _recoverMeshLoDAsset(engine: EngineContext, runtime: MeshLoDAsse
     }
 
     runtime.gpu = { arena, pages, residentPageCount };
+    reconcileArenaSettings(runtime.settings, arena.capacityBytes);
     runtime.gpuSelection = null; // rebuilt against the new device on the next selection
     runtime.gpuDevice = engine._device;
     const d = runtime.diagnostics as MeshLoDMutableDiagnostics;

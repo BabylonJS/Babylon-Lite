@@ -14,6 +14,7 @@ import {
     PAGE_ALIGNMENT,
     SECTION_ENTRY_SIZE,
     SECTION_GROUPS,
+    SECTION_CLUSTERS,
     SECTION_GROUP_PAGE_REFS,
     SECTION_HIERARCHY_NODES,
     HIERARCHY_NODE_SIZE,
@@ -353,4 +354,37 @@ export function corruptHierarchyGroupCoverage(bytes: Uint8Array, target: "pinned
         bootstrapBytes: parsed.header.bootstrapBytes,
         byteOffset: parsed.sections[SECTION_GROUPS - 1]!.offset + omitted[0]! * GROUP_RECORD_SIZE + 28,
     };
+}
+
+export const SPATIAL_SPHERE_SECTIONS = [SECTION_GROUPS, SECTION_CLUSTERS, SECTION_HIERARCHY_NODES] as const;
+export const INVALID_SPATIAL_SPHERE_FIELDS = [
+    [0, NaN],
+    [0, Infinity],
+    [0, -Infinity],
+    [4, NaN],
+    [4, Infinity],
+    [4, -Infinity],
+    [8, NaN],
+    [8, Infinity],
+    [8, -Infinity],
+    [12, NaN],
+    [12, Infinity],
+    [12, -Infinity],
+    [12, -1],
+] as const;
+
+/** Mutate one spatial component without invalidating container checksums. */
+export function corruptSpatialSphere(
+    bytes: Uint8Array,
+    sectionType: (typeof SPATIAL_SPHERE_SECTIONS)[number],
+    fieldOffset: number,
+    value: number
+): { bootstrapBytes: number; byteOffset: number } {
+    const parsed = parseMeshLoDContainer(bytes);
+    const entry = parsed.sections.find((section) => section.type === sectionType)!;
+    const record = sectionType === SECTION_HIERARCHY_NODES ? parsed.hierarchyNodes.findIndex((node) => node.childCount === 0) : 0;
+    const byteOffset = entry.offset + record * entry.elementStride + fieldOffset;
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setFloat32(byteOffset, value, true);
+    resealContainer(bytes);
+    return { bootstrapBytes: parsed.header.bootstrapBytes, byteOffset };
 }

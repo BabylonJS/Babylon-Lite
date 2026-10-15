@@ -3,6 +3,13 @@ import { resolve } from "node:path";
 import { expect, test } from "../parity/parity-fixtures";
 import type * as Gpu from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type * as Scheduler from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scheduler.js";
+import type * as Api from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type * as Scene from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type * as Decoder from "../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
+import type * as Camera from "../../../packages/babylon-lite/src/camera/free-camera.js";
+import type * as Pbr from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import type * as Mock from "../unit/mesh-lod/fixtures/gpu-mock.js";
+import type * as Fixture from "../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const sourceRoot = resolve(__dirname, "..", "..", "..", "packages", "babylon-lite", "src", "mesh-lod");
 const moduleUrl = (name: string): string => `/@fs/${resolve(sourceRoot, name).replaceAll("\\", "/")}`;
@@ -10,15 +17,23 @@ const moduleUrl = (name: string): string => `/@fs/${resolve(sourceRoot, name).re
 test("production MeshLoD WGSL preserves zero and high shared-page demand priorities", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(
-        async ({ shader, gpuUrl, schedulerUrl }) => {
+        async ({ shader, gpuUrl, schedulerUrl, apiUrl, sceneUrl, decoderUrl, cameraUrl, materialUrl, mockUrl, fixtureUrl }) => {
             const gpu = (await import(gpuUrl)) as typeof Gpu;
             const scheduling = (await import(schedulerUrl)) as typeof Scheduler;
+            const api = (await import(apiUrl)) as typeof Api;
+            const scene = (await import(sceneUrl)) as typeof Scene;
+            const decoder = (await import(decoderUrl)) as typeof Decoder;
+            const cameras = (await import(cameraUrl)) as typeof Camera;
+            const materials = (await import(materialUrl)) as typeof Pbr;
+            const mocks = (await import(mockUrl)) as typeof Mock;
+            const fixtures = (await import(fixtureUrl)) as typeof Fixture;
             const adapter = await navigator.gpu.requestAdapter();
             if (!adapter) {
                 throw new Error("WebGPU adapter unavailable");
             }
             const device = await adapter.requestDevice();
             let scheduler: Scheduler.MeshLoDRequestScheduler | undefined;
+            let cpuAsset: Api.MeshLoDAsset | undefined;
             try {
                 device.pushErrorScope("validation");
                 const module = device.createShaderModule({ code: shader });
@@ -40,38 +55,37 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                     )
                 );
                 const center: [number, number, number] = [0, 0, 0];
-                const nodes = gpu.packHierarchyNodes([0, 1].map((groupId) => ({ center, radius: 1, error: 5, groupId, childOffset: 0, childCount: 0 })));
-                const groups = gpu.packGroups(
-                    [0, 1].map((id) => ({
-                        center,
-                        radius: 1,
-                        simplifiedError: id === 0 ? 0 : 5,
-                        depth: id,
-                        firstCluster: id,
-                        clusterCount: 1,
-                        firstPageRef: id,
-                        pageRefCount: 1,
-                        terminal: id === 0,
-                        pinned: id === 0,
-                        sourceTriangleCount: 1,
-                        outputTriangleCount: 1,
-                    }))
-                );
-                const clusters = gpu.packClusters(
-                    [0, 1].map((id) => ({
-                        center,
-                        radius: 1,
-                        error: 0,
-                        groupId: id,
-                        refinedGroupId: id === 0 ? 1 : -1,
-                        pageId: id,
-                        triangleCount: 1,
-                        vertexCount: 3,
-                        vertexOffset: 0,
-                        indexOffset: 0,
-                        sourceTriangleCount: 1,
-                    }))
-                );
+                const nodeRecords = [0, 1].map((groupId) => ({ center, radius: 1, error: 5, groupId, childOffset: 0, childCount: 0 }));
+                const nodes = gpu.packHierarchyNodes(nodeRecords);
+                const groupRecords = [0, 1].map((id) => ({
+                    center,
+                    radius: 1,
+                    simplifiedError: id === 0 ? 0 : 5,
+                    depth: id,
+                    firstCluster: id,
+                    clusterCount: 1,
+                    firstPageRef: id,
+                    pageRefCount: 1,
+                    terminal: id === 0,
+                    pinned: id === 0,
+                    sourceTriangleCount: 1,
+                    outputTriangleCount: 1,
+                }));
+                const groups = gpu.packGroups(groupRecords);
+                const clusterRecords = [0, 1].map((id) => ({
+                    center,
+                    radius: 1,
+                    error: 0,
+                    groupId: id,
+                    refinedGroupId: id === 0 ? 1 : -1,
+                    pageId: id,
+                    triangleCount: 1,
+                    vertexCount: 3,
+                    vertexOffset: 0,
+                    indexOffset: 0,
+                    sourceTriangleCount: 1,
+                }));
+                const clusters = gpu.packClusters(clusterRecords);
                 const refs = gpu.packGroupPageRefs(Uint32Array.from([0, 1]));
                 const meta = Uint32Array.from([...nodes, ...groups, ...clusters, ...refs]);
                 const instances = new Float32Array(2 * gpu.INSTANCE_WORDS);
@@ -175,15 +189,67 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                 groupF32[gpu.GROUP_WORDS + 4] = 18;
                 params.set([1024, 1024, 512, 0], 28);
                 paramsU32[36] = 2;
+                const { engine } = mocks.createMockEngine();
+                decoder._setMeshLoDPageDecoder(mocks.createFillDecoder().decoder);
+                const loaded = await api.loadMeshLoD(engine, fixtures.buildMinimalContainer().bytes.buffer as ArrayBuffer, {
+                    selectionMode: "cpu",
+                    cacheCapacityBytes: 2 * 65536,
+                    cacheBudgetBytes: 2 * 65536,
+                });
+                const coarseRecord = loaded._runtime.pageRecords[0]!;
+                const coarsePage = loaded._runtime.gpu.pages[0]!;
+                cpuAsset = {
+                    ...loaded,
+                    _runtime: {
+                        ...loaded._runtime,
+                        header: { ...loaded._runtime.header, levelCount: 2 },
+                        groups: groupRecords,
+                        clusters: clusterRecords,
+                        hierarchyNodes: nodeRecords,
+                        groupPageRefs: Uint32Array.from([0, 1]),
+                        pageRecords: [
+                            { ...coarseRecord, storedBytes: 65536 },
+                            { ...coarseRecord, storedBytes: 65536, pinned: false, coarse: false },
+                        ],
+                        gpu: {
+                            ...loaded._runtime.gpu,
+                            pages: [coarsePage, { ...coarsePage, id: 1, state: "unrequested", arenaOffset: -1, arenaBytes: 0, indices: null }],
+                        },
+                    },
+                };
+                const batch: Scene.MeshLoDSceneBatch = {
+                    asset: cpuAsset,
+                    material: materials.createPbrMaterial({ doubleSided: true }),
+                    instances: [],
+                };
+                batch.instances.push(api.createMeshLoDInstance(cpuAsset, batch.material), api.createMeshLoDInstance(cpuAsset, batch.material));
+                const history = new Map<number, Scene.MeshLoDCpuInstanceHistory>();
+                const producer = {};
                 const shared = [];
                 for (const { errorPixels, sourceError } of [
                     { errorPixels: 18, sourceError: 18 },
                     { errorPixels: 36, sourceError: 18 },
                     { errorPixels: 4e32, sourceError: 4e32 },
+                    { errorPixels: 1.9, sourceError: 18 },
                 ]) {
                     groupF32[gpu.GROUP_WORDS + 4] = sourceError;
                     device.queue.writeBuffer(buffers[1]!, nodes.byteLength, groups);
                     const readback = await compute(errorPixels);
+                    groupRecords[1] = { ...groupRecords[1]!, radius: groupF32[gpu.GROUP_WORDS + 3]!, simplifiedError: groupF32[gpu.GROUP_WORDS + 4]! };
+                    const camera = cameras.createFreeCamera({ x: 0, y: 0, z: params[26]! }, { x: 0, y: 0, z: 0 });
+                    camera.fov = Math.PI / 2;
+                    camera.nearPlane = 0.1;
+                    const selections = scene.selectMeshLoDBatch(batch, { targetWidth: 1024, targetHeight: 1024, _camera: camera }, history);
+                    scene.driveMeshLoDStreaming(batch, selections, producer);
+                    const cpuDemand = [...cpuAsset._runtime._frameSnapshots.get(producer)!.demand];
+                    engine._finishOptionalFrame?.(false);
+                    const retirements = engine._retirements;
+                    engine._retirements = null;
+                    retirements?.forEach((retire) => retire());
+                    const priorState = new Uint32Array(2);
+                    if (errorPixels < 2) {
+                        priorState.fill(2);
+                    }
                     const model = gpu.runMeshLoDGpuSelection({
                         nodes,
                         groups,
@@ -193,7 +259,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                         pageStoredBytes: [65536, 65536],
                         instances,
                         instancesU32,
-                        priorState: new Uint32Array(2),
+                        priorState,
                         instanceCount: 2,
                         groupCount: 2,
                         clusterCount: 2,
@@ -213,7 +279,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                             levelCount: 2,
                         },
                     });
-                    shared.push({ readback, model: model.desiredPages });
+                    shared.push({ readback, cpuDemand, model: model.desiredPages });
                 }
                 const validation = await device.popErrorScope();
                 if (validation) {
@@ -221,6 +287,10 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                 }
                 return { initial, band, pendingInBand, abortsInBand, lastDemandFrame, starts, withdrawn, aborts, failures, shared };
             } finally {
+                if (cpuAsset) {
+                    api.disposeMeshLoDAsset(cpuAsset);
+                }
+                decoder._setMeshLoDPageDecoder(null);
                 if (scheduler) {
                     scheduling.disposeMeshLoDRequestScheduler(scheduler);
                 }
@@ -231,6 +301,13 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
             shader: readFileSync(resolve(sourceRoot, "mesh-lod-selection.wgsl"), "utf8"),
             gpuUrl: moduleUrl("mesh-lod-selection-gpu.ts"),
             schedulerUrl: moduleUrl("mesh-lod-scheduler.ts"),
+            apiUrl: moduleUrl("mesh-lod.ts"),
+            sceneUrl: moduleUrl("mesh-lod-scene.ts"),
+            decoderUrl: moduleUrl("mesh-lod-page-decoder.ts"),
+            cameraUrl: `/@fs/${resolve(sourceRoot, "..", "camera", "free-camera.ts").replaceAll("\\", "/")}`,
+            materialUrl: `/@fs/${resolve(sourceRoot, "..", "material", "pbr", "pbr-material.ts").replaceAll("\\", "/")}`,
+            mockUrl: `/@fs/${resolve(__dirname, "..", "unit", "mesh-lod", "fixtures", "gpu-mock.ts").replaceAll("\\", "/")}`,
+            fixtureUrl: `/@fs/${resolve(__dirname, "..", "unit", "mesh-lod", "fixtures", "mlod-fixture.ts").replaceAll("\\", "/")}`,
         }
     );
     expect(result.initial.demand).toHaveLength(1);
@@ -248,9 +325,10 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
     expect(result.withdrawn.demand).toEqual([]);
     expect(result.aborts).toBe(1);
     expect(result.failures).toEqual([]);
-    expect(result.shared.map(({ readback }) => readback.demand[0]?.priority)).toEqual([256, 544, 3.4028234663852886e38 / 65536]);
-    for (const { readback, model } of result.shared) {
+    expect(result.shared.map(({ readback }) => readback.demand[0]?.priority)).toEqual([256, 544, 3.4028234663852886e38 / 65536, 0]);
+    for (const { readback, cpuDemand, model } of result.shared) {
         expect(readback.demand).toEqual(model);
+        expect(readback.demand).toEqual(cpuDemand);
         expect(readback.selectedClusterCount).toBe(2);
         expect(readback.fallbackGroupCount).toBe(2);
     }

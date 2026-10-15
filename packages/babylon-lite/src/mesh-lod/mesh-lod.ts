@@ -344,10 +344,10 @@ export function setMeshLoDCacheBudget(asset: MeshLoDAsset, bytes: number): void 
     if (!Number.isFinite(bytes) || bytes <= 0) {
         throw invalidOption("cacheBudgetBytes", "a finite number > 0", bytes);
     }
-    if (bytes > asset._runtime.settings.cacheCapacityBytes) {
+    const arena = asset._runtime.gpu.arena;
+    if (bytes > arena.capacityBytes) {
         throw invalidOption("cacheBudgetBytes", "<= cacheCapacityBytes", bytes);
     }
-    const arena = asset._runtime.gpu.arena;
     const pinnedBytes = arena.pinnedCount * (arena.capacityBytes / arena.blockCount);
     if (bytes < pinnedBytes) {
         throw createMeshLoDError("MLOD_BUDGET_TOO_SMALL", "cacheBudgetBytes cannot hold the pinned coarse pages", {

@@ -3,6 +3,63 @@ import { expect, test } from "../parity/parity-fixtures";
 import type * as Probe from "./fixtures/mesh-lod-pbr.js";
 import type * as Winding from "./fixtures/mesh-lod-winding.js";
 
+test("production MeshLoD cotangent normal mapping matches PBR across world, projection and UV derivative scales", async ({ page }) => {
+    await page.goto("/");
+    const outputs = await page.evaluate(
+        async (url) => {
+            const { createMeshLoDPbrProbe } = (await import(url)) as typeof Probe;
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                throw new Error("WebGPU adapter unavailable");
+            }
+            const device = await adapter.requestDevice();
+            let probe: Awaited<ReturnType<typeof createMeshLoDPbrProbe>> | undefined;
+            try {
+                device.pushErrorScope("validation");
+                probe = await createMeshLoDPbrProbe(device, true);
+                const results = [];
+                for (const worldScale of [1, 0.01, 0.0001, 100]) {
+                    for (const projectedScale of [1, 0.25, 2]) {
+                        for (const uvExponent of [0, -8, null]) {
+                            const output = await probe.read({
+                                roughness: 0.4,
+                                specularAA: false,
+                                varyingNormals: false,
+                                lightType: "directional",
+                                worldScale,
+                                projectedScale,
+                                uvExponent,
+                            });
+                            results.push({ worldScale, projectedScale, uvExponent, ...output });
+                        }
+                    }
+                }
+                const validation = await device.popErrorScope();
+                if (validation) {
+                    throw new Error(validation.message);
+                }
+                return results;
+            } finally {
+                probe?.dispose();
+                device.destroy();
+            }
+        },
+        `/@fs/${resolve(__dirname, "fixtures", "mesh-lod-pbr.ts").replaceAll("\\", "/")}`
+    );
+    for (const output of outputs) {
+        expect(output.ordinary[0]).toBeGreaterThan(0);
+        for (let component = 0; component < 4; component++) {
+            expect(Number.isFinite(output.meshLoD[component])).toBe(true);
+            expect(output.meshLoD[component], JSON.stringify(output)).toBeCloseTo(output.ordinary[component]!, 5);
+        }
+        const reference = outputs.find(
+            (candidate) => candidate.worldScale === 1 && candidate.projectedScale === output.projectedScale && candidate.uvExponent === output.uvExponent
+        )!;
+        expect(output.meshLoD[0]).toBeCloseTo(reference.meshLoD[0]!, 5);
+    }
+    expect(outputs[0]!.ordinary[0]).not.toBeCloseTo(outputs[2]!.ordinary[0]!, 3);
+});
+
 test("production MeshLoD and ordinary PBR agree on metallic lighting and roughness/AA float outputs", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(

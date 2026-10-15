@@ -514,11 +514,27 @@ const PT = {
 } as const;
 const SP = { magic: 0, major: 4, headerBytes: 6, pageId: 8 } as const;
 
+function validateSpatialSphere(reader: Reader, offset: number, sectionType: number): void {
+    for (let component = 0; component < 4; component++) {
+        const byteOffset = offset + component * 4;
+        const value = reader.f32(byteOffset);
+        const radius = component === 3;
+        if (!Number.isFinite(value) || (radius && value < 0)) {
+            throw fail("MLOD_INVALID_HIERARCHY", radius ? "sphere radius must be finite and nonnegative" : "sphere center must be finite", {
+                sectionType,
+                byteOffset,
+                actual: value,
+            });
+        }
+    }
+}
+
 function parseGroups(reader: Reader, entry: MeshLoDSectionEntry, header: MeshLoDHeader): MeshLoDGroup[] {
     requireSection(entry, header.groupCount, GROUP_RECORD_SIZE, "GROUPS");
     const groups: MeshLoDGroup[] = [];
     for (let g = 0; g < header.groupCount; g++) {
         const base = entry.offset + g * GROUP_RECORD_SIZE;
+        validateSpatialSphere(reader, base + GR.sphere, entry.type);
         const flags = reader.u16(base + GR.flags);
         const depth = reader.u32(base + GR.depth);
         const firstCluster = reader.u32(base + GR.firstCluster);
@@ -554,6 +570,7 @@ function parseClusters(reader: Reader, entry: MeshLoDSectionEntry, header: MeshL
     const clusters: MeshLoDCluster[] = [];
     for (let c = 0; c < header.clusterCount; c++) {
         const base = entry.offset + c * CLUSTER_RECORD_SIZE;
+        validateSpatialSphere(reader, base + CR.sphere, entry.type);
         const groupId = reader.u32(base + CR.groupId);
         const refinedGroupId = reader.i32(base + CR.refinedGroupId);
         const pageId = reader.u32(base + CR.pageId);
@@ -603,6 +620,7 @@ function parseNodes(reader: Reader, entry: MeshLoDSectionEntry, header: MeshLoDH
     const nodes: MeshLoDHierarchyNode[] = [];
     for (let n = 0; n < header.hierarchyNodeCount; n++) {
         const base = entry.offset + n * HIERARCHY_NODE_SIZE;
+        validateSpatialSphere(reader, base + NR.sphere, entry.type);
         const group = reader.i32(base + NR.group);
         const childOffset = reader.u32(base + NR.firstChild);
         const childCount = reader.u32(base + NR.childCount);

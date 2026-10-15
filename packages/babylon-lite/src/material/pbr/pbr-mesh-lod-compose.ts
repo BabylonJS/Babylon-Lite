@@ -182,7 +182,8 @@ let dp2perp = cross(dp2, Ngeom);
 let dp1perp = cross(Ngeom, dp1);
 let Tt = dp2perp * duv1.x + dp1perp * duv2.x;
 let Bt = -(dp2perp * duv1.y + dp1perp * duv2.y);
-let invmax = inverseSqrt(max(dot(Tt, Tt), dot(Bt, Bt)) + 1e-7);
+let det = max(dot(Tt, Tt), dot(Bt, Bt));
+let invmax = select(inverseSqrt(det), 0.0, det == 0.0);
 let TBN = mat3x3<f32>(Tt * invmax, Bt * invmax, Ngeom);
 var N = normalize(TBN * scaledN);`;
     }

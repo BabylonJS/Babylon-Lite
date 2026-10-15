@@ -27,6 +27,7 @@ import type { MeshLoDPageDemand } from "./mesh-lod-scheduler.js";
 import { createMeshLoDError, isMeshLoDError } from "./mesh-lod-errors.js";
 import type { MeshLoDCamera, MeshLoDSelectionResult } from "./mesh-lod-selection-cpu.js";
 import { selectMeshLoDCpu } from "./mesh-lod-selection-cpu.js";
+import { addMeshLoDPageBenefit } from "./mesh-lod-selection-math.js";
 
 /** One scene-owned draw batch: all instances that share an exact asset and exact
  *  material object. Selection and expansion run per batch; the PBR module attaches
@@ -375,25 +376,22 @@ export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdate
 
 /** Aggregate one batch's per-instance selection into asset-level fine-page demand and
  *  drive the asset's streaming step. Unions each instance's desired pages (keeping the
- *  highest per-page priority), collects the pages every selected cluster references (so
+ *  summed float32 benefit before transfer-cost normalization), collects the pages every selected cluster references (so
  *  they hold a frame reference and are never evicted while the built frame is in flight),
  *  and publishes the visible/fallback/error selection diagnostics. Called once per frame
  *  by each material binding after selection, before it writes the draw stream.
  *  The producer is that binding's packet, not the shared scene batch. */
 export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: readonly MeshLoDInstanceSelection[], producer: object): void {
     const runtime: MeshLoDAssetRuntime = batch.asset._runtime;
-    const priorityByPage = new Map<number, number>();
+    const benefitByPage = new Map<number, number>();
     const referenced = new Set<number>();
     let visibleGroupCount = 0;
     let fallbackGroupCount = 0;
     let maximumSelectedErrorPixels = 0;
     let maximumUnmetErrorPixels = 0;
     for (const { result } of selections) {
-        for (const page of result.desiredPages) {
-            const existing = priorityByPage.get(page.pageId);
-            if (existing === undefined || page.priority > existing) {
-                priorityByPage.set(page.pageId, page.priority);
-            }
+        for (const [pageId, benefit] of result.pageBenefits) {
+            benefitByPage.set(pageId, addMeshLoDPageBenefit(benefitByPage.get(pageId) ?? 0, benefit));
         }
         for (const clusterId of result.selectedClusterIds) {
             referenced.add(runtime.clusters[clusterId]!.pageId);
@@ -404,8 +402,8 @@ export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: read
         maximumUnmetErrorPixels = Math.max(maximumUnmetErrorPixels, result.maximumUnmetErrorPixels);
     }
     const demand: MeshLoDPageDemand[] = [];
-    for (const [pageId, priority] of priorityByPage) {
-        demand.push({ pageId, priority });
+    for (const [pageId, benefit] of benefitByPage) {
+        demand.push({ pageId, priority: benefit / runtime.pageRecords[pageId]!.storedBytes });
     }
     demand.sort((a, b) => (b.priority !== a.priority ? b.priority - a.priority : a.pageId - b.pageId));
     const stats: MeshLoDStreamSelectionStats = { visibleGroupCount, fallbackGroupCount, maximumSelectedErrorPixels, maximumUnmetErrorPixels };

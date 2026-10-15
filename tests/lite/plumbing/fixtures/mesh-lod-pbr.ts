@@ -1,7 +1,7 @@
 import { createPbrComposer } from "../../../../packages/babylon-lite/src/material/pbr/pbr-compose.js";
 import { composeMeshLoDWgsl } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-compose.js";
 import { COMPUTE_PBR_LIGHT, getMultiLightLoop, MULTI_LIGHT_STRUCTS } from "../../../../packages/babylon-lite/src/material/pbr/fragments/multilight-wgsl.js";
-import { PBR_HAS_SPECULAR_AA } from "../../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
+import { PBR_HAS_NORMAL_MAP, PBR_HAS_SPECULAR_AA } from "../../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
 import { INSTANCE_WORDS, packInstanceRecord } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import { SCENE_UBO_BYTES } from "../../../../packages/babylon-lite/src/shader/scene-uniforms.js";
 import { MAX_LIGHTS } from "../../../../packages/babylon-lite/src/light/types.js";
@@ -11,10 +11,17 @@ export interface MeshLoDPbrCase {
     readonly specularAA: boolean;
     readonly varyingNormals: boolean;
     readonly lightType: "hemispheric" | "directional";
+    readonly worldScale?: number;
+    readonly projectedScale?: number;
+    /** Power-of-two UV extent; null/undefined produces degenerate UV derivatives. */
+    readonly uvExponent?: number | null;
 }
 
 /** Numeric fragment-output fixture; both paths consume the same decoded geometry. */
-export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
+export async function createMeshLoDPbrProbe(
+    device: GPUDevice,
+    normalMap = false
+): Promise<{
     configure(options: MeshLoDPbrCase): void;
     record(encoder: GPUCommandEncoder): void;
     read(options: MeshLoDPbrCase): Promise<{ ordinary: number[]; meshLoD: number[] }>;
@@ -52,12 +59,17 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
     textures.push(white);
     device.queue.writeTexture({ texture: white }, new Uint8Array([255, 255, 255, 255]), {}, [1, 1]);
     const whiteView = white.createView();
+    const normal = device.createTexture({ size: [1, 1], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label: "probe-normal" });
+    textures.push(normal);
+    device.queue.writeTexture({ texture: normal }, new Uint8Array([230, 170, 230, 255]), {}, [1, 1]);
+    const normalView = normal.createView();
     const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
     const positions = new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]);
     const normals = new Float32Array(9);
     const positionBuffer = upload(positions, GPUBufferUsage.VERTEX, "probe-positions");
     const normalBuffer = upload(normals, GPUBufferUsage.VERTEX, "probe-normals");
-    const uvBuffer = upload(new Float32Array(6), GPUBufferUsage.VERTEX, "probe-uv");
+    const uvs = new Float32Array(6);
+    const uvBuffer = upload(uvs, GPUBufferUsage.VERTEX, "probe-uv");
     const arena = new Uint32Array(18);
     const arenaFloats = new Float32Array(arena.buffer);
     for (let vertex = 0; vertex < 3; vertex++) {
@@ -85,7 +97,7 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
         entries: [
             { binding: 0, resource: { buffer: meshMaterialUbo } },
             ...[1, 3, 5, 7].flatMap((binding) => [
-                { binding, resource: whiteView },
+                { binding, resource: binding === 3 ? normalView : whiteView },
                 { binding: binding + 1, resource: sampler },
             ]),
             ...[arenaBuffer, drawBuffer, instanceBuffer].map((buffer, index) => ({ binding: 9 + index, resource: { buffer } })),
@@ -112,7 +124,8 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
         }
         return module;
     };
-    const ordinary = compose(0, 0, 0, 0, 2);
+    const normalFeatures = normalMap ? PBR_HAS_NORMAL_MAP : 0;
+    const ordinary = compose(normalFeatures, 0, 0, 0, 2);
     const ordinaryMaterialSpec = ordinary._materialUboSpec!;
     const ordinaryMaterial = new Float32Array(ordinaryMaterialSpec._totalBytes / 4);
     const ordinaryMaterialUbo = upload(ordinaryMaterial, GPUBufferUsage.UNIFORM, "probe-pbr-material");
@@ -126,19 +139,19 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
         entries: [
             { binding: 0, resource: { buffer: worldUbo } },
             { binding: 1, resource: { buffer: ordinaryMaterialUbo } },
-            { binding: 2, resource: whiteView },
-            { binding: 3, resource: sampler },
-            { binding: 4, resource: whiteView },
-            { binding: 5, resource: sampler },
+            ...[whiteView, ...(normalMap ? [normalView] : []), whiteView].flatMap((resource, index) => [
+                { binding: 2 + index * 2, resource },
+                { binding: 3 + index * 2, resource: sampler },
+            ]),
         ],
     });
     const pipelines = await Promise.all(
         [false, true].map(async (specularAA) => {
-            const pbr = compose(specularAA ? PBR_HAS_SPECULAR_AA : 0, 0, 0, 0, 2);
+            const pbr = compose(normalFeatures | (specularAA ? PBR_HAS_SPECULAR_AA : 0), 0, 0, 0, 2);
             const vertex = await shaderModule(pbr._vertexWGSL, "probe-pbr-vertex");
             const fragment = await shaderModule(pbr._fragmentWGSL, `probe-pbr-aa-${specularAA}`);
             const mesh = await shaderModule(
-                composeMeshLoDWgsl({ hasNormalMap: false, hasEmissiveTexture: false, hasIbl: false, doubleSided: false, unlit: false, hasSpecularAA: specularAA }),
+                composeMeshLoDWgsl({ hasNormalMap: normalMap, hasEmissiveTexture: false, hasIbl: false, doubleSided: false, unlit: false, hasSpecularAA: specularAA }),
                 `probe-mlod-aa-${specularAA}`
             );
             const [ordinaryPipeline, meshPipeline] = await Promise.all([
@@ -173,6 +186,19 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
     let active = pipelines[0]!;
     const configure = (options: MeshLoDPbrCase): void => {
         active = pipelines[options.specularAA ? 1 : 0]!;
+        const worldScale = options.worldScale ?? 1;
+        const projection = (options.projectedScale ?? 1) / worldScale;
+        scene[0] = scene[5] = projection;
+        scene[34] = 4 * worldScale;
+        device.queue.writeBuffer(sceneUbo, 0, scene);
+        world[0] = world[5] = world[10] = worldScale;
+        device.queue.writeBuffer(worldUbo, 0, world);
+        packInstanceRecord(instances, new Uint32Array(instances.buffer), 0, Array.from(world.subarray(0, 16)), true, 0);
+        device.queue.writeBuffer(instanceBuffer, 0, instances);
+        const uvScale = options.uvExponent == null ? 0 : 2 ** options.uvExponent;
+        const uvHalf = options.uvExponent == null ? 0 : (options.uvExponent + 15) << 10;
+        uvs.set([0, 0, uvScale, 0, 0, uvScale]);
+        device.queue.writeBuffer(uvBuffer, 0, uvs);
         meshMaterial.set([1, 1, 1, 1, 0, 0, 0, 0, 1, options.roughness, 1, 1, 0, 1, 0.04, 1, 1, 0, 0, 0]);
         device.queue.writeBuffer(meshMaterialUbo, 0, meshMaterial);
         for (const [name, value] of Object.entries({
@@ -202,6 +228,7 @@ export async function createMeshLoDPbrProbe(device: GPUDevice): Promise<{
             const length = Math.hypot(x, y, z);
             normals.set([x / length, y / length, z / length], vertex * 3);
             arena[vertex * 6 + 3] = octX | (octY << 16);
+            arena[vertex * 6 + 4] = vertex === 1 ? uvHalf : vertex === 2 ? uvHalf << 16 : 0;
         }
         device.queue.writeBuffer(normalBuffer, 0, normals);
         device.queue.writeBuffer(arenaBuffer, 0, arena);

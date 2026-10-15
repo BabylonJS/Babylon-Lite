@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { rebuildRenderables } from "../../../../packages/babylon-lite/src/engine/recovery-rebuild.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
@@ -24,7 +24,7 @@ import { rebuildTexture2D } from "../../../../packages/babylon-lite/src/texture/
 import { releaseTexture } from "../../../../packages/babylon-lite/src/resource/texture-release.js";
 import { _textureOwners } from "../../../../packages/babylon-lite/src/resource/texture-owner-state.js";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
-import type { MeshLoDAsset, MeshLoDInstance, MeshLoDSelectionMode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAsset, MeshLoDInstance, MeshLoDSelectionMode, MeshLoDLoadOptions } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
@@ -69,9 +69,9 @@ interface Harness {
     scene: SceneContext;
 }
 
-async function setup(selectionMode: MeshLoDSelectionMode = "gpu"): Promise<Harness> {
+async function setup(selectionMode: MeshLoDSelectionMode = "gpu", options: MeshLoDLoadOptions = {}): Promise<Harness> {
     const engine = createMockEngine().engine;
-    const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+    const asset = await loadMeshLoD(engine, statueSource(), { ...options, selectionMode });
     const scene = fakeScene(engine);
     const instance = createMeshLoDInstance(asset, {} as PbrMaterialProps);
     addMeshLoDInstanceToScene(scene, instance);
@@ -106,6 +106,23 @@ afterEach(() => {
 });
 
 describe("MeshLoD device recovery", () => {
+    it.each(["cpu", "gpu"] as const)("reconciles effective budgets with smaller replacement arenas (%s)", async (mode) => {
+        const block = 64 * 1024;
+        const { engine, asset, scene } = await setup(mode, { cacheCapacityBytes: 4 * block, cacheBudgetBytes: 4 * block });
+        for (const capacity of [2 * block, block]) {
+            (engine as unknown as { _device: MockDevice })._device = createMockDevice(capacity + 1);
+            await recover(engine, scene, false);
+            expect(asset.state).toBe("ready");
+            expect(asset._runtime.gpu.arena.capacityBytes).toBe(capacity);
+            expect(asset._runtime.settings.cacheCapacityBytes).toBe(capacity);
+            expect(asset._runtime.settings.cacheBudgetBytes).toBe(capacity);
+            expect(asset.diagnostics.gpuCacheCapacityBytes).toBe(capacity);
+            expect(asset.diagnostics.gpuCacheBudgetBytes).toBe(capacity);
+            expect(() => setMeshLoDCacheBudget(asset, capacity + 1)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+            setMeshLoDCacheBudget(asset, capacity);
+        }
+    });
+
     it("registers one renderable rebuild thunk for the MeshLoD batch", async () => {
         const { scene } = await setup();
         expect(scene._renderables).toHaveLength(1);

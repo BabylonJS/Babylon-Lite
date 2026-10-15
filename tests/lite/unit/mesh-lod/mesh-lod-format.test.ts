@@ -23,7 +23,16 @@ import {
     toMeshLoDMetadata,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import { isMeshLoDError, type MeshLoDErrorCode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
-import { buildMinimalContainer, corruptFineGroupPageRefs, corruptHierarchyGroupCoverage, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
+import {
+    buildMinimalContainer,
+    corruptFineGroupPageRefs,
+    corruptHierarchyGroupCoverage,
+    corruptSpatialSphere,
+    INVALID_SPATIAL_SPHERE_FIELDS,
+    SPATIAL_SPHERE_SECTIONS,
+    resealContainer,
+    type FixtureLayout,
+} from "./fixtures/mlod-fixture.js";
 
 describe("parseMeshLoDContainer — minimal valid container", () => {
     it("parses exact metadata and records", () => {
@@ -247,6 +256,29 @@ describe.each([false, true])("parseMeshLoDContainer — group-page membership (f
         expect(source.length).toBe(fullFile ? bytes.length : bootstrapBytes);
         expect(bootstrapBytes).toBeLessThan(bytes.length);
         expect(() => parseMeshLoDContainer(source)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", pageId: omittedPageId, byteOffset }));
+    });
+});
+
+describe.each(SPATIAL_SPHERE_SECTIONS)("parseMeshLoDContainer — spatial sphere section %s", (sectionType) => {
+    for (const fullFile of [false, true]) {
+        it.each(INVALID_SPATIAL_SPHERE_FIELDS)(`rejects CRC-resealed field %s = %s (full file: ${fullFile})`, (fieldOffset, value) => {
+            const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+            const bytes = new Uint8Array(readFileSync(path));
+            const { bootstrapBytes, byteOffset } = corruptSpatialSphere(bytes, sectionType, fieldOffset, value);
+            expect(bootstrapBytes).toBeLessThan(bytes.length);
+            expect(() => parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, bootstrapBytes))).toThrowError(
+                expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", sectionType, byteOffset })
+            );
+        });
+    }
+    it("accepts finite signed centers and zero radius", () => {
+        const { bytes } = buildMinimalContainer();
+        const parsed = parseMeshLoDContainer(bytes);
+        const offset = parsed.sections.find((section) => section.type === sectionType)!.offset;
+        const view = new DataView(bytes.buffer);
+        [-1, 0, 1, 0].forEach((value, axis) => view.setFloat32(offset + axis * 4, value, true));
+        resealContainer(bytes);
+        expect(() => parseMeshLoDContainer(bytes)).not.toThrow();
     });
 });
 
