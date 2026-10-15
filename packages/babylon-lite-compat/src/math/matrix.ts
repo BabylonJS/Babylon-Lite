@@ -6,7 +6,7 @@
  * (`v' = v · M`). `multiply(other)` applies `this` first, then `other`.
  */
 
-import { maximizeMat4InPlace, setMat4Translation } from "babylon-lite";
+import { maximizeMat4InPlace, setMat4Translation, writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "babylon-lite";
 
 import { Vector3 } from "./vector.js";
 import { Quaternion } from "./quaternion.js";
@@ -301,6 +301,28 @@ export class Matrix {
         const ey = -(yx * eye.x + yy * eye.y + yz * eye.z);
         const ez = -(zx * eye.x + zy * eye.y + zz * eye.z);
         return Matrix.FromValues(xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, ex, ey, ez, 1);
+    }
+
+    /** Babylon.js `Matrix.LookDirectionLH(forward, up)` orientation matrix. */
+    public static LookDirectionLH(forward: Vector3, up: Vector3): Matrix {
+        return Matrix.LookDirectionLHToRef(forward, up, new Matrix());
+    }
+
+    /** Babylon.js `Matrix.LookDirectionLHToRef(forward, up, result)`. */
+    public static LookDirectionLHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
+        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
+        return result.markAsUpdated();
+    }
+
+    /** Babylon.js `Matrix.LookDirectionRH(forward, up)` orientation matrix. */
+    public static LookDirectionRH(forward: Vector3, up: Vector3): Matrix {
+        return Matrix.LookDirectionRHToRef(forward, up, new Matrix());
+    }
+
+    /** Babylon.js `Matrix.LookDirectionRHToRef(forward, up, result)`. */
+    public static LookDirectionRHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
+        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
+        return result.markAsUpdated();
     }
 
     /** Babylon.js `Matrix.OrthoOffCenterLH(left, right, bottom, top, znear, zfar, halfZRange?)` — LH ortho projection. */

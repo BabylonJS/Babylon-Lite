@@ -26,7 +26,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { ClusteredLightContainer } from "../src/lights/clustered-light-container";
-import { PointLight, DirectionalLight } from "../src/lights/lights";
+import { PointLight, DirectionalLight, SpotLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
 import { Color3 } from "../src/math/color";
 import { NullEngine } from "../src/engine/engine";
@@ -90,11 +90,26 @@ describe("ClusteredLightContainer — construction defaults", () => {
 });
 
 describe("ClusteredLightContainer.IsLightSupported", () => {
-    it("accepts point lights and rejects other light types", () => {
+    it("accepts representable point lights and rejects other light types", () => {
         const point = new PointLight("p", new Vector3(1, 2, 3));
+        const spot = new SpotLight("s", new Vector3(1, 2, 3), new Vector3(0, -1, 0), Math.PI / 3, 0);
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         expect(ClusteredLightContainer.IsLightSupported(point)).toBe(true);
+        expect(ClusteredLightContainer.IsLightSupported(spot)).toBe(false);
         expect(ClusteredLightContainer.IsLightSupported(dir)).toBe(false);
+    });
+
+    it("rejects point lights that already own a shadow generator", () => {
+        const point = new PointLight("p", new Vector3(1, 2, 3));
+        point._lite.shadowGenerator = {} as never;
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(false);
+    });
+
+    it("rejects point lights on a device-less engine", () => {
+        const { scene } = makeFakeScene(true);
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(false);
+        expect(new ClusteredLightContainer("clust", [], scene).isSupported).toBe(false);
     });
 });
 
@@ -116,7 +131,6 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(first.range).toBe(7);
         expect(first.intensity).toBe(2);
     });
-
     it("ignores unsupported light types and double-adds", () => {
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         const point = new PointLight("p", new Vector3(0, 0, 0));
@@ -148,6 +162,18 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(addToSceneSpy).toHaveBeenCalledWith(scene._lite, point._lite);
 
         expect(c.removeLight(point)).toBe(-1);
+    });
+
+    it("throws before mutating when a light is added after GPU state is built", () => {
+        const { scene } = makeFakeScene(false);
+        const c = new ClusteredLightContainer("clust", [], scene);
+        const point = new PointLight("p", new Vector3(0, 0, 0));
+        c._build();
+
+        expect(() => c.addLight(point)).toThrow(/ClusteredLightContainer\.addLight after engine start/);
+        expect(c.lights).toEqual([]);
+        expect(liteContainer(c).pointLights).toEqual([]);
+        expect(point._clusteredContainer).toBeNull();
     });
 });
 
