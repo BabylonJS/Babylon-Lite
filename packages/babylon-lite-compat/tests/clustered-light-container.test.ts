@@ -9,10 +9,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * contract while the clustering data functions stay real.
  */
 
-const { addClusteredSpy, removeFromSceneSpy, addToSceneSpy } = vi.hoisted(() => ({
+const { addClusteredSpy, removeFromSceneSpy, addToSceneSpy, createEsmDirectionalShadowGeneratorSpy } = vi.hoisted(() => ({
     addClusteredSpy: vi.fn(),
     removeFromSceneSpy: vi.fn(),
     addToSceneSpy: vi.fn(),
+    createEsmDirectionalShadowGeneratorSpy: vi.fn(() => ({ kind: "esm" })),
 }));
 
 vi.mock("babylon-lite", async (importActual) => {
@@ -22,6 +23,7 @@ vi.mock("babylon-lite", async (importActual) => {
         addClusteredLightContainer: addClusteredSpy,
         removeFromScene: removeFromSceneSpy,
         addToScene: addToSceneSpy,
+        createEsmDirectionalShadowGenerator: createEsmDirectionalShadowGeneratorSpy,
     };
 });
 
@@ -47,6 +49,7 @@ function makeFakeScene(headless: boolean, id = "fake-scene"): { scene: Scene; re
         _registerClusteredLightContainer: () => {},
         _unregisterClusteredLightContainer: () => {},
         _registerShadowGenerator: () => {},
+        _unregisterShadowGenerator: () => {},
         _registerBeforeRenderFlush: () => () => {},
         _unregisterNode: (n: object) => unregistered.push(n),
         getEngine: () => ({ _headless: headless }),
@@ -58,6 +61,7 @@ beforeEach(() => {
     addClusteredSpy.mockClear();
     removeFromSceneSpy.mockClear();
     addToSceneSpy.mockClear();
+    createEsmDirectionalShadowGeneratorSpy.mockClear();
 });
 
 describe("ClusteredLightContainer — construction defaults", () => {
@@ -110,6 +114,23 @@ describe("ClusteredLightContainer.IsLightSupported", () => {
 
         shadowGenerator.dispose();
         expect(ClusteredLightContainer.IsLightSupported(point)).toBe(true);
+    });
+
+    it("does not rebuild a disposed deferred shadow generator after clustering its light", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        engine._headless = false;
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        const shadowGenerator = new ShadowGenerator(1024, point);
+
+        shadowGenerator.dispose();
+        const container = new ClusteredLightContainer("clust", [point], scene);
+        expect(container.lights).toEqual([point]);
+
+        scene._buildShadowGenerators();
+
+        expect(createEsmDirectionalShadowGeneratorSpy).not.toHaveBeenCalled();
+        expect(point._lite.shadowGenerator).toBeUndefined();
     });
 
     it("rejects point lights on a device-less engine", () => {

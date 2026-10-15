@@ -202,6 +202,7 @@ export class ShadowGenerator {
 
     public dispose(): void {
         this._disposeBeforeRenderFlush?.();
+        this._light.getScene()?._unregisterShadowGenerator(this);
         for (const { caster, observer } of this._casterDisposeObservers.values()) {
             caster.onDisposeObservable.remove(observer);
         }
