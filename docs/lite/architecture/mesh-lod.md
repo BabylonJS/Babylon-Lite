@@ -432,6 +432,10 @@ and verifies that only genuinely withdrawn demand cancels the request.
 It also sums shared missing-page demand from multiple viewport-filling instances,
 including 18 px error at a 2 px threshold on a 1024-by-1024 target, and compares
 the positive accumulated priorities with the packed-buffer GPU model.
+The same probe also compares actual CPU binding demand. Its browser module URLs
+use canonical `/@fs/` paths on Windows and POSIX: an extra slash creates a distinct
+ES module URL and must not split the injected decoder from the loader's singleton.
+The probe verifies that the loader actually calls the injected decoder.
 The selected list has a count header. Indirect expansion uses bounded XYZ
 dimensions based on `maxComputeWorkgroupsPerDimension`; the shader flattens
 workgroup IDs and skips padding beyond the count. Direct selection kernels

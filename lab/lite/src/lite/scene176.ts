@@ -11,7 +11,8 @@ import {
     type RenderTask,
 } from "babylon-lite";
 
-const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
+const MODEL_URL =
+    "https://raw.githubusercontent.com/KhronosGroupArchives/glTF-Sample-Models/d7a3cc8e51d7c573771ae77a57f16b0662a905c6/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Fixed camera pose framing the amber from the sandbox cameraPosition
@@ -94,4 +95,8 @@ async function main(): Promise<void> {
     canvas.dataset.ready = "true";
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+    console.error(error);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    canvas.dataset.error = error instanceof Error ? error.message : String(error);
+});

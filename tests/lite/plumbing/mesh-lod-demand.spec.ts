@@ -12,7 +12,11 @@ import type * as Mock from "../unit/mesh-lod/fixtures/gpu-mock.js";
 import type * as Fixture from "../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const sourceRoot = resolve(__dirname, "..", "..", "..", "packages", "babylon-lite", "src", "mesh-lod");
-const moduleUrl = (name: string): string => `/@fs/${resolve(sourceRoot, name).replaceAll("\\", "/")}`;
+// /@fs//home/... and /@fs/home/... are distinct browser module identities.
+const moduleUrl = (...parts: string[]): string =>
+    `/@fs/${resolve(...parts)
+        .replaceAll("\\", "/")
+        .replace(/^\/+/, "")}`;
 
 test("production MeshLoD WGSL preserves zero and high shared-page demand priorities", async ({ page }) => {
     await page.goto("/");
@@ -190,7 +194,8 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                 params.set([1024, 1024, 512, 0], 28);
                 paramsU32[36] = 2;
                 const { engine } = mocks.createMockEngine();
-                decoder._setMeshLoDPageDecoder(mocks.createFillDecoder().decoder);
+                const fillDecoder = mocks.createFillDecoder();
+                decoder._setMeshLoDPageDecoder(fillDecoder.decoder);
                 const loaded = await api.loadMeshLoD(engine, fixtures.buildMinimalContainer().bytes.buffer as ArrayBuffer, {
                     selectionMode: "cpu",
                     cacheCapacityBytes: 2 * 65536,
@@ -285,7 +290,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
                 if (validation) {
                     throw new Error(validation.message);
                 }
-                return { initial, band, pendingInBand, abortsInBand, lastDemandFrame, starts, withdrawn, aborts, failures, shared };
+                return { initial, band, pendingInBand, abortsInBand, lastDemandFrame, starts, withdrawn, aborts, failures, shared, decoderModes: fillDecoder.modes };
             } finally {
                 if (cpuAsset) {
                     api.disposeMeshLoDAsset(cpuAsset);
@@ -299,15 +304,15 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
         },
         {
             shader: readFileSync(resolve(sourceRoot, "mesh-lod-selection.wgsl"), "utf8"),
-            gpuUrl: moduleUrl("mesh-lod-selection-gpu.ts"),
-            schedulerUrl: moduleUrl("mesh-lod-scheduler.ts"),
-            apiUrl: moduleUrl("mesh-lod.ts"),
-            sceneUrl: moduleUrl("mesh-lod-scene.ts"),
-            decoderUrl: moduleUrl("mesh-lod-page-decoder.ts"),
-            cameraUrl: `/@fs/${resolve(sourceRoot, "..", "camera", "free-camera.ts").replaceAll("\\", "/")}`,
-            materialUrl: `/@fs/${resolve(sourceRoot, "..", "material", "pbr", "pbr-material.ts").replaceAll("\\", "/")}`,
-            mockUrl: `/@fs/${resolve(__dirname, "..", "unit", "mesh-lod", "fixtures", "gpu-mock.ts").replaceAll("\\", "/")}`,
-            fixtureUrl: `/@fs/${resolve(__dirname, "..", "unit", "mesh-lod", "fixtures", "mlod-fixture.ts").replaceAll("\\", "/")}`,
+            gpuUrl: moduleUrl(sourceRoot, "mesh-lod-selection-gpu.ts"),
+            schedulerUrl: moduleUrl(sourceRoot, "mesh-lod-scheduler.ts"),
+            apiUrl: moduleUrl(sourceRoot, "mesh-lod.ts"),
+            sceneUrl: moduleUrl(sourceRoot, "mesh-lod-scene.ts"),
+            decoderUrl: moduleUrl(sourceRoot, "mesh-lod-page-decoder.ts"),
+            cameraUrl: moduleUrl(sourceRoot, "..", "camera", "free-camera.ts"),
+            materialUrl: moduleUrl(sourceRoot, "..", "material", "pbr", "pbr-material.ts"),
+            mockUrl: moduleUrl(__dirname, "..", "unit", "mesh-lod", "fixtures", "gpu-mock.ts"),
+            fixtureUrl: moduleUrl(__dirname, "..", "unit", "mesh-lod", "fixtures", "mlod-fixture.ts"),
         }
     );
     expect(result.initial.demand).toHaveLength(1);
@@ -325,6 +330,7 @@ test("production MeshLoD WGSL preserves zero and high shared-page demand priorit
     expect(result.withdrawn.demand).toEqual([]);
     expect(result.aborts).toBe(1);
     expect(result.failures).toEqual([]);
+    expect(result.decoderModes).toEqual(["ATTRIBUTES", "TRIANGLES"]);
     expect(result.shared.map(({ readback }) => readback.demand[0]?.priority)).toEqual([256, 544, 3.4028234663852886e38 / 65536, 0]);
     for (const { readback, cpuDemand, model } of result.shared) {
         expect(readback.demand).toEqual(model);
