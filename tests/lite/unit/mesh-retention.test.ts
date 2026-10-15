@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-dispose.js";
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
-import { initMeshTransform, uploadMeshToGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import { initMeshTransform, uploadMeshToGPU, type Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { retainMeshResources, releaseMeshResources, detachMeshFromScene } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
 import { addToScene, disposeScene, type SceneChangeEvent, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import { onSceneChange } from "../../../packages/babylon-lite/src/scene/scene-change.js";
@@ -22,13 +22,46 @@ import { B as buildRuntimeMesh } from "../../../packages/babylon-lite/src/scene/
 import type { MeshGroupBuilder } from "../../../packages/babylon-lite/src/render/renderable.js";
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild.js";
 import { resolvePendingTaskMeshes } from "../../../packages/babylon-lite/src/frame-graph/render-task-transaction.js";
-import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs.js";
+import { setShadowTaskCasterMeshes, _getShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs.js";
 import { createShadowTask } from "../../../packages/babylon-lite/src/frame-graph/shadow-task.js";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator.js";
 import type { LightBase } from "../../../packages/babylon-lite/src/light/types.js";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 
 function stub<T extends object>(value: Partial<T>): T {
     return value as T;
+}
+
+async function collectGarbage(): Promise<void> {
+    setFlagsFromString("--expose_gc");
+    const collect = runInNewContext("gc") as () => void;
+    try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        for (let attempt = 0; attempt < 20; attempt++) {
+            collect();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+    } finally {
+        setFlagsFromString("--no-expose_gc");
+    }
+}
+
+function freshMesh(engine: EngineContext, name: string): Mesh {
+    const positions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
+    const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    const indices = new Uint32Array([0, 1, 2]);
+    return initMeshTransform({
+        name,
+        material: createStandardMaterial(),
+        receiveShadows: false,
+        boundMin: [-1, -1, 0],
+        boundMax: [1, 1, 0],
+        _cpuPositions: positions,
+        _cpuNormals: normals,
+        _cpuIndices: indices,
+        _gpu: uploadMeshToGPU(engine, positions, normals, indices),
+    });
 }
 
 function fixture() {
@@ -467,6 +500,70 @@ describe("retained mesh scene membership", () => {
         await waitForGpuResourceRetirements(engine);
         expect(mesh._disposed).toBe(true);
         expect(frame()).toEqual([peer]);
+    });
+
+    it("does not keep finally released detached meshes alive for shadow exclusion", async () => {
+        const { engine, scene, mesh: resident } = fixture();
+        // An unbuilt fixture scene keeps its first group member reachable through the pending boot-time group builder.
+        addToScene(scene, resident);
+        const retire = async (index: number): Promise<WeakRef<Mesh>> => {
+            const mesh = freshMesh(engine, `retired-${index}`);
+            addToScene(scene, mesh);
+            const lease = retainMeshResources(engine, mesh);
+            detachMeshFromScene(scene, mesh);
+            releaseMeshResources(lease);
+            await waitForGpuResourceRetirements(engine);
+            expect(mesh._disposed).toBe(true);
+            return new WeakRef(mesh);
+        };
+        const retired: WeakRef<Mesh>[] = [];
+        for (let index = 0; index < 3; index++) {
+            retired.push(await retire(index));
+        }
+
+        await collectGarbage();
+        expect(retired.map((ref) => ref.deref())).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("reuses filtered shadow casters across unchanged frames without rebuilding them", async () => {
+        const { engine, scene, mesh } = fixture();
+        const peer = cloneTransformNode(mesh) as typeof mesh;
+        const bystander = freshMesh(engine, "bystander");
+        addToScene(scene, mesh);
+        addToScene(scene, peer);
+        addToScene(scene, bystander);
+        const casters = [mesh, peer];
+        const filter = vi.fn(Array.prototype.filter);
+        Object.defineProperty(casters, "filter", { value: filter });
+        const sg = stub<ShadowGenerator>({});
+        setShadowTaskCasterMeshes(sg, casters);
+        await Promise.resolve();
+
+        const bystanderLease = retainMeshResources(engine, bystander);
+        detachMeshFromScene(scene, bystander);
+        releaseMeshResources(bystanderLease);
+        await waitForGpuResourceRetirements(engine);
+        for (let frame = 0; frame < 3; frame++) {
+            expect(_getShadowTaskCasterMeshes(sg, scene)).toBe(casters);
+        }
+        expect(filter).not.toHaveBeenCalled();
+
+        const lease = retainMeshResources(engine, mesh);
+        detachMeshFromScene(scene, mesh);
+        const filtered = _getShadowTaskCasterMeshes(sg, scene);
+        expect(filtered).toEqual([peer]);
+        for (let frame = 0; frame < 3; frame++) {
+            expect(_getShadowTaskCasterMeshes(sg, scene)).toBe(filtered);
+        }
+        expect(filter).toHaveBeenCalledOnce();
+
+        casters.push(bystander);
+        expect(_getShadowTaskCasterMeshes(sg, scene)).toEqual([peer]);
+        casters.splice(1, 1);
+        expect(_getShadowTaskCasterMeshes(sg, scene)).toEqual([]);
+        addToScene(scene, mesh);
+        expect(_getShadowTaskCasterMeshes(sg, scene)).toEqual([mesh]);
+        releaseMeshResources(lease);
     });
 
     it("recovers detached geometry once and keeps a clone sharing its replacement", async () => {

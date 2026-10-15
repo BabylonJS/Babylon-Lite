@@ -36,44 +36,55 @@ let leases: WeakMap<MeshResourceLease, Retention> | undefined;
 let issuedLeases: WeakSet<MeshResourceLease> | undefined;
 let disposedEngines: WeakSet<EngineContext> | undefined;
 let capturing: WeakSet<Mesh> | undefined;
-/** Meshes detached from each scene and not since reinserted there. They stay excluded from that scene's shadow casters
- *  even after their final lease retires the geometry, so a caller's unchanged caster array cannot draw destroyed buffers. */
-let detachedMeshes: WeakMap<SceneContext, Set<Mesh>> | undefined;
+/** Scenes each mesh was detached from and not since reinserted into. Weak on both sides, so exclusion never extends a
+ *  retired mesh's lifetime, yet a caller caster array still holding it keeps it excluded and its destroyed buffers undrawn. */
+let detachedFrom: WeakMap<Mesh, WeakSet<SceneContext>> | undefined;
+/** Scenes that ever detached a mesh; caster lookups elsewhere return the registered array untouched. */
+let detachScenes: WeakSet<SceneContext> | undefined;
 /** Per scene and caller caster array, the last filtered array. Reusing it keeps the identity stable across frames,
  *  since shadow hooks rebuild their nested task (and re-render the map) whenever the array identity changes. */
 let filteredCasters: WeakMap<SceneContext, WeakMap<readonly Mesh[], readonly Mesh[]>> | undefined;
 
+function isDetached(scene: SceneContext, mesh: Mesh): boolean {
+    const scenes = detachedFrom!.get(mesh);
+    if (!scenes?.has(scene)) {
+        return false;
+    }
+    // Reinsertion goes through addToScene, which re-registers membership even after the last lease is gone.
+    if (hasMeshScene(scene, mesh)) {
+        scenes.delete(scene);
+        return false;
+    }
+    return true;
+}
+
+// Runs per generator per frame: an unchanged lookup only scans the caller array against the cached result.
 function filterShadowCasters(scene: SceneContext, casters: readonly Mesh[]): readonly Mesh[] {
-    const gone = detachedMeshes?.get(scene);
-    if (gone) {
-        // Reinsertion goes through addToScene, which re-registers membership even after the last lease is gone.
-        for (const mesh of gone) {
-            if (hasMeshScene(scene, mesh)) {
-                gone.delete(mesh);
-            }
-        }
-    }
-    if (!gone?.size) {
-        return casters;
-    }
-    const kept = casters.filter((caster) => !gone.has(caster));
-    if (kept.length === casters.length) {
+    if (!detachScenes!.has(scene)) {
         return casters;
     }
     let cache = filteredCasters!.get(scene);
+    const cached = cache?.get(casters);
+    let kept = 0;
+    let reusable = cached !== undefined;
+    for (const caster of casters) {
+        if (!isDetached(scene, caster)) {
+            reusable &&= cached![kept] === caster;
+            kept++;
+        }
+    }
+    if (kept === casters.length) {
+        return casters;
+    }
+    if (reusable && kept === cached!.length) {
+        return cached!;
+    }
     if (!cache) {
         filteredCasters!.set(scene, (cache = new WeakMap()));
     }
-    const cached = cache.get(casters);
-    if (cached && sameMeshes(cached, kept)) {
-        return cached;
-    }
-    cache.set(casters, kept);
-    return kept;
-}
-
-function sameMeshes(a: readonly Mesh[], b: readonly Mesh[]): boolean {
-    return a.length === b.length && a.every((mesh, index) => mesh === b[index]);
+    const filtered = casters.filter((caster) => !isDetached(scene, caster));
+    cache.set(casters, filtered);
+    return filtered;
 }
 
 function captureTextures(state: Retention, material: Material): void {
@@ -287,16 +298,18 @@ export function detachMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     const detach = (): void => {
         captureTextures(state, mesh.material);
         removeMeshFromScene(scene, mesh, true);
-        if (!detachedMeshes) {
-            detachedMeshes = new WeakMap();
+        if (!detachedFrom) {
+            detachedFrom = new WeakMap();
+            detachScenes = new WeakSet();
             filteredCasters = new WeakMap();
             _setShadowCasterFilter(filterShadowCasters);
         }
-        let gone = detachedMeshes.get(scene);
-        if (!gone) {
-            detachedMeshes.set(scene, (gone = new Set()));
+        detachScenes!.add(scene);
+        let scenes = detachedFrom.get(mesh);
+        if (!scenes) {
+            detachedFrom.set(mesh, (scenes = new WeakSet()));
         }
-        gone.add(mesh);
+        scenes.add(scene);
         // Membership changed, so `onSceneChange` subscribers see the mesh leave; its children stay.
         _notifySceneChange(scene, mesh, "removed");
     };

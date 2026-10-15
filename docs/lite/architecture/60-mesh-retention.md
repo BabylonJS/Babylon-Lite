@@ -66,7 +66,10 @@ nested caster tasks never see scene removal, so detach also records the mesh as
 detached from that scene: the caster set each shadow dispatcher reads for the scene
 omits it (a stable filtered array, so the task rebuilds once and the map re-renders),
 without mutating the caller's array. Reinsertion restores the original array; a mesh
-retired while detached stays excluded.
+retired while detached stays excluded while a caller's array still holds it.
+Exclusions are weak per mesh and scene, so they never keep a released mesh alive.
+The per-frame lookup is non-allocating while unchanged: it scans the caller's array
+against the cached filtered array and rebuilds only when the effective set changes.
 Actual mutations invalidate scene renderable versions. A repeated detach does not.
 
 Reinsertion builds ordinary fresh scene-local renderables and appends normal
@@ -176,6 +179,8 @@ implementation or asset is copied.
   engine/scene teardown, queued-release reacquisition, cross-engine errors,
   detached recovery, independent mesh-local draw selection recovery, dropping a
   queued explicit render-task admission, shadow-caster exclusion until reinsertion,
+  collection of repeatedly retired distinct detached meshes, non-allocating unchanged
+  caster lookups,
   material/texture swaps, reentrancy, independent engine hooks, and scene-change
   events for detach/reinsertion without echoing retained children.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
