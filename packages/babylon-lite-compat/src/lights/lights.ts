@@ -297,6 +297,9 @@ function ensureLightVersionBump(lite: LightBase): () => void {
  */
 const NO_MESH_ID = "\u0000lightFilter:none";
 
+/** @internal Every filter id this module has minted, so an id inherited by a clone is recognisable. */
+const mintedFilterIds = new Set<string>();
+
 /** @internal Install a mesh-list method override that behaves like the prototype method it shadows. */
 function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unknown): void {
     Object.defineProperty(array, method, { value, enumerable: false, configurable: true, writable: true });
@@ -306,10 +309,7 @@ function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unk
  * @internal The id set for one mesh list, or `undefined` when the list is empty.
  *
  * Lite filters by `mesh.id` and treats an id-less mesh as lit by every light, so a mesh only needs
- * an id once it joins a list. The id is minted from the compat `uniqueId` rather than taken from
- * `mesh.id`, which defaults to the name: Babylon.js matches these lists by object identity, so two
- * meshes sharing a name must stay independently excludable. An id already on the Lite mesh (a
- * `.babylon` or glTF mesh, whose loaded light lists are keyed on it) is kept.
+ * an id once it joins a list.
  */
 function meshIdSet(meshes: readonly AbstractMesh[]): Set<string> | undefined {
     if (meshes.length === 0) {
@@ -317,10 +317,26 @@ function meshIdSet(meshes: readonly AbstractMesh[]): Set<string> | undefined {
     }
     const ids = new Set<string>();
     for (const mesh of meshes) {
-        const lite = mesh._lite;
-        ids.add((lite.id ??= `#${mesh.uniqueId}`));
+        ids.add(filterId(mesh));
     }
     return ids;
+}
+
+/**
+ * @internal The id this mesh is filtered by, minting one when it needs it.
+ */
+function filterId(mesh: AbstractMesh): string {
+    const lite = mesh._lite;
+    const current = lite.id;
+    if (current !== undefined && !mintedFilterIds.has(current)) {
+        return current;
+    }
+    const minted = `#${mesh.uniqueId}`;
+    if (current !== minted) {
+        lite.id = minted;
+        mintedFilterIds.add(minted);
+    }
+    return minted;
 }
 
 export class HemisphericLight extends Light {

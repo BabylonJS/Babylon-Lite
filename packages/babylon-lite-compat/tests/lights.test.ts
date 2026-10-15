@@ -391,6 +391,27 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(excluded(led)).toBeUndefined();
     });
 
+    it("scopes a clone separately from the source it inherited a filter id from", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        const source = mesh("panel");
+
+        rim.excludedMeshes = [source];
+        await flush();
+        const sourceId = source._lite.id;
+        expect(sourceId).toBeTruthy();
+
+        // `cloneMeshNode` builds the clone by spreading the source mesh, so the clone starts out
+        // carrying the id that was just minted for the source.
+        const clone = mesh("panel", sourceId);
+        rim.excludedMeshes = [clone];
+        await flush();
+
+        // Listing only the clone must not darken the source as well.
+        expect(clone._lite.id).not.toBe(sourceId);
+        expect(excluded(rim)).toEqual([clone._lite.id]);
+        expect(excluded(rim)).not.toContain(sourceId);
+    });
+
     it("does not rebuild for a light held by a clustered container", async () => {
         const scene = sceneStub(true);
         const led = new PointLight("led", new Vector3(0, 1, 0), scene);

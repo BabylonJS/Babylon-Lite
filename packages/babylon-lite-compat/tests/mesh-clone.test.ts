@@ -237,6 +237,17 @@ describe("Mesh.clone", () => {
         expect(clone.isVisible).toBe(false);
     });
 
+    it("does not carry the source's light-filter id onto the clone", () => {
+        const scene = fakeScene();
+        const src = sourceMesh(scene, fakeMaterial());
+        (src as unknown as { _lite: { id?: string } })._lite.id = "floor-node-7";
+
+        const clone = src.clone("copy");
+
+        expect((src as unknown as { _lite: { id?: string } })._lite.id).toBe("floor-node-7");
+        expect((clone as unknown as { _lite: { id?: string } })._lite.id).toBeUndefined();
+    });
+
     it("uses the Babylon.js empty default name and derives the clone ID", () => {
         const scene = fakeScene();
         const src = sourceMesh(scene, fakeMaterial());
