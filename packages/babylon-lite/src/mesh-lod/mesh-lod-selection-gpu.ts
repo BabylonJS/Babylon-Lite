@@ -27,6 +27,8 @@ import type { MeshLoDError } from "./mesh-lod-errors.js";
 import type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 import {
     extractFrustumPlanes,
+    addMeshLoDPageBenefit,
+    meshLoDPageBenefit,
     isSimilarityTransform,
     conservativeWorldScale,
     meshLoDConeCullMargin,
@@ -530,13 +532,9 @@ export function runMeshLoDGpuSelection(input: MeshLoDGpuSelectionModelInput): Me
             if (p.errorPx > maximumUnmetErrorPixels) {
                 maximumUnmetErrorPixels = p.errorPx;
             }
-            const areaCap = params.targetWidth * params.targetHeight;
-            const projectedAreaPx = Math.min(Math.PI * p.projectedRadiusPx * p.projectedRadiusPx, areaCap);
-            const qualityPressure = Math.max(0, p.errorPx / threshold - 1);
-            const groupBenefit = projectedAreaPx * qualityPressure;
-            const pageShare = groupBenefit / missing.length;
+            const pageShare = meshLoDPageBenefit(p, threshold, params.targetWidth, params.targetHeight, missing.length);
             for (const pageId of missing) {
-                demandShare.set(pageId, (demandShare.get(pageId) ?? 0) + pageShare);
+                demandShare.set(pageId, addMeshLoDPageBenefit(demandShare.get(pageId) ?? 0, pageShare));
             }
         }
     }
@@ -1032,10 +1030,6 @@ export const CONTROL_FALLBACK_WORD = CONTROL_DIAG_OFFSET + 3;
 export const CONTROL_SELECTED_ERROR_WORD = CONTROL_DIAG_OFFSET + 4;
 export const CONTROL_UNMET_ERROR_WORD = CONTROL_DIAG_OFFSET + 5;
 
-/** Fixed-point scale the `computeDemand` kernel accumulates per-page benefit with
- *  (`FIXED_SCALE` in mesh-lod-selection.wgsl). Readback divides it back out. */
-const DEMAND_FIXED_SCALE = 256;
-
 /** Decoded GPU selection readback: streaming page demand plus the per-frame diagnostics
  *  the control buffer accumulates (architecture §12.3 step 8). */
 export interface MeshLoDGpuReadback {
@@ -1052,7 +1046,7 @@ export interface MeshLoDGpuReadback {
 
 /** Decode a copied selection control buffer into streaming demand + diagnostics.
  *  A separate bitset records demand presence even when benefit is zero. Each
- *  per-page word holds accumulated benefit (pageShare × {@link DEMAND_FIXED_SCALE});
+ *  per-page word holds the u32 bit pattern of a nonnegative float32 benefit sum;
  *  dividing by the page's stored bytes reproduces the CPU oracle's benefit/cost priority
  *  (§11.1). Pure over the control words + a stored-bytes accessor so Node fixtures can
  *  compare it against the deterministic selection model. */
@@ -1061,9 +1055,9 @@ export function decodeMeshLoDGpuReadback(control: ArrayLike<number>, pageCount: 
     const demandBitsOffset = meshLoDPageDemandBitsOffset(pageCount);
     for (let pageId = 0; pageId < pageCount; pageId++) {
         if (((control[demandBitsOffset + (pageId >>> 5)] ?? 0) & (1 << (pageId & 31))) !== 0) {
-            const benefit = control[CONTROL_PAGE_DEMAND_OFFSET + pageId] ?? 0;
+            const benefit = u32ToF32(control[CONTROL_PAGE_DEMAND_OFFSET + pageId] ?? 0);
             const stored = storedBytesOf(pageId) || 1;
-            demand.push({ pageId, priority: benefit / DEMAND_FIXED_SCALE / stored });
+            demand.push({ pageId, priority: benefit / stored });
         }
     }
     demand.sort((a, b) => (b.priority !== a.priority ? b.priority - a.priority : a.pageId - b.pageId));

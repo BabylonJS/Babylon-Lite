@@ -44,9 +44,23 @@ const GS_RESIDENT: u32 = 0x4u;
 const GS_DEMANDED: u32 = 0x8u;
 
 const PAGE_FLAG_RESIDENT: u32 = 0x1u;
-const FIXED_SCALE: f32 = 256.0; // fixed-point scale for atomic priority accumulation
+const MAX_PAGE_BENEFIT: f32 = 3.4028234663852886e38;
 
 fn metaF32(i: u32) -> f32 { return bitcast<f32>(metaBuf[i]); }
+
+fn accumulatePageBenefit(index: u32, benefit: f32) {
+  var previous = atomicLoad(&control[index]);
+  loop {
+    let current = bitcast<f32>(previous);
+    var next = MAX_PAGE_BENEFIT;
+    if (benefit < MAX_PAGE_BENEFIT - current) {
+      next = current + benefit;
+    }
+    let result = atomicCompareExchangeWeak(&control[index], previous, bitcast<u32>(next));
+    if (result.exchanged) { break; }
+    previous = result.old_value;
+  }
+}
 
 fn groupStateIndex(inst: u32, group: u32) -> u32 { return inst * params.counts.y + group; }
 fn priorIndex(inst: u32, group: u32) -> u32 { return inst * params.layout0.x + (group >> 5u); }
@@ -292,7 +306,7 @@ fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_wor
     let pageId = metaBuf[params.offsets.w + firstPageRef + i];
     if (!pageResident(pageId)) {
       atomicOr(&control[params.execution.w + (pageId >> 5u)], 1u << (pageId & 31u));
-      atomicAdd(&control[demandBase + pageId], u32(pageShare * FIXED_SCALE));
+      accumulatePageBenefit(demandBase + pageId, pageShare);
     }
   }
   atomicAdd(&control[params.control.x + 3u], 1u); // fallbackGroupCount diag

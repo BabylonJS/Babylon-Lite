@@ -125,6 +125,15 @@ and validators are in `mesh-lod-format.ts`; the writer and conversion
 options are maintained in MegameshCLI. Hierarchy nodes begin with one root
 per level; the parser rejects cycles, shared children, unreachable nodes,
 and out-of-range group/page/cluster references before selection.
+The reachable leaf records must also cover every group owning geometry.
+Node reachability alone cannot establish this: redirecting leaves to another
+valid group can hide the pinned fallback or omit a finer replacement.
+After the forest walk validates reachability, reference validation records covered
+leaf group IDs in a group-count-sized bitset;
+any nonempty group without a reachable leaf fails with
+`MLOD_INVALID_HIERARCHY` and the group's cluster-count field offset.
+CRC-resealed full-file, bootstrap, and public URL-load regressions cover
+both omitted pinned groups and omitted fine groups before decode/allocation.
 
 Every group's page-reference slice must include every page containing a cluster
 whose `groupId` identifies that group. Slice bounds and in-range page IDs alone
@@ -240,6 +249,12 @@ Demand presence is independent of priority: a fine-required group in the
 lower hysteresis band still renews its missing-page requests when its
 quality-pressure priority is zero. GPU control readback carries a separate
 per-page demand bitset alongside benefit accumulators and selected-page use.
+Each benefit word stores a nonnegative float32 sum as its u32 bit pattern,
+updated with an atomic compare/exchange loop. Addition saturates at the largest
+finite float32 rather than overflowing a fixed-point u32 and wrapping a highly
+demanded page to zero. Readback decodes the float and divides by stored bytes;
+the CPU oracle and deterministic GPU model share float32 benefit math and
+saturating accumulation matching the shader's operation order.
 
 ### 11.2 Request scheduling
 
@@ -398,6 +413,9 @@ remains set even when its accumulated benefit is zero. The nonvisual
 `mesh-lod-demand.spec.ts` plumbing test runs the production WGSL and
 readback decoder, moves a pending refinement request from 2.4 to 1.9 px,
 and verifies that only genuinely withdrawn demand cancels the request.
+It also sums shared missing-page demand from multiple viewport-filling instances,
+including 18 px error at a 2 px threshold on a 1024-by-1024 target, and compares
+the positive accumulated priorities with the packed-buffer GPU model.
 The selected list has a count header. Indirect expansion uses bounded XYZ
 dimensions based on `maxComputeWorkgroupsPerDimension`; the shader flattens
 workgroup IDs and skips padding beyond the count. Direct selection kernels
@@ -534,6 +552,16 @@ additions require an existing batch with a live renderable. Reactivating a batch
 dropped during recovery rejects with `MLOD_INVALID_OPTION` before changing its
 instances or registering deferred work; the one-time scene builder is not replayed.
 An empty batch that still has a live renderable can accept an instance again.
+Recovery acquires the replacement packet's texture leases before disposing the
+outgoing packet generation, including when a persistent target reuses its update
+batch. Outgoing disposal unregisters its target disposers, clears CPU scratch and
+hysteresis, and releases GPU selection/instance state independently of task teardown.
+Packet texture leases capture their acquired GPU allocations: a deferred release
+must never decrement or destroy a replacement allocation after recovery mutates a
+`Texture2D` wrapper in place. Release notifications apply only if the wrapper
+still identifies that outgoing allocation. Repeated bound-target recovery tests
+cover both selection modes, stable disposer counts, released scratch/resources,
+and replacement texture ownership through final teardown.
 
 ## 15. Demo
 

@@ -26,6 +26,19 @@ export interface ProjectedSphere {
     readonly projectedRadiusPx: number;
 }
 
+/** Float32 page benefit, matching the production compute kernel's operation order. */
+export function meshLoDPageBenefit(p: ProjectedSphere, screenSpaceError: number, targetWidth: number, targetHeight: number, missingPages: number): number {
+    const area = Math.min(fmul(fmul(f32(Math.PI), p.projectedRadiusPx), p.projectedRadiusPx), fmul(targetWidth, targetHeight));
+    const pressure = Math.max(0, fsub(fdiv(p.errorPx, screenSpaceError), 1));
+    return fdiv(fmul(area, pressure), missingPages);
+}
+
+/** Saturating float32 sum mirrored by the GPU's compare/exchange accumulator. */
+export function addMeshLoDPageBenefit(current: number, benefit: number): number {
+    const maximum = 3.4028234663852886e38;
+    return benefit < fsub(maximum, current) ? fadd(current, benefit) : maximum;
+}
+
 /** Conservative operator-norm bound: sqrt(||A^T A||_infinity), including shear. */
 export function conservativeWorldScale(m: ArrayLike<number>): number {
     const c0 = m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!;

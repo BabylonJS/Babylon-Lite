@@ -7,7 +7,7 @@ import type * as Scheduler from "../../../packages/babylon-lite/src/mesh-lod/mes
 const sourceRoot = resolve(__dirname, "..", "..", "..", "packages", "babylon-lite", "src", "mesh-lod");
 const moduleUrl = (name: string): string => `/@fs/${resolve(sourceRoot, name).replaceAll("\\", "/")}`;
 
-test("production MeshLoD WGSL retains zero-priority demand while a fine-page request is pending", async ({ page }) => {
+test("production MeshLoD WGSL preserves zero and high shared-page demand priorities", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(
         async ({ shader, gpuUrl, schedulerUrl }) => {
@@ -74,8 +74,11 @@ test("production MeshLoD WGSL retains zero-priority demand while a fine-page req
                 );
                 const refs = gpu.packGroupPageRefs(Uint32Array.from([0, 1]));
                 const meta = Uint32Array.from([...nodes, ...groups, ...clusters, ...refs]);
-                const instances = new Float32Array(gpu.INSTANCE_WORDS);
-                gpu.packInstanceRecord(instances, new Uint32Array(instances.buffer), 0, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], true, 0);
+                const instances = new Float32Array(2 * gpu.INSTANCE_WORDS);
+                const instancesU32 = new Uint32Array(instances.buffer);
+                for (let slot = 0; slot < 2; slot++) {
+                    gpu.packInstanceRecord(instances, instancesU32, slot * gpu.INSTANCE_WORDS, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], true, slot);
+                }
                 const pageState = new Uint32Array(2 * gpu.PAGE_STATE_WORDS);
                 pageState[0] = gpu.PAGE_FLAG_RESIDENT;
                 const params = new Float32Array(64);
@@ -98,15 +101,16 @@ test("production MeshLoD WGSL retains zero-priority demand while a fine-page req
                     upload(meta, GPUBufferUsage.STORAGE),
                     upload(pageState, GPUBufferUsage.STORAGE),
                     upload(new Uint32Array(instances.buffer), GPUBufferUsage.STORAGE),
-                    upload(new Uint32Array(1), GPUBufferUsage.STORAGE),
                     upload(new Uint32Array(2), GPUBufferUsage.STORAGE),
-                    upload(new Uint32Array(5), GPUBufferUsage.STORAGE),
+                    upload(new Uint32Array(4), GPUBufferUsage.STORAGE),
+                    upload(new Uint32Array(9), GPUBufferUsage.STORAGE),
                     upload(new Uint32Array(controlWords), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC),
                 ];
                 const bindGroup = device.createBindGroup({ layout, entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })) });
                 const staging = device.createBuffer({ size: controlWords * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
                 const compute = async (errorPixels: number): Promise<Gpu.MeshLoDGpuReadback> => {
-                    params[26] = 1 + 250 / errorPixels;
+                    const groupF32 = new Float32Array(groups.buffer);
+                    params[26] = groupF32[gpu.GROUP_WORDS + 3]! + (groupF32[gpu.GROUP_WORDS + 4]! * params[30]!) / errorPixels;
                     device.queue.writeBuffer(buffers[0]!, 0, params);
                     const encoder = device.createCommandEncoder();
                     for (const index of [5, 6, 7]) {
@@ -166,11 +170,56 @@ test("production MeshLoD WGSL retains zero-priority demand while a fine-page req
                 for (let frame = 9; frame <= 12; frame++) {
                     scheduling.submitMeshLoDDemand(scheduler, withdrawn.demand, frame);
                 }
+                const groupF32 = new Float32Array(groups.buffer);
+                groupF32[gpu.GROUP_WORDS + 3] = 1024;
+                groupF32[gpu.GROUP_WORDS + 4] = 18;
+                params.set([1024, 1024, 512, 0], 28);
+                paramsU32[36] = 2;
+                const shared = [];
+                for (const { errorPixels, sourceError } of [
+                    { errorPixels: 18, sourceError: 18 },
+                    { errorPixels: 36, sourceError: 18 },
+                    { errorPixels: 4e32, sourceError: 4e32 },
+                ]) {
+                    groupF32[gpu.GROUP_WORDS + 4] = sourceError;
+                    device.queue.writeBuffer(buffers[1]!, nodes.byteLength, groups);
+                    const readback = await compute(errorPixels);
+                    const model = gpu.runMeshLoDGpuSelection({
+                        nodes,
+                        groups,
+                        clusters,
+                        groupPageRefs: refs,
+                        pageState,
+                        pageStoredBytes: [65536, 65536],
+                        instances,
+                        instancesU32,
+                        priorState: new Uint32Array(2),
+                        instanceCount: 2,
+                        groupCount: 2,
+                        clusterCount: 2,
+                        nodeCount: 2,
+                        pageCount: 2,
+                        wordsPerInstance: 1,
+                        params: {
+                            cameraPos: [0, 0, params[26]!],
+                            verticalFov: 1,
+                            perspectivePixelScale: 512,
+                            near: 0.1,
+                            targetWidth: 1024,
+                            targetHeight: 1024,
+                            frustumPlanes: [],
+                            screenSpaceError: 2,
+                            lodHysteresis: 0.15,
+                            levelCount: 2,
+                        },
+                    });
+                    shared.push({ readback, model: model.desiredPages });
+                }
                 const validation = await device.popErrorScope();
                 if (validation) {
                     throw new Error(validation.message);
                 }
-                return { initial, band, pendingInBand, abortsInBand, lastDemandFrame, starts, withdrawn, aborts, failures };
+                return { initial, band, pendingInBand, abortsInBand, lastDemandFrame, starts, withdrawn, aborts, failures, shared };
             } finally {
                 if (scheduler) {
                     scheduling.disposeMeshLoDRequestScheduler(scheduler);
@@ -199,4 +248,10 @@ test("production MeshLoD WGSL retains zero-priority demand while a fine-page req
     expect(result.withdrawn.demand).toEqual([]);
     expect(result.aborts).toBe(1);
     expect(result.failures).toEqual([]);
+    expect(result.shared.map(({ readback }) => readback.demand[0]?.priority)).toEqual([256, 544, 3.4028234663852886e38 / 65536]);
+    for (const { readback, model } of result.shared) {
+        expect(readback.demand).toEqual(model);
+        expect(readback.selectedClusterCount).toBe(2);
+        expect(readback.fallbackGroupCount).toBe(2);
+    }
 });

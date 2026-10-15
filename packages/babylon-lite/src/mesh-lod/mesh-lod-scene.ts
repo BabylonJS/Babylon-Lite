@@ -123,13 +123,20 @@ async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneC
                 continue;
             }
             const rebuild = async (): Promise<Renderable | null> => {
-                recoverMeshLoDAssets(engine, scene);
-                const next = await pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
-                batch.renderable = next ?? undefined;
-                if (next) {
-                    next._rebuild = rebuild;
+                const previous = batch._packet as { dispose?: () => void } | undefined;
+                batch._packet = undefined;
+                batch.renderable = undefined;
+                try {
+                    recoverMeshLoDAssets(engine, scene);
+                    const next = await pbr.buildMeshLoDBatchRenderable(engine, scene, batch);
+                    batch.renderable = next ?? undefined;
+                    if (next) {
+                        next._rebuild = rebuild;
+                    }
+                    return next;
+                } finally {
+                    previous?.dispose?.();
                 }
-                return next;
             };
             const candidate: MeshLoDSceneBatch = { ...batch, _packet: undefined, renderable: undefined };
             staged.push({ batch, candidate });

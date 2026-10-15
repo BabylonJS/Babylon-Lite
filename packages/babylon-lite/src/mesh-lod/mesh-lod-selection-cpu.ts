@@ -13,7 +13,18 @@
 
 import type { MeshLoDCluster, MeshLoDGroup, MeshLoDHierarchyNode, MeshLoDPageRecord } from "./mesh-lod-runtime.js";
 import type { MeshLoDFrustumPlane, ProjectedSphere } from "./mesh-lod-selection-math.js";
-import { conservativeWorldScale, fadd, fmul, fsub, meshLoDConeCullMargin, perspectivePixelScale, projectSphere, sphereOutsidePlanes } from "./mesh-lod-selection-math.js";
+import {
+    addMeshLoDPageBenefit,
+    conservativeWorldScale,
+    fadd,
+    fmul,
+    fsub,
+    meshLoDConeCullMargin,
+    meshLoDPageBenefit,
+    perspectivePixelScale,
+    projectSphere,
+    sphereOutsidePlanes,
+} from "./mesh-lod-selection-math.js";
 
 export type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 
@@ -200,13 +211,9 @@ export function selectMeshLoDCpu(input: MeshLoDSelectionInput): MeshLoDSelection
         if (errorPx > maximumUnmetErrorPixels) {
             maximumUnmetErrorPixels = errorPx;
         }
-        const areaCap = input.camera.targetWidth * input.camera.targetHeight;
-        const projectedAreaPx = Math.min(Math.PI * p.projectedRadiusPx * p.projectedRadiusPx, areaCap);
-        const qualityPressure = Math.max(0, errorPx / input.screenSpaceError - 1);
-        const groupBenefit = projectedAreaPx * qualityPressure;
-        const pageShare = groupBenefit / missing.length;
+        const pageShare = meshLoDPageBenefit(p, input.screenSpaceError, input.camera.targetWidth, input.camera.targetHeight, missing.length);
         for (const pageId of missing) {
-            demandShare.set(pageId, (demandShare.get(pageId) ?? 0) + pageShare);
+            demandShare.set(pageId, addMeshLoDPageBenefit(demandShare.get(pageId) ?? 0, pageShare));
         }
     }
 

@@ -2,7 +2,7 @@
  *
  *  `decodeMeshLoDGpuReadback` is the pure translation of a copied selection control
  *  buffer into streaming page demand + per-frame diagnostics. The per-page words hold
- *  accumulated benefit (pageShare × 256); dividing by a page's stored bytes reproduces
+ *  float32 accumulated benefit; dividing by a page's stored bytes reproduces
  *  the CPU oracle's benefit/cost priority (§11.1). The real WGSL fills the control buffer
  *  and the full streaming loop is browser-validated; here we pin the decode math. */
 
@@ -20,8 +20,6 @@ import {
     meshLoDPageDemandBitsOffset,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 
-const FIXED_SCALE = 256;
-
 /** Build a control buffer for `pageCount` pages, then set diagnostics + per-page benefit. */
 function control(pageCount: number, diag: Partial<Record<"count" | "visible" | "triangles" | "overflow" | "fallback", number>>, benefit: Record<number, number>): Uint32Array {
     const demandBitsOffset = meshLoDPageDemandBitsOffset(pageCount);
@@ -33,22 +31,28 @@ function control(pageCount: number, diag: Partial<Record<"count" | "visible" | "
     words[CONTROL_FALLBACK_WORD] = diag.fallback ?? 0;
     for (const [pageId, value] of Object.entries(benefit)) {
         const id = Number(pageId);
-        words[CONTROL_PAGE_DEMAND_OFFSET + id] = value;
+        new Float32Array(words.buffer)[CONTROL_PAGE_DEMAND_OFFSET + id] = value;
         words[demandBitsOffset + (id >>> 5)]! |= 1 << (id & 31);
     }
     return words;
 }
 
 describe("decodeMeshLoDGpuReadback", () => {
-    it("decodes per-page demand as benefit / scale / stored bytes", () => {
-        // Page 2 benefit 256 (=1.0 after /scale), stored 4 → priority 0.25.
-        // Page 5 benefit 512 (=2.0), stored 8 → priority 0.25 as well.
+    it("decodes per-page demand as float32 benefit / stored bytes", () => {
         const stored = [1, 1, 4, 1, 1, 8];
-        const decoded = decodeMeshLoDGpuReadback(control(6, {}, { 2: 1 * FIXED_SCALE, 5: 2 * FIXED_SCALE }), 6, (p) => stored[p]!);
+        const decoded = decodeMeshLoDGpuReadback(control(6, {}, { 2: 1, 5: 2 }), 6, (p) => stored[p]!);
         expect(decoded.demand).toHaveLength(2);
         const byId = new Map(decoded.demand.map((d) => [d.pageId, d.priority]));
         expect(byId.get(2)).toBeCloseTo(0.25, 6);
         expect(byId.get(5)).toBeCloseTo(0.25, 6);
+    });
+
+    it("retains summed benefits beyond the fixed-point u32 limit and fractional benefits", () => {
+        const decoded = decodeMeshLoDGpuReadback(control(3, {}, { 0: 2 ** 24, 1: 2 ** 25, 2: 0.001 }), 3, () => 65536);
+        expect(decoded.demand.map((page) => page.pageId)).toEqual([1, 0, 2]);
+        expect(decoded.demand[0]!.priority).toBe(512);
+        expect(decoded.demand[1]!.priority).toBe(256);
+        expect(decoded.demand[2]!.priority).toBeGreaterThan(0);
     });
 
     it("omits undemanded pages and reports an empty demand list", () => {
@@ -82,7 +86,7 @@ describe("decodeMeshLoDGpuReadback", () => {
     });
 
     it("treats a zero stored-bytes accessor result as 1 (no divide by zero)", () => {
-        const decoded = decodeMeshLoDGpuReadback(control(1, {}, { 0: FIXED_SCALE }), 1, () => 0);
+        const decoded = decodeMeshLoDGpuReadback(control(1, {}, { 0: 1 }), 1, () => 0);
         expect(decoded.demand[0]!.priority).toBeCloseTo(1, 6);
     });
 });

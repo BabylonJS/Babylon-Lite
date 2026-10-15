@@ -23,7 +23,7 @@ import {
     toMeshLoDMetadata,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import { isMeshLoDError, type MeshLoDErrorCode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
-import { buildMinimalContainer, corruptFineGroupPageRefs, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
+import { buildMinimalContainer, corruptFineGroupPageRefs, corruptHierarchyGroupCoverage, resealContainer, type FixtureLayout } from "./fixtures/mlod-fixture.js";
 
 describe("parseMeshLoDContainer — minimal valid container", () => {
     it("parses exact metadata and records", () => {
@@ -191,6 +191,25 @@ describe("parseMeshLoDContainer — committed statue assets", () => {
 });
 
 describe.each([false, true])("parseMeshLoDContainer — group-page membership (full file: %s)", (fullFile) => {
+    it.each(["pinned", "fine"] as const)("rejects CRC-correct hierarchy leaves omitting %s geometry groups", (target) => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const { bootstrapBytes, byteOffset } = corruptHierarchyGroupCoverage(bytes, target);
+        expect(bootstrapBytes).toBeLessThan(bytes.length);
+        expect(() => parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, bootstrapBytes))).toThrowError(
+            expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", byteOffset })
+        );
+    });
+    it("requires a leaf for cluster-owning groups even when their declared cluster count is zero", () => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const { bootstrapBytes, byteOffset } = corruptHierarchyGroupCoverage(bytes, "fine");
+        new DataView(bytes.buffer).setUint32(byteOffset, 0, true);
+        resealContainer(bytes);
+        expect(() => parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, bootstrapBytes))).toThrowError(
+            expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", byteOffset })
+        );
+    });
     for (const pinned of [false, true]) {
         it.each([32, 36])(`rejects misaligned decoded stream offsets at page-table field %s (pinned=${pinned})`, (field) => {
             const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));

@@ -14,7 +14,7 @@ import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/me
 import { parseMeshLoDContainer, PAGE_TABLE_RECORD_SIZE, SECTION_PAGE_TABLE } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import { createFillDecoder, createMockDevice, createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import { corruptFineGroupPageRefs, resealContainer } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
+import { corruptFineGroupPageRefs, corruptHierarchyGroupCoverage, resealContainer } from "../../unit/mesh-lod/fixtures/mlod-fixture.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 
@@ -134,6 +134,22 @@ describe("loadMeshLoD — group-page membership", () => {
         expect(device.buffers).toHaveLength(0);
     });
     for (const selectionMode of ["cpu", "gpu"] as const) {
+        it.each(["pinned", "fine"] as const)(`rejects unreachable %s geometry groups before decode/upload (${selectionMode})`, async (target) => {
+            const bytes = statueBytes();
+            const { byteOffset } = corruptHierarchyGroupCoverage(bytes, target);
+            const server = rangeServer(bytes);
+            const { engine, device } = createMockEngine();
+            const decoder = createFillDecoder();
+            _setMeshLoDPageDecoder(decoder.decoder);
+            await expect(loadMeshLoD(engine, "https://cdn.test/statue.mlod", { selectionMode, request: { fetch: server.fetch } })).rejects.toMatchObject({
+                code: "MLOD_INVALID_HIERARCHY",
+                byteOffset,
+            });
+            expect(server.calls).toBe(2);
+            expect(decoder.modes).toEqual([]);
+            expect(device.buffers).toHaveLength(0);
+            expect(device.writes).toHaveLength(0);
+        });
         it.each(["empty", "pinned"] as const)(`rejects CRC-correct %s fine-group references before decode or upload (${selectionMode})`, async (mutation) => {
             const bytes = statueBytes();
             const { byteOffset, omittedPageId } = corruptFineGroupPageRefs(bytes, mutation);

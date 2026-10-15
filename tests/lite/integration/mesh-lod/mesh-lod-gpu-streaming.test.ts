@@ -170,7 +170,7 @@ function syntheticControl(
     control[CONTROL_VISIBLE_GROUP_WORD] = diag.visible;
     control[CONTROL_TRIANGLE_WORD] = diag.triangles;
     control[CONTROL_FALLBACK_WORD] = diag.fallback;
-    control[CONTROL_PAGE_DEMAND_OFFSET + finePageId] = benefit;
+    new Float32Array(control.buffer)[CONTROL_PAGE_DEMAND_OFFSET + finePageId] = benefit;
     if (benefit > 0) {
         control[meshLoDPageDemandBitsOffset(state.pageCount) + (finePageId >>> 5)]! |= 1 << (finePageId & 31);
     }

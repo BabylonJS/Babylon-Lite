@@ -21,8 +21,8 @@ import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
-import { acquireTexture } from "../../resource/texture-acquire.js";
-import { releaseTexture } from "../../resource/texture-release.js";
+import { acquireGPUTexture } from "../../resource/gpu-texture-acquire.js";
+import { releaseTextureAllocation } from "../../resource/texture-allocation-release.js";
 import type { Camera } from "../../camera/camera.js";
 import { getCameraPosition, getViewProjectionMatrix } from "../../camera/camera.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
@@ -579,9 +579,9 @@ export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene:
     }
     const environment = batch.material._unlit === true ? null : (_scene._envTextures ?? null);
     const features = detectFeatures(batch.material, environment !== null);
-    const boundTextures = [batch.material.baseColorTexture, batch.material.normalTexture, batch.material.ormTexture, batch.material.emissiveTexture].filter(
-        (texture): texture is Texture2D => texture !== undefined
-    );
+    const textureLeases = [batch.material.baseColorTexture, batch.material.normalTexture, batch.material.ormTexture, batch.material.emissiveTexture]
+        .filter((texture): texture is Texture2D => texture !== undefined)
+        .map((texture) => ({ texture, allocation: texture.texture }));
     const maxInstances = Math.max(batch.instances.length, 1);
     let maxDrawVertices = 3;
     if (runtime.selectionMode === "cpu") {
@@ -668,8 +668,8 @@ export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene:
                 disposeDrawPacket(batch, packet);
                 retireGpuResources(engine, () => {
                     materialUbo.destroy();
-                    for (const texture of boundTextures) {
-                        releaseTexture(texture);
+                    for (const { texture, allocation } of textureLeases) {
+                        releaseTextureAllocation(allocation, texture.texture === allocation ? texture : undefined);
                     }
                 });
             },
@@ -678,8 +678,8 @@ export async function buildMeshLoDBatchRenderable(engine: EngineContext, _scene:
         const packetByTarget = new WeakMap<RenderTargetSignature, { packet: MeshLoDBatchPacket; updateBatch: MeshLoDUpdateBatch }>();
         let sceneDisposed = false;
         let firstBinding = true;
-        for (const texture of boundTextures) {
-            acquireTexture(texture);
+        for (const { allocation } of textureLeases) {
+            acquireGPUTexture(allocation);
         }
         (batch as { _packet?: unknown })._packet = packet;
 

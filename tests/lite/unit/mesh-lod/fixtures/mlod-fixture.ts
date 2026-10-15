@@ -15,6 +15,8 @@ import {
     SECTION_ENTRY_SIZE,
     SECTION_GROUPS,
     SECTION_GROUP_PAGE_REFS,
+    SECTION_HIERARCHY_NODES,
+    HIERARCHY_NODE_SIZE,
     parseMeshLoDContainer,
 } from "../../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 
@@ -326,5 +328,29 @@ export function corruptFineGroupPageRefs(bytes: Uint8Array, mutation: "empty" | 
         bootstrapBytes: parsed.header.bootstrapBytes,
         byteOffset: groupOffset + 32,
         omittedPageId: parsed.clusters[group.firstCluster]!.pageId,
+    };
+}
+
+/** Redirect geometry-group leaves without changing forest links or residency metadata. */
+export function corruptHierarchyGroupCoverage(bytes: Uint8Array, target: "pinned" | "fine"): { bootstrapBytes: number; byteOffset: number } {
+    const parsed = parseMeshLoDContainer(bytes);
+    const pinned = parsed.groups.findIndex((group) => group.pinned && group.clusterCount > 0);
+    const fine = parsed.groups.findIndex((group) => !group.pinned && group.clusterCount > 0);
+    if (pinned === -1 || fine === -1) {
+        throw new Error("fixture requires nonempty pinned and fine groups");
+    }
+    const omitted = target === "pinned" ? parsed.groups.flatMap((group, id) => (group.pinned && group.clusterCount > 0 ? [id] : [])) : [fine];
+    const replacement = target === "pinned" ? fine : pinned;
+    const nodeOffset = parsed.sections[SECTION_HIERARCHY_NODES - 1]!.offset;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let n = 0; n < parsed.hierarchyNodes.length; n++) {
+        if (omitted.includes(parsed.hierarchyNodes[n]!.groupId)) {
+            view.setInt32(nodeOffset + n * HIERARCHY_NODE_SIZE + 20, replacement, true);
+        }
+    }
+    resealContainer(bytes);
+    return {
+        bootstrapBytes: parsed.header.bootstrapBytes,
+        byteOffset: parsed.sections[SECTION_GROUPS - 1]!.offset + omitted[0]! * GROUP_RECORD_SIZE + 28,
     };
 }

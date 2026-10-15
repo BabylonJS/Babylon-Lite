@@ -125,7 +125,7 @@ describe("MeshLoD frame references (§14.1)", () => {
         const control = (pageId: number): Uint32Array => {
             const offset = meshLoDPageDemandBitsOffset(runtime.pageRecords.length);
             const words = new Uint32Array(offset + Math.ceil(runtime.pageRecords.length / 32));
-            words[CONTROL_PAGE_DEMAND_OFFSET + pageId] = 4096;
+            new Float32Array(words.buffer)[CONTROL_PAGE_DEMAND_OFFSET + pageId] = 4096;
             words[offset + (pageId >>> 5)]! |= 1 << (pageId & 31);
             return words;
         };

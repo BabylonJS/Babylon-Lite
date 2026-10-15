@@ -147,6 +147,7 @@ function modelInput(h: FixtureHierarchy, c: FixtureCase, worldMatrix: readonly n
     const params: MeshLoDGpuSelectionParams = {
         cameraPos: c.camera.position,
         verticalFov: c.camera.verticalFov,
+        perspectivePixelScale: c.camera.perspectivePixelScale,
         near: c.camera.near,
         targetWidth: c.camera.targetWidth,
         targetHeight: c.camera.targetHeight,
@@ -213,6 +214,32 @@ for (const fixtureName of ["selection-lod.json", "selection-frustum.json", "sele
 describe("GPU selection model — transformed instances", () => {
     const fixture = loadFixture("selection-lod.json");
     const closeCase = fixture.cases.find((c) => c.name.startsWith("close-resident"))!;
+
+    it.each([
+        { error: 18, priority: 256 },
+        { error: 36, priority: 544 },
+        { error: 4e32, priority: 3.4028234663852886e38 / 65536 },
+    ])("accumulates high shared-page benefit at $error px without wrapping", ({ error, priority }) => {
+        const { hierarchy, cases } = loadFixture("selection-lod.json");
+        hierarchy.groups[1]!.radius = 1024;
+        hierarchy.groups[1]!.simplifiedError = error;
+        const testCase = cases.find((entry) => entry.name.startsWith("close-missing"))!;
+        testCase.camera = { ...testCase.camera, position: [0, 0, 1536], targetWidth: 1024, targetHeight: 1024, perspectivePixelScale: 512 };
+        const input = modelInput(hierarchy, testCase, IDENTITY);
+        const instances = new Float32Array(2 * INSTANCE_WORDS);
+        instances.set(input.instances);
+        instances.set(input.instances, INSTANCE_WORDS);
+        const model = runMeshLoDGpuSelection({
+            ...input,
+            instances,
+            instancesU32: new Uint32Array(instances.buffer),
+            instanceCount: 2,
+            priorState: new Uint32Array(2),
+        });
+        expect(model.desiredPages).toEqual([{ pageId: 1, priority }]);
+        expect(Number.isFinite(priority)).toBe(true);
+        expect(model.fallbackGroupCount).toBe(2);
+    });
 
     it("selects fine near and coarse far, matching the oracle per instance", () => {
         const farMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 4990, 1];

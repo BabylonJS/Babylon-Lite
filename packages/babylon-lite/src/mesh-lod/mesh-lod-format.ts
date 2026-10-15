@@ -785,6 +785,7 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
 function validateRecordReferences(
     groups: readonly MeshLoDGroup[],
     clusters: readonly MeshLoDCluster[],
+    nodes: readonly MeshLoDHierarchyNode[],
     refs: Uint32Array,
     pages: readonly MeshLoDPageRecord[],
     groupOffset: number,
@@ -792,6 +793,12 @@ function validateRecordReferences(
 ): void {
     if (clusters.length > 0 && !groups.some((group) => group.terminal && group.clusterCount > 0)) {
         throw fail("MLOD_INVALID_HIERARCHY", "nonempty hierarchy has no terminal fallback");
+    }
+    const coveredGroups = new Uint32Array(Math.ceil(groups.length / 32));
+    for (const node of nodes) {
+        if (node.groupId >= 0) {
+            coveredGroups[node.groupId >>> 5]! |= 1 << (node.groupId & 31);
+        }
     }
     for (let p = 0; p < pages.length; p++) {
         if (pages[p]!.coarse && !pages[p]!.pinned) {
@@ -834,6 +841,11 @@ function validateRecordReferences(
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g]!;
         const missing = missingPages[g]!;
+        if ((group.clusterCount > 0 || missing.size > 0) && (coveredGroups[g >>> 5]! & (1 << (g & 31))) === 0) {
+            throw fail("MLOD_INVALID_HIERARCHY", "nonempty group has no reachable hierarchy leaf", {
+                byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.clusterCount,
+            });
+        }
         for (let r = group.firstPageRef; r < group.firstPageRef + group.pageRefCount && missing.size > 0; r++) {
             missing.delete(refs[r]!);
         }
@@ -900,7 +912,7 @@ export function parseMeshLoDContainer(bytes: Uint8Array): ParsedMeshLoDContainer
     const hierarchyNodes = parseNodes(reader, sections[SECTION_HIERARCHY_NODES - 1]!, header);
     const groupPageRefs = parseGroupPageRefs(reader, sections[SECTION_GROUP_PAGE_REFS - 1]!, header);
     const pageRecords = parsePages(reader, sections[SECTION_PAGE_TABLE - 1]!, sections[SECTION_PAGE_DATA - 1]!, header);
-    validateRecordReferences(groups, clusters, groupPageRefs, pageRecords, sections[SECTION_GROUPS - 1]!.offset, sections[SECTION_CLUSTERS - 1]!.offset);
+    validateRecordReferences(groups, clusters, hierarchyNodes, groupPageRefs, pageRecords, sections[SECTION_GROUPS - 1]!.offset, sections[SECTION_CLUSTERS - 1]!.offset);
     return { header, sections, provenance, groups, clusters, hierarchyNodes, pageRecords, groupPageRefs };
 }
 
