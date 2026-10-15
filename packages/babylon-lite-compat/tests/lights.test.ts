@@ -213,6 +213,13 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         return { _hasStarted: started, _lite: { id: "scene-lite" }, _registerLight: vi.fn(), _unregisterNode: vi.fn() } as unknown as Scene;
     }
 
+    /**
+     * `splice` the way JS callers reach it.
+     */
+    function spliceFromJs(list: AbstractMesh[], ...args: unknown[]): AbstractMesh[] {
+        return (list.splice as unknown as (...a: unknown[]) => AbstractMesh[]).call(list, ...args);
+    }
+
     /** The sync is coalesced onto the microtask queue, so let it run. */
     async function flush(): Promise<void> {
         await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -425,6 +432,27 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         // lights have published by the time it runs, so one is enough for the whole update.
         expect(rebuildMock).toHaveBeenCalledTimes(1);
         expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
+    });
+
+    it("keeps Array.splice semantics for an omitted and an explicitly undefined deleteCount", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        const floor = mesh("floor");
+        const wall = mesh("wall");
+        rim.excludedMeshes = [floor, wall];
+        await flush();
+
+        // `splice(0, undefined, mesh)` inserts without deleting, as it does on a plain array.
+        const inserted = mesh("ceiling");
+        expect(spliceFromJs(rim.excludedMeshes, 0, undefined, inserted)).toEqual([]);
+        await flush();
+        expect(rim.excludedMeshes).toEqual([inserted, floor, wall]);
+        expect(excluded(rim)).toEqual([inserted._lite.id, floor._lite.id, wall._lite.id]);
+
+        // ...and `splice()` removes nothing at all.
+        expect(spliceFromJs(rim.excludedMeshes)).toEqual([]);
+        await flush();
+        expect(rim.excludedMeshes).toHaveLength(3);
+        expect(excluded(rim)).toHaveLength(3);
     });
 
     it("does not rebuild for a light held by a clustered container", async () => {

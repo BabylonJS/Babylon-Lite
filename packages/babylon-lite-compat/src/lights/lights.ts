@@ -180,8 +180,8 @@ export abstract class Light extends Node {
             this._scheduleMeshListSync();
             return length;
         });
-        defineHook(array, "splice", (start: number, deleteCount?: number, ...items: AbstractMesh[]): AbstractMesh[] => {
-            const removed = deleteCount === undefined ? splice(start) : splice(start, deleteCount, ...items);
+        defineHook(array, "splice", (...args: SpliceArgs): AbstractMesh[] => {
+            const removed = splice(...(args as Parameters<typeof splice>));
             this._scheduleMeshListSync();
             return removed;
         });
@@ -288,6 +288,9 @@ function ensureLightVersionBump(lite: LightBase): () => void {
     });
     return bump;
 }
+
+/** @internal The arguments `Array.prototype.splice` accepts, including the no-argument call. */
+type SpliceArgs = [] | [start: number] | [start: number, deleteCount?: number, ...items: AbstractMesh[]];
 
 /**
  * @internal Stands in for "no mesh at all" in a published inclusion set. A NUL character cannot
