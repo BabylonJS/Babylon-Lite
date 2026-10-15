@@ -4,68 +4,89 @@
 > It must be so complete that if all source code were deleted, an LLM could perfectly
 > regenerate the entire engine from this document alone. Treat this as the ground truth.
 >
-> **Revision scope**: Scenes 1–175 (BoomBox PBR, Sphere+DirectionalLight, Fog+Boxes+Skybox, Shadows+ESM,
-> Alien PBR+Skeleton, PBR Gold Sphere, ChibiRex Animated, HDR Glass Sphere, Sponza, PBR Rough Sphere,
-> Shark GLB, PBR Shader Balls, PBR Spheres Grid, Flight Helmet, SpotLights+Ground, Thin Instances,
-> PBR+Standard Thin Instances, Spotlight Hard Shadows (PCF), PBR Clearcoat, PBR Emissive Spheres Grid,
-> PBR Sheen Cloth, PBR Shadows, PBR Anisotropy, Hill Valley (.babylon), KTX Texture, PBR Subsurface,
-> Material Variants (KHR_materials_variants), CSG/CSG2, FlightHelmetKTX via `KHR_texture_basisu`,
-> Gaussian splats, ShaderMaterial, GridMaterial, device-loss recovery, Havok Physics V2, and Recast V2 navigation).
-> Detailed per-module specs are in the companion docs listed below.
+> **Scope**: This overview introduces the repository, the public API, and the shared rendering architecture.
+> Feature-specific specifications live in the companion architecture pages indexed below; that index is the
+> complete catalog of those pages, not a limit on the features or scenes covered by the repository.
 
 ## Architecture Document Index
 
-Pages are ordered by how commonly Babylon Lite users reach for them — start with the scene, camera, and lights, then load and surface a model (loaders, background, materials), animate it, and finally the deeper rendering internals and tooling.
+This is the complete catalog of the architecture specifications in this directory. Pages are ordered by
+filename; the repeated numeric prefixes are part of the existing filenames.
 
-| Doc                                                                | Module                   | Scope                                                                                                     |
-| ------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------- |
-| [00-overview.md](00-overview.md)                                   | Overview                 | Repository structure, public API                                                                          |
-| [01-scene.md](01-scene.md)                                         | Scene                    | SceneContext, one-way ownership                                                                           |
-| [02-camera.md](02-camera.md)                                       | Camera                   | ArcRotateCamera + FreeCamera, controls                                                                    |
-| [03-lights.md](03-lights.md)                                       | Lights                   | Hemispheric, directional, point, spot + shared lights UBO for Standard/PBR                                |
-| [04-loaders.md](04-loaders.md)                                     | Loaders                  | glTF 2.0, dynamic glTF features, .env, .hdr, .babylon, skybox, Gaussian splats                            |
-| [05-background-skybox.md](05-background-skybox.md)                 | Background/Skybox        | DDS/HDR/cubemap skybox, ground, background material                                                       |
-| [06-pbr-material.md](06-pbr-material.md)                           | PBR Material             | ShaderFragment composition, GGX/IBL, clearcoat, sheen                                                     |
-| [07-animation.md](07-animation.md)                                 | Animation                | AnimationGroup, keyframe evaluation, glTF integration                                                     |
-| [08-standard-material.md](08-standard-material.md)                 | Standard Material        | ShaderFragment composition, Blinn-Phong                                                                   |
-| [09-texture-2d.md](09-texture-2d.md)                               | Texture2D                | Image upload, KTX1/KTX2, mipmap gen, invertY                                                              |
-| [10-mesh-generators.md](10-mesh-generators.md)                     | Mesh Generators          | Ground/heightmap, torus, sphere, box, cylinder, plane, disc, polyhedron, ribbon, tube, extrude            |
-| [11-scene-hierarchy-parenting.md](11-scene-hierarchy-parenting.md) | Scene Hierarchy          | TransformNode, parenting, world matrix propagation                                                        |
-| [12-thin-instances.md](12-thin-instances.md)                       | Thin Instances           | Per-instance matrix + color, PBR + Standard                                                               |
-| [13-skeleton.md](13-skeleton.md)                                   | Skeleton                 | Bone textures, 4/8-bone skinning                                                                          |
-| [14-morph-targets.md](14-morph-targets.md)                         | Morph Targets            | Vertex extension, GPU texture weights                                                                     |
-| [15-vertex-animation-texture.md](15-vertex-animation-texture.md)   | Vertex Animation Texture | VAT baking, texture-based skinning, per-instance + dual-clip-blend instancing, shadow casting             |
-| [16-shadow-generator.md](16-shadow-generator.md)                   | Shadow Generator         | ESM + PCF shadows, depth pass, Gaussian blur                                                              |
-| [17-cascaded-shadow.md](17-cascaded-shadow.md)                     | Cascaded Shadow Maps     | Directional CSM: frustum splits, per-cascade ortho fit, depth array, PCF5 receiver                        |
-| [18-picking.md](18-picking.md)                                     | Picking                  | GPU ID pass, CPU ray/triangle intersection                                                                |
-| [19-loader-hdr.md](19-loader-hdr.md)                               | HDR Loader               | RGBE parsing, SH extraction, GPU compute IBL                                                              |
-| [20-loader-babylon.md](20-loader-babylon.md)                       | .babylon Loader          | .babylon format parsing                                                                                   |
-| [loader-usd.md](loader-usd.md)                                     | OpenUSD Loader           | Shared protocol-v5 WASM extraction, Lite-native command-buffer materialization                           |
-| [21-core-math.md](21-core-math.md)                                 | Core Math                | Vec3, Mat4, Quat, ObservableVec3/Quat                                                                     |
-| [22-engine.md](22-engine.md)                                       | Engine                   | GPU init, MSAA, render loop, swap chain                                                                   |
-| [23-shader-composition.md](23-shader-composition.md)               | Shader Composition       | ShaderFragment system, composer, slot injection                                                           |
-| [24-shader-material.md](24-shader-material.md)                     | Shader Material          | WGSL-only ShaderMaterial: typed uniforms, samplers, defines, alpha blend/test                             |
-| [25-grid-material.md](25-grid-material.md)                         | Grid Material            | Procedural unlit object-space grid built on ShaderMaterial                                                |
-| [26-material-plugin.md](26-material-plugin.md)                     | Material Plugin          | Opt-in PBR/Standard material plugins, self-registration, zero-impact extension seam                       |
-| [27-render-pipeline.md](27-render-pipeline.md)                     | Renderable Architecture  | Renderable interfaces, entity-owned pipelines                                                             |
-| [28-frame-graph.md](28-frame-graph.md)                             | Frame Graph              | Task ordering, RenderTask, passes, render targets, RTT texture flow                                       |
-| [29-post-process.md](29-post-process.md)                           | Post Process             | Frame-graph fullscreen post-process helper and concrete post-process tasks                                |
-| [30-effect-renderer.md](30-effect-renderer.md)                     | Effect Renderer          | EffectRenderer/EffectWrapper, fullscreen passes, RTT output, texture bindings                             |
-| [31-geometry-renderer.md](31-geometry-renderer.md)                 | Geometry Renderer        | Frame-graph normal/depth/position G-buffer textures                                                       |
-| [32-sprites.md](32-sprites.md)                                     | Sprites                  | 2D sprites, depth-hosted sprites, sprite renderables                                                      |
-| [33-text.md](33-text.md)                                           | Text                     | Slug GPU font: GlyphStorage + TextData + TextRenderable (3D) / TextRenderer (2D) + defaults               |
-| [34-geospatial-camera.md](34-geospatial-camera.md)                 | Geospatial Camera        | Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls                                       |
-| [35-large-world-rendering.md](35-large-world-rendering.md)         | LWR / Floating Origin    | `useFloatingOrigin` engine flag, eye-relative upload, FO version tracking                                 |
-| [36-high-precision-matrix.md](36-high-precision-matrix.md)         | High-Precision Matrix    | `useHighPrecisionMatrix` engine flag, F64 backing, `allocateMat4` singleton, `packMat4IntoF32`            |
-| [37-resource-pool.md](37-resource-pool.md)                         | Resource Pool            | GPU buffer/texture pooling                                                                                |
-| [38-bundle-size-tooling.md](38-bundle-size-tooling.md)             | Bundle Size Tooling      | Per-scene bundle analysis, ceilings, treemaps                                                             |
-| [39-animation-parity-testing.md](39-animation-parity-testing.md)   | Animation Parity         | Animated scene test methodology                                                                           |
-| [40-material-stencil.md](40-material-stencil.md)                   | Material Stencil         | Opt-in `enableMaterialStencil` per-material stencil mask/test on Standard/PBR/Shader, zero-impact hook    |
-| [41-audio-engine.md](41-audio-engine.md)                           | Audio Engine             | Web Audio playback, buses, 3D spatial, panning, analyser, microphone, unmute UI                           |
-| [42-physics.md](42-physics.md)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
-| [49-error-handling.md](49-error-handling.md)                       | Error Handling           | Coded errors by default; `enableErrorDecoding` (always-on) vs `decodeError` (on-the-fly, e.g. telemetry)  |
-| [50-device-lost-recovery.md](50-device-lost-recovery.md)           | Device Lost Recovery     | Opt-in Scene, SpriteRenderer, and TextRenderer recovery after WebGPU device loss                          |
-| [51-flow-graph.md](51-flow-graph.md)                               | Flow Graph               | Pure-state visual scripting, stable glTF `KHR_interactivity`, and editor JSON compatibility               |
+| Doc                                                                                | Module                            | Scope                                                      |
+| ---------------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------- |
+| [00-overview.md](00-overview.md)                                                   | Overview                          | Repository structure, public API, and shared architecture  |
+| [01-scene.md](01-scene.md)                                                         | Scene                             | Scene context and ownership                                |
+| [02-camera.md](02-camera.md)                                                       | Camera                            | ArcRotateCamera, FreeCamera, and controls                  |
+| [03-lights.md](03-lights.md)                                                       | Lights                            | Light types and shared lighting data                       |
+| [04-loaders.md](04-loaders.md)                                                     | Loaders                           | glTF, USD, environment, Babylon, skybox, and splat loading |
+| [05-background-skybox.md](05-background-skybox.md)                                 | Background/Skybox                 | Environment backgrounds, skyboxes, and ground              |
+| [06-pbr-material.md](06-pbr-material.md)                                           | PBR Material                      | PBR shader composition and extensions                      |
+| [07-animation.md](07-animation.md)                                                 | Animation                         | Animation groups, evaluation, and integration              |
+| [08-standard-material.md](08-standard-material.md)                                 | Standard Material                 | Standard/Blinn-Phong material                              |
+| [09-texture-2d.md](09-texture-2d.md)                                               | Texture2D                         | 2D texture loading and codecs                              |
+| [10-mesh-generators.md](10-mesh-generators.md)                                     | Mesh Generators                   | Procedural mesh geometry                                   |
+| [11-scene-hierarchy-parenting.md](11-scene-hierarchy-parenting.md)                 | Scene Hierarchy                   | Transform nodes, parenting, and world matrices             |
+| [12-thin-instances.md](12-thin-instances.md)                                       | Thin Instances                    | Instance data and rendering                                |
+| [13-skeleton.md](13-skeleton.md)                                                   | Skeleton                          | Skeleton data and skinning                                 |
+| [14-morph-targets.md](14-morph-targets.md)                                         | Morph Targets                     | Morph target data and rendering                            |
+| [15-vertex-animation-texture.md](15-vertex-animation-texture.md)                   | Vertex Animation Texture          | VAT baking and playback                                    |
+| [16-shadow-generator.md](16-shadow-generator.md)                                   | Shadow Generator                  | ESM and PCF shadows                                        |
+| [17-cascaded-shadow.md](17-cascaded-shadow.md)                                     | Cascaded Shadow Maps              | Directional CSM                                            |
+| [18-picking.md](18-picking.md)                                                     | Picking                           | GPU and detailed CPU picking                               |
+| [19-loader-hdr.md](19-loader-hdr.md)                                               | HDR Loader                        | HDR parsing and environment generation                     |
+| [20-loader-babylon.md](20-loader-babylon.md)                                       | Babylon Loader                    | `.babylon` parsing                                         |
+| [21-core-math.md](21-core-math.md)                                                 | Core Math                         | Math primitives and observables                            |
+| [22-engine.md](22-engine.md)                                                       | Engine                            | WebGPU initialization and engine lifecycle                 |
+| [23-shader-composition.md](23-shader-composition.md)                               | Shader Composition                | Shader fragments and composition                           |
+| [24-shader-material.md](24-shader-material.md)                                     | Shader Material                   | User-authored WGSL materials                               |
+| [25-grid-material.md](25-grid-material.md)                                         | Grid Material                     | Procedural grid material                                   |
+| [26-material-plugin.md](26-material-plugin.md)                                     | Material Plugin                   | Opt-in PBR and Standard material plugins                   |
+| [27-render-pipeline.md](27-render-pipeline.md)                                     | Renderable Architecture           | Renderable contracts and pipeline ownership                |
+| [28-frame-graph.md](28-frame-graph.md)                                             | Frame Graph                       | Tasks, passes, and render targets                          |
+| [29-post-process.md](29-post-process.md)                                           | Post Process                      | Frame-graph post-processing                                |
+| [30-effect-renderer.md](30-effect-renderer.md)                                     | Effect Renderer                   | Fullscreen effects and render-to-texture                   |
+| [31-geometry-renderer.md](31-geometry-renderer.md)                                 | Geometry Renderer                 | Frame-graph geometry buffers                               |
+| [32-sprites.md](32-sprites.md)                                                     | Sprites                           | 2D and depth-hosted sprites                                |
+| [33-text.md](33-text.md)                                                           | Text                              | GPU text rendering                                         |
+| [34-geospatial-camera.md](34-geospatial-camera.md)                                 | Geospatial Camera                 | Globe-orbit camera and controls                            |
+| [35-large-world-rendering.md](35-large-world-rendering.md)                         | Large World Rendering             | Floating origin                                            |
+| [36-high-precision-matrix.md](36-high-precision-matrix.md)                         | High-Precision Matrix             | High-precision transforms                                  |
+| [37-resource-pool.md](37-resource-pool.md)                                         | Resource Pool                     | GPU resource pooling                                       |
+| [38-bundle-size-tooling.md](38-bundle-size-tooling.md)                             | Bundle Size Tooling               | Bundle analysis and size ceilings                          |
+| [39-animation-parity-testing.md](39-animation-parity-testing.md)                   | Animation Parity Testing          | Deterministic animated-scene testing                       |
+| [40-material-stencil.md](40-material-stencil.md)                                   | Material Stencil                  | Opt-in material stencil state                              |
+| [41-audio-engine.md](41-audio-engine.md)                                           | Audio Engine                      | Web Audio, spatial audio, and analysis                     |
+| [42-node-particle.md](42-node-particle.md)                                         | Node Particles                    | Node-particle editor/runtime                               |
+| [42-physics.md](42-physics.md)                                                     | Physics                           | Havok physics                                              |
+| [42-webxr.md](42-webxr.md)                                                         | WebXR                             | WebGPU WebXR rendering and input                           |
+| [46-mesh-geometry-update.md](46-mesh-geometry-update.md)                           | Mesh Geometry Update              | In-place geometry updates                                  |
+| [47-storage-buffer.md](47-storage-buffer.md)                                       | Storage Buffer                    | Storage-buffer API and lifecycle                           |
+| [48-mesh-geometry-access.md](48-mesh-geometry-access.md)                           | Mesh Geometry Access              | CPU access to mesh geometry                                |
+| [49-error-handling.md](49-error-handling.md)                                       | Error Handling                    | Coded and decoded errors                                   |
+| [49-line-system.md](49-line-system.md)                                             | Line System                       | Lines, dashes, and updates                                 |
+| [50-device-lost-recovery.md](50-device-lost-recovery.md)                           | Device-Lost Recovery              | Opt-in recovery after WebGPU device loss                   |
+| [51-alpha-to-coverage.md](51-alpha-to-coverage.md)                                 | Alpha-to-Coverage                 | Optional alpha-to-coverage state                           |
+| [51-flow-graph.md](51-flow-graph.md)                                               | Flow Graph                        | Visual scripting and glTF interactivity                    |
+| [52-screen-space-effects.md](52-screen-space-effects.md)                           | Screen-Space Effects              | Screen-space rendering effects                             |
+| [53-async-shader-pipeline-compilation.md](53-async-shader-pipeline-compilation.md) | Async Shader Pipeline Compilation | Asynchronous ShaderMaterial pipeline compilation           |
+| [54-compute.md](54-compute.md)                                                     | Compute                           | Compute shaders, bindings, and tasks                       |
+| [54-texture-array.md](54-texture-array.md)                                         | Texture2DArray                    | Texture arrays                                             |
+| [54-world-screen-projection.md](54-world-screen-projection.md)                     | World-to-Screen Projection        | World and screen coordinate projection                     |
+| [55-gaussian-splat-streaming.md](55-gaussian-splat-streaming.md)                   | Gaussian Splat Streaming          | WebGPU-native splat streaming                              |
+| [55-mesh-blending.md](55-mesh-blending.md)                                         | Mesh Blending                     | Mesh blending                                              |
+| [56-accessibility.md](56-accessibility.md)                                         | Accessibility                     | Scene accessibility and HTML twins                         |
+| [56-render-shader.md](56-render-shader.md)                                         | Render Shaders                    | Custom render passes                                       |
+| [57-texture-region.md](57-texture-region.md)                                       | Texture Region                    | Texture region uploads                                     |
+| [58-texture-render-target.md](58-texture-render-target.md)                         | Texture Render Target             | Render-target textures                                     |
+| [59-engine-gpu-events.md](59-engine-gpu-events.md)                                 | Engine GPU Events                 | GPU events and capabilities                                |
+| [demo-antigravity-racer.md](demo-antigravity-racer.md)                             | Antigravity Racer Demo            | Demo architecture                                          |
+| [demo-ocean.md](demo-ocean.md)                                                     | Ocean Demo                        | Demo architecture                                          |
+| [demo-playroom.md](demo-playroom.md)                                               | Playroom Demo                     | Demo architecture                                          |
+| [loader-usd.md](loader-usd.md)                                                     | USD Loader                        | USD command-buffer loader                                  |
+| [mesh-indexed-indirect.md](mesh-indexed-indirect.md)                               | Indexed-Indirect Mesh             | Storage-buffer-backed indexed indirect drawing             |
+| [node-block-selection.md](node-block-selection.md)                                 | Node Block Selection              | Node-material block selection                              |
+| [sprite-instance-params.md](sprite-instance-params.md)                             | Sprite Instance Parameters        | Sprite2D instance parameters                               |
 
 ---
 
@@ -75,7 +96,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 babylon-lite/
 ├── GUIDANCE.md                    # Immutable core pillars & workflow (anti-amnesia)
 ├── package.json                   # pnpm workspace root
-├── pnpm-workspace.yaml            # packages: [packages/*, apps/*]
+├── pnpm-workspace.yaml            # Workspace package configuration
 ├── tsconfig.base.json             # Shared TS config
 ├── vitest.config.ts               # Root test config
 │
@@ -254,39 +275,25 @@ babylon-lite/
 │   │       ├── load-skybox.ts     # High-level skybox loader
 │   │       └── skybox-renderable.ts # Skybox → deferred Renderable builder
 │
-├── lab/               # Dev sandbox (Scenes 1–175)
-│   ├── index.html
-│   ├── src/lite/scene1.ts          # Scene 1: BoomBox PBR
-│   ├── src/lite/scene2.ts          # Scene 2: Sphere + DirectionalLight
-│   ├── ...                         # Scenes 3–175
-│   ├── src/lite/scene74.ts         # Scene 74: EffectRenderer fullscreen pass
-│   ├── src/lite/scene75.ts         # Scene 75: EffectWrapper render-to-texture sphere
-│   ├── src/lite/scene76.ts         # Scene 76: EffectWrapper texture binding
-│   ├── src/lite/scene112.ts        # Scene 112: FlightHelmetKTX / KHR_texture_basisu
-│   ├── src/lite/scene120.ts        # Scene 120: Gaussian splatting
-│   ├── src/lite/scene159.ts        # Scene 159: ShaderMaterial basic
-│   ├── src/lite/scene164.ts        # Scene 164: device-loss recovery
-│   ├── src/lite/scene175.ts        # Scene 175: navigation raycast
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
+├── lab/lite/                      # Lite development lab and scenes
+├── lab/gl/                        # WebGL development lab and scenes
+├── playground/                    # Playground app and examples
 │
-├── reference/lite/                     # Per-scene reference data
-│   ├── scene1-boombox/            # Scene 1 reference data
-│   ├── scene2-sphere/             # Scene 2 reference data
-│   ├── ...                        # Scenes 3–175
-│   ├── scene74-effect-renderer/   # EffectRenderer fullscreen golden
-│   ├── scene75-effect-rtt-sphere/ # EffectWrapper RTT golden
-│   ├── scene76-effect-texture/    # EffectWrapper texture-binding golden
-│   ├── scene112-khr-texture-basisu/ # KHR_texture_basisu golden
-│   ├── scene120-gaussian-splatting/ # Gaussian splatting golden
-│   ├── scene164-device-lost-recovery/ # Device-loss recovery golden
-│   ├── scene175-navigation-raycast/ # Navigation raycast golden
-│   └── (each contains golden screenshots for parity tests)
+├── reference/lite/                # Lite scene references and parity goldens
+├── reference/gl/                  # WebGL scene references
+├── tests/lite/                    # Lite tests
+├── tests/gl/                      # WebGL tests
+├── scripts/                       # Build, bundle, and repository tooling
 │
 └── docs/lite/architecture/
-    └── 00-overview.md             # THIS FILE
+    └── *.md                       # Overview and companion architecture specs
 ```
+
+The workspace also contains `packages/babylon-lite-gl/` and
+`packages/babylon-lite-compat/`. The source tree above is representative rather than exhaustive:
+`packages/babylon-lite/src/` also includes accessibility, audio, collision, compute, flow graph,
+gizmo, large-world, navigation, particles, physics, post-processing, render shaders, splat loaders,
+text, VAT, and WebXR. Use the architecture index above for the available subsystem specifications.
 
 ---
 
@@ -1436,12 +1443,16 @@ For production builds, switch to `"./dist/index.js"`.
 
 ## 9. Known Limitations
 
-- **No post-processing** — Image processing applied in-shader, no separate post-process pass
-- **No LOD** — Meshes rendered at full resolution regardless of distance
+This overview does not maintain an exhaustive feature-gap list. For current subsystem behavior and
+limitations, use the relevant architecture specification and the feature comparison in
+[`docs/lite/02-feature-comparison.md`](../02-feature-comparison.md).
 
 ---
 
-## 10. File Manifest
+## 10. Legacy File Manifest
+
+This legacy listing is not maintained as a current source inventory. For authoritative module file
+manifests, see the individual architecture specifications linked in the index above.
 
 | File                                             | Purpose                                                          | Lines (approx) |
 | ------------------------------------------------ | ---------------------------------------------------------------- | -------------- |
