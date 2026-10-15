@@ -44,6 +44,26 @@ The Loaders module provides asset loading pipelines plus dynamic glTF feature mo
 
 8. **OpenUSD Loader** — Loads composed `.usd`, `.usda`, `.usdc`, and `.usdz` stages through the same protocol-v5 OpenUSD WebAssembly extractor used by Babylon.js. The worker returns command/data buffers that are validated and materialized directly into Lite scene nodes, PBR materials, shared geometry, thin instances, skeletons, morph targets, and animation groups. See the dedicated [USD loader architecture](loader-usd.md) for the virtual-file and ownership contracts.
 
+### Deterministic splat scene assets
+
+Scenes 121, 125, and 126 and their Babylon.js reference pages load `/splats/Halo_Believe.splat`,
+the same checked-in fixture used by scenes 127-129. `lab/public/splats/Halo_Believe.splat`
+is byte-identical to `CedricGuillemet/dump`'s `Halo_Believe.splat`: 11,046,944 bytes,
+SHA-256 `728e7796cdeb96f19d8b0e12b2d60f875efeff8ca280e06e02e54f99594cfed6`.
+Serving it locally removes jsDelivr availability from startup without changing splat data,
+camera parameters, shaders, or reference images.
+
+Scene 121's reference constructs its retained-data mesh with a null URL, then awaits one
+explicit `loadFileAsync` call. Supplying a URL to the constructor would start another load
+before the awaited call. Each affected scene reports initialization failures through
+`canvas.dataset.error` as well as `console.error`, allowing readiness polling to fail with
+the original error rather than a timeout.
+
+`tests/lite/plumbing/splat-scene-startup.spec.ts` verifies that both implementations of
+all three scenes initialize with jsDelivr blocked, fetch the local fixture exactly once,
+and surface a rejected fixture request. These are nonvisual startup checks: no screenshots,
+golden capture, pixel comparison, or performance measurement.
+
 ## Public API Surface
 
 ### `asset-container.ts`

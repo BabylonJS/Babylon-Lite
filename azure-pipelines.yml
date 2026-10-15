@@ -189,7 +189,8 @@ stages:
                           tests/lite/plumbing/mesh-lod-demand.spec.ts \
                           tests/lite/plumbing/mesh-lod-pbr.spec.ts \
                           tests/lite/plumbing/memory-leak.spec.ts \
-                          tests/lite/plumbing/picking.spec.ts
+                          tests/lite/plumbing/picking.spec.ts \
+                          tests/lite/plumbing/splat-scene-startup.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"

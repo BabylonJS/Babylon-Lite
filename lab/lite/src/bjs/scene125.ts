@@ -9,7 +9,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
+const SPLAT_URL = "/splats/Halo_Believe.splat";
 
 (async function () {
     const __initStart = performance.now();
@@ -52,4 +52,8 @@ const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_
 })().catch((err) => {
     // eslint-disable-next-line no-console
     console.error(err);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = err instanceof Error ? err.message : String(err);
+    }
 });

@@ -10,7 +10,7 @@
 import { attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSplat, registerScene, startEngine } from "babylon-lite";
 import type { GaussianSplattingMesh } from "babylon-lite";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/Halo_Believe.splat";
+const SPLAT_URL = "/splats/Halo_Believe.splat";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -54,4 +54,8 @@ async function main(): Promise<void> {
 main().catch((err) => {
     // eslint-disable-next-line no-console
     console.error(err);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = err instanceof Error ? err.message : String(err);
+    }
 });
