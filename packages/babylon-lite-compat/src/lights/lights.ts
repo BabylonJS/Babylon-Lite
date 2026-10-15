@@ -233,12 +233,10 @@ export abstract class Light extends Node {
         if (!scene?._hasStarted || this._clusteredContainer) {
             return;
         }
-        // The selection is baked into each renderable at build time — the shader's light-count
-        // permutation and the mesh UBO's light indices — and the per-frame updater only revisits it
+        // The selection is baked into each renderable at build time (the shader's light-count
+        // permutation and the mesh UBO's light indices) and the per-frame updater only revisits it
         // when the light COUNT changes. A list edit after start therefore needs the rebuild.
-        void rebuildSceneRenderables(scene._lite).catch((error: unknown) => {
-            console.error(error);
-        });
+        requestSceneRebuild(scene._lite);
     }
 
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
@@ -337,6 +335,31 @@ function filterId(mesh: AbstractMesh): string {
         mintedFilterIds.add(minted);
     }
     return minted;
+}
+
+/** @internal Lite scenes whose renderables a published list change has invalidated this tick. */
+const pendingSceneRebuilds = new Set<Parameters<typeof rebuildSceneRenderables>[0]>();
+let sceneRebuildScheduled = false;
+
+/**
+ * @internal Request one rebuild per scene per tick.
+ */
+function requestSceneRebuild(liteScene: Parameters<typeof rebuildSceneRenderables>[0]): void {
+    pendingSceneRebuilds.add(liteScene);
+    if (sceneRebuildScheduled) {
+        return;
+    }
+    sceneRebuildScheduled = true;
+    queueMicrotask(() => {
+        sceneRebuildScheduled = false;
+        const scenes = [...pendingSceneRebuilds];
+        pendingSceneRebuilds.clear();
+        for (const scene of scenes) {
+            void rebuildSceneRenderables(scene).catch((error: unknown) => {
+                console.error(error);
+            });
+        }
+    });
 }
 
 export class HemisphericLight extends Light {

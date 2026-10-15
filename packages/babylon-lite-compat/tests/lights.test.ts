@@ -412,6 +412,21 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(excluded(rim)).not.toContain(sourceId);
     });
 
+    it("shares one scene rebuild across lights edited in the same tick", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+
+        rim.excludedMeshes = [mesh("floor")];
+        led.includedOnlyMeshes = [mesh("door")];
+        await flush();
+
+        // A rebuild rescans every material group and recreates every mesh's GPU resources, and both
+        // lights have published by the time it runs, so one is enough for the whole update.
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
+        expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
+    });
+
     it("does not rebuild for a light held by a clustered container", async () => {
         const scene = sceneStub(true);
         const led = new PointLight("led", new Vector3(0, 1, 0), scene);
