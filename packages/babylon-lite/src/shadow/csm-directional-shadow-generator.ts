@@ -160,8 +160,11 @@ export function getCsmReceiverTexture(sg: ShadowGenerator): Texture2D {
 }
 
 /**
- * Register a callback fired each frame the CSM cascades are recomputed, right after the receiver
- * UBO is updated and uploaded — and before the shadow map and main pass are rendered.
+ * Register a callback invoked on every frame the receiver UBO is republished (right after it is
+ * uploaded, before the shadow map renders) and on every frame the active camera's change key moves
+ * while the generator is enabled (`setShadowGeneratorEnabled`), always with the currently published
+ * UBO and before the main pass renders. With the static cache's `cascadeCoveragePadding`, a camera
+ * move that redraws no cascade still invokes it, with unchanged data.
  *
  * Custom `ShaderMaterial` receivers that mirror the cascade transforms into their own uniforms
  * (rather than binding the generator's receiver UBO directly, as the built-in standard/PBR/node
@@ -169,10 +172,10 @@ export function getCsmReceiverTexture(sg: ShadowGenerator): Texture2D {
  * reads the *previous* frame's transforms — a one-frame lag that makes those shadows visibly swim
  * while the camera moves (the cascade window can slide many texels per frame during a zoom).
  *
- * Multiple receivers may register on the same generator; every registered callback is invoked each
- * frame. The callback receives the 80-float receiver UBO (layout: four `mat4x4` cascade transforms,
+ * Multiple receivers may register on the same generator; every registered callback is invoked on
+ * each of those frames. The callback receives the 80-float receiver UBO (layout: four `mat4x4` cascade transforms,
  * `viewFrustumZ`, `frustumLengths`, `shadowsInfo`, `csmParams` — see the cascaded-shadow
- * architecture doc). The array is reused each frame; copy what you need.
+ * architecture doc). The array is reused across frames; copy what you need.
  *
  * @param sg - A cascaded-shadow generator from {@link createCsmDirectionalShadowGenerator}.
  * @param cb - Receiver-sync callback.

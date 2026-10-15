@@ -620,7 +620,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 let props: PbrMaterialProps;
                 if (_needsPbrExt) {
                     const extMod = await _ensurePbrExt();
-                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, samplerFor);
+                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, extLayers, samplerFor);
                     props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
                     // UV-transform is opt-in; the gate and its conditional import live in the ext
                     // module so the import plumbing is not emitted into this file, which every
@@ -629,8 +629,8 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     await extMod.applyGltfUvTransform(props, tex);
                 } else {
                     const tex = buildSampledPbrTextures
-                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
-                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture, extLayers)
+                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture, extLayers);
                     props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
                 }
                 // Opt-in PBR features decided from the glTF material data (emissive,

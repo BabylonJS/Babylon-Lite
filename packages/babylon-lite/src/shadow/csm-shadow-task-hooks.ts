@@ -69,6 +69,9 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
+    /** @internal Camera the cascades were last fit for. `_lastCamVersion` sums counters kept on each camera, so two
+     *  cameras can share it: a camera swap is detected by identity. */
+    _lastCamera: Camera | null;
     /** @internal Effective aspect ratio the cascades were last fit against. */
     _lastCamAspect: number;
     /** @internal */
@@ -241,6 +244,7 @@ export function ensureCsmShadowTaskState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamera: null,
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
@@ -490,6 +494,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         casterVersion === state._lastCasterVersion &&
         lightVersion === state._lastLightVersion &&
         camVersion === state._lastCamVersion &&
+        camera === state._lastCamera &&
         camAspect === state._lastCamAspect
     ) {
         return 0;
@@ -519,6 +524,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastCamVersion = camVersion;
+    state._lastCamera = camera;
     state._lastCamAspect = camAspect;
     return state._task.execute?.() ?? 0;
 }
@@ -637,13 +643,41 @@ export function csmCameraAspect(scene: SceneContext, camera: Camera): number {
     return getEffectiveAspectRatio(camera, rt._width, rt._height);
 }
 
+/** @internal Write the eight world-space corners of the camera frustum slice between the fractions `nearSplit` and
+ *  `farSplit` of the camera depth range into `corners` (near quad first, then far quad). `invViewProj` is the inverse
+ *  of the camera view-projection. The one owner of the slice geometry the cascade fit covers. */
+export function _csmSliceCornersInto(corners: number[][], invViewProj: ArrayLike<number>, nearSplit: number, farSplit: number): void {
+    for (let k = 0; k < 8; k++) {
+        const ndc = FRUSTUM_NDC[k]!;
+        transformCoordInto(corners[k]!, invViewProj, ndc[0], ndc[1], ndc[2]);
+    }
+    // Interpolate near/far corners to cascade slice boundaries
+    for (let k = 0; k < 4; k++) {
+        const nearCorner = corners[k]!;
+        const farCorner = corners[k + 4]!;
+        const rx = farCorner[0]! - nearCorner[0]!;
+        const ry = farCorner[1]! - nearCorner[1]!;
+        const rz = farCorner[2]! - nearCorner[2]!;
+        farCorner[0] = nearCorner[0]! + rx * farSplit;
+        farCorner[1] = nearCorner[1]! + ry * farSplit;
+        farCorner[2] = nearCorner[2]! + rz * farSplit;
+        nearCorner[0] = nearCorner[0]! + rx * nearSplit;
+        nearCorner[1] = nearCorner[1]! + ry * nearSplit;
+        nearCorner[2] = nearCorner[2]! + rz * nearSplit;
+    }
+}
+
+/** Fit every cascade to its slice of the camera frustum. `radiusScale` (stabilized cascades only, default 1) widens
+ *  each cascade's bounding sphere by that factor before the 1/16 rounding, so the fitted map keeps covering its
+ *  slice while the camera moves a little (the static cache's opt-in camera-coverage refit). */
 export function _computeCsmCascades(
     scene: SceneContext,
     camera: Camera,
     light: DirectionalLight,
     cfg: CsmConfig,
     casterMeshes: readonly Mesh[],
-    scratch: CsmCascadeScratch
+    scratch: CsmCascadeScratch,
+    radiusScale = 1
 ): CsmCascades {
     const near = camera.nearPlane;
     const far = camera.farPlane;
@@ -699,24 +733,7 @@ export function _computeCsmCascades(
         const split = prevSplit + frustumLengths[c]! / cameraRange;
 
         // World-space frustum corners of this slice.
-        for (let k = 0; k < 8; k++) {
-            const ndc = FRUSTUM_NDC[k]!;
-            transformCoordInto(corners[k]!, invViewProj, ndc[0], ndc[1], ndc[2]);
-        }
-        // Interpolate near/far corners to cascade slice boundaries
-        for (let k = 0; k < 4; k++) {
-            const nearCorner = corners[k]!;
-            const farCorner = corners[k + 4]!;
-            const rx = farCorner[0]! - nearCorner[0]!;
-            const ry = farCorner[1]! - nearCorner[1]!;
-            const rz = farCorner[2]! - nearCorner[2]!;
-            farCorner[0] = nearCorner[0]! + rx * split;
-            farCorner[1] = nearCorner[1]! + ry * split;
-            farCorner[2] = nearCorner[2]! + rz * split;
-            nearCorner[0] = nearCorner[0]! + rx * prevSplit;
-            nearCorner[1] = nearCorner[1]! + ry * prevSplit;
-            nearCorner[2] = nearCorner[2]! + rz * prevSplit;
-        }
+        _csmSliceCornersInto(corners, invViewProj, prevSplit, split);
         prevSplit = split;
 
         // Centroid.
@@ -742,7 +759,7 @@ export function _computeCsmCascades(
             for (const corner of corners) {
                 radius = Math.max(radius, Math.hypot(corner[0]! - cx, corner[1]! - cy, corner[2]! - cz));
             }
-            radius = Math.ceil(radius * 16) / 16;
+            radius = Math.ceil(radius * radiusScale * 16) / 16;
             stableRadius = radius;
             minX = minY = minEz = -radius;
             maxX = maxY = maxEz = radius;

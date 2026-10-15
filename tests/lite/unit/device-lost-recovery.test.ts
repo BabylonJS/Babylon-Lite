@@ -298,11 +298,11 @@ describe("device-lost recovery context dispatch", () => {
             },
             defaultSampler
         );
-        const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture);
+        const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture, undefined);
 
         samplerDescriptors.length = 0;
         engine._device = { ...device };
-        await rebuildTexture2D(engine, textures.baseColorTexture);
+        await rebuildTexture2D(engine, textures.baseColorTexture!);
 
         expect(samplerDescriptors).toContainEqual({
             addressModeU: "clamp-to-edge",
