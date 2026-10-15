@@ -358,7 +358,9 @@ export function removeMeshFromScene(scene: SceneContext, mesh: Mesh, preservePar
         scene._renderableVersion++;
     }
     // Drop from the material group registry so a later full rebuild (e.g. device-lost
-    // recovery) doesn't try to re-materialize a disposed mesh.
+    // recovery) doesn't try to re-materialize a disposed mesh. Also drop the mesh's entries from
+    // the group's tracked output (`o`): runtime builds append to it, and a retired renderable left
+    // there keeps its bind groups and packets reachable until the scene is disposed.
     for (const group of scene._groups.values()) {
         for (let gi = group.length; gi-- > 0;) {
             if (group[gi] === mesh) {
@@ -370,6 +372,14 @@ export function removeMeshFromScene(scene: SceneContext, mesh: Mesh, preservePar
             for (let oi = output.length; oi-- > 0;) {
                 if (output[oi]!.mesh === mesh) {
                     output.splice(oi, 1);
+                }
+            }
+        }
+        const o = group.o;
+        if (o) {
+            for (let oi = o.length; oi--;) {
+                if (o[oi]!.mesh === mesh) {
+                    o.splice(oi, 1);
                 }
             }
         }

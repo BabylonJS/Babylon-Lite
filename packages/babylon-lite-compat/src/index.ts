@@ -47,6 +47,7 @@ export { UniformBuffer } from "./materials/uniform-buffer.js";
 
 // ─── Scene graph ─────────────────────────────────────────────────────
 export { Node } from "./node/node.js";
+export type { IAccessibilityTag } from "./node/node.js";
 export { AbstractScene } from "./scene/abstract-scene.js";
 export { Scene } from "./scene/scene.js";
 export type { MeshPredicate, TrianglePickingPredicate } from "./scene/scene.js";

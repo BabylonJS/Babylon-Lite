@@ -91,6 +91,58 @@ lease.dispose();
         }
     });
 
+    it("exposes optional sprite instance parameters through the root API without internal GPU descriptors", () => {
+        const probePath = resolve(BUILD_DIR, "sprite-instance-params.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams,
+    type Sprite2DInstanceParams, type Sprite2DLayer, type Sprite2DHandle,
+} from "./index.js";
+declare const layer: Sprite2DLayer;
+declare const handle: Sprite2DHandle;
+const tuple: Sprite2DInstanceParams = [1, 2, 3, 4] as const;
+const buffer: Sprite2DInstanceParams = new Float32Array(4);
+enableSprite2DInstanceParams(layer);
+setSprite2DInstanceParamsIndex(layer, 0, tuple);
+setSprite2DInstanceParamsIndex(layer, 0, buffer);
+setSprite2DInstanceParams(handle, tuple);
+// @ts-expect-error A tuple must contain exactly four components.
+setSprite2DInstanceParams(handle, [1, 2, 3]);
+// @ts-expect-error Instance vertex descriptors are internal.
+layer._vertexExtension;
+// @ts-expect-error Raw GPU extension types are not part of the public root API.
+import type { SpriteVertexExtension } from "./index.js";
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes voxel collision through the root API without GPU types", () => {
         const probePath = resolve(BUILD_DIR, "voxel-collision.probe.ts");
         try {

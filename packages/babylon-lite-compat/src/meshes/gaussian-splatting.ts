@@ -111,6 +111,11 @@ export class GaussianSplattingMesh extends TransformNode {
         return this._gs?.parent === this._node ? this._node : (this._gs ?? this._node);
     }
 
+    /** @internal Accessibility metadata belongs to the loaded cloud, or its placeholder before loading. */
+    protected override _accessibilitySource(): object {
+        return this._gs ?? this._node;
+    }
+
     public override get position(): Vector3 {
         return liteBackedVector3(this._xform.position);
     }
@@ -162,10 +167,12 @@ export class GaussianSplattingMesh extends TransformNode {
      */
     public _adopt(lite: LiteGsMesh): void {
         const placeholder = this._node;
+        const previousAccessibilitySource = this._accessibilitySource();
         lite.parent = placeholder;
         placeholder.children.push(lite);
         lite.name = this.name;
         this._gs = lite;
+        this._syncAccessibilityTag(previousAccessibilitySource);
         this._scene?._registerMesh(this);
     }
 
