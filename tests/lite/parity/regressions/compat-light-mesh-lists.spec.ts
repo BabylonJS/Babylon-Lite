@@ -157,6 +157,70 @@ main().catch((error) => { canvas.dataset.error = error?.message ?? String(error)
     expect(luminance(png, 0.2, 0.8)).toBeLessThan(10);
 });
 
+/**
+ * An inclusion list whose every member is also excluded lights nothing in Babylon.js. The published
+ * inclusion set has to stay non-empty to say that, because `affectsMesh` honours it only while its
+ * size is nonzero; an empty one reads as "no restriction" and lights the whole scene.
+ */
+test("identical inclusion and exclusion lists light nothing", async ({ page }) => {
+    await page.goto("/");
+    await page.setContent(`
+<canvas id="renderCanvas" width="1280" height="720"></canvas>
+<script type="module">
+import { ArcRotateCamera, Color3, Color4, DirectionalLight, MeshBuilder, Scene, StandardMaterial, Vector3, WebGPUEngine } from "${COMPAT_ENTRY}";
+
+const canvas = document.getElementById("renderCanvas");
+window.addEventListener("error", (event) => { canvas.dataset.error = event.message; });
+window.addEventListener("unhandledrejection", (event) => { canvas.dataset.error = event.reason?.message ?? String(event.reason); });
+
+async function main() {
+    const engine = new WebGPUEngine(canvas);
+    await engine.initAsync();
+
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(0, 0, 0, 1);
+
+    const camera = new ArcRotateCamera("camera", 0, 0.001, 14, Vector3.Zero(), scene);
+    camera.minZ = 0.1;
+
+    const white = new StandardMaterial("white", scene);
+    white.diffuseColor = new Color3(1, 1, 1);
+    white.specularColor = new Color3(0, 0, 0);
+
+    const floor = MeshBuilder.CreateGround("floor", { width: 40, height: 40 }, scene);
+    floor.material = white;
+
+    const box = MeshBuilder.CreateBox("box", { size: 2 }, scene);
+    box.position.y = 1;
+    box.material = white;
+
+    const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+    rim.intensity = 1;
+    rim.includedOnlyMeshes = [box];
+    rim.excludedMeshes = [box];
+
+    engine.runRenderLoop(() => scene.render());
+    await new Promise((resolve) => {
+        let left = 30;
+        const tick = () => (left-- > 0 ? requestAnimationFrame(tick) : resolve());
+        tick();
+    });
+    canvas.dataset.ready = "true";
+}
+
+main().catch((error) => { canvas.dataset.error = error?.message ?? String(error); });
+</script>`);
+
+    const canvas = page.locator("#renderCanvas");
+    await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+    await expect(canvas).not.toHaveAttribute("data-error", /./);
+
+    const png = PNG.sync.read(await canvas.screenshot());
+    // The box is the only listed mesh, and the floor was never mentioned by either list.
+    expect(luminance(png, 0.5, 0.5)).toBeLessThan(10);
+    expect(luminance(png, 0.2, 0.8)).toBeLessThan(10);
+});
+
 function luminance(png: PNG, xFraction: number, yFraction: number): number {
     const x = Math.floor(png.width * xFraction);
     const y = Math.floor(png.height * yFraction);

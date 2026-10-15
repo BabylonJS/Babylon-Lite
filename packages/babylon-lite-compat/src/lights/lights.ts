@@ -208,7 +208,7 @@ export abstract class Light extends Node {
      * @internal Publish both lists as Lite id sets and rebake the per-mesh light selection.
      *
      * Babylon.js applies `includedOnlyMeshes` first and lets `excludedMeshes` subtract from it
-     * (`Light.canAffectMesh`), while Lite's `affectsMesh` stops at a non-empty included set — so the
+     * (`Light.canAffectMesh`), while Lite's `affectsMesh` stops at a non-empty included set, so the
      * difference is taken here rather than publishing both sets. Empty lists publish `undefined` to
      * keep the "no lists" fast path in `affectsMesh` allocation-free.
      */
@@ -218,6 +218,9 @@ export abstract class Light extends Node {
         if (includedOnly && excluded) {
             for (const id of excluded) {
                 includedOnly.delete(id);
+            }
+            if (includedOnly.size === 0) {
+                includedOnly.add(NO_MESH_ID);
             }
         }
         this._lite.includedOnlyMeshIds = includedOnly;
@@ -287,6 +290,12 @@ function ensureLightVersionBump(lite: LightBase): () => void {
     });
     return bump;
 }
+
+/**
+ * @internal Stands in for "no mesh at all" in a published inclusion set. A NUL character cannot
+ * appear in a minted id or in a node id any loader produces, so it matches nothing.
+ */
+const NO_MESH_ID = "\u0000lightFilter:none";
 
 /** @internal Install a mesh-list method override that behaves like the prototype method it shadows. */
 function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unknown): void {

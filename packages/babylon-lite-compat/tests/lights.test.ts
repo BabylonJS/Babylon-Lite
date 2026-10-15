@@ -374,6 +374,23 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(rebuildMock).not.toHaveBeenCalled();
     });
 
+    it("keeps the restriction active when every included mesh is also excluded", async () => {
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
+        const box = mesh("box");
+        const other = mesh("other");
+
+        led.includedOnlyMeshes = [box];
+        led.excludedMeshes = [box];
+        await flush();
+
+        // Babylon.js lights nothing here.
+        const ids = includedOnly(led);
+        expect(ids).toHaveLength(1);
+        expect(ids).not.toContain(box._lite.id);
+        expect(ids).not.toContain(other._lite.id);
+        expect(excluded(led)).toBeUndefined();
+    });
+
     it("does not rebuild for a light held by a clustered container", async () => {
         const scene = sceneStub(true);
         const led = new PointLight("led", new Vector3(0, 1, 0), scene);
