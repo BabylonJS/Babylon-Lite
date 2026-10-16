@@ -238,6 +238,16 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
         h.render();
         expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
     });
+
+    it("refits when the active camera is REPLACED by one with the same change key", () => {
+        const before = h.staticExecute.mock.calls.length;
+        h.scene.camera = { key: h.scene.camera.key };
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+    });
 });
 
 describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)", () => {

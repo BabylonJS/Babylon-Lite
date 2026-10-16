@@ -189,7 +189,7 @@ export interface EngineContext extends SurfaceContext {
         scene: import("../scene/scene-core.js").SceneContext
     ) => (view: Float32Array, mat: import("../math/types.js").Mat4 | Float32Array | Float64Array, offsetFloats: number, srcOffsetFloats: number) => void;
 
-    /** @internal Active-camera `worldMatrixVersion` for the lights UBO version,
+    /** @internal Active-camera floating-origin revision for the lights UBO version,
      *  and the floating-origin offset applier for positional light entries.
      *  Both are set only when the engine was created with
      *  `useFloatingOrigin: true` (dynamic-imported from

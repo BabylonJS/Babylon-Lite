@@ -56,7 +56,8 @@ export interface SceneContext {
     _deferredBuilders: (() => void | Promise<void>)[];
 }
 
-/** Add an entity or asset container to the scene. Auto-routes by type. */
+/** Add an entity or asset container to the scene. Auto-routes by type. Adding a camera makes it
+ *  the active `scene.camera`; an asset container's camera is installed only when none is set. */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
 
 /** Remove an entity or asset container from the scene, undoing addToScene. Idempotent.
@@ -109,7 +110,7 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera;
 | ------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `engine`                  | passed in                                                     | Immutable reference to Engine                                             |
 | `clearColor`              | `{ r: 0.2, g: 0.2, b: 0.3, a: 1.0 }`                          | Render pass clear color                                                   |
-| `camera`                  | `null`                                                        | Set later by `createDefaultCamera`                                        |
+| `camera`                  | `null`                                                        | Set by `addToScene(camera)`, `createDefaultCamera`, or direct assignment  |
 | `lights`                  | `[]`                                                          | All light types (LightBase[])                                             |
 | `meshes`                  | `[]`                                                          | All meshes (standard, PBR, etc.)                                          |
 | `animationGroups`         | `[]`                                                          | Animation groups from glTF clips                                          |

@@ -307,6 +307,20 @@ export interface SceneContextOptions {
     defaultRenderTask?: boolean;
 }
 
+/** Match the scene camera's floating-origin mode to its engine. A camera can arrive fresh or from an
+ *  engine with the opposite mode: `getViewMatrix` zeroes the view translation only under the flag. The
+ *  view cache resets, and clearing the projection snapshot re-arms `_cameraChangeKey` (as on a fresh
+ *  camera) so its next call advances `_projRev`: the view-projection cache and every change-key
+ *  consumer (scene UBO, text, CSM, TAA, …) rewrite in this frame. */
+function syncCameraFloatingOrigin(scene: SceneContext, fo: boolean | undefined): void {
+    const cam = scene.camera;
+    if (cam && !cam._useFloatingOrigin !== !fo) {
+        cam._useFloatingOrigin = fo;
+        cam._viewVer = -1;
+        cam._projFov = undefined;
+    }
+}
+
 /** Create an empty scene context bound to the given `surface`. The default render task
  *  is built against the surface's format, MSAA configuration, and swapchain RT — the
  *  scene is permanently bound to that surface. Pass `engine` directly (since
@@ -345,23 +359,17 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _drawCallsPre: 0,
 
         _update(): void {
-            // When the engine was created with `useFloatingOrigin: true`, mark
-            // the active camera so `getViewMatrix` knows to zero its
-            // translation column (the GPU view × world product is then the
-            // eye-relative result the LWR offset trick produces). For non-LWR
-            // engines `eng.useFloatingOrigin` is false and this is a single
-            // boolean check per frame — the inner branch is dead.
-            if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
-                ctx.camera._useFloatingOrigin = true;
-                ctx.camera._viewVer = -1;
-                ctx.camera._vpVer = -1;
-            }
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
             const encoder = eng._currentEncoder;
             let draws = 0;
+            // Match the active camera's floating-origin mode to this engine before the callbacks (so the
+            // matrices they read are in the frame the engine renders) and again after them (they may
+            // install a camera), before any pre-pass, uniform update or record reads its view.
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             for (const cb of ctx._beforeRender) {
                 cb(d);
             }
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             if (ctx._materialSwapQueue.length) {
                 void processMaterialSwaps(ctx);
             }
@@ -455,7 +463,9 @@ export function addDeferredSceneRenderables(
  * to the scene, dispatching on its type. Asset containers are unpacked and each contained
  * entity added recursively. Optional scene-hosted systems such as depth-hosted sprites
  * expose their own opt-in add functions so mesh-only scenes do not pay feature-specific
- * routing bytes here.
+ * routing bytes here. Adding a camera makes it the scene's active camera (`scene.camera`),
+ * replacing any previous one; an asset container's camera is only installed when the scene
+ * has none.
  * @param scene - The owning scene (pillar 4b: entities never reference the scene themselves).
  * @param entity - The entity (or asset container) to add.
  * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
@@ -539,6 +549,8 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
         ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
+    } else if ("fov" in entity) {
+        ctx.camera = entity as Camera;
     }
     _notifySceneChange(ctx, entity, "added");
     // Recurse into children of meshes, lights, cameras — set parent links

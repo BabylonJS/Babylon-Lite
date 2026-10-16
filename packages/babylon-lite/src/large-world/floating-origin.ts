@@ -12,9 +12,10 @@
  *  fields kept in sync by a per-frame `updateFloatingOriginOffset` call,
  *  which was net cost without value (now ~200 bytes lighter, no per-frame
  *  copy work). Invalidation of mesh UBOs (which bake the offset in) happens
- *  via the camera's worldMatrixVersion via `wrapRenderableForFO`. */
+ *  via the camera's identity and worldMatrixVersion via `wrapRenderableForFO`. */
 
 import type { Vec3 } from "../math/types.js";
+import type { Camera } from "../camera/camera.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 
@@ -50,15 +51,31 @@ export function getFloatingOriginOffset(scene: SceneContext): Vec3 {
  *  This module is dynamic-imported only when `useFloatingOrigin: true`, so
  *  non-LWR engines leave `engine._wrapRenderableForFO` undefined and
  *  renderables fall through to their bare update with zero wrapper overhead. */
-/** @internal Active-camera `worldMatrixVersion`, folded into the lights UBO
- *  version so a camera move alone forces a re-upload — the floating-origin
- *  offset is baked into every world-space light position, so the UBO is stale
- *  whenever the camera moves even if no light property changed. Returns 0 when
- *  no camera is set. Reachable only when FO is on (this module is
- *  dynamic-imported), so it stays out of non-LWR light bundles. */
+/** @internal Floating-origin revision of the active camera, folded into the
+ *  lights UBO version so a camera move alone forces a re-upload — the
+ *  floating-origin offset is baked into every world-space light position, so
+ *  the UBO is stale whenever the camera moves even if no light property
+ *  changed. Advances monotonically whenever the active camera's identity or
+ *  `worldMatrixVersion` changes: a replacement camera can report the same
+ *  version from a different position, and a monotonic key cannot cancel
+ *  against the summed light versions. Reachable only when FO is on (this
+ *  module is dynamic-imported), so it stays out of non-LWR light bundles. */
 export function lightFoVersion(scene: SceneContext): number {
-    return scene.camera ? scene.camera.worldMatrixVersion : 0;
+    const cam = scene.camera;
+    const version = cam ? cam.worldMatrixVersion : -1;
+    const keys = (_lightFoKeys ??= new WeakMap());
+    let key = keys.get(scene);
+    if (!key) {
+        keys.set(scene, (key = [cam, version, 0]));
+    } else if (key[0] !== cam || key[1] !== version) {
+        key[0] = cam;
+        key[1] = version;
+        key[2]++;
+    }
+    return key[2];
 }
+
+let _lightFoKeys: WeakMap<SceneContext, [Camera | null, number, number]> | null = null;
 
 /** @internal Subtract the active-camera floating-origin offset from the
  *  positional (point = type tag 0, spot = type tag 2) light entries already
@@ -107,11 +124,15 @@ export function applyLightFoOffset(data: Float32Array, scene: SceneContext): voi
 
 export function wrapRenderableForFO(inner: () => void, scene: SceneContext, invalidate: () => void): () => void {
     let _lastCameraVersion = -1;
+    let _lastCamera: Camera | null | undefined;
     return (): void => {
-        const cv = scene.camera ? scene.camera.worldMatrixVersion : -1;
-        if (cv !== _lastCameraVersion) {
+        const cam = scene.camera;
+        const cv = cam ? cam.worldMatrixVersion : -1;
+        // Identity too: a replacement camera can report the same version from a different position.
+        if (cv !== _lastCameraVersion || cam !== _lastCamera) {
             invalidate();
             _lastCameraVersion = cv;
+            _lastCamera = cam;
         }
         inner();
     };
