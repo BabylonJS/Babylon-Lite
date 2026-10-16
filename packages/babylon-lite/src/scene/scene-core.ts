@@ -517,35 +517,7 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
         // scene must be left untouched when it does.
         registerMeshScene(ctx, mesh);
         ctx.meshes.push(mesh);
-        const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
-        if (build) {
-            let group = ctx._groups.get(build);
-            if (!group) {
-                group = [] as SceneMeshGroup;
-                ctx._groups.set(build, group);
-                if (!ctx._built) {
-                    ctx._deferredBuilders.push(async () => {
-                        const result = await build(ctx, group!);
-                        ctx._renderables.push(...result.renderables);
-                        group!.o = result.renderables;
-                        if (result.updater) {
-                            ctx._uniformUpdaters.push(result.updater);
-                        }
-                        group!.r = result.rebuildSingle;
-                    });
-                }
-            }
-            group.push(mesh);
-            // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
-            // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-            // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
-            // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
-            // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
-            // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (ctx._built || group.r) {
-                enqueueMaterialSwap(ctx, mesh);
-            }
-        }
+        joinMaterialGroup(ctx, mesh);
         ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
@@ -560,6 +532,41 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
             addToScene(scene, child as SceneEntity);
         }
+    }
+}
+
+/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the
+ *  initial build, its deferred builder) on first use. */
+function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
+    const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
+    if (!build) {
+        return;
+    }
+    let group = ctx._groups.get(build);
+    if (!group) {
+        group = [] as SceneMeshGroup;
+        ctx._groups.set(build, group);
+        if (!ctx._built) {
+            ctx._deferredBuilders.push(async () => {
+                const result = await build(ctx, group!);
+                ctx._renderables.push(...result.renderables);
+                group!.o = result.renderables;
+                if (result.updater) {
+                    ctx._uniformUpdaters.push(result.updater);
+                }
+                group!.r = result.rebuildSingle;
+            });
+        }
+    }
+    group.push(mesh);
+    // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
+    // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
+    // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
+    // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
+    // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
+    // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
+    if (ctx._built || group.r) {
+        enqueueMaterialSwap(ctx, mesh);
     }
 }
 
@@ -625,13 +632,26 @@ export function disposeScene(scene: SceneContext): void {
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
-    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
-    // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
-    // are real runtime changes and must survive so a newly introduced material group can be built below.
+    // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
+    // material AFTER addToScene), is built by the deferred builders below with its FINAL material, so its queued
+    // swap is redundant; processing it would insert a SECOND renderable per mesh (double-draw). Group membership
+    // was fixed at addToScene time, though, so first move each such mesh into its current material's group: a
+    // mesh added with no material, or re-materialed into another family, would otherwise be built by the wrong
+    // builder or not at all. On re-registration the queued swaps are real runtime changes and must survive so a
+    // newly introduced material group can be built below.
     if (!ctx._built) {
-        ctx._materialSwapQueue.length = 0;
+        for (const mesh of ctx._materialSwapQueue.splice(0)) {
+            const build = mesh.material?._buildGroup;
+            for (const [builder, group] of ctx._groups) {
+                const i = builder === build ? -1 : group.indexOf(mesh);
+                if (i >= 0) {
+                    group.splice(i, 1);
+                }
+            }
+            if (ctx.meshes.includes(mesh) && !(build && ctx._groups.get(build)?.includes(mesh))) {
+                joinMaterialGroup(ctx, mesh);
+            }
+        }
     }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);

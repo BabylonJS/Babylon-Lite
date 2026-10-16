@@ -223,6 +223,8 @@ Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to cre
 3. At `buildScene(scene)` time (called by `registerScene()` before the frame graph is built), each deferred builder runs once with the full batch of meshes for that group.
 4. Builders return `MeshGroupBuildResult`; `renderables` are pushed onto `_renderables`, and an optional `updater` is pushed onto `_uniformUpdaters` only when present.
 
+`mesh.material` may be assigned or replaced after `addToScene` and before the initial build. The material setter queues the mesh, and the initial `buildScene` moves each queued mesh into the group of its current `material._buildGroup` (creating that group's deferred builder when needed) before running the builders. A mesh added with no material therefore builds once its material is set, and a mesh re-materialed into another family is built only by the new family's builder. The queued swaps are then dropped, since the boot builders already use each mesh's final material.
+
 `buildScene(scene)` is async — deferred builders may return `Promise<void>` for GPU resource creation.
 
 This decouples scene setup from GPU resource creation, ensures all assets are loaded before pipelines are built, and keeps scene.ts entirely material-agnostic.
@@ -379,6 +381,7 @@ back-reference, so ownership cannot be recovered by mesh identity. Node material
 | `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed                                                     |
 | `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it                                                     |
 | `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds                                                           |
+| `pre-boot material assignment regroups`      | Assign/replace/clear `mesh.material` after `addToScene` → initial build uses only the final material's builder              |
 | Test                                         | Description                                                                                                                 |
 | -------------------------------------------  | -------------------------------------------------------------------------                                                   |
 | `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                                                                                 |
