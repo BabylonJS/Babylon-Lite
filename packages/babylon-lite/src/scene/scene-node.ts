@@ -45,7 +45,12 @@ export interface SceneNode {
     /** @internal Raw glTF matrices ignore TRS writes until `setParent` seeds an editable baseline. */
     _localMatrixLocked?: boolean;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
-     *  Cascade is materialized at write-time by `setSubtreeVisible`. */
+     *  Cascade is materialized at write-time by `setMeshVisible`.
+     *
+     *  Direct writes are a plain field assignment and do NOT invalidate cached opaque render
+     *  bundles, so they are only safe before the node's first rendered frame. To hide or show a
+     *  node at runtime, call `setMeshVisible(node, visible)`; a direct write after rendering can
+     *  leave a hidden mesh drawing or a revealed mesh missing until the bundles are re-recorded. */
     visible?: boolean;
     /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
     metadata?: LiteMetadata;
