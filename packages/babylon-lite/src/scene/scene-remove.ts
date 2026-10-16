@@ -2,6 +2,7 @@ import { _hasSceneChangeHook, _notifySceneChange, _runSceneChange } from "./scen
 import type { addToScene, SceneContext, SceneEntity } from "./scene-core.js";
 import { unregisterMeshScene, hasMeshRetention } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { Renderable } from "../render/renderable.js";
 import type { LightBase } from "../light/types.js";
 import type { Camera } from "../camera/camera.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
@@ -166,6 +167,21 @@ function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void
     });
 }
 
+/** Drop what an in-flight group build produced for a mesh that was removed or detached while the build
+ *  awaited: removal found nothing to tear down then, and the builder installed it afterwards. */
+function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable[]): void {
+    const teardown = scene._meshDisposables.get(mesh);
+    if (teardown) {
+        scene._meshDisposables.delete(mesh);
+        retireMeshTeardown(scene, teardown);
+    }
+    for (let i = renderables.length; i--;) {
+        if (renderables[i]!.mesh === mesh) {
+            renderables.splice(i, 1);
+        }
+    }
+}
+
 /** Run GPU teardown only after the next frame submission has drained.
  *
  *  `removeFromScene` is legal from inside `onBeforeRender` — i.e. in the MIDDLE of a frame, before
@@ -307,6 +323,7 @@ function removeChildren(scene: SceneContext, node: SceneNode): void {
 /** @internal Remove mesh membership and release unretained GPU ownership.
  *  Internal helper — `removeFromScene` dispatches here for the Mesh case. */
 export function removeMeshFromScene(scene: SceneContext, mesh: Mesh, preserveParent = false): void {
+    scene._evictBuiltMesh ??= evictBuiltMesh;
     scene._meshMaterialChange?.(mesh);
     // Notify tasks that retain their own per-mesh bindings before this mesh's
     // UBOs and shared geometry are destroyed below. The hook is optional so core

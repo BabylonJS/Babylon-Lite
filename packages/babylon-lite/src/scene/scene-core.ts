@@ -11,7 +11,7 @@ import type { AnimationGroup } from "../animation/animation-group.js";
 import { tickAnimation } from "../animation/animation-tick.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
-import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
+import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder, MeshGroupBuildResult } from "../render/renderable.js";
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
@@ -246,6 +246,9 @@ export interface SceneContext extends RenderingContext {
     /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
      *  Undefined material detaches a mesh's main-material usage. */
     _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
+    /** @internal Installed by mesh removal: drops the output a group build produced for a mesh that left
+     *  the scene while that build awaited. */
+    _evictBuiltMesh?: (scene: SceneContext, mesh: Mesh, renderables: Renderable[]) => void;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -443,6 +446,27 @@ export interface DeferredSceneRenderables {
     dispose?: () => void;
 }
 
+/**
+ * @internal Build a material group from a membership snapshot. Removal and retained detach splice the live
+ * group while a builder awaits its lazy imports, so builders get a stable list. Output for snapshot meshes
+ * that left meanwhile is evicted; meshes that joined meanwhile are queued for the material-swap drain.
+ */
+export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult> {
+    const members = group.slice();
+    const result = await build(scene, members);
+    for (const mesh of members) {
+        if (!group.includes(mesh)) {
+            scene._evictBuiltMesh?.(scene, mesh, result.renderables);
+        }
+    }
+    for (const mesh of group) {
+        if (!members.includes(mesh)) {
+            enqueueMaterialSwap(scene, mesh);
+        }
+    }
+    return result;
+}
+
 /** @internal Register optional scene-hosted render work without teaching `addToScene` about the feature. */
 export function addDeferredSceneRenderables(
     scene: SceneContext,
@@ -532,7 +556,7 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
                                 ctx._groups.delete(build);
                                 return;
                             }
-                            const result = await build(ctx, group!);
+                            const result = await _buildMeshGroup(ctx, build, group!);
                             ctx._renderables.push(...result.renderables);
                             group!.o = result.renderables;
                             if (result.updater) {

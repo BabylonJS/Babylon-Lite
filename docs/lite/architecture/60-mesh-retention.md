@@ -77,6 +77,12 @@ Detaching the last member of a material group before the scene is first register
 leaves that group's boot-time builder queued; the builder cancels an empty group
 instead of building it, so a later reinsertion creates a fresh group that the boot
 drain or the runtime build path materializes.
+Boot and device-lost recovery group builds receive a snapshot of the group's
+members, so a detach or removal while the builder awaits a lazy import cannot
+change the list it iterates. After the build, output for a snapshot member that
+left meanwhile is evicted before it is committed (its renderables are dropped and
+its per-mesh teardown retires after GPU submission), and a mesh that joined
+meanwhile is queued for the material-swap drain, so it is built exactly once.
 
 Reinsertion builds ordinary fresh scene-local renderables and appends normal
 admission order. Explicit render order still takes precedence over stable depth

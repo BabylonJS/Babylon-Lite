@@ -2,6 +2,7 @@ import { BU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _buildMeshGroup } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { uploadMeshToGPU } from "../mesh/mesh.js";
 import { setMeshDrawRangeSource } from "../mesh/mesh-draw-range-state.js";
@@ -110,7 +111,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
             scene._runtimeBuilds?.dropBase(build);
             continue;
         }
-        const result = await runRecoveryStep("rebuilding material groups", () => build(scene, meshes));
+        const result = await runRecoveryStep("rebuilding material groups", () => _buildMeshGroup(scene, build, meshes));
         if (scene._z) {
             return;
         }
