@@ -40,6 +40,10 @@ function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Materia
     const rebuildViews = options?.rebuildViews !== false;
     let changed = false;
     const pending: Promise<void>[] = [];
+    const extra = scene._materialRebuild?.((material) => matchesMaterial(material, source, materialOrView, rebuildViews));
+    if (extra) {
+        pending.push(extra);
+    }
 
     for (const mesh of scene.meshes) {
         if (matchesMaterial(mesh.material, source, materialOrView, rebuildViews)) {

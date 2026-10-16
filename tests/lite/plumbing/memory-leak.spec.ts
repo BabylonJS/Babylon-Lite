@@ -16,6 +16,9 @@
  *   3. Reads JSHeapUsedSize after each cycle
  *   4. Asserts heap growth from cycle 2→N is within tolerance
  *      (cycle 1→2 is excluded as JIT/cache warmup)
+ *
+ * Each cycle has its own deadline; the overall budget includes all cycles plus
+ * setup/cleanup. Failure still releases the browser context before a retry.
  */
 import { test, expect, acquireReferencePage } from "../parity/parity-fixtures";
 import type { CDPSession } from "@playwright/test";
@@ -23,6 +26,7 @@ import type { CDPSession } from "@playwright/test";
 // ── Configuration ──────────────────────────────────────────────────
 
 const CYCLES = 5;
+const CYCLE_TIMEOUT_MS = 60_000;
 const SETTLE_MS = 200;
 // Max allowed heap growth per cycle after warmup (bytes)
 const MAX_GROWTH_PER_CYCLE = 128 * 1024; // 128 KB
@@ -73,40 +77,44 @@ async function getJSHeapUsed(cdp: CDPSession): Promise<number> {
 // ── Tests ──────────────────────────────────────────────────────────
 
 test.describe("Memory Leak Detection", () => {
+    test.describe.configure({ timeout: (CYCLES + 1) * CYCLE_TIMEOUT_MS });
     for (const scene of SCENES) {
         test(`${scene.label} — no leak across ${CYCLES} cycles`, async ({ browser }) => {
             const { page, release } = await acquireReferencePage(browser, { width: 800, height: 600 });
-            const cdp = await page.context().newCDPSession(page);
-            await cdp.send("Performance.enable");
-            await cdp.send("HeapProfiler.enable");
-
-            await page.goto(`/lite/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
-
-            // Wait for harness to be ready
-            await page.waitForFunction(() => (window as any).__leakTest?.ready === true, null, { timeout: 15_000 });
-
             const heapSizes: number[] = [];
+            try {
+                const cdp = await page.context().newCDPSession(page);
+                await cdp.send("Performance.enable");
+                await cdp.send("HeapProfiler.enable");
 
-            for (let i = 0; i < CYCLES; i++) {
-                // Run one create → render → dispose cycle
-                const error = await page.evaluate(async () => {
-                    await (window as any).__leakTest.runCycle();
-                    return (window as any).__leakTest.error;
-                });
+                await page.goto(`/lite/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
+                await page.waitForFunction(() => (window as any).__leakTest?.ready === true, null, { timeout: 15_000 });
 
-                if (error) {
-                    throw new Error(`Cycle ${i + 1} failed: ${error}`);
+                for (let i = 0; i < CYCLES; i++) {
+                    await test.step(
+                        `Cycle ${i + 1}: create, render, dispose and collect`,
+                        async () => {
+                            const error = await page.evaluate(async () => {
+                                await (window as any).__leakTest.runCycle();
+                                return (window as any).__leakTest.error;
+                            });
+
+                            if (error) {
+                                throw new Error(`Cycle ${i + 1} failed: ${error}`);
+                            }
+
+                            await forceGC(cdp);
+                            heapSizes.push(await getJSHeapUsed(cdp));
+                        },
+                        { timeout: CYCLE_TIMEOUT_MS }
+                    );
                 }
 
-                // Force GC and measure heap
-                await forceGC(cdp);
-                const heap = await getJSHeapUsed(cdp);
-                heapSizes.push(heap);
+                await cdp.send("HeapProfiler.disable");
+                await cdp.send("Performance.disable");
+            } finally {
+                await release();
             }
-
-            await cdp.send("HeapProfiler.disable");
-            await cdp.send("Performance.disable");
-            await release();
 
             // Report
             const heapKB = heapSizes.map((h) => (h / 1024).toFixed(0));

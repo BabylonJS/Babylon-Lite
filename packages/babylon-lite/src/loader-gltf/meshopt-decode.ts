@@ -17,8 +17,10 @@ export function setMeshoptBaseUrl(url: string): void {
     meshoptBaseUrl = url.endsWith("/") ? url : url + "/";
 }
 
-/** Minimal surface of the global `MeshoptDecoder` object we rely on. */
-interface MeshoptDecoderModule {
+/** Minimal surface of the global `MeshoptDecoder` object we rely on. Exported so
+ *  the MeshLoD page decoder can share this exact decoder without duplicating the
+ *  script-URL / singleton loading logic below. */
+export interface MeshoptDecoderModule {
     ready: Promise<void>;
     decodeGltfBuffer(target: Uint8Array, count: number, size: number, source: Uint8Array, mode: string, filter?: string): void;
 }

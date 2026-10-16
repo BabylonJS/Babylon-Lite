@@ -16,6 +16,7 @@ export default tseslint.config(
             "dist/**",
             "**/dist/**",
             "packages/babylon-lite/build/**",
+            "mesh-lod-tool/build/**",
             "pages-dist/**",
             "node_modules/**",
             "**/node_modules/**",
