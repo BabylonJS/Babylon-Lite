@@ -56,14 +56,6 @@ function queueMesh(this: RenderTask, mesh: Mesh, opts?: { material?: Material })
 
 /** Remove a mesh and its task-owned resources from this task. Idempotent. */
 export function removeMeshFromTask(task: RenderTask, mesh: object): void {
-    const pending = task._pendingMeshes;
-    if (pending) {
-        for (let index = pending.length - 1; index >= 0; index--) {
-            if (pending[index]!.mesh === mesh) {
-                pending.splice(index, 1);
-            }
-        }
-    }
     _removeMeshFromRenderTask(task, mesh);
 }
 

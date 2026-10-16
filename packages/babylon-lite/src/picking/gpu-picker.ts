@@ -46,6 +46,9 @@ export interface GpuPicker {
     _contributors: Map<PickSource, PickContributor> | null;
     /** @internal Tail of the serialized pick queue for this picker — see pickAsync(). */
     _pending: Promise<void> | null;
+    /** @internal Explicit `disposePicker` calls so far. A queued request captures it, so one made before a
+     *  disposal is cancelled rather than recreating targets; device replacement does not count. */
+    _disposals: number;
 }
 
 interface PickTargets1x1 {
@@ -77,6 +80,7 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
         _sceneBG: null,
         _contributors: null,
         _pending: null,
+        _disposals: 0,
     };
 }
 
@@ -85,7 +89,7 @@ function ensurePickerDevice(engine: EngineContext, picker: GpuPicker): void {
         return;
     }
     if (picker._device) {
-        disposePicker(picker);
+        releasePickerResources(picker);
     }
     picker._device = engine._device;
 }
@@ -151,7 +155,8 @@ export interface PickOptions {
      *  structure behind/around them. When omitted, every mesh is pickable (previous behaviour). A supplied
      *  mesh filter also excludes non-mesh contributors: the predicate cannot admit them, and letting them draw
      *  would make a mesh-targeted pass neither isolated nor deterministic. Applied once while building the
-     *  candidate list used by both id assignment and resolution, so ids stay consistent. */
+     *  candidate list used by both id assignment and resolution, so ids stay consistent.
+     *  Preparation repeats if membership changes while lazy dependencies are loading. */
     filter?: (mesh: Mesh) => boolean;
     /** Exclude selected visible identities while picking the surface behind them (for direct manipulation).
      *  A mesh-only identity omits the regular mesh or all of its thin instances. A thin-instance index or
@@ -244,7 +249,7 @@ function createPickDiscardBindGroup(engine: EngineContext, layout: GPUBindGroupL
 /** Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo.
  *  Does the actual GPU render + readback for one pick — call `pickAsync` (below) instead; it serializes
  *  concurrent calls on the same picker so their shared 1×1 staging buffers never race. */
-async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
+async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo | null> {
     const scene = picker._scene;
     const pickFilter = options?.filter ?? null;
     const pickDiscard = options?.discard ?? null;
@@ -257,6 +262,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     ensurePickerDevice(engine, picker);
     const device = engine._device;
     const detailed = picker._detailedPicking;
+    const membershipVersion = scene._renderableVersion;
 
     // Resolve every lazy dependency before opening a command encoder. Awaiting while a render pass is
     // still unsubmitted lets the main frame resize and retire mesh buffers that the pick pass already
@@ -268,6 +274,12 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             let contributor = picker._contributors?.get(source);
             if (!contributor) {
                 const pipeline = await source.load();
+                if (picker._device !== device) {
+                    return createEmptyPickingInfo();
+                }
+                if (engine._device !== device || scene._renderableVersion !== membershipVersion) {
+                    return null;
+                }
                 if (!scene._pickSources.includes(source)) {
                     continue;
                 }
@@ -305,8 +317,12 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     const debug = debugLabel ? await import("./picking-debug.js") : null;
     const advancedDraw = needsAdvancedPipeline ? await (await import("./picking-advanced-draw.js")).prepareAdvancedDraw(engine, candidates) : null;
     const pipelineApi = advancedDraw ? null : detailed ? await import("./picking-detailed-pipeline.js") : await import("./picking-pipeline.js");
-    if (engine._device !== device) {
-        return pickAsyncImpl(picker, x, y, options);
+    if (picker._device !== device) {
+        return createEmptyPickingInfo();
+    }
+    // Prepared closures retain candidate identity/order and their lazy dependency choices.
+    if (engine._device !== device || scene._renderableVersion !== membershipVersion) {
+        return null;
     }
 
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
@@ -535,7 +551,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             }
         }
     }
-    if (!hitMesh && !hitContributor) {
+    if ((hitMesh && (hitMesh._disposed || !scene.meshes.includes(hitMesh))) || (!hitMesh && !hitContributor)) {
         if (debug) {
             debug.tracePick(debugLabel!, debugInput!, pickRay, pickId, depth, false, true);
         }
@@ -610,6 +626,19 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     return info;
 }
 
+async function pickStableMembership(picker: GpuPicker, generation: number, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
+    for (let attempt = 0; attempt < 16; attempt++) {
+        if (picker._disposals !== generation) {
+            return createEmptyPickingInfo();
+        }
+        const result = await pickAsyncImpl(picker, x, y, options);
+        if (result) {
+            return result;
+        }
+    }
+    throw new Error("GPU picking membership or device changed during 16 consecutive preparations. Retry after the scene stabilizes.");
+}
+
 /**
  * Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo.
  *
@@ -620,12 +649,18 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
  * cursor-following hover preview that GPU-picks on every pointermove, racing a pick fired by a click that
  * lands before the hover's pick has unmapped. Queue concurrent calls per-picker instead of rejecting: each
  * pick's full map/unmap cycle completes before the next one starts.
+ *
+ * Membership/device changes during lazy preparation restart the entire preparation before encoding.
+ * After 16 unstable attempts this request rejects explicitly; later queued requests still run.
+ * Disposing the picker during preparation cancels that request with an empty result, and so does
+ * disposing it while a request is still queued; requests made after the disposal run normally.
  */
 export function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const prior = picker._pending ?? Promise.resolve();
+    const generation = picker._disposals;
     const run = prior.then(
-        () => pickAsyncImpl(picker, x, y, options),
-        () => pickAsyncImpl(picker, x, y, options) // a prior pick's rejection must not wedge the queue for this caller
+        () => pickStableMembership(picker, generation, x, y, options),
+        () => pickStableMembership(picker, generation, x, y, options) // a prior pick's rejection must not wedge the queue for this caller
     );
     // Swallow so a rejection here doesn't propagate into the NEXT caller's chain (each caller gets its own
     // `run` promise and observes the real rejection via the returned promise, not via `_pending`).
@@ -636,8 +671,13 @@ export function pickAsync(picker: GpuPicker, x: number, y: number, options?: Pic
     return run;
 }
 
-/** Dispose GPU resources owned by this picker. */
+/** Dispose GPU resources owned by this picker. Picks still queued or preparing resolve empty. */
 export function disposePicker(picker: GpuPicker): void {
+    picker._disposals++;
+    releasePickerResources(picker);
+}
+
+function releasePickerResources(picker: GpuPicker): void {
     if (picker._rt) {
         for (const resource of [
             picker._rt.colorTex,

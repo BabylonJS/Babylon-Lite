@@ -45,15 +45,19 @@ export interface DeviceLostRecoveryState {
     _textures: Set<WeakRef<Texture2D>>;
     /** @internal `_textures` size that triggers compaction of entries whose texture was collected. */
     _texturesPruneAt: number;
-    /** @internal Textures rebuilt during the recovery currently running and the ownership each
-     *  outgoing `GPUTexture` held, carried onto the replacements once every handler has run. Lives
+    /** @internal Textures being rebuilt during the recovery currently running, the ownership each
+     *  outgoing `GPUTexture` held and that outgoing handle, carried onto the replacements once every
+     *  handler has run. Queued before the rebuild's first await so ownership changes made while a
+     *  fetch is in flight are tracked too. Lives
      *  here rather than in the rebuild module so it is scoped to one engine: a lost GPU process
      *  loses every device on the page at once, so two engines recover concurrently and their async
      *  rebuilds would otherwise share one queue — whichever finished its handlers first would top
      *  up the other engine's textures before its handlers had re-acquired them, which is exactly
      *  the inflation deferring the settle exists to prevent. One engine cannot overlap itself
-     *  because `_recovering` holds arming off until its run settles. Absent between recoveries. */
-    _pendingOwnership?: [Texture2D, number][];
+     *  because `_recovering` holds arming off until its run settles. Absent between recoveries. The
+     *  flag records whether the texture was ever owned (at the loss or by a claim since), so a
+     *  never-owned texture keeps its replacement while one released back to zero retires it. */
+    _pendingOwnership?: [Texture2D, number, GPUTexture, boolean][];
     /** @internal Set while a recovery run on this engine is in flight, so `arm` defers. Recovery
      *  installs the replacement device on the engine long before its handlers finish, leaving
      *  `_armedDevice` naming the lost one, so a registration enabled in that window would otherwise

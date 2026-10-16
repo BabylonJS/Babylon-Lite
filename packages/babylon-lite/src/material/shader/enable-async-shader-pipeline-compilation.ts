@@ -86,7 +86,7 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
     if (scene._frameGraph._tasks.some((task) => task.name === "shadow")) {
         for (const light of scene.lights) {
             const generator = light.shadowGenerator;
-            const casterMeshes = generator ? _getShadowTaskCasterMeshes(generator) : undefined;
+            const casterMeshes = generator ? _getShadowTaskCasterMeshes(generator, scene) : undefined;
             if (generator?._ensureShadowTaskState && casterMeshes && !generator._preloadPending) {
                 tasks.push(generator._ensureShadowTaskState(engine, scene, casterMeshes));
             }

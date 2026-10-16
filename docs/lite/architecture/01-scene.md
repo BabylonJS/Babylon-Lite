@@ -8,6 +8,102 @@ The Scene module defines `SceneContext` — the central, flat data container for
 
 ## Public API Surface
 
+### Retained mesh membership
+
+Module specifications: [mesh retention](60-mesh-retention.md),
+[shared geometry recovery](61-shared-mesh-recovery.md), and
+[per-engine admission](62-scene-admission.md).
+
+`retainMeshResources(engine, mesh): MeshResourceLease` creates an explicit,
+independent ownership lease. `releaseMeshResources(lease): void` releases it
+idempotently. A lease is pure state with a readonly `mesh` identity, not an
+object with attached methods. Retain before removing the mesh from its last
+scene. Retaining a disposed mesh or retaining it against a different owning
+engine throws.
+
+`detachMeshFromScene(scene, mesh): void` requires a live lease for the scene's
+engine. It removes exactly that mesh, not its children, from scene membership,
+material groups, runtime builds, swap queues, renderables, merged draw packets,
+and frame-graph task bindings. It invalidates bundles only when membership
+actually changed. Unlike `removeFromScene`, it preserves the parent link,
+children, visibility, metadata, and transform state. Lights, cameras,
+transform-only roots, and asset containers are not accepted; unsupported
+objects fail before any mutation. For a subtree, explicitly retain and detach
+each mesh; hierarchy and animation ownership remain the caller's responsibility.
+Eviction removes all legacy duplicate mesh slots, including material-group and
+standalone-renderable references, rather than leaving an inactive mesh pickable.
+
+Synchronous eviction includes merged packets whose disposers have temporarily
+moved from `_meshDisposables` into an in-flight runtime build's pending ownership.
+Removal marks and unlinks those CPU packets immediately, before another frame or
+last-lease retirement. It does not schedule their GPU teardown again: the async
+build retains its pending disposer list and releases it exactly once when its
+invalidated preparation settles.
+
+Reinsert with `addToScene(scene, mesh)`. While the engine has live leases,
+admission of an already attached mesh or light is idempotent, including
+children visited during reinsertion. Duplicate parent admission still traverses
+its descendants and admits any missing children in normal depth-first order.
+Engines with no live leases keep legacy
+admission behavior. Reinsertion appends to the mesh list and material group and builds
+fresh scene-local renderables, giving equal-order/depth ties the same admission
+order as a newly added mesh. Mesh identity and owned geometry buffers survive
+any number of detach/reinsert cycles; scene-local uniforms, bindings, and
+renderable wrappers may be rebuilt. This is not a zero-allocation or FPS claim.
+Existing explicit `renderOrder` overrides remain authoritative.
+
+Leases pin the mesh's existing resource claim, not an extra geometry owner.
+Unique-geometry updates stay legal while detached; cloned/shared-geometry
+update restrictions stay unchanged. Scene owners and independent leases are
+counted separately. Last scene removal still permanently disposes an unleased
+mesh, preserving the default `removeFromScene` contract. Last lease release
+queues fenced mesh disposal only when no scene owns it; the queued callback
+checks ownership again before releasing resources. Leases survive scene
+disposal. Engine disposal revokes its leases and releases their resources.
+Explicit `disposeMeshGpu` remains a force-disposal API and overrides retention.
+
+Material 2D textures enumerated by `getMaterialTextures`, enabled material plugins,
+and alternate shadow-caster materials are acquired when retention starts and whenever
+the material is reassigned or the mesh is detached or reinserted. Previously captured textures
+remain leased until the final lease release, so a material swap cannot retire
+resources still referenced by submitted draws. Material edits follow the usual
+rebuild rules on reinsertion. Independently owned storage buffers, render
+targets, cube textures, external textures, and animation controllers keep their own public
+ownership contracts; a mesh lease does not take ownership of those producers.
+
+The engine tracks retained mesh identities even while they belong to no scene.
+Opt-in scene device-lost recovery rebuilds this set before registered scenes,
+using retained CPU data and shared-geometry recovery as for attached meshes.
+Recovery needs to be enabled before creating recoverable resources, exactly
+as for attached meshes. Device replacement necessarily allocates replacement
+GPU buffers; ordinary detach/reinsert does not.
+
+```typescript
+const lease = retainMeshResources(engine, card);
+try {
+    addToScene(scene, card);
+    detachMeshFromScene(scene, card); // neither rendered nor scene-pickable
+    // Update transforms/material/uniquely owned geometry while inactive.
+    addToScene(scene, card); // normal fresh admission
+    detachMeshFromScene(scene, card);
+} finally {
+    releaseMeshResources(lease);
+}
+await waitForGpuResourceRetirements(engine); // explicit final teardown boundary
+```
+
+CPU scene picking enumerates the current mesh list. Explicit mesh-array and
+snapshot ray picking remain caller-owned snapshots and are not retroactively
+edited. GPU picking enumerates current membership when a queued request starts
+and rejects a readback for a mesh no longer in the scene when readback resolves.
+An already submitted frame cannot be undone; synchronous eviction affects
+subsequent recordings, while GPU teardown waits behind the submission fence.
+
+Regression coverage: legacy removal, repeated retirement fences, independent
+leases, multiple scenes, cloned geometry, parenting/visibility, material swaps,
+engine teardown, detached recovery, and native WebGPU render/picking/order
+and geometry-allocation reuse.
+
 ```typescript
 /** Image processing configuration. */
 export interface ImageProcessingConfig {

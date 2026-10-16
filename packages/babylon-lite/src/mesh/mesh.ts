@@ -95,7 +95,8 @@ export interface MeshGPU {
      *  it. Undefined → tight mesh (empty suffix, byte-identical pipeline key). */
     readonly _vbKey?: string;
     /** @internal Extra-owner count when geometry is shared across glTF nodes or mesh clones.
-     *  See resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+     *  See resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner;
+     *  zero means the final geometry claim was released and its buffers destroyed. */
     _refCount?: number;
     /** @internal Rebuild one shared geometry per replacement device. Installed only
      *  by the glTF sharing path, so ordinary meshes pay no recovery-state cost. */

@@ -1,9 +1,11 @@
-import type { Mesh, MeshGPU } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { retain } from "../resource/ref-count.js";
 import type { GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { GltfMeshData } from "./load-gltf.js";
+import { installSharedMeshRecovery as _installSharedRecovery } from "../mesh/shared-mesh-recovery.js";
+export { installSharedMeshRecovery as _installSharedRecovery } from "../mesh/shared-mesh-recovery.js";
 
 /** Upload nodes that reference the same glTF primitive with one shared geometry.
  *  This module is imported only for assets that actually repeat a mesh index. */
@@ -45,32 +47,6 @@ export async function share(
         await Promise.all(meshes.flatMap((mesh, i) => meshFeatures.map((feature) => feature.applyMesh!(meshDatas[i]!, mesh, ctx))));
     }
     return meshes;
-}
-
-/** @internal Preserve glTF geometry sharing across replacement GPU devices. */
-export function _installSharedRecovery(gpu: MeshGPU): void {
-    if (gpu._recoverShared) {
-        return;
-    }
-    let device: GPUDevice | undefined;
-    let rebuilt: MeshGPU | undefined;
-    let owners: WeakSet<Mesh> | undefined;
-    const recover: NonNullable<MeshGPU["_recoverShared"]> = (engine, mesh, upload) => {
-        if (device === engine._device) {
-            if (!owners!.has(mesh)) {
-                owners!.add(mesh);
-                retain(rebuilt!);
-            }
-            return rebuilt!;
-        }
-        const next = upload(engine, mesh);
-        device = engine._device;
-        rebuilt = next;
-        owners = new WeakSet([mesh]);
-        next._recoverShared = recover;
-        return next;
-    };
-    gpu._recoverShared = recover;
 }
 
 function shareCpuGeometry(meshDatas: GltfMeshData[], activeNodes: Set<number>): void {

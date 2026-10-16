@@ -205,6 +205,8 @@ function retainMeshGeometry(
     preserveDrawRange = false
 ): void {
     const gpu = mesh._gpu;
+    // In-place edits make this allocation diverge from siblings still awaiting shared recovery.
+    gpu._recoverShared = undefined;
     if (gpu._drawRangeSource && !preserveDrawRange) {
         gpu._drawRangeSource = undefined;
         gpu._firstIndex = gpu._baseVertex = undefined;
@@ -351,6 +353,7 @@ function writeVertexAttributeRange(
     if (destinationByteOffset + byteLength > buffer.size) {
         throw new Error("mesh attribute update requires a valid destination vertex range");
     }
+    mesh._gpu._recoverShared = undefined;
     engine._device.queue.writeBuffer(buffer, destinationByteOffset, values.buffer as ArrayBuffer, values.byteOffset + sourceVertexOffset * bytesPerVertex, byteLength);
     _markWorldMatrixDirty(mesh);
 }
@@ -621,6 +624,8 @@ export function resizeSharedMeshGeometry(
 }
 
 function retireMeshGeometryBuffers(engine: EngineContext, gpu: Mesh["_gpu"]): void {
+    // Final claim released: mark the allocation dead now so a same-device recovery cache cannot adopt it.
+    gpu._refCount = 0;
     retireGpuResources(engine, () => {
         gpu.positionBuffer.destroy();
         gpu.normalBuffer.destroy();

@@ -139,11 +139,18 @@ function installChanges(): void {
 
 function currentMembers(scene: SceneContext): WeakSet<object> {
     const members = new WeakSet<object>();
+    // Mesh membership is physical (`scene.meshes`), not hierarchy reachability: a retained mesh detached
+    // from the scene keeps its parent link, so an attached parent still lists it among its children.
+    const meshes = new Set<object>(scene.meshes);
+    const visited = new Set<object>();
     const visit = (entity: object): void => {
-        if (members.has(entity)) {
+        if (visited.has(entity)) {
             return;
         }
-        members.add(entity);
+        visited.add(entity);
+        if (!("_gpu" in entity && "material" in entity) || meshes.has(entity)) {
+            members.add(entity);
+        }
         if ("children" in entity && Array.isArray(entity.children)) {
             for (const child of entity.children) {
                 if (typeof child === "object" && child !== null && (!("parent" in child) || child.parent === entity)) {

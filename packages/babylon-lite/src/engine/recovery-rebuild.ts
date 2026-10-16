@@ -2,6 +2,7 @@ import { BU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { _buildMeshGroup } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { uploadMeshToGPU } from "../mesh/mesh.js";
 import { setMeshDrawRangeSource } from "../mesh/mesh-draw-range-state.js";
@@ -53,6 +54,8 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
     // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
     engine._pbrFallbackTex = undefined;
+    const seen = new WeakSet<object>();
+    await rebuildMeshResources(engine, engine._retainedMeshes ?? [], seen);
     for (const surface of engine.surfaces) {
         for (const ctx of surface._renderingContexts) {
             if (ctx._kind !== "scene") {
@@ -62,12 +65,12 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
             if (!isRenderingContextRegistered(surface, scene) || scene._z) {
                 continue;
             }
-            await rebuildSceneGpu(engine, scene);
+            await rebuildSceneGpu(engine, scene, seen);
         }
     }
 }
 
-async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
+async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen: WeakSet<object>): Promise<void> {
     // The environment and shadow rebuild logic each live in their own module, reached only
     // through these lazy imports so recovery-enabled scenes that use neither carry neither.
     if (scene._envTextures) {
@@ -76,7 +79,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     await runRecoveryStep("rebuilding material textures", () => rebuildSceneTextures(engine, scene));
-    await runRecoveryStep("rebuilding meshes", () => _rebuildMeshes(engine, scene));
+    await runRecoveryStep("rebuilding meshes", () => rebuildMeshResources(engine, scene.meshes, seen));
     if (scene._z) {
         return;
     }
@@ -101,7 +104,14 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     for (const [build, meshes] of scene._groups) {
-        const result = await runRecoveryStep("rebuilding material groups", () => build(scene, meshes));
+        // Emptied by removal or detach. Builders such as PBR read `meshes[0]`, and the group's pre-loss
+        // output and base target the lost device, so drop it: reinsertion builds a fresh group.
+        if (!meshes.length) {
+            scene._groups.delete(build);
+            scene._runtimeBuilds?.dropBase(build);
+            continue;
+        }
+        const result = await runRecoveryStep("rebuilding material groups", () => _buildMeshGroup(scene, build, meshes));
         if (scene._z) {
             return;
         }
@@ -170,22 +180,51 @@ function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void 
 
 /** @internal Rebuild retained mesh resources after a device loss. */
 export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext): Promise<void> {
+    await rebuildMeshResources(engine, scene.meshes, new WeakSet());
+}
+
+/** `seen` holds both visited meshes and the allocations this recovery rebuilt on the replacement
+ *  device. A mesh cloned from an already recovered mesh while recovery awaits already holds a claim
+ *  on that live replacement, so uploading it again would orphan that claim and duplicate the
+ *  geometry; it keeps the replacement instead. */
+async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh>, seen: WeakSet<object>): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
 
-    for (const mesh of scene.meshes) {
-        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
-            const recoverShared = mesh._gpu._recoverShared;
-            mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
+    for (const mesh of meshes) {
+        if (seen.has(mesh) || mesh._disposed) {
+            continue;
         }
-        if (mesh.skeleton) {
+        seen.add(mesh);
+        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices && !seen.has(mesh._gpu)) {
+            if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared && !hasMeshLocalDrawRange(mesh._gpu)) {
+                const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
+                if (mesh._disposed) {
+                    continue;
+                }
+                installSharedMeshRecovery(mesh._gpu);
+            }
+            const recoverShared = hasMeshLocalDrawRange(mesh._gpu) ? undefined : mesh._gpu._recoverShared;
+            mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
+            seen.add(mesh._gpu);
+        }
+        // A detached source and its attached clone share these objects: rebuild each once per recovery, or the
+        // second rebuild overwrites the first replacement's handles and leaves them outside owner teardown.
+        if (mesh.skeleton && !seen.has(mesh.skeleton)) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
+            if (mesh._disposed) {
+                continue;
+            }
             const old = mesh.skeleton;
             const rebuilt = skeletonFactory(engine, old.joints, old.weights, old.boneCount, old.boneMatrices, old.joints1, old.weights1);
             Object.assign(old as MutableSkeleton, rebuilt);
+            seen.add(old);
         }
-        if (mesh.morphTargets) {
+        if (mesh.morphTargets && !seen.has(mesh.morphTargets)) {
             morphFactory ??= (await import("../morph/create-morph-targets.js")).createMorphTargets;
+            if (mesh._disposed) {
+                continue;
+            }
             const old = mesh.morphTargets;
             const rebuilt = morphFactory(
                 engine,
@@ -194,8 +233,14 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
                 Array.from(old.weights)
             );
             Object.assign(old as MutableMorphTargets, rebuilt);
+            seen.add(old);
         }
     }
+}
+
+function hasMeshLocalDrawRange(gpu: MeshGPU): boolean {
+    // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
+    return "_drawRangeSource" in gpu && gpu._drawRangeSource !== undefined;
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
