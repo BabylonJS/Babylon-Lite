@@ -74,6 +74,10 @@ function filterShadowCasters(scene: SceneContext, casters: readonly Mesh[]): rea
         }
     }
     if (kept === casters.length) {
+        // Drop any earlier filtered result for this array: it would otherwise keep its former survivors reachable.
+        if (cached) {
+            cache!.delete(casters);
+        }
         return casters;
     }
     if (reusable && kept === cached!.length) {

@@ -70,7 +70,13 @@ retired while detached stays excluded while a caller's array still holds it.
 Exclusions are weak per mesh and scene, so they never keep a released mesh alive.
 The per-frame lookup is non-allocating while unchanged: it scans the caller's array
 against the cached filtered array and rebuilds only when the effective set changes.
+When the caller's array no longer needs filtering, its cached filtered result is
+dropped so former survivors are not kept reachable by the cache.
 Actual mutations invalidate scene renderable versions. A repeated detach does not.
+Detaching the last member of a material group before the scene is first registered
+leaves that group's boot-time builder queued; the builder cancels an empty group
+instead of building it, so a later reinsertion creates a fresh group that the boot
+drain or the runtime build path materializes.
 
 Reinsertion builds ordinary fresh scene-local renderables and appends normal
 admission order. Explicit render order still takes precedence over stable depth
@@ -105,7 +111,9 @@ disposal generation at enqueue, which automatic device replacement does not bump
    and leaves geometry alive across retirement fences and zero attached scenes.
    It publishes one `removed` event for that mesh to `onSceneChange` subscribers;
    reinsertion through `addToScene` publishes `added`, and admission-rejected
-   descendants that never left publish nothing.
+   descendants that never left publish nothing. A subscription made while a mesh is
+   detached seeds mesh membership from `scene.meshes`, not hierarchy reachability,
+   so the detached mesh's later reinsertion still publishes `added`.
 5. Release removes one token. Other leases or scene owners preserve resources.
 6. Final release removes the retention and engine mesh entry, clears the admission
    hook when that engine has no remaining leased meshes, and schedules fenced

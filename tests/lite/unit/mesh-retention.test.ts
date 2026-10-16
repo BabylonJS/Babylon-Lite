@@ -4,7 +4,9 @@ import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-
 import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 import { initMeshTransform, uploadMeshToGPU, type Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { retainMeshResources, releaseMeshResources, detachMeshFromScene } from "../../../packages/babylon-lite/src/mesh/mesh-retention.js";
-import { addToScene, disposeScene, type SceneChangeEvent, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import { addToScene, buildScene, disposeScene, type SceneChangeEvent, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap.js";
+import { createSceneAccessibility, disposeSceneAccessibility, getAccessibilityNode } from "../../../packages/babylon-lite/src/accessibility/scene-accessibility.js";
 import { onSceneChange } from "../../../packages/babylon-lite/src/scene/scene-change.js";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove.js";
 import { createTransformNode, cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
@@ -392,6 +394,64 @@ describe("retained mesh scene membership", () => {
         releaseMeshResources(lease);
     });
 
+    it("seeds late scene-change subscriptions from physical membership so a detached child's reinsertion publishes", async () => {
+        const { engine, scene, mesh: parent } = fixture();
+        const child = freshMesh(engine, "child");
+        child.parent = parent;
+        parent.children.push(child);
+        addToScene(scene, parent);
+        const lease = retainMeshResources(engine, child);
+        detachMeshFromScene(scene, child);
+        expect(child.parent).toBe(parent);
+
+        const events: SceneChangeEvent[] = [];
+        const unsubscribe = onSceneChange(scene, (event) => events.push(event));
+        const accessibility = createSceneAccessibility(scene);
+        expect(getAccessibilityNode(accessibility, parent)).toBeDefined();
+        expect(getAccessibilityNode(accessibility, child)).toBeUndefined();
+
+        addToScene(scene, child);
+        expect(events).toEqual([{ type: "added", entity: child }]);
+        await Promise.resolve();
+        expect(getAccessibilityNode(accessibility, child)).toBeDefined();
+
+        disposeSceneAccessibility(accessibility);
+        unsubscribe();
+        releaseMeshResources(lease);
+    });
+
+    it("cancels a group emptied by detach before registration and builds the reinserted mesh at runtime", async () => {
+        const { engine, scene, mesh } = fixture();
+        const builder: MeshGroupBuilder = vi.fn(async (_scene: SceneContext, meshes: Mesh[]) => {
+            // Mirrors real group builders, which read the first member's material.
+            void meshes[0]!.material;
+            return {
+                renderables: meshes.map((member) => ({ order: 1, mesh: member }) as never),
+                rebuildSingle: (_target: SceneContext, member: Mesh) => ({ order: 1, mesh: member }) as never,
+            };
+        });
+        builder._materialFamily = "pbr";
+        Object.defineProperty(mesh.material, "_buildGroup", { value: builder });
+        addToScene(scene, mesh);
+        const lease = retainMeshResources(engine, mesh);
+        detachMeshFromScene(scene, mesh);
+
+        await buildScene(scene);
+        expect(builder).not.toHaveBeenCalled();
+        expect(scene._groups.has(builder)).toBe(false);
+        expect(scene._renderables).toEqual([]);
+
+        addToScene(scene, mesh);
+        await processMaterialSwaps(scene);
+        expect(builder).toHaveBeenCalledOnce();
+        expect([...scene._groups.get(builder)!]).toEqual([mesh]);
+        expect(scene._renderables.map((draw) => draw.mesh)).toEqual([mesh]);
+
+        disposeScene(scene);
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+    });
+
     it("rejects cross-engine leases and reinsertion without partial scene mutation", () => {
         const { engine, scene, mesh } = fixture();
         const other = fixture();
@@ -523,6 +583,39 @@ describe("retained mesh scene membership", () => {
 
         await collectGarbage();
         expect(retired.map((ref) => ref.deref())).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("drops a stale filtered caster result once its caller array no longer needs filtering", async () => {
+        const { engine, scene, mesh: resident } = fixture();
+        addToScene(scene, resident);
+        const casters: Mesh[] = [];
+        const sg = stub<ShadowGenerator>({});
+        setShadowTaskCasterMeshes(sg, casters);
+        await Promise.resolve();
+        const detached = freshMesh(engine, "detached");
+        addToScene(scene, detached);
+        const detachedLease = retainMeshResources(engine, detached);
+
+        const warmAndRetireSurvivor = async (): Promise<WeakRef<Mesh>> => {
+            const survivor = freshMesh(engine, "survivor");
+            addToScene(scene, survivor);
+            casters.push(detached, survivor);
+            detachMeshFromScene(scene, detached);
+            expect(_getShadowTaskCasterMeshes(sg, scene)).toEqual([survivor]);
+            casters.length = 0;
+            expect(_getShadowTaskCasterMeshes(sg, scene)).toBe(casters);
+            const lease = retainMeshResources(engine, survivor);
+            detachMeshFromScene(scene, survivor);
+            releaseMeshResources(lease);
+            await waitForGpuResourceRetirements(engine);
+            expect(survivor._disposed).toBe(true);
+            return new WeakRef(survivor);
+        };
+        const survivor = await warmAndRetireSurvivor();
+
+        await collectGarbage();
+        expect(survivor.deref()).toBeUndefined();
+        releaseMeshResources(detachedLease);
     });
 
     it("reuses filtered shadow casters across unchanged frames without rebuilding them", async () => {

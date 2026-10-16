@@ -526,6 +526,12 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
                     ctx._groups.set(build, group);
                     if (!ctx._built) {
                         ctx._deferredBuilders.push(async () => {
+                            // Every member left before boot (removal or retained detach). Cancel the group so a
+                            // later reinsertion creates a fresh one, built by the drain or the runtime path.
+                            if (!group!.length) {
+                                ctx._groups.delete(build);
+                                return;
+                            }
                             const result = await build(ctx, group!);
                             ctx._renderables.push(...result.renderables);
                             group!.o = result.renderables;
