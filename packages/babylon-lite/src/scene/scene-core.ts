@@ -535,10 +535,10 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
     }
 }
 
-/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the
- *  initial build, its deferred builder) on first use. */
+/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the initial
+ *  build, its deferred builder) on first use. */
 function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
-    const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
+    const build = mesh.material?._buildGroup;
     if (!build) {
         return;
     }
@@ -548,6 +548,12 @@ function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
         ctx._groups.set(build, group);
         if (!ctx._built) {
             ctx._deferredBuilders.push(async () => {
+                // Every mesh left this group before boot (re-materialed into another family or removed). Builders
+                // require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
+                if (!group![0]) {
+                    ctx._groups.delete(build);
+                    return;
+                }
                 const result = await build(ctx, group!);
                 ctx._renderables.push(...result.renderables);
                 group!.o = result.renderables;
@@ -633,25 +639,15 @@ export function disposeScene(scene: SceneContext): void {
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
     // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
-    // material AFTER addToScene), is built by the deferred builders below with its FINAL material, so its queued
-    // swap is redundant; processing it would insert a SECOND renderable per mesh (double-draw). Group membership
-    // was fixed at addToScene time, though, so first move each such mesh into its current material's group: a
-    // mesh added with no material, or re-materialed into another family, would otherwise be built by the wrong
-    // builder or not at all. On re-registration the queued swaps are real runtime changes and must survive so a
-    // newly introduced material group can be built below.
-    if (!ctx._built) {
-        for (const mesh of ctx._materialSwapQueue.splice(0)) {
-            const build = mesh.material?._buildGroup;
-            for (const [builder, group] of ctx._groups) {
-                const i = builder === build ? -1 : group.indexOf(mesh);
-                if (i >= 0) {
-                    group.splice(i, 1);
-                }
-            }
-            if (ctx.meshes.includes(mesh) && !(build && ctx._groups.get(build)?.includes(mesh))) {
-                joinMaterialGroup(ctx, mesh);
-            }
-        }
+    // material AFTER addToScene), is built by the deferred builders below with its FINAL material. Its queued swap
+    // is redundant and would insert a SECOND renderable (double-draw), so it is dropped. Its group membership was
+    // fixed at addToScene time and may be stale (no group for a material assigned later, or the old family's
+    // group), so when any swap was queued the still-unbuilt groups are refilled from every mesh's current material,
+    // in add order. On re-registration the queued swaps are real runtime changes and must survive so a newly
+    // introduced material group can be built.
+    if (!ctx._built && ctx._materialSwapQueue.splice(0)[0]) {
+        ctx._groups.forEach((group) => (group.length = 0));
+        ctx.meshes.forEach((mesh) => joinMaterialGroup(ctx, mesh));
     }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);
