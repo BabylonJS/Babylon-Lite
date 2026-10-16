@@ -105,7 +105,7 @@ describe("retained hierarchy admission", () => {
         expect(nested.parent).toBe(node);
         expect(cameraChild.parent).toBe(camera);
         expect(lightChild.parent).toBe(light);
-        expect(f.scene.camera).toBeNull();
+        expect(f.scene.camera).toBe(camera);
         addToScene(f.scene, light);
         addToScene(f.scene, parent);
         expect(f.scene.meshes).toEqual([parent, existing, cameraChild, lightChild, fresh, nested]);

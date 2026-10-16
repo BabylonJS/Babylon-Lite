@@ -9,8 +9,9 @@
  * binding (`XRWebGLBinding` / `XRWebGLSubImage` in `@types/webxr`) so the code is
  * spec-faithful today and runs unchanged once a UA implements the binding.
  *
- * Unlike the ambient `@types/webxr` types (which the public `.d.ts` rollup treats
- * as a consumer-provided peer, like `@webgpu/types`), these have no package to
+ * Unlike the ambient `@types/webxr` types (which the public `.d.ts` rollup loads
+ * through a `/// <reference types="webxr" />` directive and a published types-only
+ * dependency), these have no package to
  * come from — so they are exported, self-contained interfaces that the rollup
  * inlines.
  */

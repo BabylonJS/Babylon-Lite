@@ -7,6 +7,8 @@ import { _registerAssetContainerSceneCleanup } from "../../../packages/babylon-l
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { ObservableVec3 } from "../../../packages/babylon-lite/src/math/observable-vec3";
 import { ObservableQuat } from "../../../packages/babylon-lite/src/math/observable-quat";
+import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
 import type { SceneContext, SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -79,6 +81,26 @@ describe("removeFromScene symmetry", () => {
         scene.camera = cam as never;
         removeFromScene(scene, other as never);
         expect(scene.camera).toBe(cam);
+    });
+
+    it("addToScene(camera) makes it the active camera, and removeFromScene undoes it", () => {
+        const scene = fakeScene();
+        const arc = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const child = { lightType: "point", children: [] };
+        arc.children.push(child as never);
+        addToScene(scene, arc);
+        expect(scene.camera).toBe(arc);
+        expect(scene.lights).toEqual([child]);
+        expect((child as { parent?: unknown }).parent).toBe(arc);
+
+        // An explicitly added camera replaces the current one.
+        const free = createFreeCamera({ x: 0, y: 0, z: -5 }, { x: 0, y: 0, z: 0 });
+        addToScene(scene, free);
+        expect(scene.camera).toBe(free);
+        expect(scene.meshes).toHaveLength(0);
+
+        removeFromScene(scene, free);
+        expect(scene.camera).toBeNull();
     });
 
     it("undoes addToScene(container): lights, camera, anim groups and beforeRender hook", () => {
