@@ -115,7 +115,7 @@ Object.assign(window, {
             });
         },
         hide(hidden: boolean): void {
-            centerBox.visible = !hidden;
+            setMeshVisible(centerBox, !hidden);
         },
         hideRuntimeParent(): void {
             setMeshVisible(runtimeParent, false);

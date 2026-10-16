@@ -27,6 +27,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { pickWithRay } from "../picking/ray-pick.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
+import type { _WritableVisibility } from "../scene/scene-node.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -235,7 +236,7 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     laser.material = laserMat as unknown as Mesh["material"];
     laser.pickable = false;
     laser.receiveShadows = false;
-    laser.visible = false;
+    (laser as _WritableVisibility).visible = false;
 
     // Selection ring (Babylon.js "gazeTracker" torus): a thin flat ring laid on the
     // surface it points at. Double-sided so it reads from either side.
@@ -249,7 +250,7 @@ function ensureUnit(pointer: XrPointer, source: DomXrInputSource): PointerUnit {
     cursor.material = cursorMat as unknown as Mesh["material"];
     cursor.pickable = false;
     cursor.receiveShadows = false;
-    cursor.visible = false;
+    (cursor as _WritableVisibility).visible = false;
 
     addToScene(pointer._scene, laser);
     addToScene(pointer._scene, cursor);
