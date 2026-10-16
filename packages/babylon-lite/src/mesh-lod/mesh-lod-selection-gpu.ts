@@ -1239,7 +1239,9 @@ function ensureMeshLoDBatchBuffers(
     const device = engine._device;
     // The persistent instance state already chose a fitting geometric capacity.
     const capacity = Math.max(state.device === device ? state.instanceCapacity : 0, instanceCapacity, 1);
-    const selectedCapacity = Math.max(assetBuffers.clusterCount * capacity, 1);
+    const storageLimit = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize);
+    // Reserve the header and bound complete pairs; only the actual selected cut must fit.
+    const selectedCapacity = Math.max(1, Math.min(assetBuffers.clusterCount * capacity, Math.floor((storageLimit - 4) / 8)));
     checkedStorageSize(engine, Math.max(capacity * assetBuffers.groupCount, 1) * 4, "mesh-lod-group-state");
     checkedStorageSize(engine, (selectedCapacity * 2 + 1) * 4, "mesh-lod-selected");
     checkedStorageSize(engine, drawVertexCapacity * 16, "mesh-lod-draw-vertices");

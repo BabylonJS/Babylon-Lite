@@ -375,6 +375,16 @@ cannot fit, the whole draw is suppressed rather than drawing a partial cut,
 and a device-limit error is surfaced after GPU readback. In GPU mode, the
 material packet keeps only a minimal placeholder for its unused CPU draw
 stream; GPU selection owns the actual draw buffer.
+The selected-pair append list is bounded independently of the instance and
+group-state buffers. With `L = min(maxStorageBufferBindingSize, maxBufferSize)`,
+its pair capacity is `max(1, min(clusterCount * instanceCapacity, floor((L - 4) / 8)))`:
+one four-byte header followed by eight-byte `(cluster, instance)` records.
+The final byte size still undergoes device-limit validation. Hidden instances,
+unused geometrically reserved slots, nonresident geometry, and mutually exclusive
+LODs may increase the potential pair count without making a fitting cut invalid.
+The bounded capacity is uploaded to the selection parameters. Only actual append
+overflow suppresses the whole expansion/draw and surfaces `MLOD_DEVICE_LIMIT`
+through the existing asynchronous readback; no prefix of an overflowing cut draws.
 CPU draw and instance storage are checked against the smaller of
 `maxStorageBufferBindingSize` and `maxBufferSize`, including initial allocation
 and GPU-to-CPU switches. Geometric growth is capped at the largest complete
@@ -663,7 +673,13 @@ effective budget. A forced out-of-capacity input verifies that rejection leaves
 the accepted value intact and reports an error; a subsequent valid input clears it.
 CPU storage regressions cover both device limits, bounded growth, initial
 allocation, and GPU-to-CPU switches, including rejected cuts without resource
-replacement. Injected XR projection regressions require both selectors to use
+replacement. GPU selected-pair regressions use the shipped 2,491-cluster statue
+with 4,097 registered instances (8,192 reserved slots), only one visible, and a
+128 MiB limit. Each storage limit is exercised independently. The potential
+163,250,180-byte list is capped to complete records within the limit, selection
+receives that exact capacity, and the real hierarchy's resident pinned cut fits.
+Both selected-list and draw-vertex overflow still surface the device-limit error.
+Injected XR projection regressions require both selectors to use
 the actual vertical scale, agree on refinement/page demand, and upload that
 same scale per eye. Hierarchy cloning tests preserve MeshLoD state, independent
 TRS/raw matrix storage, fresh IDs, and separate registration/drawing.

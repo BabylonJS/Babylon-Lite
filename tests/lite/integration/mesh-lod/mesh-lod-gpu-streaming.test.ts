@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BU } from "../../../../packages/babylon-lite/src/engine/gpu-flags.js";
 import { loadMeshLoD, createMeshLoDInstance, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { arenaUsedBytes, roundPageAllocation } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
@@ -30,6 +31,7 @@ import {
     PAGE_FLAG_RESIDENT,
     PAGE_STATE_WORDS,
     applyMeshLoDGpuReadback,
+    buildPageStateData,
     meshLoDPageDemandBitsOffset,
     meshLoDPageUseOffset,
     packClusters,
@@ -48,7 +50,7 @@ import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/mat
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import { createFillDecoder, createMockDevice, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import type { MockBuffer, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import type { MockBuffer, MockDevice, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -346,6 +348,68 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(expectedBytes).toBeLessThan(1024);
     });
 
+    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("caps selected-pair storage at %s for a sparse real-statue batch", async (limitingField) => {
+        const limitBytes = 128 * 1024 * 1024;
+        harness = await setup({ limitBytes, instanceCount: 4097, visibleCount: 1 });
+        const device = harness.engine._device as unknown as MockDevice;
+        device.limits.maxStorageBufferBindingSize = limitingField === "maxStorageBufferBindingSize" ? limitBytes : limitBytes * 2;
+        device.limits.maxBufferSize = limitingField === "maxBufferSize" ? limitBytes : limitBytes * 2;
+        harness.flush();
+        const state = harness.batchState();
+        const runtime = harness.runtime;
+        expect(runtime.clusters).toHaveLength(2491);
+        expect(state.instanceCapacity).toBe(8192);
+        expect((runtime.clusters.length * state.instanceCapacity * 2 + 1) * 4).toBe(163_250_180);
+        const expectedCapacity = Math.floor((limitBytes - 4) / 8);
+        expect(state.selectedCapacity).toBe(expectedCapacity);
+        expect(state.paramsU32[41]).toBe(expectedCapacity);
+        expect(state.selectedBuffer!.size).toBe((expectedCapacity * 2 + 1) * 4);
+        expect(state.selectedBuffer!.size).toBeLessThanOrEqual(limitBytes);
+        expect(state.selectedBuffer!.size + 8).toBeGreaterThan(limitBytes);
+        for (const buffer of device.buffers.filter((buffer) => (buffer.usage & BU.STORAGE) !== 0)) {
+            expect(buffer.size).toBeLessThanOrEqual(limitBytes);
+        }
+
+        const uploaded = (state.boundInstances as unknown as MockBuffer).data;
+        const instances = new Float32Array(uploaded.buffer, uploaded.byteOffset, uploaded.byteLength / 4);
+        const wordsPerInstance = Math.max(Math.ceil(runtime.groups.length / 32), 1);
+        const cut = runMeshLoDGpuSelection({
+            nodes: packHierarchyNodes(runtime.hierarchyNodes),
+            groups: packGroups(runtime.groups),
+            clusters: packClusters(runtime.clusters),
+            groupPageRefs: packGroupPageRefs(runtime.groupPageRefs),
+            pageState: buildPageStateData(runtime.gpu.pages, runtime.pageRecords, runtime.generation),
+            pageStoredBytes: runtime.pageRecords.map((record) => record.storedBytes),
+            instances,
+            instancesU32: new Uint32Array(uploaded.buffer, uploaded.byteOffset, uploaded.byteLength / 4),
+            priorState: new Uint32Array(wordsPerInstance * harness.instances.length),
+            instanceCount: harness.instances.length,
+            nodeCount: runtime.hierarchyNodes.length,
+            groupCount: runtime.groups.length,
+            clusterCount: runtime.clusters.length,
+            pageCount: runtime.pageRecords.length,
+            wordsPerInstance,
+            maxSelected: state.selectedCapacity,
+            params: {
+                cameraPos: [0, 0, -10],
+                verticalFov: 0.8,
+                near: 0.1,
+                targetWidth: 800,
+                targetHeight: 600,
+                frustumPlanes: [],
+                screenSpaceError: runtime.settings.screenSpaceError,
+                lodHysteresis: runtime.settings.lodHysteresis,
+                levelCount: runtime.header.levelCount,
+            },
+        });
+        expect(cut.overflow).toBe(false);
+        expect(cut.selected.length).toBeGreaterThan(0);
+        expect([...new Set(cut.selected.map((pair) => pair.instanceId))]).toEqual([0]);
+        expect(cut.selected.filter((pair) => !runtime.pageRecords[runtime.clusters[pair.clusterId]!.pageId]!.pinned)).toEqual([]);
+        expect(cut.renderedTriangleCount * 3).toBeGreaterThan(0);
+        expect(cut.renderedTriangleCount * 3).toBeLessThanOrEqual(state.drawVertexCapacity);
+    });
+
     it("feeds decoded demand into the streaming engine and refines resident pages", async () => {
         harness = await setup();
         harness.flush();
@@ -499,13 +563,13 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(cut.renderedTriangleCount * 3).toBeLessThan(state.drawVertexCapacity);
     });
 
-    it("surfaces a genuinely oversized selected cut instead of silently drawing a prefix", async () => {
+    it.each([1, 2])("surfaces selected-list/draw overflow flag %i instead of silently drawing a prefix", async (overflow) => {
         harness = await setup();
         harness.flush();
         const state = harness.batchState();
         const runtime = harness.runtime;
         const control = syntheticControl(state, 0, 0, { count: 0, visible: 1, triangles: 100, fallback: 0 });
-        control[CONTROL_OVERFLOW_WORD] = 2;
+        control[CONTROL_OVERFLOW_WORD] = overflow;
         applyMeshLoDGpuReadback(runtime, state, control, runtime.gpu.pages.length, runtime.generation);
         expect(() => harness.flush()).toThrowError(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
     });
