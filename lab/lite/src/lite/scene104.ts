@@ -39,6 +39,7 @@ import {
     setPhysicsBodyShape,
     startEngine,
     stopEngine,
+    setMeshVisible,
 } from "babylon-lite";
 import type { AssetContainer, FreeCamera, Mesh, PbrMaterialProps, PhysicsWorld, SceneNode } from "babylon-lite";
 
@@ -262,7 +263,7 @@ async function main(): Promise<void> {
             mesh.material = mat;
         } else {
             mesh.material = makeMaterial(CUBE_COLOR);
-            mesh.visible = false;
+            setMeshVisible(mesh, false);
         }
     }
     addToScene(scene, container);

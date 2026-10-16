@@ -11,6 +11,7 @@ import { createSceneContext, disposeScene, onSceneDispose } from "../../../packa
 import type { MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import type { _WritableVisibility } from "../../../packages/babylon-lite/src/scene/scene-node";
 
 interface FixtureOptions {
     readonly buffers?: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }>;
@@ -412,7 +413,7 @@ describe("node-material packet ownership", () => {
         for (const transparent of [false, true]) {
             const { binding, engine, meshes } = buildFixture(transparent);
             const pass = fakePass();
-            meshes[0]!.visible = false;
+            (meshes[0] as _WritableVisibility).visible = false;
             binding.draw(pass as never, engine);
             expect(pass.drawIndexed).not.toHaveBeenCalled();
             expect(pass.drawIndexedIndirect).not.toHaveBeenCalled();

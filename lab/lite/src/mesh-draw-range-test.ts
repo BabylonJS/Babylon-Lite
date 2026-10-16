@@ -22,6 +22,7 @@ import {
     updateMeshGeometry,
     updateMeshGeometryCapacity,
     wgsl,
+    setMeshVisible,
 } from "babylon-lite";
 import type { MeshDrawRange } from "babylon-lite";
 
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
         }
         addToScene(scene, mesh);
     }
-    points.visible = false;
+    setMeshVisible(points, false);
     await registerScene(scene);
     let active = card;
     const picker = createGpuPicker(scene);
@@ -81,14 +82,14 @@ async function main(): Promise<void> {
     window.meshDrawRangeTest = {
         select(kind, range): void {
             active = kind === "card" ? card : points;
-            card.visible = active === card;
-            points.visible = active === points;
+            setMeshVisible(card, active === card);
+            setMeshVisible(points, active === points);
             setMeshDrawRange(engine, active, range);
         },
         restoreCard(capacity): void {
             active = card;
-            card.visible = true;
-            points.visible = false;
+            setMeshVisible(card, true);
+            setMeshVisible(points, false);
             if (capacity) {
                 updateMeshGeometryCapacity(engine, card, cardPositions, cardNormals, cardIndices, cardUvs);
             } else {

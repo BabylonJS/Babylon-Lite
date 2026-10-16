@@ -3,7 +3,7 @@
 
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { LightBase } from "./types.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import { initSceneNodeTransform } from "../scene/scene-node.js";
 import type { ObservableVec3 } from "../math/observable-vec3.js";
 
@@ -65,7 +65,7 @@ export function copyLightBase(source: LightBase, clone: LightBase): void {
     clone.position.copyFrom(source.position);
     clone.rotationQuaternion.copyFrom(source.rotationQuaternion);
     clone.scaling.copyFrom(source.scaling);
-    clone.visible = source.visible;
+    (clone as _WritableVisibility).visible = source.visible;
     clone.metadata = source.metadata;
     clone.excludedMeshIds = source.excludedMeshIds;
     clone.includedOnlyMeshIds = source.includedOnlyMeshIds;

@@ -25,8 +25,7 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
  *  releasing a second claim it no longer holds would free buffers a surviving sibling still
  *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
  *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, call
- *  `setMeshVisible(mesh, false)` instead of removing it. A direct `mesh.visible` write does not
- *  invalidate cached render bundles, so it is only safe before the mesh's first rendered frame.
+ *  `setMeshVisible(mesh, false)` instead of removing it.
  *
  *  Standalone function for tree-shaking — only included when actually used. */
 export function removeFromScene(scene: SceneContext, entity: SceneEntity): void {

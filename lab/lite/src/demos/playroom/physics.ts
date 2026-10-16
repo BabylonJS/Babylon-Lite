@@ -9,6 +9,7 @@ import {
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     setThinInstanceCount,
+    setMeshVisible,
 } from "babylon-lite";
 import { applyPhysicsBodyInstanceImpulse, getPhysicsBodyInstanceLinearVelocityToRef } from "./physics-instances.js";
 import type { PhysicsBody, PhysicsCollisionInfo, PhysicsWorld } from "babylon-lite";
@@ -96,7 +97,7 @@ function maybePop(state: PlayroomState, record: BodyRecord, other: BodyRecord): 
     const generation = (record.resetGeneration ?? 0) + 1;
     record.resetGeneration = generation;
     state.canvas.dataset.lastExplosionCount = String(affected);
-    record.mesh.visible = false;
+    setMeshVisible(record.mesh, false);
     if ("thinInstances" in record.mesh && record.mesh.thinInstances) {
         setThinInstanceCount(record.mesh, 0);
     }

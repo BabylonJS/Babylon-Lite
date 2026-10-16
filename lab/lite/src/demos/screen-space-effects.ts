@@ -25,6 +25,7 @@ import {
     onBeforeRender,
     registerScene,
     startEngine,
+    setMeshVisible,
 } from "babylon-lite";
 import { demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
     const asset = await loadGltf(engine, demoAssetUrl("./screen-space-effects/cornellBox.glb", import.meta.url));
     const background = getContainerMeshes(asset).find((mesh) => mesh.name === "BackgroundPlane");
     if (background) {
-        background.visible = false;
+        setMeshVisible(background, false);
     }
     addToScene(scene, asset);
 

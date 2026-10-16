@@ -25,6 +25,7 @@ import {
     releasePhysicsShape,
     removeFromScene,
     removePhysicsBody,
+    setMeshVisible,
 } from "babylon-lite";
 import { capturePhysicsBodyInstanceResetState, resetPhysicsBodyInstances } from "./physics-instances.js";
 import type { EngineContext, Mesh, PhysicsShape, PhysicsWorld, SceneContext } from "babylon-lite";
@@ -290,7 +291,7 @@ export function resetPlayroomWorld(physics: PhysicsWorld, state: WorldState): vo
         const wasActive = record.active !== false;
         record.active = true;
         record.resetGeneration = (record.resetGeneration ?? 0) + 1;
-        record.mesh.visible = true;
+        setMeshVisible(record.mesh, true);
         if (!wasActive) {
             setPhysicsBodyMotionType(physics, record.body, PhysicsMotionType.DYNAMIC);
             setPhysicsBodyCollisionEventsEnabled(physics, record.body, true);

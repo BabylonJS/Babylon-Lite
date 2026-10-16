@@ -18,6 +18,7 @@ import {
     startEngine,
     stopEngine,
     createSceneContext,
+    setMeshVisible,
 } from "babylon-lite";
 
 const TOTAL_FRAMES = 480;
@@ -186,10 +187,10 @@ async function main(): Promise<void> {
         radiusSphere.position.set(p.x, p.y, p.z);
         const nearest = nearestBlock(blocks, p);
         if (nearest) {
-            highlight.visible = true;
+            setMeshVisible(highlight, true);
             highlight.position.set(nearest.x, nearest.y, nearest.z);
         } else {
-            highlight.visible = false;
+            setMeshVisible(highlight, false);
         }
         canvas.dataset.drawCalls = String(engine.drawCallCount);
         if (captureFrame !== null && !captureQueued && frame >= captureFrame) {
