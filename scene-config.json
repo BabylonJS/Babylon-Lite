@@ -2791,5 +2791,55 @@
         "description": "The hosted coastalCliff.glb asset exercises real PBR materials, unique per-mesh tags, known foliage exclusions, screen depth, linear albedo shadow attenuation, asset-scaled radii, and Medium-quality mesh blending over most of the frame.",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "pbr", "gltf", "albedo"],
         "skipPerf": true
+    },
+    {
+        "id": 316,
+        "slug": "scene316-rect-area-lights-pbr",
+        "name": "Scene 316 — Rect Area Lights PBR",
+        "maxMad": 0.05,
+        "maxRawKB": 90,
+        "description": "Upstream areaLightsPBRMaterial (#T7FXR8#12): three colored, rotated 6×6 rectangular emitters illuminate white glossy and red metallic PBR spheres and a shared ground using Babylon.js LTC tables.",
+        "tags": ["pbr", "procedural", "area-light", "ltc"],
+        "skipPerf": true
+    },
+    {
+        "id": 317,
+        "slug": "scene317-rect-area-lights-standard",
+        "name": "Scene 317 — Rect Area Lights Standard",
+        "maxMad": 0.05,
+        "maxRawKB": 75,
+        "description": "Upstream areaLightsStandardMaterial (#T7FXR8#67): the same three colored rectangular emitters shade blue and red Standard spheres and a white ground with independent LTC roughness.",
+        "tags": ["std", "procedural", "area-light", "ltc"],
+        "skipPerf": true
+    },
+    {
+        "id": 318,
+        "slug": "scene318-rect-area-lights-transforms",
+        "name": "Scene 318 — Rect Area Lights Transforms and Materials",
+        "maxMad": 0.05,
+        "maxRawKB": 100,
+        "description": "A rotated, nonuniformly scaled parent and light-local rotation exercise rectangular dimensions; white/tinted dielectrics and metals cover albedo weighting, alongside Standard receivers, point/hemi fill, and a back-facing magenta emitter.",
+        "tags": ["pbr", "std", "procedural", "area-light", "ltc", "transforms", "metallic", "albedo"],
+        "skipPerf": true
+    },
+    {
+        "id": 319,
+        "slug": "scene319-textured-rect-area-lights-standard",
+        "name": "Scene 319 — Textured Rect Area Lights Standard",
+        "maxMad": 0.05,
+        "maxRawKB": 95,
+        "description": "Upstream Textured - Area Lights - Standard Material (#T7FXR8#103): a scaled, rotated cyberpunk-image emitter illuminates two Standard spheres and a shared ground with independent LTC roughness.",
+        "tags": ["std", "procedural", "area-light", "ltc", "texture", "emission"],
+        "skipPerf": true
+    },
+    {
+        "id": 320,
+        "slug": "scene320-textured-rect-area-lights-pbr",
+        "name": "Scene 320 — Textured Rect Area Lights PBR",
+        "maxMad": 0.05,
+        "maxRawKB": 110,
+        "description": "Upstream Textured - Area Lights - PBR (#T7FXR8#102): three scaled, rotated emitters use distinct white, cyberpunk-image, and grey processed emission maps to illuminate a glossy grey dielectric ground.",
+        "tags": ["pbr", "std", "procedural", "area-light", "ltc", "texture", "emission"],
+        "skipPerf": true
     }
 ]

@@ -67,6 +67,11 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 
 ## Key Differences
 
+For rectangular emitters, see [Rectangular Area Lights](06-area-lights.md).
+Create the light with `createRectAreaLight(position, width, height)`, add it to
+the scene, and await `enableRectAreaLights(scene)` before `registerScene(scene)`.
+Dimensions are local-space full extents; emission points along local **-Z**.
+
 ### 1. No Scene in Constructors
 
 BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `addToScene()` them explicitly.

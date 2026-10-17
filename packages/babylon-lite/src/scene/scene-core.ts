@@ -28,6 +28,7 @@ import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
 import type { SceneChangeState } from "./scene-change.js";
+import type { SceneLightingExtension } from "../light/lighting-extension.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -157,6 +158,8 @@ export interface SceneContext extends RenderingContext {
     clearColor: GPUColorDict;
     camera: Camera | null;
     lights: LightBase[];
+    /** @internal Optional material-owned lighting contribution, installed by an explicit enabler. */
+    _lighting?: SceneLightingExtension;
     imageProcessing: ImageProcessingConfig;
 
     /** All meshes added to the scene (standard + PBR). */
@@ -637,6 +640,9 @@ export function disposeScene(scene: SceneContext): void {
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
+    for (const light of scene.lights) {
+        light._validateLighting?.(scene._lighting);
+    }
     const ctx = scene as SceneContext;
     // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
     // material AFTER addToScene), is built by the deferred builders below with its FINAL material. Its queued swap

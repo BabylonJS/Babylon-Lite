@@ -5,8 +5,8 @@ import type { Mesh } from "../mesh/mesh.js";
 
 const MSH_LIGHT_INDEX_WORD_OFFSET = 20;
 
-function affectsMesh(light: LightBase, mesh: Mesh): boolean {
-    const meshId = mesh.id;
+/** @internal Shared inclusion/exclusion predicate for a packed-light receiver ID. */
+export function lightAffectsMeshId(light: LightBase, meshId: string | undefined): boolean {
     const included = light.includedOnlyMeshIds;
     if (included?.size) {
         return !!meshId && included.has(meshId);
@@ -28,7 +28,7 @@ export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[]
         if (!light._writeLightUbo) {
             continue;
         }
-        if (affectsMesh(light, mesh)) {
+        if (lightAffectsMeshId(light, mesh.id)) {
             single = pi;
             if (u32) {
                 u32[MSH_LIGHT_INDEX_WORD_OFFSET + count] = pi;

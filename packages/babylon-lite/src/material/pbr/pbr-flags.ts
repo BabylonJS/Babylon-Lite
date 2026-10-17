@@ -20,6 +20,10 @@ export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
 export interface _PbrFragCtx {
+    /** @internal Scene-owned extension feature bits. */
+    readonly _sceneFeatures?: number;
+    /** @internal Effective per-mesh light path; zero means no light declarations are emitted. */
+    readonly _lightMode?: number;
     /** @internal */
     readonly _features: number;
     /** @internal */
@@ -46,6 +50,10 @@ export interface _PbrFragCtx {
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
+    /** @internal Opaque scene resource identity. */
+    _lightingId?: number;
+    /** @internal Binding-owned cleanup, including auxiliary material generations. */
+    _disposers?: (() => void)[];
     /** @internal */
     readonly _engine: EngineContext;
     /** @internal */
