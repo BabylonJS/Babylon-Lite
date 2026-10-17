@@ -895,6 +895,10 @@ export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat
 export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
 export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
 export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
+export {
+    getGaussianPointSplattingPackedShBytesPerSplat,
+    hasGaussianPointSplattingProjectedDepth,
+} from "./math/gaussian-point-splatting-compat-helpers.js";
 export { decomposeMat4 } from "./math/decompose-mat4.js";
 export type { DecomposedTransform } from "./math/decompose-mat4.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
