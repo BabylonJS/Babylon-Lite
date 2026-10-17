@@ -11,9 +11,13 @@
  * `light.direction.set(x, y, z)`, `light.position.y = 2`) reach the Lite light. Direction and
  * position are proxies over Lite's observable vectors; colours are proxies over the Lite colour
  * tuples, and every colour write bumps the light version so it reaches the lights UBO.
+ *
+ * `excludedMeshes` / `includedOnlyMeshes` are the same kind of live arrays. Lite filters per-mesh
+ * lighting by mesh id (`LightBase.excludedMeshIds` / `includedOnlyMeshIds`), so the wrappers hand
+ * the meshes an id and keep those sets in step with the arrays.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, removeFromScene } from "babylon-lite";
+import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, rebuildSceneRenderables, removeFromScene } from "babylon-lite";
 import type {
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
@@ -22,6 +26,7 @@ import type {
     LightBase,
 } from "babylon-lite";
 
+import type { AbstractMesh } from "../meshes/meshes.js";
 import { liteBackedColor3 } from "../math/color.js";
 import type { Color3 } from "../math/color.js";
 import { liteBackedVector3 } from "../math/vector.js";
@@ -140,6 +145,106 @@ export abstract class Light extends Node {
         }
     }
 
+    private _excludedMeshes: AbstractMesh[] = this._hookMeshList([]);
+    private _includedOnlyMeshes: AbstractMesh[] = this._hookMeshList([]);
+    private _meshListSyncScheduled = false;
+
+    /**
+     * Meshes this light does not light. Babylon.js hands out the light's own array, and
+     * `push` / `splice` on it are observed (those are the two methods Babylon.js hooks), so both
+     * `light.excludedMeshes = [...]` and `light.excludedMeshes.push(mesh)` reach the Lite light.
+     */
+    public get excludedMeshes(): AbstractMesh[] {
+        return this._excludedMeshes;
+    }
+    public set excludedMeshes(value: AbstractMesh[]) {
+        this._excludedMeshes = this._hookMeshList(value);
+        this._scheduleMeshListSync();
+    }
+
+    /** Meshes this light lights exclusively. Live in the same way as {@link excludedMeshes}. */
+    public get includedOnlyMeshes(): AbstractMesh[] {
+        return this._includedOnlyMeshes;
+    }
+    public set includedOnlyMeshes(value: AbstractMesh[]) {
+        this._includedOnlyMeshes = this._hookMeshList(value);
+        this._scheduleMeshListSync();
+    }
+
+    /**
+     * @internal Observe the two array methods Babylon.js hooks (`Lights/light.ts`
+     * `_hookArrayForExcluded`). In-place writes through any other method — `pop`, `shift`, an index
+     * assignment — do not publish in Babylon.js either, so matching the hook set is parity.
+     */
+    private _hookMeshList(array: AbstractMesh[]): AbstractMesh[] {
+        const push = array.push.bind(array);
+        const splice = array.splice.bind(array);
+        // Non-enumerable, like the prototype methods they shadow: an own enumerable "push" would
+        // surface in `for...in` over the list and in deep-equality checks against a plain array.
+        defineHook(array, "push", (...items: AbstractMesh[]): number => {
+            const length = push(...items);
+            this._scheduleMeshListSync();
+            return length;
+        });
+        defineHook(array, "splice", (...args: SpliceArgs): AbstractMesh[] => {
+            const removed = splice(...(args as Parameters<typeof splice>));
+            this._scheduleMeshListSync();
+            return removed;
+        });
+        return array;
+    }
+
+    /**
+     * @internal Coalesce the sync to the end of the tick: a list built up one `push` at a time,
+     * as a loader callback or a room-by-room walk does, would otherwise rebuild the scene's
+     * renderables once per mesh.
+     */
+    private _scheduleMeshListSync(): void {
+        if (this._meshListSyncScheduled) {
+            return;
+        }
+        this._meshListSyncScheduled = true;
+        queueMicrotask(() => {
+            this._meshListSyncScheduled = false;
+            this._syncMeshLists();
+        });
+    }
+
+    /**
+     * @internal Publish both lists as Lite id sets and rebake the per-mesh light selection.
+     *
+     * Babylon.js applies `includedOnlyMeshes` first and lets `excludedMeshes` subtract from it
+     * (`Light.canAffectMesh`), while Lite's `affectsMesh` stops at a non-empty included set, so the
+     * difference is taken here rather than publishing both sets. Empty lists publish `undefined` to
+     * keep the "no lists" fast path in `affectsMesh` allocation-free.
+     */
+    private _syncMeshLists(): void {
+        const excluded = meshIdSet(this._excludedMeshes);
+        const includedOnly = meshIdSet(this._includedOnlyMeshes);
+        if (includedOnly && excluded) {
+            for (const id of excluded) {
+                includedOnly.delete(id);
+            }
+            if (includedOnly.size === 0) {
+                includedOnly.add(NO_MESH_ID);
+            }
+        }
+        this._lite.includedOnlyMeshIds = includedOnly;
+        this._lite.excludedMeshIds = includedOnly ? undefined : excluded;
+
+        // A light held by a clustered container is out of the per-mesh light path entirely
+        // (the container calls `removeFromScene`), so nothing would read the sets back.
+        // Babylon.js skips its resync for the same reason.
+        const scene = this._scene;
+        if (!scene?._hasStarted || this._clusteredContainer) {
+            return;
+        }
+        // The selection is baked into each renderable at build time (the shader's light-count
+        // permutation and the mesh UBO's light indices) and the per-frame updater only revisits it
+        // when the light COUNT changes. A list edit after start therefore needs the rebuild.
+        requestSceneRebuild(scene._lite);
+    }
+
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
     public set shadowEnabled(enabled: boolean) {
         if (!enabled) {
@@ -188,6 +293,82 @@ function ensureLightVersionBump(lite: LightBase): () => void {
         configurable: true,
     });
     return bump;
+}
+
+/** @internal The arguments `Array.prototype.splice` accepts, including the no-argument call. */
+type SpliceArgs = [] | [start: number] | [start: number, deleteCount?: number, ...items: AbstractMesh[]];
+
+/**
+ * @internal Stands in for "no mesh at all" in a published inclusion set. A NUL character cannot
+ * appear in a minted id or in a node id any loader produces, so it matches nothing.
+ */
+const NO_MESH_ID = "\u0000lightFilter:none";
+
+/** @internal Every filter id this module has minted, so an id inherited by a clone is recognisable. */
+const mintedFilterIds = new Set<string>();
+
+/** @internal Install a mesh-list method override that behaves like the prototype method it shadows. */
+function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unknown): void {
+    Object.defineProperty(array, method, { value, enumerable: false, configurable: true, writable: true });
+}
+
+/**
+ * @internal The id set for one mesh list, or `undefined` when the list is empty.
+ *
+ * Lite filters by `mesh.id` and treats an id-less mesh as lit by every light, so a mesh only needs
+ * an id once it joins a list.
+ */
+function meshIdSet(meshes: readonly AbstractMesh[]): Set<string> | undefined {
+    if (meshes.length === 0) {
+        return undefined;
+    }
+    const ids = new Set<string>();
+    for (const mesh of meshes) {
+        ids.add(filterId(mesh));
+    }
+    return ids;
+}
+
+/**
+ * @internal The id this mesh is filtered by, minting one when it needs it.
+ */
+function filterId(mesh: AbstractMesh): string {
+    const lite = mesh._lite;
+    const current = lite.id;
+    if (current !== undefined && !mintedFilterIds.has(current)) {
+        return current;
+    }
+    const minted = `#${mesh.uniqueId}`;
+    if (current !== minted) {
+        lite.id = minted;
+        mintedFilterIds.add(minted);
+    }
+    return minted;
+}
+
+/** @internal Lite scenes whose renderables a published list change has invalidated this tick. */
+const pendingSceneRebuilds = new Set<Parameters<typeof rebuildSceneRenderables>[0]>();
+let sceneRebuildScheduled = false;
+
+/**
+ * @internal Request one rebuild per scene per tick.
+ */
+function requestSceneRebuild(liteScene: Parameters<typeof rebuildSceneRenderables>[0]): void {
+    pendingSceneRebuilds.add(liteScene);
+    if (sceneRebuildScheduled) {
+        return;
+    }
+    sceneRebuildScheduled = true;
+    queueMicrotask(() => {
+        sceneRebuildScheduled = false;
+        const scenes = [...pendingSceneRebuilds];
+        pendingSceneRebuilds.clear();
+        for (const scene of scenes) {
+            void rebuildSceneRenderables(scene).catch((error: unknown) => {
+                console.error(error);
+            });
+        }
+    });
 }
 
 export class HemisphericLight extends Light {
