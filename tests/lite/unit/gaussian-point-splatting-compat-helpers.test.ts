@@ -8,14 +8,15 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 describe("Gaussian Point Splatting compat helpers", () => {
     it("detects projection terms that make depth depend on view-space x or y", () => {
-        const projection = new Float32Array(16) as unknown as Mat4;
+        const projection = new Float32Array(16);
+        const hasProjectedDepth = () => hasGaussianPointSplattingProjectedDepth(projection as unknown as Mat4);
 
-        expect(hasGaussianPointSplattingProjectedDepth(projection)).toBe(false);
+        expect(hasProjectedDepth()).toBe(false);
         projection[2] = 1;
-        expect(hasGaussianPointSplattingProjectedDepth(projection)).toBe(true);
+        expect(hasProjectedDepth()).toBe(true);
         projection[2] = 0;
         projection[7] = 1;
-        expect(hasGaussianPointSplattingProjectedDepth(projection)).toBe(true);
+        expect(hasProjectedDepth()).toBe(true);
     });
 
     it.each([

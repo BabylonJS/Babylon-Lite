@@ -487,14 +487,7 @@ export class GaussianPointSplattingRenderer {
         return unsupported("GaussianPointSplattingRenderer.isReady", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
     }
 
-    public updateSplats(
-        _means: Float32Array,
-        _cov3d: Uint32Array,
-        _colorOpacity: Uint32Array,
-        _sh: Uint32Array | null,
-        _shDegree: number,
-        _count: number
-    ): void {
+    public updateSplats(_means: Float32Array, _cov3d: Uint32Array, _colorOpacity: Uint32Array, _sh: Uint32Array | null, _shDegree: number, _count: number): void {
         unsupported("GaussianPointSplattingRenderer.updateSplats", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
     }
 
@@ -620,9 +613,10 @@ export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
 
 export class ShaderMaterial {
     public constructor() {
+        const constructorName = new.target.name || "ShaderMaterial";
         unsupported(
-            new.target.name || "ShaderMaterial",
-            new.target === GaussianPointSplattingBlitMaterial || new.target === GaussianPointSplattingDepthBlitMaterial
+            constructorName,
+            constructorName === "GaussianPointSplattingBlitMaterial" || constructorName === "GaussianPointSplattingDepthBlitMaterial"
                 ? GAUSSIAN_POINT_SPLATTING_UNSUPPORTED
                 : "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem."
         );
