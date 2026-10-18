@@ -1,13 +1,46 @@
 import type { GLEngineContext } from "./context.js";
 
-/** Texture sampling / wrap options. All have GL-spec defaults. Mipmaps are NOT
- *  a create option — generate the chain explicitly via {@link generateTextureMipMaps}. */
+/** High-level sampling presets, mirroring Babylon's `Texture.*_SAMPLINGMODE`
+ *  numeric constants. Each resolves to GL min/mag filters; the min filter only
+ *  samples the mip chain when mipmaps are generated (as in Babylon's
+ *  `_getSamplingParameters`). */
+export const GLSamplingMode = {
+    /** Nearest mag; nearest min (`NEAREST_MIPMAP_LINEAR` with mipmaps).
+     *  (`Texture.NEAREST_SAMPLINGMODE`) */
+    NEAREST: 1,
+    /** Linear mag; linear min (`LINEAR_MIPMAP_NEAREST` with mipmaps).
+     *  (`Texture.BILINEAR_SAMPLINGMODE`) */
+    BILINEAR: 2,
+    /** Linear mag; linear min (`LINEAR_MIPMAP_LINEAR` with mipmaps). Enables
+     *  mipmap generation by default. (`Texture.TRILINEAR_SAMPLINGMODE`) */
+    TRILINEAR: 3,
+} as const;
+
+/** One of the {@link GLSamplingMode} preset values (`1`, `2` or `3`). */
+export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
+
+/** Creation options shared by EVERY texture factory (`createRawTexture`,
+ *  `createFloatTexture`, `loadTexture2D`, `createDynamicTexture`,
+ *  `createHtmlElementTexture`, `createTextureFromHandle`). All have GL-spec
+ *  defaults. Sampling resolves in this order: explicit `minFilter`/`magFilter`,
+ *  then `samplingMode`, then `gl.LINEAR`. */
 export interface GLTextureOptions {
-    /** Default: false (matches Babylon's default raw-texture behaviour). */
+    /** Flip rows vertically on upload. Default: false (matches Babylon's
+     *  default raw-texture behaviour). For dynamic textures this is the default
+     *  for every `updateDynamicTexture` call that omits `invertY`. */
     invertY?: boolean;
-    /** Default: gl.LINEAR. */
+    /** High-level sampling preset (Babylon's `samplingMode`). Derives
+     *  `minFilter`/`magFilter` (and `generateMipMaps` for `TRILINEAR`). Explicit
+     *  `minFilter` / `magFilter` / `generateMipMaps` still take precedence. */
+    samplingMode?: GLSamplingMode;
+    /** Build a full mip chain from level 0 after EVERY upload (creation, update
+     *  and `webglcontextrestored` replay). Default: `true` only when
+     *  `samplingMode` is `TRILINEAR`, otherwise `false`. The format must be
+     *  filterable (e.g. float textures need the matching linear-filtering cap). */
+    generateMipMaps?: boolean;
+    /** Default: derived from `samplingMode`, else gl.LINEAR. */
     minFilter?: GLenum;
-    /** Default: gl.LINEAR. */
+    /** Default: derived from `samplingMode`, else gl.LINEAR. */
     magFilter?: GLenum;
     /** Default: gl.CLAMP_TO_EDGE. May be `gl.REPEAT` / `gl.MIRRORED_REPEAT`
      *  (NPOT-safe in WebGL2). */
@@ -17,8 +50,9 @@ export interface GLTextureOptions {
     /** `gl.pixelStorei(UNPACK_ALIGNMENT)` for the upload (1/2/4/8). Default 4.
      *  Use 1 for tightly-packed non-RGBA rows. */
     unpackAlignment?: number;
-    /** Premultiply alpha at upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`). Default
-     *  false. */
+    /** Premultiply alpha at upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`, or
+     *  decode-time for `loadTexture2D`). Default false. For dynamic textures this
+     *  is the default for every `updateDynamicTexture` call that omits it. */
     premultiplyAlpha?: boolean;
     /** Explicit sized internalFormat for `texImage2D`. When provided it is used
      *  verbatim and the inline LDR resolver is bypassed — this is how
@@ -83,9 +117,11 @@ export interface GLTexture {
      * @internal
      */
     _dynSource?: TexImageSource | null;
-    /** UNPACK_FLIP_Y applied when replaying {@link GLTexture._dynSource}. @internal */
+    /** UNPACK_FLIP_Y applied when replaying {@link GLTexture._dynSource};
+     *  `undefined` → the texture's creation `invertY`. @internal */
     _dynInvertY?: boolean;
-    /** UNPACK_PREMULTIPLY_ALPHA applied when replaying {@link GLTexture._dynSource}. @internal */
+    /** UNPACK_PREMULTIPLY_ALPHA applied when replaying {@link GLTexture._dynSource};
+     *  `undefined` → the texture's creation `premultiplyAlpha`. @internal */
     _dynPremultiplyAlpha?: boolean;
     /**
      * The `handle` the dynamic texture's `texParameteri` filter/wrap state was
@@ -132,6 +168,54 @@ export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLe
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
 }
 
+/** Creation-time texture state resolved from {@link GLTextureOptions} — one
+ *  resolver shared by every factory so they all honor the same options with the
+ *  same defaults. A labeled tuple (not an object) so minified bundles don't
+ *  carry the field names. @internal */
+export type ResolvedTextureOptions = [minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum, generateMipMaps: boolean, invertY: boolean, premultiplyAlpha: boolean];
+
+/** Resolve {@link GLTextureOptions} to concrete GL state (see the option docs
+ *  for precedence and defaults). Sampling presets follow the subset of Babylon's
+ *  `_getSamplingParameters` they cover; the preset min filter only references
+ *  the mip chain when mipmaps are generated, so a preset never leaves a texture
+ *  mipmap-incomplete. Presets are compared as numeric literals (see
+ *  {@link GLSamplingMode}) so the preset table stays out of bundles.
+ *  @internal */
+export function resolveTextureOptions(gl: WebGL2RenderingContext, options: GLTextureOptions | undefined): ResolvedTextureOptions {
+    const o = options ?? {};
+    const mode = o.samplingMode;
+    const trilinear = mode === 3; /* TRILINEAR */
+    const nearest = mode === 1; /* NEAREST */
+    const mips = o.generateMipMaps ?? trilinear;
+    const linearOrNearest = nearest ? gl.NEAREST : gl.LINEAR;
+    // Presets are 1..3, so `mode` is truthy exactly when one is set.
+    const presetMin = mips && mode ? (nearest ? gl.NEAREST_MIPMAP_LINEAR : trilinear ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR_MIPMAP_NEAREST) : linearOrNearest;
+    return [o.minFilter ?? presetMin, o.magFilter ?? linearOrNearest, o.wrapS ?? gl.CLAMP_TO_EDGE, o.wrapT ?? gl.CLAMP_TO_EDGE, mips, !!o.invertY, !!o.premultiplyAlpha];
+}
+
+/** Size-bearing fields across the `TexImageSource` variants. @internal */
+interface TexImageSourceSize {
+    width?: number;
+    height?: number;
+    videoWidth?: number;
+    videoHeight?: number;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+}
+
+/** Pixel size of a `TexImageSource` as `texImage2D` will upload it: the
+ *  intrinsic size for video (`videoWidth`), image (`naturalWidth`) and
+ *  `VideoFrame` (`displayWidth`) sources, `width`/`height` otherwise. Clamped to
+ *  ≥ 1. @internal */
+export function getTexImageSourceSize(source: TexImageSourceSize): [number, number] {
+    return [
+        (source.videoWidth ?? source.naturalWidth ?? source.displayWidth ?? source.width) || 1,
+        (source.videoHeight ?? source.naturalHeight ?? source.displayHeight ?? source.height) || 1,
+    ];
+}
+
 /** Uint8 / float raw texture upload. The pixel data can be replaced later via
  *  {@link updateRawTexture}; the sampling and wrap can be changed via
  *  {@link updateTextureSamplingMode} / {@link updateTextureWrapMode}. */
@@ -150,12 +234,7 @@ export function createRawTexture(
         throw new Error("lite-gl: gl.createTexture returned null");
     }
     const opts = options ?? {};
-    const minFilter = opts.minFilter ?? gl.LINEAR;
-    const magFilter = opts.magFilter ?? gl.LINEAR;
-    const wrapS = opts.wrapS ?? gl.CLAMP_TO_EDGE;
-    const wrapT = opts.wrapT ?? gl.CLAMP_TO_EDGE;
-    const invertY = opts.invertY ?? false;
-    const premultiply = opts.premultiplyAlpha ?? false;
+    const [minFilter, magFilter, wrapS, wrapT, generateMipMaps, invertY, premultiplyAlpha] = resolveTextureOptions(gl, opts);
     // LDR byte formats are resolved INLINE here; the float-format table in
     // `pickSizedInternalFormat` is deliberately NOT referenced from this path so
     // it tree-shakes out of byte-only bundles. `createFloatTexture` injects its
@@ -172,9 +251,12 @@ export function createRawTexture(
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
-        setUnpackState(target, invertY, premultiply, curAlign);
+        setUnpackState(target, invertY, premultiplyAlpha, curAlign);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
+        if (generateMipMaps) {
+            g.generateMipmap(g.TEXTURE_2D);
+        }
     };
 
     const initializeParameters = (target: GLEngineContext): void => {
@@ -246,9 +328,11 @@ export function createFloatTexture(engine: GLEngineContext, data: ArrayBufferVie
     return createRawTexture(engine, data, width, height, format, type, { ...o, internalFormat });
 }
 
-/** Generate the mip chain for a texture from its level-0 contents — mipmaps as
- *  an explicit opt-in function rather than baked into the create path. Binds for
- *  upload (unit 0). No-op on a lost/disposed context or a handle-less texture. */
+/** Generate the mip chain for a texture from its level-0 contents, once. Prefer
+ *  the `generateMipMaps` / `samplingMode: TRILINEAR` creation options, which
+ *  regenerate the chain after every upload AND on `webglcontextrestored`; this
+ *  one-shot call is NOT replayed on restore. Binds for upload (unit 0). No-op on
+ *  a lost/disposed context or a disposed texture. */
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void {
     if (engine._isLost || engine._disposed || tex._disposed || tex.handle === null) {
         return;
@@ -283,15 +367,38 @@ export function updateRawTexture(
     tex._updateRaw(engine, data, o.width ?? tex.width, o.height ?? tex.height, o.unpackAlignment ?? 4);
 }
 
-/** Update a texture's min/mag sampling filters — the lite-gl equivalent of
- *  Babylon's `updateTextureSamplingMode`. Binds for upload (unit 0) so the
- *  `texParameteri` lands on this texture. No-op on a lost/disposed context. */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void {
+/**
+ * Update a texture's min/mag sampling filters — the lite-gl equivalent of
+ * Babylon's `updateTextureSamplingMode`. Two forms:
+ *
+ * - `updateTextureSamplingMode(engine, tex, samplingMode, generateMipMaps?)` —
+ *   Babylon-style {@link GLSamplingMode} preset. When `generateMipMaps` is true
+ *   the mip chain is (re)generated once and the preset's mipmapped min filter is
+ *   used; otherwise the min filter never samples mips.
+ * - `updateTextureSamplingMode(engine, tex, minFilter, magFilter)` — raw GL
+ *   filter enums.
+ *
+ * Binds for upload (unit 0) so the `texParameteri` lands on this texture. The
+ * change is not replayed on `webglcontextrestored` (creation options are).
+ * No-op on a lost/disposed context or a disposed texture.
+ */
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, modeOrMin: GLenum, magOrMips?: GLenum | boolean): void {
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
     const gl = engine.gl;
     bindTextureForUpload(engine, tex.handle);
+    let minFilter = modeOrMin;
+    let magFilter = magOrMips as GLenum;
+    if (typeof magOrMips !== "number") {
+        // Preset form: GL filter enums are ≥ 0x2600, presets are 1..3.
+        [minFilter, magFilter] = resolveTextureOptions(gl, { samplingMode: modeOrMin as GLSamplingMode, generateMipMaps: magOrMips === true });
+        if (magOrMips === true) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+        }
+    }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
 }
@@ -323,7 +430,11 @@ export function updateTextureWrapMode(engine: GLEngineContext, tex: GLTexture, w
  * @param handle - The external `WebGLTexture`.
  * @param width - Texture width in texels.
  * @param height - Texture height in texels.
- * @param options - Optional sampling/wrap to apply once (min/mag/wrapS/wrapT).
+ * @param options - Optional sampling state to apply once: filters
+ *  (`minFilter`/`magFilter`/`samplingMode`), wrap modes, and a one-shot
+ *  `generateMipMaps` from the handle's current level 0. Upload-only options
+ *  (`invertY`, `premultiplyAlpha`, `unpackAlignment`, `internalFormat`) do not
+ *  apply — the handle's pixels are owned externally.
  * @returns A {@link GLTexture} wrapping the handle.
  */
 export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTexture, width: number, height: number, options?: GLTextureOptions): GLTexture {
@@ -341,8 +452,12 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
     };
     if (options !== undefined) {
         const gl = engine.gl;
+        const [minFilter, magFilter, wrapS, wrapT, generateMipMaps] = resolveTextureOptions(gl, options);
         bindTextureForUpload(engine, handle);
-        setBoundTextureParams(gl, options.minFilter ?? gl.LINEAR, options.magFilter ?? gl.LINEAR, options.wrapS ?? gl.CLAMP_TO_EDGE, options.wrapT ?? gl.CLAMP_TO_EDGE);
+        setBoundTextureParams(gl, minFilter, magFilter, wrapS, wrapT);
+        if (generateMipMaps) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+        }
     }
     return tex;
 }
@@ -350,28 +465,27 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
 /** Asynchronous image upload.The returned texture is immediately usable (1×1
  *  transparent placeholder); `isReady` flips true once the image has been
  *  decoded and uploaded. The decoded `ImageBitmap` is retained on the texture
- *  for offline-safe `webglcontextrestored` replay. */
+ *  for offline-safe `webglcontextrestored` replay. `invertY` and
+ *  `premultiplyAlpha` are applied at decode time (`createImageBitmap`'s
+ *  `imageOrientation` / `premultiplyAlpha`) because the `UNPACK_*` flags are
+ *  ignored for `ImageBitmap` sources. */
 export function loadTexture2D(engine: GLEngineContext, url: string, options?: GLTextureOptions, onLoad?: (tex: GLTexture) => void, onError?: (err: Error) => void): GLTexture {
     const gl = engine.gl;
     const handle = gl.createTexture();
     if (handle === null) {
         throw new Error("lite-gl: gl.createTexture returned null");
     }
-    const opts = options ?? {};
-    const minFilter = opts.minFilter ?? gl.LINEAR;
-    const magFilter = opts.magFilter ?? gl.LINEAR;
-    const wrapS = opts.wrapS ?? gl.CLAMP_TO_EDGE;
-    const wrapT = opts.wrapT ?? gl.CLAMP_TO_EDGE;
-    const invertY = opts.invertY ?? false;
+    const [minFilter, magFilter, wrapS, wrapT, generateMipMaps, invertY, premultiplyAlpha] = resolveTextureOptions(gl, options);
 
     let bitmap: ImageBitmap | null = null;
     const placeholderPixels = new Uint8Array([0, 0, 0, 0]);
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
-        // invertY is applied at decode time via createImageBitmap({ imageOrientation })
-        // because UNPACK_FLIP_Y_WEBGL is IGNORED for ImageBitmap sources (and the 1×1
-        // placeholder is flip-invariant), so keep flip + premultiply off here.
+        // invertY / premultiplyAlpha are applied at decode time via createImageBitmap
+        // because UNPACK_FLIP_Y_WEBGL / UNPACK_PREMULTIPLY_ALPHA_WEBGL are IGNORED for
+        // ImageBitmap sources (and the transparent 1×1 placeholder is invariant to
+        // both), so keep flip + premultiply off here.
         setUnpackState(target, false, false);
         bindTextureForUpload(target, tex.handle);
         if (bitmap !== null) {
@@ -380,6 +494,9 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
             tex.height = bitmap.height;
         } else {
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, placeholderPixels);
+        }
+        if (generateMipMaps) {
+            g.generateMipmap(g.TEXTURE_2D);
         }
     };
 
@@ -413,7 +530,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
             }
             return r.blob();
         })
-        .then((blob) => createImageBitmap(blob, { premultiplyAlpha: "none", imageOrientation: invertY ? "flipY" : "none" }))
+        .then((blob) => createImageBitmap(blob, { premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none", imageOrientation: invertY ? "flipY" : "none" }))
         .then((bm) => {
             if (tex._disposed) {
                 bm.close();

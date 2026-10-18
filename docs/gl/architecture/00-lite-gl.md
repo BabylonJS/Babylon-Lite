@@ -83,21 +83,23 @@ packages are imported together (as NeonBrush does).
    lite-core, and the engine handle is always the **first** parameter, named
    `engine`. Lifecycle verbs track lite one-for-one:
 
-    | lite-core (`@babylonjs/lite`)          | lite-gl (`@babylonjs/lite-gl`)         |
-    | -------------------------------------- | -------------------------------------- |
-    | `EngineContext`                        | `GLEngineContext`                      |
-    | `EngineOptions`                        | `GLEngineOptions`                      |
-    | `createEngine(canvas, options)`        | `createGLEngine(canvas, options)`      |
-    | `disposeEngine(engine)`                | `disposeGLEngine(engine)`              |
-    | `resizeEngine(engine)`                 | `resizeGLEngine(engine)`               |
-    | `EffectWrapper`                        | `GLEffectWrapper`                      |
-    | `createEffectWrapper(engine, options)` | `createEffectWrapper(engine, options)` |
-    | `disposeEffectWrapper(wrapper)`        | `disposeEffectWrapper(wrapper)`        |
+    | lite-core (`@babylonjs/lite`)          | lite-gl (`@babylonjs/lite-gl`)          |
+    | -------------------------------------- | --------------------------------------- |
+    | `EngineContext`                        | `GLEngineContext`                       |
+    | `EngineOptions`                        | `GLEngineOptions`                       |
+    | `createEngine(canvas, options)`        | `createGLEngine(canvas, options)`       |
+    | `disposeEngine(engine)`                | `disposeGLEngine(engine)`               |
+    | `resizeEngine(engine)`                 | `resizeGLEngine(engine)`                |
+    | `EffectWrapper`                        | `GLEffectWrapper`                       |
+    | `createEffectWrapper(engine, options)` | `createEffectWrapper(engine, options)`  |
+    | `disposeEffectWrapper(wrapper)`        | `disposeEffectWrapper(engine, wrapper)` |
 
-    Wrappers take **shader source** and compile + own their effect (like lite),
-    and retain the engine they were created for (internal `_engine`), so
-    `disposeEffectWrapper` and `applyEffectWrapper` take **only the wrapper** —
-    exactly like lite.
+    Wrappers take **shader source** and compile + own their effect (like lite).
+    Every lite-gl function that touches GL takes the **engine first** —
+    including `applyEffectWrapper` / `disposeEffectWrapper` and the sprite
+    functions — so call sites read uniformly and no object hides a back-pointer
+    to its engine. This is a deliberate divergence from lite's wrapper-only
+    `disposeEffectWrapper(wrapper)`.
 
 3. **Documented divergences (backend-driven, not inconsistencies).**
     - `createGLEngine` is **synchronous** — WebGL2 context acquisition is sync,
@@ -107,7 +109,7 @@ packages are imported together (as NeonBrush does).
       WebGL2 has no equivalent ergonomic UBO path for these tiny effects.
     - **No `RenderingContext` / frame-graph / registration layer.** lite's
       `EffectRenderer` is a registerable rendering context; lite-gl instead
-      exposes the lower-level `applyEffectWrapper(wrapper)` + `drawEffect(engine)`
+      exposes the lower-level `applyEffectWrapper(engine, wrapper)` + `drawEffect(engine)`
       primitives, and the fullscreen quad is a context-owned lazy resource.
 
 4. **The barrel re-exports explicitly — never `export *`.** `src/index.ts`
@@ -128,7 +130,9 @@ packages are imported together (as NeonBrush does).
 5. **Options vs. separate export (the tree-shaking heuristic).** A boolean/enum
    **`option` is allowed only if it toggles a GL parameter already on the core
    path** (`minFilter` / `magFilter` / `wrapS` / `wrapT` / `invertY` /
-   `generateDepthBuffer`). A feature instead becomes a **separate, tree-shakeable
+   `premultiplyAlpha` / `generateDepthBuffer`, plus the texture `samplingMode`
+   preset and `generateMipMaps`, which resolve to the same filter state and a
+   single `gl.generateMipmap` on the shared upload path). A feature instead becomes a **separate, tree-shakeable
    export** (NOT a create-option) the moment supporting it would pull in a distinct
    code path or lookup table that non-users would otherwise ship — HDR sized-format
    resolution, stencil renderbuffers, mipmap pyramids, MRT, pixel readback,
@@ -136,7 +140,9 @@ packages are imported together (as NeonBrush does).
    why `generateRenderTargetMipMaps` / `generateRenderTargetStencil` /
    `createFloatRenderTarget` are standalone functions rather than
    `createRenderTarget` options: the RGBA8 core stays branch-free and a consumer
-   pays only for what it imports.
+   pays only for what it imports. Texture creators share one
+   `GLTextureOptions` shape, so an option accepted by one creator is accepted
+   (and honored) by all of them.
 
 Any **new** export MUST follow rules 1–2 and 4 (GL-prefixed type, engine-first
 `engine` parameter, lite-matching verb, explicit named re-export from the barrel)
@@ -237,6 +243,35 @@ export function stopRenderLoop(engine: GLEngineContext, fn?: (dt: number) => voi
 
 - `runRenderLoop(engine, fn)` is a **no-op when `fn` is already registered** (matches `AbstractEngine.runRenderLoop`). Each unique callback executes once per frame.
 - `stopRenderLoop(engine)` with no callback stops all loops; with a callback removes that one only.
+- Hosts that drive their own frame (no `runRenderLoop`) bracket it with `beginFrame(engine)` / `endFrame(engine)` so opt-in per-frame features (GPU frame timing, §3.2.1) still run. `runRenderLoop` does this automatically.
+
+#### 3.2.1 GPU frame timing (optional)
+
+```ts
+export interface GLPerfCounter {
+    current: number; // ns, latest sample
+    average: number; // ns, all-time mean
+    lastSecAverage: number; // ns, mean over the last completed second
+    min: number;
+    max: number;
+    total: number;
+    count: number;
+}
+export function captureGPUFrameTime(engine: GLEngineContext, enabled: boolean): void;
+export function getGPUFrameTimeCounter(engine: GLEngineContext): GLPerfCounter;
+```
+
+- Mirrors `ThinEngine.captureGPUFrameTime` / `getGPUFrameTimeCounter` using
+  `EXT_disjoint_timer_query_webgl2`. A no-op (counter stays at zero) when the
+  extension is unavailable.
+- Installs frame hooks on the engine; one `TIME_ELAPSED_EXT` query is in flight
+  at a time and polled non-blockingly at the next frame begin. Samples that
+  overlap a `GPU_DISJOINT_EXT` event are discarded.
+- Context loss drops the pending query and re-queries the extension after
+  restore. `captureGPUFrameTime(engine, false)` and `disposeGLEngine` delete the
+  pending query and remove the hooks.
+- Tree-shaken unless imported: the render loop only calls an optional-chained
+  `engine._frameHooks` seam.
 
 ### 3.3 Effects
 
@@ -344,10 +379,24 @@ export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samp
 ### 3.4 Textures
 
 ```ts
+export const GLSamplingMode = { NEAREST: 1, BILINEAR: 2, TRILINEAR: 3 } as const;
+export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
+
+/** Shared by every texture creator: raw, float, loaded, handle, dynamic and
+ *  HTML-element textures all accept (and honor) the same options. */
 export interface GLTextureOptions {
     /** Default: false (matches Babylon's default raw-texture behaviour). */
     invertY?: boolean;
-    /** WebGL2 sampling mode. Default: gl.LINEAR (mip: NEAREST). Pass gl.NEAREST for nearest. */
+    /** Default: false. Image loads premultiply at decode; other uploads use
+     *  `UNPACK_PREMULTIPLY_ALPHA_WEBGL`. */
+    premultiplyAlpha?: boolean;
+    /** Babylon-style sampling preset; derives min/mag filters. Explicit
+     *  `minFilter` / `magFilter` win. */
+    samplingMode?: GLSamplingMode;
+    /** Build a mip chain after every upload (incl. context restore).
+     *  Default: `samplingMode === TRILINEAR`. */
+    generateMipMaps?: boolean;
+    /** Raw GL filters. Default: derived from `samplingMode`, else gl.LINEAR. */
     minFilter?: GLenum;
     magFilter?: GLenum;
     /** Default: gl.CLAMP_TO_EDGE for both. */
@@ -408,11 +457,31 @@ export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTextur
  *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 
-/** Build a full mip chain for `tex` (a single `gl.generateMipmap`). Mipmaps are
- *  a **function**, not a create-option: `GLTextureOptions` has no
- *  `generateMipMaps` flag. No-op when `tex._disposed` or `engine._isLost`. */
+/** Build a full mip chain for `tex` (a single `gl.generateMipmap`) on demand,
+ *  e.g. after `updateRawTexture`. Creation-time mips use the `generateMipMaps`
+ *  option instead. No-op when `tex._disposed` or `engine._isLost`. */
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
+
+/** Preset form (≙ Babylon `updateTextureSamplingMode`): derives filters from
+ *  the preset and, when `generateMipMaps` is true, builds the mip chain. */
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+/** Raw form: explicit GL min/mag filters. */
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
 ```
+
+Sampling presets map as in Babylon's `_getSamplingParameters`:
+
+| Preset      | min (no mips) | min (mips)            | mag     |
+| ----------- | ------------- | --------------------- | ------- |
+| `NEAREST`   | NEAREST       | NEAREST_MIPMAP_LINEAR | NEAREST |
+| `BILINEAR`  | LINEAR        | LINEAR_MIPMAP_NEAREST | LINEAR  |
+| `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR  | LINEAR  |
+
+Without a preset, filters default to LINEAR/LINEAR even when mips are
+generated. Dynamic textures (`createDynamicTexture`, options
+`GLDynamicTextureOptions = GLTextureOptions`) track the uploaded source's
+size in `tex.width` / `tex.height`, and `updateDynamicTexture` falls back to the
+creation-time `invertY` / `premultiplyAlpha` when a call omits them.
 
 The engine-owned texture registry is a `Set`, allocated inside
 `createGLEngine` (never at module scope). All managed factories register via
@@ -594,14 +663,9 @@ tests cover upload calls, state caching, validation and restore replay.
 Dynamic-importable so only InputGlow pulls it in:
 
 ```ts
-export const GLSamplingMode = { NEAREST: 1, BILINEAR: 2, TRILINEAR: 3 } as const;
-export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
-
-export interface GLHtmlElementTextureOptions extends GLTextureOptions {
-    /** High-level sampling preset (see the Babylon-constants mapping below).
-     *  Derives min/mag filters + mip generation; explicit filter options win. */
-    samplingMode?: GLSamplingMode;
-}
+/** Same options as every other texture creator (kept as an alias for
+ *  discoverability). */
+export type GLHtmlElementTextureOptions = GLTextureOptions;
 
 export function createHtmlElementTexture(
     engine: GLEngineContext,
@@ -629,10 +693,8 @@ export interface GLEffectWrapperOptions {
     defines?: string;
 }
 
-// The wrapper compiles and OWNS its effect, and retains the engine it was
-// created for (internal `_engine`, trimmed from the public .d.ts), so
-// `disposeEffectWrapper` / `applyEffectWrapper` take only the wrapper —
-// mirroring lite's `EffectWrapper`.
+// The wrapper compiles and OWNS its effect. Like every lite-gl function,
+// `disposeEffectWrapper` / `applyEffectWrapper` take the engine first.
 export interface GLEffectWrapper {
     readonly name: string;
     /** The compiled effect the wrapper owns — exposed so the per-uniform
@@ -646,7 +708,7 @@ export interface GLEffectWrapper {
  *  built-in fullscreen-quad shader. */
 export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWrapperOptions): GLEffectWrapper;
 /** Idempotent. Disposes the effect the wrapper owns. */
-export function disposeEffectWrapper(wrapper: GLEffectWrapper): void;
+export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
 
 export interface GLViewport {
     x: number;
@@ -669,7 +731,7 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  No depth/stencil state changes: NeonBrush effects never enable them, and
  *  `createGLEngine` requested `depth: false, stencil: false`. If a future
  *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
-export function applyEffectWrapper(wrapper: GLEffectWrapper): void;
+export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
 
 /** `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. No-op when `engine._isLost`
  *  or when the bound effect is not ready. */
@@ -795,6 +857,7 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  *  Babylon parity but unused (no animation state). Resets blend to `DISABLE`
  *  afterwards (≙ Babylon `autoResetAlpha`). */
 export function renderSprites(
+    engine: GLEngineContext,
     renderer: GLSpriteRenderer,
     sprites: readonly GLSprite[],
     deltaTime: number,
@@ -804,11 +867,11 @@ export function renderSprites(
 
 /** Swap the sprite-sheet texture (≙ Babylon assigning `SpriteRenderer.texture`
  *  after async load). No-op after disposal. */
-export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void;
+export function setSpriteRendererTexture(engine: GLEngineContext, renderer: GLSpriteRenderer, texture: GLTexture): void;
 
 /** Releases the VAO/VBO/IBO + owned effect and unregisters the restore hook.
  *  Idempotent. Does NOT dispose the texture (the consumer owns it). */
-export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void;
+export function disposeSpriteRenderer(engine: GLEngineContext, renderer: GLSpriteRenderer): void;
 ```
 
 Geometry / parity notes:
@@ -1194,7 +1257,7 @@ canonical per-frame sequence is:
 
 ```
 setViewport(engine);                       // cached
-applyEffectWrapper(wrapper);       // useEffect + ensureQuad
+applyEffectWrapper(engine, wrapper); // useEffect + ensureQuad
 setEffectFloat(engine, effect, ...);       // ← AFTER applyEffectWrapper
 setEffectTexture(engine, effect, ...);
 drawEffect(engine);
@@ -1615,38 +1678,40 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 
 ## 8. Babylon.js equivalence map
 
-| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                        |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                 |
-| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                      |
-| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                       |
-| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                |
-| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                      |
-| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                   |
-| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                   |
-| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                    |
-| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                |
-| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, format, type, opts)`                                     |
-| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                          |
-| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })` |
-| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(engine, effect, cb)`                                                      |
-| `effect.isReady()`                                               | `isEffectReady(engine, effect)`                                                                |
-| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(engine, effect, name, c)`   |
-| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(engine, effect, name, glTexture)`                                            |
-| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                        |
-| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                          |
-| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(wrapper)`                                                                  |
-| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                           |
-| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                              |
-| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                   |
-| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                               |
-| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                |
-| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                      |
-| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                              |
-| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
-| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
-| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                              |
-| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                     |
+| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                   |
+| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                        |
+| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                         |
+| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                  |
+| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                        |
+| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                     |
+| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                     |
+| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                      |
+| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                  |
+| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, format, type, { generateMipMaps, invertY, samplingMode })` |
+| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                            |
+| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })`   |
+| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(engine, effect, cb)`                                                        |
+| `effect.isReady()`                                               | `isEffectReady(engine, effect)`                                                                  |
+| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(engine, effect, name, c)`     |
+| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(engine, effect, name, glTexture)`                                              |
+| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                          |
+| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                            |
+| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(engine, wrapper)`                                                            |
+| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                             |
+| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                                |
+| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                     |
+| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                                 |
+| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                  |
+| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(engine, renderer, sprites, deltaTime, view, proj)`                                |
+| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                        |
+| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                             |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, GLSamplingMode.X, mips)`                                 |
+| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                       |
+| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                               |
+| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                                |
+| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                       |
 
 Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
@@ -1790,7 +1855,7 @@ this._effect = this._wrapper.effect;            // exposed for the per-uniform s
 …
 // inside render():
 setViewport(engine);                                      // cached
-applyEffectWrapper(this._wrapper);                // useProgram (cached) + ensureQuad
+applyEffectWrapper(engine, this._wrapper);        // useProgram (cached) + ensureQuad
 setEffectFloat(engine, this._effect, "u_Progress", this.progress);
 setEffectFloat2(engine, this._effect, "u_Resolution", rx, ry);
 setEffectTexture(engine, this._effect, "overlaySampler", this._overlayTex);

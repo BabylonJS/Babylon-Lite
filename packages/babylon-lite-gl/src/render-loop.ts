@@ -37,6 +37,26 @@ export function stopRenderLoop(engine: GLEngineContext, fn?: (dt: number) => voi
     }
 }
 
+/**
+ * Marks the start of a frame (Babylon `engine.beginFrame()`). `runRenderLoop`
+ * calls this automatically before its callbacks; call it yourself only when
+ * driving frames from your own `requestAnimationFrame` loop. A no-op unless a
+ * frame-level feature such as `captureGPUFrameTime` is enabled.
+ */
+export function beginFrame(engine: GLEngineContext): void {
+    engine._frameHooks?._begin();
+}
+
+/**
+ * Marks the end of a frame (Babylon `engine.endFrame()`). `runRenderLoop`
+ * calls this automatically after its callbacks; pair it with `beginFrame` in
+ * manual loops. A no-op unless a frame-level feature such as
+ * `captureGPUFrameTime` is enabled.
+ */
+export function endFrame(engine: GLEngineContext): void {
+    engine._frameHooks?._end();
+}
+
 function scheduleFrame(engine: GLEngineContext): void {
     engine._prevNow = performance.now();
     engine._rafId = requestAnimationFrame((now) => tick(engine, now));
@@ -51,6 +71,10 @@ function tick(engine: GLEngineContext, now: number): void {
     engine._prevNow = now;
     // Snapshot — a callback may call stopRenderLoop on itself or others.
     const loops = engine._loops.slice();
+    // Inlined beginFrame / endFrame so unused exports tree-shake out. The
+    // snapshot pairs begin/end on the same hooks if a callback toggles capture.
+    const hooks = engine._frameHooks;
+    hooks?._begin();
     for (const cb of loops) {
         try {
             cb(dt);
@@ -58,6 +82,7 @@ function tick(engine: GLEngineContext, now: number): void {
             console.error("lite-gl: render loop callback threw", err);
         }
     }
+    hooks?._end();
     if (engine._loops.length > 0 && !engine._disposed && !engine._isLost) {
         engine._rafId = requestAnimationFrame((nextNow) => tick(engine, nextNow));
     }

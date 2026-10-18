@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/index";
-import { GLSamplingMode, createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
-import { bindTexture } from "../../../packages/babylon-lite-gl/src/texture";
+import { createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
+import { GLSamplingMode, bindTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockGL } from "./_lite-gl-mock";
 
 // The gl-unit project runs in the `node` environment, which has no DOM globals.

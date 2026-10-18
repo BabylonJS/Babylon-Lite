@@ -145,7 +145,7 @@ runRenderLoop(engine, () => {
 
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
+    applyEffectWrapper(engine, wrapper);
     setEffectTexture(engine, effect, "uTex", tex);
     drawEffect(engine);
 

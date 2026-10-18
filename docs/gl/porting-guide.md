@@ -40,7 +40,7 @@ style port.
 1. **Engine factory.** `new ThinEngine(canvas, aa, opts)` → `createGLEngine(canvas, opts)`. Keep the same context options (`alpha`, `premultipliedAlpha`, `depth:false`, `stencil:false`, …). See §11.1.
 2. **Classes → state + free functions.** A `BaseEffect` class becomes a plain state object plus free functions (`createBaseEffectState` / `start` / `resize` / `dispose`). Track `ownsContext` so a shared engine isn't disposed twice. See §11.2.
 3. **Convert shaders to GLSL ES 3.00** at build time (the runtime does **zero** preprocessing). See §6.2 + the shader rules below.
-4. **Rewrite each effect** mechanically (§11.3). **Order is law:** `applyEffectWrapper(wrapper)` **first**, *then* the `setEffect*` setters — uniforms write to the currently-bound program (§4.3.1). Reversing it writes to the wrong program and silently corrupts output.
+4. **Rewrite each effect** mechanically (§11.3). **Order is law:** `applyEffectWrapper(engine, wrapper)` **first**, *then* the `setEffect*` setters — uniforms write to the currently-bound program (§4.3.1). Reversing it writes to the wrong program and silently corrupts output.
 5. **Map Babylon constants → WebGL2 constants** for `createRawTexture` (Babylon `Constants.TEXTUREFORMAT_*` / `TEXTURETYPE_*` integers → `gl.RGBA` / `gl.UNSIGNED_BYTE` / …). See §11.4.
 6. **Handle context loss/restore** for anything *you* own (see §4 below). lite-gl auto-replays its own effects/textures/sprite buffers; consumer-owned GL state does not.
 7. **Sprites / particles** (if used) → `createSpriteRenderer` (from the barrel).
@@ -79,9 +79,17 @@ bit us:
   `UNPACK_FLIP_Y_WEBGL` — browsers *ignore* that pixel-store flag for
   `ImageBitmap` sources. If you hand-roll image uploads, do the same. (Raw and
   HTML-element uploads still honor `UNPACK_FLIP_Y_WEBGL`.)
-- **HTML-element textures have no mipmaps.** Sample them with **BILINEAR**, never
-  TRILINEAR (`Texture.TRILINEAR_SAMPLINGMODE` would request a mip chain that
-  doesn't exist). *(Learned porting InputGlow.)* For a fullscreen HTML-texture
+- **One options shape for every texture.** `createRawTexture`, `createFloatTexture`,
+  `loadTexture2D`, `createTextureFromHandle`, `createDynamicTexture` and
+  `createHtmlElementTexture` all take `GLTextureOptions`: `samplingMode`
+  (`GLSamplingMode.NEAREST/BILINEAR/TRILINEAR` ≙ Babylon's `*_SAMPLINGMODE`),
+  `generateMipMaps` (default: `true` only for TRILINEAR), `invertY`,
+  `premultiplyAlpha`, and raw `minFilter`/`magFilter`/`wrapS`/`wrapT` (raw filters
+  win over the preset). Mips are rebuilt after every upload, including
+  dynamic/HTML re-uploads and context restore.
+- **Mipmaps on HTML-element textures must be requested.** TRILINEAR implies
+  `generateMipMaps: true`; for a frequently re-uploaded element prefer
+  **BILINEAR** (no per-upload mip rebuild). *(Learned porting InputGlow.)* For a fullscreen HTML-texture
   sampled with the built-in quad, you may also need an **in-shader V-flip** of the
   UV to match Babylon's orientation.
 - **Uploads target the *active* texture unit.** The bind cache elides re-binds for
@@ -176,9 +184,10 @@ In-repo, this harness is `tests/gl/parity/` driven by `scene-config-webgl.json`
 - [ ] `createGLEngine` replaces `ThinEngine`; context options preserved.
 - [ ] Classes → state + free functions; `ownsContext` tracked.
 - [ ] Shaders pre-converted to ES 3.00; `#if` → `#ifdef`; `*EXT` preserved by the minifier.
+- [ ] Every lite-gl call takes `engine` first (`applyEffectWrapper(engine, w)`, `renderSprites(engine, r, …)`).
 - [ ] `applyEffectWrapper` **before** any `setEffect*` setter.
 - [ ] `createRawTexture` constants mapped to GL enums.
-- [ ] `invertY` handled at decode for image loads; HTML-element textures use BILINEAR.
+- [ ] Babylon sampling modes mapped to `samplingMode` / `generateMipMaps`; `invertY` handled at decode for image loads.
 - [ ] No hand-rolled `texImage2D` after multi-sampler binds (use the update fns).
 - [ ] Babylon sprite reference uses `disableDepthWrite = true`.
 - [ ] Consumer-owned GL state rebuilt in `onContextRestored`.

@@ -39,9 +39,9 @@ export interface GLEffectWrapperOptions {
 }
 
 /** A reusable fullscreen effect that compiles and OWNS its `GLEffect` — the
- *  WebGL counterpart of lite's `EffectWrapper`. The wrapper retains the engine
- *  it was created for, so `disposeEffectWrapper` / `applyEffectWrapper` take
- *  only the wrapper. */
+ *  WebGL counterpart of lite's `EffectWrapper`. Like every lite-gl function,
+ *  the wrapper functions take the owning engine first:
+ *  `applyEffectWrapper(engine, wrapper)` / `disposeEffectWrapper(engine, wrapper)`. */
 export interface GLEffectWrapper {
     /** Name alias for the wrapper (and its effect). */
     readonly name: string;
@@ -49,8 +49,6 @@ export interface GLEffectWrapper {
      *  setters (`setEffectFloat`/`setEffectTexture`/…) can target it — the
      *  WebGL divergence from lite's UBO-based `setEffectUniforms(wrapper, …)`. */
     readonly effect: GLEffect;
-    /** @internal The engine the wrapper was created for. */
-    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
 }
@@ -70,17 +68,19 @@ export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWr
         attributeNames: options.attributeNames,
         defines: options.defines,
     });
-    return { name, effect, _engine: engine, _disposed: false };
+    return { name, effect, _disposed: false };
 }
 
-/** Dispose the wrapper and the effect it owns (idempotent). Mirrors lite's
- *  `disposeEffectWrapper(wrapper)`. */
-export function disposeEffectWrapper(wrapper: GLEffectWrapper): void {
+/** Dispose the wrapper and the effect it owns (idempotent).
+ *
+ *  @param engine - The engine the wrapper was created on.
+ *  @param wrapper - The wrapper to dispose. */
+export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void {
     if (wrapper._disposed) {
         return;
     }
     wrapper._disposed = true;
-    disposeEffect(wrapper._engine, wrapper.effect);
+    disposeEffect(engine, wrapper.effect);
 }
 
 /** Pixel-space viewport rectangle passed to `setViewport`. */
@@ -118,9 +118,13 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
 /** Make `wrapper.effect` current and ensure the shared fullscreen quad VAO
  *  is bound. This MUST be called BEFORE any `setEffect*` call for the same
  *  effect in the current frame (uniform setters write to the currently bound
- *  program). */
-export function applyEffectWrapper(wrapper: GLEffectWrapper): void {
-    const engine = wrapper._engine;
+ *  program). Typical frame:
+ *  `applyEffectWrapper(engine, w)` → `setEffectFloat(engine, w.effect, …)` →
+ *  `drawEffect(engine)`.
+ *
+ *  @param engine - The engine the wrapper was created on.
+ *  @param wrapper - The wrapper whose effect to make current. */
+export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void {
     if (engine._isLost || engine._disposed || wrapper._disposed) {
         return;
     }

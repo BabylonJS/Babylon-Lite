@@ -2,6 +2,7 @@ import type { GLEffect } from "./effect.js";
 import type { GLTexture } from "./texture.js";
 import type { GLTexture3D } from "./texture-3d.js";
 import type { GLRenderTarget } from "./render-target.js";
+import type { GLPerfCounter } from "./gpu-frame-time.js";
 import { createGLState, resetGLState, resetGLStateCache, type GLState } from "./state.js";
 
 /**
@@ -19,6 +20,22 @@ export interface GLManagedBuffer {
     _deleteGpu: (gl: WebGL2RenderingContext) => void;
     /** @internal */
     _restore: (engine: GLEngineContext) => void;
+}
+
+/**
+ * Per-frame begin / end hooks installed by opt-in modules (currently only
+ * `captureGPUFrameTime`). Invoked by the render loop around its callbacks, or
+ * by manual `beginFrame` / `endFrame` calls. Kept local so the context type
+ * carries no runtime dependency on the tree-shakeable timing module.
+ * @internal
+ */
+export interface GLFrameHooks {
+    /** @internal */
+    _begin: () => void;
+    /** @internal */
+    _end: () => void;
+    /** Releases any GL resources owned by the hooks. @internal */
+    _dispose: () => void;
 }
 
 /** Constructor options forwarded to `canvas.getContext('webgl2', …)`. */
@@ -201,6 +218,12 @@ export interface GLEngineContext {
     /** Optional feature-owned state-cache invalidators. Allocated lazily by the first feature that needs one.
      * @internal */
     _stateCacheInvalidators?: (() => void)[];
+    /** Frame hooks installed while `captureGPUFrameTime(engine, true)` is active.
+     * @internal */
+    _frameHooks?: GLFrameHooks;
+    /** GPU frame-time counter, created lazily by `getGPUFrameTimeCounter`.
+     * @internal */
+    _gpuFrameTime?: GLPerfCounter;
 }
 
 /** Acquire a WebGL2 context on the canvas and build the pure-state handle.
@@ -272,6 +295,8 @@ export function disposeGLEngine(engine: GLEngineContext): void {
         engine._rafId = 0;
     }
     engine._loops.length = 0;
+    engine._frameHooks?._dispose();
+    engine._frameHooks = undefined;
     engine.canvas.removeEventListener("webglcontextlost", engine._lostHandler as EventListener, false);
     engine.canvas.removeEventListener("webglcontextrestored", engine._restoredHandler, false);
 

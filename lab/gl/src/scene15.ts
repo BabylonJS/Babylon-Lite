@@ -202,7 +202,7 @@ runRenderLoop(engine, (dt) => {
     setViewport(engine);
 
     // Opaque background (blend left DISABLED by the previous frame's auto-reset).
-    applyEffectWrapper(background);
+    applyEffectWrapper(engine, background);
     drawEffect(engine);
 
     const t = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
@@ -214,8 +214,8 @@ runRenderLoop(engine, (dt) => {
     // Draw both layers in order (bg -> discs -> rings). Two sprite renderers, but
     // one shared program: useProgram is issued once for the discs, then elided
     // for the rings by the current-program cache.
-    renderSprites(discRenderer, discSprites, dt, IDENTITY, IDENTITY);
-    renderSprites(ringRenderer, ringSprites, dt, IDENTITY, IDENTITY);
+    renderSprites(engine, discRenderer, discSprites, dt, IDENTITY, IDENTITY);
+    renderSprites(engine, ringRenderer, ringSprites, dt, IDENTITY, IDENTITY);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

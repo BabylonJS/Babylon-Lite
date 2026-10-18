@@ -118,13 +118,13 @@ runRenderLoop(engine, () => {
 
     // ── PASS 1: render the radial pattern into the render target ──
     bindRenderTarget(engine, rt); // binds the FBO + sets viewport to RT_SIZE
-    applyEffectWrapper(patternWrapper);
+    applyEffectWrapper(engine, patternWrapper);
     setEffectFloat(engine, patternWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
     // ── PASS 2: composite the RT to the screen ──
     bindRenderTarget(engine, null); // default framebuffer + canvas viewport
-    applyEffectWrapper(compositeWrapper);
+    applyEffectWrapper(engine, compositeWrapper);
     setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
     setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);

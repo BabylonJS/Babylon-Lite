@@ -51,7 +51,7 @@ runRenderLoop(engine, () => {
     if (!isEffectReady(engine, wrapper.effect)) return; // shaders compile async
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
+    applyEffectWrapper(engine, wrapper);
     setEffectFloat(engine, wrapper.effect, "uTime", (performance.now() - start) / 1000);
     drawEffect(engine);
 });
@@ -116,7 +116,11 @@ use.
   `getRenderWidth`, `getRenderHeight`, `get/setHardwareScalingLevel`,
   `getRenderingCanvas`, and `on/offContextLost` + `on/offContextRestored`
   (context-loss is handled: effects and textures are rebuilt on restore).
-- **Render loop** — `runRenderLoop`, `stopRenderLoop`.
+- **Render loop** — `runRenderLoop`, `stopRenderLoop`, plus `beginFrame` /
+  `endFrame` for hosts that drive their own frame.
+- **GPU frame timing (optional)** — `captureGPUFrameTime`,
+  `getGPUFrameTimeCounter` (`EXT_disjoint_timer_query_webgl2`; ≙ Babylon's
+  `ThinEngine` APIs, tree-shaken unless imported).
 - **Effects** — `createEffect`, `isEffectReady`, `getEffectCompilationError`,
   `executeWhenCompiled`, `waitForEffect` (optional cancellable readiness promise),
   `useEffect`, `disposeEffect`, and the cached uniform setters
@@ -131,7 +135,9 @@ use.
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
   `disposeTexture`, plus `updateRawTexture`, `updateTextureSamplingMode`,
-  `updateTextureWrapMode`, `createTextureFromHandle`.
+  `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
+  takes the same `GLTextureOptions` (`samplingMode` via `GLSamplingMode`,
+  `generateMipMaps`, `invertY`, `premultiplyAlpha`, raw filters / wraps).
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
 - **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color

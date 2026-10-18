@@ -348,7 +348,7 @@ runRenderLoop(engine, () => {
 
     // Pass 1 — Buffer A: render into `write`, sampling the previous frame (`read`).
     bindRenderTarget(engine, pingpong.write);
-    applyEffectWrapper(bufferWrapper);
+    applyEffectWrapper(engine, bufferWrapper);
     setEffectFloat(engine, bufferEffect, "iTime", time);
     setEffectFloat3(engine, bufferEffect, "iResolution", w, h, 1);
     setEffectTexture(engine, bufferEffect, "iChannel0", pingpong.read.texture);
@@ -356,7 +356,7 @@ runRenderLoop(engine, () => {
 
     // Pass 2 — Image: FXAA-resolve the Buffer A we just produced to the screen.
     bindRenderTarget(engine, null);
-    applyEffectWrapper(imageWrapper);
+    applyEffectWrapper(engine, imageWrapper);
     setEffectFloat3(engine, imageEffect, "iResolution", w, h, 1);
     setEffectTexture(engine, imageEffect, "iChannel0", pingpong.write.texture);
     drawEffect(engine);

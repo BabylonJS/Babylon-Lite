@@ -73,7 +73,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 16, cellWidth: 32, cellHeight: 32, texture });
         const sprites = [makeSprite(), makeSprite(), makeSprite()];
         mock.clear();
-        renderSprites(renderer, sprites, 0, VIEW, PROJ);
+        renderSprites(engine, renderer, sprites, 0, VIEW, PROJ);
         expect(mock.count("bufferSubData")).toBe(1);
         const dc = callsNamed(mock, "drawElements");
         expect(dc).toHaveLength(1);
@@ -90,7 +90,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         const view = new Array<number>(16).fill(0);
         mock.clear();
-        expect(() => renderSprites(renderer, [makeSprite()], 0, view, PROJ)).not.toThrow();
+        expect(() => renderSprites(engine, renderer, [makeSprite()], 0, view, PROJ)).not.toThrow();
         expect(mock.count("drawElements")).toBe(1);
     });
 
@@ -99,7 +99,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 16, cellWidth: 32, cellHeight: 32, texture });
         const sprites = [makeSprite(), makeSprite({ isVisible: false }), makeSprite()];
         mock.clear();
-        renderSprites(renderer, sprites, 0, VIEW, PROJ);
+        renderSprites(engine, renderer, sprites, 0, VIEW, PROJ);
         expect(callsNamed(mock, "drawElements")[0]?.args[1]).toBe(2 * 6);
     });
 
@@ -108,7 +108,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 2, cellWidth: 32, cellHeight: 32, texture });
         const sprites = [makeSprite(), makeSprite(), makeSprite(), makeSprite(), makeSprite()];
         mock.clear();
-        renderSprites(renderer, sprites, 0, VIEW, PROJ);
+        renderSprites(engine, renderer, sprites, 0, VIEW, PROJ);
         expect(callsNamed(mock, "drawElements")[0]?.args[1]).toBe(2 * 6);
     });
 
@@ -116,7 +116,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const { mock, engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        renderSprites(renderer, [makeSprite({ isVisible: false })], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite({ isVisible: false })], 0, VIEW, PROJ);
         expect(mock.count("bufferSubData")).toBe(0);
         expect(mock.count("drawElements")).toBe(0);
     });
@@ -125,7 +125,7 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const { mock, engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        renderSprites(renderer, [], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(0);
     });
 
@@ -133,8 +133,8 @@ describe("lite-gl sprites: renderSprites draw", () => {
         const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
         const vd = renderer._vertexData;
-        renderSprites(renderer, [makeSprite(), makeSprite()], 0, VIEW, PROJ);
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite(), makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(renderer._vertexData).toBe(vd);
     });
 });
@@ -144,7 +144,7 @@ describe("lite-gl sprites: blend mode", () => {
         const { mock, engine, gl, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         const fc = callsNamed(mock, "blendFuncSeparate");
         expect(fc).toHaveLength(1);
         expect(fc[0]?.args).toEqual([gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE]);
@@ -158,7 +158,7 @@ describe("lite-gl sprites: blend mode", () => {
         const { mock, engine, gl, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture, blendMode: GLBlendMode.ADD });
         mock.clear();
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         const fc = callsNamed(mock, "blendFuncSeparate");
         expect(fc).toHaveLength(1);
         expect(fc[0]?.args).toEqual([gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE]);
@@ -170,7 +170,7 @@ describe("lite-gl sprites: texture swap", () => {
         const { engine, gl, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         const tex2 = createRawTexture(engine, null, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE);
-        setSpriteRendererTexture(renderer, tex2);
+        setSpriteRendererTexture(engine, renderer, tex2);
         expect(renderer.texture).toBe(tex2);
     });
 
@@ -178,8 +178,8 @@ describe("lite-gl sprites: texture swap", () => {
         const { engine, gl, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         const tex2 = createRawTexture(engine, null, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE);
-        disposeSpriteRenderer(renderer);
-        setSpriteRendererTexture(renderer, tex2);
+        disposeSpriteRenderer(engine, renderer);
+        setSpriteRendererTexture(engine, renderer, tex2);
         expect(renderer.texture).toBe(texture);
     });
 });
@@ -196,7 +196,7 @@ describe("lite-gl sprites: manual UV rects (lottie atlas path)", () => {
         const { engine, texture } = setup(); // 64x64 texture
         const renderer = createSpriteRenderer(engine, { capacity: 4, texture });
         const sprite = makeSprite({ cellIndex: undefined, uOffset: 0.25, vOffset: 0.5, uSize: 16, vSize: 8 });
-        renderSprites(renderer, [sprite], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [sprite], 0, VIEW, PROJ);
         const vd = renderer._vertexData;
         // cellInfo = floats 10..13 of vertex 0: (uOffset, vOffset, uSize/64, vSize/64)
         expect(vd[10]).toBeCloseTo(0.25, 6);
@@ -209,7 +209,7 @@ describe("lite-gl sprites: manual UV rects (lottie atlas path)", () => {
         const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         const sprite = makeSprite({ cellIndex: 3, uOffset: 0.1, vOffset: 0.2, uSize: 0, vSize: 0 });
-        renderSprites(renderer, [sprite], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [sprite], 0, VIEW, PROJ);
         const vd = renderer._vertexData;
         // Manual UV (uSize is defined) wins over the cellIndex grid.
         expect(vd[10]).toBeCloseTo(0.1, 6);
@@ -222,7 +222,7 @@ describe("lite-gl sprites: manual UV rects (lottie atlas path)", () => {
         const { engine, texture } = setup(); // 64x64, cells 32x32 => rowSize 2
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         // cellIndex 3 => row 1, col 1 => left=(1*32)/64=0.5, top=(1*32)/64=0.5
-        renderSprites(renderer, [makeSprite({ cellIndex: 3 })], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite({ cellIndex: 3 })], 0, VIEW, PROJ);
         const vd = renderer._vertexData;
         expect(vd[10]).toBeCloseTo(0.5, 6);
         expect(vd[11]).toBeCloseTo(0.5, 6);
@@ -236,7 +236,7 @@ describe("lite-gl sprites: epsilon (UV/position inset)", () => {
         const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, texture });
         expect(renderer.epsilon).toBe(0.01);
-        renderSprites(renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 8, vSize: 8 })], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 8, vSize: 8 })], 0, VIEW, PROJ);
         // Vertex 0 is corner (0,0): its position/UV offset (floats 6,7) is inset to +eps.
         expect(renderer._vertexData[6]).toBeCloseTo(0.01, 6);
         expect(renderer._vertexData[7]).toBeCloseTo(0.01, 6);
@@ -246,7 +246,7 @@ describe("lite-gl sprites: epsilon (UV/position inset)", () => {
         const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, texture, epsilon: 0 });
         expect(renderer.epsilon).toBe(0);
-        renderSprites(renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 8, vSize: 8 })], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 8, vSize: 8 })], 0, VIEW, PROJ);
         const stride = 18; // FLOATS_PER_VERTEX
         // Corner (0,0) stays 0; corner (1,1) on vertex 2 stays 1 — full-size quad (no shrink).
         expect(renderer._vertexData[6]).toBe(0);
@@ -266,7 +266,7 @@ describe("lite-gl sprites: autoResetAlpha", () => {
             autoResetAlpha: false,
         });
         mock.clear();
-        renderSprites(renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 1, vSize: 1 })], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite({ uOffset: 0, vOffset: 0, uSize: 1, vSize: 1 })], 0, VIEW, PROJ);
         // No reset-to-DISABLE: the premultiplied mode persists for the next pass.
         expect(mock.count("disable")).toBe(0);
         expect(renderer.autoResetAlpha).toBe(false);
@@ -285,7 +285,7 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         fireLost(canvas);
         mock.clear();
-        expect(() => renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
+        expect(() => renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
         expect(mock.count("drawElements")).toBe(0);
         expect(mock.count("bufferSubData")).toBe(0);
     });
@@ -295,7 +295,7 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         renderer.texture.isReady = false;
         mock.clear();
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(0);
     });
 
@@ -307,10 +307,10 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const gl = engine.gl;
         const texture = createRawTexture(engine, null, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE);
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(0);
         mock.setParallelComplete(true);
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(1);
     });
 
@@ -318,16 +318,16 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const { mock, engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        disposeSpriteRenderer(renderer);
+        disposeSpriteRenderer(engine, renderer);
         expect(mock.count("deleteVertexArray")).toBe(1);
         expect(mock.count("deleteBuffer")).toBe(2);
         expect(mock.count("deleteProgram")).toBe(1);
         expect(mock.count("deleteTexture")).toBe(0); // consumer owns the texture
-        disposeSpriteRenderer(renderer);
-        disposeSpriteRenderer(renderer);
+        disposeSpriteRenderer(engine, renderer);
+        disposeSpriteRenderer(engine, renderer);
         expect(mock.count("deleteVertexArray")).toBe(1);
         expect(mock.count("deleteProgram")).toBe(1);
-        expect(() => renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
+        expect(() => renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
     });
 
     it("renderSprites is a no-op after the engine is disposed", () => {
@@ -335,7 +335,7 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         disposeGLEngine(engine);
         mock.clear();
-        expect(() => renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
+        expect(() => renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ)).not.toThrow();
         expect(mock.count("drawElements")).toBe(0);
     });
 });
@@ -350,7 +350,7 @@ describe("lite-gl sprites: context restore", () => {
         expect(renderer._vbo).not.toBeNull();
         mock.clear();
         // The owned effect is rebuilt by the engine; buffers by our restore hook.
-        renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(1);
     });
 });
@@ -376,8 +376,8 @@ describe("lite-gl sprites: multiple renderers share one program (redundant-usePr
         const a = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
         const b = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        renderSprites(a, [makeSprite()], 0, VIEW, PROJ);
-        renderSprites(b, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, a, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(engine, b, [makeSprite()], 0, VIEW, PROJ);
         // Both layers drew, yet the program was bound at most once across them —
         // the second renderer's draw does NOT re-issue gl.useProgram (was 2 pre-fix).
         expect(mock.count("drawElements")).toBe(2);
@@ -389,10 +389,10 @@ describe("lite-gl sprites: multiple renderers share one program (redundant-usePr
         const a = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
         const b = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
         mock.clear();
-        disposeSpriteRenderer(a);
+        disposeSpriteRenderer(engine, a);
         // b still references the shared program → not deleted yet.
         expect(mock.count("deleteProgram")).toBe(0);
-        disposeSpriteRenderer(b);
+        disposeSpriteRenderer(engine, b);
         // Last reference gone → program torn down exactly once.
         expect(mock.count("deleteProgram")).toBe(1);
     });

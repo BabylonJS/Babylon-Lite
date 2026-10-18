@@ -179,7 +179,7 @@ runRenderLoop(engine, (dt) => {
     setViewport(engine);
 
     // Opaque background (blend is left DISABLED by renderSprites' auto-reset).
-    applyEffectWrapper(background);
+    applyEffectWrapper(engine, background);
     drawEffect(engine);
 
     // Frozen capture pins the animation clock to seekTime; else the wall clock.
@@ -207,7 +207,7 @@ runRenderLoop(engine, (dt) => {
         const hue = (i / SPRITE_COUNT + t * 0.05) % 1;
         hsvToColor(hue, 0.7, 1.0, col);
     }
-    renderSprites(renderer, sprites, dt, IDENTITY, IDENTITY);
+    renderSprites(engine, renderer, sprites, dt, IDENTITY, IDENTITY);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

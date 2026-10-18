@@ -117,7 +117,7 @@ describe("lite-gl clearDynamicTextureSource()", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 32, 16);
         updateDynamicTexture(engine, tex, fakeSource(32, 16));
-        clearDynamicTextureSource(tex);
+        clearDynamicTextureSource(engine, tex);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
