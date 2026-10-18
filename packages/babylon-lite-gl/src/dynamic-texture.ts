@@ -12,7 +12,7 @@
  * internally and replayed into the fresh handle on `webglcontextrestored` by the
  * engine's standard context-restore protocol.
  */
-import { bindTextureForUpload, getTexImageSourceSize, resolveTextureOptions, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, resolveTextureOptions, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** Options for {@link createDynamicTexture}: the shared {@link GLTextureOptions}
@@ -60,15 +60,17 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
             setUnpackState(target, tex._dynInvertY ?? invertY, tex._dynPremultiplyAlpha ?? premultiplyAlpha);
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, src);
             // `texImage2D(source)` resizes the GL storage to the source size.
-            [tex.width, tex.height] = getTexImageSourceSize(src);
-            if (generateMipMaps) {
-                g.generateMipmap(g.TEXTURE_2D);
-            }
+            setTexImageSourceSize(tex, src);
         } else {
             setUnpackState(target, false, false);
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, w, h, 0, g.RGBA, g.UNSIGNED_BYTE, null);
             tex.width = w;
             tex.height = h;
+        }
+        // Also for the blank allocation, so a mipmapped min filter never
+        // samples an incomplete texture before the first update.
+        if (tex._useMipMaps) {
+            g.generateMipmap(g.TEXTURE_2D);
         }
         if (tex._dynParamsHandle !== tex.handle) {
             setBoundTextureParams(g, minFilter, magFilter, wrapS, wrapT);
@@ -87,6 +89,7 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
         _upload: upload,
         _wasReady: true,
         _dynSource: null,
+        _useMipMaps: generateMipMaps,
     };
     upload(engine);
     engine._textures.add(tex);

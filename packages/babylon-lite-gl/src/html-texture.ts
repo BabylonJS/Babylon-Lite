@@ -6,7 +6,7 @@
  * NeonBrush's `InputGlow`) tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
-import { bindTextureForUpload, getTexImageSourceSize, resolveTextureOptions, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, resolveTextureOptions, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 
 /** Options for `createHtmlElementTexture` — the shared {@link GLTextureOptions}
  *  (including `samplingMode`, `generateMipMaps`, `invertY` and
@@ -34,8 +34,8 @@ export function createHtmlElementTexture(
         setUnpackState(target, invertY, premultiplyAlpha);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, g.RGBA, g.UNSIGNED_BYTE, element);
-        [tex.width, tex.height] = getTexImageSourceSize(element);
-        if (generateMipMaps) {
+        setTexImageSourceSize(tex, element);
+        if (tex._useMipMaps) {
             g.generateMipmap(g.TEXTURE_2D);
         }
     };
@@ -55,6 +55,7 @@ export function createHtmlElementTexture(
         _upload: upload,
         _initializeParameters: initializeParameters,
         _wasReady: true,
+        _useMipMaps: generateMipMaps,
     };
     upload(engine);
     initializeParameters(engine);

@@ -132,6 +132,16 @@ export interface GLTexture {
      * @internal
      */
     _dynParamsHandle?: WebGLTexture | null;
+    /**
+     * Whether the texture's sampling uses a mip chain (≙ Babylon
+     * `InternalTexture.useMipMaps`). Upload closures regenerate the chain after
+     * every upload — including `webglcontextrestored` replay — while it is set,
+     * and preset {@link updateTextureSamplingMode} calls keep the mipmapped min
+     * filter. Seeded from the `generateMipMaps` option; set by a preset update
+     * with `generateMipMaps: true`.
+     * @internal
+     */
+    _useMipMaps?: boolean;
 }
 
 /**
@@ -188,9 +198,10 @@ export function resolveTextureOptions(gl: WebGL2RenderingContext, options: GLTex
     const nearest = mode === 1; /* NEAREST */
     const mips = o.generateMipMaps ?? trilinear;
     const linearOrNearest = nearest ? gl.NEAREST : gl.LINEAR;
+    const clamp = gl.CLAMP_TO_EDGE;
     // Presets are 1..3, so `mode` is truthy exactly when one is set.
     const presetMin = mips && mode ? (nearest ? gl.NEAREST_MIPMAP_LINEAR : trilinear ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR_MIPMAP_NEAREST) : linearOrNearest;
-    return [o.minFilter ?? presetMin, o.magFilter ?? linearOrNearest, o.wrapS ?? gl.CLAMP_TO_EDGE, o.wrapT ?? gl.CLAMP_TO_EDGE, mips, !!o.invertY, !!o.premultiplyAlpha];
+    return [o.minFilter ?? presetMin, o.magFilter ?? linearOrNearest, o.wrapS ?? clamp, o.wrapT ?? clamp, mips, !!o.invertY, !!o.premultiplyAlpha];
 }
 
 /** Size-bearing fields across the `TexImageSource` variants. @internal */
@@ -205,15 +216,14 @@ interface TexImageSourceSize {
     displayHeight?: number;
 }
 
-/** Pixel size of a `TexImageSource` as `texImage2D` will upload it: the
- *  intrinsic size for video (`videoWidth`), image (`naturalWidth`) and
- *  `VideoFrame` (`displayWidth`) sources, `width`/`height` otherwise. Clamped to
- *  ≥ 1. @internal */
-export function getTexImageSourceSize(source: TexImageSourceSize): [number, number] {
-    return [
-        (source.videoWidth ?? source.naturalWidth ?? source.displayWidth ?? source.width) || 1,
-        (source.videoHeight ?? source.naturalHeight ?? source.displayHeight ?? source.height) || 1,
-    ];
+/** Write the pixel size of a `TexImageSource` as `texImage2D` will upload it
+ *  into `tex.width` / `tex.height`: the intrinsic size for video
+ *  (`videoWidth`), image (`naturalWidth`) and `VideoFrame` (`displayWidth`)
+ *  sources, `width`/`height` otherwise. Clamped to ≥ 1. Allocation-free — it
+ *  runs on every dynamic / HTML-element re-upload. @internal */
+export function setTexImageSourceSize(tex: GLTexture, source: TexImageSourceSize): void {
+    tex.width = (source.videoWidth ?? source.naturalWidth ?? source.displayWidth ?? source.width) || 1;
+    tex.height = (source.videoHeight ?? source.naturalHeight ?? source.displayHeight ?? source.height) || 1;
 }
 
 /** Uint8 / float raw texture upload. The pixel data can be replaced later via
@@ -254,7 +264,7 @@ export function createRawTexture(
         setUnpackState(target, invertY, premultiplyAlpha, curAlign);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
-        if (generateMipMaps) {
+        if (tex._useMipMaps) {
             g.generateMipmap(g.TEXTURE_2D);
         }
     };
@@ -274,6 +284,7 @@ export function createRawTexture(
         _upload: upload,
         _initializeParameters: initializeParameters,
         _wasReady: true,
+        _useMipMaps: generateMipMaps,
     };
     tex._updateRaw = (target: GLEngineContext, newData: ArrayBufferView | null, newWidth: number, newHeight: number, unpackAlignment: number): void => {
         curData = newData;
@@ -372,9 +383,12 @@ export function updateRawTexture(
  * Babylon's `updateTextureSamplingMode`. Two forms:
  *
  * - `updateTextureSamplingMode(engine, tex, samplingMode, generateMipMaps?)` —
- *   Babylon-style {@link GLSamplingMode} preset. When `generateMipMaps` is true
- *   the mip chain is (re)generated once and the preset's mipmapped min filter is
- *   used; otherwise the min filter never samples mips.
+ *   Babylon-style {@link GLSamplingMode} preset. The preset's mipmapped min
+ *   filter is used when the texture already uses mips (`generateMipMaps`
+ *   creation option or an earlier preset update) or `generateMipMaps` is true
+ *   (≙ Babylon's `texture.useMipMaps || generateMipMaps`). When
+ *   `generateMipMaps` is true the chain is generated now and kept up to date on
+ *   later uploads and context restore.
  * - `updateTextureSamplingMode(engine, tex, minFilter, magFilter)` — raw GL
  *   filter enums.
  *
@@ -394,8 +408,9 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
     let magFilter = magOrMips as GLenum;
     if (typeof magOrMips !== "number") {
         // Preset form: GL filter enums are ≥ 0x2600, presets are 1..3.
-        [minFilter, magFilter] = resolveTextureOptions(gl, { samplingMode: modeOrMin as GLSamplingMode, generateMipMaps: magOrMips === true });
+        [minFilter, magFilter] = resolveTextureOptions(gl, { samplingMode: modeOrMin as GLSamplingMode, generateMipMaps: magOrMips === true || !!tex._useMipMaps });
         if (magOrMips === true) {
+            tex._useMipMaps = true;
             gl.generateMipmap(gl.TEXTURE_2D);
         }
     }
@@ -455,6 +470,7 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
         const [minFilter, magFilter, wrapS, wrapT, generateMipMaps] = resolveTextureOptions(gl, options);
         bindTextureForUpload(engine, handle);
         setBoundTextureParams(gl, minFilter, magFilter, wrapS, wrapT);
+        tex._useMipMaps = generateMipMaps;
         if (generateMipMaps) {
             gl.generateMipmap(gl.TEXTURE_2D);
         }
@@ -495,7 +511,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         } else {
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, placeholderPixels);
         }
-        if (generateMipMaps) {
+        if (tex._useMipMaps) {
             g.generateMipmap(g.TEXTURE_2D);
         }
     };
@@ -515,6 +531,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         _upload: upload,
         _initializeParameters: initializeParameters,
         _wasReady: false,
+        _useMipMaps: generateMipMaps,
     };
     // Placeholder upload — makes the texture sampleable before the real image arrives.
     upload(engine);

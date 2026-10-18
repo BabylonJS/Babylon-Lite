@@ -463,7 +463,9 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 
 /** Preset form (≙ Babylon `updateTextureSamplingMode`): derives filters from
- *  the preset and, when `generateMipMaps` is true, builds the mip chain. */
+ *  the preset, keeping the mipmapped min filter when the texture already uses
+ *  mips (≙ `texture.useMipMaps || generateMipMaps`). `generateMipMaps: true`
+ *  builds the chain now and keeps it current on later uploads and restore. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /** Raw form: explicit GL min/mag filters. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;

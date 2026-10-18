@@ -9,6 +9,7 @@ import {
     createTextureFromHandle,
     loadTexture2D,
     updateDynamicTexture,
+    updateRawTexture,
     updateTextureSamplingMode,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockGL } from "./_lite-gl-mock";
@@ -105,6 +106,25 @@ describe("lite-gl GLTextureOptions — samplingMode / generateMipMaps (#81)", ()
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
+    it("blank dynamic textures build their mip chain so a mipmapped filter is complete", () => {
+        const { mock, canvas, engine } = setup();
+        const tex = createDynamicTexture(engine, 4, 4, { samplingMode: GLSamplingMode.TRILINEAR });
+        expect(mock.count("generateMipmap")).toBe(1);
+        updateDynamicTexture(engine, tex, fakeSource(4, 4));
+        clearDynamicTextureSource(engine, tex);
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(mock.count("generateMipmap")).toBe(1);
+    });
+
+    it("dynamic size tracking prefers the source's intrinsic size", () => {
+        const { engine } = setup();
+        const tex = createDynamicTexture(engine, 4, 4);
+        updateDynamicTexture(engine, tex, { videoWidth: 32, videoHeight: 16, width: 1, height: 1 } as unknown as TexImageSource);
+        expect([tex.width, tex.height]).toEqual([32, 16]);
+    });
+
     it("html element textures honor premultiplyAlpha", () => {
         const { mock, engine, gl } = setup();
         createHtmlElementTexture(engine, fakeSource(2, 2) as HTMLCanvasElement, { premultiplyAlpha: true });
@@ -152,6 +172,33 @@ describe("lite-gl updateTextureSamplingMode overloads (#81)", () => {
         updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
         expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(1);
+    });
+
+    it("preset form keeps the mip chain of a texture that already uses mips (≙ Babylon useMipMaps)", () => {
+        const { mock, engine, gl } = setup();
+        const tex = raw(engine, { samplingMode: GLSamplingMode.TRILINEAR });
+        mock.clear();
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR);
+        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.NEAREST);
+        expect(filters(mock, gl)).toEqual([gl.NEAREST_MIPMAP_LINEAR, gl.NEAREST]);
+        expect(mock.count("generateMipmap")).toBe(0);
+    });
+
+    it("preset form with generateMipMaps: true keeps mips up to date on later uploads and restore", () => {
+        const { mock, canvas, engine, gl } = setup();
+        const tex = raw(engine);
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR, true);
+        mock.clear();
+        updateRawTexture(engine, tex, new Uint8Array(4));
+        expect(mock.count("generateMipmap")).toBe(1);
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(mock.count("generateMipmap")).toBe(1);
+        // A later preset update without the flag still samples the (rebuilt) chain.
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR);
+        expect(filters(mock, gl)[0]).toBe(gl.LINEAR_MIPMAP_NEAREST);
     });
 
     it("raw form still sets the given GL filters", () => {
