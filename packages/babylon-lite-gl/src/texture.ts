@@ -2,13 +2,13 @@ import type { GLEngineContext } from "./context.js";
 
 /** High-level sampling presets, mirroring Babylon's `Texture.*_SAMPLINGMODE`
  *  numeric constants. Resolve one to GL min/mag filters with
- *  {@link getSamplingModeFilters} (≙ Babylon's `_getSamplingParameters`); the
- *  min filter only samples the mip chain when the texture has mipmaps. */
+ *  {@link getSamplingModeFilters} (≙ Babylon's `_getSamplingParameters`); only
+ *  `TRILINEAR` samples the mip chain, and only when the texture has mipmaps. */
 export const GLSamplingMode = {
-    /** Nearest mag; nearest min (`NEAREST_MIPMAP_LINEAR` with mipmaps).
+    /** Nearest mag; nearest min, even with mipmaps.
      *  (`Texture.NEAREST_SAMPLINGMODE`) */
     NEAREST: 1,
-    /** Linear mag; linear min (`LINEAR_MIPMAP_NEAREST` with mipmaps).
+    /** Linear mag; linear min, even with mipmaps.
      *  (`Texture.BILINEAR_SAMPLINGMODE`) */
     BILINEAR: 2,
     /** Linear mag; linear min (`LINEAR_MIPMAP_LINEAR` with mipmaps).
@@ -200,11 +200,14 @@ export interface GLSamplingFilters {
  * Pure (no GL context needed; WebGL filter enums are spec constants) and
  * tree-shaken unless imported, so preset-free bundles ship none of it.
  *
- * | Preset      | min (no mips) | min (mips)              | mag       |
- * | ----------- | ------------- | ----------------------- | --------- |
- * | `NEAREST`   | `NEAREST`     | `NEAREST_MIPMAP_LINEAR` | `NEAREST` |
- * | `BILINEAR`  | `LINEAR`      | `LINEAR_MIPMAP_NEAREST` | `LINEAR`  |
- * | `TRILINEAR` | `LINEAR`      | `LINEAR_MIPMAP_LINEAR`  | `LINEAR`  |
+ * | Preset      | min (no mips) | min (mips)             | mag       |
+ * | ----------- | ------------- | ---------------------- | --------- |
+ * | `NEAREST`   | `NEAREST`     | `NEAREST`              | `NEAREST` |
+ * | `BILINEAR`  | `LINEAR`      | `LINEAR`               | `LINEAR`  |
+ * | `TRILINEAR` | `LINEAR`      | `LINEAR_MIPMAP_LINEAR` | `LINEAR`  |
+ *
+ * Babylon's mipmapped nearest / bilinear variants are separate modes
+ * (`NEAREST_LINEAR_MIPNEAREST` …); pass their raw filters instead.
  *
  * @example
  * ```ts
@@ -219,14 +222,9 @@ export interface GLSamplingFilters {
  * @returns The preset's `{ minFilter, magFilter }`.
  */
 export function getSamplingModeFilters(samplingMode: GLSamplingMode, useMipMaps = false): GLSamplingFilters {
-    const nearest = samplingMode === GLSamplingMode.NEAREST;
-    // WebGL filter enums: NEAREST 0x2600, LINEAR 0x2601, LINEAR_MIPMAP_NEAREST
-    // 0x2701, NEAREST_MIPMAP_LINEAR 0x2702, LINEAR_MIPMAP_LINEAR 0x2703.
-    const magFilter = nearest ? 0x2600 : 0x2601;
-    if (!useMipMaps) {
-        return { minFilter: magFilter, magFilter };
-    }
-    return { minFilter: nearest ? 0x2702 : samplingMode === GLSamplingMode.TRILINEAR ? 0x2703 : 0x2701, magFilter };
+    // WebGL filter enums: NEAREST 0x2600, LINEAR 0x2601, LINEAR_MIPMAP_LINEAR 0x2703.
+    const magFilter = samplingMode === GLSamplingMode.NEAREST ? 0x2600 : 0x2601;
+    return { minFilter: useMipMaps && samplingMode === GLSamplingMode.TRILINEAR ? 0x2703 : magFilter, magFilter };
 }
 
 /** Size-bearing fields across the `TexImageSource` variants. @internal */
@@ -431,10 +429,12 @@ export function updateRawTexture(
 /**
  * Update a texture's sampling mode from a Babylon-style preset — the lite-gl
  * equivalent of Babylon's
- * `updateTextureSamplingMode(samplingMode, texture, generateMipMaps)`. The filters come from {@link getSamplingModeFilters},
- * using the mipmapped min filter when the texture already has mipmaps (from
- * {@link generateTextureMipMaps}) or `generateMipMaps` is true; in the latter
- * case the chain is generated (and retained) right after the filters are set.
+ * `updateTextureSamplingMode(samplingMode, texture, generateMipMaps)`. The
+ * filters come from {@link getSamplingModeFilters}, using the mipmapped
+ * `TRILINEAR` min filter when the texture already has mipmaps (from
+ * {@link generateTextureMipMaps}) or `generateMipMaps` is true. Like Babylon,
+ * `generateMipMaps` only generates (and retains) the chain for `TRILINEAR`,
+ * right after the filters are set; `NEAREST` / `BILINEAR` never sample mips.
  *
  * Binds for upload (unit 0) so the `texParameteri` lands on this texture. The
  * change is not replayed on `webglcontextrestored` (creation options are).
@@ -443,7 +443,7 @@ export function updateRawTexture(
  * @param engine - The engine.
  * @param tex - The texture to update.
  * @param samplingMode - The {@link GLSamplingMode} preset.
- * @param generateMipMaps - Generate the mip chain now. Default false.
+ * @param generateMipMaps - Generate the mip chain now (`TRILINEAR` only). Default false.
  */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /**
@@ -470,7 +470,8 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
     if (typeof magFilterOrGenerateMipMaps === "number") {
         magFilter = magFilterOrGenerateMipMaps;
     } else {
-        generateMipMaps = magFilterOrGenerateMipMaps === true;
+        // ≙ Babylon: mips are generated only for a mipmapped preset (`TRILINEAR`).
+        generateMipMaps = magFilterOrGenerateMipMaps === true && modeOrMinFilter === GLSamplingMode.TRILINEAR;
         const filters = getSamplingModeFilters(modeOrMinFilter as GLSamplingMode, generateMipMaps || tex._hasMipMaps === true);
         minFilter = filters.minFilter;
         magFilter = filters.magFilter;

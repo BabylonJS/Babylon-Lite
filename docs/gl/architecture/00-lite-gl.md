@@ -470,7 +470,7 @@ export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture):
 
 /** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
  *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
- *  `generateMipMaps` the chain is generated (and retained) afterwards. */
+ *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained). */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /** Raw GL min/mag filters overload. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
@@ -490,11 +490,15 @@ export interface GLTextureUpdateOptions {
 
 `getSamplingModeFilters` maps presets as in Babylon's `_getSamplingParameters`:
 
-| Preset      | min (no mips) | min (mips)            | mag     |
-| ----------- | ------------- | --------------------- | ------- |
-| `NEAREST`   | NEAREST       | NEAREST_MIPMAP_LINEAR | NEAREST |
-| `BILINEAR`  | LINEAR        | LINEAR_MIPMAP_NEAREST | LINEAR  |
-| `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR  | LINEAR  |
+| Preset      | min (no mips) | min (mips)           | mag     |
+| ----------- | ------------- | -------------------- | ------- |
+| `NEAREST`   | NEAREST       | NEAREST              | NEAREST |
+| `BILINEAR`  | LINEAR        | LINEAR               | LINEAR  |
+| `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR | LINEAR  |
+
+Like Babylon, only `TRILINEAR` samples mips, and the preset
+`updateTextureSamplingMode` overload generates the chain only for it. Babylon's
+mipmapped nearest/bilinear variants are separate modes — pass raw filters.
 
 Without a preset, filters default to LINEAR/LINEAR even when mips are
 generated; a mipmapped preset (`useMipMaps: true`) requires a
@@ -697,6 +701,8 @@ export function createHtmlElementTexture(
 ): GLTexture;
 
 /** Re-uploads from the source element (≙ `HtmlElementTexture.update(invertY)`).
+ *  `invertY` is the raw `UNPACK_FLIP_Y_WEBGL` for every element type, whereas
+ *  Babylon flips video with `!invertY` — port video calls as `{ invertY: !invertY }`.
  *  No-op when the context is lost/disposed or the texture is disposed. */
 export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture, options?: GLTextureUpdateOptions): void;
 ```
@@ -1746,7 +1752,7 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `effectWrapper.effect = existingEffect`                          | `createEffectWrapperFromEffect(engine, existingEffect)`                                        |
 | `texture.isReady()`                                              | `isTextureReady(engine, tex)`                                                                  |
 | `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(engine, tex, src, { invertY, premultiplyAlpha })`                        |
-| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(engine, tex, { invertY })`                                           |
+| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(engine, tex, { invertY })` (video: `!invertY`)                       |
 | `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
 | `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
 | `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                              |

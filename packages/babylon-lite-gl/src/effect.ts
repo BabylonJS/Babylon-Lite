@@ -214,25 +214,24 @@ function compileEffectProgram(gl: WebGL2RenderingContext, options: GLEffectOptio
  *  location resolution + one-shot sampler-unit `uniform1i` assignment +
  *  `_onCompiled` callbacks). Returns `true` once the effect is usable. */
 export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolean {
-    if (effect.isReady) {
-        return true;
+    if (
+        !effect.isReady &&
+        !effect._disposed &&
+        !engine._isLost &&
+        !engine._disposed &&
+        effect._compileError === null &&
+        isLinkComplete(engine.gl, effect.program, engine.caps.parallelShaderCompile)
+    ) {
+        const linkErr = getLinkError(engine.gl, effect.program, effect._vs, effect._fs);
+        if (linkErr !== null) {
+            recordCompilationError(effect, linkErr);
+        } else {
+            finalizeEffect(engine, effect);
+        }
     }
-    if (effect._disposed || engine._isLost || engine._disposed) {
-        return false;
-    }
-    if (effect._compileError !== null) {
-        return false;
-    }
-    if (!isLinkComplete(engine.gl, effect.program, engine.caps.parallelShaderCompile)) {
-        return false;
-    }
-    const linkErr = getLinkError(engine.gl, effect.program, effect._vs, effect._fs);
-    if (linkErr !== null) {
-        recordCompilationError(effect, linkErr);
-        return false;
-    }
-    finalizeEffect(engine, effect);
-    return true;
+    // Read back rather than returning `true` after finalization: a ready
+    // callback may have disposed the effect or engine (or lost the context).
+    return effect.isReady;
 }
 
 /** Poll readiness once and return the recorded compile/link/restore diagnostic.

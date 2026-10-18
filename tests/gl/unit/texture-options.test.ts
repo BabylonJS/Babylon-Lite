@@ -56,10 +56,10 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         expect(getSamplingModeFilters(GLSamplingMode.TRILINEAR)).toEqual({ minFilter: gl.LINEAR, magFilter: gl.LINEAR });
     });
 
-    it("uses the mipmapped min filters when useMipMaps is true", () => {
+    it("only TRILINEAR uses a mipmapped min filter when useMipMaps is true (≙ Babylon modes 1/2/3)", () => {
         const { gl } = setup();
-        expect(getSamplingModeFilters(GLSamplingMode.NEAREST, true)).toEqual({ minFilter: gl.NEAREST_MIPMAP_LINEAR, magFilter: gl.NEAREST });
-        expect(getSamplingModeFilters(GLSamplingMode.BILINEAR, true)).toEqual({ minFilter: gl.LINEAR_MIPMAP_NEAREST, magFilter: gl.LINEAR });
+        expect(getSamplingModeFilters(GLSamplingMode.NEAREST, true)).toEqual({ minFilter: gl.NEAREST, magFilter: gl.NEAREST });
+        expect(getSamplingModeFilters(GLSamplingMode.BILINEAR, true)).toEqual({ minFilter: gl.LINEAR, magFilter: gl.LINEAR });
         expect(getSamplingModeFilters(GLSamplingMode.TRILINEAR, true)).toEqual({ minFilter: gl.LINEAR_MIPMAP_LINEAR, magFilter: gl.LINEAR });
     });
 
@@ -99,11 +99,21 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR, true);
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_NEAREST, gl.LINEAR]);
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
+        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(1);
         updateRawTexture(engine, tex, new Uint8Array(4));
         expect(mock.count("generateMipmap")).toBe(2);
+    });
+
+    it("updateTextureSamplingMode preset ignores generateMipMaps for non-mipmapped presets (≙ Babylon hasMipMaps)", () => {
+        const { mock, engine, gl } = setup();
+        const tex = raw(engine);
+        mock.clear();
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR, true);
+        expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.LINEAR]);
+        expect(mock.count("generateMipmap")).toBe(0);
+        expect(tex._hasMipMaps).not.toBe(true);
     });
 
     it("updateTextureSamplingMode preset uses mip filters once the texture has mipmaps", () => {
@@ -111,8 +121,10 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const tex = raw(engine);
         generateTextureMipMaps(engine, tex);
         mock.clear();
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR);
+        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         updateTextureSamplingMode(engine, tex, GLSamplingMode.NEAREST);
-        expect(filters(mock, gl)).toEqual([gl.NEAREST_MIPMAP_LINEAR, gl.NEAREST]);
+        expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 

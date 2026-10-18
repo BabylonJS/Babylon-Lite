@@ -163,7 +163,8 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  @returns `true` when the effect is ready and now current; `false` when
  *   nothing was bound. */
 export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean {
-    if (wrapper._disposed || !isEffectReady(engine, wrapper.effect)) {
+    // Poll first: ready callbacks fired by the poll may dispose the wrapper.
+    if (!isEffectReady(engine, wrapper.effect) || wrapper._disposed) {
         return false;
     }
     ensureQuad(engine);

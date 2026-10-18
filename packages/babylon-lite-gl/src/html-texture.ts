@@ -79,6 +79,10 @@ export function createHtmlElementTexture(
  *  created by {@link createHtmlElementTexture}. No-op when the context is
  *  lost/disposed or the texture is disposed.
  *
+ *  `invertY` is always the raw `UNPACK_FLIP_Y_WEBGL` value. Babylon flips
+ *  video elements with `!invertY`, so port `videoTexture.update(invertY)` as
+ *  `{ invertY: !invertY }` (canvas / image calls map directly).
+ *
  *  @param engine - The engine that owns the texture.
  *  @param tex - A texture created by {@link createHtmlElementTexture}.
  *  @param options - Per-update `invertY` / `premultiplyAlpha`; each defaults to

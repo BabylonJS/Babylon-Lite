@@ -560,6 +560,27 @@ describe("lite-gl: effect wrapper ownership", () => {
         vi.restoreAllMocks();
     });
 
+    it("applyEffectWrapper binds nothing when a ready callback disposes the wrapper or engine (#82)", () => {
+        for (const disposeEngine of [false, true]) {
+            const mock = createMockGL();
+            mock.setParallelComplete(false);
+            const engine = createGLEngine(createMockCanvas(mock));
+            const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+            executeWhenCompiled(engine, wrapper.effect, () => {
+                if (disposeEngine) {
+                    disposeGLEngine(engine);
+                } else {
+                    disposeEffectWrapper(engine, wrapper);
+                }
+            });
+            mock.setParallelComplete(true);
+            mock.clear();
+            expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+            expect(mock.count("createVertexArray")).toBe(0);
+            expect(mock.count("bindVertexArray")).toBe(0);
+        }
+    });
+
     it("createEffectWrapperFromEffect wraps an existing effect with its own reference (#82)", () => {
         const { mock, engine, effect } = makeReadyEffect();
         mock.clear();
