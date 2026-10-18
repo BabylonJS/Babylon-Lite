@@ -84,10 +84,11 @@ export {
     updateTextureSamplingMode,
     updateTextureWrapMode,
     createTextureFromHandle,
+    getSamplingModeFilters,
     // GLSamplingMode is a const + same-name type; one value re-export carries both.
     GLSamplingMode,
 } from "./texture.js";
-export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export type { GLTextureOptions, GLFloatTextureOptions, GLTexture, GLSamplingFilters } from "./texture.js";
 export { createTextureFromSource } from "./texture-source.js";
 export type { GLTextureSourceOptions } from "./texture-source.js";
 export {

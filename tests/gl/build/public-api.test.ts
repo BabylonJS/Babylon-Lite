@@ -138,6 +138,7 @@ describe("babylon-lite-gl build output", () => {
             "updateTextureSamplingMode",
             "updateTextureWrapMode",
             "createTextureFromHandle",
+            "getSamplingModeFilters",
             // dynamic textures
             "createDynamicTexture",
             "updateDynamicTexture",

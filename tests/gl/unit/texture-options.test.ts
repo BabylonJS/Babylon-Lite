@@ -7,6 +7,8 @@ import {
     createHtmlElementTexture,
     createRawTexture,
     createTextureFromHandle,
+    generateTextureMipMaps,
+    getSamplingModeFilters,
     loadTexture2D,
     updateDynamicTexture,
     updateRawTexture,
@@ -43,53 +45,72 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-describe("lite-gl GLTextureOptions — samplingMode / generateMipMaps (#81)", () => {
-    it("defaults to LINEAR / LINEAR without mipmaps", () => {
+describe("lite-gl getSamplingModeFilters (#81)", () => {
+    it("maps presets like Babylon's _getSamplingParameters, without mipmaps by default", () => {
+        const { gl } = setup();
+        expect(getSamplingModeFilters(GLSamplingMode.NEAREST)).toEqual({ minFilter: gl.NEAREST, magFilter: gl.NEAREST });
+        expect(getSamplingModeFilters(GLSamplingMode.BILINEAR)).toEqual({ minFilter: gl.LINEAR, magFilter: gl.LINEAR });
+        expect(getSamplingModeFilters(GLSamplingMode.TRILINEAR)).toEqual({ minFilter: gl.LINEAR, magFilter: gl.LINEAR });
+    });
+
+    it("uses the mipmapped min filters when useMipMaps is true", () => {
+        const { gl } = setup();
+        expect(getSamplingModeFilters(GLSamplingMode.NEAREST, true)).toEqual({ minFilter: gl.NEAREST_MIPMAP_LINEAR, magFilter: gl.NEAREST });
+        expect(getSamplingModeFilters(GLSamplingMode.BILINEAR, true)).toEqual({ minFilter: gl.LINEAR_MIPMAP_NEAREST, magFilter: gl.LINEAR });
+        expect(getSamplingModeFilters(GLSamplingMode.TRILINEAR, true)).toEqual({ minFilter: gl.LINEAR_MIPMAP_LINEAR, magFilter: gl.LINEAR });
+    });
+
+    it("spreads into factory options, with later explicit filters taking precedence", () => {
         const { mock, engine, gl } = setup();
         raw(engine);
         expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.LINEAR]);
+        raw(engine, { ...getSamplingModeFilters(GLSamplingMode.NEAREST) });
+        expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
+        raw(engine, { ...getSamplingModeFilters(GLSamplingMode.NEAREST), minFilter: gl.LINEAR });
+        expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.NEAREST]);
+        createDynamicTexture(engine, 4, 4, { ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) });
+        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
-    it("NEAREST preset → NEAREST / NEAREST", () => {
+    it("feeds updateTextureSamplingMode", () => {
         const { mock, engine, gl } = setup();
-        raw(engine, { samplingMode: GLSamplingMode.NEAREST });
+        const tex = raw(engine);
+        mock.clear();
+        const { minFilter, magFilter } = getSamplingModeFilters(GLSamplingMode.NEAREST);
+        updateTextureSamplingMode(engine, tex, minFilter, magFilter);
         expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
-    it("TRILINEAR preset generates mipmaps by default and uses LINEAR_MIPMAP_LINEAR", () => {
+    it("createTextureFromHandle applies spread preset filters once, without uploading", () => {
         const { mock, engine, gl } = setup();
-        raw(engine, { samplingMode: GLSamplingMode.TRILINEAR });
+        const handle = gl.createTexture() as WebGLTexture;
+        mock.clear();
+        createTextureFromHandle(engine, handle, 4, 4, { ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) });
         expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
+        expect(mock.count("texImage2D")).toBe(0);
+    });
+});
+
+describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
+    it("generates now, and not before it is called", () => {
+        const { mock, engine } = setup();
+        const tex = raw(engine);
+        updateRawTexture(engine, tex, new Uint8Array(4));
+        expect(mock.count("generateMipmap")).toBe(0);
+        generateTextureMipMaps(engine, tex);
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
-    it("TRILINEAR with generateMipMaps: false never samples the (missing) mip chain", () => {
-        const { mock, engine, gl } = setup();
-        raw(engine, { samplingMode: GLSamplingMode.TRILINEAR, generateMipMaps: false });
-        expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.LINEAR]);
-        expect(mock.count("generateMipmap")).toBe(0);
-    });
-
-    it("BILINEAR / NEAREST with generateMipMaps: true use Babylon's mipmapped min filters", () => {
-        const { mock, engine, gl } = setup();
-        raw(engine, { samplingMode: GLSamplingMode.BILINEAR, generateMipMaps: true });
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_NEAREST, gl.LINEAR]);
-        raw(engine, { samplingMode: GLSamplingMode.NEAREST, generateMipMaps: true });
-        expect(filters(mock, gl)).toEqual([gl.NEAREST_MIPMAP_LINEAR, gl.NEAREST]);
-        expect(mock.count("generateMipmap")).toBe(2);
-    });
-
-    it("explicit minFilter / magFilter take precedence over the preset", () => {
-        const { mock, engine, gl } = setup();
-        raw(engine, { samplingMode: GLSamplingMode.NEAREST, minFilter: gl.LINEAR });
-        expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.NEAREST]);
-    });
-
-    it("regenerates mipmaps on context restore", () => {
+    it("rebuilds the chain after updateRawTexture and on context restore", () => {
         const { mock, canvas, engine } = setup();
-        raw(engine, { generateMipMaps: true });
+        const tex = raw(engine);
+        generateTextureMipMaps(engine, tex);
+        mock.clear();
+        updateRawTexture(engine, tex, new Uint8Array(4));
+        expect(mock.count("texImage2D")).toBe(1);
+        expect(mock.count("generateMipmap")).toBe(1);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -97,20 +118,25 @@ describe("lite-gl GLTextureOptions — samplingMode / generateMipMaps (#81)", ()
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
-    it("dynamic textures honor samplingMode and regenerate mips after each update", () => {
-        const { mock, engine, gl } = setup();
-        const tex = createDynamicTexture(engine, 4, 4, { samplingMode: GLSamplingMode.TRILINEAR });
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
+    it("wraps the upload only once when called repeatedly", () => {
+        const { mock, canvas, engine } = setup();
+        const tex = raw(engine);
+        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(engine, tex);
+        expect(mock.count("generateMipmap")).toBe(2);
+        fireLost(canvas);
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(4, 4));
+        fireRestored(canvas);
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
-    it("blank dynamic textures build their mip chain so a mipmapped filter is complete", () => {
+    it("rebuilds the chain after each dynamic update and for the blank re-allocation on restore", () => {
         const { mock, canvas, engine } = setup();
-        const tex = createDynamicTexture(engine, 4, 4, { samplingMode: GLSamplingMode.TRILINEAR });
-        expect(mock.count("generateMipmap")).toBe(1);
+        const tex = createDynamicTexture(engine, 4, 4);
+        generateTextureMipMaps(engine, tex);
+        mock.clear();
         updateDynamicTexture(engine, tex, fakeSource(4, 4));
+        expect(mock.count("generateMipmap")).toBe(1);
         clearDynamicTextureSource(engine, tex);
         fireLost(canvas);
         mock.clear();
@@ -118,6 +144,32 @@ describe("lite-gl GLTextureOptions — samplingMode / generateMipMaps (#81)", ()
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
+    it("rebuilds the chain when the loadTexture2D image arrives", async () => {
+        vi.stubGlobal("fetch", () => Promise.resolve({ ok: true, blob: () => Promise.resolve({}) }));
+        vi.stubGlobal("createImageBitmap", () => Promise.resolve({ width: 8, height: 4, close: () => undefined } as ImageBitmap));
+        const { mock, engine } = setup();
+        let tex: ReturnType<typeof loadTexture2D> | undefined;
+        const loaded = new Promise<void>((resolve) => {
+            tex = loadTexture2D(engine, "x.png", undefined, () => resolve());
+        });
+        generateTextureMipMaps(engine, tex!);
+        mock.clear();
+        await loaded;
+        expect(mock.count("texImage2D")).toBe(1);
+        expect(mock.count("generateMipmap")).toBe(1);
+    });
+
+    it("is a no-op while the context is lost", () => {
+        const { mock, canvas, engine } = setup();
+        const tex = raw(engine);
+        fireLost(canvas);
+        mock.clear();
+        generateTextureMipMaps(engine, tex);
+        expect(mock.count("generateMipmap")).toBe(0);
+    });
+});
+
+describe("lite-gl texture upload options (#81)", () => {
     it("dynamic size tracking prefers the source's intrinsic size", () => {
         const { engine } = setup();
         const tex = createDynamicTexture(engine, 4, 4);
@@ -131,82 +183,17 @@ describe("lite-gl GLTextureOptions — samplingMode / generateMipMaps (#81)", ()
         expect(pixelStore(mock, gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)).toBe(1);
     });
 
-    it("createTextureFromHandle applies samplingMode and a one-shot mip generation", () => {
-        const { mock, engine, gl } = setup();
-        const handle = gl.createTexture() as WebGLTexture;
-        mock.clear();
-        createTextureFromHandle(engine, handle, 4, 4, { samplingMode: GLSamplingMode.TRILINEAR });
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
-        expect(mock.count("generateMipmap")).toBe(1);
-        expect(mock.count("texImage2D")).toBe(0);
-    });
-
     it("loadTexture2D decodes with the requested premultiplyAlpha / invertY", async () => {
         const decode = vi.fn((_blob: Blob, _opts: ImageBitmapOptions) => Promise.resolve({ width: 8, height: 4, close: () => undefined } as ImageBitmap));
         vi.stubGlobal("fetch", () => Promise.resolve({ ok: true, blob: () => Promise.resolve({}) }));
         vi.stubGlobal("createImageBitmap", decode);
         const { mock, engine, gl } = setup();
         const loaded = new Promise<void>((resolve) => {
-            loadTexture2D(engine, "x.png", { premultiplyAlpha: true, invertY: true, samplingMode: GLSamplingMode.NEAREST }, () => resolve());
+            loadTexture2D(engine, "x.png", { premultiplyAlpha: true, invertY: true, ...getSamplingModeFilters(GLSamplingMode.NEAREST) }, () => resolve());
         });
         expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
         await loaded;
         expect(decode.mock.calls[0]?.[1]).toEqual({ premultiplyAlpha: "premultiply", imageOrientation: "flipY" });
-    });
-});
-
-describe("lite-gl updateTextureSamplingMode overloads (#81)", () => {
-    it("preset form resolves Babylon filters", () => {
-        const { mock, engine, gl } = setup();
-        const tex = raw(engine);
-        mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.NEAREST);
-        expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
-        expect(mock.count("generateMipmap")).toBe(0);
-    });
-
-    it("preset form with generateMipMaps: true generates the mip chain once", () => {
-        const { mock, engine, gl } = setup();
-        const tex = raw(engine);
-        mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
-        expect(mock.count("generateMipmap")).toBe(1);
-    });
-
-    it("preset form keeps the mip chain of a texture that already uses mips (≙ Babylon useMipMaps)", () => {
-        const { mock, engine, gl } = setup();
-        const tex = raw(engine, { samplingMode: GLSamplingMode.TRILINEAR });
-        mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR);
-        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.NEAREST);
-        expect(filters(mock, gl)).toEqual([gl.NEAREST_MIPMAP_LINEAR, gl.NEAREST]);
-        expect(mock.count("generateMipmap")).toBe(0);
-    });
-
-    it("preset form with generateMipMaps: true keeps mips up to date on later uploads and restore", () => {
-        const { mock, canvas, engine, gl } = setup();
-        const tex = raw(engine);
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR, true);
-        mock.clear();
-        updateRawTexture(engine, tex, new Uint8Array(4));
-        expect(mock.count("generateMipmap")).toBe(1);
-        fireLost(canvas);
-        mock.clear();
-        fireRestored(canvas);
-        expect(mock.count("generateMipmap")).toBe(1);
-        // A later preset update without the flag still samples the (rebuilt) chain.
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR);
-        expect(filters(mock, gl)[0]).toBe(gl.LINEAR_MIPMAP_NEAREST);
-    });
-
-    it("raw form still sets the given GL filters", () => {
-        const { mock, engine, gl } = setup();
-        const tex = raw(engine);
-        mock.clear();
-        updateTextureSamplingMode(engine, tex, gl.NEAREST, gl.LINEAR);
-        expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.LINEAR]);
     });
 });
 

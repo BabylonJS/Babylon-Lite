@@ -12,13 +12,13 @@
  * internally and replayed into the fresh handle on `webglcontextrestored` by the
  * engine's standard context-restore protocol.
  */
-import { bindTextureForUpload, resolveTextureOptions, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
-/** Options for {@link createDynamicTexture}: the shared {@link GLTextureOptions}
- *  (`invertY` / `premultiplyAlpha` become the defaults of every
- *  {@link updateDynamicTexture} call that omits them; `generateMipMaps`
- *  regenerates the chain after each update that carries a source). */
+/** Options for {@link createDynamicTexture}: the shared {@link GLTextureOptions}.
+ *  `invertY` / `premultiplyAlpha` become the defaults of every
+ *  {@link updateDynamicTexture} call that omits them. For mipmaps, call
+ *  `generateTextureMipMaps` once; every later update rebuilds the chain. */
 export type GLDynamicTextureOptions = GLTextureOptions;
 
 /** Create a texture backed by an empty (blank) `width × height` RGBA8
@@ -44,7 +44,13 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
     }
     const w = Math.max(1, width | 0);
     const h = Math.max(1, height | 0);
-    const [minFilter, magFilter, wrapS, wrapT, generateMipMaps, invertY, premultiplyAlpha] = resolveTextureOptions(gl, options);
+    const opts = options ?? {};
+    const minFilter = opts.minFilter ?? gl.LINEAR;
+    const magFilter = opts.magFilter ?? gl.LINEAR;
+    const wrapS = opts.wrapS ?? gl.CLAMP_TO_EDGE;
+    const wrapT = opts.wrapT ?? gl.CLAMP_TO_EDGE;
+    const invertY = opts.invertY ?? false;
+    const premultiplyAlpha = opts.premultiplyAlpha ?? false;
 
     // Single `_upload` closure used for both the initial allocation AND every
     // `webglcontextrestored` replay AND every `updateDynamicTexture`. The pixel
@@ -67,11 +73,6 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
             tex.width = w;
             tex.height = h;
         }
-        // Also for the blank allocation, so a mipmapped min filter never
-        // samples an incomplete texture before the first update.
-        if (tex._useMipMaps) {
-            g.generateMipmap(g.TEXTURE_2D);
-        }
         if (tex._dynParamsHandle !== tex.handle) {
             setBoundTextureParams(g, minFilter, magFilter, wrapS, wrapT);
             tex._dynParamsHandle = tex.handle;
@@ -89,7 +90,6 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
         _upload: upload,
         _wasReady: true,
         _dynSource: null,
-        _useMipMaps: generateMipMaps,
     };
     upload(engine);
     engine._textures.add(tex);

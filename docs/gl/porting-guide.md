@@ -81,15 +81,16 @@ bit us:
   HTML-element uploads still honor `UNPACK_FLIP_Y_WEBGL`.)
 - **One options shape for every texture.** `createRawTexture`, `createFloatTexture`,
   `loadTexture2D`, `createTextureFromHandle`, `createDynamicTexture` and
-  `createHtmlElementTexture` all take `GLTextureOptions`: `samplingMode`
-  (`GLSamplingMode.NEAREST/BILINEAR/TRILINEAR` ≙ Babylon's `*_SAMPLINGMODE`),
-  `generateMipMaps` (default: `true` only for TRILINEAR), `invertY`,
-  `premultiplyAlpha`, and raw `minFilter`/`magFilter`/`wrapS`/`wrapT` (raw filters
-  win over the preset). Mips are rebuilt after every upload, including
-  dynamic/HTML re-uploads and context restore.
-- **Mipmaps on HTML-element textures must be requested.** TRILINEAR implies
-  `generateMipMaps: true`; for a frequently re-uploaded element prefer
-  **BILINEAR** (no per-upload mip rebuild). *(Learned porting InputGlow.)* For a fullscreen HTML-texture
+  `createHtmlElementTexture` all take `GLTextureOptions`: `invertY`,
+  `premultiplyAlpha` and raw `minFilter`/`magFilter`/`wrapS`/`wrapT`. Map a
+  Babylon `*_SAMPLINGMODE` by spreading
+  `getSamplingModeFilters(GLSamplingMode.X, useMipMaps)` into the options
+  (≙ Babylon's `_getSamplingParameters`; later explicit filters win).
+- **Mipmaps are an explicit call.** Babylon's `generateMipMaps` → call
+  `generateTextureMipMaps(engine, tex)` once; the chain is then rebuilt after
+  every later upload, including dynamic/HTML re-uploads and context restore.
+  For a frequently re-uploaded HTML element prefer **BILINEAR** without mips
+  (no per-upload mip rebuild). *(Learned porting InputGlow.)* For a fullscreen HTML-texture
   sampled with the built-in quad, you may also need an **in-shader V-flip** of the
   UV to match Babylon's orientation.
 - **Uploads target the *active* texture unit.** The bind cache elides re-binds for
@@ -187,7 +188,7 @@ In-repo, this harness is `tests/gl/parity/` driven by `scene-config-webgl.json`
 - [ ] Every lite-gl call takes `engine` first (`applyEffectWrapper(engine, w)`, `renderSprites(engine, r, …)`).
 - [ ] `applyEffectWrapper` **before** any `setEffect*` setter.
 - [ ] `createRawTexture` constants mapped to GL enums.
-- [ ] Babylon sampling modes mapped to `samplingMode` / `generateMipMaps`; `invertY` handled at decode for image loads.
+- [ ] Babylon sampling modes mapped via `getSamplingModeFilters` (+ `generateTextureMipMaps` for mips); `invertY` handled at decode for image loads.
 - [ ] No hand-rolled `texImage2D` after multi-sampler binds (use the update fns).
 - [ ] Babylon sprite reference uses `disableDepthWrite = true`.
 - [ ] Consumer-owned GL state rebuilt in `onContextRestored`.

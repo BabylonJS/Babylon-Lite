@@ -6,12 +6,13 @@
  * NeonBrush's `InputGlow`) tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
-import { bindTextureForUpload, resolveTextureOptions, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 
 /** Options for `createHtmlElementTexture` — the shared {@link GLTextureOptions}
- *  (including `samplingMode`, `generateMipMaps`, `invertY` and
- *  `premultiplyAlpha`), applied on creation, on every
- *  `updateHtmlElementTexture` and on `webglcontextrestored`. */
+ *  (including `invertY` and `premultiplyAlpha`), applied on creation, on every
+ *  `updateHtmlElementTexture` and on `webglcontextrestored`. For Babylon-style
+ *  presets spread `getSamplingModeFilters(...)`; for mipmaps call
+ *  `generateTextureMipMaps` once and every later update rebuilds the chain. */
 export type GLHtmlElementTextureOptions = GLTextureOptions;
 
 /** Create a texture backed by an `<canvas>` / `<img>` / `<video>` element.
@@ -27,7 +28,13 @@ export function createHtmlElementTexture(
     if (handle === null) {
         throw new Error("lite-gl: gl.createTexture returned null");
     }
-    const [minFilter, magFilter, wrapS, wrapT, generateMipMaps, invertY, premultiplyAlpha] = resolveTextureOptions(gl, options);
+    const opts = options ?? {};
+    const minFilter = opts.minFilter ?? gl.LINEAR;
+    const magFilter = opts.magFilter ?? gl.LINEAR;
+    const wrapS = opts.wrapS ?? gl.CLAMP_TO_EDGE;
+    const wrapT = opts.wrapT ?? gl.CLAMP_TO_EDGE;
+    const invertY = opts.invertY ?? false;
+    const premultiplyAlpha = opts.premultiplyAlpha ?? false;
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
@@ -35,9 +42,6 @@ export function createHtmlElementTexture(
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, g.RGBA, g.UNSIGNED_BYTE, element);
         setTexImageSourceSize(tex, element);
-        if (tex._useMipMaps) {
-            g.generateMipmap(g.TEXTURE_2D);
-        }
     };
 
     const initializeParameters = (target: GLEngineContext): void => {
@@ -55,7 +59,6 @@ export function createHtmlElementTexture(
         _upload: upload,
         _initializeParameters: initializeParameters,
         _wasReady: true,
-        _useMipMaps: generateMipMaps,
     };
     upload(engine);
     initializeParameters(engine);

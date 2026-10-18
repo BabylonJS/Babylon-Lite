@@ -97,7 +97,7 @@ runRenderLoop(engine, () => {
     }
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
+    applyEffectWrapper(engine, wrapper);
     setEffectTexture3D(engine, wrapper.effect, "uVolume", volume);
     drawEffect(engine);
     if (!verified) {

@@ -136,8 +136,10 @@ use.
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
   `disposeTexture`, plus `updateRawTexture`, `updateTextureSamplingMode`,
   `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
-  takes the same `GLTextureOptions` (`samplingMode` via `GLSamplingMode`,
-  `generateMipMaps`, `invertY`, `premultiplyAlpha`, raw filters / wraps).
+  takes the same `GLTextureOptions` (`invertY`, `premultiplyAlpha`, filters /
+  wraps). Babylon-style `GLSamplingMode` presets resolve to filters via the
+  opt-in `getSamplingModeFilters`; `generateTextureMipMaps` builds the chain
+  and keeps it current on every later upload and context restore.
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
 - **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
@@ -185,9 +187,9 @@ produces a ready, transparent-black texture at the original size. Recreate
 the texture after restore (for example from `onContextRestored`) to recover its
 content. Mutable retained sources replay their current pixels and intrinsic
 size. If a retained source was closed anyway, restore logs an error and falls
-back to transparent black for that texture only. Mipmaps generated with
-`generateTextureMipMaps` are not replayed; regenerate them after restore. No
-source is closed by lite-gl.
+back to transparent black for that texture only. Mipmaps requested with
+`generateTextureMipMaps` are rebuilt after the restored upload. No source is
+closed by lite-gl.
 
 ## Demos
 

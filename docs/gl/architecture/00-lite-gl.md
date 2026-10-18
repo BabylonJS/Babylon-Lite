@@ -74,7 +74,7 @@ packages are imported together (as NeonBrush does).
 1. **`GL` type prefix (mandatory).** Every exported _type_ is prefixed `GL`:
    `GLEngineContext`, `GLEngineOptions`, `GLEngineCaps`, `GLEffect`,
    `GLEffectOptions`, `GLEffectWrapper`, `GLEffectWrapperOptions`, `GLTexture`,
-   `GLTextureOptions`, `GLViewport`, `GLSamplingMode`,
+   `GLTextureOptions`, `GLViewport`, `GLSamplingMode`, `GLSamplingFilters`,
    `GLHtmlElementTextureOptions`. The prefix prevents clashes with lite's
    unprefixed `EngineContext` / `EffectWrapper` / … and signals "WebGL backend".
 
@@ -130,9 +130,10 @@ packages are imported together (as NeonBrush does).
 5. **Options vs. separate export (the tree-shaking heuristic).** A boolean/enum
    **`option` is allowed only if it toggles a GL parameter already on the core
    path** (`minFilter` / `magFilter` / `wrapS` / `wrapT` / `invertY` /
-   `premultiplyAlpha` / `generateDepthBuffer`, plus the texture `samplingMode`
-   preset and `generateMipMaps`, which resolve to the same filter state and a
-   single `gl.generateMipmap` on the shared upload path). A feature instead becomes a **separate, tree-shakeable
+   `premultiplyAlpha` / `generateDepthBuffer`). Babylon-style sampling presets
+   are therefore a pure helper (`getSamplingModeFilters`) spread into the
+   options, and mipmaps an explicit `generateTextureMipMaps` call, so texture
+   factories ship neither. A feature instead becomes a **separate, tree-shakeable
    export** (NOT a create-option) the moment supporting it would pull in a distinct
    code path or lookup table that non-users would otherwise ship — HDR sized-format
    resolution, stencil renderbuffers, mipmap pyramids, MRT, pixel readback,
@@ -382,21 +383,24 @@ export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samp
 export const GLSamplingMode = { NEAREST: 1, BILINEAR: 2, TRILINEAR: 3 } as const;
 export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
 
-/** Shared by every texture creator: raw, float, loaded, handle, dynamic and
- *  HTML-element textures all accept (and honor) the same options. */
+/** Pure preset → filters helper (≙ Babylon `_getSamplingParameters`). Spread
+ *  into any texture options or pass to `updateTextureSamplingMode`; tree-shaken
+ *  unless imported. `useMipMaps` (default false) selects the mipmapped min filter. */
+export interface GLSamplingFilters {
+    minFilter: GLenum;
+    magFilter: GLenum;
+}
+export function getSamplingModeFilters(samplingMode: GLSamplingMode, useMipMaps?: boolean): GLSamplingFilters;
+
+/** Shared by every texture creator: raw, float, loaded, source, handle, dynamic
+ *  and HTML-element textures all accept (and honor) the same options. */
 export interface GLTextureOptions {
     /** Default: false (matches Babylon's default raw-texture behaviour). */
     invertY?: boolean;
     /** Default: false. Image loads premultiply at decode; other uploads use
      *  `UNPACK_PREMULTIPLY_ALPHA_WEBGL`. */
     premultiplyAlpha?: boolean;
-    /** Babylon-style sampling preset; derives min/mag filters. Explicit
-     *  `minFilter` / `magFilter` win. */
-    samplingMode?: GLSamplingMode;
-    /** Build a mip chain after every upload (incl. context restore).
-     *  Default: `samplingMode === TRILINEAR`. */
-    generateMipMaps?: boolean;
-    /** Raw GL filters. Default: derived from `samplingMode`, else gl.LINEAR. */
+    /** Raw GL filters. Default: gl.LINEAR. */
     minFilter?: GLenum;
     magFilter?: GLenum;
     /** Default: gl.CLAMP_TO_EDGE for both. */
@@ -457,21 +461,19 @@ export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTextur
  *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 
-/** Build a full mip chain for `tex` (a single `gl.generateMipmap`) on demand,
- *  e.g. after `updateRawTexture`. Creation-time mips use the `generateMipMaps`
- *  option instead. No-op when `tex._disposed` or `engine._isLost`. */
+/** Build a full mip chain for `tex` now and retain the intent (≙ Babylon
+ *  `useMipMaps`, `generateTexture3DMipMaps`): sets `_hasMipMaps` and wraps
+ *  `_upload` once, so every later level-0 upload (`updateRawTexture`,
+ *  dynamic/HTML updates, the `loadTexture2D` arrival, context-restore replay)
+ *  rebuilds the chain. No-op when `tex._disposed` or `engine._isLost`. */
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 
-/** Preset form (≙ Babylon `updateTextureSamplingMode`): derives filters from
- *  the preset, keeping the mipmapped min filter when the texture already uses
- *  mips (≙ `texture.useMipMaps || generateMipMaps`). `generateMipMaps: true`
- *  builds the chain now and keeps it current on later uploads and restore. */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
-/** Raw form: explicit GL min/mag filters. */
+/** Explicit GL min/mag filters (≙ Babylon `updateTextureSamplingMode`); for a
+ *  preset pass `getSamplingModeFilters(mode, useMipMaps)`'s filters. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
 ```
 
-Sampling presets map as in Babylon's `_getSamplingParameters`:
+`getSamplingModeFilters` maps presets as in Babylon's `_getSamplingParameters`:
 
 | Preset      | min (no mips) | min (mips)            | mag     |
 | ----------- | ------------- | --------------------- | ------- |
@@ -480,7 +482,8 @@ Sampling presets map as in Babylon's `_getSamplingParameters`:
 | `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR  | LINEAR  |
 
 Without a preset, filters default to LINEAR/LINEAR even when mips are
-generated. Dynamic textures (`createDynamicTexture`, options
+generated; a mipmapped preset (`useMipMaps: true`) requires a
+`generateTextureMipMaps` call. Dynamic textures (`createDynamicTexture`, options
 `GLDynamicTextureOptions = GLTextureOptions`) track the uploaded source's
 size in `tex.width` / `tex.height`, and `updateDynamicTexture` falls back to the
 creation-time `invertY` / `premultiplyAlpha` when a call omits them.
@@ -528,7 +531,7 @@ there is no placeholder or blank allocation before the source upload. It
 applies the four min/mag/S/T parameters once to the new handle, defaulting to
 `LINEAR` / `LINEAR` and `CLAMP_TO_EDGE` / `CLAMP_TO_EDGE`. Mipmaps remain a
 separate opt-in via `generateTextureMipMaps`; a mipmap minification filter
-requires the caller to generate its chain.
+requires the caller to generate its chain once (it is then kept current).
 
 The factory reads intrinsic dimensions: `naturalWidth` / `naturalHeight` for
 images, `videoWidth` / `videoHeight` for videos, `displayWidth` / `displayHeight`
@@ -575,9 +578,8 @@ after the initial upload; callers may then close their bitmap/frame. Restore
 allocates transparent-black RGBA8 storage at the original dimensions and
 marks it ready. Applications needing the original pixels must re-upload or
 dispose/recreate the texture themselves, typically from `onContextRestored`.
-Restore replays level 0 only: callers using a mipmapped `minFilter` must call
-`generateTextureMipMaps` again from `onContextRestored`, otherwise the restored
-texture is mipmap-incomplete. This does not change
+Restore replays level 0 and the sampling parameters; a chain requested with
+`generateTextureMipMaps` is rebuilt after the restored upload. This does not change
 `createDynamicTexture`'s immediately sampleable blank-allocation contract.
 
 Implementation lives in side-effect-free `texture-source.ts`, explicitly
@@ -910,7 +912,7 @@ export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.j
 // their modules; `sideEffects: false` + no top-level side effects means a bundler
 // tree-shakes them from bundles that don't use them.
 export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeSpriteRenderer } from "./sprites.js";
-export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
+export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
 export { createRenderTarget, bindRenderTarget, resizeRenderTarget, disposeRenderTarget } from "./render-target.js";
 ```
 
@@ -1680,40 +1682,40 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 
 ## 8. Babylon.js equivalence map
 
-| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                          |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                   |
-| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                        |
-| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                         |
-| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                  |
-| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                        |
-| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                     |
-| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                     |
-| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                      |
-| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                  |
-| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, format, type, { generateMipMaps, invertY, samplingMode })` |
-| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                            |
-| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })`   |
-| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(engine, effect, cb)`                                                        |
-| `effect.isReady()`                                               | `isEffectReady(engine, effect)`                                                                  |
-| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(engine, effect, name, c)`     |
-| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(engine, effect, name, glTexture)`                                              |
-| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                          |
-| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                            |
-| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(engine, wrapper)`                                                            |
-| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                             |
-| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                                |
-| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                     |
-| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                                 |
-| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                  |
-| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(engine, renderer, sprites, deltaTime, view, proj)`                                |
-| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                        |
-| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                             |
-| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, GLSamplingMode.X, mips)`                                 |
-| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                       |
-| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                               |
-| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                                |
-| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                       |
+| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                        |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                 |
+| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                      |
+| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                       |
+| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                |
+| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                      |
+| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                   |
+| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                   |
+| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                    |
+| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                |
+| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, fmt, type, { invertY, ...getSamplingModeFilters(s) })`   |
+| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                          |
+| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })` |
+| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(engine, effect, cb)`                                                      |
+| `effect.isReady()`                                               | `isEffectReady(engine, effect)`                                                                |
+| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(engine, effect, name, c)`   |
+| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(engine, effect, name, glTexture)`                                            |
+| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                        |
+| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                          |
+| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(engine, wrapper)`                                                          |
+| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                           |
+| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                              |
+| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                   |
+| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                               |
+| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                |
+| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(engine, renderer, sprites, deltaTime, view, proj)`                              |
+| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                      |
+| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                           |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, min, mag)` from `getSamplingModeFilters(mode, mips)`   |
+| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
+| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
+| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                              |
+| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                     |
 
 Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
@@ -2126,8 +2128,8 @@ packages/babylon-lite-gl/
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation
         effect.ts           createEffect/createEffectWrapper/applyEffectWrapper, cached uniform setters, sampler finalize
         effect-ready.ts     opt-in waitForEffect polling, cancellation, lifecycle rejection and frame/listener cleanup
-        texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose
-        html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture/GLSamplingMode
+        texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose, GLSamplingMode + getSamplingModeFilters
+        html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture
         blend.ts            GLBlendMode preset + setBlendMode (cached, Babylon setAlphaMode parity)
         sprites.ts          GLSprite + createSpriteRenderer/renderSprites/dispose (own VAO/VBO/IBO)
         render-target.ts    createRenderTarget/bindRenderTarget/resizeRenderTarget/disposeRenderTarget (FBO + color tex + optional depth)
