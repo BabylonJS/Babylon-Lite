@@ -116,6 +116,7 @@ describe("babylon-lite-gl build output", () => {
             "getEffectCompilationError",
             "waitForEffect",
             "createEffectWrapper",
+            "createEffectWrapperFromEffect",
             "applyEffectWrapper",
             "drawEffect",
             "setEffectTexture",
@@ -139,6 +140,7 @@ describe("babylon-lite-gl build output", () => {
             "updateTextureWrapMode",
             "createTextureFromHandle",
             "getSamplingModeFilters",
+            "isTextureReady",
             // dynamic textures
             "createDynamicTexture",
             "updateDynamicTexture",

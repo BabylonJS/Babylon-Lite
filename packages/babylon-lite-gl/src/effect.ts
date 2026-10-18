@@ -330,7 +330,11 @@ export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void {
     effect._onCompiled.length = 0;
 }
 
-/** Cached `gl.useProgram`. No-op when the effect is not ready or already current. */
+/** Cached `gl.useProgram`. Low-level: it does NOT check readiness, so poll
+ *  {@link isEffectReady} first (binding a still-linking program can stall, and
+ *  a failed one fails the next draw). `applyEffectWrapper` does that poll for
+ *  wrappers. No-op when the effect is already current, disposed, or the
+ *  context is lost/disposed. */
 export function useEffect(engine: GLEngineContext, effect: GLEffect): void {
     if (engine._isLost || engine._disposed || effect._disposed) {
         return;

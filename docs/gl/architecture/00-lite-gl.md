@@ -468,9 +468,24 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
  *  rebuilds the chain. No-op when `tex._disposed` or `engine._isLost`. */
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 
-/** Explicit GL min/mag filters (≙ Babylon `updateTextureSamplingMode`); for a
- *  preset pass `getSamplingModeFilters(mode, useMipMaps)`'s filters. */
+/** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
+ *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
+ *  `generateMipMaps` the chain is generated (and retained) afterwards. */
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+/** Raw GL min/mag filters overload. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+
+/** ≙ Babylon `texture.isReady()`: `tex.isReady` and not disposed and the
+ *  context is not lost (the function form, mirroring `isEffectReady`). */
+export function isTextureReady(engine: GLEngineContext, tex: GLTexture): boolean;
+
+/** Per-update flags of `updateDynamicTexture` / `updateHtmlElementTexture`
+ *  (≙ lite's `DynamicTextureUpdateOptions`). Omitted flags fall back to the
+ *  creation options; the latest flags are reused by context-restore replay. */
+export interface GLTextureUpdateOptions {
+    invertY?: boolean;
+    premultiplyAlpha?: boolean;
+}
 ```
 
 `getSamplingModeFilters` maps presets as in Babylon's `_getSamplingParameters`:
@@ -485,7 +500,11 @@ Without a preset, filters default to LINEAR/LINEAR even when mips are
 generated; a mipmapped preset (`useMipMaps: true`) requires a
 `generateTextureMipMaps` call. Dynamic textures (`createDynamicTexture`, options
 `GLDynamicTextureOptions = GLTextureOptions`) track the uploaded source's
-size in `tex.width` / `tex.height`, and `updateDynamicTexture` falls back to the
+size in `tex.width` / `tex.height`. Every 2D update takes the same trailing
+options shape — `updateRawTexture(engine, tex, data, { width, height,
+unpackAlignment })`, `updateDynamicTexture(engine, tex, source, { invertY,
+premultiplyAlpha })` and `updateHtmlElementTexture(engine, tex, { invertY,
+premultiplyAlpha })` — and the dynamic / HTML updates fall back to the
 creation-time `invertY` / `premultiplyAlpha` when a call omits them.
 
 The engine-owned texture registry is a `Set`, allocated inside
@@ -677,9 +696,9 @@ export function createHtmlElementTexture(
     options?: GLHtmlElementTextureOptions
 ): GLTexture;
 
-/** Re-uploads from the source element. No-op when the context is lost/disposed
- *  or the texture is disposed. */
-export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture): void;
+/** Re-uploads from the source element (≙ `HtmlElementTexture.update(invertY)`).
+ *  No-op when the context is lost/disposed or the texture is disposed. */
+export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture, options?: GLTextureUpdateOptions): void;
 ```
 
 ### 3.5 Effect renderer (fullscreen quad)
@@ -711,7 +730,12 @@ export interface GLEffectWrapper {
  *  `createEffectWrapper(engine, options)`). `vertexSource` defaults to a
  *  built-in fullscreen-quad shader. */
 export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWrapperOptions): GLEffectWrapper;
-/** Idempotent. Disposes the effect the wrapper owns. */
+/** Wraps an EXISTING effect instead of compiling one (≙ assigning Babylon's
+ *  `EffectWrapper.effect`). Takes its own reference on the effect, so the
+ *  wrapper's and the caller's disposals are independent. Tree-shaken unless
+ *  imported. */
+export function createEffectWrapperFromEffect(engine: GLEngineContext, effect: GLEffect, name?: string): GLEffectWrapper;
+/** Idempotent. Releases the wrapper's reference on its effect. */
 export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
 
 export interface GLViewport {
@@ -724,8 +748,15 @@ export interface GLViewport {
 /** Defaults to the full canvas in pixel coordinates. */
 export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void;
 
-/** Calls `useEffect(engine, wrapper.effect)`, ensures the shared quad VAO exists
- *  (lazy-init via `ensureQuad`), binds it.
+/** Polls `isEffectReady(engine, wrapper.effect)`; when ready, ensures the shared
+ *  quad VAO exists (lazy-init via `ensureQuad`), binds it and calls
+ *  `useEffect(engine, wrapper.effect)`, returning `true`. Returns `false` and
+ *  binds nothing while the effect is compiling, failed, disposed, or the
+ *  context is lost — the caller skips that frame's setters and `drawEffect`.
+ *
+ *  An effect is always required: lite-gl has no `setEffectWrapper` (Babylon
+ *  has none either); a wrapper always holds exactly one effect, compiled by
+ *  `createEffectWrapper` or adopted by `createEffectWrapperFromEffect`.
  *
  *  This MUST be called BEFORE any `setEffectFloat*` / `setEffectTexture` call
  *  for this effect in the current frame — WebGL `gl.uniform*` writes target the
@@ -735,7 +766,7 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  No depth/stencil state changes: NeonBrush effects never enable them, and
  *  `createGLEngine` requested `depth: false, stencil: false`. If a future
  *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
-export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
+export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean;
 
 /** `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. No-op when `engine._isLost`
  *  or when the bound effect is not ready. */
@@ -1261,7 +1292,7 @@ canonical per-frame sequence is:
 
 ```
 setViewport(engine);                       // cached
-applyEffectWrapper(engine, wrapper); // useEffect + ensureQuad
+if (!applyEffectWrapper(engine, wrapper)) return; // ready poll + ensureQuad + useEffect
 setEffectFloat(engine, effect, ...);       // ← AFTER applyEffectWrapper
 setEffectTexture(engine, effect, ...);
 drawEffect(engine);
@@ -1358,7 +1389,7 @@ function ensureQuad(engine: GLEngineContext): void {
 The geometry matches Babylon's `EffectRenderer` default (positions
 `[1,1,-1,1,-1,-1,1,-1]`, indices `[0,1,2,0,2,3]`).
 
-`applyEffectWrapper` calls `ensureQuad(engine)` then `useEffect(engine, wrapper.effect)`.
+`applyEffectWrapper` polls readiness, then calls `ensureQuad(engine)` and `useEffect(engine, wrapper.effect)`.
 Once the quad VAO is built and bound, attribute state is baked into the VAO;
 subsequent frames touch zero buffer/attrib GL calls — only `useProgram` (cached),
 the user's `setEffect*` calls, and `drawElements`.
@@ -1711,7 +1742,11 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(engine, renderer, sprites, deltaTime, view, proj)`                              |
 | `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                      |
 | `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                           |
-| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, min, mag)` from `getSamplingModeFilters(mode, mips)`   |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, mode, mips)`                                           |
+| `effectWrapper.effect = existingEffect`                          | `createEffectWrapperFromEffect(engine, existingEffect)`                                        |
+| `texture.isReady()`                                              | `isTextureReady(engine, tex)`                                                                  |
+| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(engine, tex, src, { invertY, premultiplyAlpha })`                        |
+| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(engine, tex, { invertY })`                                           |
 | `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
 | `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
 | `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                              |

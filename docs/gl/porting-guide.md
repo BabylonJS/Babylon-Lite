@@ -186,7 +186,7 @@ In-repo, this harness is `tests/gl/parity/` driven by `scene-config-webgl.json`
 - [ ] Classes → state + free functions; `ownsContext` tracked.
 - [ ] Shaders pre-converted to ES 3.00; `#if` → `#ifdef`; `*EXT` preserved by the minifier.
 - [ ] Every lite-gl call takes `engine` first (`applyEffectWrapper(engine, w)`, `renderSprites(engine, r, …)`).
-- [ ] `applyEffectWrapper` **before** any `setEffect*` setter.
+- [ ] `applyEffectWrapper` **before** any `setEffect*` setter; skip the setters + `drawEffect` when it returns `false` (effect not ready yet).
 - [ ] `createRawTexture` constants mapped to GL enums.
 - [ ] Babylon sampling modes mapped via `getSamplingModeFilters` (+ `generateTextureMipMaps` for mips); `invertY` handled at decode for image loads.
 - [ ] No hand-rolled `texImage2D` after multi-sampler binds (use the update fns).

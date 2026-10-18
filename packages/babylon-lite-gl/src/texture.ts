@@ -31,8 +31,8 @@ export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode
  *  chain. */
 export interface GLTextureOptions {
     /** Flip rows vertically on upload. Default: false (matches Babylon's
-     *  default raw-texture behaviour). For dynamic textures this is the default
-     *  for every `updateDynamicTexture` call that omits `invertY`. */
+     *  default raw-texture behaviour). For dynamic / HTML-element textures this
+     *  is the default for every update that omits `invertY`. */
     invertY?: boolean;
     /** Default: gl.LINEAR. See {@link getSamplingModeFilters} for presets. */
     minFilter?: GLenum;
@@ -47,8 +47,8 @@ export interface GLTextureOptions {
      *  Use 1 for tightly-packed non-RGBA rows. */
     unpackAlignment?: number;
     /** Premultiply alpha at upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`, or
-     *  decode-time for `loadTexture2D`). Default false. For dynamic textures this
-     *  is the default for every `updateDynamicTexture` call that omits it. */
+     *  decode-time for `loadTexture2D`). Default false. For dynamic /
+     *  HTML-element textures this is the default for every update that omits it. */
     premultiplyAlpha?: boolean;
     /** Explicit sized internalFormat for `texImage2D`. When provided it is used
      *  verbatim and the inline LDR resolver is bypassed — this is how
@@ -57,6 +57,17 @@ export interface GLTextureOptions {
      *  tree-shakeable out of RGBA8-only bundles). Default: derived from
      *  `format`/`type` via the LDR resolver. */
     internalFormat?: GLenum;
+}
+
+/** Per-update pixel-store flags shared by `updateDynamicTexture` and
+ *  `updateHtmlElementTexture` (≙ lite's `DynamicTextureUpdateOptions`). Each
+ *  omitted flag falls back to the texture's creation {@link GLTextureOptions}
+ *  value; the flags of the latest update are reused on `webglcontextrestored`. */
+export interface GLTextureUpdateOptions {
+    /** Flip rows vertically on upload (`UNPACK_FLIP_Y_WEBGL`). */
+    invertY?: boolean;
+    /** Premultiply alpha on upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`). */
+    premultiplyAlpha?: boolean;
 }
 
 /**
@@ -113,12 +124,14 @@ export interface GLTexture {
      * @internal
      */
     _dynSource?: TexImageSource | null;
-    /** UNPACK_FLIP_Y applied when replaying {@link GLTexture._dynSource};
+    /** `invertY` of the latest dynamic / HTML-element update
+     *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `invertY`. @internal */
-    _dynInvertY?: boolean;
-    /** UNPACK_PREMULTIPLY_ALPHA applied when replaying {@link GLTexture._dynSource};
+    _invertY?: boolean;
+    /** `premultiplyAlpha` of the latest dynamic / HTML-element update
+     *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `premultiplyAlpha`. @internal */
-    _dynPremultiplyAlpha?: boolean;
+    _premultiplyAlpha?: boolean;
     /**
      * The `handle` the dynamic texture's `texParameteri` filter/wrap state was
      * last applied to. `texParameteri` is per-texture GL state that survives pixel
@@ -416,29 +429,74 @@ export function updateRawTexture(
 }
 
 /**
- * Update a texture's min/mag sampling filters — the lite-gl equivalent of
- * Babylon's `updateTextureSamplingMode`. For a Babylon-style preset pass the
- * filters from {@link getSamplingModeFilters}, and call
- * {@link generateTextureMipMaps} when the preset should use mipmaps:
- *
- * ```ts
- * const { minFilter, magFilter } = getSamplingModeFilters(GLSamplingMode.TRILINEAR, true);
- * updateTextureSamplingMode(engine, tex, minFilter, magFilter);
- * generateTextureMipMaps(engine, tex);
- * ```
+ * Update a texture's sampling mode from a Babylon-style preset — the lite-gl
+ * equivalent of Babylon's
+ * `updateTextureSamplingMode(samplingMode, texture, generateMipMaps)`. The filters come from {@link getSamplingModeFilters},
+ * using the mipmapped min filter when the texture already has mipmaps (from
+ * {@link generateTextureMipMaps}) or `generateMipMaps` is true; in the latter
+ * case the chain is generated (and retained) right after the filters are set.
  *
  * Binds for upload (unit 0) so the `texParameteri` lands on this texture. The
  * change is not replayed on `webglcontextrestored` (creation options are).
  * No-op on a lost/disposed context or a disposed texture.
+ *
+ * @param engine - The engine.
+ * @param tex - The texture to update.
+ * @param samplingMode - The {@link GLSamplingMode} preset.
+ * @param generateMipMaps - Generate the mip chain now. Default false.
  */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void {
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+/**
+ * Update a texture's raw GL min/mag sampling filters (e.g. `gl.NEAREST`,
+ * `gl.LINEAR_MIPMAP_LINEAR`). A mipmapped min filter needs
+ * {@link generateTextureMipMaps}. Binds for upload (unit 0); not replayed on
+ * `webglcontextrestored`. No-op on a lost/disposed context or a disposed
+ * texture.
+ *
+ * @param engine - The engine.
+ * @param tex - The texture to update.
+ * @param minFilter - `TEXTURE_MIN_FILTER` value.
+ * @param magFilter - `TEXTURE_MAG_FILTER` value.
+ */
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, modeOrMinFilter: number, magFilterOrGenerateMipMaps?: number | boolean): void {
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
+    }
+    let minFilter = modeOrMinFilter;
+    let magFilter: GLenum;
+    let generateMipMaps = false;
+    // The raw overload passes a GL enum as 4th argument; the preset one a boolean or nothing.
+    if (typeof magFilterOrGenerateMipMaps === "number") {
+        magFilter = magFilterOrGenerateMipMaps;
+    } else {
+        generateMipMaps = magFilterOrGenerateMipMaps === true;
+        const filters = getSamplingModeFilters(modeOrMinFilter as GLSamplingMode, generateMipMaps || tex._hasMipMaps === true);
+        minFilter = filters.minFilter;
+        magFilter = filters.magFilter;
     }
     const gl = engine.gl;
     bindTextureForUpload(engine, tex.handle);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+    if (generateMipMaps) {
+        generateTextureMipMaps(engine, tex);
+    }
+}
+
+/**
+ * Whether a texture holds its final content and can be sampled — the function
+ * form of {@link GLTexture.isReady}, mirroring `isEffectReady(engine, effect)`
+ * (≙ Babylon's `texture.isReady()`). False while `loadTexture2D` is still
+ * decoding (the 1×1 placeholder is bound meanwhile), after disposal, and while
+ * the context is lost/disposed.
+ *
+ * @param engine - The engine that owns the texture.
+ * @param tex - The texture to query.
+ * @returns `true` when the texture is ready to sample.
+ */
+export function isTextureReady(engine: GLEngineContext, tex: GLTexture): boolean {
+    return tex.isReady && !tex._disposed && !engine._isLost && !engine._disposed;
 }
 
 /** Update a texture's S/T wrap modes (`gl.CLAMP_TO_EDGE` / `gl.REPEAT` /

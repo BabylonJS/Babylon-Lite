@@ -12,7 +12,15 @@
  * internally and replayed into the fresh handle on `webglcontextrestored` by the
  * engine's standard context-restore protocol.
  */
-import { bindTextureForUpload, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import {
+    bindTextureForUpload,
+    setTexImageSourceSize,
+    setBoundTextureParams,
+    setUnpackState,
+    type GLTexture,
+    type GLTextureOptions,
+    type GLTextureUpdateOptions,
+} from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** Options for {@link createDynamicTexture}: the shared {@link GLTextureOptions}.
@@ -63,7 +71,7 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
         bindTextureForUpload(target, tex.handle);
         const src = tex._dynSource;
         if (src !== null && src !== undefined) {
-            setUnpackState(target, tex._dynInvertY ?? invertY, tex._dynPremultiplyAlpha ?? premultiplyAlpha);
+            setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiplyAlpha);
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, src);
             // `texImage2D(source)` resizes the GL storage to the source size.
             setTexImageSourceSize(tex, src);
@@ -107,18 +115,16 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
  *  @param engine - The engine that owns the texture.
  *  @param tex - A texture created by {@link createDynamicTexture}.
  *  @param source - The 2D pixel source to upload.
- *  @param invertY - Flip vertically on upload (`UNPACK_FLIP_Y_WEBGL`). Defaults
- *   to the texture's creation `invertY` (like Babylon's `texture.invertY`
- *   fallback), itself `false` by default.
- *  @param premultiplyAlpha - Premultiply on upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`).
- *   Defaults to the texture's creation `premultiplyAlpha`, itself `false` by default. */
-export function updateDynamicTexture(engine: GLEngineContext, tex: GLTexture, source: TexImageSource, invertY?: boolean, premultiplyAlpha?: boolean): void {
+ *  @param options - Per-update `invertY` / `premultiplyAlpha`; each defaults to
+ *   the texture's creation value (like Babylon's `texture.invertY` fallback),
+ *   itself `false` by default. */
+export function updateDynamicTexture(engine: GLEngineContext, tex: GLTexture, source: TexImageSource, options?: GLTextureUpdateOptions): void {
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
     tex._dynSource = source;
-    tex._dynInvertY = invertY;
-    tex._dynPremultiplyAlpha = premultiplyAlpha;
+    tex._invertY = options?.invertY;
+    tex._premultiplyAlpha = options?.premultiplyAlpha;
     tex._upload(engine);
 }
 

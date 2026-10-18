@@ -4,6 +4,7 @@ import {
     bindTexture,
     createEffect,
     createEffectWrapper,
+    createEffectWrapperFromEffect,
     createRawTexture,
     createGLEngine,
     disposeEffect,
@@ -530,6 +531,54 @@ describe("lite-gl: effect wrapper ownership", () => {
         applyEffectWrapper(engine, wrapper);
         expect(mock.count("createVertexArray")).toBe(0);
         expect(mock.count("useProgram")).toBe(0);
+    });
+
+    it("applyEffectWrapper returns false and binds nothing while the effect is still linking (#82)", () => {
+        const mock = createMockGL();
+        mock.setParallelComplete(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        expect(mock.count("createVertexArray")).toBe(0);
+        mock.setParallelComplete(true);
+        expect(applyEffectWrapper(engine, wrapper)).toBe(true);
+        expect(wrapper.effect.isReady).toBe(true);
+        expect(engine._state.currentProgram).toBe(wrapper.effect.program);
+    });
+
+    it("applyEffectWrapper returns false for an effect that failed to link (#82)", () => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const mock = createMockGL();
+        mock.setLinkSuccess(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        vi.restoreAllMocks();
+    });
+
+    it("createEffectWrapperFromEffect wraps an existing effect with its own reference (#82)", () => {
+        const { mock, engine, effect } = makeReadyEffect();
+        mock.clear();
+        const wrapper = createEffectWrapperFromEffect(engine, effect);
+        expect(wrapper.effect).toBe(effect);
+        expect(wrapper.name).toBe("test");
+        expect(mock.count("createProgram")).toBe(0);
+        expect(applyEffectWrapper(engine, wrapper)).toBe(true);
+        disposeEffectWrapper(engine, wrapper);
+        expect(mock.count("deleteProgram")).toBe(0);
+        expect(effect._disposed).toBe(false);
+        disposeEffect(engine, effect);
+        expect(mock.count("deleteProgram")).toBe(1);
+    });
+
+    it("createEffectWrapperFromEffect rejects a disposed effect (#82)", () => {
+        const { engine, effect } = makeReadyEffect();
+        disposeEffect(engine, effect);
+        expect(() => createEffectWrapperFromEffect(engine, effect, "late")).toThrow(/disposed/);
     });
 
     it("createEffectWrapper defaults to the built-in fullscreen vertex shader", () => {

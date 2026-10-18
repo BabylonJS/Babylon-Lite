@@ -6,7 +6,15 @@
  * NeonBrush's `InputGlow`) tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
-import { bindTextureForUpload, setTexImageSourceSize, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import {
+    bindTextureForUpload,
+    setTexImageSourceSize,
+    setBoundTextureParams,
+    setUnpackState,
+    type GLTexture,
+    type GLTextureOptions,
+    type GLTextureUpdateOptions,
+} from "./texture.js";
 
 /** Options for `createHtmlElementTexture` — the shared {@link GLTextureOptions}
  *  (including `invertY` and `premultiplyAlpha`), applied on creation, on every
@@ -38,7 +46,7 @@ export function createHtmlElementTexture(
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
-        setUnpackState(target, invertY, premultiplyAlpha);
+        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiplyAlpha);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, g.RGBA, g.UNSIGNED_BYTE, element);
         setTexImageSourceSize(tex, element);
@@ -66,12 +74,20 @@ export function createHtmlElementTexture(
     return tex;
 }
 
-/** Re-upload the texture from its source element. Only valid for textures
+/** Re-upload the texture from its source element — the counterpart of
+ *  Babylon's `HtmlElementTexture.update(invertY)`. Only valid for textures
  *  created by {@link createHtmlElementTexture}. No-op when the context is
- *  lost/disposed or the texture is disposed. */
-export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture): void {
+ *  lost/disposed or the texture is disposed.
+ *
+ *  @param engine - The engine that owns the texture.
+ *  @param tex - A texture created by {@link createHtmlElementTexture}.
+ *  @param options - Per-update `invertY` / `premultiplyAlpha`; each defaults to
+ *   the texture's creation value. Retained for `webglcontextrestored` replay. */
+export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture, options?: GLTextureUpdateOptions): void {
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
+    tex._invertY = options?.invertY;
+    tex._premultiplyAlpha = options?.premultiplyAlpha;
     tex._upload(engine);
 }
