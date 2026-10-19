@@ -846,6 +846,7 @@ export function createMeshLoDGpuInstanceState(groupCount: number): MeshLoDGpuIns
 }
 
 /** Grow (never shrink) the instance and prior-state buffers to hold `count` slots,
+ *  bounding their shared reservation by the transient unpacked group-state rows too,
  *  following make-before-break: allocate the replacements, copy the retained
  *  prior-state bits, switch the state to the new buffers, and retire the old ones
  *  after the next frame drains. All slot version tracking resets so the next upload
@@ -853,10 +854,10 @@ export function createMeshLoDGpuInstanceState(groupCount: number): MeshLoDGpuIns
 export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: MeshLoDGpuInstanceState, count: number): void {
     const device = engine._device;
     const sameDevice = state.device === device;
-    const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4);
+    const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4, state.groupCount * 4);
     const maximum = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / stride);
     if (count > maximum) {
-        throw createMeshLoDError("MLOD_DEVICE_LIMIT", "MeshLoD instance/prior-state records exceed the device storage-buffer limit", {
+        throw createMeshLoDError("MLOD_DEVICE_LIMIT", "MeshLoD instance/prior/group-state records exceed the device storage-buffer limit", {
             expected: maximum * stride,
             actual: count * stride,
         });

@@ -50,7 +50,7 @@ import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/mat
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import { createFillDecoder, createMockDevice, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import type { MockBuffer, MockDevice, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import type { MockBuffer, MockDevice, MockEncoder, MockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -89,7 +89,7 @@ interface GpuHarness {
     runtime: MeshLoDAssetRuntime;
     instances: MeshLoDInstance[];
     batchState(): MeshLoDGpuBatchState;
-    flush(): void;
+    flush(): MockRenderPass;
     abandon(flushed?: boolean, cancel?: boolean): void;
     reset(): void;
     submit(): void;
@@ -122,12 +122,14 @@ async function setup(options: { limitBytes?: number; instanceCount?: number; vis
         runtime: asset._runtime,
         instances,
         batchState: () => (batch as { _packet: { gpuBatchState: MeshLoDGpuBatchState } })._packet.gpuBatchState,
-        flush(): void {
+        flush(): MockRenderPass {
             updateBatch.reset();
             binding.update!(CONTEXT);
             updateBatch.flush(engine);
-            binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
+            const pass = createMockRenderPass();
+            binding.draw(pass as unknown as GPURenderPassEncoder, engine);
             engine._finishOptionalFrame?.(true);
+            return pass;
         },
         reset(): void {
             updateBatch.reset();
@@ -348,18 +350,29 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(expectedBytes).toBeLessThan(1024);
     });
 
-    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("caps selected-pair storage at %s for a sparse real-statue batch", async (limitingField) => {
+    it.each([
+        ["maxStorageBufferBindingSize", 4097, 8192],
+        ["maxBufferSize", 4097, 8192],
+        ["maxStorageBufferBindingSize", 65537, 107546],
+        ["maxBufferSize", 65537, 107546],
+    ] as const)("%s bounds every GPU buffer for %i sparse real-statue instances (reservation %i)", async (limitingField, instanceCount, reservedSlots) => {
         const limitBytes = 128 * 1024 * 1024;
-        harness = await setup({ limitBytes, instanceCount: 4097, visibleCount: 1 });
+        harness = await setup({ limitBytes, instanceCount, visibleCount: 1 });
         const device = harness.engine._device as unknown as MockDevice;
         device.limits.maxStorageBufferBindingSize = limitingField === "maxStorageBufferBindingSize" ? limitBytes : limitBytes * 2;
         device.limits.maxBufferSize = limitingField === "maxBufferSize" ? limitBytes : limitBytes * 2;
-        harness.flush();
+        const pass = harness.flush();
         const state = harness.batchState();
         const runtime = harness.runtime;
         expect(runtime.clusters).toHaveLength(2491);
-        expect(state.instanceCapacity).toBe(8192);
-        expect((runtime.clusters.length * state.instanceCapacity * 2 + 1) * 4).toBe(163_250_180);
+        expect(runtime.groups).toHaveLength(312);
+        expect(state.instanceCapacity).toBe(reservedSlots);
+        expect(state.paramsU32[36]).toBe(instanceCount);
+        const groupRowBytes = runtime.groups.length * 4;
+        expect(instanceCount * groupRowBytes).toBeLessThanOrEqual(limitBytes);
+        expect(state.groupStateBuffer!.size).toBe(reservedSlots * groupRowBytes);
+        expect(harness.encoder.clears).toContainEqual({ buffer: state.groupStateBuffer, offset: 0, size: instanceCount * groupRowBytes });
+        expect(pass.indirectDraws).toEqual([{ buffer: state.drawArgsBuffer, offset: 0 }]);
         const expectedCapacity = Math.floor((limitBytes - 4) / 8);
         expect(state.selectedCapacity).toBe(expectedCapacity);
         expect(state.paramsU32[41]).toBe(expectedCapacity);

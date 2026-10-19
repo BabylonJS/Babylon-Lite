@@ -402,6 +402,16 @@ LODs may increase the potential pair count without making a fitting cut invalid.
 The bounded capacity is uploaded to the selection parameters. Only actual append
 overflow suppresses the whole expansion/draw and surfaces `MLOD_DEVICE_LIMIT`
 through the existing asynchronous readback; no prefix of an overflowing cut draws.
+GPU instance reservations share one capacity with the transient group-state rows.
+For `G` groups, each reserved slot consumes 128 instance bytes,
+`max(1, ceil(G / 32)) * 4` packed hysteresis bytes, and `G * 4` unpacked
+group-state bytes in separate bindings. Geometric growth is bounded by
+`floor(L / max(128, max(1, ceil(G / 32)) * 4, G * 4))`, so every per-instance
+binding fits the same reservation. Validate the required count against that
+maximum before allocating or replacing instance/prior-state resources.
+The group-state allocator consumes this already-bounded reservation without
+rounding it up again. This is distinct from the independently capped selected list:
+a fitting instance count must not fail because unused reserved group rows overflow.
 CPU draw and instance storage are checked against the smaller of
 `maxStorageBufferBindingSize` and `maxBufferSize`, including initial allocation
 and GPU-to-CPU switches. Geometric growth is capped at the largest complete
@@ -696,6 +706,14 @@ with 4,097 registered instances (8,192 reserved slots), only one visible, and a
 163,250,180-byte list is capped to complete records within the limit, selection
 receives that exact capacity, and the real hierarchy's resident pinned cut fits.
 Both selected-list and draw-vertex overflow still surface the device-limit error.
+The same full queue/update/compute/draw regression also registers 65,537 instances
+of the 312-group statue with only one visible. At 128 MiB, the required group-state
+rows occupy 81,790,176 bytes; the common reservation caps at 107,546 slots instead
+of the invalid 131,072-slot power of two. Both device limits are exercised
+independently, all storage allocations and the active-row clear fit, the actual
+instance count is uploaded unchanged, and one indirect draw is recorded. Direct
+growth tests include hierarchies with more than 32 groups and verify rejection
+of an unfitting required count before any resource replacement.
 Injected XR projection regressions require both selectors to use
 the actual vertical scale, agree on refinement/page demand, and upload that
 same scale per eye. Hierarchy cloning tests preserve MeshLoD state, independent

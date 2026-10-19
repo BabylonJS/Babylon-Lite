@@ -457,20 +457,23 @@ describe("MeshLoD GPU instance state", () => {
         expect(device.writes.filter((write) => write.buffer === instBuffer)).toHaveLength(before + 2);
     });
 
-    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("caps instance and prior-state growth at complete records (%s)", (field) => {
-        for (const groupCount of [2, 2048]) {
+    it.each(["maxStorageBufferBindingSize", "maxBufferSize"] as const)("caps the shared instance/prior/group-state reservation at complete records (%s)", (field) => {
+        for (const groupCount of [2, 33, 312, 2048]) {
             const { engine, device } = createMockEngine();
             const state = createMeshLoDGpuInstanceState(groupCount);
             ensureMeshLoDInstanceCapacity(engine, state, 2);
-            const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4);
+            const stride = Math.max(INSTANCE_BYTES, state.wordsPerInstance * 4, groupCount * 4);
             device.limits[field] = stride * 5 + 3;
             ensureMeshLoDInstanceCapacity(engine, state, 5);
             expect(state.capacity).toBe(5);
             expect((state.instanceBuffer as unknown as MockBuffer).size).toBeLessThanOrEqual(device.limits[field]);
             expect((state.priorStateBuffer as unknown as MockBuffer).size).toBeLessThanOrEqual(device.limits[field]);
+            expect(state.capacity * groupCount * 4).toBeLessThanOrEqual(device.limits[field]);
             const before = { ...state };
             const buffers = device.buffers.length;
-            expect(() => ensureMeshLoDInstanceCapacity(engine, state, 6)).toThrowError(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
+            expect(() => ensureMeshLoDInstanceCapacity(engine, state, 6)).toThrowError(
+                expect.objectContaining({ code: "MLOD_DEVICE_LIMIT", expected: 5 * stride, actual: 6 * stride })
+            );
             expect(device.buffers).toHaveLength(buffers);
             expect(state.instanceBuffer).toBe(before.instanceBuffer);
             expect(state.priorStateBuffer).toBe(before.priorStateBuffer);
