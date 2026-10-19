@@ -8,6 +8,9 @@ import { preloadStandardGeometryFeatures, _getStandardGeometryThinInstanceHelper
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/shader/fragments/thin-instance-fragment";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { enableThinInstanceDirectDraws } from "../../../packages/babylon-lite/src/mesh/enable-thin-instance-direct-draws";
+import { setThinInstanceDrawCount, setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { buildStandardMeshRenderables, type StandardGeometryContext, type StandardRebuildContext } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
@@ -248,7 +251,7 @@ function makeCamera(x: number, y: number, z: number, version = 1): Camera {
     return { worldMatrix: worldAt(x, y, z), worldMatrixVersion: version } as unknown as Camera;
 }
 
-function buildGeoRenderable(scene: SceneContext, camera: Camera | null) {
+function buildGeoRenderable(scene: SceneContext, camera: Camera | null, directThinInstances = false) {
     const source = createStandardMaterial();
     const view = createStandardGeometryMaterialView(source, {
         attachments: [GeometryTextureType.WORLD_POSITION],
@@ -264,12 +267,47 @@ function buildGeoRenderable(scene: SceneContext, camera: Camera | null) {
         thinInstances: null,
         morphTargets: null,
         visible: true,
-        _gpu: {},
+        _gpu: directThinInstances ? { positionBuffer: {} as GPUBuffer, indexBuffer: {} as GPUBuffer, indexCount: 36, indexFormat: "uint16" } : {},
     } as unknown as Mesh;
+    if (directThinInstances) {
+        setThinInstances(mesh, new Float32Array(2 * 16), 2);
+        enableThinInstanceDirectDraws(mesh);
+    }
     const resources = { _lifetimeDisposers: [] as (() => void)[] };
     const renderable = buildStandardGeometryRenderable(scene, mesh, view, resources);
     return { renderable, mesh, resources };
 }
+
+describe("Standard geometry direct thin-instance counts", () => {
+    it("draws current counts through zero/regrowth without allocating indirect arguments", async () => {
+        const preloadMesh = makeStdMesh();
+        setThinInstances(preloadMesh, new Float32Array(2 * 16), 2);
+        await preloadStandardGeometryFeatures([preloadMesh], false);
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const { renderable, mesh } = buildGeoRenderable(scene, null, true);
+        const signature: RenderTargetSignature = { _colorFormat: "rgba16float", _sampleCount: 1 };
+        const binding = renderable.bind(engine, signature);
+        const drawIndexed = vi.fn();
+        const drawIndexedIndirect = vi.fn();
+        const pass = {
+            setPipeline: vi.fn(),
+            setBindGroup: vi.fn(),
+            setVertexBuffer: vi.fn(),
+            setIndexBuffer: vi.fn(),
+            drawIndexed,
+            drawIndexedIndirect,
+        } as unknown as GPURenderPassEncoder;
+        for (const count of [2, 0, 1, 2]) {
+            setThinInstanceDrawCount(mesh, count);
+            binding.update!({ targetWidth: 1, targetHeight: 1 });
+            binding.draw(pass, engine);
+            expect(drawIndexed).toHaveBeenLastCalledWith(36, count, 0, undefined);
+            expect(mesh.thinInstances!._drawArgsBuffer).toBeUndefined();
+        }
+        expect(drawIndexedIndirect).not.toHaveBeenCalled();
+    });
+});
 
 describe("Standard geometry task-camera floating-origin", () => {
     it("packs world/previous-world and invalidates against the effective task camera override", () => {

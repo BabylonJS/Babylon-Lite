@@ -5,6 +5,7 @@ import type { NodeMaterial } from "../../../packages/babylon-lite/src/material/n
 import { buildNodeMeshRenderables } from "../../../packages/babylon-lite/src/material/node/node-renderable";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
+import { enableThinInstanceDirectDraws } from "../../../packages/babylon-lite/src/mesh/enable-thin-instance-direct-draws";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { createSceneContext, disposeScene, onSceneDispose } from "../../../packages/babylon-lite/src/scene/scene";
@@ -295,6 +296,22 @@ describe.each([
             [3, 0, 0, 0, 0],
             [3, 1, 0, 0, 0],
         ]);
+    });
+
+    it("keeps opted-in packets direct through zero and regrowth", () => {
+        const { binding, meshes, indirectWrites, matrixBuffer, thinInstances } = buildFixture(transparent);
+        enableThinInstanceDirectDraws(meshes[0]!);
+        const pass = fakePass();
+        for (const count of [2, 0, 1, 2]) {
+            thinInstances.count = count;
+            binding.update!({ targetWidth: 1, targetHeight: 1 });
+            binding.draw(pass as never, {} as EngineContext);
+            expect(pass.drawIndexed).toHaveBeenLastCalledWith(3, count, 0, 0);
+        }
+        expect(pass.drawIndexedIndirect).not.toHaveBeenCalled();
+        expect(thinInstances._gpuBuffer).toBe(matrixBuffer);
+        expect(thinInstances._drawArgsBuffer).toBeUndefined();
+        expect(indirectWrites).toEqual([]);
     });
 });
 

@@ -54,6 +54,9 @@ export function setThinInstanceDrawCount(mesh: Mesh, count: number): void;
 /** Pre-create stable indirect draw arguments during scene warm-up. */
 export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void;
 
+/** Keep changing thin-instance counts on direct indexed draws. Call before registerScene(). */
+export function enableThinInstanceDirectDraws(mesh: Mesh): void;
+
 /** Add one instance. Returns the new instance index. Grows capacity 2× when full. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number;
 
@@ -89,7 +92,7 @@ export function clearThinInstanceLodPartner(fullMesh: Mesh): void;
 
 `setThinInstanceDrawCount()` is the count-only path for fixed-capacity pools whose CPU array and GPU
 buffer are already populated. It accepts an integer in `[0, _capacity]`, updates only `count`, and leaves
-matrix/color versions and dirty ranges untouched. Cached draws observe the count through their stable
+matrix/color dirty ranges untouched. By default, cached draws observe the count through their stable
 indirect argument buffer, so changing the active prefix neither replaces instance buffers nor invalidates
 render bundles. A caller exposing newly written slots must mark those exact matrix/color ranges dirty with
 the corresponding update API; the count-only setter deliberately does not upload vertex data. The pool
@@ -116,6 +119,49 @@ upload and is invalidated before writing, so a failed upload retries without all
 argument buffers. Base vertices are compared as signed 32-bit words.
 Matrix buffers always carry `STORAGE` for GPU picking, so switching culling on/off does
 not recreate or re-upload them. Color buffers still track their optional storage usage.
+
+### Opt-in direct draws (`enable-thin-instance-direct-draws.ts`)
+
+Call `enableThinInstanceDirectDraws(mesh)` after creating its thin instances and before `registerScene()`.
+The opt-in keeps `drawIndexed` when counts change, including zero and regrowth. It does not bypass render
+bundles: a changed captured count bumps the global visibility epoch, so each main/shadow/geometry/override
+bundle is re-recorded before its next replay. Repeated synchronization of the same count does not bump it.
+Several CPU changes before synchronization collapse to the final count. Matrix/color synchronization,
+dirty uploads, geometry offsets, picking, shaders, layouts, bind groups and depth/stencil state are unchanged.
+There is no WebKit detection or default change.
+
+This trades indirect draws for bundle recording on count changes. Because the epoch is global, other cached
+passes can also be re-recorded. Static frames still reuse bundles. The default remains promotion to stable
+indirect arguments after the first count change; `enableThinInstanceDynamicDrawCount()` still explicitly
+requests indirect arguments during warm-up.
+
+The enabler requires thin-instance data. It rejects existing GPU culling, either LOD role, an allocated
+stable indirect-argument buffer, and a pending indirect warm-up (`_drawArgsInstanceCount === -1`). It never
+silently disables features. Culling, LOD pairing (either mesh), and indirect warm-up likewise reject direct
+mode before mutating any state; disabling culling remains allowed. Clear a pairing and disable culling first.
+Repeated enable calls are idempotent. There is no runtime disable API. Clones sharing `ThinInstanceData`
+share its draw policy, just as they share matrices/counts.
+
+The feature module installs this private state only when enabled:
+
+```typescript
+// @internal member of ThinInstanceData; absent by default.
+_drawCountPolicy?: {
+    readonly _sync: (count: number) => void;
+    readonly _requireIndirect: (enabled: boolean) => void;
+};
+```
+
+`syncThinInstanceForDraw()` first synchronizes GPU vertex data, then optionally calls `_sync(ti.count)`.
+The callback bumps the epoch only when an existing `_drawArgsInstanceCount` differs from the requested count,
+then stores that count. The existing direct-count comparison consequently returns `null` without allocating
+or uploading indirect arguments. Initial capture needs no extra epoch; GPU-buffer creation already invalidates
+bundles. The callback and its captured state live behind the enabler. The optional-chain hook remains in the
+default synchronization path, so thin-instance bundles can grow slightly even without the opt-in. The hook
+does not retain the feature module or allocate its policy when the enabler is unused.
+Existing culling/LOD/warm-up APIs only optional-chain `_requireIndirect(enabled)` (true for LOD/warm-up).
+That callback rejects true with a clear incompatibility error, and accepts false without changing state.
+The new function is exported explicitly through the root entry; unused consumers do not import its module.
 
 `enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
 that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's
@@ -756,19 +802,24 @@ error propagates.
 
 ## Test Specification
 
-| Test                    | Description                                                                        |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| Scene 16 parity         | Pixel comparison of 64K colored cubes against Babylon.js reference                 |
-| Live reference          | Opens `babylon-ref-scene16.html`, captures `live-ref.png`, compares against Lite   |
-| Golden fallback         | Falls back to `babylon-ref-golden.png` if live capture fails                       |
-| MAD threshold           | Full-image Mean Absolute Difference ≤ 1                                            |
-| Exact match ratio       | ≥ 95% of pixels must be exact matches                                              |
-| Capacity growth         | `addThinInstance` beyond initial capacity → doubles array, preserves existing data |
-| Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
-| Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
-| Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
-| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers     |
-| Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
+| Test                    | Description                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Scene 16 parity         | Pixel comparison of 64K colored cubes against Babylon.js reference                                             |
+| Live reference          | Opens `babylon-ref-scene16.html`, captures `live-ref.png`, compares against Lite                               |
+| Golden fallback         | Falls back to `babylon-ref-golden.png` if live capture fails                                                   |
+| MAD threshold           | Full-image Mean Absolute Difference ≤ 1                                                                        |
+| Exact match ratio       | ≥ 95% of pixels must be exact matches                                                                          |
+| Capacity growth         | `addThinInstance` beyond initial capacity → doubles array, preserves existing data                             |
+| Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements                                    |
+| Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`                                           |
+| Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)                                   |
+| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers                                 |
+| Opt-in direct counts    | Changed counts, zero/regrowth and repeated sync stay direct, with one epoch bump per observed change           |
+| Direct compatibility    | Culling, either LOD role and indirect warm-up reject the combination in either call order without mutation     |
+| Direct isolation        | Default meshes still promote; meshes sharing data share the policy; dirty uploads remain unchanged             |
+| Direct pass coverage    | Main, transparent, geometry and override/shadow bindings use the current count; unchanged frames reuse bundles |
+| Direct public types     | The root export accepts a Mesh and returns void; declarations hide the private draw policy                     |
+| Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk                                         |
 
 ---
 
@@ -778,6 +829,7 @@ error propagates.
 | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `src/mesh/thin-instance.ts`                                | CPU-side data model + public API (`ThinInstanceData`, `setThinInstances`, etc.)                    |
 | `src/mesh/thin-instance-gpu.ts`                            | GPU buffer sync — lazy-loaded chunk (`syncThinInstanceBuffers`)                                    |
+| `src/mesh/enable-thin-instance-direct-draws.ts`            | Tree-shakable direct-count policy and compatibility validation                                     |
 | `src/mesh/thin-instance-gpu-culling.ts`                    | Opt-in compute frustum culling + compacted visible buffers + indirect args                         |
 | `src/material/standard/standard-material.ts`               | `disableLighting` property + `standardGroupBuilder` with dynamic sync loading                      |
 | `src/material/standard/standard-pipeline.ts`               | `THIN_INSTANCES`, `THIN_INSTANCE_COLOR`, `DISABLE_LIGHTING` flags + pipeline vertex buffer layouts |
