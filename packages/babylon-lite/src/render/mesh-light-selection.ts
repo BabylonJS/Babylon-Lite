@@ -6,6 +6,13 @@ import type { Mesh } from "../mesh/mesh.js";
 const MSH_LIGHT_INDEX_WORD_OFFSET = 20;
 
 function affectsMesh(light: LightBase, mesh: Mesh): boolean {
+    const includedMeshes = light.includedOnlyMeshes;
+    if (includedMeshes?.size) {
+        return includedMeshes.has(mesh) && !light.excludedMeshes?.has(mesh);
+    }
+    if (light.excludedMeshes?.has(mesh)) {
+        return false;
+    }
     const meshId = mesh.id;
     const included = light.includedOnlyMeshIds;
     if (included?.size) {

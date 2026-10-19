@@ -4,6 +4,7 @@
  *  PBR + Standard both consume the shared lights UBO (render/lights-ubo.ts);
  *  light type is encoded in vLightData.w (1=dir, 2=spot, 3=hemi, other=point). */
 
+import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "../scene/scene-node.js";
 
 /** Shared base for all light types.
@@ -14,6 +15,11 @@ export interface LightBase extends SceneNode {
     excludedMeshIds?: ReadonlySet<string>;
     /** If non-empty, ONLY these mesh IDs are lit by this light. Takes priority over excludedMeshIds. */
     includedOnlyMeshIds?: ReadonlySet<string>;
+    /** Meshes excluded from this light by object identity. Applied before the ID sets. */
+    excludedMeshes?: ReadonlySet<Mesh>;
+    /** If non-empty, ONLY these meshes are lit by this light, minus any in {@link excludedMeshes}.
+     *  Applied before the ID sets. */
+    includedOnlyMeshes?: ReadonlySet<Mesh>;
     /** Shadow generator attached to this light. Set this to make the light cast shadows. */
     shadowGenerator?: import("../shadow/shadow-generator.js").ShadowGenerator;
 
