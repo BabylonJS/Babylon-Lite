@@ -52,6 +52,11 @@ interface CsmCachedTaskState extends CsmTaskState {
     _cachedContentVersion: number;
     /** Opt-in camera-coverage refit (`cascadeCoveragePadding`); null keeps "every camera change refits". */
     _coverage: CsmCoverageState | null;
+    /** Per-cascade OWNED copies of the published light view and biased caster view-projection. A shadow camera keeps
+     *  references to the arrays it is given (`updateShadowCameraBase`), and both a spread refit and a coverage refit
+     *  recompute the shared cascade scratch while other cascades stay published, so they must not alias that scratch. */
+    _publishedViews: Float32Array[];
+    _publishedTransforms: Float32Array[];
 }
 
 /** Camera-coverage refit state. A camera POSE change no longer refits: each cascade keeps its published map until the
@@ -60,9 +65,8 @@ interface CsmCachedTaskState extends CsmTaskState {
 interface CsmCoverageState {
     /** 1 + padding: the bounding-sphere scale passed to `_computeCsmCascades`. */
     _radiusScale: number;
-    /** Camera and projection revision (`Camera._projRev`, a PER-CAMERA counter) the published splits were fit for; a
-     *  change of either forces a full refit. The identity is needed because two cameras can share a revision number. */
-    _camera: Camera | null;
+    /** Projection revision (`Camera._projRev`, a PER-CAMERA counter) the published splits were fit for; a change of it,
+     *  or of the camera itself (`CsmTaskState._lastCamera`), forces a full refit. */
     _projRev: number;
     /** Camera transform version last tested, so a still camera costs no test. */
     _poseVersion: number;
@@ -76,11 +80,6 @@ interface CsmCoverageState {
      *  consumers rely on that cadence (some re-upload their own camera terms from it). A camera change that refits
      *  no cascade therefore still invokes them, with the unchanged receiver data. */
     _notifiedCamVersion: number;
-    /** Per-cascade OWNED copies of the published light view and biased caster view-projection. A shadow camera keeps
-     *  references to the arrays it is given (`updateShadowCameraBase`), and a coverage refit recomputes the shared
-     *  cascade scratch while the other cascades stay published, so they must not alias that scratch. */
-    _views: Float32Array[];
-    _transforms: Float32Array[];
     _invViewProj: Float32Array;
     _corners: number[][];
     /** Reused output of `cascadesLeavingCoverage`, then the frame's merged cascade list. */
@@ -284,8 +283,12 @@ export function ensureCsmShadowCacheState(
     const tasks: RenderTask[] = [];
     const staticTasks: RenderTask[] = [];
     const cameras = [];
+    const publishedViews: Float32Array[] = [];
+    const publishedTransforms: Float32Array[] = [];
     for (let cascade = 0; cascade < cascadeCount; cascade++) {
         const camera = createShadowCamera(sg);
+        publishedViews.push(new Float32Array(16));
+        publishedTransforms.push(new Float32Array(16));
         const staticTask = createRenderTask(
             {
                 name: `csm${cascade}-static`,
@@ -385,6 +388,7 @@ export function ensureCsmShadowCacheState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamera: null,
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
@@ -403,7 +407,9 @@ export function ensureCsmShadowCacheState(
         _onDemote: onDemote,
         _pendingTransfers: pendingTransferTargets,
         _cachedContentVersion: -1,
-        _coverage: cache._cascadeCoveragePadding ? createCoverageState(cascadeCount, cache._cascadeCoveragePadding) : null,
+        _coverage: cache._cascadeCoveragePadding ? createCoverageState(cache._cascadeCoveragePadding) : null,
+        _publishedViews: publishedViews,
+        _publishedTransforms: publishedTransforms,
     };
     if (replacedDefaultState) {
         const version = scene._renderableVersion;
@@ -422,14 +428,15 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     }
     const camVersion = _cameraChangeKey(camera);
     const camAspect = csmCameraAspect(cached._scene, camera);
-    const cameraChanged = camVersion !== cached._lastCamVersion || camAspect !== cached._lastCamAspect;
+    const swapped = camera !== cached._lastCamera;
+    const cameraChanged = swapped || camVersion !== cached._lastCamVersion || camAspect !== cached._lastCamAspect;
     const coverage = cached._coverage;
     // With the coverage refit, only a camera swap or a projection or aspect change moves the splits and slice shapes and
     // refits every cascade; a pose change is answered per cascade by the coverage test below. Not under a floating
     // origin: the camera view-projection is then eye-relative (`getViewMatrix`), so a pure translation moves no slice
     // corner and the test could never see it; every camera change refits there, as without the option.
     const coverageRefit = !!coverage && !camera._useFloatingOrigin;
-    const refitForCamera = coverageRefit ? camera !== coverage._camera || (camera._projRev ?? 0) !== coverage._projRev || camAspect !== cached._lastCamAspect : cameraChanged;
+    const refitForCamera = coverageRefit ? swapped || (camera._projRev ?? 0) !== coverage._projRev || camAspect !== cached._lastCamAspect : cameraChanged;
     const light = sg._light as DirectionalLight;
     // A caster's DEPTH can change without its transform changing: a procedural mesh re-uploads its
     // geometry, a mesh set is re-registered, buffers are reallocated. `_renderableVersion` is the
@@ -479,8 +486,8 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     }
     let draws = 0;
     if (decision.refit || missed) {
-        // A coverage miss needs a fresh fit too. Recomputing overwrites the shared scratch, which is safe in coverage
-        // mode: published cascades read their owned copies, and cascades still pending take the fresher fit.
+        // A coverage miss needs a fresh fit too. Recomputing overwrites the shared scratch, which is safe: published
+        // cascades read their owned copies, and cascades still pending take the fresher fit.
         cached._pendingCascades = _computeCsmCascades(
             cached._scene,
             camera,
@@ -498,10 +505,10 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     if (decision.refit) {
         cached._lastCamVersion = camVersion;
         cached._lastCamAspect = camAspect;
+        cached._lastCamera = camera;
         cached._cachedContentVersion = cached._scene._renderableVersion;
         scheduler.arm(cached._gate._lastRefitDriftOnly() && !scheduler.pending());
         if (coverage) {
-            coverage._camera = camera;
             coverage._projRev = camera._projRev ?? 0;
         }
     }
@@ -588,20 +595,15 @@ function publishCsmCascades(
     if (fullUpdate) {
         _writeCsmUbo(state._uboData, cascades, cfg);
     }
-    const coverage = state._coverage;
     for (const cascade of updatedCascades) {
-        let transform = cascades._transforms[cascade]!;
-        let view = cascades._views[cascade]!;
         if (!fullUpdate) {
-            state._uboData.set(transform, cascade * 16);
+            state._uboData.set(cascades._transforms[cascade]!, cascade * 16);
         }
-        if (coverage) {
-            // Publish owned copies (see `CsmCoverageState._views`); the receiver UBO above keeps the unbiased matrix.
-            transform = coverage._transforms[cascade]!;
-            transform.set(cascades._transforms[cascade]!);
-            view = coverage._views[cascade]!;
-            view.set(cascades._views[cascade]!);
-        }
+        // Publish owned copies (see `CsmCachedTaskState._publishedViews`); the receiver UBO above keeps the unbiased matrix.
+        const transform = state._publishedTransforms[cascade]!;
+        transform.set(cascades._transforms[cascade]!);
+        const view = state._publishedViews[cascade]!;
+        view.set(cascades._views[cascade]!);
         const cascadeCamera = state._cameras[cascade]!;
         cascadeCamera.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[cascade]!, cascades._far[cascade]!);
@@ -627,23 +629,14 @@ function notifyReceivers(sg: ShadowGenerator, data: Float32Array): void {
     }
 }
 
-function createCoverageState(cascadeCount: number, padding: number): CsmCoverageState {
-    const views: Float32Array[] = [];
-    const transforms: Float32Array[] = [];
-    for (let cascade = 0; cascade < cascadeCount; cascade++) {
-        views.push(new Float32Array(16));
-        transforms.push(new Float32Array(16));
-    }
+function createCoverageState(padding: number): CsmCoverageState {
     return {
         _radiusScale: 1 + padding,
-        _camera: null,
         _projRev: -1,
         _poseVersion: -1,
         _fitCamera: null,
         _fitPose: -1,
         _notifiedCamVersion: -1,
-        _views: views,
-        _transforms: transforms,
         _invViewProj: new Float32Array(16),
         _corners: Array.from({ length: 8 }, () => [0, 0, 0]),
         _missed: [],
@@ -674,7 +667,7 @@ function cascadesLeavingCoverage(state: CsmCachedTaskState, camera: Camera, aspe
         _csmSliceCornersInto(corners, invViewProj, prevSplit, split);
         prevSplit = split;
         const t = cascade * 16;
-        const view = coverage._views[cascade]!;
+        const view = state._publishedViews[cascade]!;
         // A stabilized fit's ortho X row is the light right axis scaled by 1/R, so its length gives R back.
         const depth = 2 / Math.hypot(ubo[t]!, ubo[t + 4]!, ubo[t + 8]!);
         for (const corner of corners) {

@@ -896,7 +896,9 @@ export { createLookAtMat4LH } from "./math/create-look-at-mat4-lh.js";
 export { createPerspectiveMat4LH } from "./math/create-perspective-mat4-lh.js";
 export { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "./math/create-mat4-from-quat.js";
 export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat4.js";
+export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
 export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
+export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
 export { decomposeMat4 } from "./math/decompose-mat4.js";
 export type { DecomposedTransform } from "./math/decompose-mat4.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
@@ -1106,6 +1108,8 @@ export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisi
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
+export type { Sprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
+export { enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";

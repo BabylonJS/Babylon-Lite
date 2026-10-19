@@ -14,7 +14,7 @@ import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
-import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
+import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
@@ -65,6 +65,8 @@ interface TextRenderableGpu {
     _variantPipeline: GPURenderPipeline;
     _uploadedDataVersion: number;
     _uploadedCameraVersion: number;
+    /** Camera the uploaded mvp was composed from; a replacement camera can report the same version. */
+    _uploadedCamera?: Camera;
     _uploadedAspect: number;
     _uploadedViewportW: number;
     _uploadedViewportH: number;
@@ -290,13 +292,14 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     if (camera) {
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
         const camVer = _cameraChangeKey(camera);
-        if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedAspect !== aspect) {
+        if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedCamera !== camera || gpu._uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();
             multiplyMat4IntoBuffer(_mvpScratch, 0, vp, 0, wm as unknown as Mat4Storage, 0);
             device.queue.writeBuffer(gpu._textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
             r._wmDirty = false;
             gpu._uploadedCameraVersion = camVer;
+            gpu._uploadedCamera = camera;
             gpu._uploadedAspect = aspect;
         }
     }

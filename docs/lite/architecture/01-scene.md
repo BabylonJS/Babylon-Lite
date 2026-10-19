@@ -56,7 +56,8 @@ export interface SceneContext {
     _deferredBuilders: (() => void | Promise<void>)[];
 }
 
-/** Add an entity or asset container to the scene. Auto-routes by type. */
+/** Add an entity or asset container to the scene. Auto-routes by type. Adding a camera makes it
+ *  the active `scene.camera`; an asset container's camera is installed only when none is set. */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void;
 
 /** Remove an entity or asset container from the scene, undoing addToScene. Idempotent.
@@ -109,7 +110,7 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera;
 | ------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `engine`                  | passed in                                                     | Immutable reference to Engine                                             |
 | `clearColor`              | `{ r: 0.2, g: 0.2, b: 0.3, a: 1.0 }`                          | Render pass clear color                                                   |
-| `camera`                  | `null`                                                        | Set later by `createDefaultCamera`                                        |
+| `camera`                  | `null`                                                        | Set by `addToScene(camera)`, `createDefaultCamera`, or direct assignment  |
 | `lights`                  | `[]`                                                          | All light types (LightBase[])                                             |
 | `meshes`                  | `[]`                                                          | All meshes (standard, PBR, etc.)                                          |
 | `animationGroups`         | `[]`                                                          | Animation groups from glTF clips                                          |
@@ -221,6 +222,8 @@ Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to cre
 2. If this is the first mesh for a given builder, a deferred builder is registered.
 3. At `buildScene(scene)` time (called by `registerScene()` before the frame graph is built), each deferred builder runs once with the full batch of meshes for that group.
 4. Builders return `MeshGroupBuildResult`; `renderables` are pushed onto `_renderables`, and an optional `updater` is pushed onto `_uniformUpdaters` only when present.
+
+`mesh.material` may be assigned or replaced after `addToScene` and before the initial build. The material setter queues the mesh. When that queue is non-empty, the initial `buildScene` drops the queued swaps, since the boot builders already use each mesh's final material, and refills the still-unbuilt groups from every scene mesh's current `material._buildGroup` in add order, creating a group and its deferred builder when needed. A mesh added with no material therefore builds once its material is set, and a mesh moved to another material family is built only by the new family's builder. A boot group that ends up empty, because its meshes were moved to another family or removed before boot, is never passed to its builder (builders require at least one mesh). Its deferred builder removes it from `_groups` instead, so a mesh that joins that family later in the boot drain creates and builds a fresh group.
 
 `buildScene(scene)` is async — deferred builders may return `Promise<void>` for GPU resource creation.
 
@@ -378,6 +381,7 @@ back-reference, so ownership cannot be recovered by mesh identity. Node material
 | `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed                                                     |
 | `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it                                                     |
 | `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds                                                           |
+| `pre-boot material assignment regroups`      | Set/replace/clear material after `addToScene` → built only by final family; emptied groups (incl. PBR) skipped              |
 | Test                                         | Description                                                                                                                 |
 | -------------------------------------------  | -------------------------------------------------------------------------                                                   |
 | `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                                                                                 |

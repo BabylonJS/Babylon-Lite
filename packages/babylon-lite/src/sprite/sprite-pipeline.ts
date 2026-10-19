@@ -6,6 +6,7 @@ import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import { _getSprite2DYSortHook } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
+import type { SpriteVertexExtension } from "./sprite-fx-hook.js";
 import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
@@ -50,7 +51,7 @@ return s * in.tint * L.opacityMul;
  * `@binding(3 + 2 * extraTextures.length)`, and the user's raw fragment body. Exposed so both
  * paths share one source of truth.
  */
-export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
+export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false, extension?: SpriteVertexExtension): string {
     const group = wgsl`@group(${spriteGroupIndex})`;
     const zAttribute = hasDepth ? wgsl`,\n@location(6) z: f32` : "";
     const uvOffsetAttribute = uvScroll ? wgsl`,\n@location(7) o: vec2f` : "";
@@ -74,12 +75,12 @@ struct I {
 @location(2) a: vec2f,
 @location(3) b: vec2f,
 @location(4) r: f32,
-@location(5) c: vec4f${zAttribute}${uvOffsetAttribute}
+@location(5) c: vec4f${zAttribute}${uvOffsetAttribute}${extension?._input ?? ""}
 };
 struct O {
 @builtin(position) p: vec4f,
 @location(0) uv: vec2f,
-@location(1) tint: vec4f,
+@location(1) tint: vec4f,${extension?._output ?? ""}
 };
 @vertex
 fn vs(in: I) -> O {
@@ -98,7 +99,7 @@ let uv = mix(in.a, in.b, c)${uvScroll ? " + in.o" : ""};
 var out: O;
 out.p = vec4f(n, ${zPosition}, 1);
 out.uv = uv;
-out.tint = in.c;
+out.tint = in.c;${extension?._assignment ?? ""}
 return out;
 }`;
 }
@@ -321,6 +322,10 @@ function buildSpritePipeline(
     // attribute-building, just this data consume. The widened stride is likewise already on the layer.
     if (layer?._uvScrollAttr) {
         instanceAttributes.push(layer._uvScrollAttr);
+    }
+    const vertexAttribute = layer ? _getSpriteFxHook()?.vertexAttribute(layer) : null;
+    if (vertexAttribute) {
+        instanceAttributes.push(vertexAttribute);
     }
     const arrayStride = layer?._instanceStrideBytes ?? (hasDepth ? DEPTH_INSTANCE_STRIDE_BYTES : PURE_2D_INSTANCE_STRIDE_BYTES);
     const descriptor: GPURenderPipelineDescriptor = {

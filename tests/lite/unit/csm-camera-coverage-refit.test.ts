@@ -53,7 +53,7 @@ vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", as
 const { ensureCsmShadowCacheState, renderCsmShadowMapCached } = await import("../../../packages/babylon-lite/src/shadow/csm-shadow-cache");
 const { createArcRotateCamera } = await import("../../../packages/babylon-lite/src/camera/arc-rotate");
 const { createDirectionalLight } = await import("../../../packages/babylon-lite/src/light/directional-light");
-const { getViewProjectionMatrix } = await import("../../../packages/babylon-lite/src/camera/camera");
+const { getViewProjectionMatrix, _cameraChangeKey } = await import("../../../packages/babylon-lite/src/camera/camera");
 const { invertMat4ToRefOrIdentity } = await import("../../../packages/babylon-lite/src/math/invert-mat4-to-ref-or-identity");
 
 const FRAME_MS = 1000 / 60;
@@ -358,6 +358,28 @@ describe("CSM static cache camera-coverage refit (cascadeCoveragePadding)", () =
         rig.frame();
         expect(rig.staticCount() - before).toBe(3);
         // shadowMaxZ 300 is beyond the new far plane, so the last split is that far plane.
+        expect(rig.state._uboData[66]).toBeCloseTo(200, 3);
+        const settled = rig.staticCount();
+        for (let f = 0; f < 10; f++) {
+            rig.frame();
+        }
+        expect(rig.staticCount()).toBe(settled);
+    });
+
+    it("default (padding 0): a camera swap refits every cascade even when both cameras share a change key", () => {
+        const rig = makeRig({ padding: 0, refitMaxIntervalMs: 0 });
+        for (let f = 0; f < 200; f++) {
+            rig.frame();
+        }
+        const other = createArcRotateCamera(0, 0.95, 170, { x: 0, y: 3, z: 0 });
+        other.nearPlane = 0.5;
+        other.farPlane = 200;
+        // Same transform version and projection revision: only the camera identity tells the two apart.
+        expect(_cameraChangeKey(other)).toBe(_cameraChangeKey(rig.camera));
+        rig.scene.camera = other;
+        const before = rig.staticCount();
+        rig.frame();
+        expect(rig.staticCount() - before).toBe(3);
         expect(rig.state._uboData[66]).toBeCloseTo(200, 3);
         const settled = rig.staticCount();
         for (let f = 0; f < 10; f++) {

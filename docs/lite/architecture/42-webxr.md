@@ -34,50 +34,57 @@ anchors, and any default-experience UI.
 All exported from the package barrel `packages/babylon-lite/src/index.ts`.
 
 ### `xr/xr-support.ts`
+
 ```ts
 type XrSessionMode = "immersive-vr" | "immersive-ar";
 
-function isWebXrPresent(): boolean;                              // navigator.xr exists
-function isWebGpuXrSupported(): boolean;                         // global XRGPUBinding exists (false everywhere today)
+function isWebXrPresent(): boolean; // navigator.xr exists
+function isWebGpuXrSupported(): boolean; // global XRGPUBinding exists (false everywhere today)
 function isXrSessionSupported(mode: XrSessionMode): Promise<boolean>; // combines both + navigator.xr.isSessionSupported; never throws
 ```
 
 ### `xr/xr-camera.ts`
+
 ```ts
 interface XrCamera extends Camera {
-    readonly eye: XREye;          // "left" | "right" | "none"
-    _world: Mat4Storage;          // @internal mutable eye pose (view→world), backs worldMatrix
-    _wmv: number;                 // @internal version, backs worldMatrixVersion
+    readonly eye: XREye; // "left" | "right" | "none"
+    _world: Mat4Storage; // @internal mutable eye pose (view→world), backs worldMatrix
+    _wmv: number; // @internal version, backs worldMatrixVersion
 }
 
 function createXrCamera(eye: XREye): XrCamera;
-function updateXrCameraForView(
-    cam: XrCamera, view: XRView, rtWidth: number, rtHeight: number, viewport: NormalizedViewport,
-): void;
+function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: number, rtHeight: number, viewport: NormalizedViewport): void;
 ```
 
 ### `xr/xr-input.ts`
+
 ```ts
 interface XrInputSource {
-    readonly source: XRInputSource;       // underlying WebXR source
+    readonly source: XRInputSource; // underlying WebXR source
     readonly handedness: XRHandedness;
     readonly targetRayMode: XRTargetRayMode;
-    readonly targetRayMatrix: Float32Array;  // column-major 4×4, valid when targetRayTracked
+    readonly targetRayMatrix: Float32Array; // column-major 4×4, valid when targetRayTracked
     targetRayTracked: boolean;
-    readonly gripMatrix: Float32Array;       // valid when gripTracked
+    readonly gripMatrix: Float32Array; // valid when gripTracked
     gripTracked: boolean;
-    selecting: boolean;                      // true between selectstart/selectend
-    squeezing: boolean;                      // true between squeezestart/squeezeend
+    selecting: boolean; // true between selectstart/selectend
+    squeezing: boolean; // true between squeezestart/squeezeend
     readonly gamepad: Gamepad | null;
 }
 
 interface XrInputCallbacks {
     onInputSourcesChange?(added: readonly XrInputSource[], removed: readonly XrInputSource[]): void;
-    onSelectStart?(i: XrInputSource): void;  onSelect?(i): void;  onSelectEnd?(i): void;
-    onSqueezeStart?(i: XrInputSource): void; onSqueeze?(i): void; onSqueezeEnd?(i): void;
+    onSelectStart?(i: XrInputSource): void;
+    onSelect?(i): void;
+    onSelectEnd?(i): void;
+    onSqueezeStart?(i: XrInputSource): void;
+    onSqueeze?(i): void;
+    onSqueezeEnd?(i): void;
 }
 
-interface XrInputManager { readonly inputSources: readonly XrInputSource[]; /* + @internal state */ }
+interface XrInputManager {
+    readonly inputSources: readonly XrInputSource[]; /* + @internal state */
+}
 
 function createXrInputManager(session: XRSession, callbacks: XrInputCallbacks): XrInputManager;
 function updateXrInputPoses(mgr: XrInputManager, frame: XRFrame, referenceSpace: XRReferenceSpace): void;
@@ -85,23 +92,31 @@ function disposeXrInputManager(mgr: XrInputManager): void;
 ```
 
 ### `xr/xr-session.ts`
+
 ```ts
 interface XrSessionOptions {
-    mode?: XrSessionMode;                                   // default "immersive-vr"
-    referenceSpaceType?: XRReferenceSpaceType;              // default "local-floor", falls back to "local"
-    requiredFeatures?: string[];                            // merged with mandatory "webgpu"
+    mode?: XrSessionMode; // default "immersive-vr"
+    referenceSpaceType?: XRReferenceSpaceType; // default "local-floor", falls back to "local"
+    requiredFeatures?: string[]; // merged with mandatory "webgpu"
     optionalFeatures?: string[];
-    colorFormat?: GPUTextureFormat;                         // default binding.getPreferredColorFormat()
-    depthStencilFormat?: GPUTextureFormat | null;           // default "depth24plus"; null = color-only
-    input?: XrInputCallbacks | false;                       // false disables input tracking
+    colorFormat?: GPUTextureFormat; // default binding.getPreferredColorFormat()
+    depthStencilFormat?: GPUTextureFormat | null; // default "depth24plus"; null = color-only
+    input?: XrInputCallbacks | false; // false disables input tracking
     onFrame?(ctx: XrSessionContext, frame: XRFrame, time: DOMHighResTimeStamp): void;
     onEnd?(): void;
 }
 
 interface XrSessionContext {
-    readonly mode; session; binding; layer; referenceSpace; scene; engine;
-    readonly colorFormat; depthFormat;
-    readonly cameras: readonly XrCamera[];                  // per-eye, in XRViewerPose.views order
+    readonly mode;
+    session;
+    binding;
+    layer;
+    referenceSpace;
+    scene;
+    engine;
+    readonly colorFormat;
+    depthFormat;
+    readonly cameras: readonly XrCamera[]; // per-eye, in XRViewerPose.views order
     readonly input: XrInputManager | null;
     /* + @internal lifecycle state */
 }
@@ -111,6 +126,7 @@ function exitXr(ctx: XrSessionContext): Promise<void>;
 ```
 
 ### Ambient draft types — `xr/webxr-webgpu.d.ts`
+
 Global script (no import/export) so its `interface` blocks merge with the lib
 globals. Declares `XRGPUBinding`, `XRGPUSubImage`, the layer-init dictionaries,
 `GPURequestAdapterOptions.xrCompatible`, and `XRRenderState(Init).layers`. Starts
@@ -123,17 +139,20 @@ allowlist (`["@webgpu/types"]`).
 ## Internal Architecture
 
 ### Per-eye render unit
+
 The session owns one `XrEyeUnit` per `XRView` (one per eye), each holding:
+
 - an **eager** `RenderTarget` (`_eager = true`),
 - an `XrCamera`,
 - a scene-mirroring `RenderTask` (`createRenderTask({ rt, clr, cam }, engine, scene)`).
 
 **One render task per eye** (not one shared task retargeted twice) because each
 render task owns its own `_sceneUBO`. A single shared UBO would alias across eyes:
-`queue.writeBuffer` only leaves the *last* written value visible before submit, so
+`queue.writeBuffer` only leaves the _last_ written value visible before submit, so
 both eyes would read the second eye's view/projection.
 
 ### Zero-cost camera matrix injection (`xr-camera.ts`)
+
 Instead of adding an XR override branch to the shared `camera.ts` getters (which
 would grow every scene's bundle), `XrCamera` writes directly into the matrix
 caches those getters already read:
@@ -143,7 +162,7 @@ caches those getters already read:
   bumping `_wmv` makes `getViewMatrix` produce the inverse rigid transform and
   `_packSceneUniforms` read the eye position from the world translation column —
   both automatically.
-- **Projection** is the per-eye *asymmetric* frustum from `XRView.projectionMatrix`,
+- **Projection** is the per-eye _asymmetric_ frustum from `XRView.projectionMatrix`,
   which the symmetric-perspective `getProjectionMatrix` cannot reproduce. It is
   injected straight into `_projCache` with `_projVer = _wmv` and `_projAspect` set
   to the exact aspect the render task will request. `_viewVer`/`_vpVer` are
@@ -158,12 +177,14 @@ operand order** so the values are bit-identical; otherwise the cache misses and 
 wrong symmetric perspective is recomputed.
 
 ### Eager render targets
+
 `rt._eager = true` makes `buildRenderTarget` a no-op (the compositor owns the
 textures) and `disposeRenderTarget` a no-op (so XR-owned textures are never
 destroyed). Each frame the loop refreshes `rt._colorTexture/_colorView/
 _depthTexture/_depthView/_width/_height` from the `XRGPUSubImage`.
 
 ### Per-frame attachment swap
+
 `executePass` only re-reads the color view from the RT each frame when
 `cfg.rt === eng.scRT`. XR RTs are not `scRT`, so the loop manually updates
 `task._colorAttachment.view` **and**
@@ -171,11 +192,12 @@ _depthTexture/_depthView/_width/_height` from the `XRGPUSubImage`.
 compositor returns fresh `GPUTexture`s from a double/triple-buffered swap chain).
 
 ### Depth handling
-The single eager RT carries **both** color and depth (its descriptor has `format`
-+ `dFormat`); there is no separate `config.depth`. A `config.depth` combined with
-`_eager` would force `loadOp: "load"`, but XR needs `"clear"` each frame. With
-depth on the color RT and no `config.depth`, `_depthLoadOp` is undefined and
-defaults to `"clear"`. Correct.
+
+The single eager RT carries **both** color and depth (its descriptor has
+`format + dFormat`); there is no separate `config.depth`. A `config.depth`
+combined with `_eager` would force `loadOp: "load"`, but XR needs `"clear"` each
+frame. With depth on the color RT and no `config.depth`, `_depthLoadOp` is
+undefined and defaults to `"clear"`. Correct.
 
 ---
 
@@ -251,15 +273,15 @@ the canvas because the canvas loop is stopped while in XR.
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js (`dev/core/src/XR/`)        | Babylon Lite (`xr/`)                                  |
-| -------------------------------------- | ----------------------------------------------------- |
-| `WebXRSessionManager`                  | `enterXr` / `exitXr` / `XrSessionContext`             |
-| `WebXRExperienceHelper` (enter/exit)   | `enterXr` / `exitXr` (no default-experience UI)       |
-| `WebXRCamera` + rig cameras            | `XrCamera` (one per eye) + matrix-cache injection     |
-| `WebXRRenderTarget` / WebGL layer      | eager `RenderTarget` + `XRGPUBinding` projection layer|
-| `WebXRInput` / `WebXRInputSource`      | `XrInputManager` / `XrInputSource`                    |
-| `WebXRSessionManager.isSessionSupportedAsync` | `isXrSessionSupported`                         |
-| WebGL binding (`XRWebGLBinding`)       | **WebGPU binding** (`XRGPUBinding`) — draft           |
+| Babylon.js (`dev/core/src/XR/`)               | Babylon Lite (`xr/`)                                   |
+| --------------------------------------------- | ------------------------------------------------------ |
+| `WebXRSessionManager`                         | `enterXr` / `exitXr` / `XrSessionContext`              |
+| `WebXRExperienceHelper` (enter/exit)          | `enterXr` / `exitXr` (no default-experience UI)        |
+| `WebXRCamera` + rig cameras                   | `XrCamera` (one per eye) + matrix-cache injection      |
+| `WebXRRenderTarget` / WebGL layer             | eager `RenderTarget` + `XRGPUBinding` projection layer |
+| `WebXRInput` / `WebXRInputSource`             | `XrInputManager` / `XrInputSource`                     |
+| `WebXRSessionManager.isSessionSupportedAsync` | `isXrSessionSupported`                                 |
+| WebGL binding (`XRWebGLBinding`)              | **WebGPU binding** (`XRGPUBinding`) — draft            |
 
 Difference of substance: Babylon.js XR runs on WebGL2 with `XRWebGLBinding`;
 Babylon Lite is WebGPU-exclusive and targets the draft `XRGPUBinding`, so the
@@ -279,7 +301,11 @@ framebuffer.
 - `scene/scene-core.ts` — `SceneContext`, `scene._update`, `scene.clearColor`,
   `scene.surface.engine`.
 - Dev dependency `@types/webxr` for the standard WebXR DOM types; draft binding
-  types are ambient in `webxr-webgpu.d.ts`.
+  types are ambient in `webxr-webgpu.d.ts`. The published package lists
+  `@types/webxr` as a (types-only) dependency and the rolled-up `index.d.ts`
+  starts with `/// <reference types="webxr" />`, so strict consumers type-check
+  the public XR API even when they never use XR or set `compilerOptions.types`
+  without `webxr`.
 
 No module-level side effects (Pillar: no module-level `new Map()` etc.); all state
 lives on the returned context objects.
@@ -316,12 +342,12 @@ is exposed on `window.__xrDemo`.
 
 ## File Manifest
 
-| File                                  | Responsibility                                          |
-| ------------------------------------- | ------------------------------------------------------- |
-| `xr/webxr-webgpu.d.ts`                | Ambient declarations for the draft WebGPU XR binding.   |
-| `xr/xr-support.ts`                    | Feature detection (`XrSessionMode`, the three checks).  |
-| `xr/xr-camera.ts`                     | `XrCamera` + per-view view/projection cache injection.  |
-| `xr/xr-input.ts`                      | Input-source tracking + select/squeeze events.          |
-| `xr/xr-session.ts`                    | Session lifecycle + per-frame stereo render loop.       |
-| `tests/lite/unit/xr/*.test.ts`        | Mocked unit tests (support, camera, input, session).    |
-| `lab/lite/xr.html` + `src/xr.ts`      | Gated, gracefully-degrading lab demo.                   |
+| File                             | Responsibility                                         |
+| -------------------------------- | ------------------------------------------------------ |
+| `xr/webxr-webgpu.d.ts`           | Ambient declarations for the draft WebGPU XR binding.  |
+| `xr/xr-support.ts`               | Feature detection (`XrSessionMode`, the three checks). |
+| `xr/xr-camera.ts`                | `XrCamera` + per-view view/projection cache injection. |
+| `xr/xr-input.ts`                 | Input-source tracking + select/squeeze events.         |
+| `xr/xr-session.ts`               | Session lifecycle + per-frame stereo render loop.      |
+| `tests/lite/unit/xr/*.test.ts`   | Mocked unit tests (support, camera, input, session).   |
+| `lab/lite/xr.html` + `src/xr.ts` | Gated, gracefully-degrading lab demo.                  |
