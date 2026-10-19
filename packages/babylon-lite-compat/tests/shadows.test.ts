@@ -344,6 +344,7 @@ describe("ShadowGenerator caster synchronization", () => {
         const activeFlushCallbacks = new Set<() => void>();
         const generatorScene = {
             _registerShadowGenerator: vi.fn(),
+            _unregisterShadowGenerator: vi.fn(),
             _registerBeforeRenderFlush: (callback: () => void) => {
                 activeFlushCallbacks.add(callback);
                 return () => {

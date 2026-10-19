@@ -9,10 +9,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * contract while the clustering data functions stay real.
  */
 
-const { addClusteredSpy, removeFromSceneSpy, addToSceneSpy } = vi.hoisted(() => ({
+const { addClusteredSpy, removeFromSceneSpy, addToSceneSpy, createEsmDirectionalShadowGeneratorSpy } = vi.hoisted(() => ({
     addClusteredSpy: vi.fn(),
     removeFromSceneSpy: vi.fn(),
     addToSceneSpy: vi.fn(),
+    createEsmDirectionalShadowGeneratorSpy: vi.fn(() => ({ kind: "esm" })),
 }));
 
 vi.mock("babylon-lite", async (importActual) => {
@@ -22,11 +23,13 @@ vi.mock("babylon-lite", async (importActual) => {
         addClusteredLightContainer: addClusteredSpy,
         removeFromScene: removeFromSceneSpy,
         addToScene: addToSceneSpy,
+        createEsmDirectionalShadowGenerator: createEsmDirectionalShadowGeneratorSpy,
     };
 });
 
 import { ClusteredLightContainer } from "../src/lights/clustered-light-container";
-import { PointLight, DirectionalLight } from "../src/lights/lights";
+import { PointLight, DirectionalLight, SpotLight } from "../src/lights/lights";
+import { ShadowGenerator } from "../src/shadows/shadow-generator";
 import { Vector3 } from "../src/math/vector";
 import { Color3 } from "../src/math/color";
 import { NullEngine } from "../src/engine/engine";
@@ -45,6 +48,9 @@ function makeFakeScene(headless: boolean, id = "fake-scene"): { scene: Scene; re
         _registerLight: (l: object) => registered.push(l),
         _registerClusteredLightContainer: () => {},
         _unregisterClusteredLightContainer: () => {},
+        _registerShadowGenerator: () => {},
+        _unregisterShadowGenerator: () => {},
+        _registerBeforeRenderFlush: () => () => {},
         _unregisterNode: (n: object) => unregistered.push(n),
         getEngine: () => ({ _headless: headless }),
     } as unknown as Scene;
@@ -55,6 +61,7 @@ beforeEach(() => {
     addClusteredSpy.mockClear();
     removeFromSceneSpy.mockClear();
     addToSceneSpy.mockClear();
+    createEsmDirectionalShadowGeneratorSpy.mockClear();
 });
 
 describe("ClusteredLightContainer — construction defaults", () => {
@@ -90,11 +97,47 @@ describe("ClusteredLightContainer — construction defaults", () => {
 });
 
 describe("ClusteredLightContainer.IsLightSupported", () => {
-    it("accepts point lights and rejects other light types", () => {
+    it("accepts representable point lights and rejects other light types", () => {
         const point = new PointLight("p", new Vector3(1, 2, 3));
+        const spot = new SpotLight("s", new Vector3(1, 2, 3), new Vector3(0, -1, 0), Math.PI / 3, 0);
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         expect(ClusteredLightContainer.IsLightSupported(point)).toBe(true);
+        expect(ClusteredLightContainer.IsLightSupported(spot)).toBe(false);
         expect(ClusteredLightContainer.IsLightSupported(dir)).toBe(false);
+    });
+
+    it("rejects point lights that already own a shadow generator", () => {
+        const { scene } = makeFakeScene(false);
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        const shadowGenerator = new ShadowGenerator(1024, point);
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(false);
+
+        shadowGenerator.dispose();
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(true);
+    });
+
+    it("does not rebuild a disposed deferred shadow generator after clustering its light", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        engine._headless = false;
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        const shadowGenerator = new ShadowGenerator(1024, point);
+
+        shadowGenerator.dispose();
+        const container = new ClusteredLightContainer("clust", [point], scene);
+        expect(container.lights).toEqual([point]);
+
+        scene._buildShadowGenerators();
+
+        expect(createEsmDirectionalShadowGeneratorSpy).not.toHaveBeenCalled();
+        expect(point._lite.shadowGenerator).toBeUndefined();
+    });
+
+    it("rejects point lights on a device-less engine", () => {
+        const { scene } = makeFakeScene(true);
+        const point = new PointLight("p", new Vector3(1, 2, 3), scene);
+        expect(ClusteredLightContainer.IsLightSupported(point)).toBe(false);
+        expect(new ClusteredLightContainer("clust", [], scene).isSupported).toBe(false);
     });
 });
 
@@ -116,7 +159,6 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
         expect(first.range).toBe(7);
         expect(first.intensity).toBe(2);
     });
-
     it("ignores unsupported light types and double-adds", () => {
         const dir = new DirectionalLight("d", new Vector3(0, -1, 0));
         const point = new PointLight("p", new Vector3(0, 0, 0));
@@ -133,7 +175,7 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
     });
 
     it("removeLight returns the index and returns the light to the normal path", () => {
-        const { scene, registered } = makeFakeScene(true);
+        const { scene, registered } = makeFakeScene(false);
         const point = new PointLight("p", new Vector3(0, 0, 0), scene);
         const c = new ClusteredLightContainer("clust", [point], scene);
         addToSceneSpy.mockClear();
@@ -149,11 +191,23 @@ describe("ClusteredLightContainer.addLight / removeLight", () => {
 
         expect(c.removeLight(point)).toBe(-1);
     });
+
+    it("throws before mutating when a light is added after GPU state is built", () => {
+        const { scene } = makeFakeScene(false);
+        const c = new ClusteredLightContainer("clust", [], scene);
+        const point = new PointLight("p", new Vector3(0, 0, 0));
+        c._build();
+
+        expect(() => c.addLight(point)).toThrow(/ClusteredLightContainer\.addLight after engine start/);
+        expect(c.lights).toEqual([]);
+        expect(liteContainer(c).pointLights).toEqual([]);
+        expect(point._clusteredContainer).toBeNull();
+    });
 });
 
 describe("ClusteredLightContainer — scene wiring", () => {
     it("excludes an added light from the ordinary per-mesh light path", () => {
-        const { scene, unregistered } = makeFakeScene(true);
+        const { scene, unregistered } = makeFakeScene(false);
         const point = new PointLight("p", new Vector3(0, 0, 0), scene);
         const c = new ClusteredLightContainer("clust", [], scene);
 
@@ -163,8 +217,8 @@ describe("ClusteredLightContainer — scene wiring", () => {
     });
 
     it("detaches an added light from its own scene, never the container's", () => {
-        const container = makeFakeScene(true, "container-scene");
-        const other = makeFakeScene(true, "other-scene");
+        const container = makeFakeScene(false, "container-scene");
+        const other = makeFakeScene(false, "other-scene");
         // Light lives on `other`; the container lives on `container.scene`.
         const point = new PointLight("p", new Vector3(0, 0, 0), other.scene);
         const c = new ClusteredLightContainer("clust", [], container.scene);
