@@ -276,7 +276,7 @@
         "name": "Scene 27 — Material Variants",
         "maxMad": 1,
         "maxRawKB": 82.6,
-        "description": "glTF refrigerator with KHR_materials_variants, White variant selected. ArcRotate camera, hemispheric light.",
+        "description": "Babylon.js Assets shoe glTF with KHR_materials_variants, nondefault beach variant selected. ArcRotate camera, hemispheric light.",
         "tags": ["pbr", "gltf", "variants"],
         "skipPerf": true,
         "compatParity": true
