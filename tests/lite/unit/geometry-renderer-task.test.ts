@@ -1346,19 +1346,20 @@ describe("GeometryRendererTask", () => {
         gpu.retirements.splice(0).forEach((retire) => retire());
         const before = [...internal._bound];
 
-        // Frames without a rebuild. The entry re-packs whenever the scene camera's world-matrix counter differs from
-        // the one it compared last, so it ends packed against the camera at X = -500 (0 + 500), whose counter equals
-        // `home`'s: per-object counters start equal.
+        // Frames without a rebuild. The entry re-packs whenever the scene camera's identity or world-matrix counter
+        // differs from the one it compared last, so it ends packed against the camera at X = -500 (0 + 500), even
+        // though that camera's counter equals `home`'s: per-object counters start equal.
         (scene as { camera?: unknown }).camera = cameraAt(9000, 2);
         internal.execute();
         (scene as { camera?: unknown }).camera = cameraAt(-500, 1);
         internal.execute();
         expect(uploadedX(500)).toBe(true);
-        // `home` is drawn again, and nothing re-packs the entry against it.
+        // `home` is drawn again with an equal counter: the camera identity change alone re-packs the entry against it.
         (scene as { camera?: unknown }).camera = home;
         uploads.length = 0;
         internal.execute();
-        expect(uploadedX(-100)).toBe(false);
+        expect(uploadedX(-100)).toBe(true);
+        uploads.length = 0;
 
         // A record (a resize or `frameGraph.build()`) sees the stamped camera again, but must not carry the entry.
         internal.record();

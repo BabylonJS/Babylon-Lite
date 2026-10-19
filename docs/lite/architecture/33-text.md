@@ -479,14 +479,14 @@ only the packed atlas + instance buffer.
 called by the scene's frame graph; `update` does:
 
 0. **Late-installed variant refresh.** `bind` resolves both pipelines, but scene
-   bindings are built once — not per frame — so a styling feature enabled *after*
+   bindings are built once — not per frame — so a styling feature enabled _after_
    a binding exists would otherwise leave its weighted groups drawing with the base
    pipeline until an unrelated scene mutation rebuilt the binding. The binding's
    `update` therefore re-resolves the variant pipeline exactly once, when
    `gpu._variantPipeline === gpu._pipeline && _textVariantResolver` — an identity
    comparison that a base consumer fails on its first term and that stops matching
    after the single refresh, so no cache key is ever built per frame. The
-   re-resolution reuses the *bind-time* target arguments captured in the binding
+   re-resolution reuses the _bind-time_ target arguments captured in the binding
    closure (`colorFormat`, `sampleCount`, `depthStencilFormat`, `depthWrite`, and the
    renderable itself as the alpha-to-coverage owner), so the refreshed variant is the
    exact sibling of the base pipeline the binding already declares.
@@ -498,7 +498,7 @@ called by the scene's frame graph; `update` does:
 3. Compose MVP into a 16-float scratch from the active camera's view-projection
    × the renderable's world matrix; `writeBuffer` to the `TextU` UBO offset 0.
    Skip the recompute + upload when the world matrix is clean **and** the
-   camera's `worldMatrixVersion` and effective aspect are both unchanged.
+   camera's identity, `_cameraChangeKey` and effective aspect are all unchanged.
 4. Write viewport size at UBO offset 64 (16 bytes) when target size changed.
    Write `(1, 1, 1, opacity)` at UBO offset 80 when opacity changed.
 
@@ -619,23 +619,23 @@ Unit tests live in `tests/lite/unit/`:
 
 ## File inventory
 
-| File                              | Responsibility                                                                                                                                                                                                                                                                                                         |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/text/font.ts`                | `Font` (branded type) + `loadFont` + `createFontFromBuffer`; text-shaper boundary.                                                                                                                                                                                                                                     |
-| `src/text/glyph-extraction.ts`    | `extractGlyphCurves` + `cubicToQuadratics`; default text-shaper-backed glyph path extraction. Outline value types live in `glyph-storage.ts`.                                                                                                                                                                          |
-| `src/text/glyph-storage.ts`       | `GlyphStorage` (branded) + `CurveSetId` + outline value types (`QuadCurve`, `GlyphBounds`, `GlyphCurves`) + the supporting `SharedAtlas` / `AtlasSlot` / `GlyphBands` types and their packers (`packAppendGlyph`, `buildGlyphBands`). Public API: `createGlyphStorage` / `updateGlyphStorage` / `disposeGlyphStorage`. |
-| `src/text/layout.ts`              | `TextLayoutOptions` + `layoutText` — default LTR + word-wrap + align layout via `text-shaper.shape`.                                                                                                                                                                                                                   |
-| `src/text/text-data.ts`           | `TextData` (branded) + `GlyphRun` + `PlacedGlyph` + `TextDataUpdate` + slot-allocator types. Public API: `createTextData` / `updateTextData` / `disposeTextData` and the per-instance allocator (addRun / removeRun / replaceRun / reset+compaction).                                                                  |
-| `src/text/default-text-data.ts`   | `DefaultTextData` (branded) + `createDefaultTextData` / `updateDefaultTextData` / `disposeDefaultTextData`; convenience layer composing layout + curve extraction + a private `GlyphStorage`.                                                                                                                          |
-| `src/text/text-renderable.ts`     | `TextRenderable` + `createTextRenderable` / `addTextRenderable` / `disposeTextRenderable`; 3D `Renderable` implementation.                                                                                                                                                                                             |
-| `src/text/text-renderer.ts`       | `TextLayer` (2D pixel-space placement record) + `TextRenderer` (standalone `RenderingContext`) + their factories and the swapchain draw pass.                                                                                                                                                                          |
-| `src/text/_gpu/text-textures.ts`  | `ensureSharedAtlasGpu`; lazy `rgba32float` texture create + version-gated upload + capacity grow. (Atlas teardown is inlined in `disposeGlyphStorage` to avoid a circular import.)                                                                                                                                     |
-| `src/text/_gpu/text-pipeline.ts`  | `getOrCreateTextPipeline` / `getTextPipelineCache` / `clearTextPipelineCache` + the `TextPipelineVariant` seam; per-device bind group layout + base WGSL modules + per-target-key pipeline cache. Knows nothing about shader fragments and composes no WGSL.                                                            |
-| `src/text/shaders/slug-shader.ts` | **The single authoritative copy of the Slug WGSL.** Inline TypeScript template + `composeSlugShader(fragment)` — a deterministic builder that interpolates an optional `TextShaderFragment` into the base vertex/fragment source at named slots. Called with `null` for the base variant. |
-| `src/text/shaders/text-shader-fragment.ts` | Type-only module: `TextShaderFragment`, `TextVertexSlot`, `TextFragmentSlot`. Feature-agnostic — no font-weight (or any other feature's) semantics. Erased at build time. |
-| `src/text/set-font-weight-offset.ts` | Opt-in feature entry point: `setFontWeightOffset(data, run, offset)`. Owns the per-run offset map, the interned draw-group keys, and the per-`GPUDevice` composed+compiled variant module pair; validates and resolves the run against its `TextData`, installs the `text-data` styling seam and the `text-pipeline` variant resolver on first effective call, then repacks the data through `updateTextData({ update: "reset" })`. |
-| `src/text/load-font-weight-offset.ts` | Root-exported lazy loader for the exact `set-font-weight-offset.ts` implementation module. Application code can keep the feature behind a dynamic boundary without importing the package barrel as a namespace. |
-| `src/text/shaders/weight-shader-fragment.ts` | The weight-only `TextShaderFragment`: distance-to-quadratic helper, bounded nearest-contour band scan, weight varying, quad inflation, and unsigned-distance coverage expansion. Contains **no** copy of any base Slug logic. Reachable only from `set-font-weight-offset.ts`. |
+| File                                         | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/text/font.ts`                           | `Font` (branded type) + `loadFont` + `createFontFromBuffer`; text-shaper boundary.                                                                                                                                                                                                                                                                                                                                                  |
+| `src/text/glyph-extraction.ts`               | `extractGlyphCurves` + `cubicToQuadratics`; default text-shaper-backed glyph path extraction. Outline value types live in `glyph-storage.ts`.                                                                                                                                                                                                                                                                                       |
+| `src/text/glyph-storage.ts`                  | `GlyphStorage` (branded) + `CurveSetId` + outline value types (`QuadCurve`, `GlyphBounds`, `GlyphCurves`) + the supporting `SharedAtlas` / `AtlasSlot` / `GlyphBands` types and their packers (`packAppendGlyph`, `buildGlyphBands`). Public API: `createGlyphStorage` / `updateGlyphStorage` / `disposeGlyphStorage`.                                                                                                              |
+| `src/text/layout.ts`                         | `TextLayoutOptions` + `layoutText` — default LTR + word-wrap + align layout via `text-shaper.shape`.                                                                                                                                                                                                                                                                                                                                |
+| `src/text/text-data.ts`                      | `TextData` (branded) + `GlyphRun` + `PlacedGlyph` + `TextDataUpdate` + slot-allocator types. Public API: `createTextData` / `updateTextData` / `disposeTextData` and the per-instance allocator (addRun / removeRun / replaceRun / reset+compaction).                                                                                                                                                                               |
+| `src/text/default-text-data.ts`              | `DefaultTextData` (branded) + `createDefaultTextData` / `updateDefaultTextData` / `disposeDefaultTextData`; convenience layer composing layout + curve extraction + a private `GlyphStorage`.                                                                                                                                                                                                                                       |
+| `src/text/text-renderable.ts`                | `TextRenderable` + `createTextRenderable` / `addTextRenderable` / `disposeTextRenderable`; 3D `Renderable` implementation.                                                                                                                                                                                                                                                                                                          |
+| `src/text/text-renderer.ts`                  | `TextLayer` (2D pixel-space placement record) + `TextRenderer` (standalone `RenderingContext`) + their factories and the swapchain draw pass.                                                                                                                                                                                                                                                                                       |
+| `src/text/_gpu/text-textures.ts`             | `ensureSharedAtlasGpu`; lazy `rgba32float` texture create + version-gated upload + capacity grow. (Atlas teardown is inlined in `disposeGlyphStorage` to avoid a circular import.)                                                                                                                                                                                                                                                  |
+| `src/text/_gpu/text-pipeline.ts`             | `getOrCreateTextPipeline` / `getTextPipelineCache` / `clearTextPipelineCache` + the `TextPipelineVariant` seam; per-device bind group layout + base WGSL modules + per-target-key pipeline cache. Knows nothing about shader fragments and composes no WGSL.                                                                                                                                                                        |
+| `src/text/shaders/slug-shader.ts`            | **The single authoritative copy of the Slug WGSL.** Inline TypeScript template + `composeSlugShader(fragment)` — a deterministic builder that interpolates an optional `TextShaderFragment` into the base vertex/fragment source at named slots. Called with `null` for the base variant.                                                                                                                                           |
+| `src/text/shaders/text-shader-fragment.ts`   | Type-only module: `TextShaderFragment`, `TextVertexSlot`, `TextFragmentSlot`. Feature-agnostic — no font-weight (or any other feature's) semantics. Erased at build time.                                                                                                                                                                                                                                                           |
+| `src/text/set-font-weight-offset.ts`         | Opt-in feature entry point: `setFontWeightOffset(data, run, offset)`. Owns the per-run offset map, the interned draw-group keys, and the per-`GPUDevice` composed+compiled variant module pair; validates and resolves the run against its `TextData`, installs the `text-data` styling seam and the `text-pipeline` variant resolver on first effective call, then repacks the data through `updateTextData({ update: "reset" })`. |
+| `src/text/load-font-weight-offset.ts`        | Root-exported lazy loader for the exact `set-font-weight-offset.ts` implementation module. Application code can keep the feature behind a dynamic boundary without importing the package barrel as a namespace.                                                                                                                                                                                                                     |
+| `src/text/shaders/weight-shader-fragment.ts` | The weight-only `TextShaderFragment`: distance-to-quadratic helper, bounded nearest-contour band scan, weight varying, quad inflation, and unsigned-distance coverage expansion. Contains **no** copy of any base Slug logic. Reachable only from `set-font-weight-offset.ts`.                                                                                                                                                      |
 
 ---
 
@@ -646,7 +646,7 @@ Unit tests live in `tests/lite/unit/`:
 There is exactly **one** copy of the base Slug vertex and fragment logic, and it lives
 in `src/text/shaders/slug-shader.ts` as an inline TypeScript template. There are no
 `slug.vert.wgsl` / `slug.frag.wgsl` `?raw` files, and there is no second "weighted"
-copy of the shader: optional features contribute *incremental* WGSL through a typed
+copy of the shader: optional features contribute _incremental_ WGSL through a typed
 fragment that the template interpolates at named slots.
 
 ```typescript
@@ -691,20 +691,20 @@ export interface TextShaderFragment {
 }
 ```
 
-| Slot | Stage    | Location                                                                     | Contract                                                                                                                                                     |
-| ---- | -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `VO` | vertex   | End of the `VOut` struct body                                                | Comma-terminated member declarations. Locations `0..3` are taken by the base varyings, so fragments start at `@location(4)`.                                  |
-| `VD` | vertex   | Dead-slot early-return block                                                 | Statements assigning a defined value to every member the fragment added, on the local `d: VOut`.                                                              |
-| `VB` | vertex   | After `md` (glyph metadata) and `sy` (style) are in scope, before quad setup | Statements that **must** declare `let sb: vec4<f32>` — the shaped em-space glyph bounds. When the slot is present the template uses `sb` in place of `md.b`; when absent the template names `md.b` directly, so the base variant pays nothing. Values declared here stay in scope for `VA`. |
-| `VA` | vertex   | Just before `return out;`                                                    | Statements assigning the fragment's added varyings on `out`.                                                                                                 |
-| `FI` | fragment | End of the `FIn` struct body (before `@builtin(front_facing)`)               | Comma-terminated member declarations mirroring `VO`.                                                                                                          |
-| `FH` | fragment | Module scope, after the base helpers, before `@fragment fn main`             | Helper function / constant declarations. The base helpers (`rcode`, `solveH`, `solveV`, `ccov`, `cwgt`, `bloc`) and the `ct` / `bt` textures are already in scope, so a fragment that needs its own scan of the glyph's band lists writes it here as a self-contained function. |
+| Slot | Stage    | Location                                                                     | Contract                                                                                                                                                                                                                                                                                     |
+| ---- | -------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VO` | vertex   | End of the `VOut` struct body                                                | Comma-terminated member declarations. Locations `0..3` are taken by the base varyings, so fragments start at `@location(4)`.                                                                                                                                                                 |
+| `VD` | vertex   | Dead-slot early-return block                                                 | Statements assigning a defined value to every member the fragment added, on the local `d: VOut`.                                                                                                                                                                                             |
+| `VB` | vertex   | After `md` (glyph metadata) and `sy` (style) are in scope, before quad setup | Statements that **must** declare `let sb: vec4<f32>` — the shaped em-space glyph bounds. When the slot is present the template uses `sb` in place of `md.b`; when absent the template names `md.b` directly, so the base variant pays nothing. Values declared here stay in scope for `VA`.  |
+| `VA` | vertex   | Just before `return out;`                                                    | Statements assigning the fragment's added varyings on `out`.                                                                                                                                                                                                                                 |
+| `FI` | fragment | End of the `FIn` struct body (before `@builtin(front_facing)`)               | Comma-terminated member declarations mirroring `VO`.                                                                                                                                                                                                                                         |
+| `FH` | fragment | Module scope, after the base helpers, before `@fragment fn main`             | Helper function / constant declarations. The base helpers (`rcode`, `solveH`, `solveV`, `ccov`, `cwgt`, `bloc`) and the `ct` / `bt` textures are already in scope, so a fragment that needs its own scan of the glyph's band lists writes it here as a self-contained function.              |
 | `CO` | fragment | After base `cov` is computed and clamped, before the coverage-gamma `pow`    | Statements that may read and reassign `var cov: f32` (coverage in `[0,1]`). In scope: `rc` (em-space render coord), `pe` (pixels-per-em), `gp` (glyph texel origin), `bm` (max band indices), `in`. The gamma, the `a2c` premultiply select, and the final color write stay in the template. |
 
 There are deliberately **no** per-curve slots inside the base band loops. Those loops
 `break` as soon as a curve is behind the pixel along the band's sort axis, and they only
 ever visit the single band that contains the pixel — both correct for coverage, both
-wrong for anything that needs *nearest-contour* information (see "Why the weight fragment
+wrong for anything that needs _nearest-contour_ information (see "Why the weight fragment
 owns its own scan"). A feature that needs a different traversal writes its own bounded
 scan in `FH` rather than piggy-backing on a loop whose exit condition it does not control.
 
@@ -774,7 +774,7 @@ Resolution happens once per bind (`TextRenderable`) / once per frame update
 (`TextRenderer`) and is stored on the per-renderable / per-layer GPU record — never inside
 the draw loop, which does no map lookups and builds no key strings. A `TextRenderable`
 binding additionally re-resolves its variant pipeline once if a styling feature was
-installed *after* the binding was built (see "`TextRenderable` (3D) per-frame" step 0);
+installed _after_ the binding was built (see "`TextRenderable` (3D) per-frame" step 0);
 the `TextRenderer` path needs no equivalent because its `_update` already resolves both
 pipelines every frame. Draw paths that only need the shared quad buffer or bind-group
 layout call `getTextPipelineCache(engine)` instead, which is a single `WeakMap` get.
@@ -827,11 +827,11 @@ export function loadFontWeightOffset(): Promise<typeof setFontWeightOffset>;
 dynamically imports only `text/set-font-weight-offset`, never the package root namespace,
 so bundlers do not conservatively retain unrelated root exports in the lazy chunk.
 
-| Parameter | Type                | Description                                                                                                                                                                                                       |
-| --------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `data`    | `TextData`          | The `TextData` that owns the run. The setter mutates live data: it repacks and regroups `data` immediately, exactly like a setter on a live material.                                                              |
-| `run`     | `GlyphRun \| number` | The run to weight, as either its `GlyphRun` reference or its current index in `data.runs`. Must be a live run of `data`; anything else throws with the same message shape `updateTextData` uses.                    |
-| `offset`  | `number`            | Contour offset in **font design units** (the space of `GlyphCurves.bounds`). Positive = bolder. Must be finite; clamped to `[0, 100]` with a `console.warn`. Zero clears a previously set offset.                          |
+| Parameter | Type                 | Description                                                                                                                                                                                       |
+| --------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`    | `TextData`           | The `TextData` that owns the run. The setter mutates live data: it repacks and regroups `data` immediately, exactly like a setter on a live material.                                             |
+| `run`     | `GlyphRun \| number` | The run to weight, as either its `GlyphRun` reference or its current index in `data.runs`. Must be a live run of `data`; anything else throws with the same message shape `updateTextData` uses.  |
+| `offset`  | `number`             | Contour offset in **font design units** (the space of `GlyphCurves.bounds`). Positive = bolder. Must be finite; clamped to `[0, 100]` with a `console.warn`. Zero clears a previously set offset. |
 
 ```typescript
 import { setFontWeightOffset, createDefaultTextData, loadFont } from "@babylonjs/lite";
@@ -860,13 +860,13 @@ including after it is already bound and rendering.
    (`text-data.ts`) accepts a `GlyphRun` reference that is live in `data` or an in-range
    index into `data.runs`, and throws otherwise — same wording as the `updateTextData`
    errors (`… : run index N out of range (0..M).` / `… : GlyphRun reference is not in this
-   TextData.`). `updateTextData`'s own index path shares this helper, so the two can never
+TextData.`). `updateTextData`'s own index path shares this helper, so the two can never
    drift.
 3. **Clamp** to `[0, 100]` with a `console.warn` when out of range.
 4. **No-op detection.** If the resolved run's current effective offset already equals the
    clamped value, return before touching anything: no seam install, no shader composition,
    no `_version` / `_layoutVersion` churn. A zero call on a run that never had an offset is
-   therefore a *true* no-op — it does not install the feature or compile its shader — while
+   therefore a _true_ no-op — it does not install the feature or compile its shader — while
    the first nonzero call always installs.
 5. **Capture** the `WeakMap`'s exact prior entry for this run — whether it had one at all,
    and its value — then **store** the clamped offset (zero deletes the entry), then
@@ -883,7 +883,7 @@ including after it is already bound and rendering.
    `data`'s storage), the `WeakMap` entry written in step 5 is restored to its exact prior
    state — deleted if the run had no entry before this call, set back to the previous value
    if it did — before the error is rethrown unchanged. Without this, a failed repack would
-   leave the map at the *new* offset while the data itself was never actually repacked; a
+   leave the map at the _new_ offset while the data itself was never actually repacked; a
    caller that fixes the failure and retries with the same offset would then hit the no-op
    guard in step 4 and get silent non-repair instead of a retry. The seams installed in step
    5 are **not** rolled back — they are idempotent, side-effect-free until a run actually
@@ -985,19 +985,19 @@ atlas lookup, bind-group labelling and error messages.
 `src/text/shaders/weight-shader-fragment.ts` exports one `TextShaderFragment`
 (`_id: "w"`), containing **only** incremental code:
 
-| Slot | Contribution                                                                                                                                                   |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VO` | `@location(4) @interpolate(flat) wo:f32,` — the per-instance weight offset varying.                                                                            |
-| `VD` | `d.wo=0.0;` — dead-slot default.                                                                                                                                |
+| Slot | Contribution                                                                                                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VO` | `@location(4) @interpolate(flat) wo:f32,` — the per-instance weight offset varying.                                                                                     |
+| `VD` | `d.wo=0.0;` — dead-slot default.                                                                                                                                        |
 | `VB` | `let wo=sy.p.y; let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));` — inflates the font-space bounds symmetrically so the quad covers the expanded contour. |
-| `VA` | `out.wo=wo;`                                                                                                                                                    |
-| `FI` | `@location(4) @interpolate(flat) wo:f32,`                                                                                                                      |
-| `FH` | `dot2` + `dq` (exact distance to a quadratic Bézier) + `wdst` (the bounded nearest-contour band scan).                                                           |
-| `CO` | Zero-offset guard, unsigned distance, weighted coverage, and monotone `max` finalization.                                                                         |
+| `VA` | `out.wo=wo;`                                                                                                                                                            |
+| `FI` | `@location(4) @interpolate(flat) wo:f32,`                                                                                                                               |
+| `FH` | `dot2` + `dq` (exact distance to a quadratic Bézier) + `wdst` (the bounded nearest-contour band scan).                                                                  |
+| `CO` | Zero-offset guard, unsigned distance, weighted coverage, and monotone `max` finalization.                                                                               |
 
 ### Why the weight fragment owns its own scan
 
-The base band walk is a *winding* query, not a *nearest-contour* query, and its two
+The base band walk is a _winding_ query, not a _nearest-contour_ query, and its two
 optimizations are only sound for winding:
 
 1. It reads exactly **one** h-band (the band containing the pixel's `y`) and one v-band.
@@ -1006,7 +1006,7 @@ optimizations are only sound for winding:
    band boundary is frequently in the adjacent band.
 2. Inside a band it `break`s as soon as a curve's `max x` is more than half a pixel behind
    the pixel (curves are sorted by descending `max x`). Every remaining curve is behind the
-   ray, so it cannot cross it — but curves to the *left* of the pixel are exactly the ones
+   ray, so it cannot cross it — but curves to the _left_ of the pixel are exactly the ones
    that can be nearest to it.
 
 Accumulating a running minimum distance inside those loops therefore silently skips curves
@@ -1030,7 +1030,7 @@ fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32
   `y1 = clamp(i32((rc.y + rad) * bn.y + bn.w), 0, bm.y)`.
   Any curve with a point within `rad` of the pixel has that point inside the glyph's
   `y`-bounds, so its band index is inside `[y0, y1]` and the curve is in that band's list.
-  *Validated band-transform invariant:* `bandScaleY = hBandCount / heightFu` when
+  _Validated band-transform invariant:_ `bandScaleY = hBandCount / heightFu` when
   `heightFu > 0` and `0` otherwise, and `bandOffsetY = -yMin * bandScaleY`, so the transform
   is monotone non-decreasing and never negative. A zero scale collapses the range to band 0,
   which is the only band a zero-height glyph has. No sign guard is required; a unit test
@@ -1092,7 +1092,7 @@ radius spans).
 - **Run resolution** — the index form (`setFontWeightOffset(data, 0, …)`) is equivalent to
   the reference form; an out-of-range index and a `GlyphRun` that belongs to another
   `TextData` both throw with the `updateTextData`-shaped message.
-- **Post-create mutation** — a setter call made *after* `createTextData` (i.e. after the
+- **Post-create mutation** — a setter call made _after_ `createTextData` (i.e. after the
   runs are already packed) changes the run's draw-group key and its `params.y` immediately;
   a following zero restores both to the base key and `0`.
 - **Style packing** — a weighted run's `params.y` holds `Math.fround(offset)`; a base run's
@@ -1110,7 +1110,7 @@ radius spans).
 - **Band-scan completeness (algorithmic)** — a JS replica of `wdst`'s candidate selection,
   driven by the real `buildGlyphBands` output for a synthetic square glyph, must consider the
   true nearest curve for sample points on all four exterior sides and all four corners. The
-  pre-fix "accumulate inside the base loop" candidate set is asserted to *fail* the same
+  pre-fix "accumulate inside the base loop" candidate set is asserted to _fail_ the same
   check, so the regression cannot silently return.
 - **Band-transform invariant** — `buildGlyphBands` + the packed metadata always produce a
   non-negative, monotone band transform (what `wdst`'s range clamp relies on).

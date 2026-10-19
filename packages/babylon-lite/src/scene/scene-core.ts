@@ -315,6 +315,20 @@ export interface SceneContextOptions {
     defaultRenderTask?: boolean;
 }
 
+/** Match the scene camera's floating-origin mode to its engine. A camera can arrive fresh or from an
+ *  engine with the opposite mode: `getViewMatrix` zeroes the view translation only under the flag. The
+ *  view cache resets, and clearing the projection snapshot re-arms `_cameraChangeKey` (as on a fresh
+ *  camera) so its next call advances `_projRev`: the view-projection cache and every change-key
+ *  consumer (scene UBO, text, CSM, TAA, …) rewrite in this frame. */
+function syncCameraFloatingOrigin(scene: SceneContext, fo: boolean | undefined): void {
+    const cam = scene.camera;
+    if (cam && !cam._useFloatingOrigin !== !fo) {
+        cam._useFloatingOrigin = fo;
+        cam._viewVer = -1;
+        cam._projFov = undefined;
+    }
+}
+
 /** Create an empty scene context bound to the given `surface`. The default render task
  *  is built against the surface's format, MSAA configuration, and swapchain RT — the
  *  scene is permanently bound to that surface. Pass `engine` directly (since
@@ -353,23 +367,17 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _drawCallsPre: 0,
 
         _update(): void {
-            // When the engine was created with `useFloatingOrigin: true`, mark
-            // the active camera so `getViewMatrix` knows to zero its
-            // translation column (the GPU view × world product is then the
-            // eye-relative result the LWR offset trick produces). For non-LWR
-            // engines `eng.useFloatingOrigin` is false and this is a single
-            // boolean check per frame — the inner branch is dead.
-            if (eng.useFloatingOrigin && ctx.camera && !ctx.camera._useFloatingOrigin) {
-                ctx.camera._useFloatingOrigin = true;
-                ctx.camera._viewVer = -1;
-                ctx.camera._vpVer = -1;
-            }
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
             const encoder = eng._currentEncoder;
             let draws = 0;
+            // Match the active camera's floating-origin mode to this engine before the callbacks (so the
+            // matrices they read are in the frame the engine renders) and again after them (they may
+            // install a camera), before any pre-pass, uniform update or record reads its view.
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             for (const cb of ctx._beforeRender) {
                 cb(d);
             }
+            syncCameraFloatingOrigin(ctx, eng.useFloatingOrigin);
             if (ctx._materialSwapQueue.length) {
                 void processMaterialSwaps(ctx);
             }
@@ -463,7 +471,9 @@ export function addDeferredSceneRenderables(
  * to the scene, dispatching on its type. Asset containers are unpacked and each contained
  * entity added recursively. Optional scene-hosted systems such as depth-hosted sprites
  * expose their own opt-in add functions so mesh-only scenes do not pay feature-specific
- * routing bytes here.
+ * routing bytes here. Adding a camera makes it the scene's active camera (`scene.camera`),
+ * replacing any previous one; an asset container's camera is only installed when the scene
+ * has none.
  * @param scene - The owning scene (pillar 4b: entities never reference the scene themselves).
  * @param entity - The entity (or asset container) to add.
  * @throws When `entity` is a mesh that was already disposed — `removeFromScene` (or
@@ -515,38 +525,12 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
         // scene must be left untouched when it does.
         registerMeshScene(ctx, mesh);
         ctx.meshes.push(mesh);
-        const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
-        if (build) {
-            let group = ctx._groups.get(build);
-            if (!group) {
-                group = [] as SceneMeshGroup;
-                ctx._groups.set(build, group);
-                if (!ctx._built) {
-                    ctx._deferredBuilders.push(async () => {
-                        const result = await build(ctx, group!);
-                        ctx._renderables.push(...result.renderables);
-                        group!.o = result.renderables;
-                        if (result.updater) {
-                            ctx._uniformUpdaters.push(result.updater);
-                        }
-                        group!.r = result.rebuildSingle;
-                    });
-                }
-            }
-            group.push(mesh);
-            // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
-            // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-            // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
-            // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
-            // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
-            // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-            if (ctx._built || group.r) {
-                enqueueMaterialSwap(ctx, mesh);
-            }
-        }
+        joinMaterialGroup(ctx, mesh);
         ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
+    } else if ("fov" in entity) {
+        ctx.camera = entity as Camera;
     }
     _notifySceneChange(ctx, entity, "added");
     // Recurse into children of meshes, lights, cameras — set parent links
@@ -556,6 +540,47 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
             addToScene(scene, child as SceneEntity);
         }
+    }
+}
+
+/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the initial
+ *  build, its deferred builder) on first use. */
+function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
+    const build = mesh.material?._buildGroup;
+    if (!build) {
+        return;
+    }
+    let group = ctx._groups.get(build);
+    if (!group) {
+        group = [] as SceneMeshGroup;
+        ctx._groups.set(build, group);
+        if (!ctx._built) {
+            ctx._deferredBuilders.push(async () => {
+                // Every mesh left this group before boot (re-materialed into another family or removed). Builders
+                // require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
+                if (!group![0]) {
+                    ctx._groups.delete(build);
+                    return;
+                }
+                const result = await build(ctx, group!);
+                ctx._renderables.push(...result.renderables);
+                group!.o = result.renderables;
+                if (result.updater) {
+                    ctx._uniformUpdaters.push(result.updater);
+                }
+                group!.r = result.rebuildSingle;
+            });
+        }
+    }
+    group.push(mesh);
+    // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
+    // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
+    // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
+    // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
+    // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
+    // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
+    if (ctx._built || group.r) {
+        enqueueMaterialSwap(ctx, mesh);
     }
 }
 
@@ -621,13 +646,16 @@ export function disposeScene(scene: SceneContext): void {
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
-    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
-    // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
-    // are real runtime changes and must survive so a newly introduced material group can be built below.
-    if (!ctx._built) {
-        ctx._materialSwapQueue.length = 0;
+    // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
+    // material AFTER addToScene), is built by the deferred builders below with its FINAL material. Its queued swap
+    // is redundant and would insert a SECOND renderable (double-draw), so it is dropped. Its group membership was
+    // fixed at addToScene time and may be stale (no group for a material assigned later, or the old family's
+    // group), so when any swap was queued the still-unbuilt groups are refilled from every mesh's current material,
+    // in add order. On re-registration the queued swaps are real runtime changes and must survive so a newly
+    // introduced material group can be built.
+    if (!ctx._built && ctx._materialSwapQueue.splice(0)[0]) {
+        ctx._groups.forEach((group) => (group.length = 0));
+        ctx.meshes.forEach((mesh) => joinMaterialGroup(ctx, mesh));
     }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);

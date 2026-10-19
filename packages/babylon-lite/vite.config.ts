@@ -119,33 +119,36 @@ function emitPackageJson(): Plugin {
                 jsdelivr: "./dist/index.js",
                 unpkg: "./dist/index.js",
                 sideEffects: false,
+                // The single dependency is types-only: the rolled-up index.d.ts starts with
+                // `/// <reference types="webxr" />` because the public WebXR API
+                // (`XrSessionContext`, input/hand/teleport helpers) references ambient WebXR
+                // globals (`XRSession`, `XRFrame`, `XRView`, `XRReferenceSpace`,
+                // `XRProjectionLayer`, `XRSubImage`, ...). Installing it with the package lets
+                // strict consumers that never use XR (or set `compilerOptions.types`) type-check.
+                // The draft `XRGPUBinding` has no shipping `@types` and stays inlined.
+                dependencies: {
+                    "@types/webxr": "^0.5.0",
+                },
                 // A small, curated allowlist of STRICTLY-OPTIONAL peer dependencies. Every
                 // transitive *runtime* dependency is still bundled as an opaque implementation
-                // detail (there is no `dependencies` field), so a plain `npm i @babylonjs/lite`
-                // and CDN usage stay self-contained. These peers are never bundled and — being
-                // optional — are never auto-installed or warned about by npm/pnpm/yarn:
+                // detail, so a plain `npm i @babylonjs/lite` and CDN usage stay self-contained.
+                // These peers are never bundled and — being optional — are never auto-installed
+                // or warned about by npm/pnpm/yarn:
                 //   - @babylonjs/havok: the physics module is injected by the caller into
                 //     `createHavokWorld(scene, hknp)`; Lite never imports it. This entry only
                 //     advertises the supported version range for consumers who enable physics.
                 //   - @webgpu/types: the public `index.d.ts` references ambient WebGPU globals
                 //     (`GPUDevice`, `GPUTexture`, `GPUSampler`, ...). TypeScript consumers need
                 //     these types on their compile path.
-                //   - @types/webxr: the public WebXR API (`XrSessionContext`, input/hand/teleport
-                //     helpers) references ambient WebXR globals (`XRSession`, `XRFrame`, `XRView`,
-                //     `XRReferenceSpace`, `XRProjectionLayer`, `XRSubImage`, ...). These have a
-                //     shipping `@types` package (unlike the draft `XRGPUBinding`, which Lite owns
-                //     and inlines), so the rollup treats them as a consumer-provided peer.
                 // Keep this in sync with the allowlist in
                 // tests/lite/build/public-api-types.test.ts.
                 peerDependencies: {
                     "@babylonjs/havok": "^1.3.0",
                     "@webgpu/types": "^0.1.52",
-                    "@types/webxr": "^0.5.0",
                 },
                 peerDependenciesMeta: {
                     "@babylonjs/havok": { optional: true },
                     "@webgpu/types": { optional: true },
-                    "@types/webxr": { optional: true },
                 },
                 ...(provenance ? { babylonLiteRelease: provenance } : {}),
             };
@@ -465,13 +468,17 @@ function relocateDts(): Plugin {
 /**
  * Keep the nominal WGSL brand as a source-only enforcement mechanism. Published
  * declarations expose ordinary strings so this remains API-compatible for consumers.
+ * Also prefix the rollup with `/// <reference types="webxr" />`: the public WebXR API
+ * references ambient XR globals (`XRSession`, `XRFrame`, ...), and the directive loads
+ * `@types/webxr` (a published dependency) even for consumers whose `compilerOptions.types`
+ * omits it.
  */
 function exposeWgslSourceAsString(content: string): string {
     const alias = /^declare type WgslSource = string & \{\s*\};\r?\n/m;
     if (!alias.test(content)) {
         throw new Error("Could not find the trimmed WgslSource declaration");
     }
-    return content.replace(alias, "").replace(/\bWgslSource\b/g, "string");
+    return '/// <reference types="webxr" />\n' + content.replace(alias, "").replace(/\bWgslSource\b/g, "string");
 }
 
 /**
