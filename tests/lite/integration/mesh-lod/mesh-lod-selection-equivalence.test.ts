@@ -184,6 +184,32 @@ function modelInput(h: FixtureHierarchy, s: Scenario, prior: Uint32Array): MeshL
 const sortedUnique = (ids: { clusterId: number; instanceId: number }[]): number[] => Array.from(normalizeMeshLoDSelectedClusterIds(ids));
 const fineFromPrior = (prior: Uint32Array, groupCount: number): number[] => Array.from({ length: groupCount }, (_, g) => ((prior[g >>> 5]! & (1 << (g & 31))) !== 0 ? 1 : 0));
 
+describe.each([0, -0, 5])("MeshLoD selection equivalence — nonterminal error boundary %s", (simplifiedError) => {
+    it.each([false, true])("agrees on zero-error coarsening, positive-error refinement, and terminal FLT_MAX (fine resident: %s)", (fineResident) => {
+        const { hierarchy } = load("selection-lod.json") as { hierarchy: FixtureHierarchy };
+        hierarchy.groups[0]!.simplifiedError = Math.fround(3.4028234663852886e38);
+        hierarchy.groups[1]!.simplifiedError = simplifiedError;
+        const scenario: Scenario = {
+            camera: { position: [0, 0, 5], verticalFov: 1, near: 0.1, targetWidth: 1000, targetHeight: 1000 },
+            frustumPlanes: [],
+            resident: fineResident ? [0, 1] : [0],
+            wasFineRequired: [0, 0],
+            screenSpaceError: 2,
+            lodHysteresis: 0,
+        };
+        const cpu = selectMeshLoDCpu(oracleInput(hierarchy, scenario));
+        const input = modelInput(hierarchy, scenario, new Uint32Array(1));
+        const gpu = runMeshLoDGpuSelection(input);
+        const refines = simplifiedError > 0;
+        expect(Array.from(cpu.fineRequired)).toEqual([1, refines ? 1 : 0]);
+        expect(Array.from(cpu.selectedClusterIds)).toEqual(refines && fineResident ? [2, 3] : [0, 1]);
+        expect(cpu.desiredPages.map((page) => page.pageId)).toEqual(refines && !fineResident ? [1] : []);
+        expect(sortedUnique(gpu.selected)).toEqual(Array.from(cpu.selectedClusterIds));
+        expect(gpu.desiredPages).toEqual(cpu.desiredPages);
+        expect(fineFromPrior(input.priorState, hierarchy.groups.length)).toEqual(Array.from(cpu.fineRequired));
+    });
+});
+
 describe("MeshLoD selection equivalence — injected XR projections", () => {
     const fixture = load("selection-lod.json") as { hierarchy: FixtureHierarchy };
     for (const verticalScale of [0.75, 3]) {

@@ -27,7 +27,9 @@ import {
     buildMinimalContainer,
     corruptFineGroupPageRefs,
     corruptHierarchyGroupCoverage,
+    corruptNonterminalError,
     corruptSpatialSphere,
+    INVALID_NONTERMINAL_ERRORS,
     INVALID_SPATIAL_SPHERE_FIELDS,
     SPATIAL_SPHERE_SECTIONS,
     resealContainer,
@@ -279,6 +281,27 @@ describe.each(SPATIAL_SPHERE_SECTIONS)("parseMeshLoDContainer — spatial sphere
         [-1, 0, 1, 0].forEach((value, axis) => view.setFloat32(offset + axis * 4, value, true));
         resealContainer(bytes);
         expect(() => parseMeshLoDContainer(bytes)).not.toThrow();
+    });
+});
+
+describe.each([false, true])("parseMeshLoDContainer — nonterminal errors (full file: %s)", (fullFile) => {
+    it.each(INVALID_NONTERMINAL_ERRORS)("rejects CRC-resealed simplifiedError = %s", (value) => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const { bootstrapBytes, byteOffset } = corruptNonterminalError(bytes, value);
+        expect(bootstrapBytes).toBeLessThan(bytes.length);
+        expect(() => parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, bootstrapBytes))).toThrowError(
+            expect.objectContaining({ code: "MLOD_INVALID_HIERARCHY", sectionType: SECTION_GROUPS, byteOffset })
+        );
+    });
+
+    it.each([0, -0, 0.5])("accepts nonnegative finite simplifiedError = %s and preserves terminal sentinels", (value) => {
+        const path = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
+        const bytes = new Uint8Array(readFileSync(path));
+        const { bootstrapBytes, groupId } = corruptNonterminalError(bytes, value);
+        const parsed = parseMeshLoDContainer(fullFile ? bytes : bytes.subarray(0, bootstrapBytes));
+        expect(parsed.groups[groupId]!.simplifiedError).toBe(value);
+        expect(parsed.groups.filter((group) => group.terminal).every((group) => group.simplifiedError === Math.fround(3.4028234663852886e38))).toBe(true);
     });
 });
 

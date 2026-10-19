@@ -318,7 +318,8 @@ export function createMeshLoDInstance(asset: MeshLoDAsset, material: PbrMaterial
 }
 
 /** Register an instance into a scene. Idempotent for the same scene/instance;
- *  does not write a scene reference into the instance. */
+ *  does not write a scene reference into the instance. The scene must use the
+ *  asset's loading engine; a different engine throws `MLOD_INVALID_OPTION`. */
 export function addMeshLoDToScene(scene: SceneContext, instance: MeshLoDInstance): void {
     requireRuntime()._addMeshLoDToScene(scene, instance);
 }

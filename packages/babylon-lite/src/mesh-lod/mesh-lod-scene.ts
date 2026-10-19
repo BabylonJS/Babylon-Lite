@@ -249,6 +249,9 @@ function registerDeferredBuilder(scene: SceneContext): void {
  *  same scene/instance; validates the guaranteed opaque PBR subset immediately and
  *  writes no scene reference into the instance. */
 export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoDInstance): void {
+    if (instance._asset._runtime.engine !== scene.surface.engine) {
+        throw createMeshLoDError("MLOD_INVALID_OPTION", "MeshLoD instances must be registered with the asset's loading engine");
+    }
     validateMeshLoDEngine(scene.surface.engine);
     validateMeshLoDMaterial(instance._material);
     const existingBatch = scene._meshLoDRegistry?.byAsset.get(instance._asset)?.get(instance._material);

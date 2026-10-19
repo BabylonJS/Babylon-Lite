@@ -82,7 +82,8 @@ SceneNode clone hook, including instances nested under ordinary transforms.
 The clone shares the asset/material, copies visibility, the error override,
 TRS and any raw local matrix, and receives a fresh asset-local instance ID.
 Its transform storage and selection history are independent; it starts
-unregistered and can be added to the same or another scene separately.
+unregistered and can be added to the same or another scene separately, provided
+the destination scene uses the asset's engine.
 
 ## 4. Ownership and frame flow
 
@@ -102,6 +103,13 @@ feature through normal renderables and the opt-in draw-update batch seam.
 New asset/material batches must be added before scene registration; adding
 instances to an existing batch afterward is supported and grows its CPU/GPU
 instance capacity before drawing.
+
+Cross-scene sharing requires exact engine identity: the asset's loading engine
+must equal `scene.surface.engine`. Separate surfaces of that engine are supported.
+Registration rejects a different engine with `MLOD_INVALID_OPTION` before
+installing a registry, material-rebuild hook, deferred builder, or instance.
+Rejection leaves both scenes and the asset's geometry, streaming, and frame-retirement
+ownership unchanged; resources must never migrate to a second engine.
 
 ## 5. Lazy boundaries
 
@@ -139,6 +147,15 @@ Hierarchy, group, and cluster sphere centers must contain only finite float32
 values, and their radii must be finite and nonnegative. Metadata parsing rejects
 invalid components with `MLOD_INVALID_HIERARCHY`, the section type, and the exact
 field byte offset before decode or GPU allocation. Zero-radius spheres remain valid.
+
+Every nonterminal group's `simplifiedError` must be finite and nonnegative,
+including groups on unpinned fine pages. Negative values, negative infinity,
+positive infinity, and NaN reject with `MLOD_INVALID_HIERARCHY`, the groups section
+type, and the exact error-field byte offset in both full-file and bootstrap parsing.
+Zero remains valid. Terminal groups retain their sentinel error (`FLT_MAX`);
+their terminal flag forces fine-required selection independently of the error.
+Validation occurs before decoding or GPU allocation so CPU and GPU selection
+cannot disagree over invalid nonterminal errors.
 
 Every group's page-reference slice must include every page containing a cluster
 whose `groupId` identifies that group. Slice bounds and in-range page IDs alone

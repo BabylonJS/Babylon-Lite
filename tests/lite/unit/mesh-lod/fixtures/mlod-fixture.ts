@@ -388,3 +388,18 @@ export function corruptSpatialSphere(
     resealContainer(bytes);
     return { bootstrapBytes: parsed.header.bootstrapBytes, byteOffset };
 }
+
+export const INVALID_NONTERMINAL_ERRORS = [-1, -(2 ** -149), -Infinity, Infinity, NaN] as const;
+
+/** Replace an unpinned nonterminal group's error while preserving all checksums. */
+export function corruptNonterminalError(bytes: Uint8Array, value: number): { bootstrapBytes: number; byteOffset: number; groupId: number } {
+    const parsed = parseMeshLoDContainer(bytes);
+    const groupId = parsed.groups.findIndex((group) => !group.terminal && !group.pinned && group.clusterCount > 0);
+    if (groupId === -1) {
+        throw new Error("fixture requires a nonempty unpinned nonterminal group");
+    }
+    const byteOffset = parsed.sections[SECTION_GROUPS - 1]!.offset + groupId * GROUP_RECORD_SIZE + 16;
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setFloat32(byteOffset, value, true);
+    resealContainer(bytes);
+    return { bootstrapBytes: parsed.header.bootstrapBytes, byteOffset, groupId };
+}

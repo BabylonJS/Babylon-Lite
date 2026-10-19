@@ -11,13 +11,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadMeshLoD, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
-import { parseMeshLoDContainer, PAGE_TABLE_RECORD_SIZE, SECTION_PAGE_TABLE } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
+import { parseMeshLoDContainer, PAGE_TABLE_RECORD_SIZE, SECTION_PAGE_TABLE, SECTION_GROUPS } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
 import type { MeshoptDecoderModule } from "../../../../packages/babylon-lite/src/loader-gltf/meshopt-decode.js";
 import { createFillDecoder, createMockDevice, createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 import {
     corruptFineGroupPageRefs,
     corruptHierarchyGroupCoverage,
+    corruptNonterminalError,
     corruptSpatialSphere,
+    INVALID_NONTERMINAL_ERRORS,
     INVALID_SPATIAL_SPHERE_FIELDS,
     SPATIAL_SPHERE_SECTIONS,
     resealContainer,
@@ -178,6 +180,23 @@ describe("loadMeshLoD — group-page membership", () => {
 });
 
 for (const selectionMode of ["cpu", "gpu"] as const) {
+    describe.each(["buffer", "url"] as const)(`loadMeshLoD — nonterminal errors via %s (${selectionMode})`, (source) => {
+        it.each(INVALID_NONTERMINAL_ERRORS)("rejects CRC-resealed simplifiedError = %s before decoding or allocation", async (value) => {
+            const bytes = statueBytes();
+            const { byteOffset } = corruptNonterminalError(bytes, value);
+            const server = rangeServer(bytes);
+            const { engine, device } = createMockEngine();
+            const decoder = createFillDecoder();
+            _setMeshLoDPageDecoder(decoder.decoder);
+            await expect(
+                loadMeshLoD(engine, source === "url" ? "https://cdn.test/statue.mlod" : sourceBuffer(bytes), { selectionMode, request: { fetch: server.fetch } })
+            ).rejects.toMatchObject({ code: "MLOD_INVALID_HIERARCHY", sectionType: SECTION_GROUPS, byteOffset });
+            expect(server.calls).toBe(source === "url" ? 2 : 0);
+            expect(decoder.modes).toEqual([]);
+            expect(device.buffers).toEqual([]);
+            expect(device.writes).toEqual([]);
+        });
+    });
     describe.each(SPATIAL_SPHERE_SECTIONS)(`loadMeshLoD — spatial sphere section %s (${selectionMode})`, (sectionType) => {
         it.each(INVALID_SPATIAL_SPHERE_FIELDS)("rejects CRC-resealed field %s = %s before decoding or allocation", async (fieldOffset, value) => {
             const bytes = statueBytes();

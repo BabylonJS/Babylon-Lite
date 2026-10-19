@@ -536,6 +536,15 @@ function parseGroups(reader: Reader, entry: MeshLoDSectionEntry, header: MeshLoD
         const base = entry.offset + g * GROUP_RECORD_SIZE;
         validateSpatialSphere(reader, base + GR.sphere, entry.type);
         const flags = reader.u16(base + GR.flags);
+        const terminal = (flags & GROUP_FLAG_TERMINAL) !== 0;
+        const simplifiedError = reader.f32(base + GR.error);
+        if (!terminal && (!Number.isFinite(simplifiedError) || simplifiedError < 0)) {
+            throw fail("MLOD_INVALID_HIERARCHY", "nonterminal group simplification error must be finite and nonnegative", {
+                sectionType: entry.type,
+                byteOffset: base + GR.error,
+                actual: simplifiedError,
+            });
+        }
         const depth = reader.u32(base + GR.depth);
         const firstCluster = reader.u32(base + GR.firstCluster);
         const clusterCount = reader.u32(base + GR.clusterCount);
@@ -550,13 +559,13 @@ function parseGroups(reader: Reader, entry: MeshLoDSectionEntry, header: MeshLoD
         groups.push({
             center: [reader.f32(base + GR.sphere), reader.f32(base + GR.sphere + 4), reader.f32(base + GR.sphere + 8)],
             radius: reader.f32(base + GR.sphere + 12),
-            simplifiedError: reader.f32(base + GR.error),
+            simplifiedError,
             depth,
             firstCluster,
             clusterCount,
             firstPageRef,
             pageRefCount,
-            terminal: (flags & GROUP_FLAG_TERMINAL) !== 0,
+            terminal,
             pinned: (flags & GROUP_FLAG_PINNED_COARSE) !== 0,
             sourceTriangleCount: reader.u32(base + GR.sourceTriangles),
             outputTriangleCount: reader.u32(base + GR.emittedTriangles),
