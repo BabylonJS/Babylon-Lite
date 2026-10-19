@@ -4,16 +4,20 @@
 
 ## Purpose
 
-Expose the two deterministic CPU calculations used by Babylon.js's Gaussian
-Point Splatting renderer so API adapters can forward those public root exports
-without owning renderer behavior.
+Provide the two deterministic CPU calculations used by Babylon.js's Gaussian
+Point Splatting renderer so the compat package can forward its public root
+exports without owning renderer behavior.
 
-## Public API Surface
+## Internal API Surface
 
 ```ts
-function hasGaussianPointSplattingProjectedDepth(projection: Mat4): boolean;
-function getGaussianPointSplattingPackedShBytesPerSplat(shDegree: number): number;
+function _hasGaussianPointSplattingProjectedDepth(projection: Mat4): boolean;
+function _getGaussianPointSplattingPackedShBytesPerSplat(shDegree: number): number;
 ```
+
+Both exports are marked `@internal` and are removed from the published Lite
+declarations. They remain available at runtime through the single root entry
+point for the separately published compat package.
 
 ## Internal Architecture
 
@@ -37,9 +41,9 @@ No retained state or lifecycle.
 
 ## Babylon.js Equivalence Map
 
-- `hasGaussianPointSplattingProjectedDepth` backs
+- `_hasGaussianPointSplattingProjectedDepth` backs
   `_HasGaussianPointSplattingProjectedDepth`.
-- `getGaussianPointSplattingPackedShBytesPerSplat` backs
+- `_getGaussianPointSplattingPackedShBytesPerSplat` backs
   `_GetPackedShBytesPerSplat`.
 
 ## Dependencies

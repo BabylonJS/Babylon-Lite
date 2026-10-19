@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-    getGaussianPointSplattingPackedShBytesPerSplat,
-    hasGaussianPointSplattingProjectedDepth,
+    _getGaussianPointSplattingPackedShBytesPerSplat,
+    _hasGaussianPointSplattingProjectedDepth,
 } from "../../../packages/babylon-lite/src/math/gaussian-point-splatting-compat-helpers";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 
 describe("Gaussian Point Splatting compat helpers", () => {
     it("detects projection terms that make depth depend on view-space x or y", () => {
         const projection = new Float32Array(16);
-        const hasProjectedDepth = () => hasGaussianPointSplattingProjectedDepth(projection as unknown as Mat4);
+        const hasProjectedDepth = () => _hasGaussianPointSplattingProjectedDepth(projection as unknown as Mat4);
 
         expect(hasProjectedDepth()).toBe(false);
         projection[2] = 1;
@@ -27,6 +27,6 @@ describe("Gaussian Point Splatting compat helpers", () => {
         [3, 48],
         [4, 72],
     ])("returns %i SH-degree packed bytes", (degree, expected) => {
-        expect(getGaussianPointSplattingPackedShBytesPerSplat(degree)).toBe(expected);
+        expect(_getGaussianPointSplattingPackedShBytesPerSplat(degree)).toBe(expected);
     });
 });

@@ -9,8 +9,8 @@ vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
-        getGaussianPointSplattingPackedShBytesPerSplat: getPackedBytesMock,
-        hasGaussianPointSplattingProjectedDepth: hasProjectedDepthMock,
+        _getGaussianPointSplattingPackedShBytesPerSplat: getPackedBytesMock,
+        _hasGaussianPointSplattingProjectedDepth: hasProjectedDepthMock,
     };
 });
 

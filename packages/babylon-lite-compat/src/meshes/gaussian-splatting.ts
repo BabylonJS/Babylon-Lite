@@ -22,8 +22,8 @@ import {
     bakeCurrentTransformIntoVertices,
     createTransformNode,
     setParent,
-    getGaussianPointSplattingPackedShBytesPerSplat,
-    hasGaussianPointSplattingProjectedDepth,
+    _getGaussianPointSplattingPackedShBytesPerSplat,
+    _hasGaussianPointSplattingProjectedDepth,
 } from "babylon-lite";
 import type { GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, Mat4, SceneNode } from "babylon-lite";
 
@@ -56,11 +56,11 @@ export interface IGaussianPointSplattingProgress {
 }
 
 export function _HasGaussianPointSplattingProjectedDepth(projection: Matrix): boolean {
-    return hasGaussianPointSplattingProjectedDepth(projection.m as unknown as Mat4);
+    return _hasGaussianPointSplattingProjectedDepth(projection.m as unknown as Mat4);
 }
 
 export function _GetPackedShBytesPerSplat(shDegree: number): number {
-    return getGaussianPointSplattingPackedShBytesPerSplat(shDegree);
+    return _getGaussianPointSplattingPackedShBytesPerSplat(shDegree);
 }
 
 /** Lite loader chosen by file extension (mirrors the BJS splat plugin dispatch). */

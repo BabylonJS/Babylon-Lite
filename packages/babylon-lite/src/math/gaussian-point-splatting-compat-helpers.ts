@@ -1,10 +1,12 @@
 import type { Mat4 } from "./types.js";
 
-export function hasGaussianPointSplattingProjectedDepth(projection: Mat4): boolean {
+/** @internal Babylon.js compat bridge; not part of the public Lite API. */
+export function _hasGaussianPointSplattingProjectedDepth(projection: Mat4): boolean {
     return projection[2] !== 0 || projection[6] !== 0 || projection[3] !== 0 || projection[7] !== 0;
 }
 
-export function getGaussianPointSplattingPackedShBytesPerSplat(shDegree: number): number {
+/** @internal Babylon.js compat bridge; not part of the public Lite API. */
+export function _getGaussianPointSplattingPackedShBytesPerSplat(shDegree: number): number {
     if (shDegree < 1) {
         return 0;
     }
