@@ -395,12 +395,9 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
         eng._gpuTaskTimerResolve?.(encoder);
         flushGpuResourceRetirements(eng);
     } finally {
-        try {
-            eng._finishOptionalFrame?.(submitted);
-        } finally {
-            eng._currentEncoder = prevEncoder;
-            eng._currentDelta = prevDelta;
-        }
+        eng._currentEncoder = prevEncoder;
+        eng._currentDelta = prevDelta;
+        eng._finishOptionalFrame?.(submitted);
     }
 }
 

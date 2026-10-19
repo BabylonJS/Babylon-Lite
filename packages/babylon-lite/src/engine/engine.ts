@@ -668,11 +668,8 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
         engine._gpuTimerResolve?.();
     } finally {
-        try {
-            engine._finishOptionalFrame?.(submitted);
-        } finally {
-            engine._currentEncoder = undefined!;
-        }
+        engine._currentEncoder = undefined!;
+        engine._finishOptionalFrame?.(submitted);
     }
 }
 
