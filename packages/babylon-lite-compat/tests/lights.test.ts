@@ -12,6 +12,7 @@ vi.mock("babylon-lite", async (importActual) => {
 
 import { rebuildSceneRenderables } from "babylon-lite";
 import { DirectionalLight, HemisphericLight, PointLight, SpotLight } from "../src/lights/lights";
+import type { Light } from "../src/lights/lights";
 import { Color3 } from "../src/math/color";
 import { Vector3 } from "../src/math/vector";
 import { Mesh, TransformNode } from "../src/meshes/meshes";
@@ -191,10 +192,11 @@ describe("Light vectors and colours are live objects, as in Babylon.js", () => {
 });
 
 /**
- * Babylon.js filters per-mesh lighting with two arrays of meshes; Lite filters with two sets of mesh
- * ids (`LightBase.excludedMeshIds` / `includedOnlyMeshIds`, read by `affectsMesh`). These tests pin
- * the translation: which ids are published, when a mesh is given one, and when the published change
- * forces the renderables that baked the old selection to be rebuilt.
+ * Babylon.js filters per-mesh lighting with two arrays of meshes, and Lite filters with two sets of
+ * meshes on the light (`LightBase.excludedMeshes` / `includedOnlyMeshes`, read by `affectsMesh`).
+ * These tests pin what reaches those sets, and when a published change forces the renderables that
+ * baked the old selection to be rebuilt. What the sets then mean for a mesh is pinned natively, in
+ * `tests/lite/unit/mesh-light-selection.test.ts`.
  */
 describe("Light.excludedMeshes / includedOnlyMeshes", () => {
     const rebuildMock = vi.mocked(rebuildSceneRenderables);
@@ -203,7 +205,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         rebuildMock.mockClear();
     });
 
-    /** A compat mesh over a bare Lite mesh — no GPU geometry is needed to carry an id. */
+    /** A compat mesh over a bare Lite mesh: selection is by object, so no geometry is needed. */
     function mesh(name: string, liteId?: string): AbstractMesh {
         return Mesh._fromLite({ name, children: [], ...(liteId === undefined ? {} : { id: liteId }) } as never);
     }
@@ -225,14 +227,14 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         await new Promise<void>((resolve) => queueMicrotask(resolve));
     }
 
-    function excluded(light: { _lite: { excludedMeshIds?: ReadonlySet<string> } }): string[] | undefined {
-        const ids = light._lite.excludedMeshIds;
-        return ids && [...ids];
+    function excluded(light: Light): unknown[] | undefined {
+        const meshes = light._lite.excludedMeshes;
+        return meshes && [...meshes];
     }
 
-    function includedOnly(light: { _lite: { includedOnlyMeshIds?: ReadonlySet<string> } }): string[] | undefined {
-        const ids = light._lite.includedOnlyMeshIds;
-        return ids && [...ids];
+    function includedOnly(light: Light): unknown[] | undefined {
+        const meshes = light._lite.includedOnlyMeshes;
+        return meshes && [...meshes];
     }
 
     it("starts empty, as Babylon.js does, and publishes no sets", () => {
@@ -244,7 +246,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(includedOnly(rim)).toBeUndefined();
     });
 
-    it("publishes an assigned exclusion list as Lite mesh ids", async () => {
+    it("publishes an assigned exclusion list as Lite meshes", async () => {
         const rim = new DirectionalLight("rim", new Vector3(-2.2, -1.2, -1.6));
         const floor = mesh("floor");
         const wall = mesh("wall");
@@ -252,12 +254,11 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         rim.excludedMeshes = [floor, wall];
         await flush();
 
-        expect(excluded(rim)).toEqual([floor._lite.id, wall._lite.id]);
-        expect(floor._lite.id).toBeTruthy();
+        expect(excluded(rim)).toEqual([floor._lite, wall._lite]);
         expect(includedOnly(rim)).toBeUndefined();
     });
 
-    it("publishes an in-place push, the case a mesh-added observable drives", async () => {
+    it("publishes an in-place push, the case a mesh-added callback drives", async () => {
         const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
         const floor = mesh("floor");
         rim.excludedMeshes = [floor];
@@ -267,7 +268,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         rim.excludedMeshes.push(ceiling);
         await flush();
 
-        expect(excluded(rim)).toEqual([floor._lite.id, ceiling._lite.id]);
+        expect(excluded(rim)).toEqual([floor._lite, ceiling._lite]);
     });
 
     it("publishes a splice removal, so a mesh taken off the list is lit again", async () => {
@@ -281,7 +282,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         await flush();
 
         expect(removed).toEqual([floor]);
-        expect(excluded(rim)).toEqual([wall._lite.id]);
+        expect(excluded(rim)).toEqual([wall._lite]);
     });
 
     it("hands out a stable array that keeps publishing after a reassignment", async () => {
@@ -295,7 +296,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         await flush();
 
         // The freshly assigned array is hooked too, not just the one built in the constructor.
-        expect(includedOnly(led)).toEqual([door._lite.id]);
+        expect(includedOnly(led)).toEqual([door._lite]);
     });
 
     it("drops the published set again once a list is emptied", async () => {
@@ -311,7 +312,35 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(excluded(rim)).toBeUndefined();
     });
 
-    it("gives same-named meshes distinct ids, because Babylon.js matches by identity", async () => {
+    it("never writes to a mesh's Lite id, so a loaded light list keeps matching", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        const loaded = mesh("floor", "floor-node-7");
+        const procedural = mesh("box");
+
+        rim.excludedMeshes = [loaded, procedural];
+        await flush();
+
+        // `.babylon` light lists are keyed on the node id, so the id a mesh was loaded with has to
+        // survive being put in a compat list, and a mesh without one must not acquire one.
+        expect(loaded._lite.id).toBe("floor-node-7");
+        expect(procedural._lite.id).toBeUndefined();
+        expect(excluded(rim)).toEqual([loaded._lite, procedural._lite]);
+    });
+
+    it("keeps two meshes that share a loader id independently selectable", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        // Importing one asset twice yields distinct meshes carrying the same asset-local id.
+        const firstImport = mesh("floor", "floor-node-7");
+        const secondImport = mesh("floor", "floor-node-7");
+
+        rim.excludedMeshes = [firstImport];
+        await flush();
+
+        expect(excluded(rim)).toEqual([firstImport._lite]);
+        expect(excluded(rim)).not.toContain(secondImport._lite);
+    });
+
+    it("keeps same-named meshes independent, because Babylon.js matches by identity", async () => {
         const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
         const left = mesh("wall");
         const right = mesh("wall");
@@ -319,36 +348,24 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         rim.excludedMeshes = [left];
         await flush();
 
-        // Excluding one "wall" must not darken the other, so the id cannot be the name.
-        expect(left._lite.id).not.toBe(right._lite.id);
-        expect(excluded(rim)).toEqual([left._lite.id]);
-        expect(excluded(rim)).not.toContain(right._lite.id);
+        expect(excluded(rim)).toEqual([left._lite]);
+        expect(excluded(rim)).not.toContain(right._lite);
     });
 
-    it("keeps an id the mesh already carries, so loaded light lists still match", async () => {
-        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
-        const loaded = mesh("floor", "floor-node-7");
-
-        rim.excludedMeshes = [loaded];
-        await flush();
-
-        expect(loaded._lite.id).toBe("floor-node-7");
-        expect(excluded(rim)).toEqual(["floor-node-7"]);
-    });
-
-    it("lets an exclusion subtract from an inclusion, as Babylon.js canAffectMesh does", async () => {
+    it("publishes both lists as they are, leaving the precedence to affectsMesh", async () => {
         const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
         const carcass = mesh("carcass");
-        const shelf = mesh("shelf");
         const glassDoor = mesh("glassDoor");
 
-        led.includedOnlyMeshes = [carcass, shelf, glassDoor];
+        led.includedOnlyMeshes = [carcass, glassDoor];
         led.excludedMeshes = [glassDoor];
         await flush();
 
-        // Lite's affectsMesh stops at a non-empty included set, so the subtraction happens here.
-        expect(includedOnly(led)).toEqual([carcass._lite.id, shelf._lite.id]);
-        expect(excluded(led)).toBeUndefined();
+        // `affectsMesh` applies the inclusion and then subtracts the exclusion, so neither list is
+        // folded into the other here. An inclusion fully cancelled by an exclusion still lights
+        // nothing, which no empty set could express.
+        expect(includedOnly(led)).toEqual([carcass._lite, glassDoor._lite]);
+        expect(excluded(led)).toEqual([glassDoor._lite]);
     });
 
     it("rebuilds the renderables that baked the old selection, once per tick", async () => {
@@ -363,60 +380,6 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         // Building a list mesh by mesh must cost one rebuild, not one per mesh.
         expect(rebuildMock).toHaveBeenCalledTimes(1);
         expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
-    });
-
-    it("does not rebuild before the scene has started, or without a scene", async () => {
-        const pending = new DirectionalLight("rim", new Vector3(0, -1, 0), sceneStub(false));
-        const floor = mesh("floor");
-        pending.excludedMeshes = [floor];
-        await flush();
-
-        // The boot-time build reads the sets, so there is nothing to rebuild yet.
-        expect(excluded(pending)).toEqual([floor._lite.id]);
-        expect(rebuildMock).not.toHaveBeenCalled();
-
-        const detached = new DirectionalLight("detached", new Vector3(0, -1, 0));
-        detached.excludedMeshes = [mesh("wall")];
-        await flush();
-        expect(rebuildMock).not.toHaveBeenCalled();
-    });
-
-    it("keeps the restriction active when every included mesh is also excluded", async () => {
-        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
-        const box = mesh("box");
-        const other = mesh("other");
-
-        led.includedOnlyMeshes = [box];
-        led.excludedMeshes = [box];
-        await flush();
-
-        // Babylon.js lights nothing here.
-        const ids = includedOnly(led);
-        expect(ids).toHaveLength(1);
-        expect(ids).not.toContain(box._lite.id);
-        expect(ids).not.toContain(other._lite.id);
-        expect(excluded(led)).toBeUndefined();
-    });
-
-    it("scopes a clone separately from the source it inherited a filter id from", async () => {
-        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
-        const source = mesh("panel");
-
-        rim.excludedMeshes = [source];
-        await flush();
-        const sourceId = source._lite.id;
-        expect(sourceId).toBeTruthy();
-
-        // `cloneMeshNode` builds the clone by spreading the source mesh, so the clone starts out
-        // carrying the id that was just minted for the source.
-        const clone = mesh("panel", sourceId);
-        rim.excludedMeshes = [clone];
-        await flush();
-
-        // Listing only the clone must not darken the source as well.
-        expect(clone._lite.id).not.toBe(sourceId);
-        expect(excluded(rim)).toEqual([clone._lite.id]);
-        expect(excluded(rim)).not.toContain(sourceId);
     });
 
     it("shares one scene rebuild across lights edited in the same tick", async () => {
@@ -434,6 +397,22 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
     });
 
+    it("does not rebuild before the scene has started, or without a scene", async () => {
+        const pending = new DirectionalLight("rim", new Vector3(0, -1, 0), sceneStub(false));
+        const floor = mesh("floor");
+        pending.excludedMeshes = [floor];
+        await flush();
+
+        // The boot-time build reads the sets, so there is nothing to rebuild yet.
+        expect(excluded(pending)).toEqual([floor._lite]);
+        expect(rebuildMock).not.toHaveBeenCalled();
+
+        const detached = new DirectionalLight("detached", new Vector3(0, -1, 0));
+        detached.excludedMeshes = [mesh("wall")];
+        await flush();
+        expect(rebuildMock).not.toHaveBeenCalled();
+    });
+
     it("keeps Array.splice semantics for an omitted and an explicitly undefined deleteCount", async () => {
         const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
         const floor = mesh("floor");
@@ -446,7 +425,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(spliceFromJs(rim.excludedMeshes, 0, undefined, inserted)).toEqual([]);
         await flush();
         expect(rim.excludedMeshes).toEqual([inserted, floor, wall]);
-        expect(excluded(rim)).toEqual([inserted._lite.id, floor._lite.id, wall._lite.id]);
+        expect(excluded(rim)).toEqual([inserted._lite, floor._lite, wall._lite]);
 
         // ...and `splice()` removes nothing at all.
         expect(spliceFromJs(rim.excludedMeshes)).toEqual([]);
@@ -465,8 +444,8 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         await flush();
 
         // The container takes the light out of the per-mesh light path, so no renderable reads the
-        // sets — but they are still kept current for the moment the light is returned to the scene.
-        expect(includedOnly(led)).toEqual([door._lite.id]);
+        // sets, but they are still kept current for the moment the light is returned to the scene.
+        expect(includedOnly(led)).toEqual([door._lite]);
         expect(rebuildMock).not.toHaveBeenCalled();
     });
 });
