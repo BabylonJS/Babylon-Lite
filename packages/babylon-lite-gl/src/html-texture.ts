@@ -16,21 +16,19 @@ import {
     type GLTextureUpdateOptions,
 } from "./texture.js";
 
-/** Options for `createHtmlElementTexture` — the shared {@link GLTextureOptions}
- *  (including `invertY` and `premultiplyAlpha`), applied on creation, on every
- *  `updateHtmlElementTexture` and on `webglcontextrestored`. For Babylon-style
- *  presets spread `getSamplingModeFilters(...)`; for mipmaps call
- *  `generateTextureMipMaps` once and every later update rebuilds the chain. */
-export type GLHtmlElementTextureOptions = GLTextureOptions;
-
 /** Create a texture backed by an `<canvas>` / `<img>` / `<video>` element.
  *  The initial upload is performed immediately; call `updateHtmlElementTexture`
- *  to re-upload after the source has changed. */
-export function createHtmlElementTexture(
-    engine: GLEngineContext,
-    element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement,
-    options?: GLHtmlElementTextureOptions
-): GLTexture {
+ *  to re-upload after the source has changed.
+ *
+ *  @param engine - The engine to create GL resources on.
+ *  @param element - The source element.
+ *  @param options - The shared {@link GLTextureOptions} (including `invertY`
+ *   and `premultiplyAlpha`), applied on creation, on every
+ *   `updateHtmlElementTexture` that omits them and on `webglcontextrestored`.
+ *   For Babylon-style presets spread `getSamplingModeFilters(...)`; for mipmaps
+ *   call `generateTextureMipMaps` once and every later update rebuilds the chain.
+ *  @returns The new {@link GLTexture}. */
+export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement, options?: GLTextureOptions): GLTexture {
     const gl = engine.gl;
     const handle = gl.createTexture();
     if (handle === null) {

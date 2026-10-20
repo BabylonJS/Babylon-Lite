@@ -74,8 +74,8 @@ packages are imported together (as NeonBrush does).
 1. **`GL` type prefix (mandatory).** Every exported _type_ is prefixed `GL`:
    `GLEngineContext`, `GLEngineOptions`, `GLEngineCaps`, `GLEffect`,
    `GLEffectOptions`, `GLEffectWrapper`, `GLEffectWrapperOptions`, `GLTexture`,
-   `GLTextureOptions`, `GLViewport`, `GLSamplingMode`, `GLSamplingFilters`,
-   `GLHtmlElementTextureOptions`. The prefix prevents clashes with lite's
+   `GLTextureOptions`, `GLTextureUpdateOptions`, `GLViewport`,
+   `GLSamplingMode`, `GLSamplingFilters`. The prefix prevents clashes with lite's
    unprefixed `EngineContext` / `EffectWrapper` / … and signals "WebGL backend".
 
 2. **Mirror lite's shape when possible.** Same functional style (free functions
@@ -470,7 +470,9 @@ export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture):
 
 /** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
  *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
- *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained). */
+ *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained)
+ *  unless the texture already has one (it is rebuilt on every upload; call
+ *  `generateTextureMipMaps` to force a regeneration). */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /** Raw GL min/mag filters overload. */
 export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
@@ -479,8 +481,8 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
  *  context is not lost (the function form, mirroring `isEffectReady`). */
 export function isTextureReady(engine: GLEngineContext, tex: GLTexture): boolean;
 
-/** Per-update flags of `updateDynamicTexture` / `updateHtmlElementTexture`
- *  (≙ lite's `DynamicTextureUpdateOptions`). Omitted flags fall back to the
+/** Per-update flags of `updateRawTexture` / `updateDynamicTexture` /
+ *  `updateHtmlElementTexture` (≙ lite's `DynamicTextureUpdateOptions`). Omitted flags fall back to the
  *  creation options; the latest flags are reused by context-restore replay. */
 export interface GLTextureUpdateOptions {
     invertY?: boolean;
@@ -502,14 +504,16 @@ mipmapped nearest/bilinear variants are separate modes — pass raw filters.
 
 Without a preset, filters default to LINEAR/LINEAR even when mips are
 generated; a mipmapped preset (`useMipMaps: true`) requires a
-`generateTextureMipMaps` call. Dynamic textures (`createDynamicTexture`, options
-`GLDynamicTextureOptions = GLTextureOptions`) track the uploaded source's
-size in `tex.width` / `tex.height`. Every 2D update takes the same trailing
-options shape — `updateRawTexture(engine, tex, data, { width, height,
-unpackAlignment })`, `updateDynamicTexture(engine, tex, source, { invertY,
-premultiplyAlpha })` and `updateHtmlElementTexture(engine, tex, { invertY,
-premultiplyAlpha })` — and the dynamic / HTML updates fall back to the
-creation-time `invertY` / `premultiplyAlpha` when a call omits them.
+`generateTextureMipMaps` call. Every 2D creator takes the same
+`GLTextureOptions` (no per-creator aliases). Dynamic textures
+(`createDynamicTexture`) track the uploaded source's size in `tex.width` /
+`tex.height`. Every 2D update takes the same trailing options shape —
+`updateRawTexture(engine, tex, data, { width, height, unpackAlignment,
+invertY, premultiplyAlpha })`, `updateDynamicTexture(engine, tex, source, {
+invertY, premultiplyAlpha })` and `updateHtmlElementTexture(engine, tex, {
+invertY, premultiplyAlpha })` — and each update falls back to the
+creation-time `invertY` / `premultiplyAlpha` when a call omits them. The
+latest flags are reused by context-restore replay.
 
 The engine-owned texture registry is a `Set`, allocated inside
 `createGLEngine` (never at module scope). All managed factories register via
@@ -690,15 +694,8 @@ tests cover upload calls, state caching, validation and restore replay.
 Dynamic-importable so only InputGlow pulls it in:
 
 ```ts
-/** Same options as every other texture creator (kept as an alias for
- *  discoverability). */
-export type GLHtmlElementTextureOptions = GLTextureOptions;
-
-export function createHtmlElementTexture(
-    engine: GLEngineContext,
-    element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement,
-    options?: GLHtmlElementTextureOptions
-): GLTexture;
+/** Same `GLTextureOptions` as every other texture creator. */
+export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement, options?: GLTextureOptions): GLTexture;
 
 /** Re-uploads from the source element (≙ `HtmlElementTexture.update(invertY)`).
  *  `invertY` is the raw `UNPACK_FLIP_Y_WEBGL` for every element type, whereas

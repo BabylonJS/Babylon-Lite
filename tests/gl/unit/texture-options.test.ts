@@ -116,6 +116,37 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         expect(tex._hasMipMaps).not.toBe(true);
     });
 
+    it("updateTextureSamplingMode preset does not regenerate an existing chain", () => {
+        const { mock, engine, gl } = setup();
+        const tex = raw(engine);
+        generateTextureMipMaps(engine, tex);
+        mock.clear();
+        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
+        expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
+        expect(mock.count("generateMipmap")).toBe(0);
+        expect(tex._hasMipMaps).toBe(true);
+    });
+
+    it("updateRawTexture applies per-update invertY / premultiplyAlpha and replays them on restore", () => {
+        const { mock, canvas, engine, gl } = setup();
+        const flags = (): [unknown, unknown] => {
+            const last = (pname: number): unknown => mock.log.filter((c) => c.name === "pixelStorei" && c.args[0] === pname).at(-1)?.args[1];
+            return [last(gl.UNPACK_FLIP_Y_WEBGL), last(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)];
+        };
+        const tex = raw(engine, { invertY: false, premultiplyAlpha: false });
+        updateRawTexture(engine, tex, new Uint8Array(4), { invertY: true, premultiplyAlpha: true });
+        expect(flags()).toEqual([1, 1]);
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(flags()).toEqual([1, 1]);
+        // Omitted flags fall back to the creation options.
+        updateRawTexture(engine, tex, new Uint8Array(4), { premultiplyAlpha: true });
+        expect(flags()).toEqual([0, 1]);
+        updateRawTexture(engine, tex, new Uint8Array(4));
+        expect(flags()).toEqual([0, 0]);
+    });
+
     it("updateTextureSamplingMode preset uses mip filters once the texture has mipmaps", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);

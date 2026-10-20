@@ -146,8 +146,8 @@ use.
   and keeps it current on every later upload and context restore.
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
-  `updateDynamicTexture` / `updateHtmlElementTexture` take optional
-  `GLTextureUpdateOptions` (`invertY`, `premultiplyAlpha`).
+  `updateRawTexture` / `updateDynamicTexture` / `updateHtmlElementTexture` take
+  optional `GLTextureUpdateOptions` (`invertY`, `premultiplyAlpha`).
 - **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
   (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),

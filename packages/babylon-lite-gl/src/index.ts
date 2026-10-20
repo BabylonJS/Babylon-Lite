@@ -105,7 +105,6 @@ export type { GLPixelsTexture3DOptions, GLTexture3D } from "./texture-3d.js";
 
 // ─── Dynamic textures ────────────────────────────────────────────────
 export { createDynamicTexture, updateDynamicTexture, clearDynamicTextureSource } from "./dynamic-texture.js";
-export type { GLDynamicTextureOptions } from "./dynamic-texture.js";
 
 // ─── Render targets ──────────────────────────────────────────────────
 export {
@@ -155,4 +154,3 @@ export type { GLSprite, GLSpriteColor, GLSpriteRendererOptions, GLSpriteRenderer
 
 // ─── HTML-element textures ───────────────────────────────────────────
 export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
-export type { GLHtmlElementTextureOptions } from "./html-texture.js";

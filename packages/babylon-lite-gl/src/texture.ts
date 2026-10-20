@@ -31,8 +31,8 @@ export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode
  *  chain. */
 export interface GLTextureOptions {
     /** Flip rows vertically on upload. Default: false (matches Babylon's
-     *  default raw-texture behaviour). For dynamic / HTML-element textures this
-     *  is the default for every update that omits `invertY`. */
+     *  default raw-texture behaviour). For raw / dynamic / HTML-element textures
+     *  this is the default for every update that omits `invertY`. */
     invertY?: boolean;
     /** Default: gl.LINEAR. See {@link getSamplingModeFilters} for presets. */
     minFilter?: GLenum;
@@ -47,7 +47,7 @@ export interface GLTextureOptions {
      *  Use 1 for tightly-packed non-RGBA rows. */
     unpackAlignment?: number;
     /** Premultiply alpha at upload (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`, or
-     *  decode-time for `loadTexture2D`). Default false. For dynamic /
+     *  decode-time for `loadTexture2D`). Default false. For raw / dynamic /
      *  HTML-element textures this is the default for every update that omits it. */
     premultiplyAlpha?: boolean;
     /** Explicit sized internalFormat for `texImage2D`. When provided it is used
@@ -59,8 +59,9 @@ export interface GLTextureOptions {
     internalFormat?: GLenum;
 }
 
-/** Per-update pixel-store flags shared by `updateDynamicTexture` and
- *  `updateHtmlElementTexture` (≙ lite's `DynamicTextureUpdateOptions`). Each
+/** Per-update pixel-store flags shared by `updateRawTexture`,
+ *  `updateDynamicTexture` and `updateHtmlElementTexture` (≙ lite's
+ *  `DynamicTextureUpdateOptions`, Babylon's `updateRawTexture(…, invertY)`). Each
  *  omitted flag falls back to the texture's creation {@link GLTextureOptions}
  *  value; the flags of the latest update are reused on `webglcontextrestored`. */
 export interface GLTextureUpdateOptions {
@@ -124,11 +125,11 @@ export interface GLTexture {
      * @internal
      */
     _dynSource?: TexImageSource | null;
-    /** `invertY` of the latest dynamic / HTML-element update
+    /** `invertY` of the latest raw / dynamic / HTML-element update
      *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `invertY`. @internal */
     _invertY?: boolean;
-    /** `premultiplyAlpha` of the latest dynamic / HTML-element update
+    /** `premultiplyAlpha` of the latest raw / dynamic / HTML-element update
      *  ({@link GLTextureUpdateOptions}), reused by context-restore replay;
      *  `undefined` → the texture's creation `premultiplyAlpha`. @internal */
     _premultiplyAlpha?: boolean;
@@ -289,7 +290,7 @@ export function createRawTexture(
 
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
-        setUnpackState(target, invertY, premultiply, curAlign);
+        setUnpackState(target, tex._invertY ?? invertY, tex._premultiplyAlpha ?? premultiply, curAlign);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
     };
@@ -406,19 +407,23 @@ export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture):
  * @param engine - The engine.
  * @param tex - The raw texture to update.
  * @param data - New pixel data (must match the original `format`/`type`).
- * @param options - Optional new `width`/`height` (default: unchanged) and
- *  `unpackAlignment` (default 4).
+ * @param options - Optional new `width`/`height` (default: unchanged),
+ *  `unpackAlignment` (default 4) and `invertY` / `premultiplyAlpha` (default:
+ *  the creation values; ≙ Babylon's `updateRawTexture(…, invertY)`). The flags
+ *  are reused by context-restore replay.
  */
 export function updateRawTexture(
     engine: GLEngineContext,
     tex: GLTexture,
     data: ArrayBufferView | null,
-    options?: { width?: number; height?: number; unpackAlignment?: number }
+    options?: GLTextureUpdateOptions & { width?: number; height?: number; unpackAlignment?: number }
 ): void {
     if (engine._isLost || engine._disposed || tex._disposed || tex._updateRaw === undefined) {
         return;
     }
     const o = options ?? {};
+    tex._invertY = o.invertY;
+    tex._premultiplyAlpha = o.premultiplyAlpha;
     tex._updateRaw(engine, data, o.width ?? tex.width, o.height ?? tex.height, o.unpackAlignment ?? 4);
     if (tex._hasMipMaps) {
         // `_updateRaw` leaves the texture bound for upload (unit 0).
@@ -435,6 +440,8 @@ export function updateRawTexture(
  * {@link generateTextureMipMaps}) or `generateMipMaps` is true. Like Babylon,
  * `generateMipMaps` only generates (and retains) the chain for `TRILINEAR`,
  * right after the filters are set; `NEAREST` / `BILINEAR` never sample mips.
+ * Unlike Babylon, an existing chain is not regenerated (lite-gl already
+ * rebuilds it on every upload); call {@link generateTextureMipMaps} to force it.
  *
  * Binds for upload (unit 0) so the `texParameteri` lands on this texture. The
  * change is not replayed on `webglcontextrestored` (creation options are).
@@ -480,7 +487,9 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
     bindTextureForUpload(engine, tex.handle);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
-    if (generateMipMaps) {
+    // An existing chain is already rebuilt on every upload; call
+    // `generateTextureMipMaps` directly to force a regeneration.
+    if (generateMipMaps && !tex._hasMipMaps) {
         generateTextureMipMaps(engine, tex);
     }
 }

@@ -23,12 +23,6 @@ import {
 } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
-/** Options for {@link createDynamicTexture}: the shared {@link GLTextureOptions}.
- *  `invertY` / `premultiplyAlpha` become the defaults of every
- *  {@link updateDynamicTexture} call that omits them. For mipmaps, call
- *  `generateTextureMipMaps` once; every later update rebuilds the chain. */
-export type GLDynamicTextureOptions = GLTextureOptions;
-
 /** Create a texture backed by an empty (blank) `width × height` RGBA8
  *  allocation, whose pixels are pushed on demand with
  *  {@link updateDynamicTexture} — the WebGL counterpart of Babylon's
@@ -42,9 +36,12 @@ export type GLDynamicTextureOptions = GLTextureOptions;
  *  @param engine - The engine to create GL resources on.
  *  @param width - Texture width in texels (clamped to ≥ 1).
  *  @param height - Texture height in texels (clamped to ≥ 1).
- *  @param options - See {@link GLDynamicTextureOptions}.
+ *  @param options - The shared {@link GLTextureOptions}. `invertY` /
+ *   `premultiplyAlpha` become the defaults of every {@link updateDynamicTexture}
+ *   call that omits them. For mipmaps, call `generateTextureMipMaps` once; every
+ *   later update rebuilds the chain.
  *  @returns The new {@link GLTexture}. */
-export function createDynamicTexture(engine: GLEngineContext, width: number, height: number, options?: GLDynamicTextureOptions): GLTexture {
+export function createDynamicTexture(engine: GLEngineContext, width: number, height: number, options?: GLTextureOptions): GLTexture {
     const gl = engine.gl;
     const handle = gl.createTexture();
     if (handle === null) {
