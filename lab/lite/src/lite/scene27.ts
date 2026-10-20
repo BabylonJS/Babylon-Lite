@@ -1,9 +1,20 @@
-// Scene 27: Material Variants — matches playground #C1QH9J#78
-// Loads a refrigerator glTF with KHR_materials_variants, selects "White" variant.
+// Scene 27: Material Variants — selects the shoe's nondefault "beach" material.
+// Model: Babylon.js Assets, meshes/shoe_variants.glb (CC BY 4.0).
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, loadGltf, attachControl, selectVariant, registerScene } from "babylon-lite";
+import {
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createHemisphericLight,
+    loadGltf,
+    attachControl,
+    selectVariant,
+    registerScene,
+} from "babylon-lite";
 
-const MODEL_URL = "https://brave-engine-bucket.s3.ap-southeast-1.amazonaws.com/s3-public/assets/models/props/var_Refrigerator.glb";
+const MODEL_URL = "https://assets.babylonjs.com/meshes/shoe_variants.glb";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -13,10 +24,10 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     const container = await loadGltf(engine, MODEL_URL);
-    selectVariant(container, "White");
+    selectVariant(container, "beach");
     addToScene(scene, container);
 
-    const cam = createArcRotateCamera(2.372, 1, 5, { x: 0, y: 1, z: 0 });
+    const cam = createArcRotateCamera(2.372, 1, 0.5, { x: 0, y: 0.076, z: 0 });
     cam.nearPlane = 0.01;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
