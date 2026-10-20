@@ -16,7 +16,7 @@
     {
         "slug": "trogir-streaming",
         "name": "Trogir Gaussian Splat Streaming",
-        "description": "Stream Paolo Tosolini’s public Trogir capture while Babylon Lite draws a coarse shared Gaussian-splat representation first, then refines visible detail under live screen-error and splat-budget controls. An asset-root override supports local or alternate hosted copies.",
+        "description": "Stream Paolo Tosolini’s public Trogir capture with live detail controls, optional point sampling and accumulation settings, and an FPS counter. An asset-root override supports local or alternate hosted copies.",
         "tags": ["showcase", "gaussian splatting", "streaming"],
         "mobile": false
     },

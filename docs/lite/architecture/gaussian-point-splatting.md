@@ -35,6 +35,15 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
 Repeated enable calls update the existing handle after validating options.
 A target cannot be enabled in two scenes simultaneously.
 
+The Trogir streaming demo exposes this state in its HUD. Point sampling defaults
+off (`?points=1` opts in at startup); the first activation creates one handle and
+subsequent toggles change `colorRenderMode`, retaining its GPU resources. The
+enabled-only controls mutate density, render-scale divisor (labels 1, 1/2, 1/3,
+1/4 map to values 1, 2, 3, 4), occlusion culling, and accumulation limit.
+Read-only progress shows rendered frames and pixel-cycle length. An always-visible
+FPS/frame-time counter averages the existing frame hook's deltas over at least
+500 ms. HUD teardown disables the handle before stream/scene disposal.
+
 ## Internal Architecture
 
 `gps-suppression.ts` owns a lazy per-scene tracker shared by enabled handles.
@@ -119,6 +128,31 @@ retirement, and accumulation resets. Filtered bundle builds of scenes
 120/122/123/124/226 must have exactly zero raw-byte growth against the clean tree.
 Hardware WebGPU smoke checks exercise base and SH static pipelines without
 visual comparison or performance measurements.
+
+### Scene 331 — converged point sampling
+
+`lab/lite/src/lite/scene331.ts` reuses scene 122's hornedlizard SOG, SH
+shading, black clear color, and fixed initial camera (alpha 4.6, beta 0.956,
+radius 3, target `[0, -0.2, 0.2]`, near 0.001, far 1000). It enables point
+splatting with `renderScale: 1`: this API uses integer resolution divisors,
+so 1 samples every output pixel each frame (`pixelCycleLength === 1`).
+All other point settings retain their defaults. Readiness waits for
+`firstSortReady` and at least 300 accumulated frames before publishing
+`canvas.dataset.ready`, `renderedFrameCount`, `pixelCycleLength`, `drawCalls`,
+and `initMs`. Camera controls remain available for interactive inspection.
+
+The BJS reference feature-detects `pointSplattingRenderMode`, sets
+`pointSplattingRenderScale = 1`, and waits for
+`pointSplattingProgress.renderedFrameCount >= 300`. Importing the non-pure
+`gaussianSplattingMesh` module registers its optional controller in releases
+containing BabylonJS/Babylon.js#18962. Until such a release is installed, the
+reference uses scene 122's classic sorted-SH rendering and reports
+`dataset.renderMode = "classic"`. npm 9.31.0 was published on 2026-10-15 at
+08:13 UTC, before that PR merged at 13:53 UTC; it does not contain the feature.
+The scene's MAD ceiling is provisionally 1; the reference golden must be
+recaptured explicitly when the dependency is upgraded to the first release
+containing the PR. Scene 331's thumbnail is captured from the converged Lite
+render while the BJS reference remains on the classic fallback.
 
 ## File Manifest
 

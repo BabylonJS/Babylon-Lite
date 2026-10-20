@@ -2791,5 +2791,15 @@
         "description": "The hosted coastalCliff.glb asset exercises real PBR materials, unique per-mesh tags, known foliage exclusions, screen depth, linear albedo shadow attenuation, asset-scaled radii, and Medium-quality mesh blending over most of the frame.",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "pbr", "gltf", "albedo"],
         "skipPerf": true
+    },
+    {
+        "id": 331,
+        "slug": "scene331-gs-point-splatting",
+        "name": "Scene 331 — Gaussian Splatting — Point Sampling",
+        "maxMad": 1,
+        "maxRawKB": 92,
+        "description": "Scene 122's hornedlizard.sog + SH rendered with full-resolution point sampling; ready after 300 accumulation frames. BJS uses classic GS until PR #18962 reaches npm.",
+        "tags": ["gaussian-splatting", "sog", "sh", "point-splatting"],
+        "skipPerf": true
     }
 ]
