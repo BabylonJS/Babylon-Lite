@@ -31,6 +31,12 @@ Scene and demo pages are served live from source, so this is the loop for engine
 **Bundle** tab additionally needs the production bundles — build them with `pnpm dev:lab`
 (same server, preceded by a full bundle build) or with the tab's **Regenerate** button.
 
+Lab startup and static builds restore scene 112's Flight Helmet KTX2 fixture
+from a pinned BabylonJS/Assets revision, verifying each file before use.
+`pnpm fetch:flight-helmet` runs this preparation separately. The downloaded
+files live in the gitignored `lab/public/models/FlightHelmetKTX/` directory;
+no model binaries are added to the Lite package.
+
 ## Available Scripts
 
 | Command                    | Description                                                         |
