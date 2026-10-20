@@ -40,6 +40,8 @@ const GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED =
     "Lite's Gaussian-splat renderable fixes shader fragments and render state at load time and exposes no post-load material replacement or pipeline-rebuild lifecycle. Supporting Babylon.js GaussianSplattingMaterial plugins requires an opt-in Lite splat-material lifecycle design.";
 const GAUSSIAN_POINT_SPLATTING_UNSUPPORTED =
     "Babylon.js Gaussian Point Splatting is a separate stochastic WebGPU compute-renderer subsystem with accumulation, Hi-Z culling, depth-pass integration, and fullscreen compositing lifecycles. Lite's sorted-splat renderer has no equivalent compute or pass-ownership model, and adding one requires broad engine design rather than a small mechanical export.";
+const SHADER_MATERIAL_UNSUPPORTED =
+    "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -612,18 +614,24 @@ export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
 }
 
 export class ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by unsupported subclasses. */
+    protected static readonly _UnsupportedApi: string = "ShaderMaterial";
+
+    /** @internal Stable structural blocker inherited by unsupported subclasses. */
+    protected static readonly _UnsupportedReason: string = SHADER_MATERIAL_UNSUPPORTED;
+
     public constructor() {
-        const constructorName = new.target.name || "ShaderMaterial";
-        unsupported(
-            constructorName,
-            constructorName === "GaussianPointSplattingBlitMaterial" || constructorName === "GaussianPointSplattingDepthBlitMaterial"
-                ? GAUSSIAN_POINT_SPLATTING_UNSUPPORTED
-                : "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem."
-        );
+        unsupported(new.target._UnsupportedApi, new.target._UnsupportedReason);
     }
 }
 
 export class GaussianPointSplattingBlitMaterial extends ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedApi = "GaussianPointSplattingBlitMaterial";
+
+    /** @internal Stable structural blocker inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedReason = GAUSSIAN_POINT_SPLATTING_UNSUPPORTED;
+
     public constructor(_name: string, _scene: Scene) {
         super();
     }
@@ -654,6 +662,12 @@ export class GaussianPointSplattingBlitMaterial extends ShaderMaterial {
 }
 
 export class GaussianPointSplattingDepthBlitMaterial extends ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedApi = "GaussianPointSplattingDepthBlitMaterial";
+
+    /** @internal Stable structural blocker inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedReason = GAUSSIAN_POINT_SPLATTING_UNSUPPORTED;
+
     public constructor(_name: string, _scene: Scene) {
         super();
     }
