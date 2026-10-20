@@ -9,10 +9,10 @@ import { multiplyMat4 } from "../math/multiply-mat4.js";
 import type { Mat4 } from "../math/types.js";
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
-// Experimental temporal reprojection. m maps the previous frame's NDC (pixel center, stored depth) to the current clip space;
+// m maps previous NDC (pixel center, stored depth) to current clip space; inv maps current NDC back to previous clip space.
 // info is (full width, full height, generation, history cap). Nearest keys are ~bits(clip.w), so atomicMax keeps the closest.
 const REPROJECT = wgsl`
-struct Reproject { m:mat4x4f, info:vec4f }
+struct Reproject { m:mat4x4f, inv:mat4x4f, info:vec4f }
 @group(0) @binding(0) var<uniform> r:Reproject;
 fn reprojected(p:u32, z:f32)->vec4f {
 let size=u32(r.info.x);
@@ -26,7 +26,7 @@ return 0xffffffffu;
 }
 `;
 
-/** Forward scatter of the previous accumulation: nearest depth first, then the winning source pixel. */
+/** Forward scatter estimates current depth: nearest depth first, then the winning source pixel. */
 function scatterShader(source: boolean): WgslSource {
     return wgsl`
 ${REPROJECT}
@@ -54,7 +54,7 @@ ${source ? wgsl`if(nearest[d]==key) { atomicMax(&winner[d],p+1u); }` : wgsl`atom
 `;
 }
 
-/** Rebuilds the accumulation from scattered sources; fills magnification cracks and holes from neighbors. */
+/** Pulls bilinear history at exact destination centers, using scattered depth and neighbor estimates for cracks/holes. */
 const GATHER = wgsl`
 ${REPROJECT}
 @group(0) @binding(1) var<storage,read> nearest:array<u32>;
@@ -94,10 +94,37 @@ let generation=u32(r.info.z)<<16u;
 if(p==0u) { accum[d]=vec4f(0.0); depth[d]=0.0; counts[d]=generation; return; }
 p-=1u;
 let clip=reprojected(p,prevDepth[p]);
+let zc=clip.z/clip.w;
+let ndc=(vec2f(id.xy)+0.5)/r.info.xy*2.0-1.0;
+let previous=r.inv*vec4f(ndc.x,-ndc.y,zc,1.0);
+var color=vec4f(0.0); var weight=0.0; var samples=65535u;
+if(previous.w>1e-6) {
+let pp=(vec2f(previous.x,-previous.y)/previous.w*0.5+0.5)*r.info.xy-0.5;
+let base=vec2i(floor(pp));
+let f=fract(pp);
+for(var y=0;y<2;y++) { for(var x=0;x<2;x++) {
+let q=base+vec2i(x,y);
+let w=select(1.0-f.x,f.x,x==1)*select(1.0-f.y,f.y,y==1);
+if(w>0.0 && all(q>=vec2i(0)) && all(q<vec2i(size))) {
+let t=u32(q.y)*size.x+u32(q.x);
+let count=prevCounts[t];
+let z=prevDepth[t];
+if((count>>16u)==u32(r.info.z) && (count&65535u)>0u && z>0.0) {
+// A 5% relative clip-W tolerance rejects history across depth discontinuities.
+if(abs(reprojected(t,z).w-clip.w)<=0.05*clip.w) {
+color+=w*prevAccum[t]; weight+=w;
+samples=min(samples,count&65535u);
+}
+}
+}
+} }
+}
 var count=min(prevCounts[p]&65535u,u32(r.info.w));
+if(weight>=1e-4) { color/=weight; count=min(samples,u32(r.info.w)); }
+else { color=prevAccum[p]; }
 if(filled) { count=max(1u,count/2u); }
-accum[d]=prevAccum[p];
-depth[d]=clamp(clip.z/clip.w,0.0,1.0);
+accum[d]=color;
+depth[d]=clamp(zc,0.0,1.0);
 counts[d]=generation|count;
 }
 `;
@@ -132,17 +159,28 @@ export type GpsReprojectionDispatch = (pipeline: GPUComputePipeline, resources: 
 let pipelineCache: { device: GPUDevice; pipelines: Pipelines } | null = null;
 
 /**
- * Maps the previous frame's NDC to the current clip space, or null when the previous transform is singular.
+ * Packs the previous-NDC → current-clip matrix and its inverse into 32 floats, or null if either inverse fails.
  * `matrices` packs the previous world, view and projection at offsets 0, 16 and 32.
  */
-export function gpsReprojectionMatrix(matrices: Float32Array, world: Mat4, view: Mat4, projection: Mat4): Mat4 | null {
+export function gpsReprojectionMatrix(matrices: Float32Array, world: Mat4, view: Mat4, projection: Mat4): Float32Array | null {
     const previous = invertMat4(
         multiplyMat4(multiplyMat4(matrices.subarray(32, 48) as unknown as Mat4, matrices.subarray(16, 32) as unknown as Mat4), matrices.subarray(0, 16) as unknown as Mat4)
     );
-    return previous && multiplyMat4(multiplyMat4(multiplyMat4(projection, view), world), previous);
+    if (!previous) {
+        return null;
+    }
+    const matrix = multiplyMat4(multiplyMat4(multiplyMat4(projection, view), world), previous);
+    const inverse = invertMat4(matrix);
+    if (!inverse) {
+        return null;
+    }
+    const result = new Float32Array(32);
+    result.set(matrix);
+    result.set(inverse, 16);
+    return result;
 }
 
-/** Remaps the accumulation in place. `params` holds the reprojection matrix followed by (width, height, generation, history cap). */
+/** Remaps accumulation in place. `params` packs two matrices, then (width, height, generation, history cap) at float offset 32. */
 export function gpsRecordReprojection(
     device: GPUDevice,
     encoder: GPUCommandEncoder,
@@ -151,8 +189,8 @@ export function gpsRecordReprojection(
     createBuffer: (size: number, label: string, usage?: GPUBufferUsageFlags) => GPUBuffer,
     dispatch: GpsReprojectionDispatch
 ): void {
-    const width = params[16]!;
-    const height = params[17]!;
+    const width = params[32]!;
+    const height = params[33]!;
     const size = width * height;
     let history = target.history;
     if (!history) {
@@ -164,7 +202,7 @@ export function gpsRecordReprojection(
         };
         try {
             history = {
-                params: make(80, "reprojection parameters", BU.UNIFORM | BU.COPY_DST),
+                params: make(144, "reprojection parameters", BU.UNIFORM | BU.COPY_DST),
                 accum: make(size * 16, "previous accumulation"),
                 depth: make(size * 4, "previous depth"),
                 counts: make(size * 4, "previous counts"),

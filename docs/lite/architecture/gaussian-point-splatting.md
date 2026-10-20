@@ -138,8 +138,11 @@ module arrives, view changes keep restarting the accumulation.
 
 With `temporalReprojection`, world/view/projection matrices leave the
 generation key and are tracked separately. When they change, `prepare()` builds
-`M = P·V·W · (P'·V'·W')⁻¹` from the previous matrices and `record()` runs,
-before preprocessing:
+`M = P·V·W · (P'·V'·W')⁻¹` and its inverse from the previous matrices. The
+lazy module packs both column-major matrices at float offsets 0 and 16 in a
+36-float, 144-byte uniform, followed by `(width, height, generation, history cap)`
+at offset 32. If either inverse is singular, accumulation hard-resets.
+Before preprocessing, `record()` runs:
 
 1. Copy accumulation, depth, and counts into lazily allocated history buffers
    (about 32 extra bytes per full-resolution pixel) and clear two scatter
@@ -147,14 +150,32 @@ before preprocessing:
 2. Scatter each valid previous pixel (current generation, nonzero count,
    nonzero depth) through `M` from its pixel center and stored NDC depth, keeping
    the nearest `clip.w` per destination with `atomicMax(~bits(w))`.
-3. Record the winning source pixel per destination.
-4. Gather: copy the winner's color, recompute its depth through `M`, and clamp
-   its count to `min(GPS_REPROJECTION_SAMPLES (16), maxAccumFrames - 1)`. When at
-   least six of eight neighbors are more than 10% nearer, the pixel is a crack in
-   a magnified surface and takes the nearest neighbor's source. Empty pixels take
-   the farthest neighbor's source because disocclusions usually reveal
-   background. Neighbor fills halve their count. Pixels without any source
-   restart at zero samples.
+3. Record the winning source pixel per destination. These scatter passes only
+   estimate current depth; they no longer determine where history color is sampled.
+4. Pull gather: choose the winner as the depth source. When at least six of eight
+   neighbors are more than 10% nearer, the pixel is a crack in a magnified
+   surface and chooses the nearest neighbor's source. Empty pixels choose the
+   farthest neighbor's source because disocclusions usually reveal background.
+   Pixels without any source get zero color/depth and `generation << 16` (zero
+   samples), preserving resolve's provisional hole fills.
+5. Reproject the chosen source through `M` to obtain `zc = clip.z / clip.w`
+   and `wc = clip.w`. Build the destination's exact pixel-center NDC point
+   `((d + 0.5) / size * 2 - 1)` with Y negated and Z set to `zc`, then transform
+   through `M⁻¹` and divide by W. Previous fractional pixel coordinates are
+   `(previousNdc.xy * (0.5, -0.5) + 0.5) * size - 0.5`, so integers denote
+   centers. This backward mapping preserves subpixel motion instead of freezing
+   at a rounded scatter destination.
+6. Bilinearly sample the four history taps around that coordinate. A tap must
+   be in bounds, have the current generation, positive count and depth, and
+   agree with the estimated depth: `abs(reprojectedTap.w - wc) <= 0.05 * wc`.
+   The 5% relative clip-W tolerance rejects different surfaces while allowing
+   small local depth variation. Multiply bilinear weights by tap validity and
+   renormalize. Count is the minimum count among positive-weight accepted taps,
+   capped at `min(GPS_REPROJECTION_SAMPLES (16), maxAccumFrames - 1)` (at least
+   one). If total weight is below `1e-4` or the backward transform has invalid W,
+   copy the chosen source's color/count instead. Crack/hole neighbor fills halve
+   the resulting count, with a minimum of one. Store `clamp(zc, 0, 1)` as depth.
+   Gather still binds eight storage buffers; no extra storage is needed.
 
 The frame counter is soft-reset to the same sample cap so accumulation resumes,
 and occlusion culling is skipped for that frame because the Hi-Z is from the
@@ -172,9 +193,10 @@ History buffers are owned by the pixel-buffer target and retired with it;
 the lazily initialized pipeline cache is invalidated when the device changes.
 
 Known limitations: one depth per pixel misplaces semi-transparent
-edges, view-dependent SH color is reused until refreshed, repeated nearest
-resampling slightly softens fast-moving close surfaces, and the copy/scatter
-passes cost bandwidth on every moving frame. Babylon.js has no equivalent.
+edges, view-dependent SH color is reused until refreshed, repeated bilinear
+resampling can soften moving surfaces, and the copy/scatter/gather passes cost
+bandwidth on every moving frame. Neighbor depth estimates and nearest fallback
+can still produce artifacts near disocclusions. Babylon.js has no equivalent.
 
 ## Babylon.js Equivalence Map
 
@@ -195,7 +217,8 @@ module imports this feature.
 option validation/invalidation, pre/post-registration discovery, unrelated
 renderables, native encoder receivers and proxy reuse, all four draw commands,
 multiple targets, stream bootstrap/batches, disable/dispose restoration, buffer
-retirement, and accumulation resets. Filtered bundle builds of scenes
+retirement, accumulation resets, paired reprojection matrices, the 144-byte
+uniform layout, and hard-reset fallback for singular transforms. Filtered bundle builds of scenes
 120/122/123/124/226 must have exactly zero raw-byte growth against the clean tree.
 Hardware WebGPU smoke checks exercise base and SH static pipelines without
 visual comparison or performance measurements.
@@ -232,4 +255,5 @@ render while the BJS reference remains on the classic fallback.
 - `gps-suppression.ts`: opt-in classic-draw discovery and suppression.
 - `gps-state.ts`: state types, validation, invalidation, numeric helpers.
 - `gps-runtime.ts`: GPU resources, compute batches, composite material.
+- `gps-reproject.ts`: lazy experimental depth scatter and bilinear pull gather.
 - `gps-shaders.ts`: compute and composite WGSL.

@@ -407,10 +407,10 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         const matrix = reprojector.gpsReprojectionMatrix(state.matrices, world, view, projection);
         if (matrix) {
             const samples = gpsReprojectionSamples(gps.maxAccumFrames);
-            const reproject = (state.reproject = new Float32Array(20));
+            const reproject = (state.reproject = new Float32Array(36));
             state.fillFrames = cycle;
             reproject.set(matrix);
-            reproject.set([width, height, state.generation, Math.max(1, samples)], 16);
+            reproject.set([width, height, state.generation, Math.max(1, samples)], 32);
             gpsSoftReset(state, cycle, samples);
         } else {
             state.key = "";

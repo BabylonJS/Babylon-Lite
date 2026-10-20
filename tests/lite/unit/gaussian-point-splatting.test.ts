@@ -22,6 +22,8 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate.js";
 import type { GaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
+import { multiplyMat4 } from "../../../packages/babylon-lite/src/math/multiply-mat4.js";
+import type { Mat4 } from "../../../packages/babylon-lite/src/math/types.js";
 
 vi.mock("../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.js", async (original) => ({
     ...(await original<object>()),
@@ -68,6 +70,55 @@ function fixture(built = false) {
 }
 
 describe("Gaussian point splatting parameters", () => {
+    it("packs mutually inverse reprojection transforms in column-major order", async () => {
+        const { gpsReprojectionMatrix } = await import("../../../packages/babylon-lite/src/gaussian-point-splatting/gps-reproject.js");
+        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const matrices = new Float32Array(48);
+        for (let i = 0; i < 3; i++) {
+            matrices.set(identity, i * 16);
+        }
+        matrices[0] = 2;
+        matrices[12] = 3;
+        matrices[29] = -4;
+        matrices[32] = 2;
+        matrices[37] = 3;
+        const world = identity.slice();
+        world[5] = 2;
+        world[13] = 1;
+        const view = identity.slice();
+        view[12] = -2;
+        const projection = identity.slice();
+        projection[0] = 3;
+        projection[5] = 4;
+        const packed = gpsReprojectionMatrix(matrices, world as unknown as Mat4, view as unknown as Mat4, projection as unknown as Mat4)!;
+        expect(packed).toHaveLength(32);
+        expect(packed[0]).toBeCloseTo(0.75);
+        expect(packed[5]).toBeCloseTo(8 / 3);
+        expect(packed[12]).toBeCloseTo(-10.5);
+        expect(packed[13]).toBeCloseTo(36);
+        const forward = packed.subarray(0, 16) as unknown as Mat4;
+        const backward = packed.subarray(16, 32) as unknown as Mat4;
+        for (const product of [multiplyMat4(forward, backward), multiplyMat4(backward, forward)]) {
+            Array.from(product).forEach((value, i) => expect(value).toBeCloseTo(identity[i]!, 5));
+        }
+    });
+
+    it.each(["previous", "world", "view", "projection"] as const)("rejects singular %s reprojection transforms", async (singular) => {
+        const { gpsReprojectionMatrix } = await import("../../../packages/babylon-lite/src/gaussian-point-splatting/gps-reproject.js");
+        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const matrices = new Float32Array(48);
+        for (let i = 0; i < 3; i++) {
+            matrices.set(identity, i * 16);
+        }
+        const current = { world: identity.slice(), view: identity.slice(), projection: identity.slice() };
+        if (singular === "previous") {
+            matrices.fill(0, 0, 16);
+        } else {
+            current[singular].fill(0);
+        }
+        expect(gpsReprojectionMatrix(matrices, current.world as unknown as Mat4, current.view as unknown as Mat4, current.projection as unknown as Mat4)).toBeNull();
+    });
+
     it("chooses ceil(sqrt(points/budget)), bounded to 1..8", () => {
         expect(gpsRenderScale(0, 15_000_000)).toBe(1);
         expect(gpsRenderScale(15_000_000, 15_000_000)).toBe(1);
@@ -546,6 +597,15 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             expect(gps.progress).toMatchObject({ accumulationVersion: version, renderedFrameCount: GPS_REPROJECTION_SAMPLES * cycle + 1 });
             expect(labels.slice(0, 3)).toEqual(["GPS reproject nearest", "GPS reproject source", "GPS reproject gather"]);
             expect(clearBuffer).toHaveBeenCalledTimes(2);
+            const reprojectionWrites = vi.mocked(engine._device.queue.writeBuffer).mock.calls.filter((call) => (call[2] as Float32Array).length === 36);
+            expect(reprojectionWrites).toHaveLength(1);
+            const reprojectionParams = reprojectionWrites[0]![2] as Float32Array;
+            expect(Array.from(reprojectionParams.subarray(32))).toEqual([16, 16, version, GPS_REPROJECTION_SAMPLES]);
+            const forward = reprojectionParams.subarray(0, 16) as unknown as Mat4;
+            const backward = reprojectionParams.subarray(16, 32) as unknown as Mat4;
+            Array.from(multiplyMat4(forward, backward)).forEach((value, i) => expect(value).toBeCloseTo(i % 5 === 0 ? 1 : 0, 5));
+            expect(engine._device.createBuffer).toHaveBeenCalledWith(expect.objectContaining({ label: "GPS reprojection parameters", size: 144 }));
+            expect(engine._currentEncoder!.copyBufferToBuffer).toHaveBeenCalledWith(expect.anything(), 0, expect.anything(), 0, 16 * 16 * 16);
             expect(params()[66]).toBe(2);
             expect(params()[67]).toBe(0);
             for (let i = 1; i <= cycle; i++) {
@@ -562,6 +622,13 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             expect(params()[66]).toBe(1);
             frame();
             expect(params()[66]).toBe(0);
+            const reprojectionPasses = labels.filter((label) => label.startsWith("GPS reproject")).length;
+            const beforeSingular = gps.progress!.accumulationVersion;
+            (mesh.worldMatrix as unknown as Float32Array).fill(0);
+            frame();
+            expect(gps.progress).toMatchObject({ accumulationVersion: beforeSingular + 1, renderedFrameCount: 1 });
+            expect(params()[66]).toBe(1);
+            expect(labels.filter((label) => label.startsWith("GPS reproject"))).toHaveLength(reprojectionPasses);
         } else {
             expect(gps.progress).toMatchObject({ accumulationVersion: version + 1, renderedFrameCount: 1 });
             expect(params()[66]).toBe(1);
