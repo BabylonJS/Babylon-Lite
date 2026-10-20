@@ -473,7 +473,12 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         engine._retirements?.splice(0).forEach((dispose) => dispose());
     });
 
-    it.each([false, true])("handles camera motion with temporalReprojection=%s", async (temporalReprojection) => {
+    it.each([
+        [false, 1],
+        [true, 1],
+        [false, 2],
+        [true, 2],
+    ] as const)("handles camera motion with temporalReprojection=%s and renderScale=%s", async (temporalReprojection, renderScale) => {
         const { scene, mesh, engine } = fixture(true);
         Object.assign(mesh, {
             worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
@@ -505,7 +510,8 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             copyBufferToBuffer: vi.fn(),
             clearBuffer,
         } as unknown as GPUCommandEncoder;
-        const gps = enableGaussianPointSplatting(scene, mesh, { renderScale: 1, occlusionCulling: true, temporalReprojection });
+        const gps = enableGaussianPointSplatting(scene, mesh, { renderScale, occlusionCulling: true, temporalReprojection });
+        const cycle = renderScale * renderScale;
         const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
         const batch = binding._updateBatches![0]!;
         const camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
@@ -523,26 +529,46 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             // The reprojection module loads lazily; once it arrives the accumulation restarts without the view in its key.
             frame();
             await vi.dynamicImportSettled();
+            // Start from a known reset even when a previous case already loaded the module.
+            gps.pointScale += 0.1;
         }
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 30 * cycle; i++) {
             frame();
+            expect(params()[66]).not.toBe(2);
         }
         const version = gps.progress!.accumulationVersion;
-        expect(gps.progress).toMatchObject({ accumulationVersion: temporalReprojection ? 2 : 1, renderedFrameCount: 30 });
+        expect(gps.progress).toMatchObject({ accumulationVersion: temporalReprojection ? 2 : 1, renderedFrameCount: 30 * cycle });
         expect(params()[67]).toBe(1);
         labels.length = 0;
         camera.alpha += 0.05;
         frame();
         if (temporalReprojection) {
-            expect(gps.progress).toMatchObject({ accumulationVersion: version, renderedFrameCount: GPS_REPROJECTION_SAMPLES + 1 });
+            expect(gps.progress).toMatchObject({ accumulationVersion: version, renderedFrameCount: GPS_REPROJECTION_SAMPLES * cycle + 1 });
             expect(labels.slice(0, 3)).toEqual(["GPS reproject nearest", "GPS reproject source", "GPS reproject gather"]);
             expect(clearBuffer).toHaveBeenCalledTimes(2);
+            expect(params()[66]).toBe(2);
             expect(params()[67]).toBe(0);
-            frame();
-            expect(params()[67]).toBe(1);
+            for (let i = 1; i <= cycle; i++) {
+                frame();
+                expect(params()[66]).toBe(i < cycle ? 2 : 0);
+                expect(params()[67]).toBe(1);
+            }
             expect(labels.filter((label) => label.startsWith("GPS reproject"))).toHaveLength(3);
+            camera.alpha += 0.05;
+            frame();
+            expect(params()[66]).toBe(2);
+            gps.pointScale += 0.1;
+            frame();
+            expect(params()[66]).toBe(1);
+            frame();
+            expect(params()[66]).toBe(0);
         } else {
             expect(gps.progress).toMatchObject({ accumulationVersion: version + 1, renderedFrameCount: 1 });
+            expect(params()[66]).toBe(1);
+            for (let i = 0; i < cycle; i++) {
+                frame();
+                expect(params()[66]).toBe(0);
+            }
             expect(labels.some((label) => label.startsWith("GPS reproject"))).toBe(false);
             expect(clearBuffer).not.toHaveBeenCalled();
         }

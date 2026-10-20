@@ -124,12 +124,12 @@ export interface GpsReprojectionTarget {
     depth: GPUBuffer;
     counts: GPUBuffer;
     buffers: GPUBuffer[];
+    history?: History;
 }
 
 export type GpsReprojectionDispatch = (pipeline: GPUComputePipeline, resources: readonly GPUBuffer[], x: number, y: number) => void;
 
-const pipelineCache = new WeakMap<GPUDevice, Pipelines>();
-const historyCache = new WeakMap<GpsReprojectionTarget, History>();
+let pipelineCache: { device: GPUDevice; pipelines: Pipelines } | null = null;
 
 /**
  * Maps the previous frame's NDC to the current clip space, or null when the previous transform is singular.
@@ -154,7 +154,7 @@ export function gpsRecordReprojection(
     const width = params[16]!;
     const height = params[17]!;
     const size = width * height;
-    let history = historyCache.get(target);
+    let history = target.history;
     if (!history) {
         const buffers: GPUBuffer[] = [];
         const make = (bytes: number, label: string, usage?: GPUBufferUsageFlags): GPUBuffer => {
@@ -176,9 +176,9 @@ export function gpsRecordReprojection(
             throw error;
         }
         target.buffers.push(...buffers);
-        historyCache.set(target, history);
+        target.history = history;
     }
-    let pipelines = pipelineCache.get(device);
+    let pipelines = pipelineCache?.device === device ? pipelineCache.pipelines : null;
     if (!pipelines) {
         const compute = (code: string, label: string): GPUComputePipeline =>
             device.createComputePipeline({
@@ -191,7 +191,7 @@ export function gpsRecordReprojection(
             winner: compute(scatterShader(true), "reproject source"),
             gather: compute(GATHER, "reproject gather"),
         };
-        pipelineCache.set(device, pipelines);
+        pipelineCache = { device, pipelines };
     }
     const x = Math.ceil(width / 8);
     const y = Math.ceil(height / 8);

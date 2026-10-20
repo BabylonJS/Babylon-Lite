@@ -399,7 +399,7 @@ let sampleDepth=select(0.0,clamp(projected,0.0,1.0),hit);
 hiz[i]=select(1e30,vz+(u.range.y-u.range.x)/65534.0,hit);
 let n=u32(u.output.z);
 let gen=u32(u.state.x);
-if(u.state.z>0.5) {
+if(u.state.z>0.5 && u.state.z<1.5) {
 for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
 let pixel=id.xy*n+vec2u(x,y);
 if(all(pixel<vec2u(u.output.xy))) {
@@ -410,6 +410,15 @@ accum[o]=sampleColor; depth[o]=sampleDepth; counts[o]=(gen<<16u)|1u;
 return;
 }
 let pixel=id.xy*n+vec2u(u.cycle.xy);
+if(u.state.z>1.5) {
+for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
+let p=id.xy*n+vec2u(x,y);
+if(all(p<vec2u(u.output.xy)) && any(p!=pixel)) {
+let o=p.y*u32(u.output.x)+p.x;
+if(counts[o]==(gen<<16u)) { accum[o]=sampleColor; depth[o]=sampleDepth; }
+}
+} }
+}
 if(any(pixel>=vec2u(u.output.xy))) { return; }
 let o=pixel.y*u32(u.output.x)+pixel.x;
 let previous=counts[o];

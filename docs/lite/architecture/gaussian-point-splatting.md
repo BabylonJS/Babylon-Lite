@@ -158,7 +158,20 @@ before preprocessing:
 
 The frame counter is soft-reset to the same sample cap so accumulation resumes,
 and occlusion culling is skipped for that frame because the Hi-Z is from the
-previous view. Known limitations: one depth per pixel misplaces semi-transparent
+previous view. For the next `n²` dispatched frames, resolve uses fill mode
+(`state.z = 2`, versus `1` for a hard reset and `0` for normal accumulation).
+The existing counts buffer is the hole mask: pixels in the current generation
+with count zero receive the current low-resolution point sample's color and
+depth across their `n×n` block, except for the cycle pixel. These provisional
+fills keep count zero and are refreshed every frame, showing point-sampling
+noise rather than the underlying scene until each pixel's cycle slot supplies
+its first real sample with weight one. A new reprojection restarts the fill
+window; hard resets clear it. No extra mask buffer is allocated.
+
+History buffers are owned by the pixel-buffer target and retired with it;
+the lazily initialized pipeline cache is invalidated when the device changes.
+
+Known limitations: one depth per pixel misplaces semi-transparent
 edges, view-dependent SH color is reused until refreshed, repeated nearest
 resampling slightly softens fast-moving close surfaces, and the copy/scatter
 passes cost bandwidth on every moving frame. Babylon.js has no equivalent.

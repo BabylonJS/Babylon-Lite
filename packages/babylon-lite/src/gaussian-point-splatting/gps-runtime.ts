@@ -23,6 +23,7 @@ import {
     type GpsAccumulation,
 } from "./gps-state.js";
 import { GPS_COMPOSITE, GPS_HIZ, GPS_PARTITION, GPS_RESOLVE, GPS_SCAN_ADD, GPS_SCAN_BLOCKS, GPS_SCAN_SUMS, GPS_SPLAT, gpsPreprocessShader } from "./gps-shaders.js";
+import type * as GpsReproject from "./gps-reproject.js";
 
 interface Pipelines {
     preprocess: GPUComputePipeline;
@@ -35,16 +36,12 @@ interface Pipelines {
     hiz: GPUComputePipeline;
 }
 
-interface PixelBuffers {
+interface PixelBuffers extends GpsReproject.GpsReprojectionTarget {
     key: string;
     image: GPUBuffer;
-    accum: GPUBuffer;
-    depth: GPUBuffer;
-    counts: GPUBuffer;
     hiz: GPUBuffer;
     levels: ReturnType<typeof gpsHiZLevels>;
     levelParams: GPUBuffer[];
-    buffers: GPUBuffer[];
 }
 
 interface SplatBuffers {
@@ -90,6 +87,7 @@ interface ViewState extends GpsAccumulation {
     matrices: Float32Array;
     /** Reprojection uniforms written by prepare() for record() when the view moved. */
     reproject: Float32Array | null;
+    fillFrames: number;
 }
 
 let cache: { device: GPUDevice; compute: Map<string, Pipelines>; composite: Map<string, GPURenderPipeline> } | null = null;
@@ -101,7 +99,7 @@ function deviceCache(device: GPUDevice): NonNullable<typeof cache> {
     return cache;
 }
 
-type ReprojectionModule = typeof import("./gps-reproject.js");
+type ReprojectionModule = typeof GpsReproject;
 let reprojection: ReprojectionModule | Promise<unknown> | null = null;
 
 /** Returns the reprojection module once loaded; until then view changes keep restarting the accumulation. */
@@ -343,6 +341,7 @@ function createView(device: GPUDevice): ViewState {
             viewKey: "",
             matrices: new Float32Array(48),
             reproject: null,
+            fillFrames: 0,
         };
     } catch (error) {
         allocated.forEach((value) => value.destroy());
@@ -409,6 +408,7 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         if (matrix) {
             const samples = gpsReprojectionSamples(gps.maxAccumFrames);
             const reproject = (state.reproject = new Float32Array(20));
+            state.fillFrames = cycle;
             reproject.set(matrix);
             reproject.set([width, height, state.generation, Math.max(1, samples)], 16);
             gpsSoftReset(state, cycle, samples);
@@ -416,6 +416,9 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
             state.key = "";
             reset = gpsUpdateGeneration(state, key);
         }
+    }
+    if (reset) {
+        state.fillFrames = 0;
     }
     state.viewKey = viewKey;
     state.matrices.set(world, 0);
@@ -475,7 +478,10 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     cpu.set([Math.ceil(width / n), Math.ceil(height / n), camera.nearPlane, camera.farPlane], 52);
     cpu.set([width, height, n, stream ? 0 : target.textureWidth], 56);
     cpu.set([count, gps.pointScale, state.seed % 65536, (Math.imul(state.seed + 1, 0x9e3779b1) >>> 16) & 65535], 60);
-    cpu.set([state.generation, gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames), +reset, +(gps.occlusionCulling && !reset && !state.reproject)], 64);
+    cpu.set(
+        [state.generation, gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames), reset ? 1 : state.fillFrames > 0 ? 2 : 0, +(gps.occlusionCulling && !reset && !state.reproject)],
+        64
+    );
     cpu.set([zMin, zMax, state.pixels.levels.length, depthVisualization], 68);
     cpu.set([jitter % n, Math.floor(jitter / n), +gps.colorRenderMode, +gps.depthRenderMode], 72);
     engine._device.queue.writeBuffer(state.params, 0, cpu);
@@ -542,6 +548,9 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
     }
     readback(engine, state, state.cpu[58]!);
     state.frames++;
+    if (state.fillFrames > 0) {
+        state.fillFrames--;
+    }
     state.seed++;
     publishProgress(gps, state, state.cpu[58]! ** 2);
 }
