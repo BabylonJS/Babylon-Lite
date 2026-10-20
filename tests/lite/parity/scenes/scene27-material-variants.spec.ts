@@ -1,7 +1,7 @@
 /**
  * Scene 27 — Material Variants Parity Test
  *
- * Loads a refrigerator glTF with KHR_materials_variants and selects "White" variant.
+ * Loads the Babylon.js Assets shoe with KHR_materials_variants and selects the nondefault "beach" variant.
  * Compares Lite render against golden BJS reference.
  *
  * Assertions:
