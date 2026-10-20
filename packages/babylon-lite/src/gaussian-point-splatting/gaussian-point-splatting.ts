@@ -9,7 +9,10 @@ export type { GaussianPointSplatting, GaussianPointSplattingProgress } from "./g
 
 /** Initial mutable options; changing the returned handle takes effect on the next frame. */
 export type GaussianPointSplattingOptions = Partial<
-    Pick<GaussianPointSplatting, "colorRenderMode" | "depthRenderMode" | "depthVisualization" | "pointScale" | "renderScale" | "occlusionCulling" | "maxAccumFrames">
+    Pick<
+        GaussianPointSplatting,
+        "colorRenderMode" | "depthRenderMode" | "depthVisualization" | "pointScale" | "renderScale" | "occlusionCulling" | "maxAccumFrames" | "temporalReprojection"
+    >
 >;
 
 let enabled: WeakMap<SceneContext, Map<GaussianSplattingMesh | GaussianSplatStream, GaussianPointSplatting>> | null = null;
@@ -42,6 +45,7 @@ export function enableGaussianPointSplatting(
         renderScale: options.renderScale ?? "auto",
         occlusionCulling: options.occlusionCulling ?? false,
         maxAccumFrames: options.maxAccumFrames ?? 255,
+        temporalReprojection: options.temporalReprojection ?? false,
         get progress() {
             return this._progress;
         },

@@ -16,6 +16,7 @@ import {
     gpsOptionsKey,
     gpsPointBudget,
     gpsRenderScale,
+    gpsReprojectionSamples,
     gpsSoftReset,
     gpsUpdateGeneration,
     type GaussianPointSplatting,
@@ -84,6 +85,11 @@ interface ViewState extends GpsAccumulation {
     groups: Map<GPUComputePipeline, Map<GPUBuffer, GPUBindGroup>>;
     buffers: GPUBuffer[];
     context: DrawUpdateContext | null;
+    /** World/view/projection matrices whose view the accumulation currently holds. */
+    viewKey: string;
+    matrices: Float32Array;
+    /** Reprojection uniforms written by prepare() for record() when the view moved. */
+    reproject: Float32Array | null;
 }
 
 let cache: { device: GPUDevice; compute: Map<string, Pipelines>; composite: Map<string, GPURenderPipeline> } | null = null;
@@ -93,6 +99,15 @@ function deviceCache(device: GPUDevice): NonNullable<typeof cache> {
         cache = { device, compute: new Map(), composite: new Map() };
     }
     return cache;
+}
+
+type ReprojectionModule = typeof import("./gps-reproject.js");
+let reprojection: ReprojectionModule | Promise<unknown> | null = null;
+
+/** Returns the reprojection module once loaded; until then view changes keep restarting the accumulation. */
+function reprojectionModule(): ReprojectionModule | null {
+    reprojection ??= import("./gps-reproject.js").then((module) => (reprojection = module));
+    return reprojection instanceof Promise ? null : reprojection;
 }
 
 function pipelines(device: GPUDevice, stream: boolean, degree: number): Pipelines {
@@ -189,16 +204,17 @@ function pixelBuffers(device: GPUDevice, width: number, height: number, n: numbe
     const h = Math.ceil(height / n);
     const levels = gpsHiZLevels(w, h);
     const buffers: GPUBuffer[] = [];
-    const make = (size: number, label: string): GPUBuffer => {
-        const value = buffer(device, size, label);
+    const make = (size: number, label: string, usage?: GPUBufferUsageFlags): GPUBuffer => {
+        const value = buffer(device, size, label, usage);
         buffers.push(value);
         return value;
     };
     try {
         const image = make(w * h * 4, "image");
-        const accum = make(width * height * 16, "accumulation");
-        const depth = make(width * height * 4, "depth");
-        const counts = make(width * height * 4, "counts");
+        // COPY_SRC lets temporal reprojection snapshot the previous accumulation.
+        const accum = make(width * height * 16, "accumulation", BU.STORAGE | BU.COPY_DST | BU.COPY_SRC);
+        const depth = make(width * height * 4, "depth", BU.STORAGE | BU.COPY_DST | BU.COPY_SRC);
+        const counts = make(width * height * 4, "counts", BU.STORAGE | BU.COPY_DST | BU.COPY_SRC);
         const last = levels[levels.length - 1]!;
         const hiz = make((last.offset + 1) * 4, "Hi-Z");
         device.queue.writeBuffer(image, 0, new Uint32Array(w * h).fill(0xffffffff));
@@ -324,6 +340,9 @@ function createView(device: GPUDevice): ViewState {
             composite: null,
             groups: new Map(),
             context: null,
+            viewKey: "",
+            matrices: new Float32Array(48),
+            reproject: null,
         };
     } catch (error) {
         allocated.forEach((value) => value.destroy());
@@ -378,9 +397,30 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     const view = getViewMatrix(camera);
     const projection = getProjectionMatrix(camera, getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight));
     const world = target.worldMatrix;
-    const key = `${pixelKey}/${optionKey}/${gps._dataVersion}/${Array.from(world)}/${Array.from(view)}/${Array.from(projection)}`;
-    const reset = gpsUpdateGeneration(state, key);
+    const viewKey = `${Array.from(world)}/${Array.from(view)}/${Array.from(projection)}`;
+    // With reprojection, view changes keep the generation and remap the accumulation instead of restarting it.
+    const reprojector = gps.temporalReprojection ? reprojectionModule() : null;
+    const key = `${pixelKey}/${optionKey}/${gps._dataVersion}${reprojector ? "" : `/${viewKey}`}`;
+    let reset = gpsUpdateGeneration(state, key);
     const cycle = n * n;
+    state.reproject = null;
+    if (reprojector && !reset && state.viewKey !== viewKey) {
+        const matrix = reprojector.gpsReprojectionMatrix(state.matrices, world, view, projection);
+        if (matrix) {
+            const samples = gpsReprojectionSamples(gps.maxAccumFrames);
+            const reproject = (state.reproject = new Float32Array(20));
+            reproject.set(matrix);
+            reproject.set([width, height, state.generation, Math.max(1, samples)], 16);
+            gpsSoftReset(state, cycle, samples);
+        } else {
+            state.key = "";
+            reset = gpsUpdateGeneration(state, key);
+        }
+    }
+    state.viewKey = viewKey;
+    state.matrices.set(world, 0);
+    state.matrices.set(view, 16);
+    state.matrices.set(projection, 32);
     const content = stream ? target._gpu.contentGeneration : 0;
     if (!reset && state.content !== content) {
         gpsSoftReset(state, cycle);
@@ -435,7 +475,7 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     cpu.set([Math.ceil(width / n), Math.ceil(height / n), camera.nearPlane, camera.farPlane], 52);
     cpu.set([width, height, n, stream ? 0 : target.textureWidth], 56);
     cpu.set([count, gps.pointScale, state.seed % 65536, (Math.imul(state.seed + 1, 0x9e3779b1) >>> 16) & 65535], 60);
-    cpu.set([state.generation, gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames), +reset, +(gps.occlusionCulling && !reset)], 64);
+    cpu.set([state.generation, gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames), +reset, +(gps.occlusionCulling && !reset && !state.reproject)], 64);
     cpu.set([zMin, zMax, state.pixels.levels.length, depthVisualization], 68);
     cpu.set([jitter % n, Math.floor(jitter / n), +gps.colorRenderMode, +gps.depthRenderMode], 72);
     engine._device.queue.writeBuffer(state.params, 0, cpu);
@@ -474,6 +514,10 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
         }
         pass.end();
     };
+    if (state.reproject) {
+        (reprojection as ReprojectionModule).gpsRecordReprojection(device, encoder, pixel, state.reproject, (size, label, usage) => buffer(device, size, label, usage), dispatch);
+        state.reproject = null;
+    }
     const groups = Math.ceil(splats.count / 256);
     if (splats.count > 0) {
         const sources = stream

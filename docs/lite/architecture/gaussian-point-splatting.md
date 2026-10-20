@@ -31,6 +31,10 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
   after which accumulation converges and point compute stops; the composite
   keeps presenting the converged image. Changing it never discards samples:
   raising it resumes refinement, lowering it stops sooner.
+- `temporalReprojection: boolean` (default `false`, experimental, Lite-only).
+  World/view/projection changes remap the accumulation into the new view
+  instead of hard-resetting it, so sampling noise is limited to disocclusions
+  and screen borders. See _Temporal reprojection_ below.
 - Read-only `progress`, null before rendering and after disposal, otherwise
   `{ renderedFrameCount, accumulatedSamples, accumulationVersion, pixelCycleLength }`.
   `renderedFrameCount` counts dispatched frames since the last accumulation
@@ -45,7 +49,8 @@ The Trogir streaming demo exposes this state in its HUD. Point sampling defaults
 off (`?points=1` opts in at startup); the first activation creates one handle and
 subsequent toggles change `colorRenderMode`, retaining its GPU resources. The
 enabled-only controls mutate density, render-scale divisor (labels 1, 1/2, 1/3,
-1/4 map to values 1, 2, 3, 4), occlusion culling, and accumulation limit.
+1/4 map to values 1, 2, 3, 4), occlusion culling, experimental temporal
+reprojection (`?reproject=1` opts in at startup), and accumulation limit.
 Read-only progress shows accumulated samples against the limit (`X / max`) and
 pixel-cycle length. An always-visible
 FPS/frame-time counter averages the existing frame hook's deltas over at least
@@ -124,6 +129,39 @@ reset every few frames. Once `floor(frames / cycle) >= maxAccumFrames` the
 compute dispatch and readback are skipped. Stream canonical gather
 batches remain ahead of point compute. Resources are retired after submission;
 busy asynchronous readbacks clean up after their mapping completes.
+
+### Temporal reprojection (experimental)
+
+The shaders and passes live in `gps-reproject.ts`, which is dynamically imported
+on first use so scenes that leave the option off do not load them. Until the
+module arrives, view changes keep restarting the accumulation.
+
+With `temporalReprojection`, world/view/projection matrices leave the
+generation key and are tracked separately. When they change, `prepare()` builds
+`M = P·V·W · (P'·V'·W')⁻¹` from the previous matrices and `record()` runs,
+before preprocessing:
+
+1. Copy accumulation, depth, and counts into lazily allocated history buffers
+   (about 32 extra bytes per full-resolution pixel) and clear two scatter
+   targets.
+2. Scatter each valid previous pixel (current generation, nonzero count,
+   nonzero depth) through `M` from its pixel center and stored NDC depth, keeping
+   the nearest `clip.w` per destination with `atomicMax(~bits(w))`.
+3. Record the winning source pixel per destination.
+4. Gather: copy the winner's color, recompute its depth through `M`, and clamp
+   its count to `min(GPS_REPROJECTION_SAMPLES (16), maxAccumFrames - 1)`. When at
+   least six of eight neighbors are more than 10% nearer, the pixel is a crack in
+   a magnified surface and takes the nearest neighbor's source. Empty pixels take
+   the farthest neighbor's source because disocclusions usually reveal
+   background. Neighbor fills halve their count. Pixels without any source
+   restart at zero samples.
+
+The frame counter is soft-reset to the same sample cap so accumulation resumes,
+and occlusion culling is skipped for that frame because the Hi-Z is from the
+previous view. Known limitations: one depth per pixel misplaces semi-transparent
+edges, view-dependent SH color is reused until refreshed, repeated nearest
+resampling slightly softens fast-moving close surfaces, and the copy/scatter
+passes cost bandwidth on every moving frame. Babylon.js has no equivalent.
 
 ## Babylon.js Equivalence Map
 

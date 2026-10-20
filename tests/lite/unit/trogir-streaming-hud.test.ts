@@ -25,6 +25,7 @@ const mock = vi.hoisted(() => ({
         pointScale: 1,
         renderScale: "auto" as number | "auto",
         occlusionCulling: false,
+        temporalReprojection: false,
         maxAccumFrames: 255,
         progress: null as { renderedFrameCount: number; accumulatedSamples: number; pixelCycleLength: number } | null,
     },
@@ -91,7 +92,15 @@ beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     mock.stream.maxSplats = 1_000_000;
-    Object.assign(mock.gps, { colorRenderMode: false, pointScale: 1, renderScale: "auto", occlusionCulling: false, maxAccumFrames: 255, progress: null });
+    Object.assign(mock.gps, {
+        colorRenderMode: false,
+        pointScale: 1,
+        renderScale: "auto",
+        occlusionCulling: false,
+        temporalReprojection: false,
+        maxAccumFrames: 255,
+        progress: null,
+    });
     mock.enable.mockReturnValue(mock.gps);
     elements = new Map();
     for (const match of html.matchAll(/<\w+\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
@@ -143,8 +152,9 @@ describe("Trogir streaming HUD", () => {
         expect(mock.gps.renderScale).toBe("auto");
         change("pointScale", "2.5", "input");
         change("occlusionCulling", true);
+        change("temporalReprojection", true);
         change("maxAccumFrames", "64", "input");
-        expect(mock.gps).toMatchObject({ pointScale: 2.5, occlusionCulling: true, maxAccumFrames: 64 });
+        expect(mock.gps).toMatchObject({ pointScale: 2.5, occlusionCulling: true, temporalReprojection: true, maxAccumFrames: 64 });
         expect(elements.get("pointScaleValue")!.value).toBe("2.5×");
         expect(elements.get("maxAccumFramesValue")!.value).toBe("64");
         for (const divisor of ["1", "2", "3", "4"]) {
@@ -175,9 +185,10 @@ describe("Trogir streaming HUD", () => {
     });
 
     it("supports startup opt-in and returning to automatic render scale", async () => {
-        await start("?points=1");
+        await start("?points=1&reproject=1");
         expect(mock.enable).toHaveBeenCalledOnce();
         expect(mock.gps.colorRenderMode).toBe(true);
+        expect(mock.gps.temporalReprojection).toBe(true);
         expect(elements.get("pointSamplingOptions")!.hidden).toBe(false);
         change("renderScale", "3");
         change("renderScale", "auto");

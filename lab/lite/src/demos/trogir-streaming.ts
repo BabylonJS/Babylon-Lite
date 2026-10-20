@@ -64,6 +64,7 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const pointScaleValue = output("pointScaleValue");
     const renderScale = document.getElementById("renderScale") as HTMLSelectElement;
     const occlusionCulling = document.getElementById("occlusionCulling") as HTMLInputElement;
+    const temporalReprojection = document.getElementById("temporalReprojection") as HTMLInputElement;
     const maxAccumFrames = document.getElementById("maxAccumFrames") as HTMLInputElement;
     const maxAccumFramesValue = output("maxAccumFramesValue");
     const accumulatedFrames = output("accumulatedFrames");
@@ -76,6 +77,7 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
             pointScale: Number(pointScale.value),
             renderScale: renderScale.value === "auto" ? ("auto" as const) : Number(renderScale.value),
             occlusionCulling: occlusionCulling.checked,
+            temporalReprojection: temporalReprojection.checked,
             maxAccumFrames: Number(maxAccumFrames.value),
         };
         pointScaleValue.value = `${options.pointScale.toFixed(1)}×`;
@@ -94,11 +96,14 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
         }
         pointSamplingOptions.hidden = !pointSampling.checked;
     };
-    pointSampling.checked = new URL(location.href).searchParams.get("points") === "1";
+    const query = new URL(location.href).searchParams;
+    pointSampling.checked = query.get("points") === "1";
+    temporalReprojection.checked = query.get("reproject") === "1";
     pointSampling.addEventListener("change", togglePointSampling);
     pointScale.addEventListener("input", applyPointOptions);
     renderScale.addEventListener("change", applyPointOptions);
     occlusionCulling.addEventListener("change", applyPointOptions);
+    temporalReprojection.addEventListener("change", applyPointOptions);
     maxAccumFrames.addEventListener("input", applyPointOptions);
     togglePointSampling();
 

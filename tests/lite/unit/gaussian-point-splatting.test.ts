@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { disableGaussianPointSplatting, enableGaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gaussian-point-splatting.js";
 import {
+    GPS_REPROJECTION_SAMPLES,
     GPS_SOFT_RESET_SAMPLES,
     gpsAccumulatedSamples,
     gpsHiZLevels,
@@ -9,6 +10,7 @@ import {
     gpsPointBudget,
     gpsPoisson,
     gpsRenderScale,
+    gpsReprojectionSamples,
     gpsSoftReset,
     gpsUpdateGeneration,
 } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
@@ -95,6 +97,11 @@ describe("Gaussian point splatting parameters", () => {
         state.frames = 5;
         gpsSoftReset(state, 4);
         expect(state.frames).toBe(5);
+        state.frames = 4 * 100 + 1;
+        gpsSoftReset(state, 4, gpsReprojectionSamples(255));
+        expect(state.frames).toBe(4 * GPS_REPROJECTION_SAMPLES + 1);
+        expect(gpsReprojectionSamples(8)).toBe(7);
+        expect(gpsReprojectionSamples(1)).toBe(0);
     });
 
     it("uses desktop, iOS and mobile budgets, including desktop-mode iPads", () => {
@@ -150,6 +157,7 @@ describe("Gaussian point splatting parameters", () => {
             { pointScale: 0.5 },
             { renderScale: 2 },
             { occlusionCulling: true },
+            { temporalReprojection: true },
         ];
         for (const patch of patches) {
             expect(gpsOptionsKey({ ...gps, ...patch })).not.toBe(original);
@@ -461,6 +469,83 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         frame();
         expect(beginComputePass.mock.calls.length).toBe(passes);
         expect(binding.draw({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn() } as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        disableGaussianPointSplatting(scene, gps);
+        engine._retirements?.splice(0).forEach((dispose) => dispose());
+    });
+
+    it.each([false, true])("handles camera motion with temporalReprojection=%s", async (temporalReprojection) => {
+        const { scene, mesh, engine } = fixture(true);
+        Object.assign(mesh, {
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            vertexCount: 1,
+            textureWidth: 1,
+            shDegree: 0,
+            boundMin: [-1, -1, -1],
+            boundMax: [1, 1, 1],
+            _gs: { _centersView: {}, _covAView: {}, _covBView: {}, _colorsView: {} },
+        });
+        engine._device = {
+            limits: { maxBufferSize: 1e9, maxStorageBufferBindingSize: 1e9 },
+            queue: { writeBuffer: vi.fn() },
+            createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
+            createShaderModule: vi.fn(() => ({})),
+            createBindGroupLayout: vi.fn(() => ({})),
+            createBindGroup: vi.fn(() => ({})),
+            createPipelineLayout: vi.fn(() => ({})),
+            createComputePipeline: vi.fn((descriptor: GPUComputePipelineDescriptor) => ({ label: descriptor.label, getBindGroupLayout: vi.fn(() => ({})) })),
+            createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+        } as unknown as GPUDevice;
+        const clearBuffer = vi.fn();
+        const labels: string[] = [];
+        engine._currentEncoder = {
+            beginComputePass: vi.fn((descriptor: GPUComputePassDescriptor) => {
+                labels.push(descriptor.label!);
+                return { setPipeline: vi.fn(), setBindGroup: vi.fn(), dispatchWorkgroups: vi.fn(), dispatchWorkgroupsIndirect: vi.fn(), end: vi.fn() };
+            }),
+            copyBufferToBuffer: vi.fn(),
+            clearBuffer,
+        } as unknown as GPUCommandEncoder;
+        const gps = enableGaussianPointSplatting(scene, mesh, { renderScale: 1, occlusionCulling: true, temporalReprojection });
+        const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
+        const batch = binding._updateBatches![0]!;
+        const camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
+        const context = { targetWidth: 16, targetHeight: 16, _camera: camera };
+        const frame = (): void => {
+            batch.reset();
+            binding.update!(context);
+            batch.flush(engine);
+        };
+        const params = (): Float32Array => {
+            const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls.filter((call) => (call[2] as Float32Array).length === 76);
+            return writes[writes.length - 1]![2] as Float32Array;
+        };
+        if (temporalReprojection) {
+            // The reprojection module loads lazily; once it arrives the accumulation restarts without the view in its key.
+            frame();
+            await vi.dynamicImportSettled();
+        }
+        for (let i = 0; i < 30; i++) {
+            frame();
+        }
+        const version = gps.progress!.accumulationVersion;
+        expect(gps.progress).toMatchObject({ accumulationVersion: temporalReprojection ? 2 : 1, renderedFrameCount: 30 });
+        expect(params()[67]).toBe(1);
+        labels.length = 0;
+        camera.alpha += 0.05;
+        frame();
+        if (temporalReprojection) {
+            expect(gps.progress).toMatchObject({ accumulationVersion: version, renderedFrameCount: GPS_REPROJECTION_SAMPLES + 1 });
+            expect(labels.slice(0, 3)).toEqual(["GPS reproject nearest", "GPS reproject source", "GPS reproject gather"]);
+            expect(clearBuffer).toHaveBeenCalledTimes(2);
+            expect(params()[67]).toBe(0);
+            frame();
+            expect(params()[67]).toBe(1);
+            expect(labels.filter((label) => label.startsWith("GPS reproject"))).toHaveLength(3);
+        } else {
+            expect(gps.progress).toMatchObject({ accumulationVersion: version + 1, renderedFrameCount: 1 });
+            expect(labels.some((label) => label.startsWith("GPS reproject"))).toBe(false);
+            expect(clearBuffer).not.toHaveBeenCalled();
+        }
         disableGaussianPointSplatting(scene, gps);
         engine._retirements?.splice(0).forEach((dispose) => dispose());
     });

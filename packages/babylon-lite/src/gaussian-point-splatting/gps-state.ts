@@ -22,6 +22,8 @@ export interface GaussianPointSplatting {
     occlusionCulling: boolean;
     /** Per-pixel samples after which accumulation stops; changing it resumes or stops without invalidating samples. */
     maxAccumFrames: number;
+    /** Experimental: reproject accumulated samples when the camera or target moves instead of restarting, so noise is confined to disocclusions. */
+    temporalReprojection: boolean;
     readonly progress: GaussianPointSplattingProgress | null;
     /** @internal */
     _progress: GaussianPointSplattingProgress | null;
@@ -50,7 +52,10 @@ export function gpsPointBudget(userAgent: string, touchPoints = 0): number {
 
 /** @internal */
 export function gpsOptionsKey(
-    gps: Pick<GaussianPointSplatting, "colorRenderMode" | "depthRenderMode" | "depthVisualization" | "pointScale" | "renderScale" | "occlusionCulling" | "maxAccumFrames">
+    gps: Pick<
+        GaussianPointSplatting,
+        "colorRenderMode" | "depthRenderMode" | "depthVisualization" | "pointScale" | "renderScale" | "occlusionCulling" | "maxAccumFrames" | "temporalReprojection"
+    >
 ): string {
     if (!Number.isFinite(gps.pointScale) || gps.pointScale < 0) {
         throw new RangeError("Gaussian pointScale must be finite and nonnegative");
@@ -64,7 +69,7 @@ export function gpsOptionsKey(
     if (gps.depthVisualization !== "none" && gps.depthVisualization !== "linear" && gps.depthVisualization !== "alphaBlended") {
         throw new RangeError("Gaussian depthVisualization must be 'none', 'linear' or 'alphaBlended'");
     }
-    return `${+gps.colorRenderMode}/${+gps.depthRenderMode}/${gps.depthVisualization}/${gps.pointScale}/${gps.renderScale}/${+gps.occlusionCulling}`;
+    return `${+gps.colorRenderMode}/${+gps.depthRenderMode}/${gps.depthVisualization}/${gps.pointScale}/${gps.renderScale}/${+gps.occlusionCulling}/${+gps.temporalReprojection}`;
 }
 
 /** @internal State shared by the CPU invalidation tests and each GPU view. */
@@ -88,12 +93,20 @@ export function gpsUpdateGeneration(state: GpsAccumulation, key: string): boolea
 /** @internal History kept when streamed content changes under a still camera, so refinement blends in without a flash. */
 export const GPS_SOFT_RESET_SAMPLES = 8;
 
-/** @internal Bounds history after a content change without discarding the accumulated image. */
-export function gpsSoftReset(state: GpsAccumulation, cycle: number): void {
-    if (state.frames > GPS_SOFT_RESET_SAMPLES * cycle) {
+/** @internal History cap applied to reprojected samples, so stale view-dependent color and resampling error fade out. */
+export const GPS_REPROJECTION_SAMPLES = 16;
+
+/** @internal Bounds history after a content change or reprojection without discarding the accumulated image. */
+export function gpsSoftReset(state: GpsAccumulation, cycle: number, samples = GPS_SOFT_RESET_SAMPLES): void {
+    if (state.frames > samples * cycle) {
         // Keep the sub-pixel phase so the jitter cycle still visits every pixel once.
-        state.frames = GPS_SOFT_RESET_SAMPLES * cycle + (state.frames % cycle);
+        state.frames = samples * cycle + (state.frames % cycle);
     }
+}
+
+/** @internal Samples kept by a reprojection; always below maxAccumFrames so a moved view resumes accumulating. */
+export function gpsReprojectionSamples(maxAccumFrames: number): number {
+    return Math.min(GPS_REPROJECTION_SAMPLES, maxAccumFrames - 1);
 }
 
 /** @internal Completed per-pixel samples; accumulation is converged once this reaches maxAccumFrames. */
