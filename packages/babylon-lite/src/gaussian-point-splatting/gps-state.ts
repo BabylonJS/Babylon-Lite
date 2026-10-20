@@ -3,7 +3,10 @@ import type { GaussianSplatStream } from "../loader-splat-stream/splat-stream-ty
 
 /** Accumulation progress for the most recently rendered view. */
 export interface GaussianPointSplattingProgress {
+    /** Frames dispatched since accumulation was last invalidated; stops growing once converged. */
     readonly renderedFrameCount: number;
+    /** Completed per-pixel samples, saturating at maxAccumFrames when accumulation converges and compute stops. */
+    readonly accumulatedSamples: number;
     readonly accumulationVersion: number;
     readonly pixelCycleLength: number;
 }
@@ -17,6 +20,7 @@ export interface GaussianPointSplatting {
     pointScale: number;
     renderScale: number | "auto";
     occlusionCulling: boolean;
+    /** Per-pixel samples after which accumulation stops; changing it resumes or stops without invalidating samples. */
     maxAccumFrames: number;
     readonly progress: GaussianPointSplattingProgress | null;
     /** @internal */
@@ -32,8 +36,11 @@ export interface GaussianPointSplatting {
 }
 
 /** @internal */
-export function gpsRenderScale(points: number, budget: number): number {
-    return Math.max(1, Math.min(8, Math.ceil(Math.sqrt(Math.max(0, points) / Math.max(1, budget)))));
+export function gpsRenderScale(points: number, budget: number, current = 0): number {
+    const exact = Math.sqrt(Math.max(0, points) / Math.max(1, budget));
+    const scale = Math.max(1, Math.min(8, Math.ceil(exact)));
+    // Refining only once the estimate is clearly lower keeps noisy estimates from reallocating and resetting every few frames.
+    return current > scale && exact > current - 1.25 ? Math.min(8, current) : scale;
 }
 
 /** @internal */
@@ -57,7 +64,7 @@ export function gpsOptionsKey(
     if (gps.depthVisualization !== "none" && gps.depthVisualization !== "linear" && gps.depthVisualization !== "alphaBlended") {
         throw new RangeError("Gaussian depthVisualization must be 'none', 'linear' or 'alphaBlended'");
     }
-    return `${+gps.colorRenderMode}/${+gps.depthRenderMode}/${gps.depthVisualization}/${gps.pointScale}/${gps.renderScale}/${+gps.occlusionCulling}/${gps.maxAccumFrames}`;
+    return `${+gps.colorRenderMode}/${+gps.depthRenderMode}/${gps.depthVisualization}/${gps.pointScale}/${gps.renderScale}/${+gps.occlusionCulling}`;
 }
 
 /** @internal State shared by the CPU invalidation tests and each GPU view. */
@@ -76,6 +83,27 @@ export function gpsUpdateGeneration(state: GpsAccumulation, key: string): boolea
     state.generation = (state.generation + 1) & 65535;
     state.frames = 0;
     return true;
+}
+
+/** @internal History kept when streamed content changes under a still camera, so refinement blends in without a flash. */
+export const GPS_SOFT_RESET_SAMPLES = 8;
+
+/** @internal Bounds history after a content change without discarding the accumulated image. */
+export function gpsSoftReset(state: GpsAccumulation, cycle: number): void {
+    if (state.frames > GPS_SOFT_RESET_SAMPLES * cycle) {
+        // Keep the sub-pixel phase so the jitter cycle still visits every pixel once.
+        state.frames = GPS_SOFT_RESET_SAMPLES * cycle + (state.frames % cycle);
+    }
+}
+
+/** @internal Completed per-pixel samples; accumulation is converged once this reaches maxAccumFrames. */
+export function gpsAccumulatedSamples(frames: number, cycle: number, maxAccumFrames: number): number {
+    return Math.min(maxAccumFrames, Math.floor(frames / cycle));
+}
+
+/** @internal Running-mean history cap for the frame about to be resolved; never below a reset pixel's own count. */
+export function gpsHistoryCap(frames: number, cycle: number, maxAccumFrames: number): number {
+    return Math.min(maxAccumFrames, Math.floor(frames / cycle) + 1);
 }
 
 /** @internal Exact inverse-CDF Poisson at small means, normal asymptotics at large means. */

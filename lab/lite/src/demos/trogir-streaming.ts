@@ -155,7 +155,7 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
         }
         if (pointSampling.checked) {
             const progress = pointSplatting?.progress;
-            accumulatedFrames.value = progress ? formatCount(progress.renderedFrameCount) : "—";
+            accumulatedFrames.value = progress && pointSplatting ? `${formatCount(progress.accumulatedSamples)} / ${formatCount(pointSplatting.maxAccumFrames)}` : "—";
             pixelCycleLength.value = progress ? `${progress.pixelCycleLength} frames` : "—";
         }
         const stats = stream.stats;

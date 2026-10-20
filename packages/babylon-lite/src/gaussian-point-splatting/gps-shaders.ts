@@ -413,10 +413,10 @@ let pixel=id.xy*n+vec2u(u.cycle.xy);
 if(any(pixel>=vec2u(u.output.xy))) { return; }
 let o=pixel.y*u32(u.output.x)+pixel.x;
 let previous=counts[o];
-let count=select(0u,previous&65535u,(previous>>16u)==gen);
+let count=min(select(0u,previous&65535u,(previous>>16u)==gen),u32(u.state.y));
 let weight=1.0/f32(count+1u);
 accum[o]=mix(accum[o],sampleColor,weight);
-counts[o]=(gen<<16u)|min(count+1u,u32(u.state.y));
+counts[o]=(gen<<16u)|min(count+1u,65535u);
 if(hit || count==0u) { depth[o]=sampleDepth; }
 }
 `;

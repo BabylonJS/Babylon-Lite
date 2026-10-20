@@ -27,9 +27,15 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
 - `pointScale: number` (default `1`, finite and nonnegative).
 - `renderScale: number | "auto"` (default `"auto"`; integer divisors 1–8).
 - `occlusionCulling: boolean` (default `false`).
-- `maxAccumFrames: number` (default `255`, integer 1–65535).
+- `maxAccumFrames: number` (default `255`, integer 1–65535). Per-pixel samples
+  after which accumulation converges and point compute stops; the composite
+  keeps presenting the converged image. Changing it never discards samples:
+  raising it resumes refinement, lowering it stops sooner.
 - Read-only `progress`, null before rendering and after disposal, otherwise
-  `{ renderedFrameCount, accumulationVersion, pixelCycleLength }`.
+  `{ renderedFrameCount, accumulatedSamples, accumulationVersion, pixelCycleLength }`.
+  `renderedFrameCount` counts dispatched frames since the last accumulation
+  reset and stops growing once converged; `accumulatedSamples` is the completed
+  per-pixel sample count, saturating at `maxAccumFrames`.
 
 `GaussianPointSplattingOptions` is the partial form of the mutable settings.
 Repeated enable calls update the existing handle after validating options.
@@ -40,7 +46,8 @@ off (`?points=1` opts in at startup); the first activation creates one handle an
 subsequent toggles change `colorRenderMode`, retaining its GPU resources. The
 enabled-only controls mutate density, render-scale divisor (labels 1, 1/2, 1/3,
 1/4 map to values 1, 2, 3, 4), occlusion culling, and accumulation limit.
-Read-only progress shows rendered frames and pixel-cycle length. An always-visible
+Read-only progress shows accumulated samples against the limit (`X / max`) and
+pixel-cycle length. An always-visible
 FPS/frame-time counter averages the existing frame hook's deltas over at least
 500 ms. HUD teardown disables the handle before stream/scene disposal.
 
@@ -98,10 +105,23 @@ depth mode. Shader definitions and SH degree specialization are in
 ## State Machine / Lifecycle
 
 Each target/signature owns view state and GPU buffers. The generation key
-includes all mutable options (including depth visualization), target data/content
-generation, world/view/projection matrices, dimensions, and effective render
-scale. Any change resets accumulation. Static `updateData` is wrapped to bump a
-feature-owned content version, then restored on disable. Stream canonical gather
+includes the invalidating options (everything except `maxAccumFrames`, including
+depth visualization), static target data version, world/view/projection
+matrices, dimensions, and effective render scale. Any change hard-resets
+accumulation. Static `updateData` is wrapped to bump a feature-owned content
+version, then restored on disable.
+
+Streamed content refreshes under a still camera soft-reset instead: the frame
+counter is clamped to `GPS_SOFT_RESET_SAMPLES` (8) samples while preserving the
+sub-pixel jitter phase, and resolve clamps each pixel's running-mean count to
+the uploaded history cap, so new LODs blend in without blanking sparse content
+such as the environment sky. If a stream deferred its canonical gather
+(`gatheredGeneration !== contentGeneration`), point compute is skipped for that
+frame and the previous accumulation stays on screen. The automatic render scale
+increases immediately but only refines once `sqrt(points/budget)` falls 1.25
+below the current divisor, so noisy point-count readbacks cannot flip it and
+reset every few frames. Once `floor(frames / cycle) >= maxAccumFrames` the
+compute dispatch and readback are skipped. Stream canonical gather
 batches remain ahead of point compute. Resources are retired after submission;
 busy asynchronous readbacks clean up after their mapping completes.
 
@@ -136,7 +156,8 @@ shading, black clear color, and fixed initial camera (alpha 4.6, beta 0.956,
 radius 3, target `[0, -0.2, 0.2]`, near 0.001, far 1000). It enables point
 splatting with `renderScale: 1`: this API uses integer resolution divisors,
 so 1 samples every output pixel each frame (`pixelCycleLength === 1`).
-All other point settings retain their defaults. Readiness waits for
+`maxAccumFrames` is raised to 300 so accumulation converges exactly at the
+300-frame readiness threshold; all other point settings retain their defaults. Readiness waits for
 `firstSortReady` and at least 300 accumulated frames before publishing
 `canvas.dataset.ready`, `renderedFrameCount`, `pixelCycleLength`, `drawCalls`,
 and `initMs`. Camera controls remain available for interactive inspection.

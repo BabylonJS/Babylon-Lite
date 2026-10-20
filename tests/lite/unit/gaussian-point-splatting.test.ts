@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { disableGaussianPointSplatting, enableGaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gaussian-point-splatting.js";
 import {
+    GPS_SOFT_RESET_SAMPLES,
+    gpsAccumulatedSamples,
     gpsHiZLevels,
+    gpsHistoryCap,
     gpsOptionsKey,
     gpsPointBudget,
     gpsPoisson,
     gpsRenderScale,
+    gpsSoftReset,
     gpsUpdateGeneration,
 } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
 import type { GaussianSplattingMesh } from "../../../packages/babylon-lite/src/mesh/GaussianSplatting/gaussian-splatting-mesh.js";
@@ -16,6 +20,11 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate.js";
 import type { GaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
+
+vi.mock("../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.js", async (original) => ({
+    ...(await original<object>()),
+    getSplatStreamDrawBatch: vi.fn(() => ({ reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() })),
+}));
 
 function renderPass() {
     return { draw: vi.fn(), setVertexBuffer: vi.fn() } as unknown as GPURenderPassEncoder;
@@ -64,6 +73,28 @@ describe("Gaussian point splatting parameters", () => {
         expect(gpsRenderScale(60_000_000, 15_000_000)).toBe(2);
         expect(gpsRenderScale(60_000_001, 15_000_000)).toBe(3);
         expect(gpsRenderScale(1e20, 6_000_000)).toBe(8);
+    });
+
+    it("refines the auto render scale only once the estimate clearly drops", () => {
+        expect(gpsRenderScale(15_000_001, 15_000_000, 1)).toBe(2);
+        expect(gpsRenderScale(14_000_000, 15_000_000, 2)).toBe(2);
+        expect(gpsRenderScale(8_000_000, 15_000_000, 2)).toBe(1);
+        expect(gpsRenderScale(1e20, 15_000_000, 9)).toBe(8);
+    });
+
+    it("tracks convergence, history caps and phase-preserving soft resets", () => {
+        expect(gpsAccumulatedSamples(0, 4, 255)).toBe(0);
+        expect(gpsAccumulatedSamples(7, 4, 255)).toBe(1);
+        expect(gpsAccumulatedSamples(4 * 300, 4, 255)).toBe(255);
+        expect(gpsHistoryCap(0, 4, 255)).toBe(1);
+        expect(gpsHistoryCap(7, 4, 255)).toBe(2);
+        expect(gpsHistoryCap(4 * 300, 4, 255)).toBe(255);
+        const state = { key: "", generation: 0, frames: 4 * 100 + 3 };
+        gpsSoftReset(state, 4);
+        expect(state.frames).toBe(4 * GPS_SOFT_RESET_SAMPLES + 3);
+        state.frames = 5;
+        gpsSoftReset(state, 4);
+        expect(state.frames).toBe(5);
     });
 
     it("uses desktop, iOS and mobile budgets, including desktop-mode iPads", () => {
@@ -119,11 +150,11 @@ describe("Gaussian point splatting parameters", () => {
             { pointScale: 0.5 },
             { renderScale: 2 },
             { occlusionCulling: true },
-            { maxAccumFrames: 64 },
         ];
         for (const patch of patches) {
             expect(gpsOptionsKey({ ...gps, ...patch })).not.toBe(original);
         }
+        expect(gpsOptionsKey({ ...gps, maxAccumFrames: 64 })).toBe(original);
         expect(() => gpsOptionsKey({ ...gps, pointScale: NaN })).toThrow(RangeError);
         expect(() => gpsOptionsKey({ ...gps, renderScale: 0 })).toThrow(RangeError);
         expect(() => gpsOptionsKey({ ...gps, maxAccumFrames: 65536 })).toThrow(RangeError);
@@ -371,6 +402,69 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         expect(buffers.every((value) => value.destroy.mock.calls.length === 1)).toBe(true);
     });
 
+    it("soft-resets streamed refreshes, skips stale gathers and stops once converged", () => {
+        const { scene, engine } = fixture(true);
+        const gpu = { count: 1, contentGeneration: 0, gatheredGeneration: 0, canonical: {}, intervals: [] };
+        const stream = {
+            _engine: engine,
+            _disposed: false,
+            _renderable: null,
+            _gpu: gpu,
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            boundMin: [-1, -1, -1],
+            boundMax: [1, 1, 1],
+        } as unknown as GaussianSplatStream;
+        engine._device = {
+            limits: { maxBufferSize: 1e9, maxStorageBufferBindingSize: 1e9 },
+            queue: { writeBuffer: vi.fn() },
+            createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
+            createShaderModule: vi.fn(() => ({})),
+            createBindGroupLayout: vi.fn(() => ({})),
+            createBindGroup: vi.fn(() => ({})),
+            createPipelineLayout: vi.fn(() => ({})),
+            createComputePipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+            createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+        } as unknown as GPUDevice;
+        const beginComputePass = vi.fn(() => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), dispatchWorkgroups: vi.fn(), dispatchWorkgroupsIndirect: vi.fn(), end: vi.fn() }));
+        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 20 });
+        const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
+        const batch = binding._updateBatches![1]!;
+        const context = { targetWidth: 16, targetHeight: 16, _camera: createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 }) };
+        const frame = (): void => {
+            batch.reset();
+            binding.update!(context);
+            batch.flush(engine);
+        };
+        const historyCap = (): number => {
+            const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls;
+            return (writes[writes.length - 1]![2] as Float32Array)[65]!;
+        };
+        for (let i = 0; i < 12; i++) {
+            frame();
+        }
+        expect(gps.progress).toMatchObject({ accumulationVersion: 1, renderedFrameCount: 12, accumulatedSamples: 12 });
+        gpu.contentGeneration = 1;
+        let passes = beginComputePass.mock.calls.length;
+        frame();
+        expect(beginComputePass.mock.calls.length).toBe(passes);
+        expect(gps.progress?.renderedFrameCount).toBe(12);
+        gpu.gatheredGeneration = 1;
+        frame();
+        expect(historyCap()).toBe(GPS_SOFT_RESET_SAMPLES + 1);
+        expect(gps.progress).toMatchObject({ accumulationVersion: 1, renderedFrameCount: GPS_SOFT_RESET_SAMPLES + 1 });
+        for (let i = 0; i < 30; i++) {
+            frame();
+        }
+        expect(gps.progress).toMatchObject({ accumulationVersion: 1, renderedFrameCount: 20, accumulatedSamples: 20 });
+        passes = beginComputePass.mock.calls.length;
+        frame();
+        expect(beginComputePass.mock.calls.length).toBe(passes);
+        expect(binding.draw({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn() } as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        disableGaussianPointSplatting(scene, gps);
+        engine._retirements?.splice(0).forEach((dispose) => dispose());
+    });
+
     it("invalidates runtime accumulation for options, data, resize and reactivation", () => {
         const { scene, mesh, engine } = fixture(true);
         const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -426,15 +520,24 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         gps.colorRenderMode = true;
         frame();
         expect(gps.progress?.accumulationVersion).toBe(2);
-        gps.maxAccumFrames = 4;
+        gps.maxAccumFrames = 2;
         frame();
-        expect(gps.progress?.accumulationVersion).toBe(3);
+        const passes = vi.mocked(engine._currentEncoder.beginComputePass).mock.calls.length;
+        frame();
+        frame();
+        expect(vi.mocked(engine._currentEncoder.beginComputePass).mock.calls.length).toBe(passes);
+        expect(gps.progress).toMatchObject({ accumulationVersion: 2, renderedFrameCount: 2, accumulatedSamples: 2 });
+        gps.maxAccumFrames = 3;
+        frame();
+        expect(vi.mocked(engine._currentEncoder.beginComputePass).mock.calls.length).toBeGreaterThan(passes);
+        expect(gps.progress).toMatchObject({ accumulationVersion: 2, renderedFrameCount: 3, accumulatedSamples: 3 });
+        gps.maxAccumFrames = 255;
         mesh.updateData(new ArrayBuffer(0));
         frame();
-        expect(gps.progress?.accumulationVersion).toBe(4);
+        expect(gps.progress?.accumulationVersion).toBe(3);
         context.targetWidth = 8;
         frame();
-        expect(gps.progress?.accumulationVersion).toBe(5);
+        expect(gps.progress?.accumulationVersion).toBe(4);
         expect(gps.progress?.renderedFrameCount).toBe(1);
         gps.colorRenderMode = false;
         gps.depthRenderMode = true;
@@ -442,7 +545,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         for (const [i, mode] of (["none", "linear", "alphaBlended"] as const).entries()) {
             gps.depthVisualization = mode;
             frame();
-            expect(gps.progress?.accumulationVersion).toBe(6 + i);
+            expect(gps.progress?.accumulationVersion).toBe(5 + i);
             expect(gps.progress?.renderedFrameCount).toBe(1);
             const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls;
             expect((writes[writes.length - 1]![2] as Float32Array)[71]).toBe(i);

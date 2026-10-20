@@ -17,8 +17,8 @@ async function main(): Promise<void> {
     scene.camera = camera;
 
     const splat = await loadSOG(scene, SPLAT_URL);
-    // 1 is the full-resolution divisor: every frame samples every output pixel.
-    const points = enableGaussianPointSplatting(scene, splat, { renderScale: 1 });
+    // 1 is the full-resolution divisor: every frame samples every output pixel. Accumulation stops at maxAccumFrames.
+    const points = enableGaussianPointSplatting(scene, splat, { renderScale: 1, maxAccumFrames: ACCUMULATION_FRAMES });
 
     await registerScene(scene);
     await startEngine(engine);

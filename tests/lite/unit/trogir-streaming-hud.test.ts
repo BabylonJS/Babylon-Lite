@@ -26,7 +26,7 @@ const mock = vi.hoisted(() => ({
         renderScale: "auto" as number | "auto",
         occlusionCulling: false,
         maxAccumFrames: 255,
-        progress: null as { renderedFrameCount: number; pixelCycleLength: number } | null,
+        progress: null as { renderedFrameCount: number; accumulatedSamples: number; pixelCycleLength: number } | null,
     },
     enable: vi.fn(),
     disable: vi.fn(),
@@ -154,9 +154,9 @@ describe("Trogir streaming HUD", () => {
         }
         frame(16);
         expect(elements.get("accumulatedFrames")!.value).toBe("—");
-        mock.gps.progress = { renderedFrameCount: 1234, pixelCycleLength: 16 };
+        mock.gps.progress = { renderedFrameCount: 1024, accumulatedSamples: 64, pixelCycleLength: 16 };
         frame(16);
-        expect(elements.get("accumulatedFrames")!.value).toBe("1,234");
+        expect(elements.get("accumulatedFrames")!.value).toBe("64 / 64");
         expect(elements.get("pixelCycleLength")!.value).toBe("16 frames");
         change("pointSampling", false);
         expect(mock.gps.colorRenderMode).toBe(false);
