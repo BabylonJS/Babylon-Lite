@@ -852,6 +852,58 @@ void options;
         }
     });
 
+    it("exposes custom RenderTarget post-processes without internal shader fields", () => {
+        const probePath = resolve(BUILD_DIR, "custom-post-process.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createCustomPostProcessTask, wgsl,
+    type CustomPostProcessTaskConfig, type PostProcessTask, type EngineContext,
+    type SceneContext, type RenderTarget,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const source: RenderTarget;
+declare const destination: RenderTarget;
+const config: CustomPostProcessTaskConfig = {
+    sourceTexture: source, targetTexture: destination,
+    fragmentWGSL: wgsl\`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}\`,
+    extraTextures: [source],
+    extraTextureWGSL: "@group(0) @binding(2) var second:texture_2d<f32>;",
+    uniformWGSL: "@group(0) @binding(3) var<uniform> gain:vec4f;",
+    uniformByteLength: 16,
+    writeUniforms: data => { data[0] = 0.5; },
+};
+const standalone: PostProcessTask = createCustomPostProcessTask(config, engine);
+const inScene: PostProcessTask = createCustomPostProcessTask(config, engine, scene);
+standalone.updateUniforms();
+const output: RenderTarget = inScene.outputTexture;
+void output;
+// @ts-expect-error Application shaders are required.
+createCustomPostProcessTask({ sourceTexture: source }, engine);
+// @ts-expect-error The internal shader configuration is not public.
+config._shader;
+// @ts-expect-error Bindings follow the public fixed convention.
+config.uniformBinding = 7;
+// @ts-expect-error Internal GPU rebuild hooks are not public.
+standalone._rebuildGpuState();
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", probePath],
+                {
+                    cwd: BUILD_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes the root zero-argument pipeline-sharing enabler without its internal setter or cache type", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
