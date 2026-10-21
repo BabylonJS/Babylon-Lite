@@ -22,8 +22,14 @@ No PR was opened.
 - [x] glTF-Validator (run locally, not a repo dependency) over every exported file: 0 errors. Remaining warnings are `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` only, for meshes whose tangents were not retained (out of scope) or never existed in the source.
 - [x] Lint, typecheck, `no-webgpu` import test.
 - [x] Post-implementation code review by two independent agents (renderer-semantics fidelity; glTF conformance and robustness). Fixed: 17 behaviours (see the commit `fix(export-gltf): address code-review findings`); the rest are listed under Follow-ups with the reason.
-- [ ] Sync the doc with the code (the doc stays the one-shot spec).
+- [x] Sync the doc with the code (the doc stays the one-shot spec), then a final independent doc-vs-code review: every warning text, contract type and manifest entry matches; its remaining findings were fixed in code or doc (`fix(export-gltf): final doc/code consistency pass`). The final doc is on both branches.
 - [x] Bundle isolation: filtered builds of scene1, scene7, scene260 and scene269 contain no exporter code. The byte measurement step could not run here (its browser needs remote assets the sandbox blocks), so CI's bundle-size check is still the authority.
+
+## Final state (verified at the end of the run)
+
+- 451 unit tests pass; `no-webgpu` import test passes; `tsc` clean for the package, tests and lab; ESLint and Prettier clean on every touched file.
+- Plumbing spec: 11/11 (10 local assets + the native scene), all fixed points; glTF-Validator: 0 errors on all 22 exported files.
+- Nothing outside `export-gltf/` changed in production code except the one `index.ts` re-export.
 
 ## Follow-ups (would have been issues in the todo repo)
 
