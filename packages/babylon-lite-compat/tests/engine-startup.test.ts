@@ -87,6 +87,24 @@ describe("compat engine startup ordering", () => {
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
+    it("accepts useReverseDepthBuffer in Babylon.js engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+        const engine = new Engine(canvas, true, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
+    it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
+        const engine = new WebGPUEngine(canvas, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
     it("forwards Lite device loss to the BJS context-loss observable", async () => {
         const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
         const observer = vi.fn();

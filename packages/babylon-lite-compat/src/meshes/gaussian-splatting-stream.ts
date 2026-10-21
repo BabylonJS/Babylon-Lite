@@ -30,6 +30,48 @@ export type GaussianSplattingStreamDebugLodSource = "optimal" | "current";
 
 export type GaussianSplattingStreamLod0SplatCount = Readonly<{ status: "pending" }> | Readonly<{ status: "available"; count: number }> | Readonly<{ status: "unavailable" }>;
 
+export interface IGaussianSplattingStreamSourceRange {
+    file: number;
+    offset: number;
+    count: number;
+}
+
+interface SOGDataFile {
+    shape: number[];
+    dtype: string;
+    mins?: number | number[];
+    maxs?: number | number[];
+    codebook?: number[];
+    encoding?: string;
+    quantization?: number;
+    files: string[];
+    bands?: number;
+}
+
+interface SOGRootData {
+    version?: number;
+    means: SOGDataFile;
+    scales: SOGDataFile;
+    quats: SOGDataFile;
+    sh0: SOGDataFile;
+    shN?: SOGDataFile;
+    count?: number;
+}
+
+export interface IGaussianSplattingStreamRangePack {
+    sogData: SOGRootData;
+    subRootUrl: string;
+}
+
+export interface IGaussianSplattingStreamRangeResidencyStats {
+    enabled: boolean;
+    pages: number;
+    sourcePackLoads: number;
+    sourcePackReuses: number;
+    splitPackLoads: number;
+    cachedSourceSplats: number;
+}
+
 export interface IGaussianSplattingStreamOptions {
     deflateURL?: string;
     fflate?: unknown;
@@ -55,6 +97,8 @@ export interface IGaussianSplattingStreamOptions {
     hostCompound?: GaussianSplattingMesh;
     decodeSh?: boolean;
     needsRotationScale?: boolean;
+    rangeResidency?: boolean;
+    rangePack?: (source: Readonly<IGaussianSplattingStreamSourceRange>, sourceData: SOGRootData) => IGaussianSplattingStreamRangePack | null;
 }
 
 export interface IGaussianSplattingStreamingPart {
@@ -262,6 +306,22 @@ export class GaussianSplattingStream extends GaussianSplattingMesh {
 
     public evaluateOptimalLods(_camera: unknown = null): never {
         return unsupported("GaussianSplattingStream.evaluateOptimalLods", STREAM_BLOCKER);
+    }
+
+    public getSourceRange(_fileId: number): Readonly<IGaussianSplattingStreamSourceRange> | null {
+        return unsupported("GaussianSplattingStream.getSourceRange", STREAM_BLOCKER);
+    }
+
+    public isSplitPage(_fileId: number): boolean {
+        return unsupported("GaussianSplattingStream.isSplitPage", STREAM_BLOCKER);
+    }
+
+    public cancelRangeLoads(_files: readonly number[], _keepSources: readonly number[] = []): void {
+        unsupported("GaussianSplattingStream.cancelRangeLoads", STREAM_BLOCKER);
+    }
+
+    public get rangeResidencyStats(): Readonly<IGaussianSplattingStreamRangeResidencyStats> {
+        return unsupported("GaussianSplattingStream.rangeResidencyStats", STREAM_BLOCKER);
     }
 }
 

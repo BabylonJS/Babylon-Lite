@@ -8,6 +8,8 @@ import {
     RegisterEnginesExtensionsEngineTexture2DArrayImageSource,
     RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
     ValidateFlowGraph,
+    RemoveFlowGraphAnimationGroupObservers,
+    defaultValueParseFunction,
 } from "../src/index";
 import type { AnimationGroup, Camera, Material, Node } from "../src/index";
 import { LiteCompatError } from "../src/error";
@@ -34,6 +36,13 @@ interface UpstreamConnection {
     connectedPointIds: string[];
 }
 
+function acceptDelayReferenceBlockShape(block: GLTF2.FlowGraphDelayReferenceBlock): void {
+    block.input.getValue({});
+    block.value.setValue("", {});
+    block.value.getValue({});
+    block.getClassName();
+}
+
 describe("upstream export coverage", () => {
     it("exposes Babylon.js Power and Bezier easing classes", () => {
         expect(new PowerEase(3).ease(0.5)).toBe(0.125);
@@ -50,11 +59,16 @@ describe("upstream export coverage", () => {
         expect(FlowGraphValidationSeverity.Warning).toBe(1);
         expect(() => ValidateFlowGraph({})).toThrow(LiteCompatError);
         expect(() => ValidateFlowGraph({})).toThrow(/ValidateFlowGraph/);
+        expect(() => RemoveFlowGraphAnimationGroupObservers({}, {} as AnimationGroup)).toThrow(/FlowGraph blocks/);
+        expect(() => defaultValueParseFunction("value", {}, {}, {} as never)).toThrow(/FlowGraph blocks/);
     });
 
     it("exposes KHR_interactivity canonical-model and block symbols", () => {
         expect(GLTF2.KHR_INTERACTIVITY_SPECIFICATION_COMMIT).toBe("f798712c5685bc9223a628140fba707db8889300");
         expect(GLTF2.FlowGraphEventReferenceBlock).toBeTypeOf("function");
+        expect(GLTF2.FlowGraphDelayReferenceBlock).toBeTypeOf("function");
+        expect(GLTF2.FlowGraphDelayReferenceBlock.prototype.getClassName()).toBe("FlowGraphDelayReferenceBlock");
+        expect(acceptDelayReferenceBlockShape).toBeTypeOf("function");
         expect(GLTF2.InteractivityGraphToFlowGraphParser).toBeTypeOf("function");
         expect(GLTF2.gltfTypeToBabylonType.float).toEqual({ length: 1, flowGraphType: "number", elementType: "number" });
         expect(() => GLTF2.getMappingForDeclaration({})).toThrow(LiteCompatError);
