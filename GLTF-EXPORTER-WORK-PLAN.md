@@ -17,18 +17,20 @@ No PR was opened.
 - [x] Push the doc to `docs/gltf-exporter-architecture`.
 - [~] Pre-implementation doc review by independent agents. Three reviewers started; all three hit the session usage limit before reporting. Rather than restart them, review moved to the implementation: every module was checked against the Lite source while writing it, and two post-implementation reviewers ran on the code (below).
 - [x] Implement the module end to end (`packages/babylon-lite/src/export-gltf/`, 32 files) plus the root re-export in `index.ts`.
-- [x] Unit tests: 451 Vitest tests in `tests/lite/unit/export-gltf/` (harness with a fake WebGPU device that supports both readback paths).
+- [x] Unit tests: 451 Vitest tests (468 with the Babylon.js ports) in `tests/lite/unit/export-gltf/` (harness with a fake WebGPU device that supports both readback paths).
 - [x] Plumbing round trips: `lab/lite/export-gltf-test.{html,ts}` + `tests/lite/plumbing/export-gltf.spec.ts`. Run locally against headless Chromium with SwiftShader WebGPU: 10 local assets + a native scene, all fixed points after one export. A wider scratch run (LittlestTokyo, bunny_rigged, Animation_SkinType_01, XmpMetadataRoundedCube, rock, rhs-x, nav_test, babylonBurster, bath_day) also passed. FlightHelmetKTX could not run here (the KTX2 decoder is fetched from a CDN the sandbox blocks).
 - [x] glTF-Validator (run locally, not a repo dependency) over every exported file: 0 errors. Remaining warnings are `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` only, for meshes whose tangents were not retained (out of scope) or never existed in the source.
 - [x] Lint, typecheck, `no-webgpu` import test.
 - [x] Post-implementation code review by two independent agents (renderer-semantics fidelity; glTF conformance and robustness). Fixed: 17 behaviours (see the commit `fix(export-gltf): address code-review findings`); the rest are listed in the follow-up issue (§6) with the reason.
 - [x] Sync the doc with the code (the doc stays the one-shot spec), then a final independent doc-vs-code review: every warning text, contract type and manifest entry matches; its remaining findings were fixed in code or doc (`fix(export-gltf): final doc/code consistency pass`). The final doc is on both branches.
+- [x] Babylon.js test ports: every test in `serializers/test/unit/glTF/` and `test/integration/glTFSerializer.test.ts` now has a Lite counterpart under the same title, or a stated reason it has none (GLB-only API, no export options, or out of scope). The mapping is in the spec's "Babylon.js test ports" section. New files: `tests/lite/unit/export-gltf/bjs-ports.test.ts` (17 tests), `tests/lite/plumbing/export-gltf-bjs-ports.spec.ts` (18) and `tests/lite/plumbing/export-gltf-helpers.ts`, plus an `exportGlb` hook on the lab page. They found no exporter bugs. Divergences from Babylon.js are by design and documented: unused UVs are kept, a material-less mesh gets no default material, and a node cannot be left out of the export while its children stay.
+- [x] Removed the never-built test plans (glTF-Validator gate, visual parity scenes, bundle-size tests) from the spec; they are in the follow-up issue below.
 - [x] Bundle isolation: filtered builds of scene1, scene7, scene260 and scene269 contain no exporter code. The byte measurement step could not run here (its browser needs remote assets the sandbox blocks), so CI's bundle-size check is still the authority.
 
 ## Final state (verified at the end of the run)
 
-- 451 unit tests pass; `no-webgpu` import test passes; `tsc` clean for the package, tests and lab; ESLint and Prettier clean on every touched file.
-- Plumbing spec: 11/11 (10 local assets + the native scene), all fixed points; glTF-Validator: 0 errors on all 22 exported files.
+- 468 unit tests pass; `no-webgpu` import test passes; `tsc` clean for the package, tests and lab; ESLint and Prettier clean on every touched file.
+- Plumbing: 29/29 (`export-gltf.spec.ts` 11, all fixed points; `export-gltf-bjs-ports.spec.ts` 18). glTF-Validator (scratch run): 0 errors on the 22 round-trip exports.
 - Nothing outside `export-gltf/` changed in production code except the one `index.ts` re-export.
 
 ## Follow-up issue (paste into the todo repo)
