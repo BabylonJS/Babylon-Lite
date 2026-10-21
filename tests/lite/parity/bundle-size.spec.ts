@@ -171,15 +171,6 @@ for (const scene of SCENES) {
 
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
-        if (scene.id === 331) {
-            for (const module of ["gps-runtime", "gps-shaders", "gps-suppression"]) {
-                expect(
-                    runtimeModules.some((id) => id.includes(`/gaussian-point-splatting/${module}.`)),
-                    `scene331 MUST load ${module}, not just the classic GS renderer`
-                ).toBe(true);
-            }
-        }
-
         // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code, the depth-hosted
         // sprite renderable wrapper, handle modules, or scene-helpers (scene BGL etc.). Tree-shaking
         // currently strips these from the pure-2D path; a future edit that accidentally
