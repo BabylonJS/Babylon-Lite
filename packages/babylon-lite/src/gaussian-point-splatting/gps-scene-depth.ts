@@ -8,6 +8,17 @@ import { _packSceneUniforms } from "../frame-graph/scene-uniforms-pack.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { ensureSceneLightState } from "../render/scene-lights-ubo.js";
 import type { RenderTask } from "../frame-graph/render-task-base.js";
+import type { Camera } from "../camera/camera.js";
+
+export function gpsHasViewport(context: DrawUpdateContext | null): context is DrawUpdateContext & { _camera: Camera } {
+    const camera = context?._camera;
+    if (!camera || !context) {
+        return false;
+    }
+    const width = Math.floor(context.targetWidth * (camera.viewport?.width ?? 1));
+    const height = Math.floor(context.targetHeight * (camera.viewport?.height ?? 1));
+    return width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height);
+}
 
 export function gpsOpaqueSources(scene: SceneContext, signature: RenderTargetSignature): readonly Renderable[] {
     const task = scene._frameGraph?._tasks.find((item): item is RenderTask => "_targetSignature" in item && item._targetSignature === signature);
@@ -24,12 +35,13 @@ export interface GpsSceneDepth {
     active: boolean;
     uniforms: GPUBuffer;
     source: readonly Renderable[] | null;
+    signature: RenderTargetSignature | null;
 }
 
 export function gpsCreateSceneDepth(device: GPUDevice): GpsSceneDepth {
     const texture = device.createTexture({ label: "GPS empty scene depth", size: [1, 1], format: "depth32float", usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     const uniforms = device.createBuffer({ size: SCENE_UBO_BYTES, usage: BU.UNIFORM | BU.COPY_DST });
-    return { texture, view: texture.createView(), color: null, version: -1, bindings: [], active: false, uniforms, source: null };
+    return { texture, view: texture.createView(), color: null, version: -1, bindings: [], active: false, uniforms, source: null, signature: null };
 }
 
 export function gpsRecordSceneDepth(
@@ -40,14 +52,20 @@ export function gpsRecordSceneDepth(
     context: DrawUpdateContext,
     retire: (textures: GPUTexture[]) => void
 ): boolean {
+    if (!gpsHasViewport(context)) {
+        state.active = false;
+        return false;
+    }
     const device = engine._device;
     const source = gpsOpaqueSources(scene, signature);
     if (state.version !== scene._renderableVersion || state.source !== source) {
-        state.bindings = source
-            .filter((renderable) => !renderable.isTransparent && !!renderable.mesh)
-            .map((renderable) =>
-                renderable.bind(engine, { ...signature, _sampleCount: 1, _depthStencilFormat: "depth32float", _depthCompare: signature._depthCompare ?? "greater-equal" })
-            );
+        const prepassSignature = (state.signature ??= {
+            ...signature,
+            _sampleCount: 1,
+            _depthStencilFormat: "depth32float",
+            _depthCompare: signature._depthCompare ?? "greater-equal",
+        });
+        state.bindings = source.filter((renderable) => !renderable.isTransparent).map((renderable) => renderable.bind(engine, prepassSignature));
         state.version = scene._renderableVersion;
         state.source = source;
     }
@@ -66,7 +84,7 @@ export function gpsRecordSceneDepth(
     if (!state.active) {
         return false;
     }
-    const camera = context._camera!;
+    const camera = context._camera;
     const data = new Float32Array(SCENE_UBO_BYTES / 4);
     const viewport = camera.viewport;
     const aspect = (context.targetWidth / context.targetHeight) * (viewport ? viewport.width / viewport.height : 1);

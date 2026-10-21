@@ -15,7 +15,10 @@ export interface GaussianPointSplattingProgress {
 export interface GaussianPointSplatting {
     colorRenderMode: boolean;
     depthRenderMode: boolean;
-    /** Point-path equivalent of gsLinearDepthFragment / gsAlphaBlendedDepthFragment; match the mesh's classic fragments. Used when depthRenderMode is enabled. */
+    /**
+     * Equivalent of gsLinearDepthFragment / gsAlphaBlendedDepthFragment; match the mesh's classic fragments. Used when depthRenderMode is enabled.
+     * Linear mode renders opaque discs at full resolution, independently of pointScale/renderScale; alphaBlended retains the stochastic weighted depth mean.
+     */
     depthVisualization: "none" | "linear" | "alphaBlended";
     pointScale: number;
     renderScale: number | "auto";

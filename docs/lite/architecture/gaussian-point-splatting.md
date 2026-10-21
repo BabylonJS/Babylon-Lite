@@ -24,6 +24,9 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
   `gsAlphaBlendedDepthFragment`. The caller must set it consistently with the
   fragments applied to the classic mesh. Depth visualization is displayed when
   `depthRenderMode` is enabled; no fragment introspection is performed.
+  `linear` renders opaque discs at full resolution, independently of point
+  density, render-scale divisor, and accumulated stochastic coverage.
+  `alphaBlended` retains stochastic sampling and its premultiplied depth mean.
 - `pointScale: number` (default `1`, finite and nonnegative).
 - `renderScale: number | "auto"` (default `"auto"`; integer divisors 1–8).
 - `occlusionCulling: boolean` (default `false`).
@@ -157,17 +160,25 @@ Depth visualization reconstructs view depth from all four Z/W projection
 coefficients: `(P32 - z * P33) / (z * P23 - P22)`. Evaluating this at the
 stored reverse-Z depth, 1, and 0 gives surface depth, near, and far respectively,
 so linear and alpha-blended grayscale support both perspective and orthographic
-static cameras. Resolve converts each visualization sample to linear depth before
-averaging, storing premultiplied grayscale in the existing color history; geometric
-depth remains separate for depth writes/reprojection. Alpha-blended mode displays
-that running mean, while linear mode divides by accumulated coverage. Visualization
+static cameras. Alpha-blended resolve converts each visualization sample to linear
+depth before averaging, storing premultiplied grayscale in the existing color
+history; geometric depth remains separate for depth writes/reprojection.
+Non-alpha-blended linear resolve instead displays the nearest deterministic
+disc's depth with full coverage, as detailed below. Visualization
 camera changes reset history rather than reprojecting depth-dependent grayscale.
 
-When opaque mesh renderables are present in the target render task,
-`gps-scene-depth.ts` renders their actual bindings (including alpha testing and
+When nontransparent renderables are present in the target render task,
+`gps-scene-depth.ts` renders their actual bindings (including merged geometry, alpha testing and
 animated geometry) into a feature-owned
 single-sample opaque depth prepass before sampling. Resolve compares each sample
 against that depth before averaging, never depth-testing an already mixed average.
+Mesh backlinks are not an occluder classification: merged ShaderMaterial geometry
+has none. Each binding's native depth-write behavior determines its contribution,
+so non-depth-writing backgrounds do not occlude splats. One stable prepass signature
+is shared by every binding and retained across refreshes, preserving signature-keyed
+thin-instance LOD buckets and cull-state caches. Camera-less or empty effective
+viewports are rejected before any prepass resources are created or recorded;
+restoring eligibility resets accumulation.
 A throwaway color attachment preserves each material's original alpha-test shader;
 mixed opaque/splat scenes pay for these additional opaque draws and attachments.
 A full-resolution previous-depth buffer detects per-pixel occluder changes and
@@ -177,6 +188,23 @@ remain frozen, while changed pixels resume independently. The sampling seed keep
 advancing the jitter cycle even though converged frame progress remains frozen.
 Splat-only scenes retain
 their original converged dispatch skip and allocate no opaque depth resources.
+
+Hi-Z is never derived from stochastic splat hits. For supported reverse-Z opaque
+passes, a dedicated compute pass reduces the current opaque texture to the farthest
+view depth in each full-resolution pixel block (uncovered pixels contribute
+infinity), then builds the maximum-depth hierarchy before preprocessing.
+Without a conservative opaque source, or for other depth-comparison conventions,
+culling is disabled rather than biasing translucent/background sampling.
+
+Non-alpha-blended `linear` visualization uses a separate deterministic depth-only
+disc rasterization at full output resolution. Preprocessing retains every valid
+splat independently of point density/Poisson sampling. Disc support is
+`delta^T inverseCovariance delta <= 2 * opacity`; surviving fragments are opaque
+and reverse-Z depth testing selects the nearest disc. A resolve variant reads this
+depth texture directly into opaque linear-depth output, without temporal averaging.
+`alphaBlended` retains the stochastic premultiplied depth mean. Linear disc depth
+uses the unquantized projected center depth, stored in the otherwise unused screen
+RGB field for this mode.
 
 ## State Machine / Lifecycle
 
@@ -192,8 +220,8 @@ counter is clamped to `min(GPS_SOFT_RESET_SAMPLES (8), maxAccumFrames - 1)`
 samples while preserving the sub-pixel jitter phase. Each refresh also requires
 at least one complete `n²`-frame cycle before convergence can stop dispatches,
 including refreshes during a partial cycle and limits of one sample. Hi-Z rejection
-is disabled for that whole refresh cycle so old occluders cannot hide newly exposed
-splats; the freshly built hierarchy is used afterwards. Resolve
+is disabled for that whole refresh cycle; a current opaque hierarchy is built
+before each subsequent eligible preprocessing pass. Resolve
 clamps each pixel's running-mean count to the uploaded history cap (at most
 `maxAccumFrames - 1`, allowing zero), so the incoming sample never exceeds the
 limit and new LODs blend in without blanking sparse content
@@ -269,7 +297,7 @@ Before preprocessing, `record()` runs:
 The frame counter is soft-reset to the same sample cap so accumulation resumes,
 and a complete pixel cycle is required before convergence, even when motion
 occurred partway through a previous cycle. Occlusion culling is skipped throughout
-that refresh cycle because the old Hi-Z contains the previous view. For the next
+that refresh cycle, and resumes only from the current opaque depth. For the next
 `n²` dispatched frames, resolve uses fill mode
 (`state.z = 2`, versus `1` for a hard reset and `0` for normal accumulation).
 The existing counts buffer is the hole mask: pixels in the current generation
@@ -353,9 +381,21 @@ orthographic cameras with near/far planes 1/11. Alternating foreground/backgroun
 samples verify per-sample opaque rejection and mean linear-depth visualization;
 occluder removal and arrival reset converged history. A real opaque render binding
 also exercises the depth-prepass pipeline, scene uniforms, attachments, and texture
-sampling on WebGPU. `gaussian-point-scene-depth.test.ts` covers opaque selection,
+sampling on WebGPU. Two meshes sharing one actual opaque ShaderMaterial produce
+a meshless merged renderable: its depth must reject background samples, and hiding
+both packets must reveal them. Actual thin-instance LOD bucket publication and
+partner consumption must contribute depth, sharing one signature across source,
+partner, and renderable-version refreshes. A 300-frame translucent red foreground /
+blue background sequence must produce identical converged RGBA with conservative
+culling enabled and disabled when opaque depth is empty. Both colors must survive.
+Deterministic linear-depth rasterization must cover the opacity-scaled discs,
+select the nearer of overlapping discs regardless of submission order, and work
+with point density zero; the separate alpha-blended cases retain the weighted mean.
+`gaussian-point-scene-depth.test.ts` covers opaque selection,
 render-task filtering, update-batch ordering, viewport cropping, resize retirement,
-and hidden geometry. The two GPU readback specs run in the dedicated nonvisual
+hidden geometry, shared persistent signature identity, and missing-camera /
+empty-viewport rejection before allocation. Runtime tests also exercise restored
+eligibility and generation resets. The two GPU readback specs run in the dedicated nonvisual
 BrowserStack WebGPU CI job without screenshots, video, or trace artifacts.
 
 ## File Manifest

@@ -181,6 +181,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 let g=id.x+id.y*65535u*256u;
 if (g>=u32(u.data.x)) { return; }
 weights[g]=0u;
+let linear=u.cycle.w>0.5 && u.range.w>0.5 && u.range.w<1.5;
+if(linear) { screen[g].color=vec4f(0.0); }
 ${read}
 let wp=u.world*vec4f(center,1.0);
 let mv=u.view*u.world;
@@ -201,20 +203,29 @@ let rotation=transpose(mat3x3f(mv[0].xyz,mv[1].xyz,mv[2].xyz));
 let ax=rotation*jx; let ay=rotation*jy;
 let covariance=mat3x3f(ca,vec3f(ca.y,cb.xy),vec3f(ca.z,cb.yz));
 // Lite's stored covariance uses doubled scale; the classic quad cancels it through its viewport mapping.
-let a=dot(ax,covariance*ax)*0.25+0.075/(n*n);
-let b=dot(ax,covariance*ay)*0.25;
-let c=dot(ay,covariance*ay)*0.25+0.075/(n*n);
+var a=dot(ax,covariance*ax)*0.25+0.075/(n*n);
+var b=dot(ax,covariance*ay)*0.25;
+var c=dot(ay,covariance*ay)*0.25+0.075/(n*n);
+if(linear) {
+a+=0.000025; c+=0.000025;
+let mid=(a+c)*0.5; let radius=length(vec2f((a-c)*0.5,b));
+let major=min(mid+radius,131072.0); let minor=min(mid-radius,131072.0);
+let scale=select(0.0,(major-minor)/max(2.0*radius,1e-30),radius>0.0);
+a=(major+minor)*0.5+(a-mid)*scale;
+c=(major+minor)*0.5+(c-mid)*scale; b*=scale;
+}
 let determinant=a*c-b*b;
 if (!(determinant>0.0)) { return; }
 let radius=sqrt(8.0*((a+c)*0.5+length(vec2f((a-c)*0.5,b))));
 if (u.state.w>0.5 && occluded(mean,radius,vp.z)) { return; }
-${sh.body}
+if(!linear) { ${sh.body} }
 let lo=clamp(floor(mean-sqrt(8.0*vec2f(a,c))),vec2f(0.0),u.resolution.xy);
 let hi=clamp(ceil(mean+sqrt(8.0*vec2f(a,c))),vec2f(0.0),u.resolution.xy);
 let ellipse=6.28318530718*sqrt(determinant)*dilog(opacity);
 let rect=intensity(opacity)*(hi.x-lo.x)*(hi.y-lo.y);
 var seed=hash(g^hash(u32(u.data.z)));
-let weight=poisson(min(ellipse,rect)*u.data.y,&seed);
+var weight=1u;
+if(!linear) { weight=poisson(min(ellipse,rect)*u.data.y,&seed); }
 if (weight==0u) { return; }
 ${
     stream
@@ -227,7 +238,7 @@ if(radiance>atomicLoad(&total[1])) { atomicMax(&total[1],radiance); }
 let chol=sqrt(a);
 let depth=u32(clamp((vp.z-u.range.x)/max(1e-6,u.range.y-u.range.x),0.0,1.0)*65534.0);
 screen[g]=Screen(vec4f(mean,c/determinant,-b/determinant),
-vec4f(a/determinant,chol,b/chol,sqrt(max(0.0,c-b*b/a))),vec4f(color,opacity),
+vec4f(a/determinant,chol,b/chol,sqrt(max(0.0,c-b*b/a))),vec4f(select(color,vec3f(vp.z,0.0,0.0),linear),opacity),
 vec4u(depth,select(0u,1u,rect<ellipse),u32(lo.x)|(u32(lo.y)<<16u),u32(hi.x)|(u32(hi.y)<<16u)));
 weights[g]=min(weight,0xffffff00u);
 }
@@ -395,7 +406,7 @@ return clamp((viewDepth(z)-viewDepth(1.0))/(viewDepth(0.0)-viewDepth(1.0)),0.0,1
 }
 `;
 
-export function gpsResolveShader(sceneDepth = false, compare: GPUCompareFunction = "greater-equal"): WgslSource {
+export function gpsResolveShader(sceneDepth = false, compare: GPUCompareFunction = "greater-equal", linear = false): WgslSource {
     const comparisons: Record<GPUCompareFunction, WgslSource> = {
         never: wgsl`false`,
         less: wgsl`z<opaque`,
@@ -423,6 +434,7 @@ ${
 `
         : wgsl``
 }
+${linear ? wgsl`@group(0) @binding(${sceneDepth ? 9 : 7}) var linearDepthTexture:texture_depth_2d;` : wgsl``}
 ${LINEAR_DEPTH}
 fn visible(color:vec4f,z:f32,p:vec2u)->vec4f {
 ${sceneDepth ? wgsl`let opaque=textureLoad(sceneDepth,vec2i(p),0); if(!(${comparisons[compare]})) { return vec4f(0.0); }` : wgsl``}
@@ -433,16 +445,17 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
 if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
 let i=id.y*u32(u.resolution.x)+id.x;
 let key=atomicExchange(&image[i],0xffffffffu);
-let hit=key!=0xffffffffu;
+${linear ? wgsl`let discDepth=textureLoad(linearDepthTexture,vec2i(id.xy),0);` : wgsl``}
+let hit=${linear ? wgsl`discDepth>0.0` : wgsl`key!=0xffffffffu`};
 let rgb=(key^u32(u.data.w))&65535u;
 let scale=max(u.eye.w,bitcast<f32>(total[1]));
 let color=vec3f(f32((rgb>>11u)&31u)/31.0,f32((rgb>>5u)&63u)/63.0,f32(rgb&31u)/31.0)*scale;
 let vz=mix(u.range.x,u.range.y,f32(key>>16u)/65534.0);
 let projected=(u.projection[2].z*vz+u.projection[3].z)/(u.projection[2].w*vz+u.projection[3].w);
-let sampleDepth=select(0.0,clamp(projected,0.0,1.0),hit);
+let sampleDepth=${linear ? wgsl`discDepth` : wgsl`select(0.0,clamp(projected,0.0,1.0),hit)`};
 let shaded=select(color,vec3f(linearDepth(sampleDepth)),u.cycle.w>0.5 && u.range.w>0.5);
 let sampleColor=select(vec4f(0.0),vec4f(shaded,1.0),hit);
-hiz[i]=select(1e30,vz+(u.range.y-u.range.x)/65534.0,hit);
+hiz[i]=1e30;
 let n=u32(u.output.z);
 let gen=u32(u.state.x);
 ${
@@ -460,6 +473,13 @@ previousSceneDepth[o]=opaque;
 `
         : wgsl``
 }
+${
+    linear
+        ? wgsl`
+let value=visible(sampleColor,sampleDepth,id.xy);
+accum[i]=value; depth[i]=select(0.0,sampleDepth,value.a>0.0); counts[i]=(gen<<16u)|1u;
+`
+        : wgsl`
 if(u.state.z>0.5 && u.state.z<1.5) {
 for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
 let pixel=id.xy*n+vec2u(x,y);
@@ -501,11 +521,61 @@ let weight=1.0/f32(count+1u);
 accum[o]=mix(accum[o],value,weight);
 counts[o]=(gen<<16u)|min(count+1u,65535u);
 if(value.a>0.0 || count==0u) { depth[o]=select(0.0,sampleDepth,value.a>0.0); }
+`
+}
 }
 `;
 }
 
 export const GPS_RESOLVE = /* @__PURE__ */ gpsResolveShader();
+
+export const GPS_SCENE_HIZ = wgsl`
+${GPS_UNIFORMS}
+@group(0) @binding(0) var<uniform> u:Params;
+@group(0) @binding(1) var<storage,read_write> hiz:array<f32>;
+@group(0) @binding(2) var source:texture_depth_2d;
+${LINEAR_DEPTH}
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u) {
+if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
+let n=u32(u.output.z);
+var farthest=0.0;
+for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
+let p=id.xy*n+vec2u(x,y);
+if(all(p<vec2u(u.output.xy))) {
+let z=textureLoad(source,vec2i(p),0);
+farthest=max(farthest,select(1e30,viewDepth(z),z>0.0));
+}
+} }
+hiz[id.y*u32(u.resolution.x)+id.x]=farthest;
+}
+`;
+
+export const GPS_LINEAR_DEPTH = wgsl`
+${GPS_UNIFORMS}${SCREEN}
+@group(0) @binding(0) var<uniform> u:Params;
+@group(0) @binding(1) var<storage,read> screen:array<Screen>;
+struct Vertex {
+@builtin(position) position:vec4f,
+@location(0) @interpolate(flat) index:u32,
+}
+@vertex fn vs(@builtin(vertex_index) vertex:u32,@builtin(instance_index) index:u32)->Vertex {
+let s=screen[index];
+if(s.color.a<=0.0) { return Vertex(vec4f(0.0,0.0,2.0,1.0),index); }
+let corner=vec2f(f32(vertex&1u),f32(vertex>>1u))*2.0-1.0;
+let radius=sqrt(2.0*s.color.a)*vec2f(s.conicChol.y,length(s.conicChol.zw));
+let pixel=s.meanConic.xy+corner*radius;
+let z=s.color.x;
+let depth=(u.projection[2].z*z+u.projection[3].z)/(u.projection[2].w*z+u.projection[3].w);
+return Vertex(vec4f(pixel/u.output.xy*vec2f(2.0,-2.0)+vec2f(-1.0,1.0),depth,1.0),index);
+}
+@fragment fn fs(v:Vertex) {
+let s=screen[v.index];
+let delta=v.position.xy-s.meanConic.xy;
+let distance=s.meanConic.z*delta.x*delta.x+2.0*s.meanConic.w*delta.x*delta.y+s.conicChol.x*delta.y*delta.y;
+if(distance>2.0*s.color.a) { discard; }
+}
+`;
 
 export const GPS_HIZ = wgsl`
 struct Level { source:vec4u, destination:vec4u }
@@ -541,11 +611,6 @@ let i=pixel.y*u32(u.output.x)+pixel.x;
 let sampleColor=accum[i];
 if(sampleColor.a<0.0015) { discard; }
 let z=depth[i];
-var result=sampleColor;
-if(u.cycle.w>0.5 && u.range.w>0.5) {
-let coverage=select(sampleColor.a,1.0,u.range.w<1.5);
-result=vec4f(sampleColor.rgb*(coverage/sampleColor.a),coverage);
-}
-return Fragment(result,z);
+return Fragment(sampleColor,z);
 }
 `;

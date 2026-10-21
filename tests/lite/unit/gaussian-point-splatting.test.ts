@@ -565,7 +565,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             copyBufferToBuffer: vi.fn(),
             clearBuffer: vi.fn(),
         } as unknown as GPUCommandEncoder;
-        const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 20 });
+        const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 20, occlusionCulling: true });
         const binding = scene._renderables
             .at(-1)!
             .bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1, _depthStencilFormat: opaque ? "depth32float" : undefined } as RenderTargetSignature);
@@ -583,6 +583,8 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         for (let i = 0; i < 12; i++) {
             frame();
         }
+        const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls;
+        expect((writes.at(-1)![2] as Float32Array)[67]).toBe(+opaque);
         expect(gps.progress).toMatchObject({ accumulationVersion: 1, renderedFrameCount: 12, accumulatedSamples: 12 });
         gpu.contentGeneration = 1;
         let passes = beginComputePass.mock.calls.length;
@@ -619,6 +621,20 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             }
             expect(slots.size).toBe(4);
             expect(gps.progress).toMatchObject({ renderedFrameCount: 80, accumulatedSamples: 20 });
+            const textures = vi.mocked(engine._device.createTexture).mock.calls.length;
+            binding.update!({ ...context, _camera: null });
+            batch.flush(engine);
+            expect(vi.mocked(engine._device.createTexture).mock.calls.length).toBe(textures);
+            expect(binding.draw({} as GPURenderPassEncoder, engine)).toBe(0);
+            frame();
+            expect(gps.progress).toMatchObject({ renderedFrameCount: 1 });
+            context._camera.viewport = { x: 0, y: 0, width: 0, height: 1 };
+            frame();
+            expect(vi.mocked(engine._device.createTexture).mock.calls.length).toBe(textures);
+            expect(binding.draw({} as GPURenderPassEncoder, engine)).toBe(0);
+            context._camera.viewport = undefined;
+            frame();
+            expect(gps.progress).toMatchObject({ renderedFrameCount: 1 });
         }
         expect(binding.draw({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn() } as unknown as GPURenderPassEncoder, engine)).toBe(1);
         disableGaussianPointSplatting(scene, gps);
@@ -704,7 +720,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             expect(uploads.every((params) => params[67] === 0)).toBe(true);
             if (gps.progress!.accumulatedSamples < limit) {
                 frame();
-                expect(uploads.at(-1)![67]).toBe(1);
+                expect(uploads.at(-1)![67]).toBe(0);
             }
             for (let i = 0; i < limit * cycle; i++) {
                 frame();
@@ -883,7 +899,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         }
         const version = gps.progress!.accumulationVersion;
         expect(gps.progress).toMatchObject({ accumulationVersion: temporalReprojection ? 2 : 1, renderedFrameCount: 30 * cycle });
-        expect(params()[67]).toBe(1);
+        expect(params()[67]).toBe(0);
         labels.length = 0;
         camera.alpha += 0.05;
         frame();
@@ -905,7 +921,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             for (let i = 1; i <= cycle; i++) {
                 frame();
                 expect(params()[66]).toBe(i < cycle ? 2 : 0);
-                expect(params()[67]).toBe(i < cycle ? 0 : 1);
+                expect(params()[67]).toBe(0);
             }
             expect(labels.filter((label) => label.startsWith("GPS reproject"))).toHaveLength(3);
             camera.alpha += 0.05;
@@ -954,6 +970,10 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             limits: { maxBufferSize: 1e9, maxStorageBufferBindingSize: 1e9 },
             queue: { writeBuffer: vi.fn() },
             createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
+            createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
+                const [width, height] = descriptor.size as number[];
+                return { width, height, createView: () => ({}), destroy: vi.fn() };
+            }),
             createShaderModule: vi.fn(() => ({})),
             createBindGroupLayout: vi.fn(() => ({})),
             createBindGroup: vi.fn(() => ({})),
@@ -965,6 +985,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             }),
         } as unknown as GPUDevice;
         engine._currentEncoder = {
+            beginRenderPass: vi.fn(() => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn(), end: vi.fn() })),
             beginComputePass: vi.fn(() => ({
                 setPipeline: vi.fn(),
                 setBindGroup: vi.fn(),
@@ -1013,14 +1034,19 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         expect(gps.progress?.renderedFrameCount).toBe(1);
         gps.colorRenderMode = false;
         gps.depthRenderMode = true;
+        gps.renderScale = 2;
         const pass = { setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn() } as unknown as GPURenderPassEncoder;
         for (const [i, mode] of (["none", "linear", "alphaBlended"] as const).entries()) {
             gps.depthVisualization = mode;
+            const passesBefore = vi.mocked(engine._currentEncoder.beginComputePass).mock.calls.length;
             frame();
             expect(gps.progress?.accumulationVersion).toBe(5 + i);
             expect(gps.progress?.renderedFrameCount).toBe(1);
             const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls;
-            expect((writes[writes.length - 1]![2] as Float32Array)[71]).toBe(i);
+            const params = writes[writes.length - 1]![2] as Float32Array;
+            expect(params[71]).toBe(i);
+            expect(params[58]).toBe(mode === "linear" ? 1 : 2);
+            expect(vi.mocked(engine._currentEncoder.beginComputePass).mock.calls.length - passesBefore).toBe(mode === "linear" ? 2 : 7);
             expect(binding.draw(pass, engine)).toBe(1);
             const descriptor = compositeDescriptors[compositeDescriptors.length - 1]!;
             expect([...descriptor.fragment!.targets][0]!.writeMask).toBe(mode === "none" ? 0 : 15);
