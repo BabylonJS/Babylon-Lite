@@ -317,24 +317,94 @@ describe("Standard: emissive, alpha, culling, lighting", () => {
         expect(none.mat.emissiveFactor).toBeUndefined();
     });
 
-    it("maps alphaCutOff to MASK and writes alphaCutoff only when it is not 0.5", async () => {
-        const r = await run(std({ alphaCutOff: 0.5 }));
+    it("maps alphaCutOff with a diffuse texture to MASK and writes alphaCutoff only when it is not 0.5", async () => {
+        const r = await run(std({ alphaCutOff: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
         expect(r.mat.alphaMode).toBe("MASK");
         expect(r.mat.alphaCutoff).toBeUndefined();
-        const r2 = await run(std({ alphaCutOff: 0.25, alpha: 0.5 }));
+        const r2 = await run(std({ alphaCutOff: 0.25, diffuseTexture: column(TOP, BOTTOM) }));
         expect(r2.mat.alphaMode).toBe("MASK");
         expect(r2.mat.alphaCutoff).toBe(0.25);
+        expect(r2.warnings).toEqual([]);
     });
 
-    it("maps alpha < 1 or an opacity texture to BLEND", async () => {
-        expect((await run(std({ alpha: 0.5 }))).mat.alphaMode).toBe("BLEND");
-        expect((await run(std({ _opacityTexture: column(TOP, BOTTOM) }))).mat.alphaMode).toBe("BLEND");
-        expect((await run(std())).mat.alphaMode).toBeUndefined();
+    it("ignores alphaCutOff without a diffuse texture", async () => {
+        const r = await run(std({ alphaCutOff: 0.25 }));
+        expect(r.mat.alphaMode).toBeUndefined();
+        expect(r.mat.alphaCutoff).toBeUndefined();
+        const blended = await run(std({ alphaCutOff: 0.25, alpha: 0.5 }));
+        expect(blended.mat.alphaMode).toBe("BLEND");
+        expect(blended.mat.alphaCutoff).toBeUndefined();
+        expect(blended.warnings).toEqual([]);
+    });
+
+    it("exports alpha < 1 or an opacity texture with a cutoff and a diffuse texture as BLEND and warns", async () => {
+        const alpha = await run(std({ alphaCutOff: 0.25, alpha: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
+        expect(alpha.mat.alphaMode).toBe("BLEND");
+        expect(alpha.mat.alphaCutoff).toBeUndefined();
+        expect(alpha.warnings.filter((w) => w.includes("both alpha-tests and blends"))).toHaveLength(1);
+        const opacity = await run(std({ alphaCutOff: 0.25, _opacityTexture: column(TOP, BOTTOM), diffuseTexture: column(BOTTOM, TOP) }));
+        expect(opacity.mat.alphaMode).toBe("BLEND");
+        expect(opacity.warnings.filter((w) => w.includes("both alpha-tests and blends"))).toHaveLength(1);
     });
 
     it("maps backFaceCulling false to doubleSided", async () => {
         expect((await run(std({ backFaceCulling: false }))).mat.doubleSided).toBe(true);
         expect((await run(std({ backFaceCulling: true }))).mat.doubleSided).toBeUndefined();
+    });
+
+    describe("disableLighting", () => {
+        it("writes clamp(emissive * diffuse)^2.2 and the alpha, without the 0.5 factor, metallic or roughness", async () => {
+            const r = await run(std({ disableLighting: true, emissiveColor: [1, 0.5, 0.25], diffuseColor: [0.5, 1, 1], alpha: 0.8 }));
+            expect(Object.keys(r.mat.pbrMetallicRoughness)).toEqual(["baseColorFactor"]);
+            close(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(0.5, 2.2), Math.pow(0.5, 2.2), Math.pow(0.25, 2.2), 0.8]);
+            expect(r.mat.emissiveFactor).toBeUndefined();
+            expect(r.mat.extensions).toEqual({ KHR_materials_unlit: {} });
+        });
+
+        it("clamps the product to [0, 1] before the gamma conversion", async () => {
+            const r = await run(std({ disableLighting: true, emissiveColor: [4, 2, 1], diffuseColor: [1, 0.25, 1] }));
+            close(r.mat.pbrMetallicRoughness.baseColorFactor, [1, Math.pow(0.5, 2.2), 1, 1]);
+            expect(r.warnings).toEqual([]);
+        });
+
+        it("exports black for the default (black) emissive color", async () => {
+            const r = await run(std({ disableLighting: true }));
+            expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([0, 0, 0, 1]);
+        });
+
+        it("exports only the diffuse texture and warns about an emissive texture", async () => {
+            const r = await run(
+                std({
+                    disableLighting: true,
+                    emissiveColor: [1, 1, 1],
+                    diffuseTexture: column(TOP, BOTTOM),
+                    _bumpTexture: column(BOTTOM, TOP),
+                    _ambientTexture: column(TOP, TOP),
+                    _emissiveTexture: column(BOTTOM, BOTTOM),
+                })
+            );
+            expect(r.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });
+            expect(r.mat.normalTexture).toBeUndefined();
+            expect(r.mat.occlusionTexture).toBeUndefined();
+            expect(r.mat.emissiveTexture).toBeUndefined();
+            expect(r.mat.emissiveFactor).toBeUndefined();
+            expect(r.json.images).toHaveLength(1);
+            expect(r.warnings).toEqual([expect.stringContaining("unlit with an emissive texture")]);
+        });
+
+        it("keeps MASK for an opaque diffuse-textured material and BLEND for alpha < 1", async () => {
+            const mask = await run(std({ disableLighting: true, alphaCutOff: 0.3, diffuseTexture: column(TOP, BOTTOM) }));
+            expect(mask.mat.alphaMode).toBe("MASK");
+            expect(mask.mat.alphaCutoff).toBe(0.3);
+            const blend = await run(std({ disableLighting: true, alpha: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
+            expect(blend.mat.alphaMode).toBe("BLEND");
+        });
+    });
+
+    it("clamps a Standard emissive factor above 1 with a warning", async () => {
+        const r = await run(std({ name: "glow", emissiveColor: [2, 0.5, 0] }));
+        close(r.mat.emissiveFactor, [1, Math.pow(0.5, 2.2), 0]);
+        expect(r.warnings).toEqual(['Material "glow" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.']);
     });
 
     it("maps disableLighting to KHR_materials_unlit", async () => {

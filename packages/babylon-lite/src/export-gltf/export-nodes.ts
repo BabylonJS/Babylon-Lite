@@ -10,8 +10,8 @@ import type { ExportContext } from "./export-context.js";
 import { snapshotExtras } from "./export-context.js";
 import type { GltfMesh, GltfNode, GltfPrimitive } from "./export-gltf-types.js";
 import type { ExportedPrimitive } from "./export-geometry.js";
-import { exportPrimitive } from "./export-geometry.js";
-import { convertMatrix, convertRotation, EXPORT_EPSILON, nearlyEqual } from "./export-handedness.js";
+import { exportPrimitive, zeroUvAccessor } from "./export-geometry.js";
+import { convertMatrix, convertRotation, isIdentityRotation, nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
 import { exportMaterial } from "./export-materials.js";
 import { writeInstancing } from "./ext/export-ext-instancing.js";
 
@@ -63,7 +63,7 @@ export function isMesh(o: object): o is Mesh {
 
 /** @internal Collect and partition the export roots (see "Root collection and partitioning").
  *  `cameraFixup` is the scene camera's fixup node, when it has one; it never exports. */
-export function collectRoots(scene: SceneContext, animated: ReadonlySet<object>, cameraFixup: SceneNode | null): NodeSweep {
+export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: ReadonlySet<object>, cameraFixup: SceneNode | null): NodeSweep {
     const extras = new Map<object, SceneNode[]>();
     const found: SceneNode[] = [];
     const seen = new Set<SceneNode>();
@@ -71,6 +71,18 @@ export function collectRoots(scene: SceneContext, animated: ReadonlySet<object>,
     if (cameraFixup) {
         skipped.add(cameraFixup);
     }
+
+    // Membership sets per parent, built on first use, keep the walk linear in large hierarchies.
+    const listedChildren = new Map<object, Set<SceneNode>>();
+    const isListed = (parent: SceneNode, child: SceneNode): boolean => {
+        let set = listedChildren.get(parent);
+        if (!set) {
+            set = new Set(parent.children);
+            listedChildren.set(parent, set);
+        }
+        return set.has(child);
+    };
+    const recorded = new Set<SceneNode>();
 
     const addRoot = (node: SceneNode): void => {
         if (!seen.has(node)) {
@@ -82,20 +94,25 @@ export function collectRoots(scene: SceneContext, animated: ReadonlySet<object>,
     // does not list the child records it as an extra child, so the sweep still visits it.
     const topmost = (start: SceneNode, recordExtras: boolean): SceneNode => {
         let node = start;
+        const path = new Set<SceneNode>([node]);
         for (;;) {
             const parent = node.parent as object | null;
             if (!isExportableNode(parent)) {
                 return node;
             }
-            if (recordExtras && !parent.children.includes(node)) {
+            if (path.has(parent)) {
+                ctx.warn(`Node "${node.name}" is part of a parent cycle; exporting the cycle from this node.`);
+                return node;
+            }
+            path.add(parent);
+            if (recordExtras && !recorded.has(node) && !isListed(parent, node)) {
+                recorded.add(node);
                 let list = extras.get(parent);
                 if (!list) {
                     list = [];
                     extras.set(parent, list);
                 }
-                if (!list.includes(node)) {
-                    list.push(node);
-                }
+                list.push(node);
             }
             node = parent;
         }
@@ -161,13 +178,16 @@ function isLoaderRoot(node: SceneNode, animated: ReadonlySet<object>): boolean {
  *  parent-only extras; lights, cameras and skipped nodes excluded (they export elsewhere or never). */
 function childrenOf(node: SceneNode, extras: ReadonlyMap<object, readonly SceneNode[]>, skipped: ReadonlySet<object>): SceneNode[] {
     const out: SceneNode[] = [];
+    const seen = new Set<SceneNode>();
     for (const child of node.children) {
-        if (child.parent === node && !isLight(child) && !isCamera(child) && !skipped.has(child) && !out.includes(child)) {
+        if (child.parent === node && !isLight(child) && !isCamera(child) && !skipped.has(child) && !seen.has(child)) {
+            seen.add(child);
             out.push(child);
         }
     }
     for (const child of extras.get(node) ?? []) {
-        if (!skipped.has(child) && !out.includes(child)) {
+        if (!skipped.has(child) && !seen.has(child)) {
+            seen.add(child);
             out.push(child);
         }
     }
@@ -272,12 +292,7 @@ function isIdentityTrs(node: SceneNode): boolean {
     const p = node.position;
     const q = node.rotationQuaternion;
     const s = node.scaling;
-    return (
-        nearlyEqual([p.x, p.y, p.z], [0, 0, 0]) &&
-        nearlyEqual([q.x, q.y, q.z], [0, 0, 0]) &&
-        Math.abs(Math.abs(q.w) - 1) <= EXPORT_EPSILON &&
-        nearlyEqual([s.x, s.y, s.z], [1, 1, 1])
-    );
+    return nearlyEqual([p.x, p.y, p.z], [0, 0, 0], OMIT_EPSILON) && isIdentityRotation([q.x, q.y, q.z, q.w]) && nearlyEqual([s.x, s.y, s.z], [1, 1, 1], OMIT_EPSILON);
 }
 
 /** Write a node's local transform. `matrix` is the node's `_localMatrix`, or its world matrix for a
@@ -289,7 +304,7 @@ function writeTransform(ctx: ExportContext, out: GltfNode, node: SceneNode, conv
         const decomposable = nearlyEqual(recomposed, matrix);
         if (decomposable && !animated) {
             const m = convert ? convertMatrix(matrix) : Array.from(matrix as ArrayLike<number>);
-            if (!nearlyEqual(m, IDENTITY_MATRIX)) {
+            if (!nearlyEqual(m, IDENTITY_MATRIX, OMIT_EPSILON)) {
                 out.matrix = m;
             }
             return;
@@ -310,14 +325,14 @@ interface Xyz {
 }
 
 function writeTrs(out: GltfNode, convert: boolean, t: Xyz, q: Xyz & { readonly w: number }, s: Xyz): void {
-    if (!nearlyEqual([t.x, t.y, t.z], [0, 0, 0])) {
+    if (!nearlyEqual([t.x, t.y, t.z], [0, 0, 0], OMIT_EPSILON)) {
         out.translation = [convert ? -t.x : t.x, t.y, t.z];
     }
     const r = convert ? convertRotation(q.x, q.y, q.z, q.w) : unitQuat(q.x, q.y, q.z, q.w);
-    if (!(nearlyEqual(r, [0, 0, 0, 1]) || nearlyEqual(r, [0, 0, 0, -1]))) {
+    if (!isIdentityRotation(r)) {
         out.rotation = r;
     }
-    if (!nearlyEqual([s.x, s.y, s.z], [1, 1, 1])) {
+    if (!nearlyEqual([s.x, s.y, s.z], [1, 1, 1], OMIT_EPSILON)) {
         out.scale = [s.x, s.y, s.z];
     }
 }
@@ -336,7 +351,7 @@ function unitQuat(x: number, y: number, z: number, w: number): [number, number, 
  *  with the thin-instance extension and the morph weights. */
 function writeMesh(ctx: ExportContext, out: GltfNode, owner: SceneNode, contributors: readonly Mesh[], convert: boolean): void {
     const primitives: GltfPrimitive[] = [];
-    let weights: ArrayLike<number> | undefined;
+    let weights: number[] | undefined;
     for (const mesh of contributors) {
         const exported: ExportedPrimitive | null = exportPrimitive(ctx, mesh, convert);
         if (!exported) {
@@ -345,6 +360,10 @@ function writeMesh(ctx: ExportContext, out: GltfNode, owner: SceneNode, contribu
         const material = exportMaterial(ctx, mesh.material, exported.uvState);
         if (material !== undefined) {
             exported.primitive.material = material;
+            // Lite samples a zero-filled UV buffer on a mesh without UVs; glTF needs the attribute.
+            if (ctx.materialsUsingUv0.has(material) && exported.primitive.attributes.TEXCOORD_0 === undefined) {
+                exported.primitive.attributes.TEXCOORD_0 = zeroUvAccessor(ctx, exported.vertexCount);
+            }
         }
         primitives.push(exported.primitive);
         weights ??= exported.weights;
@@ -352,24 +371,24 @@ function writeMesh(ctx: ExportContext, out: GltfNode, owner: SceneNode, contribu
     if (primitives.length === 0) {
         return;
     }
-    const weightList = weights ? Array.from(weights) : undefined;
-    const signature = JSON.stringify([primitives, weightList]);
+    const name = contributors.find((m) => m.name)?.name;
+    // The loader promotes the first of primitive, mesh or node extras onto each Lite mesh, by
+    // reference: a mesh holding its node's extras object got them from the node, so they are node
+    // extras, not mesh extras. (For a standalone mesh node the two are the same object.)
+    const ownerExtras = owner.metadata?.gltf?.extras;
+    const extrasSource = contributors.find((m) => m.metadata?.gltf?.extras !== undefined && m.metadata.gltf.extras !== ownerExtras);
+    const meshExtras = extrasSource ? snapshotExtras(ctx, extrasSource.metadata?.gltf?.extras, extrasSource.name) : undefined;
+    // Meshes are shared only when everything they would emit is identical.
+    const signature = JSON.stringify([primitives, weights, name, meshExtras]);
     let meshIndex = ctx.meshIndex.get(signature);
     if (meshIndex === undefined) {
         const gltfMesh: GltfMesh = { primitives };
-        const name = contributors.find((m) => m.name)?.name;
         if (name) {
             gltfMesh.name = name;
         }
-        if (weightList) {
-            gltfMesh.weights = weightList;
+        if (weights) {
+            gltfMesh.weights = weights;
         }
-        // The loader promotes the first of primitive, mesh or node extras onto each Lite mesh, by
-        // reference: a mesh holding its node's extras object got them from the node, so they are
-        // node extras, not mesh extras. (For a standalone mesh node the two are the same object.)
-        const ownerExtras = owner.metadata?.gltf?.extras;
-        const source = contributors.find((m) => m.metadata?.gltf?.extras !== undefined && m.metadata.gltf.extras !== ownerExtras);
-        const meshExtras = source ? snapshotExtras(ctx, source.metadata?.gltf?.extras, source.name) : undefined;
         if (meshExtras !== undefined) {
             gltfMesh.extras = meshExtras;
         }

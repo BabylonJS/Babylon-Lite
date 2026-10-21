@@ -11,7 +11,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { ExportContext } from "./export-context.js";
 import type { GltfCamera, GltfNode } from "./export-gltf-types.js";
-import { convertRotation, EXPORT_EPSILON, nearlyEqual, rotate180Y } from "./export-handedness.js";
+import { convertRotation, EXPORT_EPSILON, isIdentityRotation, nearlyEqual, OMIT_EPSILON, rotate180Y } from "./export-handedness.js";
 import { isExportableNode, isMesh } from "./export-nodes.js";
 
 /** Lite stores glTF's infinite perspective far plane as this sentinel. */
@@ -96,10 +96,10 @@ export function exportCamera(ctx: ExportContext, scene: SceneContext, fixup: Sce
         translation = [t.x, t.y, t.z];
         rotation = [q.x, q.y, q.z, q.w];
     }
-    if (!(nearlyEqual(rotation, [0, 0, 0, 1]) || nearlyEqual(rotation, [0, 0, 0, -1]))) {
+    if (!isIdentityRotation(rotation)) {
         node.rotation = rotation;
     }
-    if (!nearlyEqual(translation, [0, 0, 0])) {
+    if (!nearlyEqual(translation, [0, 0, 0], OMIT_EPSILON)) {
         node.translation = translation;
     }
     node.camera = cameraIndex;
@@ -129,7 +129,8 @@ function isPristineFixup(fixup: SceneNode, camera: Camera): boolean {
 
 function projectionOf(ctx: ExportContext, scene: SceneContext, camera: Camera): GltfCamera {
     const canvas = (scene.surface as { canvas?: { width: number; height: number } } | undefined)?.canvas;
-    const aspect = canvas && canvas.height > 0 ? getEffectiveAspectRatio(camera, canvas.width, canvas.height) : undefined;
+    const ratio = canvas && canvas.width > 0 && canvas.height > 0 ? getEffectiveAspectRatio(camera, canvas.width, canvas.height) : undefined;
+    const aspect = ratio !== undefined && ratio > 0 && Number.isFinite(ratio) ? ratio : undefined;
     const out: GltfCamera = { type: "perspective" };
     if (camera.name) {
         out.name = camera.name;
@@ -138,7 +139,7 @@ function projectionOf(ctx: ExportContext, scene: SceneContext, camera: Camera): 
     if (!ortho) {
         out.type = "perspective";
         out.perspective = { yfov: camera.fov, znear: camera.nearPlane };
-        if (camera.farPlane < INFINITE_FAR) {
+        if (camera.farPlane < INFINITE_FAR && camera.farPlane > camera.nearPlane) {
             out.perspective.zfar = camera.farPlane;
         }
         if (aspect !== undefined) {

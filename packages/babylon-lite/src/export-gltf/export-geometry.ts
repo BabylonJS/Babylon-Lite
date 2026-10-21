@@ -2,23 +2,20 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import type { ExportContext, UvState } from "./export-context.js";
-import { computeMinMax } from "./export-buffers.js";
-import type { GltfAccessorType, GltfAttributes, GltfBufferViewTarget, GltfPrimitive } from "./export-gltf-types.js";
+import { cachedAccessor } from "./export-context.js";
+import { ARRAY_BUFFER, computeMinMax, ELEMENT_ARRAY_BUFFER, FLOAT, UNSIGNED_INT, UNSIGNED_SHORT } from "./export-buffers.js";
+import type { GltfAccessorType, GltfAttributes, GltfPrimitive } from "./export-gltf-types.js";
 import { needsWindingFlip } from "./export-handedness.js";
-
-const FLOAT = 5126;
-const UNSIGNED_SHORT = 5123;
-const UNSIGNED_INT = 5125;
-const ARRAY_BUFFER: GltfBufferViewTarget = 34962;
-const ELEMENT_ARRAY_BUFFER: GltfBufferViewTarget = 34963;
 
 /** @internal One exported primitive, before its material is attached. */
 export interface ExportedPrimitive {
     readonly primitive: GltfPrimitive;
     /** How the mesh's second UV set exports; selects the material variant. */
     readonly uvState: UvState;
-    /** Current morph weights, when the mesh has morph targets. */
-    readonly weights?: ArrayLike<number>;
+    /** Current morph weights (one per exported target), when the mesh has morph targets. */
+    readonly weights?: number[];
+    /** Number of vertices; used to synthesize UVs a textured material needs. */
+    readonly vertexCount: number;
 }
 
 /** Mesh fields the exporter reads that are not declared on the public `Mesh` interface. */
@@ -34,15 +31,13 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
         return null;
     }
     const count = Math.floor(positions.length / 3);
-    if (count === 0) {
+    const indexSource = m._cpuGpuIndices ?? m._cpuIndices;
+    if (count === 0 || indexSource?.length === 0) {
+        // Nothing to draw.
         return null;
     }
-    const mode = primitiveMode(m);
+    const sourceMode = primitiveMode(m);
     const flip = needsWindingFlip(m._authoredSign, convert);
-    if (flip && mode === 5) {
-        throw new Error("Triangle strip winding reversal is not implemented");
-    }
-    const reverse = flip && mode === 4;
 
     const attributes: GltfAttributes = {};
     attributes.POSITION = vectorAccessor(ctx, positions, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, true);
@@ -88,35 +83,47 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
     }
 
     const primitive: GltfPrimitive = { attributes };
-    const indices = indexAccessor(ctx, m, count, reverse);
-    if (indices === null) {
-        return null;
-    }
-    if (indices !== undefined) {
-        primitive.indices = indices;
+    const { index, mode } = indexAccessor(ctx, m, count, sourceMode, flip);
+    if (index !== undefined) {
+        primitive.indices = index;
     }
     if (mode !== 4) {
         primitive.mode = mode;
     }
 
     const morph = m.morphTargets;
-    let weights: ArrayLike<number> | undefined;
+    let weights: number[] | undefined;
     if (morph && morph.targets.length > 0) {
-        const targets: GltfAttributes[] = [];
-        for (const target of morph.targets) {
-            const t: GltfAttributes = {};
-            if (target.positions.length === count * 3) {
-                t.POSITION = vectorAccessor(ctx, target.positions, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, true);
-            }
-            if (target.normals && target.normals.length === count * 3) {
-                t.NORMAL = vectorAccessor(ctx, target.normals, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, false);
-            }
-            targets.push(t);
+        if (morph.targets.some((t) => t.positions.length !== count * 3)) {
+            ctx.warn(`Mesh "${m.name}" has morph targets whose length does not match its positions; exporting the mesh without them.`);
+        } else {
+            // glTF requires a base attribute for every morphed one, so NORMAL deltas need NORMAL.
+            const withNormals = attributes.NORMAL !== undefined;
+            primitive.targets = morph.targets.map((target) => {
+                const t: GltfAttributes = {
+                    POSITION: vectorAccessor(ctx, target.positions, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, true),
+                };
+                if (withNormals && target.normals && target.normals.length === count * 3) {
+                    t.NORMAL = vectorAccessor(ctx, target.normals, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, false);
+                }
+                return t;
+            });
+            weights = morph.targets.map((_, i) => morph.weights[i] ?? 0);
         }
-        primitive.targets = targets;
-        weights = morph.weights;
     }
-    return { primitive, uvState, weights };
+    return { primitive, uvState, weights, vertexCount: count };
+}
+
+/** @internal A zero-filled TEXCOORD_0 accessor for `count` vertices: what Lite samples for a mesh
+ *  without UVs (`uploadMeshToGPU` binds a zero-filled UV buffer), emitted when its material needs UV0. */
+export function zeroUvAccessor(ctx: ExportContext, count: number): number {
+    let index = ctx.zeroUvAccessors.get(count);
+    if (index === undefined) {
+        const bufferView = ctx.buffers.addBufferView(new Float32Array(count * 2), undefined, ARRAY_BUFFER);
+        index = ctx.buffers.addAccessor({ bufferView, componentType: FLOAT, count, type: "VEC2" });
+        ctx.zeroUvAccessors.set(count, index);
+    }
+    return index;
 }
 
 /** glTF numeric primitive mode for a mesh: `_topology` (1 points, 2 lines, 3 line strip, 4 triangle
@@ -155,21 +162,6 @@ function checkLength(ctx: ExportContext, m: Mesh, data: ArrayLike<number>, compo
 
 function warnGpuOnly(ctx: ExportContext, m: Mesh, label: string): void {
     ctx.warn(`Mesh "${m.name}" has ${label} on the GPU only; exporting the mesh without them.`);
-}
-
-/** Return the cached accessor for (`source`, `variant`), building it on first use. */
-function cachedAccessor(ctx: ExportContext, source: ArrayBufferView, variant: string, build: () => number): number {
-    let byVariant = ctx.accessorIndex.get(source);
-    if (!byVariant) {
-        byVariant = new Map();
-        ctx.accessorIndex.set(source, byVariant);
-    }
-    let index = byVariant.get(variant);
-    if (index === undefined) {
-        index = build();
-        byVariant.set(variant, index);
-    }
-    return index;
 }
 
 const ACCESSOR_TYPES: Readonly<Record<number, GltfAccessorType>> = { 2: "VEC2", 3: "VEC3", 4: "VEC4" };
@@ -243,60 +235,79 @@ function mirrorTangent(src: Float32Array, components: number): Float32Array {
     return out;
 }
 
-/** The index accessor for a mesh: undefined for a non-indexed primitive that needs no reversal,
- *  null when the mesh has an empty index list (nothing to draw). */
-function indexAccessor(ctx: ExportContext, m: Mesh, vertexCount: number, reverse: boolean): number | undefined | null {
+/** The index accessor and glTF mode for a mesh. Winding reversal (`flip`) applies to triangle
+ *  lists by swapping each triangle's last two indices; a triangle strip that needs it is expanded
+ *  to a reversed triangle list. Non-indexed meshes get synthesized indices only when reversed.
+ *  Indices keep their retained width (`_cpuGpuIndices`) unless they contain 65535 (glTF's
+ *  primitive-restart value for UNSIGNED_SHORT); otherwise they narrow to UNSIGNED_SHORT when every
+ *  value is below 65535. */
+function indexAccessor(ctx: ExportContext, m: Mesh, vertexCount: number, mode: number, flip: boolean): { index?: number; mode: number } {
     const source: Uint16Array | Uint32Array | undefined = m._cpuGpuIndices ?? m._cpuIndices;
-    if (!source) {
-        if (!reverse) {
-            return undefined;
-        }
-        // Non-indexed and needs reversal: synthesize the flipped sequence (0, 2, 1, 3, 5, 4, …).
-        const positions = m._cpuPositions!;
-        return cachedAccessor(ctx, positions, "synthesized-indices", () => {
-            const triangles = Math.floor(vertexCount / 3);
-            const out = vertexCount <= 65535 ? new Uint16Array(triangles * 3) : new Uint32Array(triangles * 3);
-            for (let t = 0; t < triangles; t++) {
-                out[t * 3] = t * 3;
-                out[t * 3 + 1] = t * 3 + 2;
-                out[t * 3 + 2] = t * 3 + 1;
-            }
-            return addIndexAccessor(ctx, out);
-        });
+    const strip = flip && mode === 5;
+    if (!(flip && (mode === 4 || mode === 5)) && !source) {
+        return { mode };
     }
-    if (source.length === 0) {
-        return null;
-    }
-    const retainedWidth = m._cpuGpuIndices !== undefined;
-    return cachedAccessor(ctx, source, reverse ? "indices-reversed" : "indices", () => {
-        let data: Uint16Array | Uint32Array = source;
-        if (!retainedWidth && source instanceof Uint32Array && maxValue(source) < 65535) {
-            data = Uint16Array.from(source);
-        }
-        if (reverse) {
-            data = data === source ? data.slice() : data;
-            const triangles = Math.floor(data.length / 3);
-            for (let t = 0; t < triangles; t++) {
-                const i1 = data[t * 3 + 1]!;
-                data[t * 3 + 1] = data[t * 3 + 2]!;
-                data[t * 3 + 2] = i1;
+    // Non-indexed geometry indexes its vertices in order.
+    const key: ArrayBufferView = source ?? m._cpuPositions!;
+    const variant = strip ? "indices-strip-reversed" : flip && mode === 4 ? "indices-reversed" : "indices";
+    const index = cachedAccessor(ctx, key, source ? variant : `${variant}-synthesized`, () => {
+        const list: ArrayLike<number> = source ?? sequence(vertexCount);
+        let out: number[] | Uint16Array | Uint32Array;
+        if (strip) {
+            // Strip triangle i is (s[i], s[i+1], s[i+2]) for even i and (s[i+1], s[i], s[i+2]) for odd
+            // i; reversed, each becomes (a, c, b).
+            const triangles = Math.max(list.length - 2, 0);
+            out = new Array<number>(triangles * 3);
+            for (let i = 0; i < triangles; i++) {
+                const a = i & 1 ? list[i + 1]! : list[i]!;
+                const b = i & 1 ? list[i]! : list[i + 1]!;
+                out[i * 3] = a;
+                out[i * 3 + 1] = list[i + 2]!;
+                out[i * 3 + 2] = b;
             }
+        } else if (flip && mode === 4) {
+            const triangles = Math.floor(list.length / 3);
+            out = new Array<number>(triangles * 3);
+            for (let t = 0; t < triangles; t++) {
+                out[t * 3] = list[t * 3]!;
+                out[t * 3 + 1] = list[t * 3 + 2]!;
+                out[t * 3 + 2] = list[t * 3 + 1]!;
+            }
+        } else {
+            out = source!;
         }
-        return addIndexAccessor(ctx, data);
+        return addIndexAccessor(ctx, toIndexArray(out, m._cpuGpuIndices));
     });
+    return { index, mode: strip ? 4 : mode };
+}
+
+/** Pack indices at their glTF width. Retained 32-bit indices (`_cpuGpuIndices`) stay 32-bit. All
+ *  others use UNSIGNED_SHORT when every value is below 65535 — glTF reserves 65535 as the 16-bit
+ *  primitive-restart value — and UNSIGNED_INT otherwise. */
+function toIndexArray(values: ArrayLike<number>, retained: Uint16Array | Uint32Array | undefined): Uint16Array | Uint32Array {
+    if (!(retained instanceof Uint32Array)) {
+        let max = 0;
+        for (let i = 0; i < values.length; i++) {
+            if (values[i]! > max) {
+                max = values[i]!;
+            }
+        }
+        if (max < 65535) {
+            return values instanceof Uint16Array ? values : Uint16Array.from(values);
+        }
+    }
+    return values instanceof Uint32Array ? values : Uint32Array.from(values);
+}
+
+function sequence(count: number): number[] {
+    const out = new Array<number>(count);
+    for (let i = 0; i < count; i++) {
+        out[i] = i;
+    }
+    return out;
 }
 
 function addIndexAccessor(ctx: ExportContext, data: Uint16Array | Uint32Array): number {
     const bufferView = ctx.buffers.addBufferView(data, undefined, ELEMENT_ARRAY_BUFFER);
     return ctx.buffers.addAccessor({ bufferView, componentType: data instanceof Uint16Array ? UNSIGNED_SHORT : UNSIGNED_INT, count: data.length, type: "SCALAR" });
-}
-
-function maxValue(data: Uint32Array): number {
-    let max = 0;
-    for (let i = 0; i < data.length; i++) {
-        if (data[i]! > max) {
-            max = data[i]!;
-        }
-    }
-    return max;
 }

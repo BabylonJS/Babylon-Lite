@@ -6,10 +6,15 @@
 /** Tolerance for every approximate comparison in the exporter (`≈` in the architecture doc). */
 export const EXPORT_EPSILON = 0.001;
 
-/** True when every component of `a` is within {@link EXPORT_EPSILON} of the matching component of `b`. */
-export function nearlyEqual(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+/** Tolerance for omitting values equal to their glTF defaults. Tight, so that small but real values
+ *  (sub-millimetre offsets, tiny rotations) are never dropped; it only absorbs float noise. */
+export const OMIT_EPSILON = 1e-9;
+
+/** True when every component of `a` is within `epsilon` (default {@link EXPORT_EPSILON}) of the
+ *  matching component of `b`. */
+export function nearlyEqual(a: ArrayLike<number>, b: ArrayLike<number>, epsilon = EXPORT_EPSILON): boolean {
     for (let i = 0; i < b.length; i++) {
-        if (!(Math.abs(a[i]! - b[i]!) <= EXPORT_EPSILON)) {
+        if (!(Math.abs(a[i]! - b[i]!) <= epsilon)) {
             return false;
         }
     }
@@ -114,4 +119,9 @@ export function rotationToDirection(dx: number, dy: number, dz: number): [number
  *  `(authoredSign ?? 1) === (convert ? −1 : +1)`. */
 export function needsWindingFlip(authoredSign: number | undefined, convert: boolean): boolean {
     return (authoredSign ?? 1) < 0 === convert;
+}
+
+/** Whether a quaternion is the identity rotation (either sign) within `epsilon`. */
+export function isIdentityRotation(q: ArrayLike<number>, epsilon = OMIT_EPSILON): boolean {
+    return nearlyEqual(q, [0, 0, 0, 1], epsilon) || nearlyEqual(q, [0, 0, 0, -1], epsilon);
 }

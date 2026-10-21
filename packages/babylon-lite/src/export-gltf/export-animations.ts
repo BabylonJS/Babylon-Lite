@@ -3,8 +3,10 @@
 import type { AnimationGroup } from "../animation/animation-group.js";
 import { INTERP_CUBICSPLINE, INTERP_STEP, PATH_POINTER, PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION, PATH_WEIGHTS } from "../animation/types.js";
 import type { AnimationSampler } from "../animation/types.js";
-import { computeMinMax } from "./export-buffers.js";
+import { computeMinMax, FLOAT } from "./export-buffers.js";
 import type { ExportContext } from "./export-context.js";
+import { cachedAccessor } from "./export-context.js";
+import { isExportableNode } from "./export-nodes.js";
 import type { GltfAccessorType, GltfAnimation, GltfAnimationChannel, GltfAnimationSampler } from "./export-gltf-types.js";
 
 type AnimPathName = "translation" | "rotation" | "scale" | "weights";
@@ -24,62 +26,84 @@ function pathNameOf(path: number): AnimPathName | undefined {
     }
 }
 
-/** Left-handed → right-handed conversion of a translation/rotation output array (a copy). */
-function convertOutput(output: Float32Array, pathName: AnimPathName): Float32Array {
-    const out = output.slice();
-    if (pathName === "translation") {
-        for (let i = 0; i + 2 < out.length; i += 3) {
-            out[i] = -out[i]!;
+/** @internal The scene nodes bound by a glTF-clip node channel (translation, rotation, scale or
+ *  weights) — exactly the channels {@link exportAnimations} considers. They must export TRS, never
+ *  `matrix`, and they seed root collection. */
+export function collectAnimatedNodes(groups: readonly AnimationGroup[]): Set<object> {
+    const out = new Set<object>();
+    for (const group of groups) {
+        const clip = group._gltfMixer?.[0];
+        if (!clip) {
+            continue;
         }
-    } else if (pathName === "rotation") {
-        for (let i = 0; i + 3 < out.length; i += 4) {
-            out[i + 1] = -out[i + 1]!;
-            out[i + 2] = -out[i + 2]!;
+        for (let i = 0; i < clip.channels.length; i++) {
+            const target = group.targetedAnimations[i]?.target;
+            if (pathNameOf(clip.channels[i]!.path) !== undefined && isExportableNode(target)) {
+                out.add(target);
+            }
         }
     }
     return out;
 }
 
-function cachedAccessor(ctx: ExportContext, source: Float32Array, variant: string, create: () => number): number {
-    let byVariant = ctx.accessorIndex.get(source);
-    const existing = byVariant?.get(variant);
-    if (existing !== undefined) {
-        return existing;
+/** The output array as exported: a converting target's translations get X negated and rotations the
+ *  map (x, −y, −z, w) (a copy; values and CUBICSPLINE tangents alike). Non-spline rotation keys that
+ *  are not unit length are renormalized, as glTF requires; otherwise pass-through output is the
+ *  source array itself. */
+function exportedOutput(output: Float32Array, pathName: AnimPathName, convert: boolean, cubic: boolean): Float32Array {
+    let out: Float32Array | null = null;
+    if (convert && pathName === "translation") {
+        out = output.slice();
+        for (let i = 0; i + 2 < out.length; i += 3) {
+            out[i] = -out[i]!;
+        }
+    } else if (convert && pathName === "rotation") {
+        out = output.slice();
+        for (let i = 0; i + 3 < out.length; i += 4) {
+            out[i + 1] = -out[i + 1]!;
+            out[i + 2] = -out[i + 2]!;
+        }
     }
-    const index = create();
-    if (!byVariant) {
-        byVariant = new Map();
-        ctx.accessorIndex.set(source, byVariant);
+    if (pathName === "rotation" && !cubic) {
+        const src = out ?? output;
+        for (let i = 0; i + 3 < src.length; i += 4) {
+            const len = Math.hypot(src[i]!, src[i + 1]!, src[i + 2]!, src[i + 3]!);
+            if (len > 0 && Math.abs(len - 1) > 0.0005) {
+                out ??= output.slice();
+                for (let c = 0; c < 4; c++) {
+                    out[i + c] = src[i + c]! / len;
+                }
+            }
+        }
     }
-    byVariant.set(variant, index);
-    return index;
+    return out ?? output;
 }
 
 function inputAccessor(ctx: ExportContext, input: Float32Array): number {
     return cachedAccessor(ctx, input, "animation-input", () => {
         const { min, max } = computeMinMax(input, 1);
         const bufferView = ctx.buffers.addBufferView(input);
-        return ctx.buffers.addAccessor({ bufferView, componentType: 5126, count: input.length, type: "SCALAR", min, max });
+        return ctx.buffers.addAccessor({ bufferView, componentType: FLOAT, count: input.length, type: "SCALAR", min, max });
     });
 }
 
-function outputAccessor(ctx: ExportContext, output: Float32Array, pathName: AnimPathName, convert: boolean): number {
+function componentsOf(pathName: AnimPathName): number {
+    return pathName === "rotation" ? 4 : pathName === "weights" ? 1 : 3;
+}
+
+function outputAccessor(ctx: ExportContext, output: Float32Array, pathName: AnimPathName, convert: boolean, cubic: boolean): number {
     return cachedAccessor(ctx, output, `animation-${pathName}-${convert ? "c" : "p"}`, () => {
-        const components = pathName === "rotation" ? 4 : pathName === "weights" ? 1 : 3;
+        const components = componentsOf(pathName);
         const type: GltfAccessorType = components === 4 ? "VEC4" : components === 1 ? "SCALAR" : "VEC3";
-        const data = convert ? convertOutput(output, pathName) : output;
-        const bufferView = ctx.buffers.addBufferView(data);
-        return ctx.buffers.addAccessor({ bufferView, componentType: 5126, count: output.length / components, type });
+        const bufferView = ctx.buffers.addBufferView(exportedOutput(output, pathName, convert, cubic));
+        return ctx.buffers.addAccessor({ bufferView, componentType: FLOAT, count: output.length / components, type });
     });
 }
 
-function hasMorphTargets(ctx: ExportContext, node: number): boolean {
+/** The number of morph targets of the glTF mesh on `node` (0 when it has none). */
+function morphTargetCount(ctx: ExportContext, node: number): number {
     const meshIdx = ctx.doc.nodes[node]?.mesh;
-    if (meshIdx === undefined) {
-        return false;
-    }
-    const targets = ctx.doc.meshes[meshIdx]?.primitives[0]?.targets;
-    return targets !== undefined && targets.length > 0;
+    return meshIdx === undefined ? 0 : (ctx.doc.meshes[meshIdx]?.primitives[0]?.targets?.length ?? 0);
 }
 
 function interpolationOf(sampler: AnimationSampler): GltfAnimationSampler["interpolation"] {
@@ -116,8 +140,16 @@ export function exportAnimations(ctx: ExportContext, groups: readonly AnimationG
             if (pathName === undefined || clipSampler === undefined) {
                 continue;
             }
-            if (pathName === "weights" && !hasMorphTargets(ctx, node)) {
+            const targetCount = pathName === "weights" ? morphTargetCount(ctx, node) : 1;
+            if (targetCount === 0) {
                 ctx.warn(`Animation "${group.name}" animates morph weights on a node without morph targets; skipping channel.`);
+                continue;
+            }
+            // glTF needs at least one key and exactly (keys × values per key × 3 for splines) outputs.
+            const cubic = clipSampler.interpolation === INTERP_CUBICSPLINE;
+            const keys = clipSampler.input.length;
+            if (keys === 0 || clipSampler.output.length !== keys * componentsOf(pathName) * targetCount * (cubic ? 3 : 1)) {
+                ctx.warn(`Animation "${group.name}" has a sampler whose key and value counts do not match; skipping channel.`);
                 continue;
             }
             const useKey = `${node}:${pathName}`;
@@ -133,7 +165,7 @@ export function exportAnimations(ctx: ExportContext, groups: readonly AnimationG
             if (sampler === undefined) {
                 const out: GltfAnimationSampler = {
                     input: inputAccessor(ctx, clipSampler.input),
-                    output: outputAccessor(ctx, clipSampler.output, pathName, convert),
+                    output: outputAccessor(ctx, clipSampler.output, pathName, convert, cubic),
                 };
                 const interpolation = interpolationOf(clipSampler);
                 if (interpolation) {

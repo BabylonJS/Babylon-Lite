@@ -88,13 +88,28 @@ describe("image readback paths", () => {
     it.each([
         ["a 3d texture", { dimension: "3d" as const }],
         ["a two-layer texture", { layers: 2 }],
+        ["a multisampled texture", { sampleCount: 4 }],
     ])("omits %s with the not-a-single-2D-image warning", async (_name, options) => {
         const { device, stats } = createFakeDevice();
         const glb = await exportAndParse(sceneWithBaseColor(device, createTexture(2, 2, PATTERN, options)));
-        expect(glb.warnings).toEqual(['Texture for material "mat0" is not a single 2D image; exporting the material without that texture.']);
+        expect(glb.warnings).toEqual(['Texture for material "mat0" is not a single-sampled 2D image; exporting the material without that texture.']);
         expect(glb.json.images).toBeUndefined();
         expect(glb.json.textures).toBeUndefined();
         expect(stats.copies).toBe(0);
+    });
+
+    it("omits a texture whose staging buffer exceeds device.limits.maxBufferSize and warns", async () => {
+        // A 2x2 texture needs a 2 * 256 byte staging buffer.
+        const { device, stats } = createFakeDevice({ maxBufferSize: 511 });
+        const glb = await exportAndParse(sceneWithBaseColor(device, createTexture(2, 2, PATTERN)));
+        expect(glb.warnings).toEqual(['Texture for material "mat0" is too large to read back on this device; exporting the material without that texture.']);
+        expect(glb.json.images).toBeUndefined();
+        expect(glb.json.textures).toBeUndefined();
+        expect(stats.buffersCreated).toBe(0);
+        const fits = createFakeDevice({ maxBufferSize: 512 });
+        const ok = await exportAndParse(sceneWithBaseColor(fits.device, createTexture(2, 2, PATTERN)));
+        expect(ok.warnings).toEqual([]);
+        expect(ok.json.images).toHaveLength(1);
     });
 
     it("warns that rgba16float is clamped to 8 bits and still exports it", async () => {
@@ -174,6 +189,20 @@ describe("readback failure", () => {
         } finally {
             process.off("unhandledRejection", unhandled);
         }
+    });
+});
+
+describe("synchronous submission failure", () => {
+    it("rejects the export when createBuffer throws", async () => {
+        const { device } = createFakeDevice({ failCreateBuffer: true });
+        await expect(exportAndParse(sceneWithBaseColor(device, createTexture(2, 2, PATTERN)))).rejects.toThrow("createBuffer failed");
+    });
+
+    it("destroys the transient blit texture when createBuffer throws after the blit was encoded", async () => {
+        const { device, stats } = createFakeDevice({ failCreateBuffer: true });
+        await expect(exportAndParse(sceneWithBaseColor(device, createTexture(2, 2, PATTERN, { usage: TEXTURE_BINDING })))).rejects.toThrow("createBuffer failed");
+        expect(stats.texturesCreated).toBe(1);
+        expect(stats.texturesDestroyed).toBe(1);
     });
 });
 

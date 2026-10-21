@@ -9,10 +9,10 @@ import type { StandardMaterialProps } from "../material/standard/standard-materi
 import { srgbByteToLinear } from "../math/color.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { getTextureTransform } from "../texture/texture-metadata.js";
-import type { ExportContext, MaterialExtensionWriter, PendingSlot, SlotMapping, SlotTransform, UvState } from "./export-context.js";
+import type { ExportContext, MaterialExtensionWriter, PendingFold, PendingSlot, SlotMapping, SlotTransform, UvState } from "./export-context.js";
 import { attachExtension, snapshotExtras } from "./export-context.js";
 import type { GltfJsonObject, GltfMaterial } from "./export-gltf-types.js";
-import { nearlyEqual } from "./export-handedness.js";
+import { nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
 import { requestPixels, textureReadIssue } from "./export-images.js";
 import {
     capturePbrSlot,
@@ -93,10 +93,14 @@ export function exportMaterial(ctx: ExportContext, material: Material | null | u
         }
         index = ctx.doc.materials.push(out) - 1;
         byState.set(key, index);
+        const firstSlot = ctx.slots.length;
         if (family === "pbr") {
             exportPbrMaterial(ctx, source as PbrMaterialProps, out, key);
         } else {
             exportStandardMaterial(ctx, source as StandardMaterialProps, out, key);
+        }
+        if (ctx.slots.slice(firstSlot).some((slot) => slot.mapping.texCoord === 0)) {
+            ctx.materialsUsingUv0.add(index);
         }
         const extras = snapshotExtras(ctx, source.metadata?.gltf?.extras, source.name);
         if (extras !== undefined) {
@@ -133,10 +137,12 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
     const alpha = m.alpha ?? 1;
     const baseFactor = [f[0], f[1], f[2], f[3] * alpha];
     if (isOneByOne(m.baseColorTexture)) {
-        recordFold(ctx, pmr, "baseColor", m.baseColorTexture!, baseFactor, name);
+        const tex = m.baseColorTexture!;
+        const decode = tex.texture.format.endsWith("-srgb") ? "srgb" : m._gammaAlbedo ? "gamma" : "linear";
+        recordFold(ctx, pmr, "baseColor", tex, baseFactor, name, decode);
     } else {
         capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "baseColorTexture", m.baseColorTexture, UV2_BASE_COLOR));
-        writeBaseColorFactor(pmr, baseFactor);
+        writeBaseColorFactor(ctx, pmr, baseFactor, name);
     }
 
     // Metallic-roughness from ORM (G roughness, B metallic). The spec-gloss shader path takes both
@@ -163,12 +169,12 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 }
             }
         }
-        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, ormFallback);
+        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, "linear", ormFallback);
     } else {
         if (orm) {
             capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "metallicRoughnessTexture", orm, UV2_ORM));
         }
-        writeMetallicRoughness(pmr, metallic, roughness);
+        writeMetallicRoughness(ctx, pmr, metallic, roughness, name);
     }
 
     // Normal.
@@ -199,9 +205,10 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 // The loader's ORM carrier on UV0, transformed like a core slot.
                 capturePbrSlot(ctx, m, uvState, obj, { key: "occlusionTexture", texture: m.occlusionTexture, transform: !!m._hasUvTx, extra: strengthExtra(occlusionStrength) });
             }
-        } else if (orm && !ormFallback) {
-            // glTF ORM assets share one image between metallicRoughness and occlusion.
-            capturePbrSlot(ctx, m, uvState, obj, pbrCoreSlot(m, "occlusionTexture", orm, UV2_ORM, strengthExtra(occlusionStrength)));
+        } else if (m.ormTexture && !ormFallback) {
+            // glTF ORM assets share one image between metallicRoughness and occlusion. The spec-gloss
+            // path still reads occlusion from the ORM's R channel.
+            capturePbrSlot(ctx, m, uvState, obj, pbrCoreSlot(m, "occlusionTexture", m.ormTexture, UV2_ORM, strengthExtra(occlusionStrength)));
         }
     }
 
@@ -211,8 +218,8 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
     const e = m._emissiveColor;
     if (e) {
         const peak = Math.max(e[0], e[1], e[2]);
-        const factor = peak > 1 ? [e[0] / peak, e[1] / peak, e[2] / peak] : [e[0], e[1], e[2]];
-        if (!nearlyEqual(factor, [0, 0, 0])) {
+        const factor = (peak > 1 ? [e[0] / peak, e[1] / peak, e[2] / peak] : [e[0], e[1], e[2]]).map((c) => Math.max(c, 0));
+        if (!nearlyEqual(factor, [0, 0, 0], OMIT_EPSILON)) {
             out.emissiveFactor = factor;
         }
     } else if (m.emissiveTexture) {
@@ -256,18 +263,29 @@ function coreMapping(ctx: ExportContext, m: PbrMaterialProps, tex: Texture2D, bi
     return { texCoord, transform: m._hasUvTx ? textureTransformOf(tex) : undefined, rowOrder: "storage" };
 }
 
-function writeBaseColorFactor(pmr: GltfJsonObject, factor: readonly number[]): void {
-    if (!nearlyEqual(factor, [1, 1, 1, 1])) {
-        pmr.baseColorFactor = Array.from(factor);
+/** Clamp material factors to glTF's [0, 1] range, warning when any was outside it. */
+function clampFactors(ctx: ExportContext, values: readonly number[], name: string): number[] {
+    const out = values.map((v) => Math.min(Math.max(v, 0), 1));
+    if (out.some((v, i) => v !== values[i])) {
+        ctx.warn(`Material "${name}" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.`);
+    }
+    return out;
+}
+
+function writeBaseColorFactor(ctx: ExportContext, pmr: GltfJsonObject, factor: readonly number[], name: string): void {
+    const clamped = clampFactors(ctx, factor, name);
+    if (!nearlyEqual(clamped, [1, 1, 1, 1], OMIT_EPSILON)) {
+        pmr.baseColorFactor = clamped;
     }
 }
 
-function writeMetallicRoughness(pmr: GltfJsonObject, metallic: number, roughness: number): void {
-    if (metallic !== 1) {
-        pmr.metallicFactor = metallic;
+function writeMetallicRoughness(ctx: ExportContext, pmr: GltfJsonObject, metallic: number, roughness: number, name: string): void {
+    const [m, r] = clampFactors(ctx, [metallic, roughness], name);
+    if (m !== 1) {
+        pmr.metallicFactor = m;
     }
-    if (roughness !== 1) {
-        pmr.roughnessFactor = roughness;
+    if (r !== 1) {
+        pmr.roughnessFactor = r;
     }
 }
 
@@ -280,14 +298,15 @@ function recordFold(
     texture: Texture2D,
     factor: number[],
     materialName: string,
+    decode: PendingFold["decode"],
     fallbackSlots?: PendingSlot[]
 ): void {
     if (textureReadIssue(ctx, texture) !== null) {
         ctx.warn(`1×1 factor texture for material "${materialName}" is not readable on this engine; exporting its factors without the texture.`);
         if (kind === "baseColor") {
-            writeBaseColorFactor(owner, factor);
+            writeBaseColorFactor(ctx, owner, factor, materialName);
         } else {
-            writeMetallicRoughness(owner, factor[0]!, factor[1]!);
+            writeMetallicRoughness(ctx, owner, factor[0]!, factor[1]!, materialName);
         }
         return;
     }
@@ -299,34 +318,32 @@ function recordFold(
         owner.metallicFactor = undefined;
         owner.roughnessFactor = undefined;
     }
-    ctx.folds.push({ owner, kind, texture, factor, materialName, fallbackSlots });
+    ctx.folds.push({ owner, kind, gpu: texture.texture, decode, factor, materialName, fallbackSlots });
 }
 
 /** @internal Resolve every 1×1 factor fold in capture order (synchronous, after readbacks settle and
  *  before the texture slots resolve). */
 export function resolveFolds(ctx: ExportContext): void {
     for (const fold of ctx.folds) {
-        const pixels = ctx.resolvedPixels.get(fold.texture.texture);
+        const pixels = ctx.resolvedPixels.get(fold.gpu);
         const t = pixels ? pixels.rgba : WHITE_TEXEL;
         if (fold.kind === "baseColor") {
-            // The shader samples a `-srgb` texture as linear; a linear-format texture as byte / 255.
-            const srgb = fold.texture.texture.format.endsWith("-srgb");
-            const decode = (b: number): number => (srgb ? srgbByteToLinear(b) : b / 255);
+            const decode = (b: number): number => (fold.decode === "srgb" ? srgbByteToLinear(b) : fold.decode === "gamma" ? Math.pow(b / 255, 2.2) : b / 255);
             const f = fold.factor;
-            writeBaseColorFactor(fold.owner, [decode(t[0]!) * f[0]!, decode(t[1]!) * f[1]!, decode(t[2]!) * f[2]!, (t[3]! / 255) * f[3]!]);
+            writeBaseColorFactor(ctx, fold.owner, [decode(t[0]!) * f[0]!, decode(t[1]!) * f[1]!, decode(t[2]!) * f[2]!, (t[3]! / 255) * f[3]!], fold.materialName);
             continue;
         }
         const [metallic, roughness] = fold.factor;
         if (fold.fallbackSlots && fold.fallbackSlots.length > 0 && t[0] !== 255) {
             // Occlusion reads a non-white R channel, which glTF cannot express as a factor: export
             // the 1×1 ORM as an image and keep the plain factors.
-            writeMetallicRoughness(fold.owner, metallic!, roughness!);
+            writeMetallicRoughness(ctx, fold.owner, metallic!, roughness!, fold.materialName);
             continue;
         }
         for (const slot of fold.fallbackSlots ?? []) {
             slot.cancelled = true;
         }
-        writeMetallicRoughness(fold.owner, metallic! * (t[2]! / 255), roughness! * (t[1]! / 255));
+        writeMetallicRoughness(ctx, fold.owner, metallic! * (t[2]! / 255), roughness! * (t[1]! / 255), fold.materialName);
     }
 }
 
@@ -352,11 +369,24 @@ function exportStandardMaterial(ctx: ExportContext, m: StandardMaterialProps, ou
     out.pbrMetallicRoughness = pmr;
     const alpha = m.alpha ?? 1;
     const diffuse = m.diffuseColor ?? [1, 1, 1];
-    writeBaseColorFactor(pmr, [gammaToLinear(diffuse[0]) * 0.5, gammaToLinear(diffuse[1]) * 0.5, gammaToLinear(diffuse[2]) * 0.5, alpha]);
-    pmr.metallicFactor = 0;
-    const roughness = specularPowerToRoughness(Math.min(Math.max(m.specularPower ?? 64, 0), 1024));
-    if (roughness !== 1) {
-        pmr.roughnessFactor = roughness;
+    const emissive = m.emissiveColor ?? [0, 0, 0];
+    const unlit = m.disableLighting === true;
+    if (unlit) {
+        // The unlit Standard shader outputs clamp(emissive × diffuse) × diffuseTexture, in gamma space.
+        const c = [0, 1, 2].map((i) => gammaToLinear(Math.min(Math.max(emissive[i]! * diffuse[i]!, 0), 1)));
+        writeBaseColorFactor(ctx, pmr, [c[0]!, c[1]!, c[2]!, alpha], name);
+        attachExtension(ctx, out, "KHR_materials_unlit", {});
+        if (m._emissiveTexture) {
+            ctx.warn(`Material "${name}" is unlit with an emissive texture, which KHR_materials_unlit cannot represent; exporting it without the texture.`);
+        }
+    } else {
+        // Babylon.js's Blinn-Phong → metallic-roughness approximation.
+        writeBaseColorFactor(ctx, pmr, [gammaToLinear(diffuse[0]) * 0.5, gammaToLinear(diffuse[1]) * 0.5, gammaToLinear(diffuse[2]) * 0.5, alpha], name);
+        pmr.metallicFactor = 0;
+        const roughness = specularPowerToRoughness(Math.min(Math.max(m.specularPower ?? 64, 0), 1024));
+        if (roughness !== 1) {
+            pmr.roughnessFactor = roughness;
+        }
     }
 
     const flippedMaterialWide = isStandardUvInverted(m);
@@ -370,34 +400,37 @@ function exportStandardMaterial(ctx: ExportContext, m: StandardMaterialProps, ou
         }
     };
     slot(pmr, "baseColorTexture", m.diffuseTexture, m.diffuseCoordIndex ?? 0, false);
-    const bumpLevel = m.bumpLevel ?? 1;
-    slot(obj, "normalTexture", m._bumpTexture, 0, true, bumpLevel !== 1 ? { scale: bumpLevel } : undefined);
-    slot(obj, "occlusionTexture", m._ambientTexture, m.ambientCoordIndex ?? 0, false);
-    slot(obj, "emissiveTexture", m._emissiveTexture, 0, false);
-
-    // Emissive: the texture alone needs a white factor; a non-black color (added in gamma space by
-    // the Standard shader) overrides it, converted to linear.
-    const e = m.emissiveColor ?? [0, 0, 0];
-    if (e[0] !== 0 || e[1] !== 0 || e[2] !== 0) {
-        out.emissiveFactor = [gammaToLinear(e[0]), gammaToLinear(e[1]), gammaToLinear(e[2])];
-    } else if (m._emissiveTexture) {
-        out.emissiveFactor = [1, 1, 1];
+    if (!unlit) {
+        const bumpLevel = m.bumpLevel ?? 1;
+        slot(obj, "normalTexture", m._bumpTexture, 0, true, bumpLevel !== 1 ? { scale: bumpLevel } : undefined);
+        slot(obj, "occlusionTexture", m._ambientTexture, m.ambientCoordIndex ?? 0, false);
+        slot(obj, "emissiveTexture", m._emissiveTexture, 0, false);
+        // Emissive: the texture alone needs a white factor; a non-black color (added in gamma space
+        // by the Standard shader) overrides it, converted to linear.
+        if (emissive[0] !== 0 || emissive[1] !== 0 || emissive[2] !== 0) {
+            out.emissiveFactor = clampFactors(ctx, [gammaToLinear(emissive[0]), gammaToLinear(emissive[1]), gammaToLinear(emissive[2])], name);
+        } else if (m._emissiveTexture) {
+            out.emissiveFactor = [1, 1, 1];
+        }
     }
 
+    // Alpha. Lite's alpha test runs only on the diffuse texture's alpha, and its output alpha is the
+    // material alpha (times an opacity texture), so MASK is exact only for an opaque textured material.
     const cutoff = m.alphaCutOff ?? 0;
-    if (cutoff > 0) {
+    const blends = alpha < 1 || !!m._opacityTexture;
+    if (cutoff > 0 && m.diffuseTexture && !blends) {
         out.alphaMode = "MASK";
         if (cutoff !== 0.5) {
             out.alphaCutoff = cutoff;
         }
-    } else if (alpha < 1 || m._opacityTexture) {
+    } else if (blends) {
         out.alphaMode = "BLEND";
+        if (cutoff > 0 && m.diffuseTexture) {
+            ctx.warn(`Material "${name}" both alpha-tests and blends, which glTF cannot represent; exporting it as BLEND.`);
+        }
     }
     if (m.backFaceCulling === false) {
         out.doubleSided = true;
-    }
-    if (m.disableLighting === true) {
-        attachExtension(ctx, out, "KHR_materials_unlit", {});
     }
 }
 

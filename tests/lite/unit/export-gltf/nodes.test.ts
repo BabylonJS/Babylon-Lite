@@ -182,16 +182,60 @@ describe("root collection", () => {
     });
 });
 
+describe("parent cycles", () => {
+    it("warns and exports instead of hanging when the scene graph contains a parent cycle", async () => {
+        const a = createTransformNode("a");
+        const b = createTransformNode("b");
+        // The engine's own parent setter cannot form a cycle (it recurses), so define plain properties.
+        Object.defineProperty(a, "parent", { value: b, configurable: true });
+        Object.defineProperty(b, "parent", { value: a, configurable: true });
+        a.children.push(b);
+        b.children.push(a);
+        const mesh = attach(createMesh("m"), a);
+        const glb = await exportAndParse(createScene({ meshes: [mesh] }));
+        expect(glb.warnings.filter((w) => /is part of a parent cycle; exporting the cycle from this node\./.test(w))).toHaveLength(1);
+        expect(glb.json.nodes.length).toBeGreaterThanOrEqual(2);
+        expect(glb.json.meshes).toHaveLength(1);
+        expect(glb.json.scenes[0].nodes).toHaveLength(1);
+    });
+});
+
 describe("node transforms", () => {
-    it("omits TRS components within 0.001 of their defaults", async () => {
-        const node = createTransformNode("n", 0.0005, -0.0005, 0, 0.0004, 0, 0, 1, 1.0005, 0.9995, 1);
+    it("omits TRS components that differ from their defaults only by float noise", async () => {
+        const node = createTransformNode("n", 1e-12, -1e-12, 0, 1e-12, 0, 0, 1, 1 + 1e-12, 1 - 1e-12, 1);
         const mesh = attach(createMesh("m"), node);
-        mesh.position.set(0, 0, 0);
         const glb = await exportAndParse(createScene({ meshes: [mesh] }));
         expect(glb.json.nodes[0].translation).toBeUndefined();
         expect(glb.json.nodes[0].rotation).toBeUndefined();
         expect(glb.json.nodes[0].scale).toBeUndefined();
         expect(glb.json.nodes[0].matrix).toBeUndefined();
+    });
+
+    it("keeps small real TRS values instead of treating them as defaults", async () => {
+        const half = 0.0004 / 2;
+        const node = createTransformNode("n", 0.0005, -0.0005, 0, half, 0, 0, Math.sqrt(1 - half * half), 1.0005, 0.9995, 1);
+        const mesh = attach(createMesh("m"), node);
+        const glb = await exportAndParse(createScene({ meshes: [mesh] }));
+        expectClose(glb.json.nodes[0].translation, [-0.0005, -0.0005, 0]);
+        expect(glb.json.nodes[0].rotation).toBeDefined();
+        expect(Math.abs(glb.json.nodes[0].rotation[0])).toBeCloseTo(half, 6);
+        expectClose(glb.json.nodes[0].scale, [1.0005, 0.9995, 1]);
+    });
+
+    it("keeps a small real translation in a pass-through pass", async () => {
+        const root = loaderRoot();
+        const node = attach(createTransformNode("n", 0.0005, 0, 0), root);
+        const glb = await exportAndParse(createScene({ meshes: [attach(createMesh("m", { authoredSign: -1 }), node)] }));
+        expectClose(glb.json.nodes[0].translation, [0.0005, 0, 0]);
+    });
+
+    it("keeps a _localMatrix that differs from identity by a small real amount and omits float noise", async () => {
+        const nearIdentity = matrixNode("near", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.0005, 0, 0, 1]);
+        const glbNear = await exportAndParse(createScene({ meshes: [attach(createMesh("a"), nearIdentity)] }));
+        expectClose(glbNear.json.nodes[0].matrix, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -0.0005, 0, 0, 1]);
+        const noise = matrixNode("noise", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1e-12, 0, 0, 1]);
+        const glbNoise = await exportAndParse(createScene({ meshes: [attach(createMesh("b"), noise)] }));
+        expect(glbNoise.json.nodes[0].matrix).toBeUndefined();
     });
 
     it("converts TRS in a converting pass: negates translation X and converts the rotation", async () => {
@@ -348,20 +392,86 @@ describe("mesh folding", () => {
         expect(glb.json.nodes[0].children).toEqual([1]);
     });
 
-    it("exports ONE glTF mesh for two nodes sharing geometry arrays and material", async () => {
+    describe("sharing a glTF mesh between nodes", () => {
         const positions = new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]);
         const normals = new Float32Array([0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1]);
         const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
         const indices = new Uint32Array([0, 1, 2, 0, 2, 3]);
-        const material = createPbrMaterial({});
-        const a = createMesh("a", { positions, normals, uvs, indices, material });
-        const b = createMesh("b", { positions, normals, uvs, indices, material });
-        b.position.set(4, 0, 0);
+        const sharedMesh = (name: string, material: ReturnType<typeof createPbrMaterial>) => createMesh(name, { positions, normals, uvs, indices, material });
+
+        it("exports ONE glTF mesh for two same-named nodes sharing geometry arrays and material", async () => {
+            const material = createPbrMaterial({});
+            const a = sharedMesh("tile", material);
+            const b = sharedMesh("tile", material);
+            b.position.set(4, 0, 0);
+            const glb = await exportAndParse(createScene({ meshes: [a, b] }));
+            expect(glb.json.nodes).toHaveLength(2);
+            expect(glb.json.meshes).toHaveLength(1);
+            expect(glb.json.meshes[0].name).toBe("tile");
+            expect(glb.json.nodes.map((n: { mesh: number }) => n.mesh)).toEqual([0, 0]);
+            expect(glb.json.materials).toHaveLength(1);
+        });
+
+        it("exports separate glTF meshes, sharing the accessors and material, for differently named nodes", async () => {
+            const material = createPbrMaterial({});
+            const glb = await exportAndParse(createScene({ meshes: [sharedMesh("a", material), sharedMesh("b", material)] }));
+            expect(glb.json.nodes).toHaveLength(2);
+            expect(glb.json.meshes.map((m: { name: string }) => m.name)).toEqual(["a", "b"]);
+            expect(glb.json.nodes.map((n: { mesh: number }) => n.mesh)).toEqual([0, 1]);
+            expect(glb.json.meshes[1].primitives).toEqual(glb.json.meshes[0].primitives);
+            expect(glb.json.materials).toHaveLength(1);
+        });
+
+        it("exports separate glTF meshes for same-named nodes with different materials", async () => {
+            const glb = await exportAndParse(createScene({ meshes: [sharedMesh("tile", createPbrMaterial({})), sharedMesh("tile", createPbrMaterial({ metallicFactor: 0 }))] }));
+            expect(glb.json.meshes).toHaveLength(2);
+        });
+
+        describe("mesh extras", () => {
+            const material = createPbrMaterial({});
+            const holderWith = (name: string, meshExtras: unknown) => {
+                const holder = createTransformNode(name);
+                holder.metadata = { gltf: { extras: { owner: name } } };
+                const mesh = attach(sharedMesh("tile", material), holder);
+                mesh.metadata = { gltf: { extras: meshExtras } };
+                return mesh;
+            };
+
+            it("shares one glTF mesh when the mesh extras are identical", async () => {
+                const glb = await exportAndParse(createScene({ meshes: [holderWith("h1", { kind: "x" }), holderWith("h2", { kind: "x" })] }));
+                expect(glb.json.nodes).toHaveLength(2);
+                expect(glb.json.meshes).toHaveLength(1);
+                expect(glb.json.meshes[0].extras).toEqual({ kind: "x" });
+            });
+
+            it("keeps separate glTF meshes when the mesh extras differ", async () => {
+                const glb = await exportAndParse(createScene({ meshes: [holderWith("h1", { kind: "x" }), holderWith("h2", { kind: "y" })] }));
+                expect(glb.json.nodes).toHaveLength(2);
+                expect(glb.json.meshes.map((m: { extras: unknown }) => m.extras)).toEqual([{ kind: "x" }, { kind: "y" }]);
+                expect(glb.json.nodes.map((n: { mesh: number }) => n.mesh)).toEqual([0, 1]);
+            });
+        });
+    });
+
+    it("does not fold a mesh child whose translation is a small real value", async () => {
+        const holder = createTransformNode("holder");
+        const a = attach(quad("a", 1), holder);
+        const b = attach(quad("b", 2), holder);
+        b.position.set(0.0005, 0, 0);
         const glb = await exportAndParse(createScene({ meshes: [a, b] }));
         expect(glb.json.nodes).toHaveLength(2);
-        expect(glb.json.meshes).toHaveLength(1);
-        expect(glb.json.nodes.map((n: { mesh: number }) => n.mesh)).toEqual([0, 0]);
-        expect(glb.json.materials).toHaveLength(1);
+        expectClose(glb.json.nodes[1].translation, [-0.0005, 0, 0]);
+    });
+
+    it("still folds a mesh child whose TRS differs from identity only by float noise", async () => {
+        const holder = createTransformNode("holder");
+        const a = attach(quad("a", 1), holder);
+        const b = attach(quad("b", 2), holder);
+        b.position.set(1e-12, 0, 0);
+        b.scaling.set(1 + 1e-12, 1, 1);
+        const glb = await exportAndParse(createScene({ meshes: [a, b] }));
+        expect(glb.json.nodes).toHaveLength(1);
+        expect(glb.json.meshes[0].primitives).toHaveLength(2);
     });
 });
 

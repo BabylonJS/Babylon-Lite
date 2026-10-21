@@ -28,7 +28,7 @@ export function captureTextureSlot(
     if (!(key in owner)) {
         owner[key] = undefined;
     }
-    const pending: PendingSlot = { owner, key, slot, texture: tex, mapping, extra, materialName };
+    const pending: PendingSlot = { owner, key, slot, gpu: tex.texture, mapping, extra, materialName };
     ctx.slots.push(pending);
     return pending;
 }
@@ -41,7 +41,7 @@ export function resolveTextureSlots(ctx: ExportContext): void {
         if (slot.cancelled) {
             continue;
         }
-        const pixels = ctx.resolvedPixels.get(slot.texture.texture);
+        const pixels = ctx.resolvedPixels.get(slot.gpu);
         if (!pixels) {
             continue;
         }
@@ -60,6 +60,5 @@ export function resolveTextureSlots(ctx: ExportContext): void {
         }
         writeTextureTransform(ctx, info, slot.mapping);
         slot.owner[slot.key] = info;
-        slot.resolved = true;
     }
 }

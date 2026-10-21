@@ -15,16 +15,15 @@ No PR was opened.
 
 - [x] Rescope the architecture doc: anything needing code outside `export-gltf/` is out of scope (Scope section).
 - [x] Push the doc to `docs/gltf-exporter-architecture`.
-- [ ] Pre-implementation doc review by independent agents (source accuracy, internal consistency and implementability, glTF/validator conformance); fix findings.
-- [ ] Implement the module end to end.
-- [ ] Unit tests (Vitest) for every rule the doc's unit table lists that can run without a GPU.
-- [ ] Lint, typecheck, focused unit tests, `no-webgpu` import test.
+- [~] Pre-implementation doc review by independent agents. Three reviewers started; all three hit the session usage limit before reporting. Rather than restart them, review moved to the implementation: every module was checked against the Lite source while writing it, and two post-implementation reviewers ran on the code (below).
+- [x] Implement the module end to end (`packages/babylon-lite/src/export-gltf/`, 32 files) plus the root re-export in `index.ts`.
+- [x] Unit tests: 382 Vitest tests in `tests/lite/unit/export-gltf/` (harness with a fake WebGPU device that supports both readback paths).
+- [x] Plumbing round trips: `lab/lite/export-gltf-test.{html,ts}` + `tests/lite/plumbing/export-gltf.spec.ts`. Run locally against headless Chromium with SwiftShader WebGPU: 10 local assets + a native scene, all fixed points after one export. A wider scratch run (LittlestTokyo, bunny_rigged, Animation_SkinType_01, XmpMetadataRoundedCube, rock, rhs-x, nav_test, babylonBurster, bath_day) also passed. FlightHelmetKTX could not run here (the KTX2 decoder is fetched from a CDN the sandbox blocks).
+- [x] glTF-Validator (run locally, not a repo dependency) over every exported file: 0 errors. Remaining warnings are `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` only, for meshes whose tangents were not retained (out of scope) or never existed in the source.
+- [x] Lint, typecheck, `no-webgpu` import test.
 - [ ] Post-implementation code review by independent agents; fix findings.
 - [ ] Sync the doc with the code (the doc stays the one-shot spec).
-
-## Judgment calls made without you
-
-_(filled in as the run progresses)_
+- [ ] Bundle isolation check (filtered scene build).
 
 ## Follow-ups (would have been issues in the todo repo)
 
@@ -50,7 +49,26 @@ _(filled in as the run progresses)_
 12. Cloned skinned characters (`cloneTransformNode` shares skeleton and morph targets): decide skin identity rules once skins exist.
 13. Removing an animation group does not stop it ticking and there is no dispose; decide whether export should honor `removeFromScene`-style group removal.
 
+### Lite renderer quirks found by the review (Lite-side, not exporter changes)
+
+16. PBR `normalTextureScale` only takes effect when the template extension is active (UV transform, vertex colors or UV2; `pbr-template.ts` ~314). Elsewhere Lite renders the normal map at scale 1. The exporter still exports the authored scale.
+17. PBR `occlusionStrength` is applied only by the reflectance fragment (`mix(1, occ, strength)`); the base template uses `orm.r` at full strength. The exporter exports the authored strength.
+18. An iridescence texture on UV1 without any core `_uv2Mask` bit never enables `PBR2_HAS_UV2`, so `input.uv2` may be missing in Lite.
+19. Light `range` is ignored under Lite's default physical falloff, but exported (glTF viewers cut off at `range`).
+
+### Review findings deliberately not addressed (judgment: low value or needs outside changes)
+
+20. Exact F0 interplay between `KHR_materials_ior` and `KHR_materials_specular` (Lite's loader lets the specular factor override the IOR-derived F0).
+21. `_metallicReflectanceTexture` RGB tint (glTF `specularTexture` uses alpha only) — not representable; no warning yet.
+22. Volume: thickness textures sampled from R (`useGlTFChannel` false) and `thickness.min` are not exported.
+23. Spot `innerConeAngle` could be derived from Lite's exponent falloff instead of left at 0.
+24. Standard approximations that glTF cannot express: opacity-texture alpha, additive emissive, ambient texture as occlusion, diffuse-texture alpha under BLEND (Lite ignores it, glTF multiplies it in). A channel op that forces the exported diffuse alpha to 255 under BLEND would close the last one.
+25. No NaN/Infinity sanitization and no index range validation; malformed geometry can still produce validator errors.
+26. A mesh parented (via `parent` only) to the scene camera's fixup node is dropped.
+
 ### Housekeeping
 
 14. Stale v1 planning docs on `feat/gltf-export` (`requirements.md`, `prd.md`, `goals.md`, `53-gltf-exporter.md`) contradict the current spec; delete or archive them.
 15. Parity scenes E-1 … E-24 and their goldens are specified but not created in this run (they need Babylon.js golden captures and CI).
+27. Add `gltf-validator` as a root dev dependency and run it in the plumbing spec (the local run used a scratch install).
+28. The plumbing spec uses the repo's Playwright config (`channel: "chrome"`); locally it was run with Chromium + SwiftShader via a scratch config. CI should pick it up like the other plumbing specs — worth confirming on the first CI run.

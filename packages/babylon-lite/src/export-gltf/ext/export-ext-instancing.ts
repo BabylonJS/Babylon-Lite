@@ -3,13 +3,13 @@
 import type { Mat4 } from "../../math/types.js";
 import { decomposeMat4 } from "../../math/decompose-mat4.js";
 import type { Mesh } from "../../mesh/mesh.js";
+import { FLOAT } from "../export-buffers.js";
 import type { ExportContext } from "../export-context.js";
 import { attachExtension } from "../export-context.js";
 import type { GltfAttributes, GltfNode } from "../export-gltf-types.js";
 import { convertRotation, EXPORT_EPSILON } from "../export-handedness.js";
 
 const EXT = "EXT_mesh_gpu_instancing";
-const FLOAT = 5126;
 
 /** @internal Attach `EXT_mesh_gpu_instancing` to `node` for a mesh with active thin instances.
  *  Instance matrices are node-local in Lite (`world × instanceMatrix`), as the extension expects.

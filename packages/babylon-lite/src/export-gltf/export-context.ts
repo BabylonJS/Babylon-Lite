@@ -3,7 +3,6 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import type { Texture2D } from "../texture/texture-2d.js";
 import { createBufferBuilder } from "./export-buffers.js";
 import type { BufferBuilder } from "./export-buffers.js";
 import type { GltfAnimation, GltfAsset, GltfCamera, GltfImage, GltfJsonObject, GltfMaterial, GltfMesh, GltfNode, GltfTexture } from "./export-gltf-types.js";
@@ -63,15 +62,14 @@ export interface PendingSlot {
     readonly key: string;
     /** glTF slot string used as the image `name`, e.g. "baseColorTexture" or "clearcoatTexture". */
     readonly slot: string;
-    readonly texture: Texture2D;
+    /** The texture's GPU texture, captured synchronously (the wrapper may change after capture). */
+    readonly gpu: GPUTexture;
     readonly mapping: SlotMapping;
     /** Extra textureInfo members (`scale` for normal textures, `strength` for occlusion). */
     readonly extra?: Readonly<Record<string, number>>;
     readonly materialName: string;
     /** Set by fold resolution when the slot's texture folded into factors instead (1×1 ORM). */
     cancelled?: boolean;
-    /** Set at resolution: whether `owner[key]` was written. */
-    resolved?: boolean;
 }
 
 /** @internal A 1×1 factor fold recorded during capture; the folded factors are written at resolution. */
@@ -79,7 +77,11 @@ export interface PendingFold {
     /** The `pbrMetallicRoughness` object that receives the folded factors. */
     readonly owner: GltfJsonObject;
     readonly kind: "baseColor" | "metallicRoughness";
-    readonly texture: Texture2D;
+    /** The 1×1 texture's GPU texture, captured synchronously. */
+    readonly gpu: GPUTexture;
+    /** How the shader decodes the texel's RGB bytes: the sRGB curve (`-srgb` format), `^2.2`
+     *  (`_gammaAlbedo` on a linear format), or byte / 255. Base color only. */
+    readonly decode: "srgb" | "gamma" | "linear";
     /** The props' own factors, multiplied into the texel: `[r, g, b, a]` for base color
      *  (alpha already includes the material alpha), `[metallic, roughness]` for ORM. */
     readonly factor: readonly number[];
@@ -128,6 +130,10 @@ export interface ExportContext {
     readonly accessorIndex: Map<ArrayBufferView, Map<string, number>>;
     /** Primitive-list signature → glTF mesh index. */
     readonly meshIndex: Map<string, number>;
+    /** glTF material indices with a texture slot sampling TEXCOORD_0. */
+    readonly materialsUsingUv0: Set<number>;
+    /** Vertex count → zero-filled TEXCOORD_0 accessor (for UV-less meshes with textured materials). */
+    readonly zeroUvAccessors: Map<number, number>;
     readonly extensionsUsed: Set<string>;
     readonly extensionsRequired: Set<string>;
     /** Logs each distinct message once per call, as `[babylon-lite] glTF export: <message>`. */
@@ -187,6 +193,8 @@ export function createExportContext(engine: EngineContext, generator: string): E
         textureIndex: new Map(),
         accessorIndex: new Map(),
         meshIndex: new Map(),
+        materialsUsingUv0: new Set(),
+        zeroUvAccessors: new Map(),
         extensionsUsed: new Set(),
         extensionsRequired: new Set(),
         warn(message) {
@@ -217,4 +225,20 @@ export function snapshotExtras(ctx: ExportContext, extras: unknown, ownerName: s
         ctx.warn(`Extras of "${ownerName ?? ""}" are not JSON-serializable; exporting without them.`);
         return undefined;
     }
+}
+
+/** @internal Return the cached accessor for (`source`, `variant`), building it on first use. The
+ *  variant names how the source bytes were transformed (conversion pass, winding, attribute kind). */
+export function cachedAccessor(ctx: ExportContext, source: ArrayBufferView, variant: string, build: () => number): number {
+    let byVariant = ctx.accessorIndex.get(source);
+    if (!byVariant) {
+        byVariant = new Map();
+        ctx.accessorIndex.set(source, byVariant);
+    }
+    let index = byVariant.get(variant);
+    if (index === undefined) {
+        index = build();
+        byVariant.set(variant, index);
+    }
+    return index;
 }

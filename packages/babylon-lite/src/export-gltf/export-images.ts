@@ -18,14 +18,20 @@ return clamp(textureLoad(src,vec2i(v.p.xy),0),vec4f(0),vec4f(1));
 }`;
 
 /** @internal Why a texture cannot be read back on this engine, or null when it can: no GPU device
- *  (null engine), not a single 2D image, or a format/usage combination neither path can copy. */
-export function textureReadIssue(ctx: ExportContext, tex: Texture2D): "engine" | "dimension" | null {
+ *  (null engine) or a format/usage combination neither path can copy ("engine"), not a single
+ *  single-sampled 2D image ("dimension"), or a staging buffer beyond the device's `maxBufferSize`
+ *  ("size"). */
+export function textureReadIssue(ctx: ExportContext, tex: Texture2D): "engine" | "dimension" | "size" | null {
     const gpu = tex.texture;
     if (!ctx.engine._device || !gpu) {
         return "engine";
     }
-    if (gpu.dimension !== "2d" || gpu.depthOrArrayLayers > 1) {
+    if (gpu.dimension !== "2d" || gpu.depthOrArrayLayers > 1 || (gpu.sampleCount ?? 1) > 1) {
         return "dimension";
+    }
+    const maxBufferSize = ctx.engine._device.limits?.maxBufferSize;
+    if (maxBufferSize !== undefined && Math.ceil((gpu.width * 4) / 256) * 256 * gpu.height > maxBufferSize) {
+        return "size";
     }
     return readbackPath(gpu) === null ? "engine" : null;
 }
@@ -39,7 +45,11 @@ export function checkTextureReadable(ctx: ExportContext, tex: Texture2D, materia
         return false;
     }
     if (issue === "dimension") {
-        ctx.warn(`Texture for material "${materialName}" is not a single 2D image; exporting the material without that texture.`);
+        ctx.warn(`Texture for material "${materialName}" is not a single-sampled 2D image; exporting the material without that texture.`);
+        return false;
+    }
+    if (issue === "size") {
+        ctx.warn(`Texture for material "${materialName}" is too large to read back on this device; exporting the material without that texture.`);
         return false;
     }
     if (tex.texture.format.endsWith("float")) {
@@ -73,7 +83,13 @@ export function requestPixels(ctx: ExportContext, tex: Texture2D): Promise<Pixel
     if (!pending) {
         const errorSlot = ctx.readbackErrors.length;
         ctx.readbackErrors.push(undefined);
-        pending = submitReadback(ctx, gpu).catch((error: unknown) => {
+        let submitted: Promise<PixelData>;
+        try {
+            submitted = submitReadback(ctx, gpu);
+        } catch (error) {
+            submitted = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+        pending = submitted.catch((error: unknown) => {
             ctx.readbackErrors[errorSlot] = error ?? new Error("Texture readback failed");
             return null;
         });
@@ -88,22 +104,30 @@ function submitReadback(ctx: ExportContext, gpu: GPUTexture): Promise<PixelData>
     const height = gpu.height;
     const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
     const direct = readbackPath(gpu) === "direct";
-    const encoder = device.createCommandEncoder({ label: "gltf-export-readback" });
     let target: GPUTexture | null = null;
-    let source = gpu;
-    if (!direct) {
-        target = device.createTexture({
-            label: "gltf-export-blit",
-            size: { width, height },
-            format: gpu.format.endsWith("-srgb") ? "rgba8unorm-srgb" : "rgba8unorm",
-            usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC,
-        });
-        encodeBlit(ctx, encoder, gpu, target);
-        source = target;
+    let staging: GPUBuffer | null = null;
+    try {
+        const encoder = device.createCommandEncoder({ label: "gltf-export-readback" });
+        let source = gpu;
+        if (!direct) {
+            target = device.createTexture({
+                label: "gltf-export-blit",
+                size: { width, height },
+                format: gpu.format.endsWith("-srgb") ? "rgba8unorm-srgb" : "rgba8unorm",
+                usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC,
+            });
+            encodeBlit(ctx, encoder, gpu, target);
+            source = target;
+        }
+        staging = device.createBuffer({ label: "gltf-export-staging", size: bytesPerRow * height, usage: BU.MAP_READ | BU.COPY_DST });
+        encoder.copyTextureToBuffer({ texture: source, mipLevel: 0 }, { buffer: staging, bytesPerRow, rowsPerImage: height }, { width, height, depthOrArrayLayers: 1 });
+        device.queue.submit([encoder.finish()]);
+    } catch (error) {
+        // A synchronous failure must not leak the transient GPU objects created so far.
+        staging?.destroy();
+        target?.destroy();
+        throw error;
     }
-    const staging = device.createBuffer({ label: "gltf-export-staging", size: bytesPerRow * height, usage: BU.MAP_READ | BU.COPY_DST });
-    encoder.copyTextureToBuffer({ texture: source, mipLevel: 0 }, { buffer: staging, bytesPerRow, rowsPerImage: height }, { width, height, depthOrArrayLayers: 1 });
-    device.queue.submit([encoder.finish()]);
     const swapRB = direct && gpu.format.startsWith("bgra");
     return finishReadback(staging, target, width, height, bytesPerRow, swapRB);
 }

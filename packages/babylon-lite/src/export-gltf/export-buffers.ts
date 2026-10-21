@@ -2,6 +2,17 @@
 
 import type { GltfAccessor, GltfAccessorType, GltfBufferView, GltfBufferViewTarget, GltfComponentType } from "./export-gltf-types.js";
 
+/** @internal glTF accessor component types. */
+export const UNSIGNED_SHORT = 5123;
+/** @internal */
+export const UNSIGNED_INT = 5125;
+/** @internal */
+export const FLOAT = 5126;
+/** @internal bufferView target for vertex attributes. */
+export const ARRAY_BUFFER = 34962;
+/** @internal bufferView target for indices. */
+export const ELEMENT_ARRAY_BUFFER = 34963;
+
 /** @internal One accessor request. */
 export interface AccessorDesc {
     readonly bufferView: number;

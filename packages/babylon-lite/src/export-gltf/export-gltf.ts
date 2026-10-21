@@ -1,9 +1,8 @@
 /** glTF 2.0 binary exporter entry point. */
 
-import type { AnimationGroup } from "../animation/animation-group.js";
 import { VERSION } from "../engine/version.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { exportAnimations } from "./export-animations.js";
+import { collectAnimatedNodes, exportAnimations } from "./export-animations.js";
 import { cameraFixupOf, exportCamera } from "./export-cameras.js";
 import type { ExportContext } from "./export-context.js";
 import { createExportContext, snapshotExtras } from "./export-context.js";
@@ -11,7 +10,7 @@ import { frameGlb } from "./export-glb.js";
 import type { GltfDocument } from "./export-gltf-types.js";
 import { encodeImages } from "./export-images.js";
 import { finalizeMaterials, resolveFolds } from "./export-materials.js";
-import { collectRoots, exportNodeTrees, isExportableNode } from "./export-nodes.js";
+import { collectRoots, exportNodeTrees } from "./export-nodes.js";
 import { resolveTextureSlots } from "./export-textures.js";
 import { exportLights } from "./ext/export-ext-lights-punctual.js";
 
@@ -36,7 +35,7 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     // 1. Capture (synchronous): read the scene, emit JSON and geometry, submit texture readbacks.
     const animated = collectAnimatedNodes(scene.animationGroups);
     const fixup = cameraFixupOf(scene.camera);
-    const sweep = collectRoots(scene, animated, fixup);
+    const sweep = collectRoots(ctx, scene, animated, fixup);
     const assetExtras = snapshotExtras(ctx, sweep.assetExtras, "asset");
     if (assetExtras !== undefined) {
         ctx.doc.asset.extras = assetExtras;
@@ -72,24 +71,6 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     const bin = ctx.buffers.finalize();
     const json = JSON.stringify(assembleDocument(ctx, bin.byteLength));
     return new Blob([frameGlb(json, bin)], { type: "model/gltf-binary" });
-}
-
-/** Scene nodes bound by a glTF-clip animation channel (node TRS or morph weights). */
-function collectAnimatedNodes(groups: readonly AnimationGroup[]): Set<object> {
-    const out = new Set<object>();
-    for (const group of groups) {
-        if (!group._gltfMixer) {
-            continue;
-        }
-        for (const targeted of group.targetedAnimations) {
-            const target = targeted.target;
-            const path = targeted.path;
-            if (target && isExportableNode(target) && (path === "translation" || path === "rotation" || path === "scale" || path === "weights")) {
-                out.add(target);
-            }
-        }
-    }
-    return out;
 }
 
 /** The glTF document with only non-empty top-level members, in a fixed member order. */

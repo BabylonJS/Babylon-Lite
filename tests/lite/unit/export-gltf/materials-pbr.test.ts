@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFakeDevice, createMesh, createScene, createTexture, decodePng, exportAndParse, readBufferView } from "./export-test-utils";
+import { createFakeDevice, createMesh, createScene, createTexture, decodePng, exportAndParse, readAccessor, readBufferView } from "./export-test-utils";
 import type { FakeTextureOptions, ParsedGlb } from "./export-test-utils";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
@@ -64,7 +64,7 @@ describe("PBR core: base color", () => {
     });
 
     it("omits a factor that is approximately [1, 1, 1, 1]", async () => {
-        const r = await run(createPbrMaterial({ baseColorFactor: [1, 1, 1 - 1e-9, 1] }));
+        const r = await run(createPbrMaterial({ baseColorFactor: [1, 1, 1 - 1e-12, 1] }));
         expect(r.mat.pbrMetallicRoughness).toBeUndefined();
     });
 
@@ -75,6 +75,43 @@ describe("PBR core: base color", () => {
         expect(r.mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
         expect(r.json.images).toBeUndefined();
         expect(r.json.textures).toBeUndefined();
+    });
+
+    it("keeps a base color factor that differs from white by a small real amount", async () => {
+        const r = await run(createPbrMaterial({ baseColorFactor: [1, 1, 0.9995, 1] }));
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [1, 1, 0.9995, 1]);
+    });
+
+    it("clamps a base color factor outside [0, 1] and warns", async () => {
+        const r = await run(createPbrMaterial({ name: "bright", baseColorFactor: [2, -1, 0.5, 1] }));
+        expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([1, 0, 0.5, 1]);
+        expect(r.warnings).toEqual(['Material "bright" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.']);
+    });
+
+    it("clamps metallic and roughness outside [0, 1] and warns", async () => {
+        const r = await run(createPbrMaterial({ name: "odd", metallicFactor: 1.5, roughnessFactor: -0.5 }));
+        expect(r.mat.pbrMetallicRoughness).toEqual({ roughnessFactor: 0 });
+        expect(r.warnings).toEqual(['Material "odd" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.']);
+        const inRange = await run(createPbrMaterial({ metallicFactor: 0.5, roughnessFactor: 0.5 }));
+        expect(inRange.warnings).toEqual([]);
+    });
+
+    it("decodes a 1x1 linear-format base color with (byte / 255)^2.2 when the material has _gammaAlbedo", async () => {
+        const texture = createTexture(1, 1, [128, 64, 255, 255], { format: "rgba8unorm" });
+        const r = await run(createPbrMaterial({ baseColorTexture: texture, _gammaAlbedo: true }));
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(128 / 255, 2.2), Math.pow(64 / 255, 2.2), 1, 1]);
+    });
+
+    it("decodes a 1x1 -srgb base color with the sRGB curve even when the material has _gammaAlbedo", async () => {
+        const texture = createTexture(1, 1, [128, 64, 255, 255], { format: "rgba8unorm-srgb" });
+        const r = await run(createPbrMaterial({ baseColorTexture: texture, _gammaAlbedo: true }));
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbByteToLinear(128), srgbByteToLinear(64), 1, 1]);
+    });
+
+    it("folds a 1x1 linear-format base color as byte / 255 without _gammaAlbedo", async () => {
+        const texture = createTexture(1, 1, [128, 64, 255, 255], { format: "rgba8unorm" });
+        const r = await run(createPbrMaterial({ baseColorTexture: texture, _gammaAlbedo: false }));
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [128 / 255, 64 / 255, 1, 1]);
     });
 
     it("folds a 1x1 rgba8unorm base color as byte / 255", async () => {
@@ -171,10 +208,11 @@ describe("PBR core: metallic-roughness and occlusion", () => {
         expect(r.mat.occlusionTexture.texCoord).toBeUndefined();
     });
 
-    it("does not export an ORM as metallicRoughness for a spec-gloss material", async () => {
-        const r = await run(createPbrMaterial({ ormTexture: tex(20), specGlossTexture: tex(50), metallicFactor: 0.5 }));
+    it("does not export an ORM as metallicRoughness for a spec-gloss material but still exports its occlusion", async () => {
+        const r = await run(createPbrMaterial({ ormTexture: tex(20), specGlossTexture: tex(50), metallicFactor: 0.5, occlusionStrength: 0.5 }));
         expect(r.mat.pbrMetallicRoughness.metallicRoughnessTexture).toBeUndefined();
-        expect(r.mat.occlusionTexture).toBeUndefined();
+        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBe(0.5);
+        expect(r.mat.occlusionTexture).toEqual({ index: 0, strength: 0.5 });
     });
 });
 
@@ -342,6 +380,13 @@ describe("PBR core: normal, emissive, alpha, culling", () => {
         expect(r.mat.emissiveTexture).toEqual({ index: 0 });
     });
 
+    it("keeps a small real emissive color and omits a float-noise one", async () => {
+        const small = await run(createPbrMaterial({ _emissiveColor: [0.0005, 0, 0] }));
+        close(small.mat.emissiveFactor, [0.0005, 0, 0]);
+        const noise = await run(createPbrMaterial({ _emissiveColor: [1e-12, 0, 0] }));
+        expect(noise.mat.emissiveFactor).toBeUndefined();
+    });
+
     it("omits a black emissive color", async () => {
         const r = await run(createPbrMaterial({ _emissiveColor: [0, 0, 0] }));
         expect(r.mat.emissiveFactor).toBeUndefined();
@@ -436,5 +481,55 @@ describe("material name and extras", () => {
         const r = await run(material);
         expect(r.mat.extras).toBeUndefined();
         expect(r.warnings).toContain('Extras of "bad" are not JSON-serializable; exporting without them.');
+    });
+});
+
+describe("PBR core: zero-filled TEXCOORD_0 for a UV-less mesh", () => {
+    const quadWithoutUvs = (name: string, material: Mesh["material"]) => createMesh(name, { material, uvs: null });
+
+    async function runMeshes(meshes: Mesh[]): Promise<ParsedGlb> {
+        return exportAndParse(createScene({ meshes, device: createFakeDevice().device }));
+    }
+
+    it("adds a zero-filled TEXCOORD_0 when the material has a texture slot sampling UV0", async () => {
+        const glb = await runMeshes([quadWithoutUvs("m", createPbrMaterial({ baseColorTexture: tex(10) }))]);
+        const attribute = glb.json.meshes[0].primitives[0].attributes.TEXCOORD_0;
+        expect(attribute).toBeDefined();
+        expect(glb.json.accessors[attribute]).toMatchObject({ type: "VEC2", componentType: 5126, count: 4 });
+        expect(readAccessor(glb, attribute)).toEqual(new Array(8).fill(0));
+    });
+
+    it("shares the zero UV accessor between meshes with the same vertex count and does so for any UV0 slot", async () => {
+        const glb = await runMeshes([quadWithoutUvs("a", createPbrMaterial({ baseColorTexture: tex(10) })), quadWithoutUvs("b", createPbrMaterial({ normalTexture: tex(20) }))]);
+        const [a, b] = glb.json.meshes.map((m: { primitives: { attributes: { TEXCOORD_0?: number } }[] }) => m.primitives[0]!.attributes.TEXCOORD_0);
+        expect(a).toBeDefined();
+        expect(b).toBe(a);
+    });
+
+    it("uses a separate zero UV accessor for a different vertex count", async () => {
+        const triangle = createMesh("tri", {
+            material: createPbrMaterial({ baseColorTexture: tex(10) }),
+            positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            uvs: null,
+            indices: new Uint32Array([0, 1, 2]),
+        });
+        const glb = await runMeshes([quadWithoutUvs("quad", createPbrMaterial({ baseColorTexture: tex(10) })), triangle]);
+        const accessors = glb.json.meshes.map((m: { primitives: { attributes: { TEXCOORD_0: number } }[] }) => glb.json.accessors[m.primitives[0]!.attributes.TEXCOORD_0]);
+        expect(accessors.map((a: { count: number }) => a.count)).toEqual([4, 3]);
+    });
+
+    it("adds no TEXCOORD_0 for a material without texture slots, or one whose only texture folded to a factor", async () => {
+        const glb = await runMeshes([
+            quadWithoutUvs("plain", createPbrMaterial({})),
+            quadWithoutUvs("folded", createPbrMaterial({ baseColorTexture: createTexture(1, 1, [128, 64, 255, 255]) })),
+        ]);
+        for (const mesh of glb.json.meshes) {
+            expect(mesh.primitives[0].attributes.TEXCOORD_0).toBeUndefined();
+        }
+    });
+
+    it("keeps the mesh's own UVs when it has them", async () => {
+        const glb = await runMeshes([createMesh("m", { material: createPbrMaterial({ baseColorTexture: tex(10) }) })]);
+        expect(readAccessor(glb, glb.json.meshes[0].primitives[0].attributes.TEXCOORD_0)).toEqual([0, 0, 1, 0, 1, 1, 0, 1]);
     });
 });

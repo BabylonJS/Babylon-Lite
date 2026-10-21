@@ -38,6 +38,11 @@ const STAMPED = { _hasTx: true, uScale: 2, uOffset: 0.25 };
 const UNSTAMPED = { uScale: 2, uOffset: 0.25 };
 const STAMPED_RESULT = { offset: [0.25, 0], scale: [2, 1] };
 
+function expectClose(actual: number[], expected: number[]): void {
+    expect(actual).toHaveLength(expected.length);
+    expected.forEach((e, i) => expect(actual[i]).toBeCloseTo(e, 6));
+}
+
 function isUsed(r: Result, name: string): boolean {
     return (r.json.extensionsUsed ?? []).includes(name);
 }
@@ -76,14 +81,25 @@ describe("KHR_materials_unlit", () => {
         expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([0.2, 0.4, 0.6, 1]);
     });
 
-    it("does not override a core baseColorFactor", async () => {
+    it("multiplies a core baseColorFactor's RGB by _unlitColor", async () => {
         const r = await run({ _unlit: true, _unlitColor: [0.2, 0.4, 0.6], baseColorFactor: [0.5, 0.5, 0.5, 1] });
-        expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([0.5, 0.5, 0.5, 1]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.1, 0.2, 0.3, 1]);
     });
 
-    it("does not override a core factor produced by alpha", async () => {
+    it("multiplies the RGB of a factor produced by alpha and keeps the alpha", async () => {
         const r = await run({ _unlit: true, _unlitColor: [0.2, 0.4, 0.6], alpha: 0.5 });
-        expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([1, 1, 1, 0.5]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.2, 0.4, 0.6, 0.5]);
+    });
+
+    it("clamps the tinted factor to [0, 1]", async () => {
+        const r = await run({ _unlit: true, _unlitColor: [2, 0.5, 1], baseColorFactor: [0.75, 0.5, 1, 1] });
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [1, 0.25, 1, 1]);
+    });
+
+    it("removes baseColorFactor when the tinted result is all ones", async () => {
+        const r = await run({ _unlit: true, _unlitColor: [2, 2, 2], baseColorFactor: [0.5, 0.5, 0.5, 1] });
+        expect(r.mat.pbrMetallicRoughness).toBeUndefined();
+        expectEmitted(r, "KHR_materials_unlit");
     });
 
     it("omits a white _unlitColor", async () => {
@@ -363,6 +379,47 @@ describe("KHR_materials_ior", () => {
         expectAbsent(await run({ _subsurface: { refraction: {} } }), "KHR_materials_ior");
         expectAbsent(await run({}), "KHR_materials_ior");
     });
+
+    it("omits an IOR within 1e-9 of 1.5 and keeps one that is merely close", async () => {
+        expectAbsent(await run({ _subsurface: { refraction: { indexOfRefraction: 1.5 + 1e-10 } } }), "KHR_materials_ior");
+        const r = await run({ _subsurface: { refraction: { indexOfRefraction: 1.5005 } } });
+        expect(expectEmitted(r, "KHR_materials_ior")).toEqual({ ior: 1.5005 });
+    });
+
+    describe("from reflectance when no refraction IOR is set", () => {
+        const iorOf = (reflectance: number): number => {
+            const r = Math.sqrt(reflectance);
+            return (1 + r) / (1 - r);
+        };
+
+        it("exports ior = (1 + sqrt(r)) / (1 - sqrt(r))", async () => {
+            const r = await run({ reflectance: 0.2 });
+            expect(expectEmitted(r, "KHR_materials_ior").ior).toBeCloseTo(iorOf(0.2), 9);
+        });
+
+        it("omits the extension at the 0.04 default, which is IOR 1.5", async () => {
+            expectAbsent(await run({ reflectance: 0.04 }), "KHR_materials_ior");
+        });
+
+        it("clamps reflectance to 0.99", async () => {
+            const r = await run({ reflectance: 5 });
+            expect(expectEmitted(r, "KHR_materials_ior").ior).toBeCloseTo(iorOf(0.99), 9);
+        });
+
+        it("clamps a negative reflectance to 0, giving IOR 1", async () => {
+            const r = await run({ reflectance: -1 });
+            expect(expectEmitted(r, "KHR_materials_ior").ior).toBe(1);
+        });
+
+        it("prefers the refraction IOR over reflectance", async () => {
+            const r = await run({ reflectance: 0.2, _subsurface: { refraction: { indexOfRefraction: 1.33 } } });
+            expect(expectEmitted(r, "KHR_materials_ior")).toEqual({ ior: 1.33 });
+        });
+
+        it("is not derived for a spec-gloss material", async () => {
+            expectAbsent(await run({ reflectance: 0.2, specGlossTexture: tex(10) }), "KHR_materials_ior");
+        });
+    });
 });
 
 describe("KHR_materials_specular", () => {
@@ -614,12 +671,14 @@ describe("KHR_materials_pbrSpecularGlossiness", () => {
         expect(sg.diffuseFactor).toEqual(r.mat.pbrMetallicRoughness.baseColorFactor);
     });
 
-    it("writes no metallicRoughnessTexture or ORM occlusion on the core", async () => {
+    it("writes no metallicRoughnessTexture but exports occlusion from the ORM texture on the core", async () => {
         const r = await run({ specGlossTexture: tex(10), ormTexture: tex(30), metallicFactor: 0.5 });
         expectEmitted(r, NAME);
         expect(r.mat.pbrMetallicRoughness.metallicRoughnessTexture).toBeUndefined();
-        expect(r.mat.occlusionTexture).toBeUndefined();
-        expect(r.json.images).toHaveLength(1);
+        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBe(0.5);
+        expect(r.mat.occlusionTexture).toBeDefined();
+        expect(r.mat.occlusionTexture.index).not.toBe(expectEmitted(r, NAME).specularGlossinessTexture.index);
+        expect(r.json.images).toHaveLength(2);
     });
 
     it("exports the specular-glossiness texture on texCoord 1 for a UV1 slot", async () => {

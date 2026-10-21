@@ -210,6 +210,21 @@ describe("indices", () => {
         expect(readAccessor(narrow, firstPrimitive(narrow).indices)).toEqual(FORWARD_INDICES);
     });
 
+    it("widens a retained Uint16 list that contains 65535 to UNSIGNED_INT", async () => {
+        const glb = await exportMesh(createMesh("m", { gpuIndices: new Uint16Array([0, 1, 2, 0, 2, 65535]) }));
+        expect(glb.json.accessors[firstPrimitive(glb).indices].componentType).toBe(UNSIGNED_INT);
+        expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual([0, 1, 2, 0, 2, 65535]);
+        const below = await exportMesh(createMesh("m", { gpuIndices: new Uint16Array([0, 1, 2, 0, 2, 65534]) }));
+        expect(below.json.accessors[firstPrimitive(below).indices].componentType).toBe(UNSIGNED_SHORT);
+    });
+
+    it("keeps a retained Uint32 list 32-bit even when every value is small, and narrows a non-retained one", async () => {
+        const retained = await exportMesh(createMesh("m", { gpuIndices: new Uint32Array([0, 1, 2]) }));
+        expect(retained.json.accessors[firstPrimitive(retained).indices].componentType).toBe(UNSIGNED_INT);
+        const cpuOnly = await exportMesh(createMesh("m", { indices: new Uint32Array([0, 1, 2]) }));
+        expect(cpuOnly.json.accessors[firstPrimitive(cpuOnly).indices].componentType).toBe(UNSIGNED_SHORT);
+    });
+
     it("prefers _cpuGpuIndices over _cpuIndices", async () => {
         const glb = await exportMesh(createMesh("m", { indices: new Uint32Array([3, 3, 3]), gpuIndices: new Uint16Array([0, 2, 1]) }));
         expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual([0, 2, 1]);
@@ -250,9 +265,33 @@ describe("winding order", () => {
 });
 
 describe("topology", () => {
-    it("rejects a triangle strip that needs a winding reversal", async () => {
-        const mesh = createMesh("strip", { authoredSign: -1, extra: { _topology: 4 } });
-        await expect(exportMesh(mesh)).rejects.toThrow("Triangle strip winding reversal is not implemented");
+    it("expands a triangle strip that needs a winding reversal into a reversed TRIANGLES list", async () => {
+        // Strip (0, 1, 2, 3) is triangles (0, 1, 2) and (2, 1, 3); reversed they are (0, 2, 1) and (2, 3, 1).
+        const mesh = createMesh("strip", { authoredSign: -1, indices: new Uint32Array([0, 1, 2, 3]), extra: { _topology: 4 } });
+        const glb = await exportMesh(mesh);
+        expect(firstPrimitive(glb).mode).toBeUndefined();
+        expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual([0, 2, 1, 2, 3, 1]);
+        expect(glb.json.accessors[firstPrimitive(glb).indices].count).toBe(6);
+    });
+
+    it("expands a longer reversed strip with alternating triangle order and keeps the source untouched", async () => {
+        const indices = new Uint32Array([0, 1, 2, 3, 1]);
+        const glb = await exportMesh(createMesh("strip", { authoredSign: -1, indices, extra: { _topology: 4 } }));
+        // Triangles (0,1,2), (2,1,3), (2,3,1) reversed to (0,2,1), (2,3,1), (2,1,3).
+        expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual([0, 2, 1, 2, 3, 1, 2, 1, 3]);
+        expect(Array.from(indices)).toEqual([0, 1, 2, 3, 1]);
+    });
+
+    it("expands a reversed non-indexed triangle strip over its vertex sequence", async () => {
+        const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]);
+        const glb = await exportMesh(createMesh("strip", { authoredSign: -1, positions, normals: null, uvs: null, indices: null, extra: { _topology: 4 } }));
+        expect(firstPrimitive(glb).mode).toBeUndefined();
+        expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual([0, 2, 1, 2, 3, 1]);
+    });
+
+    it("exports a reversed strip with fewer than three indices as an empty triangle list without throwing", async () => {
+        const glb = await exportMesh(createMesh("strip", { authoredSign: -1, indices: new Uint32Array([0, 1]), extra: { _topology: 4 } }));
+        expect(glb.json.nodes).toHaveLength(1);
     });
 
     it("exports a triangle strip that needs no reversal as mode 5", async () => {
@@ -363,10 +402,43 @@ describe("morph targets", () => {
         expectClose(readAccessor(glb, firstPrimitive(glb).targets[0].POSITION), [1, 0, 0, 2, 1, 0, -3, 0, 1, 0.5, 0.5, 0.5]);
     });
 
-    it("omits a morph delta whose length does not match the positions", async () => {
+    it("drops all morph targets and their weights, with a warning, when a target's positions length mismatches", async () => {
         const mesh = createMesh("m", { extra: { morphTargets: { targets: [{ positions: new Float32Array(6), normals: null }], weights: new Float32Array([1]), count: 1 } } });
         const glb = await exportMesh(mesh);
-        expect(firstPrimitive(glb).targets).toEqual([{}]);
+        expect(firstPrimitive(glb).targets).toBeUndefined();
+        expect(glb.json.meshes[0].weights).toBeUndefined();
+        expect(glb.warnings).toEqual(['Mesh "m" has morph targets whose length does not match its positions; exporting the mesh without them.']);
+    });
+
+    it("drops every target when only one of several mismatches", async () => {
+        const good = { positions: new Float32Array(12), normals: null };
+        const bad = { positions: new Float32Array(9), normals: null };
+        const mesh = createMesh("m", { extra: { morphTargets: { targets: [good, bad], weights: new Float32Array([0.5, 0.5]), count: 2 } } });
+        const glb = await exportMesh(mesh);
+        expect(firstPrimitive(glb).targets).toBeUndefined();
+        expect(glb.json.meshes[0].weights).toBeUndefined();
+        expect(glb.warnings).toHaveLength(1);
+    });
+
+    it("emits target NORMAL deltas only when the base NORMAL is emitted", async () => {
+        const targets = [{ positions: new Float32Array(12), normals: new Float32Array([0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -0.5, 0, 0]) }];
+        const morphTargets = { targets, weights: new Float32Array([1]), count: 1 };
+        const withNormals = await exportMesh(createMesh("m", { extra: { morphTargets } }));
+        expect(firstPrimitive(withNormals).attributes.NORMAL).toBeDefined();
+        expect(firstPrimitive(withNormals).targets[0].NORMAL).toBeDefined();
+        const without = await exportMesh(createMesh("m", { normals: null, extra: { morphTargets } }));
+        expect(firstPrimitive(without).attributes.NORMAL).toBeUndefined();
+        expect(firstPrimitive(without).targets[0].NORMAL).toBeUndefined();
+        expect(firstPrimitive(without).targets[0].POSITION).toBeDefined();
+    });
+
+    it("writes exactly one weight per target, padding missing weights with 0 and ignoring extras", async () => {
+        const targets = [0, 1, 2].map(() => ({ positions: new Float32Array(12), normals: null }));
+        const padded = await exportMesh(createMesh("m", { extra: { morphTargets: { targets, weights: new Float32Array([0.5]), count: 3 } } }));
+        expect(padded.json.meshes[0].weights).toEqual([0.5, 0, 0]);
+        const longer = await exportMesh(createMesh("m", { extra: { morphTargets: { targets: targets.slice(0, 2), weights: new Float32Array([0.25, 0.5, 0.75]), count: 2 } } }));
+        expect(longer.json.meshes[0].weights).toEqual([0.25, 0.5]);
+        expect(firstPrimitive(longer).targets).toHaveLength(2);
     });
 });
 

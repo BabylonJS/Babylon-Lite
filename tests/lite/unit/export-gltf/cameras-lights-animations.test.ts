@@ -97,6 +97,40 @@ describe("camera", () => {
         expect(zeroHeight.json.cameras[0].perspective.aspectRatio).toBeUndefined();
     });
 
+    it("omits aspectRatio unless both canvas dimensions are positive", async () => {
+        const camera = lookingAlongZ();
+        for (const canvas of [
+            { width: 0, height: 400 },
+            { width: 800, height: 0 },
+            { width: 0, height: 0 },
+            { width: -10, height: 400 },
+        ]) {
+            const glb = await exportAndParse(createScene({ camera, canvas }));
+            expect(glb.json.cameras[0].perspective.aspectRatio).toBeUndefined();
+        }
+        const ok = await exportAndParse(createScene({ camera, canvas: { width: 300, height: 100 } }));
+        expect(ok.json.cameras[0].perspective.aspectRatio).toBe(3);
+    });
+
+    it("omits zfar unless nearPlane < farPlane < 1e6", async () => {
+        const camera = lookingAlongZ();
+        camera.nearPlane = 2;
+        for (const far of [2, 1, -5, Number.NaN, Infinity]) {
+            camera.farPlane = far;
+            const glb = await exportAndParse(createScene({ camera }));
+            expect(glb.json.cameras[0].perspective.zfar, `farPlane ${far}`).toBeUndefined();
+        }
+        camera.farPlane = 2.5;
+        const glb = await exportAndParse(createScene({ camera }));
+        expect(glb.json.cameras[0].perspective.zfar).toBe(2.5);
+    });
+
+    it("keeps a small real camera translation", async () => {
+        const camera = createFreeCamera({ x: 0.0005, y: 0, z: 0 }, { x: 0.0005, y: 0, z: 1 });
+        const glb = await exportAndParse(createScene({ camera }));
+        expectClose(glb.json.nodes[0].translation, [-0.0005, 0, 0]);
+    });
+
     it("exports the orthographic plane form", async () => {
         const camera = lookingAlongZ();
         camera.nearPlane = 0.5;
@@ -230,6 +264,28 @@ describe("lights", () => {
         ]);
     });
 
+    it("divides a light color with a component above 1 by its peak and multiplies the intensity by the peak", async () => {
+        const light = createPointLight([0, 0, 0], 3);
+        light.diffuse = [4, 2, 1];
+        const bright = createDirectionalLight([0, -1, 0], 1);
+        bright.diffuse = [2, 2, 2];
+        const glb = await exportAndParse(createScene({ lights: [light, bright] }));
+        const [a, b] = glb.json.extensions.KHR_lights_punctual.lights;
+        expectClose(a.color, [1, 0.5, 0.25]);
+        expect(a.intensity).toBe(12);
+        expect(b.color).toBeUndefined();
+        expect(b.intensity).toBe(2);
+    });
+
+    it("leaves a color with every component at most 1 alone", async () => {
+        const light = createPointLight([0, 0, 0], 3);
+        light.diffuse = [1, 0.5, 0.25];
+        const glb = await exportAndParse(createScene({ lights: [light] }));
+        const [a] = glb.json.extensions.KHR_lights_punctual.lights;
+        expect(a.color).toEqual([1, 0.5, 0.25]);
+        expect(a.intensity).toBe(3);
+    });
+
     it("lists KHR_lights_punctual in extensionsUsed only", async () => {
         const glb = await exportAndParse(createScene({ lights: [createPointLight([0, 0, 0])] }));
         expect(glb.json.extensionsUsed).toEqual(["KHR_lights_punctual"]);
@@ -253,6 +309,28 @@ describe("lights", () => {
         const glb = await exportAndParse(createScene({ lights: [light] }));
         expect(glb.json.extensions.KHR_lights_punctual.lights[0].spot.outerConeAngle).toBeCloseTo(Math.PI / 2, 6);
         expect(glb.warnings).toContain('Spot light "wide" has a cone wider than KHR_lights_punctual allows; exporting a 180° cone.');
+    });
+
+    it("clamps a degenerate spot cone (angle / 2 below 1e-4, or NaN) to 1e-4 with a warning", async () => {
+        const zero = createSpotLight([0, 0, 0], [0, 0, -1], 0, 1);
+        zero.name = "zero";
+        const tiny = createSpotLight([0, 0, 0], [0, 0, -1], 1e-4, 1);
+        tiny.name = "tiny";
+        const nan = createSpotLight([0, 0, 0], [0, 0, -1], Number.NaN, 1);
+        nan.name = "nan";
+        const glb = await exportAndParse(createScene({ lights: [zero, tiny, nan] }));
+        for (const block of glb.json.extensions.KHR_lights_punctual.lights) {
+            expect(block.spot.outerConeAngle).toBe(1e-4);
+        }
+        for (const name of ["zero", "tiny", "nan"]) {
+            expect(glb.warnings).toContain(`Spot light "${name}" has an empty cone; exporting the narrowest cone KHR_lights_punctual allows.`);
+        }
+    });
+
+    it("does not clamp or warn for a cone whose half angle is exactly 1e-4", async () => {
+        const glb = await exportAndParse(createScene({ lights: [createSpotLight([0, 0, 0], [0, 0, -1], 2e-4, 1)] }));
+        expect(glb.json.extensions.KHR_lights_punctual.lights[0].spot.outerConeAngle).toBeCloseTo(1e-4, 12);
+        expect(glb.warnings).toEqual([]);
     });
 
     it("warns about a spot light exponent other than 1", async () => {
@@ -339,6 +417,58 @@ describe("lights", () => {
         expectClose(glb.json.nodes[0].translation, [-5, 1, 0]);
     });
 
+    it("places a light parented to another light as a world-placed scene root", async () => {
+        const parentLight = createPointLight([5, 0, 0]);
+        const child = createPointLight([0, 2, 0]);
+        setParent(child, parentLight);
+        const glb = await exportAndParse(createScene({ lights: [parentLight, child] }));
+        expect(glb.json.nodes).toHaveLength(2);
+        expect(glb.json.scenes[0].nodes).toEqual([0, 1]);
+        expect(glb.json.nodes[0].children).toBeUndefined();
+        expectClose(glb.json.nodes[1].translation, [-5, 2, 0]);
+        expect(glb.json.nodes[1].extensions.KHR_lights_punctual.light).toBe(1);
+    });
+
+    it("places a light parented to a camera as a world-placed scene root, not as a child of the camera node", async () => {
+        const camera = createFreeCamera({ x: 5, y: 0, z: 0 }, { x: 5, y: 0, z: 1 });
+        const light = createPointLight([0, 1, 0]);
+        setParent(light, camera);
+        const glb = await exportAndParse(createScene({ lights: [light], camera }));
+        const lightNode = glb.json.nodes.find((n: { extensions?: unknown }) => n.extensions);
+        expect(glb.json.scenes[0].nodes).toContain(glb.json.nodes.indexOf(lightNode));
+        expect(glb.json.nodes.every((n: { children?: number[] }) => n.children === undefined)).toBe(true);
+        expectClose(lightNode.translation, [-5, 1, 0]);
+    });
+
+    it("collapses onto the parent only when the light's local state is identity within 1e-9", async () => {
+        const make = (x: number) => {
+            const holder = createTransformNode("holder");
+            const mesh = attach(createMesh("m"), holder);
+            const light = createPointLight([x, 0, 0]);
+            setParent(light, holder);
+            return { mesh, light };
+        };
+        const noise = make(1e-12);
+        const collapsed = await exportAndParse(createScene({ meshes: [noise.mesh], lights: [noise.light] }));
+        expect(collapsed.json.nodes).toHaveLength(1);
+        expect(collapsed.json.nodes[0].extensions.KHR_lights_punctual).toEqual({ light: 0 });
+        const small = make(0.0005);
+        const separate = await exportAndParse(createScene({ meshes: [small.mesh], lights: [small.light] }));
+        expect(separate.json.nodes).toHaveLength(2);
+        expect(separate.json.nodes[0].extensions).toBeUndefined();
+        expectClose(separate.json.nodes[1].translation, [-0.0005, 0, 0]);
+    });
+
+    it("does not collapse a directional light whose direction is slightly off the default", async () => {
+        const holder = createTransformNode("holder");
+        const mesh = attach(createMesh("m"), holder);
+        const light = createDirectionalLight([0.0005, 0, -1]);
+        setParent(light, holder);
+        const glb = await exportAndParse(createScene({ meshes: [mesh], lights: [light] }));
+        expect(glb.json.nodes).toHaveLength(2);
+        expect(glb.json.nodes[1].rotation).toBeDefined();
+    });
+
     it("puts at most one light on a node", async () => {
         const holder = createTransformNode("holder");
         const mesh = attach(createMesh("m"), holder);
@@ -403,6 +533,10 @@ const channel = (target: object, path: "translation" | "rotation" | "scale" | "w
 const exportGroups = (groups: AnimationGroups, extra: Partial<Parameters<typeof createScene>[0]> = {}): Promise<ParsedGlb> =>
     exportAndParse(createScene({ animationGroups: groups, ...extra }));
 
+/** Unit quaternions (xyzw), so rotation tests exercise conversion rather than renormalization. */
+const UNIT_A: [number, number, number, number] = [0.1, 0.2, 0.3, Math.sqrt(1 - 0.14)];
+const UNIT_B: [number, number, number, number] = [-0.4, 0.5, 0.6, Math.sqrt(1 - 0.77)];
+
 describe("animations", () => {
     it("emits one glTF animation per _gltfMixer group and warns for groups without one", async () => {
         const a = createTransformNode("a");
@@ -446,13 +580,13 @@ describe("animations", () => {
                 "g",
                 [channel(a, "rotation", 0), channel(b, "rotation", 1)],
                 [
-                    { input: [0, 1], output: [0.1, 0.2, 0.3, 0.9, -0.4, 0.5, 0.6, 0.7] },
+                    { input: [0, 1], output: [...UNIT_A, ...UNIT_B] },
                     { input: [0, 1], output: [0.1, 0.2, 0.3, 0.4, 1, 2, 3, 4, 5, 6, 7, 8, 0.1, 0.2, 0.3, 0.4, 9, 8, 7, 6, 5, 4, 3, 2], interpolation: INTERP_CUBICSPLINE },
                 ]
             ),
         ]);
         const samplers = glb.json.animations[0].samplers;
-        expectClose(readAccessor(glb, samplers[0].output), [0.1, -0.2, -0.3, 0.9, -0.4, -0.5, -0.6, 0.7]);
+        expectClose(readAccessor(glb, samplers[0].output), [UNIT_A[0], -UNIT_A[1], -UNIT_A[2], UNIT_A[3], UNIT_B[0], -UNIT_B[1], -UNIT_B[2], UNIT_B[3]]);
         expectClose(readAccessor(glb, samplers[1].output), [0.1, -0.2, -0.3, 0.4, 1, -2, -3, 4, 5, -6, -7, 8, 0.1, -0.2, -0.3, 0.4, 9, -8, -7, 6, 5, -4, -3, 2]);
         expect(glb.json.accessors[samplers[0].output].type).toBe("VEC4");
     });
@@ -486,7 +620,7 @@ describe("animations", () => {
         const root = loaderRoot();
         const node = attach(createTransformNode("n"), root);
         const translation = new Float32Array([1, 2, 3, -4, 5, 6]);
-        const rotation = new Float32Array([0.1, 0.2, 0.3, 0.9, -0.4, 0.5, 0.6, 0.7]);
+        const rotation = new Float32Array([...UNIT_A, ...UNIT_B]);
         const animationGroup = group(
             "g",
             [channel(node, "translation", 0), channel(node, "rotation", 1)],
@@ -504,6 +638,133 @@ describe("animations", () => {
         const expected = (f: Float32Array) => Array.from(new Uint8Array(f.buffer));
         expect(bytesOf(samplers[0].output)).toEqual(expected(translation));
         expect(bytesOf(samplers[1].output)).toEqual(expected(rotation));
+    });
+
+    it("renormalizes non-unit LINEAR and STEP rotation keys in the converting pass", async () => {
+        const a = createTransformNode("a");
+        const b = createTransformNode("b");
+        const glb = await exportGroups([
+            group(
+                "g",
+                [channel(a, "rotation", 0), channel(b, "rotation", 1)],
+                [
+                    { input: [0, 1], output: [0, 0, 0, 2, 0.2, 0.4, 0.4, 0.8] },
+                    { input: [0, 1], output: [0, 0, 0, 0.5, 0, 0, 3, 4], interpolation: INTERP_STEP },
+                ]
+            ),
+        ]);
+        const [linear, step] = glb.json.animations[0].samplers;
+        // Mirrored (x, -y, -z, w), then divided by the length.
+        expectClose(readAccessor(glb, linear.output), [0, 0, 0, 1, 0.2 / 1, -0.4, -0.4, 0.8]);
+        expectClose(readAccessor(glb, step.output), [0, 0, 0, 1, 0, 0, -0.6, 0.8]);
+    });
+
+    it("renormalizes non-unit rotation keys in the pass-through pass and leaves unit keys byte-identical", async () => {
+        const root = loaderRoot();
+        const node = attach(createTransformNode("n"), root);
+        const unit = new Float32Array([...UNIT_A]);
+        const glb = await exportGroups([group("g", [channel(node, "rotation", 0)], [{ input: [0, 1, 2], output: [...unit, 0, 0, 3, 4, 0, 0, 0, 0.5] }])]);
+        const out = readAccessor(glb, glb.json.animations[0].samplers[0].output);
+        expect(out.slice(0, 4)).toEqual(Array.from(unit));
+        expectClose(out.slice(4, 8), [0, 0, 0.6, 0.8]);
+        expectClose(out.slice(8, 12), [0, 0, 0, 1]);
+    });
+
+    it("keeps keys within 0.0005 of unit length unchanged", async () => {
+        const root = loaderRoot();
+        const node = attach(createTransformNode("n"), root);
+        const nearUnit = new Float32Array([0, 0, 0, 1.0004]);
+        const glb = await exportGroups([group("g", [channel(node, "rotation", 0)], [{ input: [0], output: Array.from(nearUnit) }])]);
+        expect(readAccessor(glb, glb.json.animations[0].samplers[0].output)).toEqual(Array.from(nearUnit));
+    });
+
+    it("does not renormalize CUBICSPLINE rotation values or tangents", async () => {
+        const root = loaderRoot();
+        const node = attach(createTransformNode("n"), root);
+        const output = [1, 1, 1, 1, 2, 0, 0, 0, 3, 3, 3, 3, 4, 4, 4, 4, 5, 0, 0, 0, 6, 6, 6, 6];
+        const glb = await exportGroups([group("g", [channel(node, "rotation", 0)], [{ input: [0, 1], output, interpolation: INTERP_CUBICSPLINE }])]);
+        expect(readAccessor(glb, glb.json.animations[0].samplers[0].output)).toEqual(output);
+    });
+
+    it("skips a channel whose sampler has no keys", async () => {
+        const a = createTransformNode("a");
+        const b = createTransformNode("b");
+        const glb = await exportGroups([
+            group(
+                "g",
+                [channel(a, "translation", 0), channel(b, "translation", 1)],
+                [
+                    { input: [], output: [] },
+                    { input: [0, 1], output: [0, 0, 0, 1, 1, 1] },
+                ]
+            ),
+        ]);
+        expect(glb.warnings).toContain('Animation "g" has a sampler whose key and value counts do not match; skipping channel.');
+        expect(glb.json.animations[0].channels).toHaveLength(1);
+        expect(glb.json.animations[0].channels[0].target.node).toBe(1);
+    });
+
+    it("skips a channel whose output length does not match keys x components", async () => {
+        const a = createTransformNode("a");
+        const b = createTransformNode("b");
+        const c = createTransformNode("c");
+        const glb = await exportGroups([
+            group(
+                "g",
+                [channel(a, "translation", 0), channel(b, "rotation", 1), channel(c, "scale", 2)],
+                [
+                    { input: [0, 1], output: [0, 0, 0, 1, 1] },
+                    { input: [0, 1], output: [0, 0, 0, 1, 0, 0, 0] },
+                    { input: [0, 1], output: [1, 1, 1, 2, 2, 2] },
+                ]
+            ),
+        ]);
+        // Identical warnings are logged once.
+        expect(glb.warnings.filter((w) => w.includes("key and value counts do not match"))).toHaveLength(1);
+        expect(glb.json.animations[0].channels).toHaveLength(1);
+        expect(glb.json.animations[0].channels[0].target.path).toBe("scale");
+    });
+
+    it("requires three outputs per key for CUBICSPLINE", async () => {
+        const a = createTransformNode("a");
+        const b = createTransformNode("b");
+        const glb = await exportGroups([
+            group(
+                "g",
+                [channel(a, "translation", 0), channel(b, "translation", 1)],
+                [
+                    // Two keys need 2 * 3 * 3 = 18 values; a plain 6 is wrong for a spline.
+                    { input: [0, 1], output: [0, 0, 0, 1, 1, 1], interpolation: INTERP_CUBICSPLINE },
+                    { input: [0, 1], output: new Array(18).fill(1), interpolation: INTERP_CUBICSPLINE },
+                ]
+            ),
+        ]);
+        expect(glb.warnings.filter((w) => w.includes("key and value counts do not match"))).toHaveLength(1);
+        expect(glb.json.animations[0].channels.map((c: { target: { node: number } }) => c.target.node)).toEqual([1]);
+    });
+
+    it("requires one output per key and morph target for weights", async () => {
+        const target = (): { positions: Float32Array; normals: null } => ({ positions: new Float32Array(12), normals: null });
+        const mesh = createMesh("m", { extra: { morphTargets: { targets: [target(), target()], weights: new Float32Array([0, 0]), count: 2 } } });
+        const other = createMesh("o", { extra: { morphTargets: { targets: [target(), target()], weights: new Float32Array([0, 0]), count: 2 } } });
+        const glb = await exportGroups(
+            [
+                group(
+                    "g",
+                    [channel(mesh, "weights", 0), channel(other, "weights", 1)],
+                    [
+                        // One value per key matches a single target only.
+                        { input: [0, 1], output: [0, 1] },
+                        { input: [0, 1], output: [0, 0, 1, 1] },
+                    ]
+                ),
+            ],
+            { meshes: [mesh, other] }
+        );
+        expect(glb.warnings.filter((w) => w.includes("key and value counts do not match"))).toHaveLength(1);
+        expect(glb.json.animations[0].channels).toHaveLength(1);
+        expect(glb.json.animations[0].channels[0].target.node).toBe(1);
+        expect(readAccessor(glb, glb.json.animations[0].samplers[0].output)).toEqual([0, 0, 1, 1]);
     });
 
     it("writes input accessor min and max", async () => {
@@ -627,19 +888,17 @@ describe("animations", () => {
         expect(glb.json.animations).toBeUndefined();
     });
 
-    it("resolves a channel targeting a folded mesh to the absorbing node", async () => {
+    it("never folds a mesh bound by a clip channel, whatever the group's string path says", async () => {
         const holder = createTransformNode("holder");
-        const folded = attach(createMesh("folded"), holder);
-        // The clip channel binds the mesh, but the group's string path is not one of the node paths the
-        // sweep treats as "animated", so the mesh still folds into `holder`.
+        const bound = attach(createMesh("bound"), holder);
+        // Animated nodes are detected from the clip channel's numeric path, so the mesh keeps its own
+        // node (a folded mesh would have no node for the channel to target).
         const glb = await exportGroups(
-            [group("g", [{ target: folded, path: "visibility", clipPath: PATH_TRANSLATION, samplerIdx: 0 }], [{ input: [0, 1], output: [0, 0, 0, 1, 1, 1] }])],
-            {
-                meshes: [folded],
-            }
+            [group("g", [{ target: bound, path: "visibility", clipPath: PATH_TRANSLATION, samplerIdx: 0 }], [{ input: [0, 1], output: [0, 0, 0, 1, 1, 1] }])],
+            { meshes: [bound] }
         );
-        expect(glb.json.nodes).toHaveLength(1);
-        expect(glb.json.animations[0].channels[0].target.node).toBe(0);
+        expect(glb.json.nodes.map((n: { name: string }) => n.name)).toEqual(["holder", "bound"]);
+        expect(glb.json.animations[0].channels[0].target.node).toBe(1);
     });
 
     it("keeps a mesh child that a node-path channel animates as its own node", async () => {

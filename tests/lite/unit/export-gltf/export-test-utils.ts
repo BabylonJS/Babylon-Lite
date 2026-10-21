@@ -16,6 +16,7 @@ export interface FakeGpuTexture {
     usage: number;
     dimension: GPUTextureDimension;
     depthOrArrayLayers: number;
+    sampleCount?: number;
     /** Storage-order bytes as the GPU holds them (BGRA order for bgra formats). */
     __pixels: Uint8Array;
     destroyed?: boolean;
@@ -35,10 +36,12 @@ export interface FakeDeviceStats {
 
 /** A fake GPUDevice implementing exactly what the exporter's readback uses: command encoders with
  *  `copyTextureToBuffer` and a one-draw blit render pass, staging buffers with `mapAsync`, transient
- *  textures, shader modules, layouts and pipelines. `failMap` makes every `mapAsync` reject. */
-export function createFakeDevice(options: { failMap?: boolean } = {}): { device: GPUDevice; stats: FakeDeviceStats } {
+ *  textures, shader modules, layouts and pipelines. `failMap` makes every `mapAsync` reject,
+ *  `failCreateBuffer` makes `createBuffer` throw synchronously and `maxBufferSize` sets `limits.maxBufferSize`. */
+export function createFakeDevice(options: { failMap?: boolean; maxBufferSize?: number; failCreateBuffer?: boolean } = {}): { device: GPUDevice; stats: FakeDeviceStats } {
     const stats: FakeDeviceStats = { copies: 0, blits: 0, buffersCreated: 0, buffersDestroyed: 0, texturesCreated: 0, texturesDestroyed: 0 };
     const device = {
+        ...(options.maxBufferSize !== undefined ? { limits: { maxBufferSize: options.maxBufferSize } } : {}),
         createCommandEncoder() {
             return {
                 copyTextureToBuffer(src: { texture: FakeGpuTexture }, dst: { buffer: { __data: Uint8Array }; bytesPerRow: number }, size: { width: number; height: number }) {
@@ -70,6 +73,9 @@ export function createFakeDevice(options: { failMap?: boolean } = {}): { device:
             };
         },
         createBuffer(desc: { size: number }) {
+            if (options.failCreateBuffer) {
+                throw new Error("createBuffer failed");
+            }
             stats.buffersCreated++;
             const data = new Uint8Array(desc.size);
             return {
@@ -133,6 +139,7 @@ export interface FakeTextureOptions {
     wrapper?: Record<string, unknown>;
     dimension?: GPUTextureDimension;
     layers?: number;
+    sampleCount?: number;
 }
 
 /** A Texture2D over a fake GPU texture. `pixels` (RGBA bytes, row 0 first in storage order) is
@@ -145,6 +152,9 @@ export function createTexture(width: number, height: number, pixels: readonly nu
     const gpu = fakeGpuTexture(width, height, options.format ?? "rgba8unorm", options.usage ?? GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING, data);
     gpu.dimension = options.dimension ?? "2d";
     gpu.depthOrArrayLayers = options.layers ?? 1;
+    if (options.sampleCount !== undefined) {
+        gpu.sampleCount = options.sampleCount;
+    }
     return {
         texture: gpu as unknown as GPUTexture,
         view: {} as GPUTextureView,
@@ -240,7 +250,6 @@ export function createScene(options: FakeSceneOptions = {}): SceneContext {
 
 /** A parsed GLB. */
 export interface ParsedGlb {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     json: any;
     bin: Uint8Array;
     bytes: Uint8Array;
