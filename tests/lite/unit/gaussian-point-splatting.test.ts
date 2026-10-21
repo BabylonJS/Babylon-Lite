@@ -543,7 +543,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
         } as unknown as GPUDevice;
         const beginComputePass = vi.fn(() => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), dispatchWorkgroups: vi.fn(), dispatchWorkgroupsIndirect: vi.fn(), end: vi.fn() }));
-        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn(), clearBuffer: vi.fn() } as unknown as GPUCommandEncoder;
         const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 20 });
         const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
         const batch = binding._updateBatches![1]!;
@@ -625,8 +625,8 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             dispatchWorkgroupsIndirect: vi.fn(),
             end: vi.fn(),
         }));
-        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn() } as unknown as GPUCommandEncoder;
-        const gps = enableGaussianPointSplatting(scene, stream, { renderScale, maxAccumFrames: limit + (phase > 0 ? 1 : 0) });
+        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn(), clearBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        const gps = enableGaussianPointSplatting(scene, stream, { renderScale, maxAccumFrames: limit + (phase > 0 ? 1 : 0), occlusionCulling: true });
         const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
         const batch = binding._updateBatches![1]!;
         const context = { targetWidth: 16, targetHeight: 16, _camera: createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 }) };
@@ -658,6 +658,11 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             expect(new Set(slots).size).toBe(cycle);
             expect(slots[0]).toBe(previousPhase);
             expect(uploads.every((params) => params[65]! <= limit - 1)).toBe(true);
+            expect(uploads.every((params) => params[67] === 0)).toBe(true);
+            if (gps.progress!.accumulatedSamples < limit) {
+                frame();
+                expect(uploads.at(-1)![67]).toBe(1);
+            }
             for (let i = 0; i < limit * cycle; i++) {
                 frame();
             }
@@ -668,6 +673,106 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         }
         disableGaussianPointSplatting(scene, gps);
         engine._retirements?.splice(0).forEach((dispose) => dispose());
+    });
+
+    it("reuses streamed working capacity while dispatching only active splats", () => {
+        const { scene, engine } = fixture(true);
+        const gpu = { count: 257, contentGeneration: 0, gatheredGeneration: 0, canonical: {}, intervals: [] };
+        const stream = {
+            _engine: engine,
+            _disposed: false,
+            _renderable: null,
+            _gpu: gpu,
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            boundMin: [-1, -1, -1],
+            boundMax: [1, 1, 1],
+        } as unknown as GaussianSplatStream;
+        const allocations: { label: string; size: number; destroy: ReturnType<typeof vi.fn> }[] = [];
+        const uploads: Float32Array[] = [];
+        engine._device = {
+            limits: { maxBufferSize: 1e9, maxStorageBufferBindingSize: 4500 * 64 },
+            queue: {
+                writeBuffer: vi.fn((_buffer, _offset, data: Float32Array) => {
+                    if (data.length === 76) {
+                        uploads.push(data.slice());
+                    }
+                }),
+            },
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+                const value = { label: descriptor.label!, size: descriptor.size, destroy: vi.fn() };
+                allocations.push(value);
+                return value;
+            }),
+            createShaderModule: vi.fn(() => ({})),
+            createBindGroupLayout: vi.fn(() => ({})),
+            createBindGroup: vi.fn(() => ({})),
+            createPipelineLayout: vi.fn(() => ({})),
+            createComputePipeline: vi.fn((descriptor: GPUComputePipelineDescriptor) => ({ label: descriptor.label, getBindGroupLayout: vi.fn(() => ({})) })),
+            createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+        } as unknown as GPUDevice;
+        const dispatches: { label: string; x: number }[] = [];
+        engine._currentEncoder = {
+            beginComputePass: vi.fn((descriptor: GPUComputePassDescriptor) => ({
+                setPipeline: vi.fn(),
+                setBindGroup: vi.fn(),
+                dispatchWorkgroups: vi.fn((x: number) => dispatches.push({ label: descriptor.label!, x })),
+                dispatchWorkgroupsIndirect: vi.fn(),
+                end: vi.fn(),
+            })),
+            copyBufferToBuffer: vi.fn(),
+            clearBuffer: vi.fn(),
+        } as unknown as GPUCommandEncoder;
+        const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 1 });
+        const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
+        const batch = binding._updateBatches![1]!;
+        const frame = (count: number): void => {
+            gpu.count = count;
+            gpu.gatheredGeneration = ++gpu.contentGeneration;
+            dispatches.length = 0;
+            batch.reset();
+            binding.update!({ targetWidth: 16, targetHeight: 16, _camera: camera });
+            batch.flush(engine);
+            expect(uploads.at(-1)![60]).toBe(count);
+            expect(engine._currentEncoder!.clearBuffer).toHaveBeenLastCalledWith(expect.objectContaining({ label: "GPS point count" }), 4, 4);
+            expect(dispatches.filter(({ label }) => label === "GPS preprocess").map(({ x }) => x)).toEqual(count > 0 ? [Math.ceil(count / 256)] : []);
+        };
+        const camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
+        frame(257);
+        const workingBuffers = (): typeof allocations => allocations.filter(({ label }) => ["GPS weights", "GPS screen", "GPS CDF", "GPS block sums"].includes(label));
+        const first = workingBuffers();
+        expect(first.map(({ size }) => size)).toEqual([257 * 4, 257 * 64, 257 * 4, 8]);
+        const groups = vi.mocked(engine._device.createBindGroup).mock.calls.length;
+        frame(256);
+        frame(0);
+        frame(257);
+        expect(workingBuffers()).toEqual(first);
+        expect(engine._device.createBindGroup).toHaveBeenCalledTimes(groups);
+        frame(258);
+        expect(
+            workingBuffers()
+                .slice(-4)
+                .map(({ size }) => size)
+        ).toEqual([514 * 4, 514 * 64, 514 * 4, 12]);
+        frame(513);
+        expect(workingBuffers()).toHaveLength(8);
+        frame(2500);
+        expect(
+            workingBuffers()
+                .slice(-4)
+                .map(({ size }) => size)
+        ).toEqual([2500 * 4, 2500 * 64, 2500 * 4, 40]);
+        frame(2501);
+        expect(
+            workingBuffers()
+                .slice(-4)
+                .map(({ size }) => size)
+        ).toEqual([4500 * 4, 4500 * 64, 4500 * 4, 72]);
+        frame(300);
+        frame(4500);
+        expect(workingBuffers()).toHaveLength(16);
+        disableGaussianPointSplatting(scene, gps);
+        engine._retirements?.splice(0).forEach((dispose) => dispose());
+        expect(allocations.every(({ destroy }) => destroy.mock.calls.length === 1)).toBe(true);
     });
 
     it.each([
@@ -757,7 +862,7 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             for (let i = 1; i <= cycle; i++) {
                 frame();
                 expect(params()[66]).toBe(i < cycle ? 2 : 0);
-                expect(params()[67]).toBe(1);
+                expect(params()[67]).toBe(i < cycle ? 0 : 1);
             }
             expect(labels.filter((label) => label.startsWith("GPS reproject"))).toHaveLength(3);
             camera.alpha += 0.05;

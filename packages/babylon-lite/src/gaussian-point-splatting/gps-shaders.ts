@@ -130,6 +130,7 @@ export function gpsPreprocessShader(stream: boolean, degree: number): WgslSource
         ? wgsl`
 struct Canonical { centerOpacity: vec4f, covarianceA: vec4f, covarianceB: vec4f, color: vec4f }
 @group(0) @binding(4) var<storage,read> source: array<Canonical>;
+@group(0) @binding(5) var<storage,read_write> total: array<atomic<u32>>;
 `
         : wgsl`
 @group(0) @binding(4) var centers: texture_2d<f32>;
@@ -215,6 +216,14 @@ let rect=intensity(opacity)*(hi.x-lo.x)*(hi.y-lo.y);
 var seed=hash(g^hash(u32(u.data.z)));
 let weight=poisson(min(ellipse,rect)*u.data.y,&seed);
 if (weight==0u) { return; }
+${
+    stream
+        ? wgsl`
+let radiance=bitcast<u32>(max(0.0,max(color.r,max(color.g,color.b))));
+if(radiance>atomicLoad(&total[1])) { atomicMax(&total[1],radiance); }
+`
+        : wgsl``
+}
 let chol=sqrt(a);
 let depth=u32(clamp((vp.z-u.range.x)/max(1e-6,u.range.y-u.range.x),0.0,1.0)*65534.0);
 screen[g]=Screen(vec4f(mean,c/determinant,-b/determinant),
@@ -367,7 +376,8 @@ if(s.depthRect.y==1u && random(&seed)*intensity(s.color.a)>=intensity(alpha)) { 
 let pixel=vec2i(floor(s.meanConic.xy+offset));
 if(any(pixel<vec2i(0)) || any(pixel>=vec2i(u.resolution.xy))) { return; }
 let dither=vec3f(random(&seed),random(&seed),random(&seed))-0.5;
-let color=clamp(s.color.rgb/u.eye.w+dither/vec3f(31.0,63.0,31.0),vec3f(0.0),vec3f(1.0));
+let scale=max(u.eye.w,bitcast<f32>(total[1]));
+let color=clamp(s.color.rgb/scale+dither/vec3f(31.0,63.0,31.0),vec3f(0.0),vec3f(1.0));
 let q=vec3u(color*vec3f(31.0,63.0,31.0)+0.5);
 let packed=(q.x<<11u)|(q.y<<5u)|q.z;
 let key=(s.depthRect.x<<16u)|(packed^u32(u.data.w));
@@ -384,6 +394,7 @@ ${GPS_UNIFORMS}
 @group(0) @binding(3) var<storage,read_write> depth:array<f32>;
 @group(0) @binding(4) var<storage,read_write> counts:array<u32>;
 @group(0) @binding(5) var<storage,read_write> hiz:array<f32>;
+@group(0) @binding(6) var<storage,read> total:array<u32>;
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u) {
 if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
@@ -391,7 +402,8 @@ let i=id.y*u32(u.resolution.x)+id.x;
 let key=atomicExchange(&image[i],0xffffffffu);
 let hit=key!=0xffffffffu;
 let rgb=(key^u32(u.data.w))&65535u;
-let color=vec3f(f32((rgb>>11u)&31u)/31.0,f32((rgb>>5u)&63u)/63.0,f32(rgb&31u)/31.0)*u.eye.w;
+let scale=max(u.eye.w,bitcast<f32>(total[1]));
+let color=vec3f(f32((rgb>>11u)&31u)/31.0,f32((rgb>>5u)&63u)/63.0,f32(rgb&31u)/31.0)*scale;
 let sampleColor=select(vec4f(0.0),vec4f(color,1.0),hit);
 let vz=mix(u.range.x,u.range.y,f32(key>>16u)/65534.0);
 let projected=(u.projection[2].z*vz+u.projection[3].z)/(u.projection[2].w*vz+u.projection[3].w);
@@ -458,6 +470,9 @@ let xy=vec2f(f32((i<<1u)&2u),f32(i&2u));
 return Vertex(vec4f(xy*2.0-1.0,0.0,1.0),vec2f(xy.x,1.0-xy.y));
 }
 struct Fragment { @location(0) color:vec4f, @builtin(frag_depth) depth:f32 }
+fn viewDepth(z:f32)->f32 {
+return (u.projection[3].z-z*u.projection[3].w)/(z*u.projection[2].w-u.projection[2].z);
+}
 @fragment fn fs(v:Vertex)->Fragment {
 let pixel=vec2u(clamp(v.uv,vec2f(0.0),vec2f(0.999999))*u.output.xy);
 let i=pixel.y*u32(u.output.x)+pixel.x;
@@ -466,9 +481,8 @@ if(sampleColor.a<0.0015) { discard; }
 let z=depth[i];
 var result=sampleColor;
 if(u.cycle.w>0.5 && u.range.w>0.5) {
-let p22=u.projection[2].z; let p32=u.projection[3].z;
-let vz=p32/(z-p22);
-let near=p32/(1.0-p22); let far=-p32/p22;
+let vz=viewDepth(z);
+let near=viewDepth(1.0); let far=viewDepth(0.0);
 let linear=clamp((vz-near)/(far-near),0.0,1.0);
 let coverage=select(sampleColor.a,1.0,u.range.w<1.5);
 result=vec4f(vec3f(linear*coverage),coverage);

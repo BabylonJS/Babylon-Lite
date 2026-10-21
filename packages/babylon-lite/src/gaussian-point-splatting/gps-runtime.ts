@@ -47,6 +47,7 @@ interface PixelBuffers extends GpsReproject.GpsReprojectionTarget {
 
 interface SplatBuffers {
     count: number;
+    capacity: number;
     weights: GPUBuffer;
     screen: GPUBuffer;
     cdf: GPUBuffer;
@@ -128,6 +129,7 @@ function pipelines(device: GPUDevice, stream: boolean, degree: number): Pipeline
     ];
     if (stream) {
         entries.push({ binding: 4, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } });
+        entries.push({ binding: 5, visibility: SS.COMPUTE, buffer: { type: "storage" } });
     } else {
         for (let i = 4; i < 8 + Math.ceil((((degree + 1) ** 2 - 1) * 3) / 16); i++) {
             entries.push({ binding: i, visibility: SS.COMPUTE, texture: { sampleType: i < 8 ? "unfilterable-float" : "uint" } });
@@ -233,7 +235,7 @@ function pixelBuffers(device: GPUDevice, width: number, height: number, n: numbe
     }
 }
 
-function splatBuffers(device: GPUDevice, count: number): SplatBuffers {
+function splatBuffers(device: GPUDevice, capacity: number): SplatBuffers {
     const buffers: GPUBuffer[] = [];
     const make = (size: number, label: string): GPUBuffer => {
         const value = buffer(device, size, label);
@@ -242,11 +244,12 @@ function splatBuffers(device: GPUDevice, count: number): SplatBuffers {
     };
     try {
         return {
-            count,
-            weights: make(count * 4, "weights"),
-            screen: make(count * 64, "screen"),
-            cdf: make(count * 4, "CDF"),
-            sums: make(Math.ceil(count / 256) * 4, "block sums"),
+            count: 0,
+            capacity,
+            weights: make(capacity * 4, "weights"),
+            screen: make(capacity * 64, "screen"),
+            cdf: make(capacity * 4, "CDF"),
+            sums: make(Math.ceil(capacity / 256) * 4, "block sums"),
             buffers,
         };
     } catch (error) {
@@ -310,7 +313,7 @@ function createView(device: GPUDevice): ViewState {
     };
     try {
         const params = make(304, "parameters", BU.UNIFORM | BU.COPY_DST);
-        const total = make(4, "point count", BU.STORAGE | BU.COPY_SRC);
+        const total = make(8, "point count", BU.STORAGE | BU.COPY_SRC | BU.COPY_DST);
         const indirect = make(12, "dispatch", BU.STORAGE | BU.INDIRECT);
         const buckets = make(65537 * 4, "partitions", BU.STORAGE);
         const readbacks = Array.from({ length: 3 }, () => ({ buffer: make(4, "readback", BU.COPY_DST | BU.MAP_READ), busy: false }));
@@ -389,14 +392,17 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         state.composite = null;
         state.groups.clear();
     }
-    if (state.splats?.count !== count) {
-        const splats = splatBuffers(engine._device, count);
+    if (!state.splats || state.splats.capacity < count) {
+        const limit = Math.floor(Math.min(engine._device.limits.maxBufferSize, engine._device.limits.maxStorageBufferBindingSize) / 64);
+        const capacity = state.splats ? Math.max(count, Math.min(state.splats.capacity * 2, limit)) : count;
+        const splats = splatBuffers(engine._device, capacity);
         if (state.splats) {
             retireBuffers(engine, state.splats.buffers);
         }
         state.splats = splats;
         state.groups.clear();
     }
+    state.splats.count = count;
     const view = getViewMatrix(camera);
     const projection = getProjectionMatrix(camera, getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight));
     const world = target.worldMatrix;
@@ -486,7 +492,12 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     cpu.set([width, height, n, stream ? 0 : target.textureWidth], 56);
     cpu.set([count, gps.pointScale, state.seed % 65536, (Math.imul(state.seed + 1, 0x9e3779b1) >>> 16) & 65535], 60);
     cpu.set(
-        [state.generation, gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames), reset ? 1 : state.fillFrames > 0 ? 2 : 0, +(gps.occlusionCulling && !reset && !state.reproject)],
+        [
+            state.generation,
+            gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames),
+            reset ? 1 : state.fillFrames > 0 ? 2 : 0,
+            +(gps.occlusionCulling && !reset && state.refreshFrames === 0),
+        ],
         64
     );
     cpu.set([zMin, zMax, state.pixels.levels.length, depthVisualization], 68);
@@ -532,9 +543,12 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
         state.reproject = null;
     }
     const groups = Math.ceil(splats.count / 256);
+    if (stream) {
+        encoder.clearBuffer(state.total, 4, 4);
+    }
     if (splats.count > 0) {
         const sources = stream
-            ? [target._gpu.canonical]
+            ? [target._gpu.canonical, state.total]
             : [target._gs._centersView, target._gs._covAView, target._gs._covBView, target._gs._colorsView, ...(target._gs._shViews ?? [])];
         dispatch(pipeline.preprocess, [params, splats.weights, splats.screen, pixel.hiz, ...sources], Math.min(groups, 65535), Math.ceil(groups / 65535));
         dispatch(pipeline.blocks, [params, splats.weights, splats.cdf, splats.sums], Math.min(groups, 65535), Math.ceil(groups / 65535));
@@ -546,7 +560,7 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
         dispatch(pipeline.splat, [params, splats.cdf, state.total, state.buckets, splats.screen, pixel.image], 0, 1, true);
     }
     const level0 = pixel.levels[0]!;
-    dispatch(pipeline.resolve, [params, pixel.image, pixel.accum, pixel.depth, pixel.counts, pixel.hiz], Math.ceil(level0.width / 8), Math.ceil(level0.height / 8));
+    dispatch(pipeline.resolve, [params, pixel.image, pixel.accum, pixel.depth, pixel.counts, pixel.hiz, state.total], Math.ceil(level0.width / 8), Math.ceil(level0.height / 8));
     if (gps.occlusionCulling) {
         for (let i = 1; i < pixel.levels.length; i++) {
             const level = pixel.levels[i]!;

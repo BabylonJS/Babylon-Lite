@@ -97,6 +97,12 @@ the target's depth compare (default reverse-Z `greater-equal`), optional depth
 writes, and the target's multisample count. Color writes are enabled for color
 mode or for depth mode with an explicit non-`none` depth visualization.
 
+Splat working buffers track active count separately from capacity. They retain
+their allocations and compute bind groups across decreases and increases within
+capacity, grow geometrically when needed (bounded by device buffer limits), and
+retire replaced buffers after submission. Allocation sizes use capacity; uniforms,
+scan lengths, and dispatch workgroups use only the active count.
+
 ## Shader Logic
 
 Preprocessing reads static center/covariance/color textures and optional SH
@@ -108,6 +114,21 @@ keys and updates generation-tagged running color averages and depths.
 The composite displays accumulated color or the explicit linear/alpha-blended
 depth mode. Shader definitions and SH degree specialization are in
 `gps-shaders.ts`.
+
+The point-count buffer contains two `u32` words: total points and the positive
+float bits of the stream's maximum sampled radiance. Each streamed preprocess
+clears the second word, then atomically reduces the maximum nonnegative RGB
+component of its sampled screen records. Sampling divides by the greater of
+this maximum and the static radiance scale (1, or 8 for static SH); resolve
+multiplies by exactly the same scale. Thus RGB565 quantization does not clip
+streamed HDR colors before averaging coverage, and each frame's accumulation
+remains in radiance units even when the scale changes.
+
+Depth visualization reconstructs view depth from all four Z/W projection
+coefficients: `(P32 - z * P33) / (z * P23 - P22)`. Evaluating this at the
+stored reverse-Z depth, 1, and 0 gives surface depth, near, and far respectively,
+so linear and alpha-blended grayscale support both perspective and orthographic
+static cameras.
 
 ## State Machine / Lifecycle
 
@@ -122,7 +143,9 @@ Streamed content refreshes under a still camera soft-reset instead: the frame
 counter is clamped to `min(GPS_SOFT_RESET_SAMPLES (8), maxAccumFrames - 1)`
 samples while preserving the sub-pixel jitter phase. Each refresh also requires
 at least one complete `n²`-frame cycle before convergence can stop dispatches,
-including refreshes during a partial cycle and limits of one sample. Resolve
+including refreshes during a partial cycle and limits of one sample. Hi-Z rejection
+is disabled for that whole refresh cycle so old occluders cannot hide newly exposed
+splats; the freshly built hierarchy is used afterwards. Resolve
 clamps each pixel's running-mean count to the uploaded history cap (at most
 `maxAccumFrames - 1`, allowing zero), so the incoming sample never exceeds the
 limit and new LODs blend in without blanking sparse content
@@ -197,9 +220,9 @@ Before preprocessing, `record()` runs:
 
 The frame counter is soft-reset to the same sample cap so accumulation resumes,
 and a complete pixel cycle is required before convergence, even when motion
-occurred partway through a previous cycle. Occlusion culling is skipped for
-that frame because the Hi-Z is from the
-previous view. For the next `n²` dispatched frames, resolve uses fill mode
+occurred partway through a previous cycle. Occlusion culling is skipped throughout
+that refresh cycle because the old Hi-Z contains the previous view. For the next
+`n²` dispatched frames, resolve uses fill mode
 (`state.z = 2`, versus `1` for a hard reset and `0` for normal accumulation).
 The existing counts buffer is the hole mask: pixels in the current generation
 with count zero receive the current low-resolution point sample's color and
@@ -237,8 +260,9 @@ module imports this feature.
 option validation/invalidation, pre/post-registration discovery, unrelated
 renderables, native encoder receivers and proxy reuse, all four draw commands,
 multiple targets, stream bootstrap/batches, disable/dispose restoration, buffer
-retirement, accumulation resets, low-limit streamed refreshes across every cycle
-slot, paired reprojection matrices and inverse projection, the 208-byte
+retirement, capacity reuse and device-bounded growth with active-count dispatches,
+accumulation resets, low-limit streamed refreshes with occlusion disabled across
+every cycle slot, paired reprojection matrices and inverse projection, the 208-byte
 uniform layout, and hard-reset fallback for singular/non-finite transforms.
 Numerical tests and hardware compute readbacks cover backward-motion foreground
 collisions, lateral-motion depth rejection, orthographic and finite/infinite
@@ -259,6 +283,13 @@ not cross-engine pixel equivalence. Filtered bundle builds of scenes
 120/122/123/124/226 must have exactly zero raw-byte growth against the clean tree.
 Hardware WebGPU smoke checks exercise base and SH static pipelines without
 visual comparison or performance measurements.
+`tests/lite/integration/gaussian-point-sampling.spec.ts` runs real stream
+preprocess, RGB565 sampling, resolve, and composite shaders with buffer/texture
+readbacks. It verifies rejection against stale Hi-Z versus an unculled refresh,
+per-frame HDR maxima that can increase or decrease, quarter-coverage radiance
+accumulation (including radiance 2 producing 0.5), static base/SH shader compilation,
+and both depth visualization modes at near/middle/far depths for perspective and
+orthographic cameras with near/far planes 1/11.
 
 ## File Manifest
 
