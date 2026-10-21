@@ -150,7 +150,7 @@ export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: 
             continue;
         }
         const world = node.parent !== null && node.parent !== undefined && !cycleRoots.has(node);
-        if (!world && isLoaderRoot(node, animated)) {
+        if (!world && !cycleRoots.has(node) && isLoaderRoot(node, animated)) {
             const rootExtras = node.metadata?.gltf?.extras;
             if (assetExtras === undefined && rootExtras !== undefined) {
                 assetExtras = rootExtras;

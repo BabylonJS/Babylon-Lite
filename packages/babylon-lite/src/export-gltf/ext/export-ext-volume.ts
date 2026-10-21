@@ -21,10 +21,12 @@ export const volumeWriter: MaterialExtensionWriter = {
         if (tint) {
             const color = tint.color;
             // The loader's synthesized no-absorption tint: white (or unset) at distance 1.
-            const synthesized = tint.atDistance === 1 && (!color || (Math.abs(color[0] - 1) <= 1e-6 && Math.abs(color[1] - 1) <= 1e-6 && Math.abs(color[2] - 1) <= 1e-6));
+            // An unset distance is the runtime default 1 (`refraction-rtt-fragment.ts`).
+            const atDistance = tint.atDistance ?? 1;
+            const synthesized = atDistance === 1 && (!color || (Math.abs(color[0] - 1) <= 1e-6 && Math.abs(color[1] - 1) <= 1e-6 && Math.abs(color[2] - 1) <= 1e-6));
             if (!synthesized) {
-                if (tint.atDistance !== undefined && tint.atDistance > 0) {
-                    payload.attenuationDistance = tint.atDistance;
+                if (atDistance > 0) {
+                    payload.attenuationDistance = atDistance;
                 }
                 if (color) {
                     setVecUnlessDefault(payload, "attenuationColor", color, [1, 1, 1]);

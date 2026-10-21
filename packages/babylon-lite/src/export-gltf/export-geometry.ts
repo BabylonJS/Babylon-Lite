@@ -38,11 +38,15 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
     }
     const sourceMode = primitiveMode(m);
     const flip = needsWindingFlip(m._authoredSign, convert);
+    // A reversed triangle list or strip with fewer than 3 indices has no triangle left to draw.
+    if (flip && (sourceMode === 4 || sourceMode === 5) && (indexSource?.length ?? count) < 3) {
+        return null;
+    }
 
     const attributes: GltfAttributes = {};
     attributes.POSITION = vectorAccessor(ctx, positions, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, true);
     const normals = m._cpuNormals;
-    if (normals && !m._flatNormal && checkLength(ctx, m, normals, 3, count, "normals")) {
+    if (normals && normals.length > 0 && !m._flatNormal && checkLength(ctx, m, normals, 3, count, "normals")) {
         attributes.NORMAL = vectorAccessor(ctx, normals, 3, count, convert ? "direction-c" : "unit", convert ? mirrorDirection : repairUnitLength, false);
     }
     const tangents = m._cpuTangents;
