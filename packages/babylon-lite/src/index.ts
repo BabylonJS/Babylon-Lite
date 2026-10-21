@@ -731,6 +731,8 @@ export type { KhrInteractivityRuntimeValueSnapshot } from "./loader-gltf/khr-int
 // use it); only these tiny setters are statically reachable from the entry point.
 export { setDracoBaseUrl } from "./loader-gltf/draco-decode.js";
 export { setMeshoptBaseUrl } from "./loader-gltf/meshopt-decode.js";
+// ─── Exporters ───────────────────────────────────────────────────────
+export { exportSceneAsGlb } from "./export-gltf/export-gltf.js";
 // ─── Hierarchy ───────────────────────────────────────────────────────
 export type { IWorldMatrixProvider, IParentable } from "./scene/parentable.js";
 export { setParent } from "./scene/set-parent.js";
