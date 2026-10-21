@@ -4,10 +4,10 @@
 
 ## Branches
 
-| Branch | Base | Contents |
-| --- | --- | --- |
-| `docs/gltf-exporter-architecture` | `prod` (`4ce7440`) | `docs/lite/architecture/60-gltf-exporter.md` plus its row in `00-overview.md` |
-| `feat/gltf-exporter-implementation` | the docs branch | the exporter (`packages/babylon-lite/src/export-gltf/`), the `index.ts` re-export, tests, doc revisions made during implementation, and this file |
+| Branch                              | Base               | Contents                                                                                                                                          |
+| ----------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/gltf-exporter-architecture`   | `prod` (`4ce7440`) | `docs/lite/architecture/60-gltf-exporter.md` plus its row in `00-overview.md`                                                                     |
+| `feat/gltf-exporter-implementation` | the docs branch    | the exporter (`packages/babylon-lite/src/export-gltf/`), the `index.ts` re-export, tests, doc revisions made during implementation, and this file |
 
 No PR was opened.
 
@@ -70,5 +70,5 @@ No PR was opened.
 
 14. Stale v1 planning docs on `feat/gltf-export` (`requirements.md`, `prd.md`, `goals.md`, `53-gltf-exporter.md`) contradict the current spec; delete or archive them.
 15. Parity scenes E-1 … E-24 and their goldens are specified but not created in this run (they need Babylon.js golden captures and CI).
-27. Add `gltf-validator` as a root dev dependency and run it in the plumbing spec (the local run used a scratch install).
-28. The plumbing spec uses the repo's Playwright config (`channel: "chrome"`); locally it was run with Chromium + SwiftShader via a scratch config. CI should pick it up like the other plumbing specs — worth confirming on the first CI run.
+16. Add `gltf-validator` as a root dev dependency and run it in the plumbing spec (the local run used a scratch install).
+17. The plumbing spec uses the repo's Playwright config (`channel: "chrome"`); locally it was run with Chromium + SwiftShader via a scratch config. CI should pick it up like the other plumbing specs — worth confirming on the first CI run.

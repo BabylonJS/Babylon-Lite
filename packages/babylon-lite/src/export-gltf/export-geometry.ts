@@ -103,7 +103,7 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
                 const t: GltfAttributes = {
                     POSITION: vectorAccessor(ctx, target.positions, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, true),
                 };
-                if (withNormals && target.normals && target.normals.length === count * 3) {
+                if (withNormals && target.normals && checkLength(ctx, m, target.normals, 3, count, "morph-target normals")) {
                     t.NORMAL = vectorAccessor(ctx, target.normals, 3, count, convert ? "position-c" : "v", convert ? mirrorX : null, false);
                 }
                 return t;

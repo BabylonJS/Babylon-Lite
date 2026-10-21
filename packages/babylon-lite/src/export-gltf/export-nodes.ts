@@ -83,6 +83,7 @@ export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: 
         return set.has(child);
     };
     const recorded = new Set<SceneNode>();
+    const cycleRoots = new Set<SceneNode>();
 
     const addRoot = (node: SceneNode): void => {
         if (!seen.has(node)) {
@@ -101,7 +102,10 @@ export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: 
                 return node;
             }
             if (path.has(parent)) {
+                // A cycle has no world matrix (computing it would recurse forever): export the cycle from
+                // this node with its local transform.
                 ctx.warn(`Node "${node.name}" is part of a parent cycle; exporting the cycle from this node.`);
+                cycleRoots.add(node);
                 return node;
             }
             path.add(parent);
@@ -145,7 +149,7 @@ export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: 
         if (skipped.has(node)) {
             continue;
         }
-        const world = node.parent !== null && node.parent !== undefined;
+        const world = node.parent !== null && node.parent !== undefined && !cycleRoots.has(node);
         if (!world && isLoaderRoot(node, animated)) {
             const rootExtras = node.metadata?.gltf?.extras;
             if (assetExtras === undefined && rootExtras !== undefined) {
