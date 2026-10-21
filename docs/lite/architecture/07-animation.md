@@ -369,11 +369,36 @@ The functions expose raw ease-in curves. Babylon.js easing modes remain a compat
 facade concern: `EasingFunction.ease()` remaps the input/output for ease-out and
 ease-in-out, then delegates the raw curve calculation to Lite.
 
-Per-key easing remains outside this track-wide contract. Supporting
-`IAnimationKey.easingFunction` cleanly would require property-track compilation
-to retain an optional easing callback per segment and
-`evaluatePropertySampler()` to select it with the start-key index. Generic glTF
-`AnimationSampler` data would remain unchanged.
+### Compat per-key easing
+
+Native property tracks retain their track-wide easing contract. The compat
+keyframe model additionally accepts Babylon.js-shaped per-key easing:
+
+```typescript
+interface IAnimationKey {
+    frame: number;
+    value: AnimationValue;
+    interpolation?: number;
+    easingFunction?: IEasingFunction;
+}
+```
+
+For each non-STEP segment `[a, b)`, `Animation.evaluate()` selects
+`a.easingFunction ?? animation.getEasingFunction()` and applies its `ease()`
+method to normalized progress before interpolation. An absent callback leaves
+progress linear. Key easing overrides the animation default; the next key's
+callback applies only to the segment it starts. Preserve callback receivers,
+unclamped overshoot and current scalar/vector/quaternion interpolation. STEP
+segments and clamped first/last endpoints never invoke easing.
+
+Direct or attached tracks with an outgoing non-STEP key callback use the
+existing compat evaluator, with an explicit fallback reason. Independent
+supported tracks still delegate to Lite. A final key's callback and callbacks
+on STEP segments are unused and do not force fallback. Structural groups use
+the same `evaluate()` path. Evaluator ownership is chosen when playback starts;
+adding callbacks to a previously native track requires starting playback again.
+Neither native property-track compilation nor generic glTF `AnimationSampler`
+data changes.
 
 ### Scratch Buffer: `_quat`
 
@@ -675,7 +700,7 @@ their key array), but unlike Babylon.js it does not observe in-place mutation of
 key objects already compiled into packed native buffers.
 
 Compat temporarily retains its existing CPU evaluator for explicitly unsupported
-tracks: mixed per-key STEP/LINEAR segments, matrix/color/custom data shapes,
+tracks: per-key easing, mixed per-key STEP/LINEAR segments, matrix/color/custom data shapes,
 relative/constant loop modes, unresolved or non-native property bindings, and
 tracks whose key domain cannot represent the requested forward play range.
 Calls with differing track frame rates, reverse ranges/speeds, non-finite timing,
@@ -688,9 +713,9 @@ multi-target `AnimationGroup` path also remains compat-owned because its
 rest-pose-weighted mixer and mutable lifecycle do not yet match Lite's
 single-target property group and opt-in mixer semantics. Structural rest poses
 are captured by value (including cloned vector/quaternion values), so repeated
-partial-weight blends cannot mutate their own baseline. Babylon.js per-key
-`IAnimationKey.easingFunction` is a separate compatibility feature; this contract
-covers the animation-level easing API requested by the compat tracker.
+partial-weight blends cannot mutate their own baseline. Per-key easing is
+implemented by this same compat evaluator; animation-level-only tracks retain
+the native delegation described above.
 
 ## Dependencies
 
@@ -729,6 +754,7 @@ covers the animation-level easing API requested by the compat tracker.
 21. **Compat native delegation**: Verify supported Babylon.js-shaped direct and attached animations are advanced and written by a Lite property group, while unsupported independent tracks use the explicit compat fallback
 22. **Compat easing facade**: Verify `IEasingFunction | null`, live replacement/clearing, direct and structural evaluation, and native scalar/vector/quaternion playback
 23. **Compat lifecycle**: Verify nonzero ranges, exact loop boundaries, completion, pause/restart/stop, full-key-domain seeking, positive speed changes, and overlapping write order
+24. **Compat per-key easing**: Verify start-key precedence, default/linear fallback, STEP and final-key callback bypass, scalar/vector/quaternion values, structural groups, and mixed native/compat playback
 
 ## File Manifest
 

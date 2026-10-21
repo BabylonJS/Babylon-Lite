@@ -40,6 +40,8 @@ export interface IAnimationKey {
     value: AnimationValue;
     /** Babylon.js per-key interpolation hint (`AnimationKeyInterpolation`). */
     interpolation?: number;
+    /** Easing for the segment starting at this key; overrides animation-level easing. */
+    easingFunction?: IEasingFunction;
 }
 
 /**
@@ -103,8 +105,8 @@ export class Animation {
     }
 
     /**
-     * Assigns the easing function used to transform each non-STEP segment's normalized progress.
-     * @param easingFunction - A Babylon.js-shaped easing object, or `null` to restore linear progress.
+     * Assigns default easing for non-STEP segments without a key-specific easing function.
+     * @param easingFunction - A Babylon.js-shaped easing object, or `null` to use linear progress on keys without an override.
      */
     public setEasingFunction(easingFunction: IEasingFunction | null): void {
         this._easingFunction = easingFunction;
@@ -112,7 +114,7 @@ export class Animation {
 
     /**
      * Gets the easing function currently assigned to this animation.
-     * @returns The assigned easing object, or `null` when interpolation uses linear progress.
+     * @returns The assigned default easing object, or `null` when keys without an override use linear progress.
      */
     public getEasingFunction(): IEasingFunction | null {
         return this._easingFunction;
@@ -142,7 +144,8 @@ export class Animation {
                     return a.value;
                 }
                 const gradient = (frame - a.frame) / (b.frame - a.frame);
-                return interpolateValue(a.value, b.value, this._easingFunction?.ease(gradient) ?? gradient, this.dataType);
+                const easing = a.easingFunction ?? this._easingFunction;
+                return interpolateValue(a.value, b.value, easing?.ease(gradient) ?? gradient, this.dataType);
             }
         }
         return keys[keys.length - 1]!.value;
@@ -694,6 +697,9 @@ function getTrackNativeFallbackReason(target: unknown, animation: Animation, fro
     }
     if (!uniformInterpolation(keys)) {
         return `native property animation track "${animation.targetProperty}" mixes STEP and LINEAR segments`;
+    }
+    if (keys.some((key, index) => index < keys.length - 1 && key.interpolation !== AnimationKeyInterpolation.STEP && key.easingFunction)) {
+        return `native property animation track "${animation.targetProperty}" uses per-key easing`;
     }
     if (!supportsNativeBinding(target, animation.targetProperty, stride)) {
         return `native property animation path "${animation.targetProperty}" is not writable by the native binding`;

@@ -315,6 +315,63 @@ describe("NullEngine (headless)", () => {
         expect(target.x).toBeCloseTo(2.5);
     });
 
+    it("retains per-key easing on fallback while independent tracks remain native", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0, y: 0 };
+        const keyed = new Animation("perKey", "x", 10);
+        keyed.setKeys([
+            { frame: 0, value: 0, easingFunction: new QuadraticEase() },
+            { frame: 10, value: 10 },
+            { frame: 20, value: 20 },
+        ]);
+        keyed.setEasingFunction(new CubicEase());
+        const native = new Animation("native", "y", 10);
+        native.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 20, value: 20 },
+        ]);
+        const keyedEvaluate = vi.spyOn(keyed, "evaluate");
+        const nativeEvaluate = vi.spyOn(native, "evaluate");
+        const animatable = scene.beginDirectAnimation(target, [keyed, native], 0, 20, false);
+
+        expect(animatable._lite).toBeDefined();
+        expect(animatable._nativeFallbackReason).toMatch(/per-key easing/);
+        scene._tick(500);
+        expect(target).toEqual({ x: 2.5, y: 5 });
+        animatable.goToFrame(15);
+        expect(target).toEqual({ x: 11.25, y: 15 });
+        keyed.setEasingFunction(null);
+        animatable.goToFrame(15);
+        expect(target).toEqual({ x: 15, y: 15 });
+        expect(keyedEvaluate).toHaveBeenCalled();
+        expect(nativeEvaluate).not.toHaveBeenCalled();
+        scene.dispose();
+    });
+
+    it.each([true, false])("keeps unused per-key callbacks native (STEP: %s)", (step) => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0 };
+        const ignored = { ease: vi.fn(() => 0.75) };
+        const animation = new Animation("unusedPerKey", "x", 10);
+        animation.setKeys([
+            { frame: 0, value: 0, interpolation: step ? AnimationKeyInterpolation.STEP : undefined, easingFunction: step ? ignored : undefined },
+            { frame: 10, value: 10, easingFunction: ignored },
+        ]);
+        animation.setEasingFunction(new QuadraticEase());
+        const evaluate = vi.spyOn(animation, "evaluate");
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 10, false);
+
+        expect(animatable._lite).toBeDefined();
+        expect(animatable._nativeFallbackReason).toBeUndefined();
+        scene._tick(500);
+        expect(target.x).toBeCloseTo(step ? 0 : 2.5);
+        animatable.goToFrame(10);
+        expect(target.x).toBe(10);
+        expect(ignored.ease).not.toHaveBeenCalled();
+        expect(evaluate).not.toHaveBeenCalled();
+        scene.dispose();
+    });
+
     it("keeps supported tracks native in a mixed supported/fallback call", () => {
         const scene = new Scene(new NullEngine());
         const target = { x: 0, y: 0 };
