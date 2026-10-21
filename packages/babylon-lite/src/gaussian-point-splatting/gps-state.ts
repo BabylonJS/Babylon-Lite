@@ -114,9 +114,9 @@ export function gpsAccumulatedSamples(frames: number, cycle: number, maxAccumFra
     return Math.min(maxAccumFrames, Math.floor(frames / cycle));
 }
 
-/** @internal Running-mean history cap for the frame about to be resolved; never below a reset pixel's own count. */
+/** @internal Running-mean history cap, leaving room for the incoming sample (zero history at a one-sample limit). */
 export function gpsHistoryCap(frames: number, cycle: number, maxAccumFrames: number): number {
-    return Math.min(maxAccumFrames, Math.floor(frames / cycle) + 1);
+    return Math.min(maxAccumFrames - 1, Math.floor(frames / cycle) + 1);
 }
 
 /** @internal Exact inverse-CDF Poisson at small means, normal asymptotics at large means. */

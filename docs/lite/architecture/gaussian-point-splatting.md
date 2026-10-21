@@ -39,7 +39,9 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
   `{ renderedFrameCount, accumulatedSamples, accumulationVersion, pixelCycleLength }`.
   `renderedFrameCount` counts dispatched frames since the last accumulation
   reset and stops growing once converged; `accumulatedSamples` is the completed
-  per-pixel sample count, saturating at `maxAccumFrames`.
+  per-pixel sample count, saturating at `maxAccumFrames`. A phase-preserving
+  refresh can require up to one extra partial cycle after this sample limit
+  before dispatches stop, so every cycle slot processes the changed content.
 
 `GaussianPointSplattingOptions` is the partial form of the mutable settings.
 Repeated enable calls update the existing handle after validating options.
@@ -117,15 +119,20 @@ accumulation. Static `updateData` is wrapped to bump a feature-owned content
 version, then restored on disable.
 
 Streamed content refreshes under a still camera soft-reset instead: the frame
-counter is clamped to `GPS_SOFT_RESET_SAMPLES` (8) samples while preserving the
-sub-pixel jitter phase, and resolve clamps each pixel's running-mean count to
-the uploaded history cap, so new LODs blend in without blanking sparse content
+counter is clamped to `min(GPS_SOFT_RESET_SAMPLES (8), maxAccumFrames - 1)`
+samples while preserving the sub-pixel jitter phase. Each refresh also requires
+at least one complete `n²`-frame cycle before convergence can stop dispatches,
+including refreshes during a partial cycle and limits of one sample. Resolve
+clamps each pixel's running-mean count to the uploaded history cap (at most
+`maxAccumFrames - 1`, allowing zero), so the incoming sample never exceeds the
+limit and new LODs blend in without blanking sparse content
 such as the environment sky. If a stream deferred its canonical gather
 (`gatheredGeneration !== contentGeneration`), point compute is skipped for that
 frame and the previous accumulation stays on screen. The automatic render scale
 increases immediately but only refines once `sqrt(points/budget)` falls 1.25
 below the current divisor, so noisy point-count readbacks cannot flip it and
-reset every few frames. Once `floor(frames / cycle) >= maxAccumFrames` the
+reset every few frames. Once `floor(frames / cycle) >= maxAccumFrames` and the
+pending refresh cycle is complete, the
 compute dispatch and readback are skipped. Stream canonical gather
 batches remain ahead of point compute. Resources are retired after submission;
 busy asynchronous readbacks clean up after their mapping completes.
@@ -139,27 +146,37 @@ module arrives, view changes keep restarting the accumulation.
 With `temporalReprojection`, world/view/projection matrices leave the
 generation key and are tracked separately. When they change, `prepare()` builds
 `M = P·V·W · (P'·V'·W')⁻¹` and its inverse from the previous matrices. The
-lazy module packs both column-major matrices at float offsets 0 and 16 in a
-36-float, 144-byte uniform, followed by `(width, height, generation, history cap)`
-at offset 32. If either inverse is singular, accumulation hard-resets.
+lazy module packs both column-major matrices at float offsets 0 and 16, then
+the current inverse projection at offset 32 in a 52-float, 208-byte uniform.
+`(width, height, generation, history cap)` follows at offset 48. If any inverse
+is singular or non-finite, accumulation hard-resets. The full inverse projection
+reconstructs positive finite current view depth as
+`(P⁻¹ · clip).z / (P⁻¹ · clip).w`, supporting perspective (finite or infinite
+far plane), orthographic, and off-axis projections without inferring depth from
+the homogeneous scale of the inter-frame transform.
 Before preprocessing, `record()` runs:
 
 1. Copy accumulation, depth, and counts into lazily allocated history buffers
    (about 32 extra bytes per full-resolution pixel) and clear two scatter
    targets.
 2. Scatter each valid previous pixel (current generation, nonzero count,
-   nonzero depth) through `M` from its pixel center and stored NDC depth, keeping
-   the nearest `clip.w` per destination with `atomicMax(~bits(w))`.
+   positive depth in `(0, 1]`) through `M` from its pixel center and stored NDC
+   depth. Reject nonpositive/non-finite W, out-of-range projected Z, and
+   nonpositive/non-finite reconstructed view depth. Keep the nearest current
+   reverse-Z projected depth `zc = clip.z / clip.w` per destination with
+   `atomicMax(bits(zc))`; positive float bits preserve reverse-Z ordering.
 3. Record the winning source pixel per destination. These scatter passes only
    estimate current depth; they no longer determine where history color is sampled.
 4. Pull gather: choose the winner as the depth source. When at least six of eight
-   neighbors are more than 10% nearer, the pixel is a crack in a magnified
+   neighbors have reconstructed current view depth more than 10% nearer, the pixel is a crack in a magnified
    surface and chooses the nearest neighbor's source. Empty pixels choose the
    farthest neighbor's source because disocclusions usually reveal background.
+   Near/far neighbor selection uses reconstructed view depth, not homogeneous W
+   or raw projected-depth ratios.
    Pixels without any source get zero color/depth and `generation << 16` (zero
    samples), preserving resolve's provisional hole fills.
 5. Reproject the chosen source through `M` to obtain `zc = clip.z / clip.w`
-   and `wc = clip.w`. Build the destination's exact pixel-center NDC point
+   and reconstruct its current view depth `vc`. Build the destination's exact pixel-center NDC point
    `((d + 0.5) / size * 2 - 1)` with Y negated and Z set to `zc`, then transform
    through `M⁻¹` and divide by W. Previous fractional pixel coordinates are
    `(previousNdc.xy * (0.5, -0.5) + 0.5) * size - 0.5`, so integers denote
@@ -167,8 +184,9 @@ Before preprocessing, `record()` runs:
    at a rounded scatter destination.
 6. Bilinearly sample the four history taps around that coordinate. A tap must
    be in bounds, have the current generation, positive count and depth, and
-   agree with the estimated depth: `abs(reprojectedTap.w - wc) <= 0.05 * wc`.
-   The 5% relative clip-W tolerance rejects different surfaces while allowing
+   have valid projected/current view depths and agree with the estimated depth:
+   `abs(viewDepth(reprojectedTap) - vc) <= 0.05 * vc`.
+   The 5% relative view-depth tolerance rejects different surfaces while allowing
    small local depth variation. Multiply bilinear weights by tap validity and
    renormalize. Count is the minimum count among positive-weight accepted taps,
    capped at `min(GPS_REPROJECTION_SAMPLES (16), maxAccumFrames - 1)` (at least
@@ -178,7 +196,9 @@ Before preprocessing, `record()` runs:
    Gather still binds eight storage buffers; no extra storage is needed.
 
 The frame counter is soft-reset to the same sample cap so accumulation resumes,
-and occlusion culling is skipped for that frame because the Hi-Z is from the
+and a complete pixel cycle is required before convergence, even when motion
+occurred partway through a previous cycle. Occlusion culling is skipped for
+that frame because the Hi-Z is from the
 previous view. For the next `n²` dispatched frames, resolve uses fill mode
 (`state.z = 2`, versus `1` for a hard reset and `0` for normal accumulation).
 The existing counts buffer is the hole mask: pixels in the current generation
@@ -217,8 +237,25 @@ module imports this feature.
 option validation/invalidation, pre/post-registration discovery, unrelated
 renderables, native encoder receivers and proxy reuse, all four draw commands,
 multiple targets, stream bootstrap/batches, disable/dispose restoration, buffer
-retirement, accumulation resets, paired reprojection matrices, the 144-byte
-uniform layout, and hard-reset fallback for singular transforms. Filtered bundle builds of scenes
+retirement, accumulation resets, low-limit streamed refreshes across every cycle
+slot, paired reprojection matrices and inverse projection, the 208-byte
+uniform layout, and hard-reset fallback for singular/non-finite transforms.
+Numerical tests and hardware compute readbacks cover backward-motion foreground
+collisions, lateral-motion depth rejection, orthographic and finite/infinite
+perspective projections. The nonvisual hardware regression lives in
+`tests/lite/integration/gaussian-point-reprojection.spec.ts`: it runs the actual
+three compute passes on 12 pixels, reads winning source/color/depth/count
+buffers, and checks a red foreground at view depth 2 against a green background
+at depth 10. Backward translation by one unit must retain the foreground
+(current view depth 3 versus 11); lateral translation must reject the background
+bilinear tap despite both homogeneous scale ratios being one. It also rejects
+history moved behind the camera or beyond the far plane, non-finite/out-of-range
+stored depths, and verifies that hole filling selects the farther neighbor
+using view depth during lateral motion. The test can reuse the running lab server by
+setting `LAB_TEST_PORT` and requires WebGPU; it makes no screenshots or timing
+assertions. Experimental reprojection has no Babylon.js equivalent/reference
+capture; Spector inspection verifies its own three-pass layout and shader state,
+not cross-engine pixel equivalence. Filtered bundle builds of scenes
 120/122/123/124/226 must have exactly zero raw-byte growth against the clean tree.
 Hardware WebGPU smoke checks exercise base and SH static pipelines without
 visual comparison or performance measurements.

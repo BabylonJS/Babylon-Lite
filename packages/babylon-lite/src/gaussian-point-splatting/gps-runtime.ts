@@ -19,6 +19,7 @@ import {
     gpsReprojectionSamples,
     gpsSoftReset,
     gpsUpdateGeneration,
+    GPS_SOFT_RESET_SAMPLES,
     type GaussianPointSplatting,
     type GpsAccumulation,
 } from "./gps-state.js";
@@ -88,6 +89,8 @@ interface ViewState extends GpsAccumulation {
     /** Reprojection uniforms written by prepare() for record() when the view moved. */
     reproject: Float32Array | null;
     fillFrames: number;
+    /** A phase-preserving reset must refresh every cycle slot before convergence can stop dispatches. */
+    refreshFrames: number;
 }
 
 let cache: { device: GPUDevice; compute: Map<string, Pipelines>; composite: Map<string, GPURenderPipeline> } | null = null;
@@ -342,6 +345,7 @@ function createView(device: GPUDevice): ViewState {
             matrices: new Float32Array(48),
             reproject: null,
             fillFrames: 0,
+            refreshFrames: 0,
         };
     } catch (error) {
         allocated.forEach((value) => value.destroy());
@@ -407,10 +411,11 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         const matrix = reprojector.gpsReprojectionMatrix(state.matrices, world, view, projection);
         if (matrix) {
             const samples = gpsReprojectionSamples(gps.maxAccumFrames);
-            const reproject = (state.reproject = new Float32Array(36));
+            const reproject = (state.reproject = new Float32Array(52));
             state.fillFrames = cycle;
+            state.refreshFrames = cycle;
             reproject.set(matrix);
-            reproject.set([width, height, state.generation, Math.max(1, samples)], 32);
+            reproject.set([width, height, state.generation, Math.max(1, samples)], 48);
             gpsSoftReset(state, cycle, samples);
         } else {
             state.key = "";
@@ -419,6 +424,7 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     }
     if (reset) {
         state.fillFrames = 0;
+        state.refreshFrames = 0;
     }
     state.viewKey = viewKey;
     state.matrices.set(world, 0);
@@ -426,11 +432,12 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     state.matrices.set(projection, 32);
     const content = stream ? target._gpu.contentGeneration : 0;
     if (!reset && state.content !== content) {
-        gpsSoftReset(state, cycle);
+        gpsSoftReset(state, cycle, Math.min(GPS_SOFT_RESET_SAMPLES, gps.maxAccumFrames - 1));
+        state.refreshFrames = cycle;
     }
     state.content = content;
     state.drawable = true;
-    if (!reset && gpsAccumulatedSamples(state.frames, cycle, gps.maxAccumFrames) >= gps.maxAccumFrames) {
+    if (!reset && state.refreshFrames === 0 && gpsAccumulatedSamples(state.frames, cycle, gps.maxAccumFrames) >= gps.maxAccumFrames) {
         // Converged: the composite keeps presenting the accumulation and the params written by the last dispatch.
         publishProgress(gps, state, cycle);
         return false;
@@ -550,6 +557,9 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
     state.frames++;
     if (state.fillFrames > 0) {
         state.fillFrames--;
+    }
+    if (state.refreshFrames > 0) {
+        state.refreshFrames--;
     }
     state.seed++;
     publishProgress(gps, state, state.cpu[58]! ** 2);

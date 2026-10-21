@@ -10,10 +10,20 @@ import type { Mat4 } from "../math/types.js";
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
 // m maps previous NDC (pixel center, stored depth) to current clip space; inv maps current NDC back to previous clip space.
-// info is (full width, full height, generation, history cap). Nearest keys are ~bits(clip.w), so atomicMax keeps the closest.
+// projectionInverse reconstructs current view depth; clip.w alone is only the ratio of the two frames' clip-W values.
+// info is (full width, full height, generation, history cap). Nearest keys are bits(current reverse-Z NDC depth).
 const REPROJECT = wgsl`
-struct Reproject { m:mat4x4f, inv:mat4x4f, info:vec4f }
+struct Reproject { m:mat4x4f, inv:mat4x4f, projectionInverse:mat4x4f, info:vec4f }
 @group(0) @binding(0) var<uniform> r:Reproject;
+fn viewDepth(clip:vec4f)->f32 {
+let view=r.projectionInverse*clip;
+return view.z/view.w;
+}
+fn valid(clip:vec4f)->bool {
+let z=clip.z/clip.w;
+let v=viewDepth(clip);
+return clip.w>0.0 && clip.w<=3.402823e38 && z>0.0 && z<=1.0 && v>0.0 && v<=3.402823e38;
+}
 fn reprojected(p:u32, z:f32)->vec4f {
 let size=u32(r.info.x);
 let ndc=(vec2f(f32(p%size),f32(p/size))+0.5)/r.info.xy*2.0-1.0;
@@ -21,7 +31,7 @@ return r.m*vec4f(ndc.x,-ndc.y,z,1.0);
 }
 fn destination(clip:vec4f)->u32 {
 let px=(vec2f(clip.x,-clip.y)/clip.w*0.5+0.5)*r.info.xy;
-if(clip.w>1e-6 && all(px>=vec2f(0.0)) && all(px<r.info.xy)) { return u32(px.y)*u32(r.info.x)+u32(px.x); }
+if(valid(clip) && all(px>=vec2f(0.0)) && all(px<r.info.xy)) { return u32(px.y)*u32(r.info.x)+u32(px.x); }
 return 0xffffffffu;
 }
 `;
@@ -44,11 +54,11 @@ if(any(id.xy>=vec2u(r.info.xy))) { return; }
 let p=id.y*u32(r.info.x)+id.x;
 let z=prevDepth[p];
 let count=prevCounts[p];
-if((count>>16u)!=u32(r.info.z) || (count&65535u)==0u || z<=0.0) { return; }
+if((count>>16u)!=u32(r.info.z) || (count&65535u)==0u || !(z>0.0 && z<=1.0)) { return; }
 let clip=reprojected(p,z);
 let d=destination(clip);
 if(d==0xffffffffu) { return; }
-let key=~bitcast<u32>(clip.w);
+let key=bitcast<u32>(clip.z/clip.w);
 ${source ? wgsl`if(nearest[d]==key) { atomicMax(&winner[d],p+1u); }` : wgsl`atomicMax(&nearest[d],key);`}
 }
 `;
@@ -70,17 +80,19 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
 let size=vec2u(r.info.xy);
 if(any(id.xy>=size)) { return; }
 let d=id.y*size.x+id.x;
-let own=nearest[d];
-var closest=0u; var nearSource=0u; var farthest=0xffffffffu; var farSource=0u; var nearer=0u;
+var own=0.0;
+if(winner[d]!=0u) { let p=winner[d]-1u; own=viewDepth(reprojected(p,prevDepth[p])); }
+var closest=3.402823e38; var nearSource=0u; var farthest=0.0; var farSource=0u; var nearer=0u;
 for(var y=-1;y<=1;y++) { for(var x=-1;x<=1;x++) {
 let q=vec2i(id.xy)+vec2i(x,y);
 if((x!=0 || y!=0) && all(q>=vec2i(0)) && all(q<vec2i(size))) {
 let n=u32(q.y)*size.x+u32(q.x);
-let key=nearest[n];
-if(key!=0u) {
-if(key>closest) { closest=key; nearSource=winner[n]; }
-if(key<farthest) { farthest=key; farSource=winner[n]; }
-if(own!=0u && bitcast<f32>(~key)<0.9*bitcast<f32>(~own)) { nearer++; }
+if(nearest[n]!=0u) {
+let p=winner[n]-1u;
+let v=viewDepth(reprojected(p,prevDepth[p]));
+if(v<closest) { closest=v; nearSource=winner[n]; }
+if(v>farthest) { farthest=v; farSource=winner[n]; }
+if(own>0.0 && v<0.9*own) { nearer++; }
 }
 }
 } }
@@ -95,10 +107,11 @@ if(p==0u) { accum[d]=vec4f(0.0); depth[d]=0.0; counts[d]=generation; return; }
 p-=1u;
 let clip=reprojected(p,prevDepth[p]);
 let zc=clip.z/clip.w;
+let vc=viewDepth(clip);
 let ndc=(vec2f(id.xy)+0.5)/r.info.xy*2.0-1.0;
 let previous=r.inv*vec4f(ndc.x,-ndc.y,zc,1.0);
 var color=vec4f(0.0); var weight=0.0; var samples=65535u;
-if(previous.w>1e-6) {
+if(previous.w>0.0 && previous.w<=3.402823e38) {
 let pp=(vec2f(previous.x,-previous.y)/previous.w*0.5+0.5)*r.info.xy-0.5;
 let base=vec2i(floor(pp));
 let f=fract(pp);
@@ -109,9 +122,10 @@ if(w>0.0 && all(q>=vec2i(0)) && all(q<vec2i(size))) {
 let t=u32(q.y)*size.x+u32(q.x);
 let count=prevCounts[t];
 let z=prevDepth[t];
-if((count>>16u)==u32(r.info.z) && (count&65535u)>0u && z>0.0) {
-// A 5% relative clip-W tolerance rejects history across depth discontinuities.
-if(abs(reprojected(t,z).w-clip.w)<=0.05*clip.w) {
+if((count>>16u)==u32(r.info.z) && (count&65535u)>0u && z>0.0 && z<=1.0) {
+let tap=reprojected(t,z);
+// Compare actual current view depths, not the inter-frame homogeneous scale.
+if(valid(tap) && abs(viewDepth(tap)-vc)<=0.05*vc) {
 color+=w*prevAccum[t]; weight+=w;
 samples=min(samples,count&65535u);
 }
@@ -159,7 +173,8 @@ export type GpsReprojectionDispatch = (pipeline: GPUComputePipeline, resources: 
 let pipelineCache: { device: GPUDevice; pipelines: Pipelines } | null = null;
 
 /**
- * Packs the previous-NDC → current-clip matrix and its inverse into 32 floats, or null if either inverse fails.
+ * Packs the previous-NDC → current-clip matrix, its inverse and current inverse projection into 48 floats.
+ * Returns null for singular or non-finite transforms.
  * `matrices` packs the previous world, view and projection at offsets 0, 16 and 32.
  */
 export function gpsReprojectionMatrix(matrices: Float32Array, world: Mat4, view: Mat4, projection: Mat4): Float32Array | null {
@@ -171,16 +186,18 @@ export function gpsReprojectionMatrix(matrices: Float32Array, world: Mat4, view:
     }
     const matrix = multiplyMat4(multiplyMat4(multiplyMat4(projection, view), world), previous);
     const inverse = invertMat4(matrix);
-    if (!inverse) {
+    const projectionInverse = invertMat4(projection);
+    if (!inverse || !projectionInverse) {
         return null;
     }
-    const result = new Float32Array(32);
+    const result = new Float32Array(48);
     result.set(matrix);
     result.set(inverse, 16);
-    return result;
+    result.set(projectionInverse, 32);
+    return result.every(Number.isFinite) ? result : null;
 }
 
-/** Remaps accumulation in place. `params` packs two matrices, then (width, height, generation, history cap) at float offset 32. */
+/** Remaps accumulation in place. `params` packs three matrices, then (width, height, generation, history cap) at float offset 48. */
 export function gpsRecordReprojection(
     device: GPUDevice,
     encoder: GPUCommandEncoder,
@@ -189,8 +206,8 @@ export function gpsRecordReprojection(
     createBuffer: (size: number, label: string, usage?: GPUBufferUsageFlags) => GPUBuffer,
     dispatch: GpsReprojectionDispatch
 ): void {
-    const width = params[32]!;
-    const height = params[33]!;
+    const width = params[48]!;
+    const height = params[49]!;
     const size = width * height;
     let history = target.history;
     if (!history) {
@@ -202,7 +219,7 @@ export function gpsRecordReprojection(
         };
         try {
             history = {
-                params: make(144, "reprojection parameters", BU.UNIFORM | BU.COPY_DST),
+                params: make(208, "reprojection parameters", BU.UNIFORM | BU.COPY_DST),
                 accum: make(size * 16, "previous accumulation"),
                 depth: make(size * 4, "previous depth"),
                 counts: make(size * 4, "previous counts"),
