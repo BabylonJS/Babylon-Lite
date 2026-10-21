@@ -1,6 +1,7 @@
 import { test, expect } from "../parity/parity-fixtures";
 import * as fs from "fs";
 import * as path from "path";
+import { parseGlb } from "./export-gltf-helpers";
 
 /** Mirrors `ExportRoundTrip` in lab/lite/src/export-gltf-test.ts. */
 interface ExportRoundTrip {
@@ -27,18 +28,6 @@ const ASSETS = [
 ];
 
 const OUT_DIR = path.join(__dirname, "../../../test-results/export-gltf");
-
-function parseGlb(base64: string): { json: Record<string, unknown>; bytes: Buffer } {
-    const bytes = Buffer.from(base64, "base64");
-    expect(bytes.readUInt32LE(0)).toBe(0x46546c67);
-    expect(bytes.readUInt32LE(4)).toBe(2);
-    expect(bytes.readUInt32LE(8)).toBe(bytes.length);
-    expect(bytes.readUInt32LE(16)).toBe(0x4e4f534a);
-    const jsonLength = bytes.readUInt32LE(12);
-    const json = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString("utf8")) as Record<string, unknown>;
-    expect(bytes.readUInt32LE(20 + jsonLength + 4)).toBe(0x004e4942);
-    return { json, bytes };
-}
 
 function save(name: string, result: ExportRoundTrip): void {
     fs.mkdirSync(OUT_DIR, { recursive: true });

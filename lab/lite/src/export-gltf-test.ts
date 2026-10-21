@@ -39,6 +39,8 @@ export interface ExportRoundTrip {
 export interface ExportGltfTest {
     roundTripAsset(url: string): Promise<ExportRoundTrip>;
     roundTripNative(): Promise<ExportRoundTrip>;
+    /** Load a GLB (base64) into a fresh scene, export it once and return the export (base64) and the warnings it logged. */
+    exportGlb(glbBase64: string): Promise<{ glb: string; warnings: string[] }>;
 }
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -109,6 +111,15 @@ const api: ExportGltfTest = {
         addToScene(scene, container);
         scene.camera ??= container.cameras?.[0] ?? null;
         return roundTrip(engine, scene);
+    },
+    async exportGlb(glbBase64) {
+        const engine = await getEngine();
+        enableGltfCameras();
+        const bytes = Uint8Array.from(atob(glbBase64), (c) => c.charCodeAt(0));
+        const scene = await reload(engine, new Blob([bytes], { type: "model/gltf-binary" }));
+        const warnings: string[] = [];
+        const exported = await exportCapturingWarnings(scene, warnings);
+        return { glb: toBase64(new Uint8Array(await exported.arrayBuffer())), warnings };
     },
     async roundTripNative() {
         const engine = await getEngine();
