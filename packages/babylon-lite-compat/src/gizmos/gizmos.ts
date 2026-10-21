@@ -216,7 +216,7 @@ abstract class GizmoBase {
 export class PositionGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LitePositionGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: AxisDragGizmo | null = null;
     private _yGizmo: AxisDragGizmo | null = null;
     private _zGizmo: AxisDragGizmo | null = null;
@@ -257,18 +257,19 @@ export class PositionGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachPositionGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /** Babylon.js `attachedNode` — any node, including a `TransformNode`, whose Lite node is `_node` rather than `_lite`. */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachPositionGizmoToNode(this._lite, nodeLite(value));
     }
 
     public override dispose(): void {
@@ -286,7 +287,7 @@ export class PositionGizmo extends GizmoBase {
 export class RotationGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteRotationGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: PlaneRotationGizmo | null = null;
     private _yGizmo: PlaneRotationGizmo | null = null;
     private _zGizmo: PlaneRotationGizmo | null = null;
@@ -325,18 +326,19 @@ export class RotationGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachRotationGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /** Babylon.js `attachedNode` — any node, including a `TransformNode`, whose Lite node is `_node` rather than `_lite`. */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachRotationGizmoToNode(this._lite, nodeLite(value));
     }
 
     public override dispose(): void {
@@ -354,7 +356,7 @@ export class RotationGizmo extends GizmoBase {
 export class ScaleGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteScaleGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: AxisScaleGizmo | null = null;
     private _yGizmo: AxisScaleGizmo | null = null;
     private _zGizmo: AxisScaleGizmo | null = null;
@@ -383,18 +385,19 @@ export class ScaleGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachScaleGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /** Babylon.js `attachedNode` — any node, including a `TransformNode`, whose Lite node is `_node` rather than `_lite`. */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachScaleGizmoToNode(this._lite, nodeLite(value));
     }
 
     public override dispose(): void {
