@@ -17,6 +17,7 @@ import {
     createStandardMaterial,
     createTexture2DFromPixels,
     createTransformNode,
+    enableDeviceLostSceneRecovery,
     enableGltfCameras,
     exportSceneAsGlb,
     loadGltf,
@@ -39,8 +40,9 @@ export interface ExportRoundTrip {
 export interface ExportGltfTest {
     roundTripAsset(url: string): Promise<ExportRoundTrip>;
     roundTripNative(): Promise<ExportRoundTrip>;
-    /** Load a GLB (base64) into a fresh scene, export it once and return the export (base64) and the warnings it logged. */
-    exportGlb(glbBase64: string): Promise<{ glb: string; warnings: string[] }>;
+    /** Load a GLB (base64) into a fresh scene, export it once and return the export (base64) and the warnings it logged.
+     *  `retainCpuVertexData` enables device-lost scene recovery before loading, the opt-in that keeps tangents, second UVs and vertex colors on the CPU. */
+    exportGlb(glbBase64: string, options?: { retainCpuVertexData?: boolean }): Promise<{ glb: string; warnings: string[] }>;
 }
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -112,8 +114,11 @@ const api: ExportGltfTest = {
         scene.camera ??= container.cameras?.[0] ?? null;
         return roundTrip(engine, scene);
     },
-    async exportGlb(glbBase64) {
+    async exportGlb(glbBase64, options) {
         const engine = await getEngine();
+        if (options?.retainCpuVertexData) {
+            enableDeviceLostSceneRecovery(engine);
+        }
         enableGltfCameras();
         const bytes = Uint8Array.from(atob(glbBase64), (c) => c.charCodeAt(0));
         const scene = await reload(engine, new Blob([bytes], { type: "model/gltf-binary" }));

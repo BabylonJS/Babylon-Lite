@@ -15,10 +15,16 @@ interface ExportGlbResult {
 }
 
 /** Load a fixture into a fresh scene through the page, export it once and parse the result. */
-async function roundTrip(page: Page, fixture: GltfFixture): Promise<ParsedGlb & { warnings: string[] }> {
+async function roundTrip(page: Page, fixture: GltfFixture, options?: { retainCpuVertexData?: boolean }): Promise<ParsedGlb & { warnings: string[] }> {
     const result = await page.evaluate(
-        (glb) => (window as unknown as { exportGltfTest: { exportGlb(g: string): Promise<ExportGlbResult> } }).exportGltfTest.exportGlb(glb),
-        fixture.toGlb().toString("base64")
+        ([glb, opts]) =>
+            (window as unknown as { exportGltfTest: { exportGlb(g: string, o?: { retainCpuVertexData?: boolean }): Promise<ExportGlbResult> } }).exportGltfTest.exportGlb(
+                glb as string,
+                opts as {
+                    retainCpuVertexData?: boolean;
+                }
+            ),
+        [fixture.toGlb().toString("base64"), options] as const
     );
     return { ...parseGlb(result.glb), warnings: result.warnings };
 }
@@ -71,29 +77,29 @@ test.describe("Babylon.js glTFExporter.test.ts", () => {
         source.json.meshes[0].primitives[0].attributes.TEXCOORD_0 = uvAccessor;
         source.json.meshes[0].primitives[0].attributes.COLOR_0 = colorAccessor;
 
-        const { json, bin } = await roundTrip(page, source);
+        const { json, bin } = await roundTrip(page, source, { retainCpuVertexData: true });
 
         const primitive = json.meshes[0].primitives[0];
         expect(primitive.mode ?? 4).toBe(4);
-        // COLOR_0 is deliberately absent: without enableDeviceLostSceneRecovery the loader keeps vertex colors on the GPU only,
-        // so the exporter omits them with a warning (docs/lite/architecture/60-gltf-exporter.md, Scope).
-        expect(Object.keys(primitive.attributes).sort()).toEqual(["NORMAL", "POSITION", "TEXCOORD_0"]);
+        // The loader keeps vertex colors on the CPU only under the enableDeviceLostSceneRecovery opt-in, which the harness enables here.
+        expect(Object.keys(primitive.attributes).sort()).toEqual(["COLOR_0", "NORMAL", "POSITION", "TEXCOORD_0"]);
         const position = json.accessors[primitive.attributes.POSITION];
         expect(position).toMatchObject({ componentType: 5126, count: 3, type: "VEC3", min: [0, 0, 0], max: [1, 1, 0] });
         const positions = readAccessor(json, bin, primitive.attributes.POSITION);
         const uvs = readAccessor(json, bin, primitive.attributes.TEXCOORD_0);
+        const colors = readAccessor(json, bin, primitive.attributes.COLOR_0);
         const indices = primitive.indices === undefined ? [0, 1, 2] : readAccessor(json, bin, primitive.indices);
         const corners = indices.map((index) => positions.slice(index * 3, index * 3 + 3).join(",")).sort();
         expect(corners).toEqual(["0,0,0", "0,1,0", "1,0,0"]);
 
         const rows: number[][] = [];
         for (let vertex = 0; vertex < positions.length / 3; vertex++) {
-            rows.push([...positions.slice(vertex * 3, vertex * 3 + 3), ...uvs.slice(vertex * 2, vertex * 2 + 2)]);
+            rows.push([...positions.slice(vertex * 3, vertex * 3 + 3), ...uvs.slice(vertex * 2, vertex * 2 + 2), ...colors.slice(vertex * 4, vertex * 4 + 4)]);
         }
         const expectedRows = [
-            [0, 0, 0, 0, 0],
-            [1, 0, 0, 1, 0],
-            [0, 1, 0, 0, 1],
+            [0, 0, 0, 0, 0, 1, 0, 0, 1],
+            [1, 0, 0, 1, 0, 0, 1, 0, 1],
+            [0, 1, 0, 0, 1, 0, 0, 1, 1],
         ];
         const byPosition = (left: number[], right: number[]): number => left.slice(0, 3).join(",").localeCompare(right.slice(0, 3).join(","));
         expect(rows.sort(byPosition)).toEqual(expectedRows.sort(byPosition));
