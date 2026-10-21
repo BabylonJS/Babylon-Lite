@@ -3,12 +3,28 @@ import { build } from "esbuild";
 import { resolve } from "node:path";
 import type * as GpsShaders from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-shaders.js";
 import type * as GpsSceneDepth from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-scene-depth.js";
+import type * as GpsPass from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-pass.js";
+import type * as GpsRuntime from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-runtime.js";
+import type * as NativeTasks from "../../../packages/babylon-lite/src/frame-graph/render-task-base.js";
+import type * as NativeTargets from "../../../packages/babylon-lite/src/engine/render-target.js";
+import type * as NativeShader from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
+import type * as NativeCoverage from "../../../packages/babylon-lite/src/render/alpha-to-coverage.js";
+import type * as NativeStencil from "../../../packages/babylon-lite/src/material/enable-material-stencil.js";
+import type * as NativeTransmission from "../../../packages/babylon-lite/src/frame-graph/transmission.js";
+import type * as NativeSkybox from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import type { GaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
+import type { GaussianSplattingMesh } from "../../../packages/babylon-lite/src/mesh/GaussianSplatting/gaussian-splatting-mesh.js";
+import type { DrawUpdateContext } from "../../../packages/babylon-lite/src/render/renderable.js";
+import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task-base.js";
+import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
+import type { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
+import type { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility.js";
 import type { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate.js";
 import type { getSceneBindGroupLayout } from "../../../packages/babylon-lite/src/render/scene-helpers.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable.js";
-import type { createBox } from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
+import type { createBox, createPlane } from "../../../packages/babylon-lite/src/mesh/mesh-factories.js";
 import type { createLinearDepthMaterial } from "../../../packages/babylon-lite/src/render/linear-depth-material.js";
 import type { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
@@ -18,10 +34,22 @@ import type { tryBind } from "../../../packages/babylon-lite/src/mesh/thin-insta
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target.js";
 
 type GpuTestApi = typeof GpsShaders &
-    typeof GpsSceneDepth & {
+    typeof GpsSceneDepth &
+    typeof GpsPass &
+    typeof GpsRuntime &
+    typeof NativeTasks &
+    typeof NativeTargets &
+    typeof NativeShader &
+    typeof NativeCoverage &
+    typeof NativeStencil &
+    typeof NativeTransmission &
+    typeof NativeSkybox & {
+        wgsl: typeof wgsl;
+        setMeshVisible: typeof setSubtreeVisible;
         createArcRotateCamera: typeof createArcRotateCamera;
         getSceneBindGroupLayout: typeof getSceneBindGroupLayout;
         createBox: typeof createBox;
+        createPlane: typeof createPlane;
         createLinearDepthMaterial: typeof createLinearDepthMaterial;
         buildShaderMaterialRenderables: typeof buildShaderMaterialRenderables;
         publishTiLodBucket: typeof publishTiLodBucket;
@@ -37,9 +65,20 @@ test("Gaussian point sampling preserves radiance, conservative visibility and di
             contents: `
 export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-shaders.js";
 export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-scene-depth.js";
+export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-pass.js";
+export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-runtime.js";
+export * from "./packages/babylon-lite/src/frame-graph/render-task-base.js";
+export * from "./packages/babylon-lite/src/engine/render-target.js";
+export * from "./packages/babylon-lite/src/material/shader/shader-material.js";
+export * from "./packages/babylon-lite/src/render/alpha-to-coverage.js";
+export * from "./packages/babylon-lite/src/material/enable-material-stencil.js";
+export * from "./packages/babylon-lite/src/frame-graph/transmission.js";
+export * from "./packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+export { wgsl } from "./packages/babylon-lite/src/shader/wgsl.js";
+export { setSubtreeVisible as setMeshVisible } from "./packages/babylon-lite/src/scene/visibility.js";
 export { createArcRotateCamera } from "./packages/babylon-lite/src/camera/arc-rotate.js";
 export { getSceneBindGroupLayout } from "./packages/babylon-lite/src/render/scene-helpers.js";
-export { createBox } from "./packages/babylon-lite/src/mesh/mesh-factories.js";
+export { createBox, createPlane } from "./packages/babylon-lite/src/mesh/mesh-factories.js";
 export { createLinearDepthMaterial } from "./packages/babylon-lite/src/render/linear-depth-material.js";
 export { buildShaderMaterialRenderables } from "./packages/babylon-lite/src/material/shader/shader-renderable.js";
 export { publishTiLodBucket } from "./packages/babylon-lite/src/mesh/thin-instance-gpu-culling.js";
@@ -98,7 +137,7 @@ export { tryBind } from "./packages/babylon-lite/src/mesh/thin-instance-cull-bin
             return data;
         };
         const uniforms = (orthographic = false): Float32Array => {
-            const data = new Float32Array(76);
+            const data = new Float32Array(80);
             const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
             data.set(identity);
             data.set(identity, 16);
@@ -109,6 +148,7 @@ export { tryBind } from "./packages/babylon-lite/src/mesh/thin-instance-cull-bin
             data.set([1, 1000, 0, 0], 60);
             data.set([1, 3, 1, 0], 64);
             data.set([6, 7, 1, 0], 68);
+            data.set([0, 1, 0, 0], 76);
             return data;
         };
         const preprocess = compute(shaders.gpsPreprocessShader(true, 0));
@@ -418,25 +458,31 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
             imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
             lights: [],
             _disposables: [],
+            _beforeRender: [],
+            _frameGraph: { _tasks: [] },
+            clearColor: { r: 0, g: 0, b: 0, a: 1 },
         } as unknown as SceneContext;
-        const prepass = shaders.gpsCreateSceneDepth(device);
-        buffers.push(prepass.uniforms);
-        engine._currentEncoder = device.createCommandEncoder();
-        shaders.gpsRecordSceneDepth(
-            prepass,
-            scene,
-            engine,
-            { _sampleCount: 1, _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float" },
-            { targetWidth: 1, targetHeight: 1, _camera: camera },
-            (textures) => textures.forEach((texture) => texture.destroy())
-        );
+        const nativeTarget = shaders.createRenderTarget({ samples: 1, format: "rgba8unorm", dFormat: "depth32float", size: { width: 1, height: 1 } });
+        const nativeTask = shaders._createAutomaticRenderTask({ name: "native-visibility", rt: nativeTarget, autoMirror: false }, engine, scene);
+        scene._frameGraph._tasks.push(nativeTask);
+        nativeTask._renderables = scene._renderables;
+        nativeTask.record();
+        const nativeDepth = shaders.gpsCreateSceneDepth();
+        const recordNative = (): GPUTextureView => {
+            nativeTask.execute!();
+            if (!shaders.gpsRecordSceneDepth(nativeDepth, scene, engine, nativeTask._targetSignature, { targetWidth: 1, targetHeight: 1, _camera: camera }) || !nativeDepth.view) {
+                throw new Error("Native task depth unavailable");
+            }
+            return nativeDepth.view;
+        };
         const depthReadback = make(new Float32Array(1));
         const readDepth = compute(`
 @group(0) @binding(0) var source:texture_depth_2d;
 @group(0) @binding(1) var<storage,read_write> result:array<f32>;
 @compute @workgroup_size(1) fn main() { result[0]=textureLoad(source,vec2i(0),0); }
 `);
-        dispatch(engine._currentEncoder, readDepth, [prepass.view, depthReadback]);
+        engine._currentEncoder = device.createCommandEncoder();
+        dispatch(engine._currentEncoder, readDepth, [recordNative(), depthReadback]);
         device.queue.submit([engine._currentEncoder.finish()]);
         const opaqueDepth = new Float32Array(await read(depthReadback, 4))[0]!;
         scene._meshDisposables = new Map();
@@ -444,19 +490,13 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
         const meshes = [shaders.createBox(engine, 4), shaders.createBox(engine, 4)];
         meshes.forEach((mesh) => (mesh.material = material));
         scene._renderables = shaders.buildShaderMaterialRenderables(scene, meshes).renderables;
+        nativeTask._renderables = scene._renderables;
+        nativeTask.record();
         const mergedCount = scene._renderables.length;
         const mergedHasMesh = !!scene._renderables[0]?.mesh;
         scene._renderableVersion++;
         engine._currentEncoder = device.createCommandEncoder();
-        shaders.gpsRecordSceneDepth(
-            prepass,
-            scene,
-            engine,
-            { _sampleCount: 1, _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float" },
-            { targetWidth: 1, targetHeight: 1, _camera: camera },
-            (textures) => textures.forEach((texture) => texture.destroy())
-        );
-        dispatch(engine._currentEncoder, readDepth, [prepass.view, depthReadback]);
+        dispatch(engine._currentEncoder, readDepth, [recordNative(), depthReadback]);
         device.queue.submit([engine._currentEncoder.finish()]);
         const mergedDepth = new Float32Array(await read(depthReadback, 4))[0]!;
         const mergedCpu = uniforms();
@@ -470,20 +510,13 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
         const mergedPrevious = make(new Float32Array(1));
         const mergedVisibility = [];
         for (const hidden of [false, true]) {
-            meshes.forEach((mesh) => (mesh.visible = !hidden));
+            meshes.forEach((mesh) => shaders.setMeshVisible(mesh, !hidden));
             device.queue.writeBuffer(total, 4, new Float32Array([1]));
             device.queue.writeBuffer(mergedImage, 0, new Uint32Array([31]));
             mergedCpu[66] = hidden ? 3 : 1;
             device.queue.writeBuffer(mergedParams, 0, mergedCpu);
             engine._currentEncoder = device.createCommandEncoder();
-            shaders.gpsRecordSceneDepth(
-                prepass,
-                scene,
-                engine,
-                { _sampleCount: 1, _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float" },
-                { targetWidth: 1, targetHeight: 1, _camera: camera },
-                (textures) => textures.forEach((texture) => texture.destroy())
-            );
+            const view = recordNative();
             dispatch(engine._currentEncoder, resolveOccluded, [
                 mergedParams,
                 mergedImage,
@@ -493,7 +526,7 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
                 mergedHiZ,
                 total,
                 mergedPrevious,
-                prepass.view,
+                view,
             ]);
             device.queue.submit([engine._currentEncoder.finish()]);
             mergedVisibility.push(Array.from(new Float32Array(await read(mergedAccumulation, 16))));
@@ -541,22 +574,380 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
             },
         };
         scene._renderables = [source, partner];
+        nativeTask._renderables = scene._renderables;
+        nativeTask.record();
         const lodDepth = [];
         for (let frame = 0; frame < 2; frame++) {
             scene._renderableVersion++;
             engine._currentEncoder = device.createCommandEncoder();
-            shaders.gpsRecordSceneDepth(
-                prepass,
-                scene,
-                engine,
-                { _sampleCount: 1, _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float" },
-                { targetWidth: 1, targetHeight: 1, _camera: camera },
-                (textures) => textures.forEach((texture) => texture.destroy())
-            );
-            dispatch(engine._currentEncoder, readDepth, [prepass.view, depthReadback]);
+            dispatch(engine._currentEncoder, readDepth, [recordNative(), depthReadback]);
             device.queue.submit([engine._currentEncoder.finish()]);
             lodDepth.push(new Float32Array(await read(depthReadback, 4))[0]!);
         }
+        const nativeCases = [];
+        shaders.enableMaterialStencil();
+        const sampleLayout = device.createBindGroupLayout({
+            entries: Array.from({ length: 9 }, (_, binding) => ({
+                binding,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
+            })),
+        });
+        const sampleModule = device.createShaderModule({ code: shaders.gpsCompositeShader(4) });
+        const sampleComposite = device.createRenderPipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [shaders.getSceneBindGroupLayout(engine), sampleLayout] }),
+            vertex: { module: sampleModule, entryPoint: "vs" },
+            fragment: {
+                module: sampleModule,
+                entryPoint: "fs",
+                targets: [
+                    {
+                        format: "rgba8unorm",
+                        blend: { color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" }, alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" } },
+                    },
+                ],
+            },
+            depthStencil: { format: "depth24plus-stencil8", depthWriteEnabled: false, depthCompare: "always" },
+            multisample: { count: 4 },
+        });
+        const resolveMsaa = compute(shaders.gpsResolveShader(true, "greater-equal", false, 4));
+        const cardMaterial = (opacity: number, half = false, depthWrite = true, blended = false): NativeShader.ShaderMaterial => {
+            const mat = shaders.createShaderMaterial({
+                vertexSource: shaders.wgsl`@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4f {
+return vec4f(input.position.x*shaderUniforms.width+shaderUniforms.offset,input.position.y*2.0,0.6,1.0); }`,
+                fragmentSource: shaders.wgsl`@fragment fn mainFragment()->@location(0) vec4f { return vec4f(1.0,0.0,0.0,shaderUniforms.opacity); }`,
+                attributes: ["position"],
+                uniforms: [
+                    { name: "opacity", type: "f32" },
+                    { name: "width", type: "f32" },
+                    { name: "offset", type: "f32" },
+                ],
+                backFaceCulling: false,
+                depthWrite,
+                needAlphaBlending: blended,
+            });
+            shaders.setShaderFloat(mat, "opacity", opacity);
+            shaders.setShaderFloat(mat, "width", half ? 1 : 2);
+            shaders.setShaderFloat(mat, "offset", half ? -0.5 : 0);
+            shaders.setAlphaToCoverage(mat, true);
+            return mat;
+        };
+        for (const kind of ["zero", "partial", "silhouette", "stencil", "shared", "eager", "transmission", "viewport", "transparent"] as const) {
+            const width = kind === "stencil" ? 2 : kind === "viewport" ? 101 : 1;
+            const outputWidth = kind === "viewport" ? 51 : width;
+            const rt = shaders.createRenderTarget({ samples: 4, format: "rgba8unorm", dFormat: kind === "eager" ? undefined : "depth24plus-stencil8", size: { width, height: 1 } });
+            const resolved = shaders.createRenderTarget({ samples: 1, format: "rgba8unorm", size: { width, height: 1 } });
+            const external = kind === "eager" ? shaders.createRenderTarget({ samples: 4, dFormat: "depth24plus-stencil8", size: { width, height: 1 } }) : undefined;
+            if (external) {
+                shaders.buildRenderTarget(external, engine);
+                external._eager = true;
+            }
+            const task = shaders._createAutomaticRenderTask({ name: kind, rt, rst: resolved, depth: external, autoMirror: false }, engine, scene);
+            scene._frameGraph._tasks.push(task);
+            const card = shaders.createPlane(engine);
+            const cardMat = cardMaterial(kind === "zero" || kind === "viewport" ? 0 : kind === "partial" ? 0.5 : 1, kind === "silhouette", true, kind === "transparent");
+            card.material = cardMat;
+            const nativeMeshes = [card];
+            if (kind === "stencil") {
+                const writer = shaders.createPlane(engine);
+                const writerMat = cardMaterial(1, true, false);
+                writerMat.stencil = { passOp: "increment-clamp" };
+                writer.material = writerMat;
+                cardMat.stencil = { compare: "equal" };
+                nativeMeshes.unshift(writer);
+            }
+            const nativeRenderables = shaders.buildShaderMaterialRenderables(scene, nativeMeshes).renderables;
+            const cpu = uniforms(true);
+            cpu[52] = cpu[56] = outputWidth;
+            cpu[68] = cpu[69] = 8;
+            cpu.set([0, 4, kind === "viewport" ? 50 : 0, 0], 76);
+            const planes = Array.from({ length: 4 }, (_, sample) => {
+                cpu[76] = sample;
+                return {
+                    params: make(cpu, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+                    accumulation: make(new Float32Array(outputWidth * 4)),
+                    geometricDepth: make(new Float32Array(outputWidth)),
+                    counts: make(new Uint32Array(outputWidth)),
+                    previous: make(new Float32Array(outputWidth)),
+                };
+            });
+            const image = make(new Uint32Array(outputWidth).fill(31));
+            const hiz = make(new Float32Array(outputWidth));
+            const pointDepth = shaders.gpsCreateSceneDepth();
+            let pointContext: DrawUpdateContext;
+            let consumingTask = task;
+            const point: Renderable = {
+                order: 200,
+                isTransparent: true,
+                bind() {
+                    return {
+                        renderable: point,
+                        pipeline: sampleComposite,
+                        update(context) {
+                            pointContext = context;
+                        },
+                        draw(pass) {
+                            if (
+                                !shaders.gpsWithPassDepth(pass, () => {
+                                    if (
+                                        !shaders.gpsRecordSceneDepth(pointDepth, scene, engine, consumingTask._targetSignature, pointContext, shaders.gpsPassHasDraws(pass)) ||
+                                        !pointDepth.view
+                                    ) {
+                                        throw new Error(`Missing native ${kind} depth`);
+                                    }
+                                    const view = pointDepth.view;
+                                    planes.forEach(({ params, accumulation, geometricDepth, counts, previous }) =>
+                                        dispatch(
+                                            engine._currentEncoder,
+                                            resolveMsaa,
+                                            [params, image, accumulation, geometricDepth, counts, hiz, total, previous, view],
+                                            Math.ceil(outputWidth / 8)
+                                        )
+                                    );
+                                })
+                            ) {
+                                throw new Error("Native visibility barrier missing");
+                            }
+                            pass.setPipeline(sampleComposite);
+                            pass.setBindGroup(
+                                1,
+                                device.createBindGroup({
+                                    layout: sampleLayout,
+                                    entries: [planes[0]!.params, ...planes.map((plane) => plane.accumulation), ...planes.map((plane) => plane.geometricDepth)].map(
+                                        (buffer, binding) => ({ binding, resource: { buffer } })
+                                    ),
+                                })
+                            );
+                            pass.draw(3);
+                            return 1;
+                        },
+                    };
+                },
+            };
+            let overlay: NativeTasks.RenderTaskBase | undefined;
+            if (kind === "shared" || kind === "eager") {
+                task._renderables = nativeRenderables;
+                task.record();
+                overlay = shaders._createAutomaticRenderTask(
+                    { name: `${kind}-overlay`, rt, rst: resolved, depth: external, sharedRt: true, depthClear: false, clr: false, autoMirror: false },
+                    engine,
+                    scene
+                );
+                overlay._renderables = [point];
+                scene._frameGraph._tasks.push(overlay);
+                consumingTask = overlay;
+                overlay.record();
+            } else {
+                task._renderables = [...nativeRenderables, point];
+                if (kind === "transmission") {
+                    const segment = (order: number): Renderable => {
+                        const r: Renderable = { order, isTransparent: true, _transmissive: true, bind: () => ({ renderable: r, pipeline: sampleComposite, draw: () => 0 }) };
+                        return r;
+                    };
+                    task._renderables.push(segment(199), segment(201));
+                    shaders.enableRenderTaskTransmission(task as RenderTask, engine, { linear: false, generateMipmaps: false, copyCount: 0 });
+                }
+                task.record();
+            }
+            if (kind === "viewport") {
+                camera.viewport = { x: 0.5, y: 0, width: 0.5, height: 1 };
+            }
+            const release = shaders.installGpsPasses(scene);
+            engine._currentEncoder = device.createCommandEncoder();
+            device.queue.writeBuffer(total, 4, new Float32Array([1]));
+            if (external) {
+                engine._currentEncoder
+                    .beginRenderPass({
+                        colorAttachments: [],
+                        depthStencilAttachment: {
+                            view: external._depthView!,
+                            depthLoadOp: "clear",
+                            depthStoreOp: "store",
+                            depthClearValue: 0,
+                            stencilLoadOp: "clear",
+                            stencilStoreOp: "store",
+                            stencilClearValue: 0,
+                        },
+                    })
+                    .end();
+            }
+            task.execute!();
+            overlay?.execute!();
+            const output = make(new Uint32Array((256 * 2) / 4), GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+            engine._currentEncoder.copyTextureToBuffer({ texture: resolved._colorTexture!, origin: [kind === "viewport" ? 100 : 0, 0] }, { buffer: output, bytesPerRow: 256 }, [
+                kind === "stencil" ? 2 : 1,
+                1,
+            ]);
+            device.queue.submit([engine._currentEncoder.finish()]);
+            await output.mapAsync(GPUMapMode.READ);
+            nativeCases.push({ kind, color: Array.from(new Uint8Array(output.getMappedRange().slice(0, kind === "stencil" ? 8 : 4))) });
+            output.unmap();
+            camera.viewport = undefined;
+            release();
+            overlay?.dispose?.();
+            task.dispose?.();
+            shaders.disposeRenderTarget(external);
+            scene._frameGraph._tasks = scene._frameGraph._tasks.filter((candidate) => candidate !== task && candidate !== overlay);
+        }
+        const monitored: Record<string, GPUBuffer[]> = {};
+        const createBuffer = device.createBuffer.bind(device);
+        device.createBuffer = (descriptor) => {
+            const tracked = descriptor.label === "GPS visibility dispatch" || descriptor.label === "GPS accumulation";
+            const buffer = createBuffer(tracked ? { ...descriptor, usage: descriptor.usage | GPUBufferUsage.COPY_SRC } : descriptor);
+            if (tracked) {
+                (monitored[descriptor.label!] ??= []).push(buffer);
+            }
+            return buffer;
+        };
+        const staticData = [
+            [0, 0, 0, 1],
+            [0.01, 0, 0, 0],
+            [0.01, 0, 0.01, 0],
+            [0, 0, 1, 1],
+        ].map((data) => {
+            const texture = device.createTexture({ size: [1, 1], format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+            device.queue.writeTexture({ texture }, new Float32Array(data), {}, [1, 1]);
+            return texture;
+        });
+        const worldMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const target = {
+            vertexCount: 1,
+            textureWidth: 1,
+            shDegree: 0,
+            worldMatrix,
+            boundMin: [-0.1, -0.1, -0.1],
+            boundMax: [0.1, 0.1, 0.1],
+            _gs: {
+                _centersView: staticData[0]!.createView(),
+                _covAView: staticData[1]!.createView(),
+                _covBView: staticData[2]!.createView(),
+                _colorsView: staticData[3]!.createView(),
+            },
+        } as unknown as GaussianSplattingMesh;
+        const gps: GaussianPointSplatting = {
+            _target: target,
+            _dataVersion: 0,
+            _disabled: false,
+            _dispose: null,
+            _progress: null,
+            colorRenderMode: true,
+            depthRenderMode: false,
+            depthVisualization: "none",
+            pointScale: 1000,
+            renderScale: 1,
+            maxAccumFrames: 4,
+            temporalReprojection: true,
+            occlusionCulling: true,
+            get progress() {
+                return this._progress;
+            },
+        };
+        const cube = device.createTexture({ size: [1, 1, 6], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+        for (let layer = 0; layer < 6; layer++) {
+            device.queue.writeTexture({ texture: cube, origin: [0, 0, layer] }, new Uint8Array([0, 128, 0, 255]), {}, [1, 1]);
+        }
+        const skybox = await shaders.buildHdrSkyboxRenderable(
+            scene,
+            { specularCubeView: cube.createView({ dimension: "cube" }), cubeSampler: device.createSampler() } as EnvironmentTextures,
+            100,
+            [0, 0, 0],
+            [1, 1, 1]
+        );
+        const points = shaders.createGpsRenderable(scene, gps);
+        const monitorRt = shaders.createRenderTarget({ samples: 4, format: "rgba8unorm", dFormat: "depth24plus-stencil8", size: { width: 1, height: 1 } });
+        const monitorTask = shaders._createAutomaticRenderTask({ name: "skybox-convergence", rt: monitorRt, autoMirror: false }, engine, scene);
+        monitorTask._renderables = [skybox, points.renderable];
+        scene._frameGraph._tasks.push(monitorTask);
+        monitorTask.record();
+        let linearRasterCount = 0;
+        const monitorFrame = (): number => {
+            let nativePasses = 0;
+            scene._beforeRender.forEach((hook) => hook(0));
+            engine._currentEncoder = device.createCommandEncoder();
+            const begin = engine._currentEncoder.beginRenderPass.bind(engine._currentEncoder);
+            engine._currentEncoder.beginRenderPass = (descriptor) => {
+                if (descriptor.label === "GPS linear discs") {
+                    linearRasterCount++;
+                }
+                if (descriptor.depthStencilAttachment?.view === monitorRt._depthView) {
+                    nativePasses++;
+                }
+                return begin(descriptor);
+            };
+            monitorTask.execute!();
+            device.queue.submit([engine._currentEncoder.finish()]);
+            return nativePasses;
+        };
+        for (let frame = 0; frame < 6; frame++) {
+            monitorFrame();
+        }
+        const readWork = async (): Promise<number[]> => Array.from(new Uint32Array(await read(monitored["GPS visibility dispatch"]!.at(-1)!, 40)));
+        const readAccumulation = async (samples = 4): Promise<number[]> => {
+            const planes = await Promise.all(monitored["GPS accumulation"]!.slice(-samples).map(async (buffer) => Array.from(new Float32Array(await read(buffer, 16)))));
+            return planes.flat();
+        };
+        const skyboxWork = await readWork();
+        const skyboxProgress = gps.progress;
+        const monitorCard = shaders.createPlane(engine);
+        monitorCard.material = cardMaterial(1);
+        monitorTask._renderables.splice(1, 0, ...shaders.buildShaderMaterialRenderables(scene, [monitorCard]).renderables);
+        monitorTask.record();
+        monitorFrame();
+        const changedWork = await readWork();
+        for (let frame = 0; frame < 5; frame++) {
+            monitorFrame();
+        }
+        const reconvergedWork = await readWork();
+        worldMatrix[12] = 3.5;
+        monitorFrame();
+        const front = await readAccumulation();
+        const version = gps.progress!.accumulationVersion;
+        worldMatrix[12] = 0;
+        monitorFrame();
+        const behind = await readAccumulation();
+        const crossedVersion = gps.progress!.accumulationVersion;
+        monitorCard.material = cardMaterial(1, false, true, true);
+        const transparentWriters = shaders.buildShaderMaterialRenderables(scene, [monitorCard]).renderables;
+        monitorTask._renderables = [...transparentWriters, points.renderable];
+        monitorTask.record();
+        for (let frame = 0; frame < 5; frame++) {
+            monitorFrame();
+        }
+        const transparentHidden = await readAccumulation();
+        shaders.setMeshVisible(monitorCard, false);
+        monitorFrame();
+        const transparentRevealed = await readAccumulation(1);
+        shaders.setMeshVisible(monitorCard, true);
+        monitorFrame();
+        const transparentWake = await readWork();
+        for (let frame = 0; frame < 5; frame++) {
+            monitorFrame();
+        }
+        const transparentConverged = await readWork();
+        gps.depthRenderMode = true;
+        gps.depthVisualization = "linear";
+        monitorFrame();
+        const hiddenDiscs = await readAccumulation();
+        for (let frame = 0; frame < 5; frame++) {
+            monitorFrame();
+        }
+        shaders.setMeshVisible(monitorCard, false);
+        monitorFrame();
+        const revealedDiscs = await readAccumulation();
+        const linearProgress = gps.progress;
+        monitorTask._renderables = [points.renderable];
+        monitorTask.record();
+        monitorFrame();
+        const pureConvergedPasses = monitorFrame();
+        shaders.setMeshVisible(monitorCard, true);
+        monitorTask._renderables = [...transparentWriters, points.renderable];
+        monitorTask.record();
+        monitorFrame();
+        points.dispose();
+        monitorTask.dispose?.();
+        device.createBuffer = createBuffer;
+        staticData.forEach((texture) => texture.destroy());
+        cube.destroy();
         await device.queue.onSubmittedWorkDone();
         const validation = await device.popErrorScope();
         buffers.forEach((buffer) => buffer.destroy());
@@ -564,8 +955,7 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
         depthTexture.destroy();
         opaqueTexture.destroy();
         fixedDiscDepth.destroy();
-        prepass.texture.destroy();
-        prepass.color?.destroy();
+        nativeTask.dispose?.();
         scene._disposables.forEach((dispose) => dispose());
         scene._meshDisposables.forEach((disposers) => disposers.forEach((dispose) => dispose()));
         device.destroy();
@@ -582,6 +972,24 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
             mergedVisibility,
             lodDepth,
             signatureCount: signatures.size,
+            nativeCases,
+            skyboxWork,
+            skyboxProgress,
+            changedWork,
+            reconvergedWork,
+            front,
+            behind,
+            version,
+            crossedVersion,
+            hiddenDiscs,
+            revealedDiscs,
+            linearRasterCount,
+            linearProgress,
+            transparentHidden,
+            transparentRevealed,
+            transparentWake,
+            transparentConverged,
+            pureConvergedPasses,
             gpuErrors,
             validation: validation?.message,
         };
@@ -599,6 +1007,37 @@ let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.
     ]);
     result.lodDepth.forEach((depth) => expect(depth).toBeCloseTo(0.6, 6));
     expect(result.signatureCount).toBe(1);
+    for (const { kind, color } of result.nativeCases) {
+        const expected =
+            kind === "stencil"
+                ? [0, 0, 255, 255, 255, 0, 0, 255]
+                : kind === "zero" || kind === "viewport"
+                  ? [0, 0, 255, 255]
+                  : kind === "partial"
+                    ? [128, 0, 128, 192]
+                    : kind === "silhouette"
+                      ? [128, 0, 128, 255]
+                      : [255, 0, 0, 255];
+        color.forEach((value, channel) => expect(Math.abs(value - expected[channel]!)).toBeLessThanOrEqual(1));
+    }
+    expect(result.skyboxProgress).toMatchObject({ renderedFrameCount: 4, accumulatedSamples: 4 });
+    expect([result.skyboxWork[0], result.skyboxWork[1], result.skyboxWork[4], result.skyboxWork[7]]).toEqual([0, 0, 0, 0]);
+    expect([result.changedWork[0], result.changedWork[1], result.changedWork[4], result.changedWork[7]]).toEqual([1, 1, 1, 257]);
+    expect([result.reconvergedWork[0], result.reconvergedWork[1], result.reconvergedWork[4], result.reconvergedWork[7]]).toEqual([0, 0, 0, 0]);
+    for (let sample = 0; sample < 4; sample++) {
+        expect(result.front[sample * 4 + 3]).toBe(1);
+        expect(result.behind.slice(sample * 4, sample * 4 + 4)).toEqual([0, 0, 0, 0]);
+        expect(result.hiddenDiscs.slice(sample * 4, sample * 4 + 4)).toEqual([0, 0, 0, 0]);
+        expect(result.revealedDiscs[sample * 4 + 3]).toBe(1);
+    }
+    expect(result.crossedVersion).toBe(result.version + 1);
+    expect(result.linearRasterCount).toBe(1);
+    expect(result.linearProgress?.renderedFrameCount).toBe(1);
+    expect(result.pureConvergedPasses).toBe(1);
+    expect(result.transparentHidden).toEqual(new Array<number>(16).fill(0));
+    expect(result.transparentRevealed).toEqual([0, 0, 1, 1]);
+    expect(result.transparentWake[0]).toBe(1);
+    expect(result.transparentConverged[0]).toBe(0);
     expect(result.distribution[1]).toEqual(result.distribution[0]);
     expect(result.distribution[0]![0]).toBeGreaterThan(0.05);
     expect(result.distribution[0]![2]).toBeGreaterThan(0.05);

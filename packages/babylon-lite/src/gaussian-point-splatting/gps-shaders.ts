@@ -4,7 +4,7 @@ export const GPS_UNIFORMS = wgsl`
 struct Params {
 world: mat4x4f, view: mat4x4f, projection: mat4x4f,
 eye: vec4f, resolution: vec4f, output: vec4f, data: vec4f,
-state: vec4f, range: vec4f, cycle: vec4f,
+state: vec4f, range: vec4f, cycle: vec4f, visibility: vec4f,
 }
 `;
 
@@ -406,7 +406,16 @@ return clamp((viewDepth(z)-viewDepth(1.0))/(viewDepth(0.0)-viewDepth(1.0)),0.0,1
 }
 `;
 
-export function gpsResolveShader(sceneDepth = false, compare: GPUCompareFunction = "greater-equal", linear = false): WgslSource {
+function depthSource(binding: number, samples: number): WgslSource {
+    return wgsl`
+@group(0) @binding(${binding}) var sceneDepth:${samples > 1 ? wgsl`texture_depth_multisampled_2d` : wgsl`texture_depth_2d`};
+fn opaqueDepth(pixel:vec2u,sample:u32)->f32 {
+return textureLoad(sceneDepth,vec2i(pixel+vec2u(u.visibility.zw)),${samples > 1 ? wgsl`i32(sample)` : wgsl`0`});
+}
+`;
+}
+
+export function gpsResolveShader(sceneDepth = false, compare: GPUCompareFunction = "greater-equal", linear = false, samples = 1): WgslSource {
     const comparisons: Record<GPUCompareFunction, WgslSource> = {
         never: wgsl`false`,
         less: wgsl`z<opaque`,
@@ -430,22 +439,15 @@ ${
     sceneDepth
         ? wgsl`
 @group(0) @binding(7) var<storage,read_write> previousSceneDepth:array<f32>;
-@group(0) @binding(8) var sceneDepth:texture_depth_2d;
+${depthSource(8, samples)}
 `
         : wgsl``
 }
-${linear ? wgsl`@group(0) @binding(${sceneDepth ? 9 : 7}) var linearDepthTexture:texture_depth_2d;` : wgsl``}
+${linear ? wgsl`@group(0) @binding(${sceneDepth ? 9 : 7}) var linearDepthTexture:${samples > 1 ? wgsl`texture_depth_multisampled_2d` : wgsl`texture_depth_2d`};` : wgsl``}
 ${LINEAR_DEPTH}
-fn visible(color:vec4f,z:f32,p:vec2u)->vec4f {
-${sceneDepth ? wgsl`let opaque=textureLoad(sceneDepth,vec2i(p),0); if(!(${comparisons[compare]})) { return vec4f(0.0); }` : wgsl``}
-return color;
-}
-@compute @workgroup_size(8,8)
-fn main(@builtin(global_invocation_id) id:vec3u) {
-if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
-let i=id.y*u32(u.resolution.x)+id.x;
-let key=atomicExchange(&image[i],0xffffffffu);
-${linear ? wgsl`let discDepth=textureLoad(linearDepthTexture,vec2i(id.xy),0);` : wgsl``}
+struct Sample { color:vec4f, depth:f32 }
+fn sampleValue(key:u32,p:vec2u,sample:u32)->Sample {
+${linear ? wgsl`let discDepth=textureLoad(linearDepthTexture,vec2i(p),${samples > 1 ? wgsl`i32(sample)` : wgsl`0`});` : wgsl``}
 let hit=${linear ? wgsl`discDepth>0.0` : wgsl`key!=0xffffffffu`};
 let rgb=(key^u32(u.data.w))&65535u;
 let scale=max(u.eye.w,bitcast<f32>(total[1]));
@@ -455,85 +457,81 @@ let projected=(u.projection[2].z*vz+u.projection[3].z)/(u.projection[2].w*vz+u.p
 let sampleDepth=${linear ? wgsl`discDepth` : wgsl`select(0.0,clamp(projected,0.0,1.0),hit)`};
 let shaded=select(color,vec3f(linearDepth(sampleDepth)),u.cycle.w>0.5 && u.range.w>0.5);
 let sampleColor=select(vec4f(0.0),vec4f(shaded,1.0),hit);
+${sceneDepth ? wgsl`let z=sampleDepth; let opaque=opaqueDepth(p,sample); if(!(${comparisons[compare]})) { return Sample(vec4f(0.0),0.0); }` : wgsl``}
+return Sample(sampleColor,select(0.0,sampleDepth,hit));
+}
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u) {
+if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
+let i=id.y*u32(u.resolution.x)+id.x;
+var key=atomicLoad(&image[i]);
+if(u.visibility.x+1.0>=max(1.0,u.visibility.y)) { key=atomicExchange(&image[i],0xffffffffu); }
 hiz[i]=1e30;
 let n=u32(u.output.z);
 let gen=u32(u.state.x);
+let sample=u32(u.visibility.x);
+let pixel=id.xy*n+vec2u(u.cycle.xy);
+for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
+let p=id.xy*n+vec2u(x,y);
+if(any(p>=vec2u(u.output.xy))) { continue; }
+let o=p.y*u32(u.output.x)+p.x;
 ${
     sceneDepth
         ? wgsl`
-for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
-let p=id.xy*n+vec2u(x,y);
-if(all(p<vec2u(u.output.xy))) {
-let o=p.y*u32(u.output.x)+p.x;
-let opaque=textureLoad(sceneDepth,vec2i(p),0);
+let opaque=opaqueDepth(p,sample);
 if(previousSceneDepth[o]!=opaque) { counts[o]=gen<<16u; accum[o]=vec4f(0.0); depth[o]=0.0; }
 previousSceneDepth[o]=opaque;
-}
-} }
 `
         : wgsl``
 }
 ${
     linear
         ? wgsl`
-let value=visible(sampleColor,sampleDepth,id.xy);
-accum[i]=value; depth[i]=select(0.0,sampleDepth,value.a>0.0); counts[i]=(gen<<16u)|1u;
+let value=sampleValue(key,p,sample);
+accum[o]=value.color; depth[o]=value.depth; counts[o]=(gen<<16u)|1u;
 `
         : wgsl`
 if(u.state.z>0.5 && u.state.z<1.5) {
-for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
-let pixel=id.xy*n+vec2u(x,y);
-if(all(pixel<vec2u(u.output.xy))) {
-let o=pixel.y*u32(u.output.x)+pixel.x;
-let value=visible(sampleColor,sampleDepth,pixel);
-accum[o]=value; depth[o]=select(0.0,sampleDepth,value.a>0.0); counts[o]=(gen<<16u)|1u;
-${sceneDepth ? wgsl`previousSceneDepth[o]=textureLoad(sceneDepth,vec2i(pixel),0);` : wgsl``}
+let value=sampleValue(key,p,sample);
+accum[o]=value.color; depth[o]=value.depth; counts[o]=(gen<<16u)|1u;
+continue;
 }
-} }
-return;
+if(any(p!=pixel)) {
+if(u.state.z>1.5 && u.state.z<3.5 && counts[o]==(gen<<16u)) {
+let value=sampleValue(key,p,sample);
+accum[o]=value.color; depth[o]=value.depth;
 }
-let pixel=id.xy*n+vec2u(u.cycle.xy);
-if(u.state.z>1.5 && u.state.z<2.5) {
-for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
-let p=id.xy*n+vec2u(x,y);
-if(all(p<vec2u(u.output.xy)) && any(p!=pixel)) {
-let o=p.y*u32(u.output.x)+p.x;
-if(counts[o]==(gen<<16u)) {
-let value=visible(sampleColor,sampleDepth,p);
-accum[o]=value; depth[o]=select(0.0,sampleDepth,value.a>0.0);
+continue;
 }
-}
-} }
-}
-if(any(pixel>=vec2u(u.output.xy))) { return; }
-let o=pixel.y*u32(u.output.x)+pixel.x;
 let previous=counts[o];
-var count=min(select(0u,previous&65535u,(previous>>16u)==gen),u32(u.state.y));
+let count=min(select(0u,previous&65535u,(previous>>16u)==gen),u32(u.state.y));
 ${
     sceneDepth
         ? wgsl`
-if(u.state.z>2.5 && (previous>>16u)==gen && (previous&65535u)>u32(u.state.y)) { return; }
+if(u.state.z>2.5 && (previous>>16u)==gen && (previous&65535u)>u32(u.state.y)) { continue; }
 `
         : wgsl``
 }
-let value=visible(sampleColor,sampleDepth,pixel);
+let value=sampleValue(key,p,sample);
 let weight=1.0/f32(count+1u);
-accum[o]=mix(accum[o],value,weight);
+accum[o]=mix(accum[o],value.color,weight);
 counts[o]=(gen<<16u)|min(count+1u,65535u);
-if(value.a>0.0 || count==0u) { depth[o]=select(0.0,sampleDepth,value.a>0.0); }
+if(value.color.a>0.0 || count==0u) { depth[o]=value.depth; }
 `
 }
+} }
 }
 `;
 }
 
 export const GPS_RESOLVE = /* @__PURE__ */ gpsResolveShader();
 
-export const GPS_SCENE_HIZ = wgsl`
+export function gpsSceneHiZShader(samples = 1): WgslSource {
+    return wgsl`
 ${GPS_UNIFORMS}
 @group(0) @binding(0) var<uniform> u:Params;
 @group(0) @binding(1) var<storage,read_write> hiz:array<f32>;
-@group(0) @binding(2) var source:texture_depth_2d;
+${depthSource(2, samples)}
 ${LINEAR_DEPTH}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u) {
@@ -543,11 +541,65 @@ var farthest=0.0;
 for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
 let p=id.xy*n+vec2u(x,y);
 if(all(p<vec2u(u.output.xy))) {
-let z=textureLoad(source,vec2i(p),0);
+for(var sample=0u;sample<max(1u,u32(u.visibility.y));sample++) {
+let z=opaqueDepth(p,sample);
 farthest=max(farthest,select(1e30,viewDepth(z),z>0.0));
+}
 }
 } }
 hiz[id.y*u32(u.resolution.x)+id.x]=farthest;
+}
+`;
+}
+
+export const GPS_SCENE_HIZ = /* @__PURE__ */ gpsSceneHiZShader();
+
+export function gpsVisibilityShader(samples = 1): WgslSource {
+    return wgsl`
+${GPS_UNIFORMS}
+@group(0) @binding(0) var<uniform> u:Params;
+@group(0) @binding(1) var<storage,read_write> accum:array<vec4f>;
+@group(0) @binding(2) var<storage,read_write> depth:array<f32>;
+@group(0) @binding(3) var<storage,read_write> counts:array<u32>;
+@group(0) @binding(4) var<storage,read_write> previous:array<f32>;
+${depthSource(5, samples)}
+@group(0) @binding(6) var<storage,read_write> work:array<atomic<u32>>;
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u) {
+if(any(id.xy>=vec2u(u.output.xy))) { return; }
+let gen=u32(u.state.x);
+let sample=u32(u.visibility.x);
+let o=id.y*u32(u.output.x)+id.x;
+let z=opaqueDepth(id.xy,sample);
+if(previous[o]!=z) {
+counts[o]=gen<<16u; accum[o]=vec4f(0.0); depth[o]=0.0; previous[o]=z;
+}
+let count=counts[o];
+if((count>>16u)!=gen || (count&65535u)<=u32(u.state.y)) { atomicStore(&work[0],1u); }
+}
+`;
+}
+
+export const GPS_VISIBILITY_WORK = wgsl`
+${GPS_UNIFORMS}
+@group(0) @binding(0) var<uniform> u:Params;
+@group(0) @binding(1) var<storage,read_write> work:array<u32>;
+@group(0) @binding(2) var<storage,read_write> splat:array<u32>;
+@compute @workgroup_size(1)
+fn main() {
+let required=work[0]!=0u || u.state.z<2.5;
+work[0]=select(0u,1u,required);
+let groups=u32(ceil(u.data.x/256.0));
+work[1]=select(0u,min(groups,65535u),required); work[2]=u32(ceil(f32(groups)/65535.0)); work[3]=1u;
+work[4]=select(0u,1u,required); work[5]=1u; work[6]=1u;
+work[7]=select(0u,257u,required); work[8]=1u; work[9]=1u;
+var width=u32(u.resolution.x); var height=u32(u.resolution.y);
+for(var level=0u;level<u32(u.range.z);level++) {
+let offset=10u+level*3u;
+work[offset]=select(0u,(width+7u)/8u,required); work[offset+1u]=(height+7u)/8u; work[offset+2u]=1u;
+width=max(1u,width/2u); height=max(1u,height/2u);
+}
+if(!required) { splat[0]=0u; splat[1]=1u; splat[2]=1u; }
 }
 `;
 
@@ -569,7 +621,8 @@ let z=s.color.x;
 let depth=(u.projection[2].z*z+u.projection[3].z)/(u.projection[2].w*z+u.projection[3].w);
 return Vertex(vec4f(pixel/u.output.xy*vec2f(2.0,-2.0)+vec2f(-1.0,1.0),depth,1.0),index);
 }
-@fragment fn fs(v:Vertex) {
+@fragment fn fs(v:Vertex,@builtin(sample_index) sample:u32) {
+if(sample>=max(1u,u32(u.visibility.y))) { discard; }
 let s=screen[v.index];
 let delta=v.position.xy-s.meanConic.xy;
 let distance=s.meanConic.z*delta.x*delta.x+2.0*s.meanConic.w*delta.x*delta.y+s.conicChol.x*delta.y*delta.y;
@@ -594,23 +647,35 @@ hiz[u.destination.x+id.y*u.destination.y+id.x]=farthest;
 }
 `;
 
-export const GPS_COMPOSITE = wgsl`
+export function gpsCompositeShader(samples = 1): WgslSource {
+    let buffers = wgsl``;
+    let selection = wgsl``;
+    for (let sample = 0; sample < samples; sample++) {
+        buffers = wgsl`${buffers}
+@group(1) @binding(${1 + sample}) var<storage,read> accum${sample}:array<vec4f>;
+@group(1) @binding(${1 + samples + sample}) var<storage,read> depth${sample}:array<f32>;`;
+        selection = wgsl`${selection}
+case ${sample}u: { color=accum${sample}[i]; z=depth${sample}[i]; }`;
+    }
+    return wgsl`
 ${GPS_UNIFORMS}
 @group(1) @binding(0) var<uniform> u:Params;
-@group(1) @binding(1) var<storage,read> accum:array<vec4f>;
-@group(1) @binding(2) var<storage,read> depth:array<f32>;
+${buffers}
 struct Vertex { @builtin(position) position:vec4f, @location(0) uv:vec2f }
 @vertex fn vs(@builtin(vertex_index) i:u32)->Vertex {
 let xy=vec2f(f32((i<<1u)&2u),f32(i&2u));
 return Vertex(vec4f(xy*2.0-1.0,0.0,1.0),vec2f(xy.x,1.0-xy.y));
 }
 struct Fragment { @location(0) color:vec4f, @builtin(frag_depth) depth:f32 }
-@fragment fn fs(v:Vertex)->Fragment {
+@fragment fn fs(v:Vertex,@builtin(sample_index) sample:u32)->Fragment {
 let pixel=vec2u(clamp(v.uv,vec2f(0.0),vec2f(0.999999))*u.output.xy);
 let i=pixel.y*u32(u.output.x)+pixel.x;
-let sampleColor=accum[i];
-if(sampleColor.a<0.0015) { discard; }
-let z=depth[i];
-return Fragment(sampleColor,z);
+var color=vec4f(0.0); var z=0.0;
+switch(min(sample,${samples - 1}u)) { ${selection} default: {} }
+if(color.a<0.0015) { discard; }
+return Fragment(color,z);
 }
 `;
+}
+
+export const GPS_COMPOSITE = /* @__PURE__ */ gpsCompositeShader();

@@ -135,6 +135,20 @@ capacity, grow geometrically when needed (bounded by device buffer limits), and
 retire replaced buffers after submission. Allocation sizes use capacity; uniforms,
 scan lengths, and dispatch workgroups use only the active count.
 
+The shared `Params` uniform is 80 floats / 320 bytes. The first 76 floats retain
+their existing matrix, resolution, sampling, generation and visualization layout.
+The final vec4 is `(historySampleIndex, historySamples, viewportX, viewportY)`.
+Each native sample owns separate full-resolution color/depth/count/native-depth
+buffers indexed by `y * width + x`. Separate planes preserve the original
+single-sample maximum dimensions under default storage-binding limits; four
+samples must not require one four-times-larger binding. Resolve and monitoring
+process each plane with its own 320-byte parameter buffer. Resolve loads shared
+point keys for earlier planes and clears them only in the last plane.
+The composite binds one color/depth pair per plane (eight storage bindings for
+four samples) and selects the appropriate pair with `sample_index`.
+Splat-only stochastic views share one history across destination samples; mixed
+views and deterministic disc rasters retain every native sample.
+
 ## Shader Logic
 
 Preprocessing reads static center/covariance/color textures and optional SH
@@ -167,25 +181,56 @@ Non-alpha-blended linear resolve instead displays the nearest deterministic
 disc's depth with full coverage, as detailed below. Visualization
 camera changes reset history rather than reprojecting depth-dependent grayscale.
 
-When nontransparent renderables are present in the target render task,
-`gps-scene-depth.ts` renders their actual bindings (including merged geometry, alpha testing and
-animated geometry) into a feature-owned
-single-sample opaque depth prepass before sampling. Resolve compares each sample
-against that depth before averaging, never depth-testing an already mixed average.
-Mesh backlinks are not an occluder classification: merged ShaderMaterial geometry
-has none. Each binding's native depth-write behavior determines its contribution,
-so non-depth-writing backgrounds do not occlude splats. One stable prepass signature
-is shared by every binding and retained across refreshes, preserving signature-keyed
-thin-instance LOD buckets and cull-state caches. Camera-less or empty effective
-viewports are rejected before any prepass resources are created or recorded;
-restoring eligibility resets accumulation.
-A throwaway color attachment preserves each material's original alpha-test shader;
-mixed opaque/splat scenes pay for these additional opaque draws and attachments.
-A full-resolution previous-depth buffer detects per-pixel occluder changes and
-clears affected histories, including cycle pixels not sampled in the current frame.
+Visibility uses the consuming task's actual depth attachment, not a geometry replay
+with a different sample count or depth/stencil format. A feature-owned task/encoder
+adapter defers point compute until the point binding is reached in the native pass.
+It ends that pass, samples its depth-only view, and resumes color/depth/stencil
+attachments with `load`, restoring dynamic viewport/scissor/stencil/blend state and
+the scene bind group. Native geometry executes only once. Consequently native
+alpha-to-coverage, stencil writer/tester ordering, merged ShaderMaterial geometry,
+thin-instance LOD, and depth loaded from earlier shared/eager tasks remain intact.
+The adapter forwards all native methods with their real receivers and cooperates
+with transmission's existing split passes; it is removed on last-handle disposal.
+It instruments the command encoder's `beginRenderPass` method temporarily, never
+the command encoder's identity, so submission fences and readbacks still match.
+Original method descriptors are restored in `finally`; existing GPU timing
+instrumentation remains in the call chain. Added/replaced tasks are discovered
+before rendering and when point bindings are built. Superseded, removed and
+disposed wrappers are deactivated, so another feature retaining a captured wrapper
+cannot keep point instrumentation alive. Last-handle release is idempotent.
+
+The adapter tracks actual preceding draw commands, including transparent depth
+writers and earlier point draws. Unknown render bundles conservatively count as
+possible depth contributors; only the task's native opaque bundles with an empty
+opaque binding list are proven empty. A depth clear resets this evidence; LOAD
+segments retain it. Loaded shared/eager depth remains a source even without any
+preceding draws in the current task. Transparency, missing mesh backlinks,
+pipeline labels and order never prove a native draw cannot write depth.
+Preparation checks convergence before pausing the native pass, so unchanged
+unmonitored point-only views composite without an extra pass boundary or resolve.
+
+Mixed MSAA visibility keeps separate color/depth/count/previous-depth histories for
+each consuming-pass sample. Resolve compares the current stochastic hit with each
+native depth sample before averaging; the composite selects that sample's history
+with `sample_index`. Averaging coverage into one pixel alpha would incorrectly dim
+the opaque foreground and is not permitted. Camera viewport offsets address the
+original full-size depth texture. Every plane is checked against device limits
+before allocation, without reducing native sample coverage. Camera-less or empty effective
+viewports are rejected before recording; restoring eligibility resets accumulation.
+Previous-depth histories detect per-sample occluder changes and clear affected
+histories, including cycle pixels not sampled in the current frame.
 Visibility continues to be checked after convergence; unchanged converged pixels
 remain frozen, while changed pixels resume independently. The sampling seed keeps
 advancing the jitter cycle even though converged frame progress remains frozen.
+The monitor reduces remaining work into a GPU flag and generates indirect
+dispatches: words 1-3 are preprocessing/block-scan/scan-add arguments, 4-6 are
+scan-sums arguments, 7-9 partition arguments, and each Hi-Z level has three
+arguments starting at word 10. Level zero also drives resolve. An unchanged
+converged view dispatches zero groups for these stages and stochastic sampling;
+only cheap native-depth monitoring and the composite execute. This also handles
+meshless native HDR/DDS backgrounds without guessing whether a renderable writes
+depth. Changed depth resets the affected sample's history and wakes processing
+until that sample independently reaches the accumulation limit.
 Splat-only scenes retain
 their original converged dispatch skip and allocate no opaque depth resources.
 
@@ -198,13 +243,24 @@ culling is disabled rather than biasing translucent/background sampling.
 
 Non-alpha-blended `linear` visualization uses a separate deterministic depth-only
 disc rasterization at full output resolution. Preprocessing retains every valid
-splat independently of point density/Poisson sampling. Disc support is
+splat independently of point density/Poisson sampling and native Hi-Z. A reusable
+disc cache must include geometry currently hidden behind a moving occluder.
+The depth texture and raster pipeline use the consuming pass's sample count.
+Disc support is
 `delta^T inverseCovariance delta <= 2 * opacity`; surviving fragments are opaque
 and reverse-Z depth testing selects the nearest disc. A resolve variant reads this
 depth texture directly into opaque linear-depth output, without temporal averaging.
 `alphaBlended` retains the stochastic premultiplied depth mean. Linear disc depth
 uses the unquantized projected center depth, stored in the otherwise unused screen
 RGB field for this mode.
+An unchanged deterministic view completes after its first disc rasterization,
+independently of `maxAccumFrames`. Its raw-disc validity key contains dimensions,
+sample count, world/view/projection, streamed content generation and static-data
+version, independently of the accumulation/visibility key. Adding or removing the
+last native contributor resets visibility histories without invalidating the
+unchanged raw discs. When opaque visibility still
+needs monitoring, reuse the completed disc texture and run only visibility resolve;
+do not repeat preprocessing or rasterization of unchanged discs.
 
 ## State Machine / Lifecycle
 
@@ -241,6 +297,12 @@ busy asynchronous readbacks clean up after their mapping completes.
 The shaders and passes live in `gps-reproject.ts`, which is dynamically imported
 on first use so scenes that leave the option off do not load them. Until the
 module arrives, view changes keep restarting the accumulation.
+
+Native-depth-monitored views conservatively hard-reset on world/view/projection
+changes even when reprojection is enabled. Reprojecting an already mixed history
+cannot safely test its individual samples against native geometry: moving a target
+behind an unchanged occluder must not preserve its foreground color. The existing
+single-history reprojection path remains available for splat-only color views.
 
 With `temporalReprojection`, world/view/projection matrices leave the
 generation key and are tracked separately. When they change, `prepare()` builds
@@ -352,6 +414,10 @@ retirement, capacity reuse and device-bounded growth with active-count dispatche
 accumulation resets, low-limit streamed refreshes with occlusion disabled across
 every cycle slot, paired reprojection matrices and inverse projection, the 208-byte
 uniform layout, and hard-reset fallback for singular/non-finite transforms.
+Native-pass adapter tests cover receivers, dynamic state, LOAD/clear segments,
+unknown and proven-empty bundles, captured wrapper deactivation and idempotent
+release. Four-sample 2560x1440 allocations must fit the default 128 MiB storage
+binding limit without changing sample coverage.
 Numerical tests and hardware compute readbacks cover backward-motion foreground
 collisions, lateral-motion depth rejection, orthographic and finite/infinite
 perspective projections. The nonvisual hardware regression lives in
@@ -380,7 +446,7 @@ and both depth visualization modes at near/middle/far depths for perspective and
 orthographic cameras with near/far planes 1/11. Alternating foreground/background
 samples verify per-sample opaque rejection and mean linear-depth visualization;
 occluder removal and arrival reset converged history. A real opaque render binding
-also exercises the depth-prepass pipeline, scene uniforms, attachments, and texture
+also exercises native task execution, scene uniforms, attachments, and texture
 sampling on WebGPU. Two meshes sharing one actual opaque ShaderMaterial produce
 a meshless merged renderable: its depth must reject background samples, and hiding
 both packets must reveal them. Actual thin-instance LOD bucket publication and
@@ -391,10 +457,22 @@ culling enabled and disabled when opaque depth is empty. Both colors must surviv
 Deterministic linear-depth rasterization must cover the opacity-scaled discs,
 select the nearer of overlapping discs regardless of submission order, and work
 with point density zero; the separate alpha-blended cases retain the weighted mean.
-`gaussian-point-scene-depth.test.ts` covers opaque selection,
-render-task filtering, update-batch ordering, viewport cropping, resize retirement,
-hidden geometry, shared persistent signature identity, and missing-camera /
-empty-viewport rejection before allocation. Runtime tests also exercise restored
+Real four-sample native ShaderMaterial tasks cover zero/partial alpha-to-coverage,
+ordinary silhouettes, stencil-conditioned depth, shared-RT loaded depth, eager
+external depth, transmission splits around the point draw, and a fractional
+101-pixel right-half viewport including its 51st pixel. A real native HDR cubemap
+skybox plus the full point runtime must converge to zero indirect work, wake on
+native depth changes, and reconverge. Moving the target across a fixed occluder
+with reprojection enabled must reset rather than preserve stale foreground color.
+Four-sample linear discs rasterize once, including initially occluded geometry;
+hiding that occluder reveals the cached discs without rerasterization.
+`gaussian-point-scene-depth.test.ts` covers borrowed native attachment ownership,
+render-task filtering, loaded-only overlays, native viewport rounding,
+shared persistent signature identity, and missing-camera / empty-viewport rejection.
+It also verifies encoder identity, native receivers, load-descriptor cloning,
+dynamic state restoration, multiple native pass segments, reference-counted
+installation, late/replaced/removed tasks, and exception cleanup.
+Runtime tests also exercise restored
 eligibility and generation resets. The two GPU readback specs run in the dedicated nonvisual
 BrowserStack WebGPU CI job without screenshots, video, or trace artifacts.
 
@@ -404,6 +482,7 @@ BrowserStack WebGPU CI job without screenshots, video, or trace artifacts.
 - `gps-suppression.ts`: opt-in classic-draw discovery and suppression.
 - `gps-state.ts`: state types, validation, invalidation, numeric helpers.
 - `gps-runtime.ts`: GPU resources, compute batches, composite material.
-- `gps-scene-depth.ts`: feature-owned opaque visibility prepass.
+- `gps-pass.ts`: feature-owned native-pass barriers and lifecycle.
+- `gps-scene-depth.ts`: borrowed consuming-pass depth and native viewport mapping.
 - `gps-reproject.ts`: lazy experimental depth scatter and bilinear pull gather.
 - `gps-shaders.ts`: compute and composite WGSL.
