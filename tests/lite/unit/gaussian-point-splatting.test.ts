@@ -519,8 +519,20 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         expect(buffers.every((value) => value.destroy.mock.calls.length === 1)).toBe(true);
     });
 
-    it("soft-resets streamed refreshes, skips stale gathers and stops once converged", () => {
+    it.each([false, true])("soft-resets streamed refreshes and freezes converged progress with opaque monitoring=%s", (opaque) => {
         const { scene, engine } = fixture(true);
+        if (opaque) {
+            const occluder: Renderable = {
+                order: 100,
+                isTransparent: false,
+                mesh: { visible: true } as Renderable["mesh"],
+                bind: () => ({ renderable: occluder, pipeline: {} as GPURenderPipeline, draw: () => 0 }),
+            };
+            scene._renderables.push(occluder);
+            scene.lights = [];
+            scene.imageProcessing = { exposure: 1, contrast: 1, toneMappingEnabled: false };
+            Object.assign(engine, { canvas: { width: 16, height: 16 } });
+        }
         const gpu = { count: 1, contentGeneration: 0, gatheredGeneration: 0, canonical: {}, intervals: [] };
         const stream = {
             _engine: engine,
@@ -541,11 +553,22 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
             createPipelineLayout: vi.fn(() => ({})),
             createComputePipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
             createRenderPipeline: vi.fn(() => ({ getBindGroupLayout: vi.fn(() => ({})) })),
+            createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
+                const [width, height] = descriptor.size as number[];
+                return { width, height, createView: () => ({}), destroy: vi.fn() };
+            }),
         } as unknown as GPUDevice;
         const beginComputePass = vi.fn(() => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), dispatchWorkgroups: vi.fn(), dispatchWorkgroupsIndirect: vi.fn(), end: vi.fn() }));
-        engine._currentEncoder = { beginComputePass, copyBufferToBuffer: vi.fn(), clearBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        engine._currentEncoder = {
+            beginComputePass,
+            beginRenderPass: vi.fn(() => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), end: vi.fn() })),
+            copyBufferToBuffer: vi.fn(),
+            clearBuffer: vi.fn(),
+        } as unknown as GPUCommandEncoder;
         const gps = enableGaussianPointSplatting(scene, stream, { renderScale: 1, maxAccumFrames: 20 });
-        const binding = scene._renderables[1]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 } as RenderTargetSignature);
+        const binding = scene._renderables
+            .at(-1)!
+            .bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1, _depthStencilFormat: opaque ? "depth32float" : undefined } as RenderTargetSignature);
         const batch = binding._updateBatches![1]!;
         const context = { targetWidth: 16, targetHeight: 16, _camera: createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 }) };
         const frame = (): void => {
@@ -576,7 +599,27 @@ describe("Gaussian point splatting lifecycle without a GPU", () => {
         expect(gps.progress).toMatchObject({ accumulationVersion: 1, renderedFrameCount: 20, accumulatedSamples: 20 });
         passes = beginComputePass.mock.calls.length;
         frame();
-        expect(beginComputePass.mock.calls.length).toBe(passes);
+        if (opaque) {
+            expect(beginComputePass.mock.calls.length).toBeGreaterThan(passes);
+        } else {
+            expect(beginComputePass.mock.calls.length).toBe(passes);
+        }
+        expect(gps.progress).toMatchObject({ renderedFrameCount: 20, accumulatedSamples: 20 });
+        if (opaque) {
+            gps.renderScale = 2;
+            for (let i = 0; i < 80; i++) {
+                frame();
+            }
+            const slots = new Set<number>();
+            for (let i = 0; i < 4; i++) {
+                frame();
+                const writes = vi.mocked(engine._device.queue.writeBuffer).mock.calls;
+                const params = writes.at(-1)![2] as Float32Array;
+                slots.add(params[72]! + 2 * params[73]!);
+            }
+            expect(slots.size).toBe(4);
+            expect(gps.progress).toMatchObject({ renderedFrameCount: 80, accumulatedSamples: 20 });
+        }
         expect(binding.draw({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn() } as unknown as GPURenderPassEncoder, engine)).toBe(1);
         disableGaussianPointSplatting(scene, gps);
         engine._retirements?.splice(0).forEach((dispose) => dispose());

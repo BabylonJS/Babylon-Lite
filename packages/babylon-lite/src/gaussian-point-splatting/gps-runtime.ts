@@ -23,8 +23,21 @@ import {
     type GaussianPointSplatting,
     type GpsAccumulation,
 } from "./gps-state.js";
-import { GPS_COMPOSITE, GPS_HIZ, GPS_PARTITION, GPS_RESOLVE, GPS_SCAN_ADD, GPS_SCAN_BLOCKS, GPS_SCAN_SUMS, GPS_SPLAT, gpsPreprocessShader } from "./gps-shaders.js";
+import {
+    GPS_COMPOSITE,
+    GPS_HIZ,
+    GPS_PARTITION,
+    GPS_RESOLVE,
+    GPS_SCAN_ADD,
+    GPS_SCAN_BLOCKS,
+    GPS_SCAN_SUMS,
+    GPS_SPLAT,
+    gpsPreprocessShader,
+    gpsResolveShader,
+} from "./gps-shaders.js";
+import { gpsCreateSceneDepth, gpsOpaqueSources, gpsRecordSceneDepth, type GpsSceneDepth } from "./gps-scene-depth.js";
 import type * as GpsReproject from "./gps-reproject.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 interface Pipelines {
     preprocess: GPUComputePipeline;
@@ -43,6 +56,7 @@ interface PixelBuffers extends GpsReproject.GpsReprojectionTarget {
     hiz: GPUBuffer;
     levels: ReturnType<typeof gpsHiZLevels>;
     levelParams: GPUBuffer[];
+    previousSceneDepth?: GPUBuffer;
 }
 
 interface SplatBuffers {
@@ -92,15 +106,24 @@ interface ViewState extends GpsAccumulation {
     fillFrames: number;
     /** A phase-preserving reset must refresh every cycle slot before convergence can stop dispatches. */
     refreshFrames: number;
+    opaque?: GpsSceneDepth;
+    sceneResolve?: GPUComputePipeline;
 }
 
-let cache: { device: GPUDevice; compute: Map<string, Pipelines>; composite: Map<string, GPURenderPipeline> } | null = null;
+interface DeviceCache {
+    compute: Map<string, Pipelines>;
+    composite: Map<string, GPURenderPipeline>;
+}
 
-function deviceCache(device: GPUDevice): NonNullable<typeof cache> {
-    if (cache?.device !== device) {
-        cache = { device, compute: new Map(), composite: new Map() };
+let cache: WeakMap<GPUDevice, DeviceCache> | null = null;
+
+function deviceCache(device: GPUDevice): DeviceCache {
+    let shared = cache?.get(device);
+    if (!shared) {
+        shared = { compute: new Map(), composite: new Map() };
+        (cache ??= new WeakMap()).set(device, shared);
     }
-    return cache;
+    return shared;
 }
 
 type ReprojectionModule = typeof GpsReproject;
@@ -185,9 +208,7 @@ function compositePipeline(engine: EngineContext, target: RenderTargetSignature,
                     : [],
             },
             primitive: { topology: "triangle-list", cullMode: "none" },
-            depthStencil: target._depthStencilFormat
-                ? { format: target._depthStencilFormat, depthWriteEnabled: depthMode, depthCompare: target._depthCompare ?? "greater-equal" }
-                : undefined,
+            depthStencil: target._depthStencilFormat ? { format: target._depthStencilFormat, depthWriteEnabled: depthMode, depthCompare: "always" } : undefined,
             multisample: { count: target._sampleCount },
         });
         shared.composite.set(key, result);
@@ -265,7 +286,7 @@ function bindGroup(device: GPUDevice, pipeline: GPUComputePipeline | GPURenderPi
     });
 }
 
-function retireBuffers(engine: EngineContext, buffers: readonly GPUBuffer[]): void {
+function retireBuffers(engine: EngineContext, buffers: readonly (GPUBuffer | GPUTexture)[]): void {
     retireGpuResources(engine, () => buffers.forEach((value) => value.destroy()));
 }
 
@@ -408,7 +429,7 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     const world = target.worldMatrix;
     const viewKey = `${Array.from(world)}/${Array.from(view)}/${Array.from(projection)}`;
     // With reprojection, view changes keep the generation and remap the accumulation instead of restarting it.
-    const reprojector = gps.temporalReprojection ? reprojectionModule() : null;
+    const reprojector = gps.temporalReprojection && !(gps.depthRenderMode && gps.depthVisualization !== "none") ? reprojectionModule() : null;
     const key = `${pixelKey}/${optionKey}/${gps._dataVersion}${reprojector ? "" : `/${viewKey}`}`;
     let reset = gpsUpdateGeneration(state, key);
     const cycle = n * n;
@@ -433,9 +454,9 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         state.refreshFrames = 0;
     }
     state.viewKey = viewKey;
-    state.matrices.set(world, 0);
-    state.matrices.set(view, 16);
-    state.matrices.set(projection, 32);
+    packMat4IntoF32(state.matrices, world, 0);
+    packMat4IntoF32(state.matrices, view, 16);
+    packMat4IntoF32(state.matrices, projection, 32);
     const content = stream ? target._gpu.contentGeneration : 0;
     if (!reset && state.content !== content) {
         gpsSoftReset(state, cycle, Math.min(GPS_SOFT_RESET_SAMPLES, gps.maxAccumFrames - 1));
@@ -443,7 +464,8 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     }
     state.content = content;
     state.drawable = true;
-    if (!reset && state.refreshFrames === 0 && gpsAccumulatedSamples(state.frames, cycle, gps.maxAccumFrames) >= gps.maxAccumFrames) {
+    const converged = !reset && state.refreshFrames === 0 && gpsAccumulatedSamples(state.frames, cycle, gps.maxAccumFrames) >= gps.maxAccumFrames;
+    if (converged && !state.opaque?.active) {
         // Converged: the composite keeps presenting the accumulation and the params written by the last dispatch.
         publishProgress(gps, state, cycle);
         return false;
@@ -481,12 +503,12 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     zMin = Math.max(camera.nearPlane, zMin);
     zMax = Math.max(zMin + 1e-6, zMax);
     const eye = getCameraPosition(camera);
-    const jitter = state.frames % (n * n);
+    const jitter = (converged ? state.seed : state.frames) % cycle;
     const depthVisualization = gps.depthVisualization === "linear" ? 1 : gps.depthVisualization === "alphaBlended" ? 2 : 0;
     const cpu = state.cpu;
-    cpu.set(world, 0);
-    cpu.set(view, 16);
-    cpu.set(projection, 32);
+    packMat4IntoF32(cpu, world, 0);
+    packMat4IntoF32(cpu, view, 16);
+    packMat4IntoF32(cpu, projection, 32);
     cpu.set([eye.x, eye.y, eye.z, !stream && target.shDegree > 0 ? 8 : 1], 48);
     cpu.set([Math.ceil(width / n), Math.ceil(height / n), camera.nearPlane, camera.farPlane], 52);
     cpu.set([width, height, n, stream ? 0 : target.textureWidth], 56);
@@ -495,7 +517,7 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
         [
             state.generation,
             gpsHistoryCap(state.frames, cycle, gps.maxAccumFrames),
-            reset ? 1 : state.fillFrames > 0 ? 2 : 0,
+            reset ? 1 : state.fillFrames > 0 ? 2 : converged ? 3 : 0,
             +(gps.occlusionCulling && !reset && state.refreshFrames === 0),
         ],
         64
@@ -507,7 +529,21 @@ function prepare(gps: GaussianPointSplatting, state: ViewState, engine: EngineCo
     return true;
 }
 
-function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineContext, pipeline: Pipelines): void {
+function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineContext, pipeline: Pipelines, scene: SceneContext, signature: RenderTargetSignature): void {
+    if (state.context && !gps._disabled && (gps.colorRenderMode || gps.depthRenderMode)) {
+        if (signature._depthStencilFormat && (state.opaque || gpsOpaqueSources(scene, signature).some((item) => !item.isTransparent && !!item.mesh))) {
+            const opaque = (state.opaque ??= gpsCreateSceneDepth(engine._device));
+            const active = opaque.active;
+            const texture = opaque.texture;
+            gpsRecordSceneDepth(opaque, scene, engine, signature, state.context, (textures) => retireBuffers(engine, textures));
+            if (opaque.active !== active) {
+                state.key = "";
+            }
+            if (opaque.texture !== texture) {
+                state.groups.clear();
+            }
+        }
+    }
     if (!prepare(gps, state, engine)) {
         return;
     }
@@ -560,15 +596,31 @@ function record(gps: GaussianPointSplatting, state: ViewState, engine: EngineCon
         dispatch(pipeline.splat, [params, splats.cdf, state.total, state.buckets, splats.screen, pixel.image], 0, 1, true);
     }
     const level0 = pixel.levels[0]!;
-    dispatch(pipeline.resolve, [params, pixel.image, pixel.accum, pixel.depth, pixel.counts, pixel.hiz, state.total], Math.ceil(level0.width / 8), Math.ceil(level0.height / 8));
+    const resources: (GPUBuffer | GPUTextureView)[] = [params, pixel.image, pixel.accum, pixel.depth, pixel.counts, pixel.hiz, state.total];
+    let resolve = pipeline.resolve;
+    if (state.opaque?.active) {
+        if (!pixel.previousSceneDepth) {
+            pixel.previousSceneDepth = buffer(device, state.cpu[56]! * state.cpu[57]! * 4, "opaque depth history");
+            pixel.buffers.push(pixel.previousSceneDepth);
+        }
+        resolve = state.sceneResolve ??= device.createComputePipeline({
+            label: "GPS scene resolve",
+            layout: "auto",
+            compute: { module: device.createShaderModule({ code: gpsResolveShader(true, signature._depthCompare) }), entryPoint: "main" },
+        });
+        resources.push(pixel.previousSceneDepth, state.opaque.view);
+    }
+    dispatch(resolve, resources, Math.ceil(level0.width / 8), Math.ceil(level0.height / 8));
     if (gps.occlusionCulling) {
         for (let i = 1; i < pixel.levels.length; i++) {
             const level = pixel.levels[i]!;
             dispatch(pipeline.hiz, [pixel.levelParams[i - 1]!, pixel.hiz], Math.ceil(level.width / 8), Math.ceil(level.height / 8));
         }
     }
-    readback(engine, state, state.cpu[58]!);
-    state.frames++;
+    if (state.cpu[66] !== 3) {
+        readback(engine, state, state.cpu[58]!);
+        state.frames++;
+    }
     if (state.fillFrames > 0) {
         state.fillFrames--;
     }
@@ -601,6 +653,9 @@ export function createGpsRenderable(scene: SceneContext, gps: GaussianPointSplat
         state.drawable = false;
         state.groups.clear();
         state.composite = null;
+        if (state.opaque) {
+            retireBuffers(engine, [state.opaque.texture, ...(state.opaque.color ? [state.opaque.color] : []), state.opaque.uniforms]);
+        }
         views.delete(state);
         retireBuffers(engine, [
             ...state.buffers,
@@ -634,7 +689,7 @@ export function createGpsRenderable(scene: SceneContext, gps: GaussianPointSplat
                 },
                 flush(currentEngine) {
                     if (!state.disposed && !this._retired) {
-                        record(gps, state, currentEngine, compute);
+                        record(gps, state, currentEngine, compute, scene, signature);
                     }
                 },
                 destroy() {

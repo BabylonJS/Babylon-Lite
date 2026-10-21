@@ -2,13 +2,29 @@ import { expect, test } from "@playwright/test";
 import { build } from "esbuild";
 import { resolve } from "node:path";
 import type * as GpsShaders from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-shaders.js";
+import type * as GpsSceneDepth from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-scene-depth.js";
+import type { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate.js";
+import type { getSceneBindGroupLayout } from "../../../packages/babylon-lite/src/render/scene-helpers.js";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable.js";
+
+type GpuTestApi = typeof GpsShaders & typeof GpsSceneDepth & { createArcRotateCamera: typeof createArcRotateCamera; getSceneBindGroupLayout: typeof getSceneBindGroupLayout };
 
 test("Gaussian point sampling preserves stream radiance and visualizes perspective/orthographic depth", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
     const bundle = await build({
-        entryPoints: [resolve("packages", "babylon-lite", "src", "gaussian-point-splatting", "gps-shaders.ts")],
+        stdin: {
+            contents: `
+export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-shaders.js";
+export * from "./packages/babylon-lite/src/gaussian-point-splatting/gps-scene-depth.js";
+export { createArcRotateCamera } from "./packages/babylon-lite/src/camera/arc-rotate.js";
+export { getSceneBindGroupLayout } from "./packages/babylon-lite/src/render/scene-helpers.js";
+`,
+            resolveDir: resolve("."),
+        },
         bundle: true,
         format: "iife",
         globalName: "gpsShaderTest",
@@ -16,7 +32,7 @@ test("Gaussian point sampling preserves stream radiance and visualizes perspecti
     });
     await page.addScriptTag({ content: bundle.outputFiles[0]!.text });
     const result = await page.evaluate(async () => {
-        const shaders = (window as unknown as { gpsShaderTest: typeof GpsShaders }).gpsShaderTest;
+        const shaders = (window as unknown as { gpsShaderTest: GpuTestApi }).gpsShaderTest;
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter) {
             throw new Error("WebGPU adapter unavailable");
@@ -36,10 +52,10 @@ test("Gaussian point sampling preserves stream radiance and visualizes perspecti
         };
         const compute = (code: string): GPUComputePipeline =>
             device.createComputePipeline({ layout: "auto", compute: { module: device.createShaderModule({ code }), entryPoint: "main" } });
-        const dispatch = (encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, resources: GPUBuffer[]): void => {
+        const dispatch = (encoder: GPUCommandEncoder, pipeline: GPUComputePipeline, resources: (GPUBuffer | GPUTextureView)[]): void => {
             const group = device.createBindGroup({
                 layout: pipeline.getBindGroupLayout(0),
-                entries: resources.map((buffer, binding) => ({ binding, resource: { buffer } })),
+                entries: resources.map((resource, binding) => ({ binding, resource: "mapAsync" in resource ? { buffer: resource } : resource })),
             });
             const pass = encoder.beginComputePass();
             pass.setPipeline(pipeline);
@@ -137,8 +153,21 @@ test("Gaussian point sampling preserves stream radiance and visualizes perspecti
                     const cpu = uniforms(orthographic);
                     cpu[71] = visualization;
                     cpu[75] = 1;
-                    const z = (cpu[42]! * viewDepth + cpu[46]!) / (cpu[43]! * viewDepth + cpu[47]!);
-                    const resources = [make(cpu, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST), make(new Float32Array([0, 0, 0, 0.25])), make(new Float32Array([z]))];
+                    cpu[68] = cpu[69] = viewDepth;
+                    const params = make(cpu, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+                    const accumulation = make(new Float32Array(4));
+                    const geometricDepth = make(new Float32Array(1));
+                    const image = make(new Uint32Array([0]));
+                    const counts = make(new Uint32Array(1));
+                    const hiz = make(new Float32Array(1));
+                    for (let frame = 0; frame < 4; frame++) {
+                        cpu[66] = frame === 0 ? 1 : 0;
+                        device.queue.writeBuffer(params, 0, cpu);
+                        const encoder = device.createCommandEncoder();
+                        dispatch(encoder, resolveSamples, [params, image, accumulation, geometricDepth, counts, hiz, total]);
+                        device.queue.submit([encoder.finish()]);
+                    }
+                    const resources = [params, accumulation, geometricDepth];
                     const group = device.createBindGroup({
                         layout: composite.getBindGroupLayout(1),
                         entries: resources.map((buffer, binding) => ({ binding, resource: { buffer } })),
@@ -163,17 +192,118 @@ test("Gaussian point sampling preserves stream radiance and visualizes perspecti
                 }
             }
         }
+        const mixedCases = [];
+        const resolveOccluded = compute(shaders.gpsResolveShader(true));
+        const opaqueTexture = device.createTexture({ size: [1, 1], format: "depth32float", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+        for (const visualization of [0, 2]) {
+            const cpu = uniforms(true);
+            cpu[71] = visualization;
+            cpu[75] = 1;
+            const params = make(cpu, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+            const image = make(new Uint32Array(1));
+            const accumulation = make(new Float32Array(4));
+            const geometricDepth = make(new Float32Array(1));
+            const counts = make(new Uint32Array(1));
+            const hiz = make(new Float32Array(1));
+            const previousOpaque = make(new Float32Array(1));
+            const frame = (viewDepth: number, opaque: number, index: number): void => {
+                cpu[66] = index === 0 ? 1 : 3;
+                cpu[68] = cpu[69] = viewDepth;
+                device.queue.writeBuffer(params, 0, cpu);
+                device.queue.writeBuffer(image, 0, new Uint32Array([viewDepth === 2 ? 0xf800 : 0x001f]));
+                const encoder = device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [],
+                    depthStencilAttachment: { view: opaqueTexture.createView(), depthClearValue: opaque, depthLoadOp: "clear", depthStoreOp: "store" },
+                });
+                pass.end();
+                dispatch(encoder, resolveOccluded, [params, image, accumulation, geometricDepth, counts, hiz, total, previousOpaque, opaqueTexture.createView()]);
+                device.queue.submit([encoder.finish()]);
+            };
+            for (let index = 0; index < 4; index++) {
+                frame(index % 2 === 0 ? 2 : 8, visualization === 0 ? 0.6 : 0, index);
+            }
+            const average = Array.from(new Float32Array(await read(accumulation, 16)));
+            frame(8, 0, 4);
+            const revealed = Array.from(new Float32Array(await read(accumulation, 16)));
+            frame(2, 0.99, 5);
+            const hidden = Array.from(new Float32Array(await read(accumulation, 16)));
+            mixedCases.push({ visualization, average, revealed, hidden });
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const engine = { _device: device, canvas } as unknown as EngineContext;
+        const camera = shaders.createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+        const opaqueModule = device.createShaderModule({
+            code: `
+@vertex fn vs(@builtin(vertex_index) i:u32)->@builtin(position) vec4f {
+let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3)); return vec4f(p[i],0.6,1);
+}
+@fragment fn fs()->@location(0) vec4f { return vec4f(1,0,0,1); }
+`,
+        });
+        const opaquePipeline = device.createRenderPipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [shaders.getSceneBindGroupLayout(engine)] }),
+            vertex: { module: opaqueModule, entryPoint: "vs" },
+            fragment: { module: opaqueModule, entryPoint: "fs", targets: [{ format: "rgba8unorm" }] },
+            depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater-equal" },
+        });
+        const opaqueRenderable: Renderable = {
+            order: 100,
+            isTransparent: false,
+            mesh: { visible: true } as Renderable["mesh"],
+            bind: () => ({
+                renderable: opaqueRenderable,
+                pipeline: opaquePipeline,
+                draw: (pass) => {
+                    pass.draw(3);
+                    return 1;
+                },
+            }),
+        };
+        const scene = {
+            _renderables: [opaqueRenderable],
+            _renderableVersion: 1,
+            imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
+            lights: [],
+            _disposables: [],
+        } as unknown as SceneContext;
+        const prepass = shaders.gpsCreateSceneDepth(device);
+        buffers.push(prepass.uniforms);
+        engine._currentEncoder = device.createCommandEncoder();
+        shaders.gpsRecordSceneDepth(
+            prepass,
+            scene,
+            engine,
+            { _sampleCount: 1, _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float" },
+            { targetWidth: 1, targetHeight: 1, _camera: camera },
+            (textures) => textures.forEach((texture) => texture.destroy())
+        );
+        const depthReadback = make(new Float32Array(1));
+        const readDepth = compute(`
+@group(0) @binding(0) var source:texture_depth_2d;
+@group(0) @binding(1) var<storage,read_write> result:array<f32>;
+@compute @workgroup_size(1) fn main() { result[0]=textureLoad(source,vec2i(0),0); }
+`);
+        dispatch(engine._currentEncoder, readDepth, [prepass.view, depthReadback]);
+        device.queue.submit([engine._currentEncoder.finish()]);
+        const opaqueDepth = new Float32Array(await read(depthReadback, 4))[0]!;
         await device.queue.onSubmittedWorkDone();
         const validation = await device.popErrorScope();
         buffers.forEach((buffer) => buffer.destroy());
         texture.destroy();
         depthTexture.destroy();
+        opaqueTexture.destroy();
+        prepass.texture.destroy();
+        prepass.color?.destroy();
+        scene._disposables.forEach((dispose) => dispose());
         device.destroy();
-        return { radianceCases, depthCases, gpuErrors, validation: validation?.message };
+        return { radianceCases, depthCases, mixedCases, opaqueDepth, gpuErrors, validation: validation?.message };
     });
     expect(errors).toEqual([]);
     expect(result.gpuErrors).toEqual([]);
     expect(result.validation).toBeUndefined();
+    expect(result.opaqueDepth).toBeCloseTo(0.6, 6);
     for (const entry of result.radianceCases) {
         expect(entry.occludedWeight).toBe(0);
         expect(entry.visibleWeight).toBeGreaterThan(0);
@@ -187,5 +317,13 @@ test("Gaussian point sampling preserves stream radiance and visualizes perspecti
         const expected = ((entry.viewDepth - 1) / 10) * coverage;
         entry.color.slice(0, 3).forEach((channel) => expect(Math.abs(channel / 255 - expected)).toBeLessThanOrEqual(1 / 255));
         expect(Math.abs(entry.color[3]! / 255 - coverage)).toBeLessThanOrEqual(1 / 255);
+    }
+    for (const entry of result.mixedCases) {
+        const expected = entry.visualization === 0 ? [0.5, 0, 0, 0.5] : [0.4, 0.4, 0.4, 1];
+        entry.average.forEach((value, index) => expect(value).toBeCloseTo(expected[index]!, 5));
+        if (entry.visualization === 0) {
+            expect(entry.revealed).toEqual([0, 0, 1, 1]);
+        }
+        expect(entry.hidden).toEqual([0, 0, 0, 0]);
     }
 });

@@ -6,6 +6,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import type { Mat4 } from "../math/types.js";
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
@@ -170,7 +171,7 @@ export interface GpsReprojectionTarget {
 
 export type GpsReprojectionDispatch = (pipeline: GPUComputePipeline, resources: readonly GPUBuffer[], x: number, y: number) => void;
 
-let pipelineCache: { device: GPUDevice; pipelines: Pipelines } | null = null;
+let pipelineCache: WeakMap<GPUDevice, Pipelines> | null = null;
 
 /**
  * Packs the previous-NDC → current-clip matrix, its inverse and current inverse projection into 48 floats.
@@ -191,9 +192,9 @@ export function gpsReprojectionMatrix(matrices: Float32Array, world: Mat4, view:
         return null;
     }
     const result = new Float32Array(48);
-    result.set(matrix);
-    result.set(inverse, 16);
-    result.set(projectionInverse, 32);
+    packMat4IntoF32(result, matrix);
+    packMat4IntoF32(result, inverse, 16);
+    packMat4IntoF32(result, projectionInverse, 32);
     return result.every(Number.isFinite) ? result : null;
 }
 
@@ -233,7 +234,7 @@ export function gpsRecordReprojection(
         target.buffers.push(...buffers);
         target.history = history;
     }
-    let pipelines = pipelineCache?.device === device ? pipelineCache.pipelines : null;
+    let pipelines = pipelineCache?.get(device);
     if (!pipelines) {
         const compute = (code: string, label: string): GPUComputePipeline =>
             device.createComputePipeline({
@@ -246,7 +247,7 @@ export function gpsRecordReprojection(
             winner: compute(scatterShader(true), "reproject source"),
             gather: compute(GATHER, "reproject gather"),
         };
-        pipelineCache = { device, pipelines };
+        (pipelineCache ??= new WeakMap()).set(device, pipelines);
     }
     const x = Math.ceil(width / 8);
     const y = Math.ceil(height / 8);

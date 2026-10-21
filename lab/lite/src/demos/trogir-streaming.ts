@@ -21,6 +21,7 @@ import { acquireTrogirStartupResource, finishTrogirStartup, observeTrogirStartup
 import { resolveTrogirAssets } from "./trogir-assets";
 import { attachTrogirCollision } from "./trogir-collision";
 import { resolveTrogirQuality } from "./trogir-quality";
+import { installTrogirPointSurfaceLimit } from "./trogir-point-surface";
 
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
 const MB = 1024 * 1024;
@@ -60,6 +61,7 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const cameraOutputs = [cameraX, cameraY, cameraZ, cameraYaw, cameraPitch, cameraRoll];
     const pointSampling = document.getElementById("pointSampling") as HTMLInputElement;
     const pointSamplingOptions = document.getElementById("pointSamplingOptions") as HTMLElement;
+    const pointSamplingStatus = document.getElementById("pointSamplingStatus") as HTMLElement;
     const pointScale = document.getElementById("pointScale") as HTMLInputElement;
     const pointScaleValue = output("pointScaleValue");
     const renderScale = document.getElementById("renderScale") as HTMLSelectElement;
@@ -88,7 +90,14 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     };
     const togglePointSampling = (): void => {
         if (pointSampling.checked && !pointSplatting) {
-            pointSplatting = enableGaussianPointSplatting(scene, stream, { colorRenderMode: false });
+            try {
+                pointSplatting = enableGaussianPointSplatting(scene, stream, { colorRenderMode: false });
+                pointSamplingStatus.hidden = true;
+            } catch (reason) {
+                pointSampling.checked = false;
+                pointSamplingStatus.textContent = `Point sampling unavailable: ${reason instanceof Error ? reason.message : String(reason)}. Classic rendering remains active.`;
+                pointSamplingStatus.hidden = false;
+            }
         }
         applyPointOptions();
         if (pointSplatting) {
@@ -188,6 +197,7 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
         pointScale.removeEventListener("input", applyPointOptions);
         renderScale.removeEventListener("change", applyPointOptions);
         occlusionCulling.removeEventListener("change", applyPointOptions);
+        temporalReprojection.removeEventListener("change", applyPointOptions);
         maxAccumFrames.removeEventListener("input", applyPointOptions);
         if (pointSplatting) {
             disableGaussianPointSplatting(scene, pointSplatting);
@@ -240,6 +250,7 @@ async function main(): Promise<void> {
     let disposeCollision: (() => void) | null = null;
     let disposeCameraControls: (() => void) | null = null;
     let disposeHud: (() => void) | null = null;
+    let disposeSurfaceLimit: (() => void) | null = null;
     let disposed = false;
     const dispose = (): void => {
         if (disposed) {
@@ -250,6 +261,7 @@ async function main(): Promise<void> {
         disposeCollision?.();
         disposeHud?.();
         disposeCameraControls?.();
+        disposeSurfaceLimit?.();
         if (scene && stream) {
             disposeGaussianSplatStream(scene, stream);
         }
@@ -281,6 +293,8 @@ async function main(): Promise<void> {
             return;
         }
         engine = createdEngine;
+        // A successful device request guarantees these minima; keep the cap valid even when the adapter grants more.
+        disposeSurfaceLimit = installTrogirPointSurfaceLimit(engine, canvas, Math.min(quality.requiredLimits.maxBufferSize, quality.requiredLimits.maxStorageBufferBindingSize));
         scene = createSceneContext(engine);
         const loadedStream = await acquireTrogirStartupResource(
             loadGaussianSplatStream(engine, assets.metadataUrl, {

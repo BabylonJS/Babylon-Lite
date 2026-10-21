@@ -386,7 +386,27 @@ if(atomicLoad(&image[index])>key) { atomicMin(&image[index],key); }
 }
 `;
 
-export const GPS_RESOLVE = wgsl`
+const LINEAR_DEPTH = wgsl`
+fn viewDepth(z:f32)->f32 {
+return (u.projection[3].z-z*u.projection[3].w)/(z*u.projection[2].w-u.projection[2].z);
+}
+fn linearDepth(z:f32)->f32 {
+return clamp((viewDepth(z)-viewDepth(1.0))/(viewDepth(0.0)-viewDepth(1.0)),0.0,1.0);
+}
+`;
+
+export function gpsResolveShader(sceneDepth = false, compare: GPUCompareFunction = "greater-equal"): WgslSource {
+    const comparisons: Record<GPUCompareFunction, WgslSource> = {
+        never: wgsl`false`,
+        less: wgsl`z<opaque`,
+        equal: wgsl`z==opaque`,
+        "less-equal": wgsl`z<=opaque`,
+        greater: wgsl`z>opaque`,
+        "not-equal": wgsl`z!=opaque`,
+        "greater-equal": wgsl`z>=opaque`,
+        always: wgsl`true`,
+    };
+    return wgsl`
 ${GPS_UNIFORMS}
 @group(0) @binding(0) var<uniform> u:Params;
 @group(0) @binding(1) var<storage,read_write> image:array<atomic<u32>>;
@@ -395,6 +415,19 @@ ${GPS_UNIFORMS}
 @group(0) @binding(4) var<storage,read_write> counts:array<u32>;
 @group(0) @binding(5) var<storage,read_write> hiz:array<f32>;
 @group(0) @binding(6) var<storage,read> total:array<u32>;
+${
+    sceneDepth
+        ? wgsl`
+@group(0) @binding(7) var<storage,read_write> previousSceneDepth:array<f32>;
+@group(0) @binding(8) var sceneDepth:texture_depth_2d;
+`
+        : wgsl``
+}
+${LINEAR_DEPTH}
+fn visible(color:vec4f,z:f32,p:vec2u)->vec4f {
+${sceneDepth ? wgsl`let opaque=textureLoad(sceneDepth,vec2i(p),0); if(!(${comparisons[compare]})) { return vec4f(0.0); }` : wgsl``}
+return color;
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u) {
 if(any(id.xy>=vec2u(u.resolution.xy))) { return; }
@@ -404,43 +437,75 @@ let hit=key!=0xffffffffu;
 let rgb=(key^u32(u.data.w))&65535u;
 let scale=max(u.eye.w,bitcast<f32>(total[1]));
 let color=vec3f(f32((rgb>>11u)&31u)/31.0,f32((rgb>>5u)&63u)/63.0,f32(rgb&31u)/31.0)*scale;
-let sampleColor=select(vec4f(0.0),vec4f(color,1.0),hit);
 let vz=mix(u.range.x,u.range.y,f32(key>>16u)/65534.0);
 let projected=(u.projection[2].z*vz+u.projection[3].z)/(u.projection[2].w*vz+u.projection[3].w);
 let sampleDepth=select(0.0,clamp(projected,0.0,1.0),hit);
+let shaded=select(color,vec3f(linearDepth(sampleDepth)),u.cycle.w>0.5 && u.range.w>0.5);
+let sampleColor=select(vec4f(0.0),vec4f(shaded,1.0),hit);
 hiz[i]=select(1e30,vz+(u.range.y-u.range.x)/65534.0,hit);
 let n=u32(u.output.z);
 let gen=u32(u.state.x);
+${
+    sceneDepth
+        ? wgsl`
+for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
+let p=id.xy*n+vec2u(x,y);
+if(all(p<vec2u(u.output.xy))) {
+let o=p.y*u32(u.output.x)+p.x;
+let opaque=textureLoad(sceneDepth,vec2i(p),0);
+if(previousSceneDepth[o]!=opaque) { counts[o]=gen<<16u; accum[o]=vec4f(0.0); depth[o]=0.0; }
+previousSceneDepth[o]=opaque;
+}
+} }
+`
+        : wgsl``
+}
 if(u.state.z>0.5 && u.state.z<1.5) {
 for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
 let pixel=id.xy*n+vec2u(x,y);
 if(all(pixel<vec2u(u.output.xy))) {
 let o=pixel.y*u32(u.output.x)+pixel.x;
-accum[o]=sampleColor; depth[o]=sampleDepth; counts[o]=(gen<<16u)|1u;
+let value=visible(sampleColor,sampleDepth,pixel);
+accum[o]=value; depth[o]=select(0.0,sampleDepth,value.a>0.0); counts[o]=(gen<<16u)|1u;
+${sceneDepth ? wgsl`previousSceneDepth[o]=textureLoad(sceneDepth,vec2i(pixel),0);` : wgsl``}
 }
 } }
 return;
 }
 let pixel=id.xy*n+vec2u(u.cycle.xy);
-if(u.state.z>1.5) {
+if(u.state.z>1.5 && u.state.z<2.5) {
 for(var y=0u;y<n;y++) { for(var x=0u;x<n;x++) {
 let p=id.xy*n+vec2u(x,y);
 if(all(p<vec2u(u.output.xy)) && any(p!=pixel)) {
 let o=p.y*u32(u.output.x)+p.x;
-if(counts[o]==(gen<<16u)) { accum[o]=sampleColor; depth[o]=sampleDepth; }
+if(counts[o]==(gen<<16u)) {
+let value=visible(sampleColor,sampleDepth,p);
+accum[o]=value; depth[o]=select(0.0,sampleDepth,value.a>0.0);
+}
 }
 } }
 }
 if(any(pixel>=vec2u(u.output.xy))) { return; }
 let o=pixel.y*u32(u.output.x)+pixel.x;
 let previous=counts[o];
-let count=min(select(0u,previous&65535u,(previous>>16u)==gen),u32(u.state.y));
+var count=min(select(0u,previous&65535u,(previous>>16u)==gen),u32(u.state.y));
+${
+    sceneDepth
+        ? wgsl`
+if(u.state.z>2.5 && (previous>>16u)==gen && (previous&65535u)>u32(u.state.y)) { return; }
+`
+        : wgsl``
+}
+let value=visible(sampleColor,sampleDepth,pixel);
 let weight=1.0/f32(count+1u);
-accum[o]=mix(accum[o],sampleColor,weight);
+accum[o]=mix(accum[o],value,weight);
 counts[o]=(gen<<16u)|min(count+1u,65535u);
-if(hit || count==0u) { depth[o]=sampleDepth; }
+if(value.a>0.0 || count==0u) { depth[o]=select(0.0,sampleDepth,value.a>0.0); }
 }
 `;
+}
+
+export const GPS_RESOLVE = /* @__PURE__ */ gpsResolveShader();
 
 export const GPS_HIZ = wgsl`
 struct Level { source:vec4u, destination:vec4u }
@@ -470,9 +535,6 @@ let xy=vec2f(f32((i<<1u)&2u),f32(i&2u));
 return Vertex(vec4f(xy*2.0-1.0,0.0,1.0),vec2f(xy.x,1.0-xy.y));
 }
 struct Fragment { @location(0) color:vec4f, @builtin(frag_depth) depth:f32 }
-fn viewDepth(z:f32)->f32 {
-return (u.projection[3].z-z*u.projection[3].w)/(z*u.projection[2].w-u.projection[2].z);
-}
 @fragment fn fs(v:Vertex)->Fragment {
 let pixel=vec2u(clamp(v.uv,vec2f(0.0),vec2f(0.999999))*u.output.xy);
 let i=pixel.y*u32(u.output.x)+pixel.x;
@@ -481,11 +543,8 @@ if(sampleColor.a<0.0015) { discard; }
 let z=depth[i];
 var result=sampleColor;
 if(u.cycle.w>0.5 && u.range.w>0.5) {
-let vz=viewDepth(z);
-let near=viewDepth(1.0); let far=viewDepth(0.0);
-let linear=clamp((vz-near)/(far-near),0.0,1.0);
 let coverage=select(sampleColor.a,1.0,u.range.w<1.5);
-result=vec4f(vec3f(linear*coverage),coverage);
+result=vec4f(sampleColor.rgb*(coverage/sampleColor.a),coverage);
 }
 return Fragment(result,z);
 }

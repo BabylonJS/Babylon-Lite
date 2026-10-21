@@ -29,7 +29,8 @@ and `disableGaussianPointSplatting(scene, handle)`. The target is a
 - `occlusionCulling: boolean` (default `false`).
 - `maxAccumFrames: number` (default `255`, integer 1–65535). Per-pixel samples
   after which accumulation converges and point compute stops; the composite
-  keeps presenting the converged image. Changing it never discards samples:
+  keeps presenting the converged image. Mixed opaque scenes keep monitoring
+  visibility without advancing progress or readbacks. Changing it never discards samples:
   raising it resumes refinement, lowering it stops sooner.
 - `temporalReprojection: boolean` (default `false`, experimental, Lite-only).
   World/view/projection changes remap the accumulation into the new view
@@ -57,6 +58,14 @@ Read-only progress shows accumulated samples against the limit (`X / max`) and
 pixel-cycle length. An always-visible
 FPS/frame-time counter averages the existing frame hook's deltas over at least
 500 ms. HUD teardown disables the handle before stream/scene disposal.
+The demo bounds its canvas backing-store area by the engine's guaranteed buffer
+limits divided by 16 bytes per full-resolution accumulation pixel. A
+layout/DPR observer updates `maxDevicePixelRatio` and resizes the surface outside
+the render callback, including after CSS resize, browser zoom, and display changes.
+This cap is independent of the point render-scale divisor and also bounds the
+optional reprojection history buffers. Failed activation clears the checkbox,
+hides point controls, and displays a status message without stopping the classic
+renderer or invoking the startup-failure overlay.
 
 ## Internal Architecture
 
@@ -66,8 +75,8 @@ renderables produced by deferred registration. It excludes point renderables.
 For static targets, transparent renderables with order 200 are candidates.
 For streams, the existing `stream._renderable` identifies the candidate directly.
 
-Each candidate's `bind` is wrapped without changing its update functions, batch
-list, pipeline, or binding receiver. Its `draw` receives a forwarding Proxy,
+Each candidate's `bind` is wrapped without changing its batch list, pipeline,
+or binding receiver. Its `draw` receives a forwarding Proxy,
 cached per render-pass or render-bundle encoder. All native encoder methods are
 called with the real encoder as `this`.
 
@@ -78,8 +87,25 @@ attach the same base classic pipeline directly. Thus neither path needs a mesh
 backlink. Discovery runs even with color rendering off. Once a target is known,
 only `draw`, `drawIndexed`, `drawIndirect`, and `drawIndexedIndirect` are
 swallowed while its `colorRenderMode` is enabled. All binding-side notifications
-and stream gather/update work still execute. Suppressed bindings report zero
-draw calls.
+and stream selection/canonical-gather work still execute. After the stream's
+bootstrap draw notification, its shared batch's `queue` wrapper substitutes the
+last completed projection key while point color is active. The existing batch
+therefore gathers changed canonical records without repeating classic projection,
+compaction, or radix sorting. Bootstrap projection/readback and draw notification
+run normally; switching color mode off queues the real key again, so changed
+content or view is sorted before the classic draw.
+
+For static meshes, classic updates run through first-sort completion, preserving
+`firstSortReady`, then pause while point color is active. This avoids worker sorts
+and sorted-order uploads. On classic reactivation, pending orders are recycled
+without uploading and the existing two-buffer worker pool drains. The next
+classic update forces a fresh sort; classic draws remain gated until that result
+is uploaded. Subsequent camera motion uses the normal asynchronous classic sort
+policy, so continued motion cannot indefinitely delay reactivation. This gate also survives
+feature disposal: restoration of the classic `bind` waits for fresh ordering.
+All of this policy lives in the opt-in suppression module, with no feature
+imports, metadata, or branches added to classic loaders or mesh pipelines.
+Suppressed bindings report zero draw calls.
 
 An observed draw without a matching buffer identifies a non-target candidate.
 Its original `bind` is restored, its cached wrapper becomes a forwarding
@@ -92,9 +118,12 @@ scan hook when the last handle is removed.
 
 The feature owns compute pipelines for preprocessing, block/sum prefix scans,
 scan addition, partitioning, stochastic sampling, resolve, and optional Hi-Z.
+Compute and composite variants are retained in a lazily initialized
+`WeakMap<GPUDevice, DeviceCache>` so alternating engines reuse their own pipelines
+after warm-up without retaining unused devices or allocating caches at import time.
 The composite is a fullscreen triangle with premultiplied-alpha blending,
-the target's depth compare (default reverse-Z `greater-equal`), optional depth
-writes, and the target's multisample count. Color writes are enabled for color
+unconditional composite depth comparison, optional geometric depth writes,
+and the target's multisample count. Color writes are enabled for color
 mode or for depth mode with an explicit non-`none` depth visualization.
 
 Splat working buffers track active count separately from capacity. They retain
@@ -128,7 +157,26 @@ Depth visualization reconstructs view depth from all four Z/W projection
 coefficients: `(P32 - z * P33) / (z * P23 - P22)`. Evaluating this at the
 stored reverse-Z depth, 1, and 0 gives surface depth, near, and far respectively,
 so linear and alpha-blended grayscale support both perspective and orthographic
-static cameras.
+static cameras. Resolve converts each visualization sample to linear depth before
+averaging, storing premultiplied grayscale in the existing color history; geometric
+depth remains separate for depth writes/reprojection. Alpha-blended mode displays
+that running mean, while linear mode divides by accumulated coverage. Visualization
+camera changes reset history rather than reprojecting depth-dependent grayscale.
+
+When opaque mesh renderables are present in the target render task,
+`gps-scene-depth.ts` renders their actual bindings (including alpha testing and
+animated geometry) into a feature-owned
+single-sample opaque depth prepass before sampling. Resolve compares each sample
+against that depth before averaging, never depth-testing an already mixed average.
+A throwaway color attachment preserves each material's original alpha-test shader;
+mixed opaque/splat scenes pay for these additional opaque draws and attachments.
+A full-resolution previous-depth buffer detects per-pixel occluder changes and
+clears affected histories, including cycle pixels not sampled in the current frame.
+Visibility continues to be checked after convergence; unchanged converged pixels
+remain frozen, while changed pixels resume independently. The sampling seed keeps
+advancing the jitter cycle even though converged frame progress remains frozen.
+Splat-only scenes retain
+their original converged dispatch skip and allocate no opaque depth resources.
 
 ## State Machine / Lifecycle
 
@@ -233,7 +281,7 @@ its first real sample with weight one. A new reprojection restarts the fill
 window; hard resets clear it. No extra mask buffer is allocated.
 
 History buffers are owned by the pixel-buffer target and retired with it;
-the lazily initialized pipeline cache is invalidated when the device changes.
+the lazily initialized reprojection pipeline cache is keyed weakly by device.
 
 Known limitations: one depth per pixel misplaces semi-transparent
 edges, view-dependent SH color is reused until refreshed, repeated bilinear
@@ -255,6 +303,18 @@ canonical buffers/batches, and the local state/shader modules. No general-purpos
 module imports this feature.
 
 ## Test Specification
+
+`tests/lite/unit/gaussian-point-splatting-device-cache.test.ts` alternates two
+devices after convergence and asserts that compute/render pipelines, shader
+modules, and composite bind groups stop being created after warm-up. The same
+test retains all three reprojection pipelines per device. A low-tier device
+granting exactly 64,640,000 bytes per buffer/binding exercises the actual
+accumulation/history allocation paths after a 2560×1600 high-DPI target is
+bounded, then repeats after CSS resize and DPR changes. Observer disposal is
+verified separately from GPU resource retirement.
+`tests/lite/unit/trogir-point-sampling-activation.test.ts` exercises both
+`?points=1` and interactive activation failures, verifies continued classic
+streaming and visible status, and confirms that retry succeeds.
 
 `tests/lite/unit/gaussian-point-splatting.test.ts` covers numeric helpers,
 option validation/invalidation, pre/post-registration discovery, unrelated
@@ -289,7 +349,14 @@ readbacks. It verifies rejection against stale Hi-Z versus an unculled refresh,
 per-frame HDR maxima that can increase or decrease, quarter-coverage radiance
 accumulation (including radiance 2 producing 0.5), static base/SH shader compilation,
 and both depth visualization modes at near/middle/far depths for perspective and
-orthographic cameras with near/far planes 1/11.
+orthographic cameras with near/far planes 1/11. Alternating foreground/background
+samples verify per-sample opaque rejection and mean linear-depth visualization;
+occluder removal and arrival reset converged history. A real opaque render binding
+also exercises the depth-prepass pipeline, scene uniforms, attachments, and texture
+sampling on WebGPU. `gaussian-point-scene-depth.test.ts` covers opaque selection,
+render-task filtering, update-batch ordering, viewport cropping, resize retirement,
+and hidden geometry. The two GPU readback specs run in the dedicated nonvisual
+BrowserStack WebGPU CI job without screenshots, video, or trace artifacts.
 
 ## File Manifest
 
@@ -297,5 +364,6 @@ orthographic cameras with near/far planes 1/11.
 - `gps-suppression.ts`: opt-in classic-draw discovery and suppression.
 - `gps-state.ts`: state types, validation, invalidation, numeric helpers.
 - `gps-runtime.ts`: GPU resources, compute batches, composite material.
+- `gps-scene-depth.ts`: feature-owned opaque visibility prepass.
 - `gps-reproject.ts`: lazy experimental depth scatter and bilinear pull gather.
 - `gps-shaders.ts`: compute and composite WGSL.
