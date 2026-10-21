@@ -24,7 +24,6 @@ interface FlowGraphDataConnection<T> {
     getValue(context: unknown): T;
     connectTo(point: FlowGraphDataConnection<T>): void;
     getClassName(): string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Exact Babylon.js public serialization hook shape.
     serialize(serializationObject?: any): void;
 }
 

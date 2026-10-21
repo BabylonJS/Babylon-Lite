@@ -11,7 +11,7 @@ import {
     RemoveFlowGraphAnimationGroupObservers,
     defaultValueParseFunction,
 } from "../src/index";
-import type { AnimationGroup, Camera, Material, Node } from "../src/index";
+import type { AnimationGroup, AssetContainer, Camera, FlowGraphContext, Material, Node } from "../src/index";
 import { LiteCompatError } from "../src/error";
 import type { IGLTFToFlowGraphMapping } from "../src/loading/unsupported-khr-interactivity";
 
@@ -59,8 +59,8 @@ describe("upstream export coverage", () => {
         expect(FlowGraphValidationSeverity.Warning).toBe(1);
         expect(() => ValidateFlowGraph({})).toThrow(LiteCompatError);
         expect(() => ValidateFlowGraph({})).toThrow(/ValidateFlowGraph/);
-        expect(() => RemoveFlowGraphAnimationGroupObservers({}, {} as AnimationGroup)).toThrow(/FlowGraph blocks/);
-        expect(() => defaultValueParseFunction("value", {}, {}, {} as never)).toThrow(/FlowGraph blocks/);
+        expect(() => RemoveFlowGraphAnimationGroupObservers({} as FlowGraphContext, {} as AnimationGroup)).toThrow(/FlowGraph blocks/);
+        expect(() => defaultValueParseFunction("value", {}, {} as AssetContainer, {} as never)).toThrow(/FlowGraph blocks/);
     });
 
     it("exposes KHR_interactivity canonical-model and block symbols", () => {

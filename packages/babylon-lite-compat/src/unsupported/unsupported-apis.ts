@@ -89,7 +89,6 @@ export interface FlowGraphContext {
 export interface Observer<T> {
     callback: (eventData: T, eventState: unknown) => void;
     mask: number;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Exact Babylon.js public observer scope.
     scope: any;
     unregisterOnNextCall: boolean;
     remove(defer?: boolean): void;
@@ -98,9 +97,7 @@ export interface Observer<T> {
 export interface IFlowGraphAnimationObserverSet {
     block: FlowGraphPlayAnimationBlock;
     groupEnd: Observer<AnimationGroup>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Exact Babylon.js public observer payload.
     animationEnd: Observer<any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Exact Babylon.js public observer payload.
     animationLoop: Observer<any>;
     groupLoop: Observer<AnimationGroup>;
 }
@@ -109,7 +106,6 @@ export function RemoveFlowGraphAnimationGroupObservers(_context: FlowGraphContex
     return unsupported("RemoveFlowGraphAnimationGroupObservers", FLOW_GRAPH_UNSUPPORTED);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Exact Babylon.js serialization hook shape.
 export function defaultValueParseFunction(_key: string, _serializationObject: any, _assetsContainer: AssetContainer, _scene: Scene): any {
     return unsupported("defaultValueParseFunction", FLOW_GRAPH_UNSUPPORTED);
 }
