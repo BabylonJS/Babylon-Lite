@@ -355,10 +355,10 @@ result.rgb = source.rgb * mix(vec3f(1), tint, amount);
 ### Ambient-occlusion producer
 
 1. Map the effect pixel to an integer scene-depth coordinate and load its depth. Cleared depth returns zero occlusion.
-2. Reconstruct world position at that depth texel's center UV (not the unsnapped effect UV) and the closest-neighbour world normal; transform both into view space and orient the normal toward the camera.
+2. Reconstruct world position at that depth texel's center UV (not the unsnapped effect UV) and transform it into view space. Compute `fade = 1 - smoothstep(fadeStart, fadeEnd, abs(viewPos.z))` immediately; if zero, return zero before reconstructing the normal or marching. Otherwise reconstruct the closest-neighbour world normal and transform it into view space. Orient it toward the viewer using the vector between unprojected reverse-Z depths `0.5` and `1` at the same depth UV, transformed as a direction into view space. This ray points toward the perspective eye or along the parallel orthographic viewing direction, including off-center orthographic volumes; the depths avoid unprojecting an infinite far plane.
 3. Unproject offsets of one depth texel from the snapped receiver UV at the receiver depth to convert the world-space radius into a screen-space march radius.
 4. Convert the radius to a UV vector using independent horizontal/vertical world-units-per-UV scales. For each rotated and step-jittered slice and both directions, reconstruct each loaded sample at its own depth texel's center UV. Retain the largest normalized positive normal/sample cosine above `bias`, attenuated by `1 - (distance / radius)^2`; average those directional occlusion estimates. Snapping both receiver and sample positions keeps a sloping plane coplanar at reduced effect resolutions instead of generating false horizons.
-5. Shape the average occlusion with `pow(averageOcclusion, power)` and fade it by view distance.
+5. Shape the average occlusion with `pow(averageOcclusion, power)` and multiply by the previously computed fade, preserving the smooth transition interval.
 6. Apply horizontal and vertical depth-aware bilateral blur, then temporal reprojection, rejection, and neighborhood clamp.
 
 The multiply composite is:
@@ -460,6 +460,8 @@ Camera-only reprojection cannot preserve history for independently moving object
 - Ambient-occlusion defaults, depth-only requirements, target alias rejection, disabled identity, depth-binding replacement, target resizing, and default multiply composition are covered by unit/mock lifecycle tests.
 - AO rejects non-fullscreen camera viewports at creation, record, and execute, including later in-place mutations and disabled execution.
 - A numerical sloping-plane regression checks nearest-depth texel-center reconstruction at quarter, half, and full resolution; paired shader-contract assertions tie both receiver and march reconstruction to those coordinates.
+- Numerical projection-ray regressions cover perspective and off-center orthographic normal orientation, a sloped receiver, and foreground occlusion. Shader contracts bind the orientation to the unprojected ray, not the camera-origin vector.
+- Fade contracts require the zero-fade exit before normal reconstruction and horizon sampling, while retaining the smoothstep multiplier for the transition interval.
 - AO WGSL assertions check source contracts only; aspect-ratio consistency, jitter quality, silhouette halos, blur quality, and moving-object trails require WebGPU rendering.
 
 ### Demo validation

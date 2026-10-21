@@ -14,7 +14,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
-import { getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
+import { getProjectionMatrix, getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
+import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { invertMat4 } from "../../../packages/babylon-lite/src/math/invert-mat4";
@@ -324,6 +325,66 @@ describe("ambient-occlusion nearest-depth reconstruction on a sloping plane", ()
     });
 });
 
+describe("ambient-occlusion projection-ray normal orientation", () => {
+    const dot = (a: readonly number[], b: readonly number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+    const subtract = (a: readonly number[], b: readonly number[]): [number, number, number] => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!];
+
+    it("keeps an off-center orthographic sloped receiver facing parallel rays and accepting foreground occlusion", () => {
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        camera.nearPlane = 0.1;
+        camera.farPlane = 20;
+        enableOrthographicCamera(camera, { left: 8, right: 12, bottom: -2, top: 2 });
+        const projection = getProjectionMatrix(camera, 1);
+        const inverse = invertMat4(projection)!;
+        const receiver: [number, number, number] = [10, 0, 1];
+        const uv = projectWorld(projection, receiver);
+        expect(uv[0]).toBeCloseTo(0.5, 5);
+        expect(uv[1]).toBeCloseTo(0.5, 5);
+        const near = reconstructWorld(inverse, [uv[0], uv[1], 1]);
+        const far = reconstructWorld(inverse, [uv[0], uv[1], 0.5]);
+        const towardViewer = normalize(subtract(near, far));
+        expect(towardViewer[0]).toBeCloseTo(0, 5);
+        expect(towardViewer[1]).toBeCloseTo(0, 5);
+        expect(towardViewer[2]).toBeCloseTo(-1, 5);
+
+        // Screen-right/down derivatives on z = x - 9.
+        const normal = normalize(cross([0.1, 0, 0.1], [0, -0.1, 0]));
+        expect(
+            dot(
+                normal,
+                receiver.map((value) => -value)
+            )
+        ).toBeLessThan(0);
+        expect(dot(normal, towardViewer)).toBeGreaterThan(0);
+        const foreground = projectWorld(projection, [10.1, 0, 0.9]);
+        const sample = reconstructWorld(inverse, foreground);
+        const delta = normalize(subtract(sample, receiver));
+        for (const sign of [-1, 1]) {
+            const input = normal.map((value) => value * sign);
+            const oriented = input.map((value) => (dot(input, towardViewer) < 0 ? -value : value));
+            expect(dot(oriented, delta)).toBeCloseTo(1, 5);
+            expect(Math.abs(dot(oriented, normalize([0.1, 0, 0.1])))).toBeLessThan(1e-5);
+        }
+        const oldOrientation = normal.map((value) => -value);
+        expect(dot(oldOrientation, delta)).toBeLessThan(-0.99);
+    });
+
+    it.each([
+        [0.5, 0.5],
+        [0.1, 0.8],
+        [0.9, 0.2],
+    ])("preserves the perspective viewing direction at UV (%s, %s)", (u, v) => {
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const inverse = invertMat4(getProjectionMatrix(camera, 16 / 9))!;
+        const near = reconstructWorld(inverse, [u, v, 1]);
+        const far = reconstructWorld(inverse, [u, v, 0.5]);
+        const receiver = reconstructWorld(inverse, [u, v, 0.1]);
+        const towardViewer = normalize(subtract(near, far));
+        const towardOrigin = normalize([-receiver[0], -receiver[1], -receiver[2]]);
+        expect(dot(towardViewer, towardOrigin)).toBeCloseTo(1, 5);
+    });
+});
+
 describe("clampScreenSpaceContactShadowsConfig", () => {
     it("applies documented defaults", () => {
         const clamped = clampScreenSpaceContactShadowsConfig({} as never);
@@ -579,6 +640,27 @@ describe("screen-space-ambient-occlusion producer and blur WGSL", () => {
         expect(producer).toContain("let sampleCoord=ssUvToCoord(sampleUv,ssAo.depthDims);");
         expect(producer).toContain("let sampleDepth=textureLoad(ssAoDepth,sampleCoord,0);");
         expect(producer).toContain("let sampleWorld=ssWorldFromDepth(ssTexelUv(sampleCoord,ssAo.depthDims),sampleDepth,ssAo.invViewProj);");
+    });
+
+    it("orients the normal with an unprojected viewing ray for both projection kinds", () => {
+        expect(producer).toContain("let rayNear=ssWorldFromDepth(depthUv,1.0,ssAo.invViewProj);");
+        expect(producer).toContain("let rayFar=ssWorldFromDepth(depthUv,0.5,ssAo.invViewProj);");
+        expect(producer).toContain("let towardViewer=(ssAo.view*vec4f(rayNear-rayFar,0.0)).xyz;");
+        expect(producer).toContain("if(dot(normal,towardViewer)<0.0){normal=-normal;}");
+        expect(producer).not.toContain("dot(normal,-viewPos)");
+    });
+
+    it("returns fully faded receivers before normal reconstruction and marching while preserving the transition fade", () => {
+        const fragment = producer.slice(producer.indexOf("@fragment fn ssAoFragment"));
+        const fade = fragment.indexOf("let fade=1.0-smoothstep(ssAo.fadeStart,ssAo.fadeEnd,abs(viewPos.z));");
+        const earlyReturn = fragment.indexOf("if(fade<=0.0){return vec4f(0.0);}");
+        expect(fade).toBeGreaterThan(fragment.indexOf("let viewPos="));
+        expect(earlyReturn).toBeGreaterThan(fade);
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("let rayNear="));
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("ssNormalFromDepth("));
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("for(var slice"));
+        expect(fragment).toContain("return vec4f(shaped*fade,0.0,0.0,0.0);");
+        expect(fragment.match(/let fade=/g)).toHaveLength(1);
     });
 
     it("uses depth-aware separable taps and writes scalar occlusion", () => {

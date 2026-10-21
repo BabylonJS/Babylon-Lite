@@ -146,8 +146,13 @@ const AO_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssAoFragment(v:SsAoVOut)->@l
   let depthUv=ssTexelUv(depthCoord,ssAo.depthDims);
   let worldPos=ssWorldFromDepth(depthUv,depth,ssAo.invViewProj);
   let viewPos=(ssAo.view*vec4f(worldPos,1.0)).xyz;
+  let fade=1.0-smoothstep(ssAo.fadeStart,ssAo.fadeEnd,abs(viewPos.z));
+  if(fade<=0.0){return vec4f(0.0);}
+  let rayNear=ssWorldFromDepth(depthUv,1.0,ssAo.invViewProj);
+  let rayFar=ssWorldFromDepth(depthUv,0.5,ssAo.invViewProj);
+  let towardViewer=(ssAo.view*vec4f(rayNear-rayFar,0.0)).xyz;
   var normal=normalize((ssAo.view*vec4f(ssNormalFromDepth(depthUv,ssAo.depthDims,ssAo.invViewProj,ssAoDepth),0.0)).xyz);
-  if(dot(normal,-viewPos)<0.0){normal=-normal;}
+  if(dot(normal,towardViewer)<0.0){normal=-normal;}
 
   let adjacentX=ssWorldFromDepth(depthUv+vec2f(1.0/ssAo.depthDims.x,0.0),depth,ssAo.invViewProj);
   let adjacentY=ssWorldFromDepth(depthUv+vec2f(0.0,1.0/ssAo.depthDims.y),depth,ssAo.invViewProj);
@@ -189,7 +194,6 @@ const AO_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssAoFragment(v:SsAoVOut)->@l
 
   let averageOcclusion=clamp(occlusion/f32(sliceCount*2u),0.0,1.0);
   let shaped=pow(averageOcclusion,ssAo.power);
-  let fade=1.0-smoothstep(ssAo.fadeStart,ssAo.fadeEnd,abs(viewPos.z));
   return vec4f(shaped*fade,0.0,0.0,0.0);
 }`;
 
