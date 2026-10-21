@@ -436,6 +436,21 @@ describe("Quaternion", () => {
 });
 
 describe("Scalar / constants", () => {
+    it.each([
+        [10, 20, 5, 0],
+        [10, 20, 25, 1],
+        [20, 10, 5, 1],
+        [20, 10, 25, 0],
+        [10, 20, 15, 0.5],
+        [20, 10, 15, 0.5],
+        [10, 20, 10, 0],
+        [10, 20, 20, 1],
+        [10, 10, 15, 0],
+        [10, 10, 10, 0],
+    ])("InverseLerp(%s, %s, %s) returns the bounded parameter %s", (a, b, value, expected) => {
+        expect(Scalar.InverseLerp(a, b, value)).toBe(expected);
+    });
+
     it("clamps and lerps", () => {
         expect(Scalar.Clamp(5, 0, 1)).toBe(1);
         expect(Scalar.Lerp(0, 10, 0.5)).toBe(5);
