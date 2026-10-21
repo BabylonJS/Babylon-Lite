@@ -17,13 +17,13 @@ No PR was opened.
 - [x] Push the doc to `docs/gltf-exporter-architecture`.
 - [~] Pre-implementation doc review by independent agents. Three reviewers started; all three hit the session usage limit before reporting. Rather than restart them, review moved to the implementation: every module was checked against the Lite source while writing it, and two post-implementation reviewers ran on the code (below).
 - [x] Implement the module end to end (`packages/babylon-lite/src/export-gltf/`, 32 files) plus the root re-export in `index.ts`.
-- [x] Unit tests: 382 Vitest tests in `tests/lite/unit/export-gltf/` (harness with a fake WebGPU device that supports both readback paths).
+- [x] Unit tests: 451 Vitest tests in `tests/lite/unit/export-gltf/` (harness with a fake WebGPU device that supports both readback paths).
 - [x] Plumbing round trips: `lab/lite/export-gltf-test.{html,ts}` + `tests/lite/plumbing/export-gltf.spec.ts`. Run locally against headless Chromium with SwiftShader WebGPU: 10 local assets + a native scene, all fixed points after one export. A wider scratch run (LittlestTokyo, bunny_rigged, Animation_SkinType_01, XmpMetadataRoundedCube, rock, rhs-x, nav_test, babylonBurster, bath_day) also passed. FlightHelmetKTX could not run here (the KTX2 decoder is fetched from a CDN the sandbox blocks).
 - [x] glTF-Validator (run locally, not a repo dependency) over every exported file: 0 errors. Remaining warnings are `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` only, for meshes whose tangents were not retained (out of scope) or never existed in the source.
 - [x] Lint, typecheck, `no-webgpu` import test.
-- [ ] Post-implementation code review by independent agents; fix findings.
+- [x] Post-implementation code review by two independent agents (renderer-semantics fidelity; glTF conformance and robustness). Fixed: 17 behaviours (see the commit `fix(export-gltf): address code-review findings`); the rest are listed under Follow-ups with the reason.
 - [ ] Sync the doc with the code (the doc stays the one-shot spec).
-- [ ] Bundle isolation check (filtered scene build).
+- [x] Bundle isolation: filtered builds of scene1, scene7, scene260 and scene269 contain no exporter code. The byte measurement step could not run here (its browser needs remote assets the sandbox blocks), so CI's bundle-size check is still the authority.
 
 ## Follow-ups (would have been issues in the todo repo)
 
