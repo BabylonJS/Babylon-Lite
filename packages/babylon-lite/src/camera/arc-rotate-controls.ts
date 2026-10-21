@@ -462,15 +462,20 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
             const cosA = Math.cos(camera.alpha);
             const sinA = Math.sin(camera.alpha);
-            const rightX = -sinA;
-            const rightZ = cosA;
             const panScale = camera.radius * 0.001;
+            const panX = camera.inertialPanningX * panScale;
+            const panY = camera.inertialPanningY * panScale;
+            const panYAcross = Math.cos(camera.beta) * panY;
 
+            // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector (-sinα, 0, cosα), Y
+            // along its up vector (-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
+            // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
+            // target never moves towards or away from the eye.
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.
-            camera.target.x += rightX * camera.inertialPanningX * panScale;
-            camera.target.y += camera.inertialPanningY * panScale;
-            camera.target.z += rightZ * camera.inertialPanningX * panScale;
+            camera.target.x -= sinA * panX + cosA * panYAcross;
+            camera.target.y += Math.sin(camera.beta) * panY;
+            camera.target.z += cosA * panX - sinA * panYAcross;
 
             camera.inertialPanningX *= camera.panningInertia;
             camera.inertialPanningY *= camera.panningInertia;
