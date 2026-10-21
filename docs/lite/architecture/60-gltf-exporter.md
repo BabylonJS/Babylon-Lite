@@ -21,7 +21,7 @@ The module handles four concerns:
 
 ### Scope
 
-The module is a leaf. It reads existing scene, engine and loader state, and changes no code outside `packages/babylon-lite/src/export-gltf/` except the one root re-export of `exportSceneAsGlb` in `index.ts`. Capabilities that would need a change anywhere else are **out of scope** and listed below, with what the exporter does instead. The design decisions behind them are deferred. The module's own tests, parity scenes and documentation are part of the module and do not count as outside changes.
+The module is a leaf. It reads existing scene, engine and loader state, and changes no code outside `packages/babylon-lite/src/export-gltf/` except the one root re-export of `exportSceneAsGlb` in `index.ts`. Capabilities that would need a change anywhere else are **out of scope** and listed below, with what the exporter does instead. The design decisions behind them are deferred. The module's own tests, lab page and documentation are part of the module and do not count as outside changes.
 
 **Out of scope: needs a change outside `export-gltf/`**
 
@@ -1249,12 +1249,10 @@ Found while checking exporter output against what Lite renders. They are rendere
 
 ## Test Specification
 
-Four layers, mapped onto TESTING.md's categories:
+Two layers, mapped onto TESTING.md's categories:
 
-- Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`). Implemented.
-- Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts` with the lab page `lab/lite/export-gltf-test.html`). Implemented.
-- A glTF-Validator gate that this module introduces. Planned; the validator is not yet a repo dev dependency.
-- A visual parity suite adapted from the Babylon.js serializer's visualization tests. Planned; no parity scene exists yet.
+- Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`).
+- Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts` with the lab page `lab/lite/export-gltf-test.html`).
 
 Because Lite entities are plain data, unit-test stubs are object literals; no engine or real GPU is required.
 
@@ -1288,24 +1286,24 @@ Tests assert on parsed GLB output, warning texts and counters of the fake device
 
 ### Loader-convention invariants
 
-These exporter rules each invert a specific loader convention. Each pair is kept honest by the listed tests (unit files under `tests/lite/unit/export-gltf/`; E-numbers are the planned parity scenes):
+These exporter rules each invert a specific loader convention. Each pair is kept honest by the listed tests (unit files under `tests/lite/unit/export-gltf/`):
 
-| Invariant (loader convention ↔ exporter rule)                                                                                                           | Enforcing tests                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `uAng` stores glTF `rotation` verbatim ↔ re-emitted unchanged                                                                                           | `materials-pbr.test.ts` (texture transforms) · E-15                                                    |
-| native generators wind against their normals and glTF data with them, recorded by `_authoredSign` ↔ the winding table                                   | `handedness.test.ts` (`needsWindingFlip`) · `geometry.test.ts` (winding) · plumbing native scene · E-1 |
-| `angle` stores the full cone ↔ `outerConeAngle = angle / 2`                                                                                             | `cameras-lights-animations.test.ts` (lights) · E-9                                                     |
-| 1×1 bakes: base color `rgba8unorm-srgb`, ORM `[255, rough, metal, 255]` ↔ factor folds                                                                  | `materials-pbr.test.ts` (base color, metallic-roughness) · E-17                                        |
-| ORM packing R=occlusion / G=roughness / B=metallic ↔ `ormTexture` re-emitted as `metallicRoughnessTexture`                                              | `materials-pbr.test.ts` (metallic-roughness and occlusion) · E-17                                      |
-| sheen roughness packed in the color texture's alpha ↔ `sheenRoughnessTexture` re-references `texture`                                                   | `material-writers.test.ts` (sheen) · E-20                                                              |
-| loader conversion root `(−1,1,1)` ↔ root stripping + pass-through state                                                                                 | `nodes.test.ts` (root collection) · plumbing asset round trips · E-1                                   |
-| camera fixup `(−a, a, a)`, 180° yaw camera-local ↔ pristine fixup collapse                                                                              | `cameras-lights-animations.test.ts` (fixup nodes) · E-10                                               |
-| clip constants (`PATH_*` 0–4, `INTERP_*` 0–2) ↔ the clip-contract tables                                                                                | `cameras-lights-animations.test.ts` (animations) · E-3 / E-4                                           |
-| Standard `perturbNormal` scales N by `1 / bumpLevel` before renormalizing ↔ `normalTexture.scale = bumpLevel`                                           | `materials-standard.test.ts` (texture slots) · E-24                                                    |
-| Standard `perturbNormal` frame `(−T₀, −B₀)` vs the PBR cotangent frame `(T₀, −B₀)` ↔ red (and, when flipped, green) inversion                           | `materials-standard.test.ts` (bump inversion) · E-24                                                   |
-| the loader uploads glTF images unflipped ↔ PBR slots read back in storage row order                                                                     | `images.test.ts` (readback paths) · E-16 · E-17                                                        |
-| no-`NORMAL` primitives flagged `_flatNormal` ↔ `NORMAL` omitted                                                                                         | `geometry.test.ts` (attributes) · E-14                                                                 |
-| Standard flips UV0 slots by the material-wide orientation (shared path) or per texture (per-texture path), PBR does not ↔ per-slot row order and offset | `materials-standard.test.ts` (UV mapping, both paths) · E-13 · E-24                                    |
+| Invariant (loader convention ↔ exporter rule)                                                                                                           | Enforcing tests                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `uAng` stores glTF `rotation` verbatim ↔ re-emitted unchanged                                                                                           | `materials-pbr.test.ts` (texture transforms)                                                     |
+| native generators wind against their normals and glTF data with them, recorded by `_authoredSign` ↔ the winding table                                   | `handedness.test.ts` (`needsWindingFlip`) · `geometry.test.ts` (winding) · plumbing native scene |
+| `angle` stores the full cone ↔ `outerConeAngle = angle / 2`                                                                                             | `cameras-lights-animations.test.ts` (lights)                                                     |
+| 1×1 bakes: base color `rgba8unorm-srgb`, ORM `[255, rough, metal, 255]` ↔ factor folds                                                                  | `materials-pbr.test.ts` (base color, metallic-roughness)                                         |
+| ORM packing R=occlusion / G=roughness / B=metallic ↔ `ormTexture` re-emitted as `metallicRoughnessTexture`                                              | `materials-pbr.test.ts` (metallic-roughness and occlusion)                                       |
+| sheen roughness packed in the color texture's alpha ↔ `sheenRoughnessTexture` re-references `texture`                                                   | `material-writers.test.ts` (sheen)                                                               |
+| loader conversion root `(−1,1,1)` ↔ root stripping + pass-through state                                                                                 | `nodes.test.ts` (root collection) · plumbing asset round trips                                   |
+| camera fixup `(−a, a, a)`, 180° yaw camera-local ↔ pristine fixup collapse                                                                              | `cameras-lights-animations.test.ts` (fixup nodes)                                                |
+| clip constants (`PATH_*` 0–4, `INTERP_*` 0–2) ↔ the clip-contract tables                                                                                | `cameras-lights-animations.test.ts` (animations)                                                 |
+| Standard `perturbNormal` scales N by `1 / bumpLevel` before renormalizing ↔ `normalTexture.scale = bumpLevel`                                           | `materials-standard.test.ts` (texture slots)                                                     |
+| Standard `perturbNormal` frame `(−T₀, −B₀)` vs the PBR cotangent frame `(T₀, −B₀)` ↔ red (and, when flipped, green) inversion                           | `materials-standard.test.ts` (bump inversion)                                                    |
+| the loader uploads glTF images unflipped ↔ PBR slots read back in storage row order                                                                     | `images.test.ts` (readback paths)                                                                |
+| no-`NORMAL` primitives flagged `_flatNormal` ↔ `NORMAL` omitted                                                                                         | `geometry.test.ts` (attributes)                                                                  |
+| Standard flips UV0 slots by the material-wide orientation (shared path) or per texture (per-texture path), PBR does not ↔ per-slot row order and offset | `materials-standard.test.ts` (UV mapping, both paths)                                            |
 
 ### Plumbing tests — Playwright, `tests/lite/plumbing/export-gltf.spec.ts`
 
@@ -1345,59 +1343,9 @@ The Babylon.js `glTFSerializer.test.ts` suite maps as follows (unit layer unless
 
 The Babylon.js unit suite `test/unit/glTF/glTFMaterialExporter.test.ts` ("NullEngine / cached texture path") covers cached-byte reuse, which is out of scope here; its null-engine cases map onto the null-engine cases in `images.test.ts` and `materials-pbr.test.ts`. Its newer "material properties" block and `glTFExporter.test.ts` / `glTFAnimation.test.ts` / `glTFSkinsAndMorphTargets.test.ts` (master only) cover ground the unit files above already cover.
 
-### Validation gates
+### Round-trip idempotence
 
-Two gates apply to every plumbing and parity output:
-
-- **glTF-Validator** (`gltf-validator`). **Planned.** The validator is not yet a repo dev dependency; adding it (a root dev dependency) is the first follow-up. Target: zero errors. `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE` warnings are expected and allowed for meshes whose tangents are not exported or never existed (the exporter does not generate tangents). Information messages are allowed, for example `UNUSED_OBJECT` (a synthesized `TEXCOORD_0`), `NODE_EMPTY`, `GLB_EMPTY_BIN_CHUNK` and `UNSUPPORTED_EXTENSION` for spec-gloss. No other warning is allowed.
-- **Round-trip idempotence** (implemented in the plumbing spec): for glTF assets, `export(load(export(load(asset))))` is byte-identical to `export(load(asset))`, so `first === second === third`; for a native scene only `second === third` holds. The first export drops what is out of scope; after that, the output is a fixed point.
-
-### Visual parity suite — Playwright, `tests/lite/parity/scenes/` (planned)
-
-**Not yet created.** No parity scene, golden or `scene-config.json` entry exists for the exporter. The suite below is the plan. Each scene will follow GUIDANCE §2's new-scene checklist: lab page and script, Vite input, parity spec, golden under `reference/lite/sceneN-<slug>/`, thumbnail, gallery card, bundle-size check, and a `scene-config.json` entry with `id`, `slug`, `name` and `maxMad`. Scene ids are allocated sequentially after the highest existing id when each scene lands; slugs take the form `sceneN-export-<name>`. The E-numbers below are stable labels, not ids.
-
-The export twist: the page builds or loads the source scene, calls `exportSceneAsGlb`, reimports the Blob with `loadGltf`, and renders the **reimported** scene against the golden. `?seekTime=` freezes animated scenes. Goldens follow GUIDANCE §2b/§2c: captured once from the Babylon.js render of the source scene and never regenerated at test time.
-
-Adapted from the Babylon.js `"GLTF Serializer"` entries in `packages/tools/tests/test/visualization/config.json` (playground ids and reference images are kept as provenance):
-
-| E#   | Scene                          | Babylon.js source (playgroundId · reference image)                                                                                    | Adaptation                                                                                                   |
-| ---- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| E-1  | `export-negative-world-matrix` | with Negative World Matrix, 4 variants (LH/RH × once/twice) — `#KX53VK#88` · `glTFSerializerNegativeWorldMatrix.png` (errorRatio 1.1) | natively built and glTF-loaded negative-scale hierarchies; single and double round trip                      |
-| E-2  | `export-shared-buffers`        | Shared Buffer Conversions — `#KX53VK#85` · `glTFSerializerSharedBufferConversions.png`                                                | meshes sharing geometry with mixed conversion needs                                                          |
-| E-3  | `export-skinning-animation`    | Skinning and Animation (+RH) — `#DMZBX1#1/2` · `gltfSerializerSkinningAndAnimation.png`                                               | deferred until skins are in scope                                                                            |
-| E-4  | `export-morph-animation`       | Morph Target Animation — `#84M2SR#107` · `gltfSerializerMorphTargetAnimation.png`                                                     | morphed mesh, weights channel                                                                                |
-| E-5  | `export-morph-animation-group` | Morph Target Animation Group — `#T087A8#29` · `gltfSerializerMorphTargetAnimationGroup.png`                                           | group-driven weights, non-zero rest weights                                                                  |
-| E-6  | `export-draco-source`          | KHR draco mesh compression — `#F8BF8N#3` · `glTFSerializerKhrDracoMeshCompression.png`                                                | Draco source asset: decoded at load, exported as plain accessors                                             |
-| E-7  | `export-clearcoat`             | KHR materials clearcoat — `#9N6CLU#23` · `glTFSerializerKhrMaterialsClearcoat.png`                                                    | clearcoat factors and textures                                                                               |
-| E-8  | `export-gpu-instancing`        | KHR gpu instancing — `#1Q2BWN#10` · `glTFSerializerKhrGpuInstancing.png`                                                              | thin instances → extension → thin instances                                                                  |
-| E-9  | `export-punctual-lights`       | KHR punctual light LH/RH — `#FLXW8B#27` · `glTFSerializerKHRPunctualLightLH/RH.png`                                                   | native lights (converting) and glTF lights (pass-through)                                                    |
-| E-10 | `export-camera`                | Camera, 4 variants (LH/RH × round trip once/twice) — `#O0M0J9#25` · `glTFSerializerCameraLeftHand/RightHand.png`                      | native camera and imported camera (`enableGltfCameras`) with fixup collapse; double round trip               |
-| E-11 | `export-rotation-conversion`   | Rotation conversion LH — `#UK7FLI#1` · `glTFSerializerRotationConversionLH.png`                                                       | nested rotated nodes through the converting pass                                                             |
-| E-12 | `export-camera-animation`      | camera rotation animation, 4 variants — `#3A00GJ#42` · `glTFSerializerCameraRotationAnimation.png`                                    | imported animated camera round trip (Lite scenes are single-handed, so one scene covers the surviving legs)  |
-| E-13 | `export-texture-roundtrip`     | un/compressed texture roundtrip — `#8NTR5X#8` · `glTFSerializerTextureExport.png` (errorRatio 0.1)                                    | glTF PNG direct copy next to KTX2 blit-decode (repeat-wrapped content only, since samplers are out of scope) |
-| E-14 | `export-multimaterial`         | multimaterial with raw texture — `#KU72PX` · `glTFSerializerMultimaterial.png`                                                        | multi-primitive node, distinct materials, pixels-sourced texture, a no-`NORMAL` primitive                    |
-| E-15 | `export-texture-transform`     | Export GLTF Extension KHR_texture_transform — `#20OAV9#15148` · `exportGltfKHRTextureTransform.png`                                   | offset / scale / rotation / texCoord round trip                                                              |
-
-Additional scenes, for exporter surface with no Babylon.js visual twin:
-
-| E#   | Scene                            | Covers                                                                                                                                      |
-| ---- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| E-16 | `export-boombox`                 | the BoomBox asset; full PBR (tangents only with an opt-in); byte-stable geometry pass-through; carries the export demo's `maxRawKB` ceiling |
-| E-17 | `export-flighthelmet`            | multi-mesh, multi-material, ORM sharing, occlusion texCoord                                                                                 |
-| E-18 | `export-spec-gloss`              | spec-gloss re-emission and MR fallback                                                                                                      |
-| E-19 | `export-glass`                   | ior + transmission + volume + dispersion                                                                                                    |
-| E-20 | `export-material-extension-grid` | sheen, anisotropy, iridescence, unlit, emissive-strength spheres                                                                            |
-| E-21 | `export-compressed-source`       | meshopt + quantized source, exported dequantized                                                                                            |
-| E-22 | `export-vertex-colors`           | `COLOR_0` RGBA with vertex-alpha blending                                                                                                   |
-| E-23 | `export-ortho-camera`            | orthographic bounds → `xmag` / `ymag`                                                                                                       |
-| E-24 | `export-babylon-standard`        | `.babylon`-loaded Standard scene → MR conversion, incl. an `invertY` texture                                                                |
-
-Export scenes run in CI like every other parity scene; there is no separate tier. Source assets for parity scenes are chosen so that what Scope leaves out (skins, non-repeat sampling, Standard `uvOffset` without the opt-in) does not change the rendered frame.
-
-### Bundle-size tests (planned)
-
-- **Isolation.** Scenes that do not import `exportSceneAsGlb` carry zero exporter bytes. Per-scene manifests match a build without the module. The module changes no code that unrelated scenes fetch.
-- **Ceiling.** The export demo scene (E-16) carries the `maxRawKB` ceiling on its `scene-config.json` entry. Ceiling changes follow §2 rule 9.
+For glTF assets, `export(load(export(load(asset))))` is byte-identical to `export(load(asset))`, so `first === second === third`; for a native scene only `second === third` holds. The first export drops what is out of scope; after that, the output is a fixed point. The plumbing spec asserts this for every case.
 
 ---
 
@@ -1442,8 +1390,5 @@ Sizes are approximate (`wc -l`). The only production file outside `export-gltf/`
 | `lab/lite/export-gltf-test.html`                                | 11 lines          | plumbing lab page                                                                                                |
 | `lab/lite/src/export-gltf-test.ts`                              | ~155 lines        | `window.exportGltfTest`: three-stage round trip for assets and a native scene                                    |
 | `tests/lite/plumbing/export-gltf.spec.ts`                       | ~95 lines         | plumbing spec: 10 assets plus a native scene, idempotence assertions                                             |
-| `package.json` (root)                                           | planned           | `gltf-validator` dev dependency (validator gate)                                                                 |
-| `scene-config.json`                                             | planned           | 23 entries for E-1 … E-24 except the deferred E-3; E-16's entry carries the export demo `maxRawKB` ceiling       |
-| `tests/lite/parity/scenes/sceneN-export-*.spec.ts`              | planned           | visual parity suite (E-1 … E-24, except E-3)                                                                     |
 
 _End of spec. Regeneration target: deterministic GLB output, pass-through fidelity for glTF-sourced geometry and transforms, pixel-exact images, the documented warnings at the boundary, and no production change outside `export-gltf/` except the root re-export._
