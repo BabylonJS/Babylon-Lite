@@ -161,6 +161,50 @@ void [position, loaded];
         }
     });
 
+    it("exposes task removal for graphs and scenes through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "remove-task.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { removeTask, type FrameGraph, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const task: Task;
+const removedFromGraph: boolean = removeTask(graph, task);
+const removedFromScene: boolean = removeTask(scene, task);
+// @ts-expect-error A target must be a graph or scene.
+removeTask({}, task);
+// @ts-expect-error A task must satisfy the Task contract.
+removeTask(graph, { name: "incomplete" });
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes frame graph texture tasks through the root API with typed output aliases", () => {
         const probePath = resolve(BUILD_DIR, "frame-graph-texture-tasks.probe.ts");
         try {
