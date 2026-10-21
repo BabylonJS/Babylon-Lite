@@ -1,5 +1,5 @@
 /**
- * Unit tests for the screen-space contact-shadow / global-illumination effects
+ * Unit tests for the screen-space ambient-occlusion, contact-shadow, and global-illumination effects
  * (see `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * Split into three groups:
@@ -11,13 +11,20 @@
  *   3. Task-lifecycle integration tests against a mock GPU device — validation errors,
  *      the disabled/enabled identity transitions, and same-size source-identity rebuilds.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import { getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { invertMat4 } from "../../../packages/babylon-lite/src/math/invert-mat4";
+import {
+    clampScreenSpaceAmbientOcclusionConfig,
+    createScreenSpaceAmbientOcclusionPostProcessTask,
+    screenSpaceAmbientOcclusionBlurWGSL,
+    screenSpaceAmbientOcclusionProducerWGSL,
+    SS_AO_PRODUCER_UNIFORM_FLOATS,
+} from "../../../packages/babylon-lite/src/post-process/screen-space-ambient-occlusion";
 import {
     createScreenSpaceContactShadowsPostProcessTask,
     clampScreenSpaceContactShadowsConfig,
@@ -337,6 +344,50 @@ describe("clampScreenSpaceGlobalIlluminationConfig", () => {
     });
 });
 
+describe("clampScreenSpaceAmbientOcclusionConfig", () => {
+    it("applies documented defaults", () => {
+        const clamped = clampScreenSpaceAmbientOcclusionConfig({} as never);
+        expect(clamped.resolutionScale).toBe(0.5);
+        expect(clamped.intensity).toBe(1);
+        expect(clamped.radius).toBe(0.5);
+        expect(clamped.bias).toBe(0.05);
+        expect(clamped.power).toBe(1.5);
+        expect(clamped.sliceCount).toBe(3);
+        expect(clamped.stepCount).toBe(4);
+        expect(clamped.fadeStart).toBe(20);
+        expect(clamped.fadeEnd).toBe(60);
+        expect(clamped.temporalWeight).toBeCloseTo(1 / 32, 10);
+        expect(clamped.temporalSamples).toBe(64);
+    });
+
+    it("clamps numeric settings and keeps fadeEnd beyond fadeStart", () => {
+        const clamped = clampScreenSpaceAmbientOcclusionConfig({
+            resolutionScale: 0,
+            intensity: 8,
+            radius: 100,
+            bias: 2,
+            power: 0,
+            sliceCount: 99,
+            stepCount: 0,
+            fadeStart: 200000,
+            fadeEnd: 10,
+            temporalWeight: -1,
+            temporalSamples: 10000,
+        } as never);
+        expect(clamped.resolutionScale).toBe(0.25);
+        expect(clamped.intensity).toBe(4);
+        expect(clamped.radius).toBe(20);
+        expect(clamped.bias).toBe(0.99);
+        expect(clamped.power).toBe(0.1);
+        expect(clamped.sliceCount).toBe(8);
+        expect(clamped.stepCount).toBe(1);
+        expect(clamped.fadeStart).toBe(100000);
+        expect(clamped.fadeEnd).toBeCloseTo(100000.001, 8);
+        expect(clamped.temporalWeight).toBe(0);
+        expect(clamped.temporalSamples).toBe(256);
+    });
+});
+
 // ─── 2. WGSL contracts ───────────────────────────────────────────────────────
 
 describe("screenSpaceRaymarchWGSL (shared library)", () => {
@@ -447,6 +498,41 @@ describe("screen-space-global-illumination producer WGSL", () => {
     });
 });
 
+describe("screen-space-ambient-occlusion producer and blur WGSL", () => {
+    const producer = screenSpaceAmbientOcclusionProducerWGSL();
+    const blur = screenSpaceAmbientOcclusionBlurWGSL();
+
+    it("uses only depth input and reconstructs view-space horizons", () => {
+        expect(producer).toContain("var ssAoDepth:texture_depth_2d;");
+        expect(producer).not.toContain("texture_2d<f32>");
+        expect(producer).toContain("ssNormalFromDepth(");
+        expect(producer).toContain("ssAo.sliceCount");
+        expect(producer).toContain("ssAo.stepCount");
+        expect(producer).toContain("let cosine=dot(normal,delta/distance);");
+        expect(producer).toContain("ssAo.bias");
+        expect(SS_AO_PRODUCER_UNIFORM_FLOATS).toBe(44);
+        expect((SS_AO_PRODUCER_UNIFORM_FLOATS * 4) % 16).toBe(0);
+    });
+
+    it("keeps separate UV radius axes, spatially offset jitter hashes, and radial attenuation in the shader contract", () => {
+        expect(producer).toContain("vec2f(ssAo.radius)/max(vec2f(worldPerUvX,worldPerUvY),vec2f(1e-4))");
+        expect(producer).toContain("signedDirection*radiusUv*fraction");
+        expect(producer).not.toContain("sqrt(max(worldPerUvX*worldPerUvY");
+        expect(producer).toContain("ssPhaseAngle(vec2f(coord)+vec2f(19.0,73.0),ssAo.phase)");
+        expect(producer).toContain("ssPhaseAngle(vec2f(coord),ssAo.phase)*6.28318530718");
+        expect(producer).toContain("let radialWeight=1.0-(distance/ssAo.radius)*(distance/ssAo.radius);");
+        expect(producer).toContain("*radialWeight");
+    });
+
+    it("uses depth-aware separable taps and writes scalar occlusion", () => {
+        expect(blur).toContain("var ssAoBlurDepth:texture_depth_2d;");
+        expect(blur).toContain("var ssAoInput:texture_2d<f32>;");
+        expect(blur).toContain("let relativeDepth=abs(tapDistance-centerDistance)/max(centerDistance,0.001);");
+        expect(blur).toContain("let weight=spatialWeights[i]*depthWeight;");
+        expect(blur).toContain("textureLoad(ssAoInput,tapCoord,0).r");
+    });
+});
+
 describe("screen-space temporal resolve WGSL", () => {
     it("has a 288-byte uniform layout with separate effect and depth dimensions", () => {
         expect(SS_TEMPORAL_UNIFORM_FLOATS).toBe(72);
@@ -511,10 +597,11 @@ interface Capture {
 }
 
 function makeFakeTexture(): GPUTexture {
-    return {
-        createView: (opts?: GPUTextureViewDescriptor) => ({ aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
+    const texture = {
+        createView: (opts?: GPUTextureViewDescriptor) => ({ texture, aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
         destroy: () => undefined,
     } as unknown as GPUTexture;
+    return texture;
 }
 
 function makeMockEngine(capture: Capture): EngineContext {
@@ -538,13 +625,11 @@ function makeMockEngine(capture: Capture): EngineContext {
         createSampler: (d: GPUSamplerDescriptor) => d as unknown as GPUSampler,
         createBuffer: (d: GPUBufferDescriptor) => ({ descriptor: d, destroy: () => undefined }) as unknown as GPUBuffer,
         createTexture: (d: GPUTextureDescriptor) =>
-            ({
+            Object.assign(makeFakeTexture(), {
                 descriptor: d,
                 format: d.format,
                 sampleCount: d.sampleCount ?? 1,
-                createView: (opts?: GPUTextureViewDescriptor) => ({ aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
-                destroy: () => undefined,
-            }) as unknown as GPUTexture,
+            }),
         queue: { writeBuffer: () => undefined },
     } as unknown as GPUDevice;
 
@@ -708,5 +793,164 @@ describe("screen-space global illumination task lifecycle", () => {
         task.record();
         expect(() => task.execute!()).not.toThrow();
         expect(task.outputTexture).not.toBe(task.illuminationTexture);
+    });
+});
+
+describe("createScreenSpaceAmbientOcclusionPostProcessTask validation", () => {
+    it("requires single-sample color/depth inputs and a depth attachment", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const multisampled = createRenderTarget({ format: "bgra8unorm", dFormat: "depth24plus-stencil8", samples: 4, size: { width: 64, height: 64 } });
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: multisampled, camera }, engine)).toThrow(/single-sample/);
+
+        const noDepth = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 64, height: 64 } });
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: noDepth, camera }, engine)).toThrow(/depth attachment/);
+    });
+
+    it("accepts a separate depth target and rejects a composite target that aliases its source", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const color = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 64, height: 64 } });
+        const depth = makeSceneColorDepthRT(64, 64);
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: color, depthTexture: depth, camera, composition: "none" }, engine)).not.toThrow();
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: depth, camera, targetTexture: depth }, engine)).toThrow(/targetTexture must differ/);
+    });
+});
+
+describe("screen-space ambient-occlusion task lifecycle", () => {
+    it("records producer, bilateral blur, and temporal resolve passes", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        expect(task.execute!()).toBe(5);
+        expect(task.outputTexture).toBe(task.occlusionTexture);
+        task.dispose();
+    });
+
+    it("rebuilds depth bindings when the depth GPUTexture identity changes at the same size", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const bindGroups = vi.spyOn(engine._device, "createBindGroup");
+
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        task.execute!();
+        bindGroups.mockClear();
+        source._depthTexture = makeFakeTexture();
+        task.execute!();
+        const depthGroups = bindGroups.mock.calls
+            .map(([descriptor]) => descriptor)
+            .filter((descriptor) => /-(producer|blur-horizontal|blur-vertical|resolve)-bind-group$/.test(descriptor.label ?? ""));
+        expect(depthGroups).toHaveLength(4);
+        for (const descriptor of depthGroups) {
+            const binding = descriptor.label?.endsWith("-resolve-bind-group") ? 1 : 0;
+            expect(Array.from(descriptor.entries).find((entry) => entry.binding === binding)?.resource).toHaveProperty("texture", source._depthTexture);
+        }
+        task.dispose();
+    });
+
+    it("clears scalar identity once when disabled and resumes all passes when re-enabled", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const passes = vi.spyOn(engine._currentEncoder, "beginRenderPass");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        expect(task.execute!()).toBe(5);
+
+        task.enabled = false;
+        passes.mockClear();
+        expect(task.execute!()).toBe(0);
+        expect(passes.mock.calls.map(([descriptor]) => descriptor.label)).toEqual(["screen-space-ambient-occlusion-clear-stable", "screen-space-ambient-occlusion-clear-history"]);
+        for (const [descriptor] of passes.mock.calls) {
+            expect(Array.from(descriptor.colorAttachments)[0]).toMatchObject({
+                loadOp: "clear",
+                clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            });
+        }
+        passes.mockClear();
+        expect(task.execute!()).toBe(0);
+        expect(passes).not.toHaveBeenCalled();
+
+        task.enabled = true;
+        expect(task.execute!()).toBe(5);
+        task.dispose();
+    });
+
+    it("reallocates AO targets and rebinds both blur inputs after a resize", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const textures = vi.spyOn(engine._device, "createTexture");
+        const bindGroups = vi.spyOn(engine._device, "createBindGroup");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        task.execute!();
+        const oldTargets = textures.mock.results.slice(0, 3).map((result) => result.value as GPUTexture);
+        const destroySpies = oldTargets.map((texture) => vi.spyOn(texture, "destroy"));
+        const oldStable = task.occlusionTexture._colorTexture;
+        textures.mockClear();
+        bindGroups.mockClear();
+
+        source._width = 128;
+        source._height = 96;
+        task.record();
+        expect(task.execute!()).toBe(5);
+        const resizedTargets = textures.mock.calls.slice(0, 3);
+        expect(resizedTargets).toHaveLength(3);
+        for (const [descriptor] of resizedTargets) {
+            expect(descriptor.format).toBe("r8unorm");
+            expect(descriptor.size).toEqual({ width: 64, height: 48 });
+        }
+        for (const destroy of destroySpies) {
+            expect(destroy).toHaveBeenCalledOnce();
+        }
+        const blurGroups = bindGroups.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => /-blur-(horizontal|vertical)-bind-group$/.test(descriptor.label ?? ""));
+        expect(blurGroups).toHaveLength(2);
+        for (const [index, descriptor] of blurGroups.entries()) {
+            const texture = textures.mock.results[index]?.value as GPUTexture | undefined;
+            expect(texture).toBeDefined();
+            expect(oldTargets).not.toContain(texture);
+            expect(Array.from(descriptor.entries).find((entry) => entry.binding === 1)?.resource).toHaveProperty("texture", texture);
+        }
+        expect(task.occlusionTexture._colorTexture).not.toBe(oldStable);
+        expect(task.occlusionTexture._width).toBe(64);
+        expect(task.occlusionTexture._height).toBe(48);
+        task.dispose();
+    });
+
+    it("composites with multiply by default and keeps the color pass active while disabled", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const modules = vi.spyOn(engine._device, "createShaderModule");
+        const writes = vi.spyOn(engine._device.queue, "writeBuffer");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera }, engine);
+        task.record();
+        expect(task.outputTexture).not.toBe(task.occlusionTexture);
+        expect(task.outputTexture).not.toBe(source);
+        expect(task.execute!()).toBe(6);
+        expect(modules.mock.calls.some(([descriptor]) => descriptor.code.includes("color.rgb*(1.0-amount)"))).toBe(true);
+
+        task.enabled = false;
+        expect(task.execute!()).toBe(1);
+        const uniformData = writes.mock.lastCall?.[2];
+        expect(uniformData).toBeInstanceOf(Float32Array);
+        expect(Array.from(uniformData as Float32Array).slice(0, 2)).toEqual([1, 0]);
+        const passesBefore = capture.beginRenderPassCount;
+        expect(task.execute!()).toBe(1);
+        expect(capture.beginRenderPassCount).toBe(passesBefore + 1);
+        task.dispose();
     });
 });

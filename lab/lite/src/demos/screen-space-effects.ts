@@ -1,9 +1,9 @@
 /**
  * Demo — Screen-Space Effects.
  *
- * Shows Babylon Lite's contact-shadow and one-bounce global-illumination tasks
- * over the Cornell Box from zuuhr/GlobalIlumination-BabylonJS. Both effects consume the same
- * single-sample scene depth and can be toggled independently at runtime.
+ * Shows Babylon Lite's ambient-occlusion, contact-shadow, and one-bounce
+ * global-illumination tasks over the Cornell Box from zuuhr/GlobalIlumination-BabylonJS.
+ * All three effects consume the same single-sample scene depth and can be toggled independently.
  * Asset source: https://github.com/zuuhr/GlobalIlumination-BabylonJS/blob/main/public/scenes/cornellBox.glb
  */
 import {
@@ -18,6 +18,7 @@ import {
     createRenderTarget,
     createRenderTask,
     createSceneContext,
+    createScreenSpaceAmbientOcclusionPostProcessTask,
     createScreenSpaceContactShadowsPostProcessTask,
     createScreenSpaceGlobalIlluminationPostProcessTask,
     getContainerMeshes,
@@ -112,7 +113,6 @@ async function main(): Promise<void> {
             sourceTexture: contactShadows.outputTexture,
             depthTexture: sceneTarget,
             camera,
-            targetTexture: engine.scRT,
             composition: "color-bleed",
             resolutionScale: 0.75,
             intensity: 1.9,
@@ -131,10 +131,32 @@ async function main(): Promise<void> {
         engine,
         scene
     );
-
+    const ambientOcclusion = createScreenSpaceAmbientOcclusionPostProcessTask(
+        {
+            name: "screen-space-effects-ao",
+            sourceTexture: globalIllumination.outputTexture,
+            depthTexture: sceneTarget,
+            camera,
+            targetTexture: engine.scRT,
+            resolutionScale: 0.5,
+            intensity: 0.8,
+            radius: 0.55,
+            bias: 0.05,
+            power: 1.5,
+            sliceCount: 3,
+            stepCount: 4,
+            fadeStart: 15,
+            fadeEnd: 35,
+            temporalWeight: 1 / 32,
+            temporalSamples: 64,
+        },
+        engine,
+        scene
+    );
     addTask(scene, sceneTask);
     addTask(scene, contactShadows);
     addTask(scene, globalIllumination);
+    addTask(scene, ambientOcclusion);
 
     let autoOrbit = false;
     onBeforeRender(scene, (deltaMs) => {
@@ -145,6 +167,9 @@ async function main(): Promise<void> {
 
     bindToggle("toggleContact", "Contact shadows", true, (enabled) => {
         contactShadows.enabled = enabled;
+    });
+    bindToggle("toggleAo", "Ambient occlusion", true, (enabled) => {
+        ambientOcclusion.enabled = enabled;
     });
     bindToggle("toggleGi", "Global illumination", true, (enabled) => {
         globalIllumination.enabled = enabled;
