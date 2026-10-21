@@ -18,6 +18,7 @@ import {
     createDefaultCamera as liteCreateDefaultCamera,
     setFog,
     setClipPlane,
+    setEnvironmentRotation,
     loadEnvironment,
     loadDdsEnvironment,
     loadHdrEnvironment,
@@ -788,7 +789,27 @@ export class Scene extends AbstractScene {
         return this._envTexture;
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
+        if (value === this._envTexture) {
+            return;
+        }
+        this._envTexture?._envOwners?.delete(this);
         this._envTexture = value;
+        if (value) {
+            (value._envOwners ??= new Set()).add(this);
+        }
+        this._syncEnvironmentRotation();
+    }
+
+    /**
+     * @internal Forward the environment texture's `rotationY` to Lite's `setEnvironmentRotation`, which rotates the
+     * image-based lighting and the environment skybox. A scene whose environment is never rotated never calls it, so the
+     * rotation uniform and skybox patch stay unregistered.
+     */
+    public _syncEnvironmentRotation(): void {
+        const rotation = this._envTexture?.rotationY ?? 0;
+        if (rotation !== (this._lite._environmentRotation ?? 0)) {
+            setEnvironmentRotation(this._lite, rotation);
+        }
     }
 
     /**
@@ -868,7 +889,7 @@ export class Scene extends AbstractScene {
      */
     public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
-            this._envTexture = texture;
+            this.environmentTexture = texture;
         }
         this._defaultEnvOptions = {
             ...(this._defaultEnvOptions ?? {}),
@@ -1229,6 +1250,8 @@ export class Scene extends AbstractScene {
             runCleanup(() => clearAnimationManager(this._blendManager!));
         }
         this._runningAnimatables.length = 0;
+        // The environment texture can outlive the scene: stop it from notifying (and retaining) a disposed scene.
+        this._envTexture?._envOwners?.delete(this);
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

@@ -588,6 +588,19 @@ export class DynamicTexture extends BaseTexture {
     }
 }
 
+/** @internal A scene that uses a cube texture as its `environmentTexture` and forwards its `rotationY` to Lite. */
+export interface EnvironmentRotationOwner {
+    /** @internal */
+    _syncEnvironmentRotation(): void;
+}
+
+/** Tell every scene that uses a cube texture as its environment that the texture's `rotationY` changed. */
+function notifyEnvironmentRotation(owners: ReadonlySet<EnvironmentRotationOwner> | undefined): void {
+    for (const owner of owners ?? []) {
+        owner._syncEnvironmentRotation();
+    }
+}
+
 /**
  * Babylon.js `CubeTexture` — environment/skybox cube map. Babylon Lite loads
  * environments through `loadEnvironment` (IBL + skybox registered on the scene)
@@ -615,6 +628,22 @@ export class CubeTexture extends BaseTexture {
     public readonly _envLoaderKind: "cube" | "hdr" = "cube";
     /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
     public readonly onLoadObservable = new Observable<CubeTexture>();
+
+    /**
+     * Babylon.js `CubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. Forwarded to Lite's
+     * `setEnvironmentRotation` on every scene that uses this texture as its `environmentTexture`, which rotates the
+     * image-based lighting and the environment skybox together.
+     */
+    public get rotationY(): number {
+        return this._rotationY;
+    }
+    public set rotationY(value: number) {
+        this._rotationY = value;
+        notifyEnvironmentRotation(this._envOwners);
+    }
+    private _rotationY = 0;
+    /** @internal Scenes that use this texture as their `environmentTexture`. */
+    public _envOwners?: Set<EnvironmentRotationOwner>;
     private _ready = false;
     private readonly _readyPromise: Promise<void>;
 
@@ -691,6 +720,22 @@ export class HDRCubeTexture extends BaseTexture {
     public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
     /** Fires when the HDR environment is "ready" (resolved on a microtask). */
     public readonly onLoadObservable = new Observable<HDRCubeTexture>();
+
+    /**
+     * Babylon.js `HDRCubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. Forwarded to Lite's
+     * `setEnvironmentRotation` on every scene that uses this texture as its `environmentTexture`, which rotates the
+     * image-based lighting and the environment skybox together.
+     */
+    public get rotationY(): number {
+        return this._rotationY;
+    }
+    public set rotationY(value: number) {
+        this._rotationY = value;
+        notifyEnvironmentRotation(this._envOwners);
+    }
+    private _rotationY = 0;
+    /** @internal Scenes that use this texture as their `environmentTexture`. */
+    public _envOwners?: Set<EnvironmentRotationOwner>;
     private _ready = false;
     private readonly _readyPromise: Promise<void>;
 
