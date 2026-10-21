@@ -327,6 +327,8 @@ The producer runs at half linear resolution by default.
 
 The producer and blur targets run at `resolutionScale`; the default half-resolution path shades one quarter of the full-resolution pixels.
 
+Ambient occlusion currently requires a fullscreen camera viewport: omit `camera.viewport` or use `{ x: 0, y: 0, width: 1, height: 1 }`. The factory, `record`, and `execute` reject any other viewport with a descriptive error, including in-place viewport mutations after creation and while the effect is disabled. This restriction keeps reconstruction and temporal reprojection in the same full-target coordinate system until sub-viewports are supported.
+
 The global-illumination temporal resolve applies a fused five-tap cross filter to the current raw estimate. Neighbor weights combine a fixed spatial weight with relative view-depth agreement. This removes independent pixel noise without allocating another target or pass.
 
 ## Shader Logic
@@ -352,10 +354,10 @@ result.rgb = source.rgb * mix(vec3f(1), tint, amount);
 
 ### Ambient-occlusion producer
 
-1. Load scene depth. Cleared depth returns zero occlusion.
-2. Reconstruct world position and the closest-neighbour world normal; transform both into view space and orient the normal toward the camera.
-3. Unproject adjacent depth texels at the receiver depth to convert the world-space radius into a screen-space march radius.
-4. Convert the radius to a UV vector using independent horizontal/vertical world-units-per-UV scales. For each rotated and step-jittered slice and both directions, retain the largest normalized positive normal/sample cosine above `bias`, attenuated by `1 - (distance / radius)^2`; average those directional occlusion estimates.
+1. Map the effect pixel to an integer scene-depth coordinate and load its depth. Cleared depth returns zero occlusion.
+2. Reconstruct world position at that depth texel's center UV (not the unsnapped effect UV) and the closest-neighbour world normal; transform both into view space and orient the normal toward the camera.
+3. Unproject offsets of one depth texel from the snapped receiver UV at the receiver depth to convert the world-space radius into a screen-space march radius.
+4. Convert the radius to a UV vector using independent horizontal/vertical world-units-per-UV scales. For each rotated and step-jittered slice and both directions, reconstruct each loaded sample at its own depth texel's center UV. Retain the largest normalized positive normal/sample cosine above `bias`, attenuated by `1 - (distance / radius)^2`; average those directional occlusion estimates. Snapping both receiver and sample positions keeps a sloping plane coplanar at reduced effect resolutions instead of generating false horizons.
 5. Shape the average occlusion with `pow(averageOcclusion, power)` and fade it by view distance.
 6. Apply horizontal and vertical depth-aware bilateral blur, then temporal reprojection, rejection, and neighborhood clamp.
 
@@ -456,6 +458,8 @@ Camera-only reprojection cannot preserve history for independently moving object
 - public factories clamp invalid resolution, step, and temporal settings;
 - generated WGSL contains the scalar/color history layouts and the dual-surface/tangent-plane contracts;
 - Ambient-occlusion defaults, depth-only requirements, target alias rejection, disabled identity, depth-binding replacement, target resizing, and default multiply composition are covered by unit/mock lifecycle tests.
+- AO rejects non-fullscreen camera viewports at creation, record, and execute, including later in-place mutations and disabled execution.
+- A numerical sloping-plane regression checks nearest-depth texel-center reconstruction at quarter, half, and full resolution; paired shader-contract assertions tie both receiver and march reconstruction to those coordinates.
 - AO WGSL assertions check source contracts only; aspect-ratio consistency, jitter quality, silhouette halos, blur quality, and moving-object trails require WebGPU rendering.
 
 ### Demo validation

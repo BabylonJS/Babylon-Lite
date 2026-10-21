@@ -44,6 +44,7 @@ export interface ScreenSpaceAmbientOcclusionPostProcessTaskConfig {
     sourceTexture: RenderTarget;
     /** Depth attachment source, when different from `sourceTexture` (must be single-sample). */
     depthTexture?: RenderTarget;
+    /** Must use a fullscreen viewport (omitted, or x/y = 0 and width/height = 1). */
     camera: Camera;
     /** Composite destination. `null`/omitted composites over `sourceTexture`; must differ from it. */
     targetTexture?: RenderTarget | null;
@@ -138,16 +139,18 @@ const AO_FULLSCREEN_VERTEX_WGSL = wgsl`struct SsAoVOut{@builtin(position) positi
 const AO_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssAoFragment(v:SsAoVOut)->@location(0) vec4f{
   let coord=vec2i(v.position.xy);
   let uv=ssTexelUv(coord,ssAo.outputDims);
-  let depth=textureLoad(ssAoDepth,ssUvToCoord(uv,ssAo.depthDims),0);
+  let depthCoord=ssUvToCoord(uv,ssAo.depthDims);
+  let depth=textureLoad(ssAoDepth,depthCoord,0);
   if(ssIsClearDepth(depth)){return vec4f(0.0);}
 
-  let worldPos=ssWorldFromDepth(uv,depth,ssAo.invViewProj);
+  let depthUv=ssTexelUv(depthCoord,ssAo.depthDims);
+  let worldPos=ssWorldFromDepth(depthUv,depth,ssAo.invViewProj);
   let viewPos=(ssAo.view*vec4f(worldPos,1.0)).xyz;
-  var normal=normalize((ssAo.view*vec4f(ssNormalFromDepth(uv,ssAo.depthDims,ssAo.invViewProj,ssAoDepth),0.0)).xyz);
+  var normal=normalize((ssAo.view*vec4f(ssNormalFromDepth(depthUv,ssAo.depthDims,ssAo.invViewProj,ssAoDepth),0.0)).xyz);
   if(dot(normal,-viewPos)<0.0){normal=-normal;}
 
-  let adjacentX=ssWorldFromDepth(uv+vec2f(1.0/ssAo.depthDims.x,0.0),depth,ssAo.invViewProj);
-  let adjacentY=ssWorldFromDepth(uv+vec2f(0.0,1.0/ssAo.depthDims.y),depth,ssAo.invViewProj);
+  let adjacentX=ssWorldFromDepth(depthUv+vec2f(1.0/ssAo.depthDims.x,0.0),depth,ssAo.invViewProj);
+  let adjacentY=ssWorldFromDepth(depthUv+vec2f(0.0,1.0/ssAo.depthDims.y),depth,ssAo.invViewProj);
   let worldPerUvX=length(adjacentX-worldPos)*ssAo.depthDims.x;
   let worldPerUvY=length(adjacentY-worldPos)*ssAo.depthDims.y;
   let radiusUv=vec2f(ssAo.radius)/max(vec2f(worldPerUvX,worldPerUvY),vec2f(1e-4));
@@ -165,12 +168,13 @@ const AO_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssAoFragment(v:SsAoVOut)->@l
       var horizon=0.0;
       for(var step:u32=0u;step<stepCount;step=step+1u){
         let fraction=(f32(step)+jitter)/f32(stepCount);
-        let sampleUv=uv+signedDirection*radiusUv*fraction;
+        let sampleUv=depthUv+signedDirection*radiusUv*fraction;
         if(sampleUv.x<0.0||sampleUv.x>1.0||sampleUv.y<0.0||sampleUv.y>1.0){continue;}
-        if(length((sampleUv-uv)*ssAo.depthDims)<1.0){continue;}
-        let sampleDepth=textureLoad(ssAoDepth,ssUvToCoord(sampleUv,ssAo.depthDims),0);
+        if(length((sampleUv-depthUv)*ssAo.depthDims)<1.0){continue;}
+        let sampleCoord=ssUvToCoord(sampleUv,ssAo.depthDims);
+        let sampleDepth=textureLoad(ssAoDepth,sampleCoord,0);
         if(ssIsClearDepth(sampleDepth)){continue;}
-        let sampleWorld=ssWorldFromDepth(sampleUv,sampleDepth,ssAo.invViewProj);
+        let sampleWorld=ssWorldFromDepth(ssTexelUv(sampleCoord,ssAo.depthDims),sampleDepth,ssAo.invViewProj);
         let sampleView=(ssAo.view*vec4f(sampleWorld,1.0)).xyz;
         let delta=sampleView-viewPos;
         let distance=length(delta);
@@ -253,6 +257,14 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
     scene?: SceneContext
 ): ScreenSpaceAmbientOcclusionPostProcessTask {
     const name = config.name ?? "screen-space-ambient-occlusion";
+    const camera = config.camera;
+    function assertFullscreenViewport(): void {
+        const viewport = camera.viewport;
+        if (viewport && (viewport.x !== 0 || viewport.y !== 0 || viewport.width !== 1 || viewport.height !== 1)) {
+            throw new Error(`ScreenSpaceAmbientOcclusionPostProcessTask "${name}": camera.viewport must be fullscreen (x=0, y=0, width=1, height=1).`);
+        }
+    }
+    assertFullscreenViewport();
     const source = config.sourceTexture;
     const depthSource = config.depthTexture ?? source;
     if ((source._descriptor.samples ?? 1) !== 1) {
@@ -268,7 +280,7 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
 
     const clamped = clampScreenSpaceAmbientOcclusionConfig(config);
     const params = {
-        camera: config.camera,
+        camera,
         enabled: true,
         composition: config.composition ?? "multiply",
         resetVersion: config.resetVersion ?? 0,
@@ -446,6 +458,7 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
         temporalWeight: params.temporalWeight,
         resetVersion: params.resetVersion,
         record(): void {
+            assertFullscreenViewport();
             ensurePipelines();
             const srcSize = resolveScreenSpaceSourceSize(depthSource);
             const scaled = computeScreenSpaceScaledSize(srcSize.width, srcSize.height, params.resolutionScale);
@@ -467,6 +480,7 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
             task.outputTexture = composite ? composite.outputTexture : owner.stableTexture;
         },
         execute(): number {
+            assertFullscreenViewport();
             if (!task.enabled) {
                 if (lastEnabled) {
                     owner.clearIdentity();
