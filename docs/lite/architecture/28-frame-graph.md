@@ -26,6 +26,7 @@ This gives Babylon Lite enough structure for offscreen RTT passes, per-pass came
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export type { Task } from "./frame-graph/task.js";
 export { getFrameGraph } from "./scene/scene.js";
+export { getFrameGraphTasks } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 
 export type { Pass } from "./frame-graph/pass.js";
@@ -78,11 +79,59 @@ remain synchronous. `buildFrameGraphTask()` initializes only its selected task, 
 order and content dependencies remain the caller's responsibility. Re-recording replaces the initializer pass;
 task disposal clears it without releasing the borrowed target.
 
+### Task discovery
+
+```typescript
+export function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];
+```
+
+The root-package function returns `frameGraph._tasks` directly, without allocating,
+filtering, or validating the typed argument. The array is a **live view**, not a
+snapshot: repeated calls return the same instance throughout the graph's lifetime.
+Later `addTask()`, `addTaskAtStart()`, `addTaskBefore()`, `addTaskAfter()`, and
+`removeTask()` calls mutate that same array in place. `frameGraph.dispose()` disposes
+the tasks still registered and empties the same array.
+
+```typescript
+const sceneTasks = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks = getFrameGraphTasks(frameGraphContext.frameGraph);
+const snapshot = sceneTasks.slice(); // copy membership/order when a stable snapshot is needed
+```
+
+For scene graphs, use `getFrameGraph(scene)`. For scene-less graphs, use
+`FrameGraphContext.frameGraph`; registered contexts can be found through
+`getRenderingContexts(surface)` and identified with
+`getRenderingContextKind(context) === "frame-graph-context"`.
+
+Every registered top-level task is listed in build/execution order, including
+the default scene render task, system tasks such as the leading shadow task, and
+tasks whose `executionEnabled` is `false`. A composite such as bloom appears once
+per registration; its privately owned extraction, blur, and merge sub-tasks are
+not separate entries. Duplicate registrations remain duplicate entries. Names
+are neither unique nor stable identifiers. Indexes shift after insertion or
+removal, so a polling consumer must re-read the list and associate the current
+index with each task object's identity.
+
+The caller must not mutate the returned array; `readonly` is a TypeScript-only
+restriction, not a runtime freeze. Discovery transfers no ownership: the graph
+continues to own registered tasks and their disposal. A copied snapshot also
+borrows the task objects, whose resources may later be disposed. Explicit removal
+transfers cleanup responsibility as described in **Task removal and ownership**.
+
+The effective execution gate is `task.executionEnabled !== false`: both `true`
+and `undefined` mean enabled, and consumers should write booleans when toggling.
+Setting it to `false` keeps recording/resources intact but skips the task entirely,
+not a disabled passthrough pass; downstream consumers may therefore sample stale
+targets. This is independent of task-specific `enabled` settings. One-shot compute
+tasks also write their own `executionEnabled`, so a consumer's toggle may be
+overwritten by that scheduler. Discovery does not change any of these semantics.
+
 ### `Task`
 
 ```typescript
 export interface Task {
     readonly name: string;
+    executionEnabled?: boolean;
     readonly engine: EngineContext;
     readonly scene?: SceneContext;
     _passes: Pass[];
@@ -1036,6 +1085,7 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Babylon.js concept              | Babylon Lite                                               |
 | ------------------------------- | ---------------------------------------------------------- |
 | Frame graph                     | Ordered `FrameGraph._tasks`                                |
+| `frameGraph.tasks`              | `getFrameGraphTasks(frameGraph)` (readonly live view)      |
 | Frame graph task                | `Task` (with `_passes: Pass[]`)                            |
 | `IFrameGraphPass`               | `Pass`                                                     |
 | `FrameGraphRenderPass`          | `RenderPass` (no shared render context)                    |
@@ -1052,6 +1102,15 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Render target texture           | `createRenderTargetTexture()`                              |
 | Pass-specific camera/scene UBO  | `RenderTaskConfig.cam` + task-owned `_sceneUBO`            |
 
+## Task Discovery Test Specification
+
+- Root import and emitted declarations expose exactly `getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[]`; no internal task storage or GPU types leak through this API.
+- Graph and scene `addTask()` calls preserve insertion/build/execution order, including the scene's default render task and leading shadow adapter.
+- The live array keeps its identity through append, start/before/after insertion, removal (including duplicates), and graph disposal.
+- Disabled tasks remain visible. A real bloom composite appears once without exposing its privately owned sub-tasks.
+- Standalone `FrameGraphContext.frameGraph` is enumerable. Disposal empties the retained array and disposes only tasks still owned by the graph.
+- Focused frame-graph unit and public-API build tests enforce the contract; a filtered scene1 runtime bundle comparison verifies zero bytes when discovery is unused. CI owns visual/parity and wider scene coverage.
+
 ## File Manifest
 
 | File                                         | Purpose                                                                                       |
@@ -1059,7 +1118,7 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `src/frame-graph/task.ts`                    | Polymorphic task interface (now with `_passes: Pass[]`)                                       |
 | `src/frame-graph/pass.ts`                    | `Pass` base interface, `addPassDependencies`                                                  |
 | `src/frame-graph/render-pass.ts`             | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                          |
-| `src/frame-graph/frame-graph.ts`             | Ordered task list and two-phase build/execute/dispose lifecycle                               |
+| `src/frame-graph/frame-graph.ts`             | Ordered task list, readonly live discovery, and two-phase build/execute/dispose lifecycle     |
 | `src/frame-graph/frame-graph-actions.ts`     | Public task-insertion + `addRenderPass` actions                                               |
 | `src/frame-graph/render-task-base.ts`        | Direct RenderTask target preparation, scene UBO/bindings, draw buckets, descriptor, execution |
 | `src/frame-graph/render-task.ts`             | Public task factory plus lazily installed explicit mesh population seam                       |

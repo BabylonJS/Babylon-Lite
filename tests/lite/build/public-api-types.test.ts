@@ -205,6 +205,71 @@ removeTask(graph, { name: "incomplete" });
         }
     });
 
+    it("exposes readonly live task discovery through the root API without internal storage", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).toContain("export declare function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];");
+        expect(dts.match(/declare function getFrameGraphTasks\(/g)).toHaveLength(1);
+        expect(dts).not.toMatch(/^\s*_tasks:/m);
+        const probePath = resolve(BUILD_DIR, "frame-graph-task-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getFrameGraph, getFrameGraphTasks, type FrameGraph, type FrameGraphContext, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const context: FrameGraphContext;
+declare const task: Task;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+const exactSignature: Equal<typeof getFrameGraphTasks, (frameGraph: FrameGraph) => readonly Task[]> = true;
+const sceneTasks: readonly Task[] = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks: readonly Task[] = getFrameGraphTasks(context.frameGraph);
+const tasks = getFrameGraphTasks(graph);
+// The array is readonly; task execution gates remain writable.
+tasks[0]!.executionEnabled = false;
+// @ts-expect-error The live list is not a mutable array.
+const mutable: Task[] = tasks;
+// @ts-expect-error Consumers must not append to the live list.
+tasks.push(task);
+// @ts-expect-error Consumers must not replace entries.
+tasks[0] = task;
+// @ts-expect-error Consumers must not clear the live list.
+tasks.length = 0;
+// @ts-expect-error There is no SceneContext overload.
+getFrameGraphTasks(scene);
+// @ts-expect-error Internal storage is not public.
+graph._tasks;
+// @ts-expect-error The argument must be a frame graph.
+getFrameGraphTasks({});
+void [exactSignature, sceneTasks, standaloneTasks];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes frame graph texture tasks through the root API with typed output aliases", () => {
         const probePath = resolve(BUILD_DIR, "frame-graph-texture-tasks.probe.ts");
         try {
