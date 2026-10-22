@@ -1,5 +1,5 @@
 /**
- * Scene 327 — glTF export: KHR_texture_transform
+ * Scene 320 — glTF export: KHR_texture_transform
  *
  * Babylon.js visualization test: "Export GLTF Extension KHR_texture_transform"
  * Playground: #20OAV9#15148. Reference image: exportGltfKHRTextureTransform.png (errorRatio 1.1).
@@ -13,18 +13,18 @@ import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(327);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene327-gltf-export-texture-transform");
+const sceneConfig = getSceneConfig(320);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene320-gltf-export-texture-transform");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 327 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 320 skipped via skipParity in scene-config.json");
 
-test("Scene 327 — Export GLTF Extension KHR_texture_transform matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 320 — Export GLTF Extension KHR_texture_transform matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 327, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 320, timeout: 90_000 });
 
-    await page.goto("/scene327.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 327 Lite" });
+    await page.goto("/scene320.html");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 320 Lite" });
     await page.locator("#loader-overlay").waitFor({ state: "detached", timeout: 10_000 });
     await page.waitForTimeout(500);
 

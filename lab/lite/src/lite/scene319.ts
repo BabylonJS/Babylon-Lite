@@ -1,4 +1,4 @@
-// Scene 324: glTF export, Rotation Conversion. Babylon.js visualization test "GLTF Serializer Rotation conversion,
+// Scene 319: glTF export, Rotation Conversion. Babylon.js visualization test "GLTF Serializer Rotation conversion,
 // left-handed" (playground #UK7FLI#1). Six rotated parent/child box pairs are exported with exportSceneAsGlb and
 // reloaded with loadGltf. The right-handed variant is not ported (Lite has no right-handed scenes).
 import {

@@ -1,4 +1,4 @@
-// Scene 327: glTF export of Standard-material planes with a transformed diffuse texture — matches Babylon.js playground
+// Scene 320: glTF export of Standard-material planes with a transformed diffuse texture — matches Babylon.js playground
 // #20OAV9#15148 (visualization test "Export GLTF Extension KHR_texture_transform").
 //
 // Four planes (no transform; rotation; offset; scale) are exported, and the export is loaded back into the same scene

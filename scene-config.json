@@ -2823,9 +2823,9 @@
         "skipPerf": true
     },
     {
-        "id": 324,
-        "slug": "scene324-gltf-export-rotation-conversion",
-        "name": "Scene 324 — glTF Export: Rotation Conversion",
+        "id": 319,
+        "slug": "scene319-gltf-export-rotation-conversion",
+        "name": "Scene 319 — glTF Export: Rotation Conversion",
         "maxMad": 0.15,
         "maxRawKB": 119.2,
         "description": "Babylon.js visualization test “GLTF Serializer Rotation conversion, left-handed” (playground #UK7FLI#1): Six rotated parent/child box pairs exported and reloaded.",
@@ -2833,9 +2833,9 @@
         "skipPerf": true
     },
     {
-        "id": 327,
-        "slug": "scene327-gltf-export-texture-transform",
-        "name": "Scene 327 — glTF Export: KHR_texture_transform",
+        "id": 320,
+        "slug": "scene320-gltf-export-texture-transform",
+        "name": "Scene 320 — glTF Export: KHR_texture_transform",
         "maxMad": 0.05,
         "maxRawKB": 141.0,
         "description": "Babylon.js visualization test “Export GLTF Extension KHR_texture_transform” (playground #20OAV9#15148): Standard materials with rotated, offset and scaled textures, exported and reloaded below the originals.",

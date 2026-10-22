@@ -1,4 +1,4 @@
-// Scene 324 — BJS reference for the glTF export "Rotation conversion" test.
+// Scene 319 — BJS reference for the glTF export "Rotation conversion" test.
 // Mirrors playground #UK7FLI#1 (Babylon.js visualization test "GLTF Serializer Rotation conversion, left-handed";
 // reference image glTFSerializerRotationConversionLH.png): six rotated parent/child box pairs exported with
 // GLTF2Export (lights and cameras excluded) and reloaded. The snippet's own right-handed variant is not ported

@@ -1,4 +1,4 @@
-// Scene 327 — BJS reference for the glTF export "Export GLTF Extension KHR_texture_transform" test.
+// Scene 320 — BJS reference for the glTF export "Export GLTF Extension KHR_texture_transform" test.
 // Mirrors playground #20OAV9#15148 (Babylon.js visualization test "Export GLTF Extension KHR_texture_transform"):
 // four Standard-material planes with rotated / offset / scaled diffuse textures are exported with GLTF2Export
 // (planes only) and re-imported into the same scene, 1.5 units below the originals.

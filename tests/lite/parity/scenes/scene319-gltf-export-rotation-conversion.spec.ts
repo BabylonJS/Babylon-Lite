@@ -1,5 +1,5 @@
 /**
- * Scene 324 — glTF export: rotation conversion
+ * Scene 319 — glTF export: rotation conversion
  *
  * Babylon.js visualization test: "GLTF Serializer Rotation conversion, left-handed".
  * Playground: #UK7FLI#1. Reference image: glTFSerializerRotationConversionLH.png (errorRatio 1.1).
@@ -12,18 +12,18 @@ import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(324);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene324-gltf-export-rotation-conversion");
+const sceneConfig = getSceneConfig(319);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene319-gltf-export-rotation-conversion");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 324 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 319 skipped via skipParity in scene-config.json");
 
-test("Scene 324 — GLTF Serializer Rotation conversion, left-handed matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 319 — GLTF Serializer Rotation conversion, left-handed matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 324, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 319, timeout: 90_000 });
 
-    await page.goto("/scene324.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 324 Lite" });
+    await page.goto("/scene319.html");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 319 Lite" });
     await page.locator("#loader-overlay").waitFor({ state: "detached", timeout: 10_000 });
     await page.waitForTimeout(500);
 
