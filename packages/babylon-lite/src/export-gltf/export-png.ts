@@ -1,4 +1,4 @@
-/** Dependency-free PNG encoder for the glTF exporter (RGBA8, no canvas, worker-safe). */
+/** PNG encoder for the glTF exporter (RGBA8, no canvas). */
 
 let crcTable: Uint32Array | null = null;
 

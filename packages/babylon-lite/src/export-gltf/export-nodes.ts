@@ -167,7 +167,7 @@ export function collectRoots(ctx: ExportContext, scene: SceneContext, animated: 
 
 /** The glTF loader's conversion root: a geometry-free, matrix-free TransformNode at the origin with
  *  identity rotation and scaling (−1, 1, 1), not bound by any animation channel. Detected by shape
- *  only (never by name); inverts `createTransformNode("__root__", 0,0,0, 0,0,0,1, −1,1,1)`. */
+ *  only; inverts `createTransformNode("__root__", 0,0,0, 0,0,0,1, −1,1,1)`. */
 function isLoaderRoot(node: SceneNode, animated: ReadonlySet<object>): boolean {
     if (isMesh(node) || node._localMatrix || animated.has(node)) {
         return false;

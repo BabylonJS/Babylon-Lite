@@ -2,8 +2,7 @@
  *
  *  The loader types glTF JSON as `any`, so the exporter declares its own schema typings,
  *  covering only the members it writes. Member names and value types follow the glTF 2.0
- *  JSON schema; every member is optional except where the schema requires it. Type-only:
- *  this file contributes zero runtime bytes. */
+ *  JSON schema; every member is optional except where the schema requires it. */
 
 /** Free-form extension or extras payload. */
 export type GltfJsonObject = Record<string, unknown>;
@@ -169,7 +168,7 @@ export interface GltfBuffer extends GltfProperty {
     byteLength: number;
 }
 
-/** The glTF document root. Arrays are created on first use; empty ones are never serialized. */
+/** The glTF document root. Empty arrays are never serialized. */
 export interface GltfDocument extends GltfProperty {
     asset: GltfAsset;
     extensionsUsed?: string[];

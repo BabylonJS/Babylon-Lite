@@ -19,7 +19,6 @@ const MIN_OUTER_CONE = 1e-4;
 
 type ExportableLight = PointLight | DirectionalLight | SpotLight;
 
-/** Build the `KHR_lights_punctual` light block for one light. */
 function buildLightBlock(ctx: ExportContext, light: ExportableLight): GltfJsonObject {
     const block: GltfJsonObject = {};
     if (light.name) {

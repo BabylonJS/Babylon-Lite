@@ -1,13 +1,12 @@
 /** Left-handed ↔ right-handed conversion math for the glTF exporter.
  *
  *  Lite is left-handed; glTF is right-handed. Converting passes mirror across the YZ plane
- *  with `C = diag(−1, 1, 1, 1)` (C⁻¹ = C). Every function here is pure and allocation-light. */
+ *  with `C = diag(−1, 1, 1, 1)` (C⁻¹ = C). */
 
-/** Tolerance for every approximate comparison in the exporter (`≈` in the architecture doc). */
+/** Default tolerance for approximate comparisons (`≈` in the architecture doc). */
 export const EXPORT_EPSILON = 0.001;
 
-/** Tolerance for omitting values equal to their glTF defaults. Tight, so that small but real values
- *  (sub-millimetre offsets, tiny rotations) are never dropped; it only absorbs float noise. */
+/** Tolerance for omitting values equal to their glTF defaults; small enough to absorb only float noise. */
 export const OMIT_EPSILON = 1e-9;
 
 /** True when every component of `a` is within `epsilon` (default {@link EXPORT_EPSILON}) of the
@@ -21,7 +20,6 @@ export function nearlyEqual(a: ArrayLike<number>, b: ArrayLike<number>, epsilon 
     return true;
 }
 
-/** Mirror a translation across the YZ plane: `(x, y, z) → (−x, y, z)`. */
 export function convertTranslation(x: number, y: number, z: number): [number, number, number] {
     return [-x, y, z];
 }

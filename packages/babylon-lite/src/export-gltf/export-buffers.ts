@@ -29,13 +29,11 @@ export interface AccessorDesc {
 export interface BufferBuilder {
     /** The glTF `bufferViews` array; `byteOffset`s are written by {@link BufferBuilder.finalize}. */
     readonly bufferViews: GltfBufferView[];
-    /** The glTF `accessors` array. */
     readonly accessors: GltfAccessor[];
     /** Snapshot `bytes` into a new bufferView and return its index. The bytes are copied on the
      *  call, so later writes to the source never reach the output. A repeated call with the same
      *  view object, stride and target returns the existing index. */
     addBufferView(bytes: ArrayBufferView, byteStride?: number, target?: GltfBufferViewTarget): number;
-    /** Record an accessor and return its index. */
     addAccessor(desc: AccessorDesc): number;
     /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added). */
     finalize(): Uint8Array;

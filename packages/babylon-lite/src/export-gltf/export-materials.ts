@@ -123,8 +123,6 @@ function texCoordOf(tex: Texture2D | null | undefined): number | undefined {
     return (tex as { _texCoord?: number } | null | undefined)?._texCoord;
 }
 
-// ─── PBR core ────────────────────────────────────────────────────────
-
 function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMaterial, uvState: UvState): void {
     const name = materialLabel(m);
     const obj = out as unknown as GltfJsonObject;
@@ -180,7 +178,6 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
         writeMetallicRoughness(ctx, pmr, metallic, roughness, name);
     }
 
-    // Normal.
     const normalScale = m.normalTextureScale ?? 1;
     capturePbrSlot(ctx, m, uvState, obj, pbrCoreSlot(m, "normalTexture", m.normalTexture, UV2_NORMAL, normalScale !== 1 ? { scale: normalScale } : undefined));
 
@@ -229,7 +226,6 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
         out.emissiveFactor = [1, 1, 1];
     }
 
-    // Alpha mode.
     const cutoff = m._alphaCutOff ?? 0;
     if (cutoff > 0) {
         out.alphaMode = "MASK";
@@ -362,8 +358,6 @@ export function finalizeMaterials(ctx: ExportContext): void {
         }
     }
 }
-
-// ─── Standard → metallic-roughness ───────────────────────────────────
 
 function exportStandardMaterial(ctx: ExportContext, m: StandardMaterialProps, out: GltfMaterial, uvState: UvState): void {
     const name = materialLabel(m);

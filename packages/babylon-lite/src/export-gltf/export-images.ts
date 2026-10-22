@@ -7,7 +7,7 @@ import type { ExportContext, PixelData, SlotMapping } from "./export-context.js"
 import { encodePng } from "./export-png.js";
 
 /** WGSL for the decode blit: one fragment per target texel copies the source texel verbatim
- *  (no filtering), clamped to [0, 1]. Minimal whitespace per the repo's inline-WGSL convention. */
+ *  (no filtering), clamped to [0, 1]. */
 const BLIT_WGSL = `@group(0) @binding(0) var src:texture_2d<f32>;
 struct V{@builtin(position) p:vec4f};
 @vertex fn vs(@builtin(vertex_index) i:u32)->V{

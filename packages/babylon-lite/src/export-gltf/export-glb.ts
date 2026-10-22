@@ -7,9 +7,8 @@ const CHUNK_BIN = 0x004e4942; // "BIN\0"
 
 /** @internal Frame a JSON string and a BIN payload as a binary glTF 2.0 container.
  *
- *  The BIN chunk is always written, with length 0 when there is no binary data (Babylon.js does
- *  the same). The GLB specification allows omitting an empty BIN chunk, but Lite's own GLB parser
- *  requires it, so writing it keeps every export reloadable in Lite. The JSON chunk is padded to
+ *  The BIN chunk is always written, with length 0 when empty, as in Babylon.js: the GLB spec allows
+ *  omitting it, but Lite's GLB parser requires it. The JSON chunk is padded to
  *  4 bytes with spaces (0x20) and the BIN chunk with zeros. */
 export function frameGlb(json: string, bin: Uint8Array): Uint8Array<ArrayBuffer> {
     const jsonBytes = new TextEncoder().encode(json);

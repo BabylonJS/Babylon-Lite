@@ -33,7 +33,6 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
     const count = Math.floor(positions.length / 3);
     const indexSource = m._cpuGpuIndices ?? m._cpuIndices;
     if (count === 0 || indexSource?.length === 0) {
-        // Nothing to draw.
         return null;
     }
     const sourceMode = primitiveMode(m);
@@ -241,10 +240,7 @@ function mirrorTangent(src: Float32Array, components: number): Float32Array {
 
 /** The index accessor and glTF mode for a mesh. Winding reversal (`flip`) applies to triangle
  *  lists by swapping each triangle's last two indices; a triangle strip that needs it is expanded
- *  to a reversed triangle list. Non-indexed meshes get synthesized indices only when reversed.
- *  Indices keep their retained width (`_cpuGpuIndices`) unless they contain 65535 (glTF's
- *  primitive-restart value for UNSIGNED_SHORT); otherwise they narrow to UNSIGNED_SHORT when every
- *  value is below 65535. */
+ *  to a reversed triangle list. Non-indexed meshes get synthesized indices only when reversed. */
 function indexAccessor(ctx: ExportContext, m: Mesh, vertexCount: number, mode: number, flip: boolean): { index?: number; mode: number } {
     const source: Uint16Array | Uint32Array | undefined = m._cpuGpuIndices ?? m._cpuIndices;
     const strip = flip && mode === 5;
