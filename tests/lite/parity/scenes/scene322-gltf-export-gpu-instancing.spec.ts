@@ -7,6 +7,10 @@
  *
  * Only the reloaded scene is rendered, as in the Babylon.js harness; the source scene is never rendered.
  *
+ * Threshold: Lite renders TeapotsGalore's metallic PBR material (metallic 0.8, roughness 0.5) under the hemispheric light
+ * brighter than Babylon.js (MAD ≈ 5.92), identically with and without the export step, so the gap is in the renderer,
+ * not the exporter. `maxMad` covers it until that is fixed; it guards the export path against regressions meanwhile.
+ *
  * Assertions:
  * - Full image MAD ≤ scene-config.json maxMad
  */

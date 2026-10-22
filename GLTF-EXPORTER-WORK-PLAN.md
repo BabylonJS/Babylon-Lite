@@ -26,7 +26,7 @@ No PR was opened.
 - [x] Sync the doc with the code (the doc stays the one-shot spec), then a final independent doc-vs-code review: every warning text, contract type and manifest entry matches; its remaining findings were fixed in code or doc (`fix(export-gltf): final doc/code consistency pass`). The final doc is on both branches.
 - [x] Babylon.js test ports: every test in `serializers/test/unit/glTF/` and `test/integration/glTFSerializer.test.ts` now has a Lite counterpart under the same title, or a stated reason it has none (GLB-only API, no export options, or out of scope). The mapping is in the spec's "Babylon.js test ports" section. New files: `tests/lite/unit/export-gltf/bjs-ports.test.ts` (17 tests), `tests/lite/plumbing/export-gltf-bjs-ports.spec.ts` (18) and `tests/lite/plumbing/export-gltf-helpers.ts`, plus an `exportGlb` hook on the lab page. They found no exporter bugs. Divergences from Babylon.js are by design and documented: unused UVs are kept, a material-less mesh gets no default material, and a node cannot be left out of the export while its children stay.
 - [x] Removed the never-built test plans (glTF-Validator gate, visual parity scenes, bundle-size tests) from the spec; they are in the follow-up issue below.
-- [x] Visual parity scenes ported from the Babylon.js "GLTF Serializer" visualization tests (you approved local visual runs): 316, 317, 318, 320, 322, 323, 324 and 325, covering 10 of the 26 tests.
+- [x] Visual parity scenes ported from the Babylon.js "GLTF Serializer" visualization tests (you approved local visual runs): 316, 317, 318, 320, 322, 323, 324 and 325, covering 9 of the 26 tests (316 covers two).
     - Each Babylon.js reference page rebuilds its playground from the snippet and passed Babylon.js's own reference-image check before its golden was captured. Scene 320 is the exception: the WebGPU render of the face's normal map differs by 3.2 % against a 1.1 % limit.
     - Bundle ceilings were measured with the repo script.
     - Blocked scenes (319, 321, 326) and the one waiting on its texture (327) are on `wip/gltf-export-parity-blocked`.
@@ -79,10 +79,10 @@ No PR was opened.
 
 ### 3. Tests not built yet
 
-- [ ] **Visual parity suite: the Babylon.js "GLTF Serializer" visual tests not yet passing in Lite.** Ten of the 26 are ported on `feat/gltf-exporter-implementation` as scenes 316, 317, 318, 320, 322, 323, 324, 325. The spec's "Visual parity suite" section has the method, per-scene MADs and the full mapping. Still open:
+- [ ] **Visual parity suite: the Babylon.js "GLTF Serializer" visual tests not yet passing in Lite.** Nine of the 26 are ported (in eight scenes; 316 covers two) on `feat/gltf-exporter-implementation` as scenes 316, 317, 318, 320, 322, 323, 324, 325. The spec's "Visual parity suite" section has the method, per-scene MADs and the full mapping. Still open:
     - Morph Target Animation Group (`#T087A8#29`): needs skins (the alien's reloaded pose differs). Scene 319 is written on `wip/gltf-export-parity-blocked`.
     - KHR materials clearcoat (`#9N6CLU#23`): needs gamma-space DDS environments in Lite (§5). Scene 321 is written on `wip/gltf-export-parity-blocked`.
-    - multimaterial with raw texture (`#KU72PX#0`): needs samplers (§1). Scene 326 is written on `wip/gltf-export-parity-blocked`; with nearest sampling forced on the reload it reaches MAD 0.12.
+    - multimaterial with raw texture (`#KU72PX`): needs samplers (§1). Scene 326 is written on `wip/gltf-export-parity-blocked`; with nearest sampling forced on the reload it reaches MAD 0.12.
     - Export GLTF Extension KHR_texture_transform (`#20OAV9#15148`): needs its texture `https://i.imgur.com/JbvoYlB.png` to capture the golden. Scene 327 is written on `wip/gltf-export-parity-blocked`.
     - Skinning and Animation (left and right handed): need skins.
     - Camera, left-handed (once / twice) and camera rotation animation LH → LH: need a multi-camera export decision (§1).

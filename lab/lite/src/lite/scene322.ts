@@ -1,6 +1,8 @@
 // Scene 322 — Babylon.js visualization test "GLTF Serializer KHR gpu instancing" (playground #1Q2BWN#10).
 // TeapotsGalore.gltf is loaded into a scene, exported to GLB, and the GLB is loaded into a new scene that gets its own
 // camera and light. Only the reloaded scene is rendered (the harness renders the returned `outScene`).
+// Known gap (not the exporter): Lite renders the metallic teapots brighter than Babylon.js under the hemispheric light,
+// with or without the export step; see the spec header.
 
 import {
     addToScene,

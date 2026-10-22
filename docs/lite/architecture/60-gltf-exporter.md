@@ -1254,7 +1254,7 @@ Three layers, mapped onto TESTING.md's categories:
 
 - Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`).
 - Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts` and `export-gltf-bjs-ports.spec.ts`, with the lab page `lab/lite/export-gltf-test.html`).
-- Playwright visual parity scenes 316–325 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
+- Playwright visual parity scenes 316–318, 320 and 322–325 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
 
 The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
@@ -1385,7 +1385,7 @@ For glTF assets, `export(load(export(load(asset))))` is byte-identical to `expor
 
 ### Visual parity suite — Playwright, `tests/lite/parity/scenes/`
 
-The Babylon.js `"GLTF Serializer"` visualization tests (`packages/tools/tests/test/visualization/config.json`, 26 entries) are ported as Lite parity scenes, following GUIDANCE §2's scene checklist. Each scene has two pages:
+The Babylon.js `"GLTF Serializer"` visualization tests (`packages/tools/tests/test/visualization/config.json`, 26 entries) are ported as Lite parity scenes, following GUIDANCE §2's scene checklist. Besides its bundle page (`bundle-sceneN.html`), each scene has two pages:
 
 - **Babylon.js reference page** (`lab/lite/babylon-ref-sceneN.html`, `lab/lite/src/bjs/sceneN.ts`). It runs the test's playground as-is (same values, order and URLs), with the test's `replace` options as query-parameter variants and Babylon.js's seeded `Math.random`, through `@babylonjs/serializers` (a lab dev dependency). Before its golden was captured, each page was checked against Babylon.js's own reference image for that test, at the test's 600×400 size with antialiasing off (`?antialias=0`), using Babylon.js's pass rule (pixelmatch threshold 0.035, differing pixels ≤ the test's `errorRatio` %).
 - **Lite page** (`lab/lite/sceneN.html`, `lab/lite/src/lite/sceneN.ts`). It builds the same scene with the public Lite API, calls `exportSceneAsGlb`, reloads the Blob with `loadGltf`, and repeats the snippet's post-load steps. Every place where Lite cannot express a snippet step is named in the page header and the spec header.
@@ -1403,15 +1403,15 @@ The golden (`reference/lite/<slug>/babylon-ref-golden.png`, committed) is captur
 | 324   | Rotation conversion, left-handed · `#UK7FLI#1`                        | 0.092    | 0.15     | Babylon.js's default material for material-less boxes is a Standard material, so the Lite boxes get `createStandardMaterial()`                                                                                                   |
 | 325   | un/compressed texture roundtrip · `#8NTR5X#8`                         | 0.85     | 0.9      | PBR `debugMode = 20` maps to `setPbrUnlit`; the remaining difference is the KTX2 source re-encoded as PNG (original image bytes are out of scope); 0.0005 without export                                                         |
 
-Not ported (16 of 26):
+Nine of the 26 tests are ported, in the eight scenes above (316 covers two). Not ported (17 of 26):
 
 - Right-handed variants (8): Negative World Matrix (right handed, once / twice), KHR punctual light right-handed, Camera right-handed (once / twice), and the camera rotation animation tests RH → LH, RH → RH, LH → RH. Lite has no right-handed scenes.
 - Skinning and Animation, and its right-handed twin (2): skins are out of scope.
 - Camera, left-handed (once / twice) and camera rotation animation LH → LH (3): they export two or eight cameras from one scene into split viewports. A Lite scene has one camera and the exporter exports `scene.camera` only.
-- Morph Target Animation Group (`#T087A8#29`): the alien is skinned, so its reloaded pose differs (skins).
-- KHR materials clearcoat (`#9N6CLU#23`): the snippet's DDS environment is gamma-space; Lite's DDS environment loader treats it as linear (MAD 54.5 with or without export).
-- multimaterial with raw texture (`#KU72PX#0`): its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling).
-- Export GLTF Extension KHR_texture_transform (`#20OAV9#15148`): written, awaiting its texture (`https://i.imgur.com/JbvoYlB.png`) for the golden.
+- Morph Target Animation Group (`#T087A8#29`): the alien is skinned, so its reloaded pose differs (skins). Written as scene 319 on branch `wip/gltf-export-parity-blocked`.
+- KHR materials clearcoat (`#9N6CLU#23`): the snippet's DDS environment is gamma-space; Lite's DDS environment loader treats it as linear (MAD 54.5 with or without export). Written as scene 321 on `wip/gltf-export-parity-blocked`.
+- multimaterial with raw texture (`#KU72PX`): its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling). Written as scene 326 on `wip/gltf-export-parity-blocked`.
+- Export GLTF Extension KHR_texture_transform (`#20OAV9#15148`): written as scene 327 on `wip/gltf-export-parity-blocked`; its golden needs the texture `https://i.imgur.com/JbvoYlB.png`, which could not be fetched here.
 
 ---
 

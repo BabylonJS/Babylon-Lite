@@ -9,7 +9,8 @@
  * Not ported: the two right-handed tests ("right handed, once / twice"); Lite has no right-handed scenes.
  * Not reproduced one-to-one: Lite has no per-material sideOrientation, so the "CW" triangles keep their vertices and
  * get reversed indices. The page opts into `enableDeviceLostSceneRecovery` so loaded meshes keep their vertex colors
- * for the second export (see the page and docs/lite/architecture/60-gltf-exporter.md, Scope).
+ * for the second export (see the page and docs/lite/architecture/60-gltf-exporter.md, Scope). The snippet's
+ * `shouldExportNode` excludes the light; Lite's exporter has no node filter, so the light joins after the round trips.
  */
 import { expect, test } from "../parity-fixtures";
 import * as path from "path";

@@ -8,6 +8,10 @@
  * Not reproduced: Draco compression (the Lite exporter writes plain accessors, compressed output is out of scope), and the
  * snippet's shouldExportNode filter (lights and the camera are added after the export instead).
  *
+ * Threshold: the Lite render differs from the golden by MAD ≈ 0.63 without export and ≈ 0.81 with it, mostly on the
+ * normal-mapped face. The Babylon.js WebGPU reference page itself differs from Babylon.js's WebGL reference image there
+ * by 3.2 % of pixels (its limit is 1.1 %), with or without export.
+ *
  * Assertions:
  * - Full image MAD ≤ scene-config.json maxMad
  */

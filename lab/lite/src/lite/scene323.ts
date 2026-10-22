@@ -29,7 +29,8 @@ async function main(): Promise<void> {
     ground.material = createPbrMaterial({ roughnessFactor: 0.66 });
     addToScene(scene, ground);
 
-    // Lights. Babylon.js FALLOFF_GLTF is Lite's default physical falloff (PBR `usePhysicalLightFalloff`).
+    // Lights. Babylon.js `falloffType = FALLOFF_GLTF` has no Lite counterpart; Lite lights use the PBR material's
+    // physical falloff. The exporter clamps the 30-radian spot cone to a valid outerConeAngle (with a warning).
     // The snippet's `shouldExportNode` keeps only lights; Lite's exporter has no filter, so the lights are
     // exported from a scene of their own and only the reloaded lights join the render scene.
     const lightScene = createSceneContext(engine);

@@ -1,6 +1,7 @@
 // Scene 320 — Babylon.js visualization test "GLTF Serializer KHR draco mesh compression" (playground #F8BF8N#3).
 // Alien.gltf is exported, the exported nodes are removed, and the GLB is loaded back into the same scene.
 // Babylon Lite writes plain accessors (Draco output is out of scope), so the export carries no KHR_draco_mesh_compression.
+// The remaining difference (mostly the normal-mapped face) is explained in the spec header.
 
 import {
     addToScene,
