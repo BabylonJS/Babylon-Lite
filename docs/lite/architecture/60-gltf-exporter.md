@@ -1254,7 +1254,7 @@ Three layers, mapped onto TESTING.md's categories:
 
 - Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`).
 - Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts` and `export-gltf-bjs-ports.spec.ts`, with the lab page `lab/lite/export-gltf-test.html`).
-- Playwright visual parity scenes 316–318, 320 and 322–325 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
+- Playwright visual parity scenes 316, 317, 318, 324 and 327 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
 
 The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
@@ -1392,26 +1392,29 @@ The Babylon.js `"GLTF Serializer"` visualization tests (`packages/tools/tests/te
 
 The golden (`reference/lite/<slug>/babylon-ref-golden.png`, committed) is captured once from the reference page at 1280×720. The spec compares the Lite page with it against the scene's `maxMad`. Variants that share one Babylon.js reference image share one golden.
 
+A test is kept only when its Lite page matches the golden closely. A test that would pass only through a threshold covering deliberately skipped work (an out-of-scope exporter capability, or a Lite renderer gap outside this module) is not kept. Its scene is preserved on branch `wip/gltf-export-parity-blocked`, and the gap is tracked in the follow-up issue.
+
 | Scene | Babylon.js test(s) · playground                                       | Lite MAD | `maxMad` | Notes                                                                                                                                                                                                                            |
 | ----- | --------------------------------------------------------------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 316   | with Negative World Matrix (left handed, once / twice) · `#KX53VK#88` | 0.015    | 0.05     | `?iterations=2` is the second test; the page enables `enableDeviceLostSceneRecovery` so the second export keeps vertex colors (Scope)                                                                                            |
 | 317   | Shared Buffer Conversions · `#KX53VK#85`                              | 0.015    | 0.05     | two meshes over one set of arrays                                                                                                                                                                                                |
 | 318   | Morph Target Animation · `#84M2SR#107`                                | 0.0006   | 0.05     | the influence animations are not authored (the exporter exports only glTF-clip animation groups); the frame-60 weights are applied after the reload. Upstream excludes this test on WebGPU, but the WebGPU reference page passes |
-| 320   | KHR draco mesh compression · `#F8BF8N#3`                              | 0.81     | 0.9      | Lite writes plain accessors. The reference page differs from the WebGL reference image by 3.2 % (limit 1.1 %) on the normal-mapped face, with or without export                                                                  |
-| 322   | KHR gpu instancing · `#1Q2BWN#10`                                     | 5.92     | 6.0      | Lite renders TeapotsGalore's metallic PBR under a hemispheric light brighter than Babylon.js; identical with and without export (renderer gap)                                                                                   |
-| 323   | KHR punctual light, left-handed · `#FLXW8B#27`                        | 2.77     | 2.9      | Lite PBR direct lighting without an environment is darker (2.36 without export) and has no `FALLOFF_GLTF`; the 30-radian spot cone is clamped to a valid `outerConeAngle`                                                        |
 | 324   | Rotation conversion, left-handed · `#UK7FLI#1`                        | 0.092    | 0.15     | Babylon.js's default material for material-less boxes is a Standard material, so the Lite boxes get `createStandardMaterial()`                                                                                                   |
-| 325   | un/compressed texture roundtrip · `#8NTR5X#8`                         | 0.85     | 0.9      | PBR `debugMode = 20` maps to `setPbrUnlit`; the remaining difference is the KTX2 source re-encoded as PNG (original image bytes are out of scope); 0.0005 without export                                                         |
+| 327   | Export GLTF Extension KHR_texture_transform · `#20OAV9#15148`         | 0.0003   | 0.05     | `wAng` maps to `uAng` with the opposite sign; the light and camera join after the export (no node filter)                                                                                                                        |
 
-Nine of the 26 tests are ported, in the eight scenes above (316 covers two). Not ported (17 of 26):
+Six of the 26 tests are ported, in the five scenes above (316 covers two). Not ported (20 of 26):
 
 - Right-handed variants (8): Negative World Matrix (right handed, once / twice), KHR punctual light right-handed, Camera right-handed (once / twice), and the camera rotation animation tests RH → LH, RH → RH, LH → RH. Lite has no right-handed scenes.
 - Skinning and Animation, and its right-handed twin (2): skins are out of scope.
 - Camera, left-handed (once / twice) and camera rotation animation LH → LH (3): they export two or eight cameras from one scene into split viewports. A Lite scene has one camera and the exporter exports `scene.camera` only.
-- Morph Target Animation Group (`#T087A8#29`): the alien is skinned, so its reloaded pose differs (skins). Written as scene 319 on branch `wip/gltf-export-parity-blocked`.
-- KHR materials clearcoat (`#9N6CLU#23`): the snippet's DDS environment is gamma-space; Lite's DDS environment loader treats it as linear (MAD 54.5 with or without export). Written as scene 321 on `wip/gltf-export-parity-blocked`.
-- multimaterial with raw texture (`#KU72PX`): its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling). Written as scene 326 on `wip/gltf-export-parity-blocked`.
-- Export GLTF Extension KHR_texture_transform (`#20OAV9#15148`): written as scene 327 on `wip/gltf-export-parity-blocked`; its golden needs the texture `https://i.imgur.com/JbvoYlB.png`, which could not be fetched here.
+- Kept on `wip/gltf-export-parity-blocked`, with the blocker (7):
+    - Morph Target Animation Group (`#T087A8#29`), scene 319: the alien is skinned, so its reloaded pose differs (skins).
+    - KHR draco mesh compression (`#F8BF8N#3`), scene 320: the Lite render is MAD 0.63 off without export (mostly the normal-mapped face) and 0.81 with it, because tangents and vertex colors are dropped (CPU retention is out of scope). The Babylon.js WebGPU reference page also misses Babylon.js's own reference image by 3.2 % (limit 1.1 %) there.
+    - KHR materials clearcoat (`#9N6CLU#23`), scene 321: the snippet's DDS environment is gamma-space; Lite's DDS environment loader treats it as linear (MAD 54.5 with or without export).
+    - KHR gpu instancing (`#1Q2BWN#10`), scene 322: Lite renders TeapotsGalore's metallic PBR under a hemispheric light brighter than Babylon.js (MAD 5.92, identical with and without export).
+    - KHR punctual light, left-handed (`#FLXW8B#27`), scene 323: Lite PBR direct lighting without an environment is darker (MAD 2.36 without export, 2.77 with it) and Lite has no `FALLOFF_GLTF`; the exporter also clamps the snippet's 30-radian spot cone to a valid `outerConeAngle`.
+    - un/compressed texture roundtrip (`#8NTR5X#8`), scene 325: the KTX2 source comes back re-encoded as PNG (original image bytes are out of scope): MAD 0.85, against 0.0005 without export.
+    - multimaterial with raw texture (`#KU72PX`), scene 326: its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling).
 
 ---
 
@@ -1454,10 +1457,10 @@ Sizes are approximate (`wc -l`). The only production file outside `export-gltf/`
 | `tests/lite/unit/export-gltf/images.test.ts`                                                     | ~240 lines         | readback paths, image identity, failures, container                                                              |
 | `tests/lite/unit/export-gltf/bjs-ports.test.ts`                                                  | ~495 lines         | Babylon.js test ports over native scenes                                                                         |
 | `tests/lite/unit/export-gltf/cameras-lights-animations.test.ts`                                  | ~910 lines         | cameras, lights, animations                                                                                      |
-| `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | ~50–180 lines each | visual parity scenes 316, 317, 318, 320, 322, 323, 324, 325: Lite page and Babylon.js reference page             |
+| `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | ~50–180 lines each | visual parity scenes 316, 317, 318, 324, 327: Lite page and Babylon.js reference page                            |
 | `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | ~40–60 lines each  | visual parity specs                                                                                              |
 | `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | images             | goldens and gallery thumbnails                                                                                   |
-| `scene-config.json`                                                                              | 8 entries          | ids 316–318, 320, 322–325 with `maxMad` and `maxRawKB`                                                           |
+| `scene-config.json`                                                                              | 5 entries          | ids 316–318, 324, 327 with `maxMad` and `maxRawKB`                                                               |
 | `lab/package.json`                                                                               | 1 line             | `@babylonjs/serializers` dev dependency for the reference pages                                                  |
 | `lab/lite/export-gltf-test.html`                                                                 | 11 lines           | plumbing lab page                                                                                                |
 | `lab/lite/src/export-gltf-test.ts`                                                               | ~170 lines         | `window.exportGltfTest`: three-stage round trip for assets and a native scene; single export of a GLB            |

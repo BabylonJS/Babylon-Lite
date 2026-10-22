@@ -411,16 +411,6 @@
         "compatParity": true
     },
     {
-        "id": 99,
-        "slug": "scene99-bone-control",
-        "name": "Scene 99 — Bone Control",
-        "maxMad": 0.02,
-        "maxRawKB": 91.8,
-        "description": "Xbot skinned model at bind pose with the whole left arm hidden via opt-in bone control (enableBoneControl + setBoneVisible collapses the bone sub-tree). Parity against BJS bone local-matrix collapse.",
-        "tags": ["gltf", "skeleton", "bone-control"],
-        "skipPerf": true
-    },
-    {
         "id": 40,
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",
@@ -1056,6 +1046,16 @@
         "maxRawKB": 59.8,
         "description": "World-space facing billboards drawn with the opt-in billboardBlendAdditive blend mode (src-alpha, one); several large overlapping billboards in front of two boxes make the additive brightening obvious, matching the BJS SpriteManager ALPHA_ONEONE oracle.",
         "tags": ["sprites", "billboards", "blend"],
+        "skipPerf": true
+    },
+    {
+        "id": 99,
+        "slug": "scene99-bone-control",
+        "name": "Scene 99 — Bone Control",
+        "maxMad": 0.02,
+        "maxRawKB": 91.8,
+        "description": "Xbot skinned model at bind pose with the whole left arm hidden via opt-in bone control (enableBoneControl + setBoneVisible collapses the bone sub-tree). Parity against BJS bone local-matrix collapse.",
+        "tags": ["gltf", "skeleton", "bone-control"],
         "skipPerf": true
     },
     {
@@ -2101,6 +2101,16 @@
         "compatParity": true
     },
     {
+        "id": 226,
+        "slug": "scene226-gs-gltf",
+        "name": "Scene 226 — Gaussian Splatting glTF",
+        "maxMad": 5,
+        "maxRawKB": 65,
+        "description": "Ports playground #WSAFDA#0: loads Halo_Believe.glb via loadGltf(). The glb's single POINTS-mode primitive carries the KHR_gaussian_splatting extension; the new gltf-feature-gaussian-splatting.ts strips it from the core mesh pipeline and converts POSITION/SCALE/OPACITY/ROTATION + the SH degree-0 DC term into Lite's standard 32-byte splat row buffer, then attaches a GaussianSplattingMesh (rotated 180° about Z to match the BJS reference orientation) via the existing splat pipeline. v1 scope: SH degree 0 only. Reference loads the same .glb via ImportMeshAsync + @babylonjs/loaders KHR_gaussian_splatting.",
+        "tags": ["gaussian-splatting", "gltf"],
+        "skipPerf": true
+    },
+    {
         "id": 227,
         "slug": "scene227-multi-canvas-same-scene",
         "name": "Scene 227 — Multi-Canvas (Same Scene)",
@@ -2412,16 +2422,6 @@
         "maxRawKB": 80.8,
         "description": "EnvironmentTest.gltf (glTF-IBL) — cx20 gltf-test. Exercises EXT_lights_image_based: the glTF carries its own document-level image-based light (irradiance SH9 + prefiltered specular cubemap mips + intensity/rotation), driving PBR IBL through Lite's existing environment path (EnvironmentTextures + scene UBO spherical harmonics). Grid of metallic-roughness spheres.",
         "tags": ["gltf", "pbr", "env", "ibl"],
-        "skipPerf": true
-    },
-    {
-        "id": 226,
-        "slug": "scene226-gs-gltf",
-        "name": "Scene 226 — Gaussian Splatting glTF",
-        "maxMad": 5,
-        "maxRawKB": 65,
-        "description": "Ports playground #WSAFDA#0: loads Halo_Believe.glb via loadGltf(). The glb's single POINTS-mode primitive carries the KHR_gaussian_splatting extension; the new gltf-feature-gaussian-splatting.ts strips it from the core mesh pipeline and converts POSITION/SCALE/OPACITY/ROTATION + the SH degree-0 DC term into Lite's standard 32-byte splat row buffer, then attaches a GaussianSplattingMesh (rotated 180° about Z to match the BJS reference orientation) via the existing splat pipeline. v1 scope: SH degree 0 only. Reference loads the same .glb via ImportMeshAsync + @babylonjs/loaders KHR_gaussian_splatting.",
-        "tags": ["gaussian-splatting", "gltf"],
         "skipPerf": true
     },
     {
@@ -2823,36 +2823,6 @@
         "skipPerf": true
     },
     {
-        "id": 320,
-        "slug": "scene320-gltf-export-draco",
-        "name": "Scene 320 — glTF Export: Draco Source Round Trip",
-        "maxMad": 0.9,
-        "maxRawKB": 136.8,
-        "description": "Babylon.js visualization test “GLTF Serializer KHR draco mesh compression” (playground #F8BF8N#3): The Alien glTF exported and reloaded (Lite writes plain accessors; Draco output is out of scope).",
-        "tags": ["gltf", "export"],
-        "skipPerf": true
-    },
-    {
-        "id": 322,
-        "slug": "scene322-gltf-export-gpu-instancing",
-        "name": "Scene 322 — glTF Export: EXT_mesh_gpu_instancing",
-        "maxMad": 6.0,
-        "maxRawKB": 123.6,
-        "description": "Babylon.js visualization test “GLTF Serializer KHR gpu instancing” (playground #1Q2BWN#10): TeapotsGalore thin instances exported and reloaded.",
-        "tags": ["gltf", "export"],
-        "skipPerf": true
-    },
-    {
-        "id": 323,
-        "slug": "scene323-gltf-export-punctual-lights",
-        "name": "Scene 323 — glTF Export: KHR_lights_punctual",
-        "maxMad": 2.9,
-        "maxRawKB": 120.9,
-        "description": "Babylon.js visualization test “GLTF Serializer KHR punctual light, left-handed” (playground #FLXW8B#27): Directional, point and spot lights with glTF falloff, exported and reloaded over a PBR ground.",
-        "tags": ["gltf", "export"],
-        "skipPerf": true
-    },
-    {
         "id": 324,
         "slug": "scene324-gltf-export-rotation-conversion",
         "name": "Scene 324 — glTF Export: Rotation Conversion",
@@ -2863,12 +2833,12 @@
         "skipPerf": true
     },
     {
-        "id": 325,
-        "slug": "scene325-gltf-export-texture-roundtrip",
-        "name": "Scene 325 — glTF Export: Texture Round Trip",
-        "maxMad": 0.9,
-        "maxRawKB": 122.9,
-        "description": "Babylon.js visualization test “GLTF Serializer un/compressed texture roundtrip” (playground #8NTR5X#8): PNG, JPEG and KTX2 textures loaded four ways, exported, reloaded and shown unlit.",
+        "id": 327,
+        "slug": "scene327-gltf-export-texture-transform",
+        "name": "Scene 327 — glTF Export: KHR_texture_transform",
+        "maxMad": 0.05,
+        "maxRawKB": 141.0,
+        "description": "Babylon.js visualization test “Export GLTF Extension KHR_texture_transform” (playground #20OAV9#15148): Standard materials with rotated, offset and scaled textures, exported and reloaded below the originals.",
         "tags": ["gltf", "export"],
         "skipPerf": true
     }
