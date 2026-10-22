@@ -12,6 +12,8 @@ import type * as NativeCoverage from "../../../packages/babylon-lite/src/render/
 import type * as NativeStencil from "../../../packages/babylon-lite/src/material/enable-material-stencil.js";
 import type * as NativeTransmission from "../../../packages/babylon-lite/src/frame-graph/transmission.js";
 import type * as NativeSkybox from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import type { createSplatStreamGpuState, retireSplatStreamGpuState } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.js";
+import type { GaussianSplatStream } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-types.js";
 import type { GaussianPointSplatting } from "../../../packages/babylon-lite/src/gaussian-point-splatting/gps-state.js";
 import type { GaussianSplattingMesh } from "../../../packages/babylon-lite/src/mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import type { DrawUpdateContext } from "../../../packages/babylon-lite/src/render/renderable.js";
@@ -54,6 +56,8 @@ type GpuTestApi = typeof GpsShaders &
         buildShaderMaterialRenderables: typeof buildShaderMaterialRenderables;
         publishTiLodBucket: typeof publishTiLodBucket;
         tryBind: typeof tryBind;
+        createSplatStreamGpuState: typeof createSplatStreamGpuState;
+        retireSplatStreamGpuState: typeof retireSplatStreamGpuState;
     };
 
 test("Gaussian point sampling preserves radiance, conservative visibility and distinct depth modes", async ({ page }) => {
@@ -74,6 +78,7 @@ export * from "./packages/babylon-lite/src/render/alpha-to-coverage.js";
 export * from "./packages/babylon-lite/src/material/enable-material-stencil.js";
 export * from "./packages/babylon-lite/src/frame-graph/transmission.js";
 export * from "./packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+export { createSplatStreamGpuState, retireSplatStreamGpuState } from "./packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.js";
 export { wgsl } from "./packages/babylon-lite/src/shader/wgsl.js";
 export { setSubtreeVisible as setMeshVisible } from "./packages/babylon-lite/src/scene/visibility.js";
 export { createArcRotateCamera } from "./packages/babylon-lite/src/camera/arc-rotate.js";
@@ -945,6 +950,71 @@ return vec4f(input.position.x*shaderUniforms.width+shaderUniforms.offset,input.p
         monitorFrame();
         points.dispose();
         monitorTask.dispose?.();
+        const streamGpu = shaders.createSplatStreamGpuState(engine, 1, 1024 * 1024);
+        streamGpu.gatheredGeneration = streamGpu.contentGeneration;
+        const stream = {
+            _gpu: streamGpu,
+            _disposed: false,
+            worldMatrix,
+            boundMin: [-0.1, -0.1, -0.1],
+            boundMax: [0.1, 0.1, 0.1],
+        } as unknown as GaussianSplatStream;
+        const streamGps: GaussianPointSplatting = {
+            ...gps,
+            _target: stream,
+            _progress: null,
+            colorRenderMode: true,
+            depthRenderMode: true,
+            depthVisualization: "linear",
+            get progress() {
+                return this._progress;
+            },
+        };
+        const streamPoints = shaders.createGpsRenderable(scene, streamGps);
+        const streamRt = shaders.createRenderTarget({ samples: 1, format: "rgba8unorm", dFormat: "depth32float", size: { width: 1, height: 1 } });
+        const streamTask = shaders._createAutomaticRenderTask({ name: "empty-linear-stream", rt: streamRt, autoMirror: false }, engine, scene);
+        const instrumentedPasses: boolean[] = [];
+        const observer: Renderable = {
+            order: 201,
+            isTransparent: true,
+            bind: () => ({
+                renderable: observer,
+                pipeline: opaquePipeline,
+                draw(pass) {
+                    instrumentedPasses.push(shaders.gpsPassHasDraws(pass) !== undefined);
+                    return 0;
+                },
+            }),
+        };
+        streamTask._renderables = [streamPoints.renderable, observer];
+        scene._frameGraph._tasks.push(streamTask);
+        streamTask.record();
+        const streamFrame = (): void => {
+            scene._beforeRender.forEach((hook) => hook(0));
+            engine._currentEncoder = device.createCommandEncoder();
+            streamTask.execute!();
+            device.queue.submit([engine._currentEncoder.finish()]);
+        };
+        streamFrame();
+        const emptyStreamColor = await readAccumulation(1);
+        streamFrame();
+        device.queue.writeBuffer(streamGpu.canonical, 0, new Float32Array([0, 0, 0, 1, 0.01, 0, 0, 0.01, 0, 0.01, 0, 0, 0, 0, 1, 0]));
+        streamGpu.count = 1;
+        streamGpu.contentGeneration++;
+        streamGpu.gatheredGeneration = streamGpu.contentGeneration;
+        streamFrame();
+        const publishedStreamColor = await readAccumulation(1);
+        const streamAllocationCount = monitored["GPS accumulation"]!.length;
+        streamGps.colorRenderMode = false;
+        streamGps.depthRenderMode = false;
+        streamFrame();
+        streamGps.depthRenderMode = true;
+        streamFrame();
+        const reactivatedStreamColor = await readAccumulation(1);
+        const reactivatedAllocationCount = monitored["GPS accumulation"]!.length;
+        streamPoints.dispose();
+        streamTask.dispose?.();
+        shaders.retireSplatStreamGpuState(streamGpu);
         device.createBuffer = createBuffer;
         staticData.forEach((texture) => texture.destroy());
         cube.destroy();
@@ -990,6 +1060,12 @@ return vec4f(input.position.x*shaderUniforms.width+shaderUniforms.offset,input.p
             transparentWake,
             transparentConverged,
             pureConvergedPasses,
+            emptyStreamColor,
+            publishedStreamColor,
+            reactivatedStreamColor,
+            streamAllocationCount,
+            reactivatedAllocationCount,
+            instrumentedPasses,
             gpuErrors,
             validation: validation?.message,
         };
@@ -1038,6 +1114,12 @@ return vec4f(input.position.x*shaderUniforms.width+shaderUniforms.offset,input.p
     expect(result.transparentRevealed).toEqual([0, 0, 1, 1]);
     expect(result.transparentWake[0]).toBe(1);
     expect(result.transparentConverged[0]).toBe(0);
+    expect(result.emptyStreamColor).toEqual([0, 0, 0, 0]);
+    expect(result.publishedStreamColor[3]).toBe(1);
+    result.publishedStreamColor.slice(0, 3).forEach((channel) => expect(channel).toBeCloseTo(0.4, 5));
+    expect(result.reactivatedStreamColor).toEqual(result.publishedStreamColor);
+    expect(result.reactivatedAllocationCount).toBe(result.streamAllocationCount);
+    expect(result.instrumentedPasses).toEqual([true, true, true, false, true]);
     expect(result.distribution[1]).toEqual(result.distribution[0]);
     expect(result.distribution[0]![0]).toBeGreaterThan(0.05);
     expect(result.distribution[0]![2]).toBeGreaterThan(0.05);

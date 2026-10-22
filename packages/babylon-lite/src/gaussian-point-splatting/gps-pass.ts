@@ -15,7 +15,7 @@ interface TaskPatch {
 }
 
 interface PassOwner {
-    references: number;
+    rendering: Set<() => boolean>;
     scan: () => void;
     tasks: Map<RenderTask, TaskPatch>;
 }
@@ -119,6 +119,15 @@ function wrapPass(task: RenderTask, begin: GPUCommandEncoder["beginRenderPass"],
     return proxy;
 }
 
+function hasRendering(predicates: ReadonlySet<() => boolean>): boolean {
+    for (const predicate of predicates) {
+        if (predicate()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function execute(task: RenderTask, engine: EngineContext, original: NonNullable<RenderTask["execute"]>): number {
     const encoder = engine._currentEncoder;
     const descriptor = Object.getOwnPropertyDescriptor(encoder, "beginRenderPass");
@@ -145,12 +154,13 @@ function execute(task: RenderTask, engine: EngineContext, original: NonNullable<
 }
 
 /** All pass splitting belongs to the opt-in renderer; the frame graph retains its native execution path. */
-export function installGpsPasses(scene: SceneContext): () => void {
+export function installGpsPasses(scene: SceneContext, isRendering?: () => boolean): () => void {
     let owner = owners?.get(scene);
     if (!owner) {
         const tasks: PassOwner["tasks"] = new Map();
+        const rendering: PassOwner["rendering"] = new Set();
         owner = {
-            references: 0,
+            rendering,
             tasks,
             scan() {
                 const current = new Set(scene._frameGraph?._tasks ?? []);
@@ -182,7 +192,7 @@ export function installGpsPasses(scene: SceneContext): () => void {
                     const patch: TaskPatch = {
                         original,
                         active: true,
-                        wrapped: () => (patch.active ? execute(renderTask, scene.surface.engine, original) : original.call(renderTask)),
+                        wrapped: () => (patch.active && hasRendering(rendering) ? execute(renderTask, scene.surface.engine, original) : original.call(renderTask)),
                     };
                     tasks.set(renderTask, patch);
                     renderTask.execute = patch.wrapped;
@@ -192,7 +202,8 @@ export function installGpsPasses(scene: SceneContext): () => void {
         (owners ??= new WeakMap()).set(scene, owner);
         scene._beforeRender.push(owner.scan);
     }
-    owner.references++;
+    const rendering = (): boolean => isRendering?.() ?? true;
+    owner.rendering.add(rendering);
     owner.scan();
     let released = false;
     return () => {
@@ -200,7 +211,8 @@ export function installGpsPasses(scene: SceneContext): () => void {
             return;
         }
         released = true;
-        if (--owner.references !== 0) {
+        owner.rendering.delete(rendering);
+        if (owner.rendering.size !== 0) {
             return;
         }
         owner.tasks.forEach((patch, task) => {

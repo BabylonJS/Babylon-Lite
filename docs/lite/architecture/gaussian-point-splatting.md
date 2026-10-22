@@ -198,6 +198,12 @@ instrumentation remains in the call chain. Added/replaced tasks are discovered
 before rendering and when point bindings are built. Superseded, removed and
 disposed wrappers are deactivated, so another feature retaining a captured wrapper
 cannot keep point instrumentation alive. Last-handle release is idempotent.
+Each retained handle supplies a live render-mode predicate. When no retained
+handle is enabled with either color or depth rendering, task wrappers call the
+native execute function directly: the encoder method is untouched and no pass
+proxy or forwarding state is created. Toggling a handle back on restores pass
+instrumentation on its next execution without discarding cached GPU resources
+or changing classic fresh-sort restoration.
 
 The adapter tracks actual preceding draw commands, including transparent depth
 writers and earlier point draws. Unknown render bundles conservatively count as
@@ -261,6 +267,11 @@ last native contributor resets visibility histories without invalidating the
 unchanged raw discs. When opaque visibility still
 needs monitoring, reuse the completed disc texture and run only visibility resolve;
 do not repeat preprocessing or rasterization of unchanged discs.
+An initially empty stream still clears the cached depth texture and resolves
+transparent output, but does not create a raster bind group or issue a disc draw.
+Its zero-capacity screen buffer cannot satisfy the shader's minimum 64-byte
+`Screen` binding. Publishing nonempty content invalidates completion, grows the
+working buffers, and performs the first valid disc raster.
 
 ## State Machine / Lifecycle
 
@@ -466,6 +477,13 @@ native depth changes, and reconverge. Moving the target across a fixed occluder
 with reprojection enabled must reset rather than preserve stale foreground color.
 Four-sample linear discs rasterize once, including initially occluded geometry;
 hiding that occluder reveals the cached discs without rerasterization.
+An actual stream GPU state starts with zero active splats in linear mode, resolves
+transparent output without validation errors, then publishes one canonical splat
+and resolves its depth. Turning both modes off must forward the native pass
+unchanged; reactivating depth mode restores instrumentation and the same output
+without allocating new accumulation buffers. Multi-handle unit coverage checks
+that either color or depth rendering keeps instrumentation active until the last
+active handle is toggled off or released.
 `gaussian-point-scene-depth.test.ts` covers borrowed native attachment ownership,
 render-task filtering, loaded-only overlays, native viewport rounding,
 shared persistent signature identity, and missing-camera / empty-viewport rejection.

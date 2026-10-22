@@ -765,15 +765,17 @@ function recordPrepared(gps: GaussianPointSplatting, state: ViewState, engine: E
             state.groups.clear();
         }
         if (!state.linearReady) {
-            const raster = linearDepthPipeline(device, pixel.samples);
             const pass = encoder.beginRenderPass({
                 label: "GPS linear discs",
                 colorAttachments: [],
                 depthStencilAttachment: { view: state.linear.view, depthLoadOp: "clear", depthStoreOp: "store", depthClearValue: 0 },
             });
-            pass.setPipeline(raster);
-            pass.setBindGroup(0, groupFor(raster, [params, splats.screen]));
-            pass.draw(4, splats.count);
+            if (splats.count > 0) {
+                const raster = linearDepthPipeline(device, pixel.samples);
+                pass.setPipeline(raster);
+                pass.setBindGroup(0, groupFor(raster, [params, splats.screen]));
+                pass.draw(4, splats.count);
+            }
             pass.end();
             state.linearReady = true;
         }
@@ -831,7 +833,7 @@ function publishProgress(gps: GaussianPointSplatting, state: ViewState, cycle: n
 
 /** @internal Compute and fullscreen material owned entirely by the opt-in enabler. */
 export function createGpsRenderable(scene: SceneContext, gps: GaussianPointSplatting): { renderable: Renderable; dispose: () => void } {
-    const releasePasses = installGpsPasses(scene);
+    const releasePasses = installGpsPasses(scene, () => !gps._disabled && (gps.colorRenderMode || gps.depthRenderMode));
     const views = new Set<ViewState>();
     const bySignature = new WeakMap<RenderTargetSignature, ViewState>();
     const engine = scene.surface.engine;

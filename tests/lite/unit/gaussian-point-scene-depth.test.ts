@@ -192,6 +192,49 @@ it("tracks actual preceding native draws across LOAD segments and proves only na
     release();
 });
 
+it("forwards native passes unchanged while all retained handles are off and resumes for either render mode", () => {
+    const nativePass = { end: vi.fn() } as unknown as GPURenderPassEncoder;
+    const begin = vi.fn(() => nativePass);
+    const encoder = { beginRenderPass: begin } as unknown as GPUCommandEncoder;
+    const engine = { _currentEncoder: encoder } as EngineContext;
+    const view = {} as GPUTextureView;
+    const first = { colorRenderMode: true, depthRenderMode: false };
+    const second = { colorRenderMode: false, depthRenderMode: false };
+    let expectedActive = true;
+    const task = {
+        _targetSignature: { _sampleCount: 4, _depthStencilFormat: "depth32float" },
+        _config: { rt: { _depthView: view } },
+        execute() {
+            expect(encoder.beginRenderPass === begin).toBe(!expectedActive);
+            const pass = encoder.beginRenderPass({ colorAttachments: [], depthStencilAttachment: { view, depthLoadOp: "load", depthStoreOp: "store" } });
+            expect(pass === nativePass).toBe(!expectedActive);
+            expect(gpsPassHasDraws(pass)).toBe(expectedActive ? false : undefined);
+            pass.end();
+            return 1;
+        },
+    } as unknown as RenderTask;
+    const scene = { surface: { engine }, _beforeRender: [], _frameGraph: { _tasks: [task] } } as unknown as SceneContext;
+    const releaseFirst = installGpsPasses(scene, () => first.colorRenderMode || first.depthRenderMode);
+    const releaseSecond = installGpsPasses(scene, () => second.colorRenderMode || second.depthRenderMode);
+    task.execute!();
+    first.colorRenderMode = false;
+    expectedActive = false;
+    task.execute!();
+    second.depthRenderMode = true;
+    expectedActive = true;
+    task.execute!();
+    releaseSecond();
+    expectedActive = false;
+    task.execute!();
+    first.colorRenderMode = true;
+    expectedActive = true;
+    task.execute!();
+    releaseFirst();
+    expectedActive = false;
+    task.execute!();
+    expect(encoder.beginRenderPass).toBe(begin);
+});
+
 it("deactivates wrappers captured by a later feature across scan, disposal and re-enabling", () => {
     const observed: boolean[] = [];
     const view = {} as GPUTextureView;
