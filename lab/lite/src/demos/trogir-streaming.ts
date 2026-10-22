@@ -2,16 +2,18 @@ import {
     attachGaussianSplatStream,
     createEngine,
     createSceneContext,
+    disableGaussianPointSplatting,
     disposeEngine,
     disposeGaussianSplatStream,
     disposeScene,
+    enableGaussianPointSplatting,
     loadGaussianSplatStream,
     loadSplatVoxelCollision,
     onBeforeRender,
     registerScene,
     startEngine,
 } from "babylon-lite";
-import type { EngineContext, GaussianSplatStream, SceneContext } from "babylon-lite";
+import type { EngineContext, GaussianPointSplatting, GaussianSplatStream, SceneContext } from "babylon-lite";
 import { attachTrogirCameraControls, createTrogirCamera } from "./trogir-camera";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
@@ -19,6 +21,7 @@ import { acquireTrogirStartupResource, finishTrogirStartup, observeTrogirStartup
 import { resolveTrogirAssets } from "./trogir-assets";
 import { attachTrogirCollision } from "./trogir-collision";
 import { resolveTrogirQuality } from "./trogir-quality";
+import { installTrogirPointSurfaceLimit } from "./trogir-point-surface";
 
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
 const MB = 1024 * 1024;
@@ -38,6 +41,9 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const leaves = output("leaves");
     const gpuBytes = output("gpuBytes");
     const requests = output("requests");
+    const fps = output("fps");
+    let frameTime = 0;
+    let frameCount = 0;
     const screenError = document.getElementById("screenError") as HTMLInputElement;
     const screenErrorValue = output("screenErrorValue");
     const splatBudget = document.getElementById("splatBudget") as HTMLInputElement;
@@ -53,7 +59,62 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     const cameraRoll = output("cameraRoll");
     const cameraPoseStatus = document.getElementById("cameraPoseStatus") as HTMLElement;
     const cameraOutputs = [cameraX, cameraY, cameraZ, cameraYaw, cameraPitch, cameraRoll];
+    const pointSampling = document.getElementById("pointSampling") as HTMLInputElement;
+    const pointSamplingOptions = document.getElementById("pointSamplingOptions") as HTMLElement;
+    const pointSamplingStatus = document.getElementById("pointSamplingStatus") as HTMLElement;
+    const pointScale = document.getElementById("pointScale") as HTMLInputElement;
+    const pointScaleValue = output("pointScaleValue");
+    const renderScale = document.getElementById("renderScale") as HTMLSelectElement;
+    const occlusionCulling = document.getElementById("occlusionCulling") as HTMLInputElement;
+    const temporalReprojection = document.getElementById("temporalReprojection") as HTMLInputElement;
+    const maxAccumFrames = document.getElementById("maxAccumFrames") as HTMLInputElement;
+    const maxAccumFramesValue = output("maxAccumFramesValue");
+    const accumulatedFrames = output("accumulatedFrames");
+    const pixelCycleLength = output("pixelCycleLength");
+    let pointSplatting: GaussianPointSplatting | null = null;
     let disposed = false;
+
+    const applyPointOptions = (): void => {
+        const options = {
+            pointScale: Number(pointScale.value),
+            renderScale: renderScale.value === "auto" ? ("auto" as const) : Number(renderScale.value),
+            occlusionCulling: occlusionCulling.checked,
+            temporalReprojection: temporalReprojection.checked,
+            maxAccumFrames: Number(maxAccumFrames.value),
+        };
+        pointScaleValue.value = `${options.pointScale.toFixed(1)}×`;
+        maxAccumFramesValue.value = String(options.maxAccumFrames);
+        if (pointSplatting) {
+            Object.assign(pointSplatting, options);
+        }
+    };
+    const togglePointSampling = (): void => {
+        if (pointSampling.checked && !pointSplatting) {
+            try {
+                pointSplatting = enableGaussianPointSplatting(scene, stream, { colorRenderMode: false });
+                pointSamplingStatus.hidden = true;
+            } catch (reason) {
+                pointSampling.checked = false;
+                pointSamplingStatus.textContent = `Point sampling unavailable: ${reason instanceof Error ? reason.message : String(reason)}. Classic rendering remains active.`;
+                pointSamplingStatus.hidden = false;
+            }
+        }
+        applyPointOptions();
+        if (pointSplatting) {
+            pointSplatting.colorRenderMode = pointSampling.checked;
+        }
+        pointSamplingOptions.hidden = !pointSampling.checked;
+    };
+    const query = new URL(location.href).searchParams;
+    pointSampling.checked = query.get("points") === "1";
+    temporalReprojection.checked = query.get("reproject") === "1";
+    pointSampling.addEventListener("change", togglePointSampling);
+    pointScale.addEventListener("input", applyPointOptions);
+    renderScale.addEventListener("change", applyPointOptions);
+    occlusionCulling.addEventListener("change", applyPointOptions);
+    temporalReprojection.addEventListener("change", applyPointOptions);
+    maxAccumFrames.addEventListener("input", applyPointOptions);
+    togglePointSampling();
 
     const applyControls = (): void => {
         stream.screenError = Number(screenError.value);
@@ -93,9 +154,23 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
     };
     cameraPose.addEventListener("toggle", updateCameraPose);
 
-    onBeforeRender(scene, () => {
+    onBeforeRender(scene, (deltaMs) => {
         if (disposed) {
             return;
+        }
+        if (deltaMs > 0) {
+            frameTime += deltaMs;
+            frameCount++;
+            if (frameTime >= 500) {
+                const averageMs = frameTime / frameCount;
+                fps.value = `${(1000 / averageMs).toFixed(1)} FPS · ${averageMs.toFixed(1)} ms`;
+                frameTime = frameCount = 0;
+            }
+        }
+        if (pointSampling.checked) {
+            const progress = pointSplatting?.progress;
+            accumulatedFrames.value = progress && pointSplatting ? `${formatCount(progress.accumulatedSamples)} / ${formatCount(pointSplatting.maxAccumFrames)}` : "—";
+            pixelCycleLength.value = progress ? `${progress.pixelCycleLength} frames` : "—";
         }
         const stats = stream.stats;
         phase.value = stats.phase;
@@ -118,6 +193,15 @@ function installHud(scene: SceneContext, stream: GaussianSplatStream, canvas: HT
             return;
         }
         disposed = true;
+        pointSampling.removeEventListener("change", togglePointSampling);
+        pointScale.removeEventListener("input", applyPointOptions);
+        renderScale.removeEventListener("change", applyPointOptions);
+        occlusionCulling.removeEventListener("change", applyPointOptions);
+        temporalReprojection.removeEventListener("change", applyPointOptions);
+        maxAccumFrames.removeEventListener("input", applyPointOptions);
+        if (pointSplatting) {
+            disableGaussianPointSplatting(scene, pointSplatting);
+        }
         screenError.removeEventListener("input", applyControls);
         splatBudget.removeEventListener("input", applyControls);
         cameraPose.removeEventListener("toggle", updateCameraPose);
@@ -166,6 +250,7 @@ async function main(): Promise<void> {
     let disposeCollision: (() => void) | null = null;
     let disposeCameraControls: (() => void) | null = null;
     let disposeHud: (() => void) | null = null;
+    let disposeSurfaceLimit: (() => void) | null = null;
     let disposed = false;
     const dispose = (): void => {
         if (disposed) {
@@ -176,6 +261,7 @@ async function main(): Promise<void> {
         disposeCollision?.();
         disposeHud?.();
         disposeCameraControls?.();
+        disposeSurfaceLimit?.();
         if (scene && stream) {
             disposeGaussianSplatStream(scene, stream);
         }
@@ -207,6 +293,8 @@ async function main(): Promise<void> {
             return;
         }
         engine = createdEngine;
+        // A successful device request guarantees these minima; keep the cap valid even when the adapter grants more.
+        disposeSurfaceLimit = installTrogirPointSurfaceLimit(engine, canvas, Math.min(quality.requiredLimits.maxBufferSize, quality.requiredLimits.maxStorageBufferBindingSize));
         scene = createSceneContext(engine);
         const loadedStream = await acquireTrogirStartupResource(
             loadGaussianSplatStream(engine, assets.metadataUrl, {

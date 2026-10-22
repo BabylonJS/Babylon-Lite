@@ -1512,3 +1512,5 @@ export {
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
 export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
 export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
+export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";
