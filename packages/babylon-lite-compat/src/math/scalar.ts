@@ -1,5 +1,7 @@
 /** Babylon.js-compatible scalar helpers and a small set of math constants. */
 
+import { inverseLerp } from "babylon-lite";
+
 export const Epsilon = 0.001;
 export const ToRadians = Math.PI / 180;
 export const ToDegrees = 180 / Math.PI;
@@ -13,7 +15,7 @@ export const Scalar = {
         return start + (end - start) * amount;
     },
     InverseLerp(a: number, b: number, value: number): number {
-        return a === b ? 0 : (value - a) / (b - a);
+        return inverseLerp(a, b, value);
     },
     DegreesToRadians(degrees: number): number {
         return degrees * ToRadians;
