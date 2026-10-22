@@ -2791,5 +2791,45 @@
         "description": "The hosted coastalCliff.glb asset exercises real PBR materials, unique per-mesh tags, known foliage exclusions, screen depth, linear albedo shadow attenuation, asset-scaled radii, and Medium-quality mesh blending over most of the frame.",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "pbr", "gltf", "albedo"],
         "skipPerf": true
+    },
+    {
+        "id": 316,
+        "slug": "scene316-gltf-export-negative-world-matrix",
+        "name": "Scene 316 — glTF Export: Negative World Matrix",
+        "maxMad": 0.05,
+        "maxRawKB": 126.3,
+        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, once / twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded once or twice.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 317,
+        "slug": "scene317-gltf-export-shared-buffers",
+        "name": "Scene 317 — glTF Export: Shared Buffer Conversions",
+        "maxMad": 0.05,
+        "maxRawKB": 118.4,
+        "description": "Babylon.js visualization test “GLTF Serializer Shared Buffer Conversions” (playground #KX53VK#85): Two triangles sharing one vertex-colored geometry, exported and reloaded.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 323,
+        "slug": "scene323-gltf-export-punctual-lights",
+        "name": "Scene 323 — glTF Export: KHR_lights_punctual",
+        "maxMad": 2.9,
+        "maxRawKB": 120.9,
+        "description": "Babylon.js visualization test “GLTF Serializer KHR punctual light, left-handed” (playground #FLXW8B#27): Directional, point and spot lights with glTF falloff, exported and reloaded over a PBR ground.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 324,
+        "slug": "scene324-gltf-export-rotation-conversion",
+        "name": "Scene 324 — glTF Export: Rotation Conversion",
+        "maxMad": 0.15,
+        "maxRawKB": 119.2,
+        "description": "Babylon.js visualization test “GLTF Serializer Rotation conversion, left-handed” (playground #UK7FLI#1): Six rotated parent/child box pairs exported and reloaded.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
     }
 ]
