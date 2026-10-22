@@ -83,7 +83,7 @@ export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinit
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
+export { buildFrameGraphTask, getFrameGraphTasks } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 export {
     createFrameGraphContext,
