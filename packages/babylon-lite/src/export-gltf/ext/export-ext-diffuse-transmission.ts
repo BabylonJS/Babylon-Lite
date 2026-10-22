@@ -20,7 +20,7 @@ export const diffuseTransmissionWriter: MaterialExtensionWriter = {
         if (t.color) {
             setVecUnlessDefault(payload, "diffuseTransmissionColorFactor", t.color, [1, 1, 1]);
         }
-        capturePbrSlot(ctx, material, uvState, payload, { key: "diffuseTransmissionColorTexture", texture: t.colorTexture, transform });
+        capturePbrSlot(ctx, material, uvState, payload, { key: "diffuseTransmissionColorTexture", texture: t.colorTexture, transform, colorDecode: "linear" });
         attachExtension(ctx, out, "KHR_materials_diffuse_transmission", payload);
     },
 };

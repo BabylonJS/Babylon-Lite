@@ -37,6 +37,7 @@ export function captureTextureSlot(
  *  (synchronous). Image and texture indices are assigned here, so they never depend on GPU
  *  completion order. */
 export function resolveTextureSlots(ctx: ExportContext): void {
+    const imagesByTexture = new Map<GPUTexture, Map<string, number>>();
     for (const slot of ctx.slots) {
         if (slot.cancelled) {
             continue;
@@ -45,7 +46,17 @@ export function resolveTextureSlots(ctx: ExportContext): void {
         if (!pixels) {
             continue;
         }
-        const image = insertImage(ctx, pixels, slot.mapping, slot.slot);
+        const variant = `${slot.mapping.rowOrder}:${slot.mapping.invert ?? ""}:${slot.mapping.colorDecode ?? ""}`;
+        let byVariant = imagesByTexture.get(slot.gpu);
+        let image = byVariant?.get(variant);
+        if (image === undefined) {
+            image = insertImage(ctx, pixels, slot.mapping, slot.slot);
+            if (!byVariant) {
+                byVariant = new Map();
+                imagesByTexture.set(slot.gpu, byVariant);
+            }
+            byVariant.set(variant, image);
+        }
         let index = ctx.textureIndex.get(image);
         if (index === undefined) {
             index = ctx.doc.textures.push({ source: image }) - 1;

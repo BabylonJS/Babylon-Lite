@@ -51,6 +51,8 @@ export interface SlotMapping {
     readonly rowOrder: RowOrder;
     /** Channels to invert (`v → 255 − v`) in the emitted image; Standard bump slots only. */
     readonly invert?: "r" | "rg";
+    /** Convert linear-format color RGB to glTF sRGB; alpha is unchanged. */
+    readonly colorDecode?: "linear" | "gamma";
 }
 
 /** @internal A texture slot recorded during capture. Resolution writes `owner[key]`, or leaves it

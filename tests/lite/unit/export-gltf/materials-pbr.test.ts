@@ -5,7 +5,7 @@ import { createPbrMaterial } from "../../../../packages/babylon-lite/src/materia
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { createMaterialView } from "../../../../packages/babylon-lite/src/material/material-view";
 import type { Material } from "../../../../packages/babylon-lite/src/material/material";
-import { srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
+import { linearToSrgbByte, srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 
 type State = "uv1" | "uv0" | "lost";
@@ -50,6 +50,34 @@ const close = (actual: number[], expected: number[], digits = 6): void => {
 };
 
 describe("PBR core: base color", () => {
+    it("preserves the bytes of an sRGB base-color image", async () => {
+        const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
+        const r = await run(createPbrMaterial({ baseColorTexture: createTexture(2, 1, pixels, { format: "rgba8unorm-srgb" }) }));
+        const png = await decodePng(readBufferView(r, r.json.images[0].bufferView));
+        expect(Array.from(png.rgba)).toEqual(pixels);
+    });
+
+    it.each([false, true])("encodes linear-format base-color RGB for glTF sRGB sampling (gamma albedo: %s)", async (gamma) => {
+        const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
+        const texture = createTexture(2, 1, pixels, { format: "rgba8unorm" });
+        const r = await run(createPbrMaterial({ baseColorTexture: texture, ormTexture: texture, _gammaAlbedo: gamma }));
+        const base = r.mat.pbrMetallicRoughness.baseColorTexture.index;
+        const orm = r.mat.pbrMetallicRoughness.metallicRoughnessTexture.index;
+        expect(base).not.toBe(orm);
+        const decode = async (index: number) => {
+            const source = r.json.textures[index].source;
+            return (await decodePng(readBufferView(r, r.json.images[source].bufferView))).rgba;
+        };
+        const expected = pixels.map((v, i) => (i % 4 === 3 ? v : linearToSrgbByte(gamma ? Math.pow(v / 255, 2.2) : v / 255)));
+        expect(Array.from(await decode(base))).toEqual(expected);
+        expect(Array.from(await decode(orm))).toEqual(pixels);
+        for (let i = 0; i < pixels.length; i++) {
+            if (i % 4 !== 3) {
+                expect(srgbByteToLinear(expected[i]!)).toBeCloseTo(gamma ? Math.pow(pixels[i]! / 255, 2.2) : pixels[i]! / 255, 2);
+            }
+        }
+    });
+
     it("omits everything for a default material", async () => {
         const r = await run(createPbrMaterial());
         expect(r.mat).toEqual({});
@@ -353,6 +381,13 @@ describe("PBR core: one glTF material per (material, UV state)", () => {
 });
 
 describe("PBR core: normal, emissive, alpha, culling", () => {
+    it.each(["rgba8unorm", "rgba8unorm-srgb"] as const)("preserves emissive sampled colors from %s", async (format) => {
+        const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
+        const r = await run(createPbrMaterial({ emissiveTexture: createTexture(2, 1, pixels, { format }) }));
+        const png = await decodePng(readBufferView(r, r.json.images[0].bufferView));
+        expect(Array.from(png.rgba)).toEqual(pixels.map((v, i) => (i % 4 === 3 || format.endsWith("-srgb") ? v : linearToSrgbByte(v / 255))));
+    });
+
     it("writes normalTextureScale as normalTexture.scale and omits it at 1", async () => {
         const r = await run(createPbrMaterial({ normalTexture: tex(30), normalTextureScale: 2 }));
         expect(r.mat.normalTexture).toEqual({ index: 0, scale: 2 });

@@ -15,9 +15,12 @@ export const specGlossWriter: MaterialExtensionWriter = {
         const p: GltfJsonObject = {};
         attachExtension(ctx, out, "KHR_materials_pbrSpecularGlossiness", p);
         if (!isOneByOne(material.baseColorTexture)) {
-            capturePbrSlot(ctx, material, uvState, p, pbrCoreSlot(material, "diffuseTexture", material.baseColorTexture, UV2_BASE_COLOR));
+            capturePbrSlot(ctx, material, uvState, p, {
+                ...pbrCoreSlot(material, "diffuseTexture", material.baseColorTexture, UV2_BASE_COLOR),
+                colorDecode: material._gammaAlbedo ? "gamma" : "linear",
+            });
         }
-        capturePbrSlot(ctx, material, uvState, p, pbrCoreSlot(material, "specularGlossinessTexture", material.specGlossTexture, UV2_SPEC_GLOSS));
+        capturePbrSlot(ctx, material, uvState, p, { ...pbrCoreSlot(material, "specularGlossinessTexture", material.specGlossTexture, UV2_SPEC_GLOSS), colorDecode: "linear" });
         ctx.afterResolve.push(() => {
             const f = out.pbrMetallicRoughness?.baseColorFactor;
             if (f) {

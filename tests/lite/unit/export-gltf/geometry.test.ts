@@ -381,6 +381,28 @@ describe("morph targets", () => {
             },
         });
 
+    it.each([false, true])("keeps POSITION bounds when morph normals share their source array (pass-through: %s)", async (passThrough) => {
+        const zero = new Float32Array(12);
+        const mesh = createMesh("m", {
+            extra: {
+                morphTargets: {
+                    targets: [
+                        { positions: new Float32Array(12).fill(0.5), normals: zero },
+                        { positions: zero, normals: new Float32Array(12).fill(0.25) },
+                    ],
+                    weights: new Float32Array([0.5, 0.5]),
+                    count: 2,
+                },
+            },
+        });
+        const glb = await (passThrough ? exportPassThrough(mesh) : exportMesh(mesh));
+        const targets = firstPrimitive(glb).targets;
+        const position = glb.json.accessors[targets[1].POSITION];
+        expect(position.min).toEqual([0, 0, 0]);
+        expect(position.max).toEqual([0, 0, 0]);
+        expect(targets[1].POSITION).not.toBe(targets[0].NORMAL);
+    });
+
     it("exports converted deltas with POSITION min/max and the current weights", async () => {
         const glb = await exportMesh(morphMesh([0.5, 0.25]));
         const primitive = firstPrimitive(glb);

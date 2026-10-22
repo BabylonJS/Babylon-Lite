@@ -21,6 +21,8 @@ export interface PbrSlotRequest {
     readonly uv1?: boolean;
     /** Extra textureInfo members (`scale`, `strength`). */
     readonly extra?: Readonly<Record<string, number>>;
+    /** How a linear-format color texture is decoded before glTF sRGB encoding. */
+    readonly colorDecode?: "linear" | "gamma";
 }
 
 /** @internal The material's name as used in warnings. */
@@ -81,7 +83,8 @@ export function capturePbrSlot(ctx: ExportContext, material: PbrMaterialProps, u
         texCoord = resolved;
     }
     const transform = req.transform ? textureTransformOf(tex) : undefined;
-    captureTextureSlot(ctx, owner, req.key, req.slot ?? req.key, tex, { texCoord, transform, rowOrder: "storage" }, name, req.extra);
+    const colorDecode = tex.texture.format.endsWith("-srgb") ? undefined : req.colorDecode;
+    captureTextureSlot(ctx, owner, req.key, req.slot ?? req.key, tex, { texCoord, transform, rowOrder: "storage", colorDecode }, name, req.extra);
 }
 
 /** @internal Set `owner[key] = value` unless `value` equals `omitAt` exactly. */

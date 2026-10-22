@@ -146,6 +146,8 @@ export interface SlotMapping {
     readonly rowOrder: RowOrder;
     /** Channels to invert (`v → 255 − v`) in the emitted image; Standard bump slots only. */
     readonly invert?: "r" | "rg";
+    /** Convert linear-format color RGB to glTF sRGB; alpha is unchanged. */
+    readonly colorDecode?: "linear" | "gamma";
 }
 
 /** A texture slot recorded during capture. Resolution writes `owner[key]`, or leaves it unset when the pixels are unreadable. */
@@ -387,6 +389,8 @@ Internal imports are static. The tree-shaking boundary is the feature itself: sc
 - `finalize()` orders bufferViews by descending alignment need (`byteLength % 4 === 0` → 4, `% 2 === 0` → 2, else 1; this is the Babylon.js packing rule). The sort is stable. It concatenates the views in that order with no padding, assigns offsets (`byteOffset` is omitted on the view placed at offset 0), and returns the BIN payload. The sort alone satisfies glTF's alignment rules: every view whose length is a multiple of 4 starts at a 4-aligned offset, and every view whose length is a multiple of 2 at a 2-aligned one. Every emitted vertex attribute, matrix and float array has a length that is a multiple of 4, as glTF's 4-byte vertex-attribute rule requires. All data targets `buffers[0]`. This matches Babylon.js.
 
 `min`/`max` come from `computeMinMax`, per component, over the emitted (converted) data, for every `POSITION` attribute accessor, every morph-target `POSITION` accessor, and every animation input accessor. These are the places where the glTF specification requires them. Zero elements give zero bounds.
+
+Float-accessor cache variants include component count, element count and whether bounds are required, so shared source arrays cannot substitute a NORMAL or UV descriptor for a POSITION descriptor.
 
 ### Root collection and partitioning — `export-nodes.ts`
 
@@ -870,11 +874,15 @@ The exporter submits readbacks during capture, one per distinct `GPUTexture`, at
 
 **Factor folds.** A 1×1 `baseColorTexture` or `ormTexture` that folds (PBR core) is read from the 4 bytes of its `PixelData` and produces no image. Any other 1×1 texture exports as a normal image.
 
-**Content dedup.** Readback images dedupe by content in their emitted form. The key is `${width}x${height}:${rowOrder}:${invert ?? ""}:${fnv1a32(bytes)}`, hashed over the bytes after reordering and inversion. On a key match the bytes are compared, and a mismatch takes a fresh image. A new image keeps its emitted RGBA bytes (`ctx.imagePixels`) until encoding. This collapses the duplicate GPUTextures the loader creates for one source image: separate sRGB and linear uploads hold identical bytes, and so do per-sampler uploads. Two textures with identical stored bytes in different formats (sRGB versus linear) therefore share one image, which is correct because the PNG bytes are identical.
+**Color encoding.** PBR color slots backed by linear-format textures convert RGB to glTF's sRGB image representation with `linearToSrgbByte`. Base color and spec-gloss diffuse first apply `pow(rgb, 2.2)` when `_gammaAlbedo` is set. Emissive, spec-gloss specular RGB and diffuse-transmission color use their sampled linear RGB directly. Sheen color applies the gamma power only when `albedoScaling` is disabled. Alpha and data slots are unchanged. Textures already stored in an sRGB format retain their bytes. The reflectance writer retains the loader's existing gamma-byte convention; see Open conformance notes.
+
+**Content dedup.** Readback images dedupe by content in their emitted form. The key includes dimensions, row order, channel inversion, color conversion and FNV-1a of the emitted bytes. On a key match the bytes are compared, and a mismatch takes a fresh image. A new image keeps its emitted RGBA bytes (`ctx.imagePixels`) until encoding. Separate sources with identical emitted bytes and operations share one image.
 
 **HDR clamp.** Float sources (`rgba16float`, `rgba32float`, any format ending in `float`) are clamped to [0, 1] by the blit, with `Texture for material "<name>" has a floating-point format; exporting it clamped to 8 bits.` The warning comes from the slot check, not from folds.
 
-**GLB placement.** Images are written as `{ name, mimeType: "image/png", bufferView }`, with `name` set to the glTF slot string through which the image was first exported (`"baseColorTexture"`, `"clearcoatTexture"`, …). `encodeImages` encodes every image to PNG, concurrently, and adds the bytes as bufferViews in image-index order, so the layout never depends on encoder completion order.
+**Shared sources.** Slot resolution caches image indices by GPU texture, row order, channel inversion and color conversion before content hashing. UV selection and transforms remain on individual textureInfos. Different GPU textures still use content deduplication.
+
+**GLB placement.** Images are written as `{ name, mimeType: "image/png", bufferView }`, with `name` set to the glTF slot string through which the image was first exported (`"baseColorTexture"`, `"clearcoatTexture"`, …). `encodeImages` encodes and appends one PNG at a time in image-index order, bounding encoder scratch space to one image. BufferBuilder's source-identity cache uses weak keys; its copied payloads own the output bytes.
 
 **PNG encoding** (`export-png.ts`) is dependency-free and worker-safe (no canvas, no DOM):
 
@@ -1274,7 +1282,7 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 ### Unit tests — Vitest, `tests/lite/unit/export-gltf/`
 
-468 tests in ten files, built on one harness.
+481 tests in ten files, built on one harness.
 
 **Harness — `export-test-utils.ts`.** It supplies everything a test needs without a GPU:
 
@@ -1466,6 +1474,7 @@ These are renderer prerequisites for blocked parity scenes, not exporter changes
 ### Open conformance notes
 
 - Resolve the interaction between `KHR_materials_ior` and `KHR_materials_specular`, and whether to report the unrepresentable RGB tint of `_metallicReflectanceTexture`.
+- Reconcile the reflectance loader's gamma-byte convention with glTF's sRGB curve, and the existing factor-fold policy for sRGB textures combined with `_gammaAlbedo` or legacy sheen's extra shader-side gamma decode.
 - Export volume thickness from the intended texture channel and honor `thickness.min`.
 - Determine whether spot `innerConeAngle` can be derived from Lite's exponent falloff.
 - Review Standard-material alpha behavior for opacity maps, additive emissive, ambient occlusion, and diffuse alpha under BLEND.

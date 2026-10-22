@@ -181,7 +181,7 @@ function vectorAccessor(
     convert: ((src: Float32Array, components: number) => Float32Array) | null,
     withBounds: boolean
 ): number {
-    return cachedAccessor(ctx, source, variant, () => {
+    return cachedAccessor(ctx, source, `${variant}:${components}:${count}:${withBounds}`, () => {
         const data = convert ? convert(source, components) : source;
         const bufferView = ctx.buffers.addBufferView(data, undefined, ARRAY_BUFFER);
         const bounds = withBounds ? computeMinMax(data, components, count) : undefined;

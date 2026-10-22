@@ -46,7 +46,7 @@ export function createBufferBuilder(): BufferBuilder {
     const bufferViews: GltfBufferView[] = [];
     const accessors: GltfAccessor[] = [];
     const payloads: Uint8Array[] = [];
-    const viewIndex = new Map<ArrayBufferView, Map<string, number>>();
+    const viewIndex = new WeakMap<ArrayBufferView, Map<string, number>>();
 
     return {
         bufferViews,

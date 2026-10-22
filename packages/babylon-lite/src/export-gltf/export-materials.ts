@@ -141,7 +141,10 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
         const decode = tex.texture.format.endsWith("-srgb") ? "srgb" : m._gammaAlbedo ? "gamma" : "linear";
         recordFold(ctx, pmr, "baseColor", tex, baseFactor, name, decode);
     } else {
-        capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "baseColorTexture", m.baseColorTexture, UV2_BASE_COLOR));
+        capturePbrSlot(ctx, m, uvState, pmr, {
+            ...pbrCoreSlot(m, "baseColorTexture", m.baseColorTexture, UV2_BASE_COLOR),
+            colorDecode: m._gammaAlbedo ? "gamma" : "linear",
+        });
         writeBaseColorFactor(ctx, pmr, baseFactor, name);
     }
 
@@ -214,7 +217,7 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
 
     // Emissive. A peak above 1 inverts the loader's emissive-strength premultiplication; the
     // emissive-strength writer emits the peak.
-    capturePbrSlot(ctx, m, uvState, obj, pbrCoreSlot(m, "emissiveTexture", m.emissiveTexture, UV2_EMISSIVE));
+    capturePbrSlot(ctx, m, uvState, obj, { ...pbrCoreSlot(m, "emissiveTexture", m.emissiveTexture, UV2_EMISSIVE), colorDecode: "linear" });
     const e = m._emissiveColor;
     if (e) {
         const peak = Math.max(e[0], e[1], e[2]);

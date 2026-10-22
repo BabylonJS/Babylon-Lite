@@ -3,7 +3,7 @@ import { createFakeDevice, createMesh, createScene, createTexture, decodePng, ex
 import type { ParsedGlb } from "./export-test-utils";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
-import { srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
+import { linearToSrgbByte, srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 
 type State = "uv1" | "uv0" | "lost";
@@ -200,6 +200,15 @@ describe("KHR_materials_clearcoat", () => {
 });
 
 describe("KHR_materials_sheen", () => {
+    it.each([false, true])("encodes sheen RGB and preserves packed roughness (albedo scaling: %s)", async (albedoScaling) => {
+        const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
+        const r = await run({ _sheen: { isEnabled: true, albedoScaling, texture: createTexture(2, 1, pixels) } });
+        const sheen = expectEmitted(r, "KHR_materials_sheen");
+        expect(sheen.sheenColorTexture.index).toBe(sheen.sheenRoughnessTexture.index);
+        const png = await decodePng(readBufferView(r, r.json.images[0].bufferView));
+        expect(Array.from(png.rgba)).toEqual(pixels.map((v, i) => (i % 4 === 3 ? v : linearToSrgbByte(albedoScaling ? v / 255 : Math.pow(v / 255, 2.2)))));
+    });
+
     it("is absent unless isEnabled", async () => {
         expectAbsent(await run({ _sheen: { isEnabled: false } }), "KHR_materials_sheen");
     });
@@ -578,6 +587,19 @@ describe("KHR_materials_dispersion", () => {
 });
 
 describe("KHR_materials_diffuse_transmission", () => {
+    it("encodes diffuse-transmission color without changing shared intensity alpha", async () => {
+        const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
+        const texture = createTexture(2, 1, pixels);
+        const r = await run({ _subsurface: { translucency: { intensityTexture: texture, colorTexture: texture }, thickness: { min: 0, max: 0 } } });
+        const dt = expectEmitted(r, "KHR_materials_diffuse_transmission");
+        const color = r.json.textures[dt.diffuseTransmissionColorTexture.index].source;
+        const intensity = r.json.textures[dt.diffuseTransmissionTexture.index].source;
+        const colorPng = await decodePng(readBufferView(r, r.json.images[color].bufferView));
+        const intensityPng = await decodePng(readBufferView(r, r.json.images[intensity].bufferView));
+        expect(Array.from(colorPng.rgba)).toEqual(pixels.map((v, i) => (i % 4 === 3 ? v : linearToSrgbByte(v / 255))));
+        expect(Array.from(intensityPng.rgba)).toEqual(pixels);
+    });
+
     const marker = { min: 0, max: 0 };
 
     it("is emitted only with the zero-thickness marker", async () => {
@@ -693,10 +715,11 @@ describe("KHR_materials_pbrSpecularGlossiness", () => {
         expect(lost.warnings.filter((w) => LOST_UV1.test(w))).toHaveLength(1);
     });
 
-    it("exports the specular-glossiness texture bytes verbatim", async () => {
-        const r = await run({ specGlossTexture: createTexture(2, 1, [1, 2, 3, 4, 5, 6, 7, 8]) });
+    it.each(["rgba8unorm", "rgba8unorm-srgb"] as const)("preserves specular-glossiness sampled RGB and gloss alpha from %s", async (format) => {
+        const pixels = [1, 2, 3, 4, 5, 6, 7, 8];
+        const r = await run({ specGlossTexture: createTexture(2, 1, pixels, { format }) });
         const png = await decodePng(readBufferView(r, r.json.images[0].bufferView));
-        expect(Array.from(png.rgba)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+        expect(Array.from(png.rgba)).toEqual(pixels.map((v, i) => (i % 4 === 3 || format.endsWith("-srgb") ? v : linearToSrgbByte(v / 255))));
     });
 });
 

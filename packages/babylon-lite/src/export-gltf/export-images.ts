@@ -2,6 +2,7 @@
 
 import { BU, SS, TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "../texture/texture-2d.js";
+import { linearToSrgbByte } from "../math/color.js";
 import type { ExportContext, PixelData, SlotMapping } from "./export-context.js";
 import { encodePng } from "./export-png.js";
 
@@ -201,7 +202,7 @@ function encodeBlit(ctx: ExportContext, encoder: GPUCommandEncoder, src: GPUText
  *  `{ mimeType: "image/png" }` image named after `slot`. Its bytes are encoded by {@link encodeImages}. */
 export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: SlotMapping, slot: string): number {
     const bytes = applyChannelOps(pixels, mapping);
-    const key = `${pixels.width}x${pixels.height}:${mapping.rowOrder}:${mapping.invert ?? ""}:${fnv1a32(bytes)}`;
+    const key = `${pixels.width}x${pixels.height}:${mapping.rowOrder}:${mapping.invert ?? ""}:${mapping.colorDecode ?? ""}:${fnv1a32(bytes)}`;
     const candidates = ctx.imageIndex.get(key);
     if (candidates) {
         for (const index of candidates) {
@@ -222,7 +223,7 @@ export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: Slot
 
 function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
     const { width, height, rgba } = pixels;
-    if (mapping.rowOrder === "storage" && !mapping.invert) {
+    if (mapping.rowOrder === "storage" && !mapping.invert && !mapping.colorDecode) {
         return rgba;
     }
     const out = new Uint8Array(rgba.length);
@@ -237,6 +238,14 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
             out[i] = 255 - out[i]!;
             if (invertG) {
                 out[i + 1] = 255 - out[i + 1]!;
+            }
+        }
+    }
+    if (mapping.colorDecode) {
+        for (let i = 0; i < out.length; i += 4) {
+            for (let c = 0; c < 3; c++) {
+                const value = out[i + c]! / 255;
+                out[i + c] = linearToSrgbByte(mapping.colorDecode === "gamma" ? Math.pow(value, 2.2) : value);
             }
         }
     }
@@ -265,11 +274,11 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     return true;
 }
 
-/** @internal Encode every image to PNG, then add the bytes as bufferViews in image-index order, so
- *  the layout never depends on encoder completion order. */
+/** @internal Encode and append one PNG at a time in image-index order. */
 export async function encodeImages(ctx: ExportContext): Promise<void> {
-    const pngs = await Promise.all(ctx.imagePixels.map((p) => encodePng(p.width, p.height, p.rgba)));
-    for (let i = 0; i < pngs.length; i++) {
-        ctx.doc.images[i]!.bufferView = ctx.buffers.addBufferView(pngs[i]!);
+    for (let i = 0; i < ctx.imagePixels.length; i++) {
+        const pixels = ctx.imagePixels[i]!;
+        const png = await encodePng(pixels.width, pixels.height, pixels.rgba);
+        ctx.doc.images[i]!.bufferView = ctx.buffers.addBufferView(png);
     }
 }

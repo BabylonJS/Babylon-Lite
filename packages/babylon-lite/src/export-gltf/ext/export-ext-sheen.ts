@@ -22,13 +22,23 @@ export const sheenWriter: MaterialExtensionWriter = {
             payload.sheenColorFactor = [r, g, b];
         }
         const colorGate = hasTx(sheen.texture);
-        capturePbrSlot(ctx, material, uvState, payload, { key: "sheenColorTexture", texture: sheen.texture, transform: colorGate });
+        capturePbrSlot(ctx, material, uvState, payload, {
+            key: "sheenColorTexture",
+            texture: sheen.texture,
+            transform: colorGate,
+            colorDecode: sheen.albedoScaling ? "linear" : "gamma",
+        });
         setUnlessDefault(payload, "sheenRoughnessFactor", sheen.roughness ?? 0, 0);
         if (sheen.roughnessTexture) {
             capturePbrSlot(ctx, material, uvState, payload, { key: "sheenRoughnessTexture", texture: sheen.roughnessTexture, transform: true });
         } else {
             // Lite reads packed roughness from the color texture's alpha.
-            capturePbrSlot(ctx, material, uvState, payload, { key: "sheenRoughnessTexture", texture: sheen.texture, transform: colorGate });
+            capturePbrSlot(ctx, material, uvState, payload, {
+                key: "sheenRoughnessTexture",
+                texture: sheen.texture,
+                transform: colorGate,
+                colorDecode: sheen.albedoScaling ? "linear" : "gamma",
+            });
         }
         attachExtension(ctx, out, "KHR_materials_sheen", payload);
     },
