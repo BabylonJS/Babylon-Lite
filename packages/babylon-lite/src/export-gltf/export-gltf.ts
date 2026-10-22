@@ -59,6 +59,8 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     // 3. Resolve (synchronous): factor folds, then texture slots, then dependent values.
     resolveFolds(ctx);
     resolveTextureSlots(ctx);
+    ctx.pixelCache.clear();
+    ctx.resolvedPixels.clear();
     for (const callback of ctx.afterResolve) {
         callback();
     }

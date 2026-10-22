@@ -278,10 +278,13 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     return true;
 }
 
-/** @internal Encode and append one PNG at a time in image-index order. */
+/** @internal Encode and append one PNG at a time in image-index order, releasing each image's
+ *  pixels once its PNG is appended. */
 export async function encodeImages(ctx: ExportContext): Promise<void> {
-    for (let i = 0; i < ctx.imagePixels.length; i++) {
-        const pixels = ctx.imagePixels[i]!;
+    const pending: (PixelData | undefined)[] = ctx.imagePixels.splice(0);
+    for (let i = 0; i < pending.length; i++) {
+        const pixels = pending[i]!;
+        pending[i] = undefined;
         const png = await encodePng(pixels.width, pixels.height, pixels.rgba);
         ctx.doc.images[i]!.bufferView = ctx.buffers.addBufferView(png);
     }
