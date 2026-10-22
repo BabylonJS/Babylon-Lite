@@ -62,7 +62,7 @@ export default {
     1. Run `scripts/gltf-export-parity/build-asset-mirror.sh`. It rebuilds the assets from GitHub and npm. The one exception is `i.imgur.com/JbvoYlB.png`, which you add by hand.
     2. Start the lab: `LAB_DEV_PORT=5179 pnpm --filter @babylon-lite/lab dev`.
     3. Use `npx tsx scripts/gltf-export-parity/xrun.mjs golden|lite|fidelity …`. It does what the spec does, serving the assets from the mirror.
-- **Bundle ceilings:** run `python3 scripts/gltf-export-parity/seed-bundle-asset-cache.py`, then `BUNDLE_SOFTWARE_RENDER=1 pnpm exec tsx scripts/build-bundle-scenes.ts --scenes sceneN` (after `pnpm build:lib`).
+- **Bundle ceilings:** run `node scripts/gltf-export-parity/seed-bundle-asset-cache.mjs`, then `BUNDLE_SOFTWARE_RENDER=1 pnpm exec tsx scripts/build-bundle-scenes.ts --scenes sceneN` (after `pnpm build:lib`).
 - **Porting more Babylon.js visual tests:** see `scripts/gltf-export-parity/visual-port-brief.md` (method, fidelity gate, checklist) and `playground-facts.md` (each snippet's exact content).
 
 ## Open work
