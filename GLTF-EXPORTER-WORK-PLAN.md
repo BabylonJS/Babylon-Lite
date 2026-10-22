@@ -136,4 +136,4 @@ No PR was opened.
 - Stale v1 planning docs on `feat/gltf-export` (`requirements.md`, `prd.md`, `goals.md`, `53-gltf-exporter.md`) contradict the current spec; delete or archive them.
 - The plumbing specs use the repo's Playwright config (`channel: "chrome"`); locally they ran under Chromium + SwiftShader via a scratch config. CI should pick them up like the other plumbing specs; worth confirming on the first CI run.
 - History has `wip(...)` commits, and two of them (`a6319f8`, `d8bdf6f`) are mid-update states where unit tests fail; squash on merge.
-- Delete this file before merging.
+- Delete this file, `GLTF-EXPORTER-HANDOFF.md` and `scripts/gltf-export-parity/` (handoff tooling: asset mirror, local parity runner, porting brief) before merging.
