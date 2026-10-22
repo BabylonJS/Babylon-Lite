@@ -18,7 +18,8 @@ import {
     createDefaultCamera as liteCreateDefaultCamera,
     setFog,
     setClipPlane,
-    setEnvironmentRotation,
+    setEnvironmentLightingRotation,
+    setEnvironmentSkyboxRotation,
     loadEnvironment,
     loadDdsEnvironment,
     loadHdrEnvironment,
@@ -190,6 +191,8 @@ export class Scene extends AbstractScene {
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
     private _envTexture: CubeTexture | HDRCubeTexture | null = null;
+    /** Environment lighting rotation last forwarded to Lite. */
+    private _envRotation = 0;
     private _brdfTexture: BaseTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: CompatShadowGenerator[] = [];
@@ -322,6 +325,7 @@ export class Scene extends AbstractScene {
         for (const callback of this._beforeRenderFlushCallbacks) {
             callback();
         }
+        this._syncEnvironmentRotation();
     }
 
     /** @internal Register work that must observe all compat before-render mutations before Lite renders. */
@@ -789,26 +793,21 @@ export class Scene extends AbstractScene {
         return this._envTexture;
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
-        if (value === this._envTexture) {
-            return;
-        }
-        this._envTexture?._envOwners?.delete(this);
         this._envTexture = value;
-        if (value) {
-            (value._envOwners ??= new Set()).add(this);
-        }
         this._syncEnvironmentRotation();
     }
 
     /**
-     * @internal Forward the environment texture's `rotationY` to Lite's `setEnvironmentRotation`, which rotates the
-     * image-based lighting and the environment skybox. A scene whose environment is never rotated never calls it, so the
-     * rotation uniform and skybox patch stay unregistered.
+     * Forward the environment texture's `rotationY` to the image-based lighting only. As in Babylon.js, a skybox keeps the
+     * orientation it was created with (see {@link createDefaultSkybox}) and the `createDefaultEnvironment` background never
+     * turns. Also runs every frame, so the texture needs no link back to the scenes that use it. A scene whose
+     * environment is never rotated never calls Lite.
      */
-    public _syncEnvironmentRotation(): void {
+    private _syncEnvironmentRotation(): void {
         const rotation = this._envTexture?.rotationY ?? 0;
-        if (rotation !== (this._lite._environmentRotation ?? 0)) {
-            setEnvironmentRotation(this._lite, rotation);
+        if (rotation !== this._envRotation) {
+            this._envRotation = rotation;
+            setEnvironmentLightingRotation(this._lite, rotation);
         }
     }
 
@@ -890,6 +889,12 @@ export class Scene extends AbstractScene {
     public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
             this.environmentTexture = texture;
+        }
+        // Babylon.js builds the skybox from a clone of the texture, so the skybox keeps the rotation of this moment while
+        // later `rotationY` changes only turn the lighting.
+        const skyboxRotation = (texture ?? this._envTexture)?.rotationY ?? 0;
+        if (skyboxRotation) {
+            setEnvironmentSkyboxRotation(this._lite, skyboxRotation);
         }
         this._defaultEnvOptions = {
             ...(this._defaultEnvOptions ?? {}),
@@ -1250,8 +1255,6 @@ export class Scene extends AbstractScene {
             runCleanup(() => clearAnimationManager(this._blendManager!));
         }
         this._runningAnimatables.length = 0;
-        // The environment texture can outlive the scene: stop it from notifying (and retaining) a disposed scene.
-        this._envTexture?._envOwners?.delete(this);
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

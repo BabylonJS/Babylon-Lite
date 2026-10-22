@@ -69,6 +69,12 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
 /** Set environment rotation around the Y axis, in radians. */
 export function setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 
+/** Rotate only the image-based lighting around the Y axis, in radians; the visible skybox keeps its own orientation. */
+export function setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void;
+
+/** Give the visible skybox a fixed Y rotation, in radians, independent of the lighting. Call before the skybox is built. */
+export function setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void;
+
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;
 
