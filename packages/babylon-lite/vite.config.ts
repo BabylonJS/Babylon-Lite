@@ -165,7 +165,7 @@ function emitPackageJson(): Plugin {
  * license text must be propagated per its MIT/Apache-2.0 attribution terms.
  * Keep this list in sync with the `dependencies` field of package.json.
  */
-const BUNDLED_DEPENDENCIES = ["manifold-3d", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm", "text-shaper"];
+const BUNDLED_DEPENDENCIES = ["manifold-3d", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm", "text-shaper", "navcat", "mathcat"];
 
 /**
  * Resolve a bundled dependency's installed directory. These are declared
@@ -528,6 +528,11 @@ function enumerateLibEntries(): Record<string, string> {
  * defeating module-granular elimination of the default-layout text path.
  */
 const VENDOR_CHUNKS: ReadonlyArray<readonly [RegExp, string]> = [
+    // Keep the SDK's query/generation entry points separate. Unlike the WASM runtimes,
+    // Navcat/mathcat bytes remain included in the scene/demo runtime size accounting.
+    [/[\\/]node_modules[\\/]navcat[\\/]dist[\\/]blocks\.js$/, "vendor/navcat-generation"],
+    [/[\\/]node_modules[\\/]navcat[\\/]/, "vendor/navcat"],
+    [/[\\/]node_modules[\\/]mathcat[\\/]/, "vendor/navcat-math"],
     [/[\\/]node_modules[\\/]text-shaper[\\/]/, "vendor/text-shaper"],
     [/[\\/]node_modules[\\/]@?recast-navigation/, "vendor/recast-navigation"],
     [/[\\/]node_modules[\\/]manifold-3d[\\/]/, "vendor/manifold"],

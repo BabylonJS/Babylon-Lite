@@ -1296,3 +1296,87 @@ describe("build/package.json", () => {
         }
     });
 });
+
+describe("Navcat published root contract", () => {
+    it("keeps SDK internals out of the root declaration and exposes the full optional API", () => {
+        const probe = resolve(BUILD_DIR, "navcat-root.probe.ts");
+        try {
+            writeFileSync(
+                probe,
+                `import {
+    createNavcatManager, findNavcatNearestPoly, findNavcatPath, raycastNavcat, moveAlongNavcatSurface,
+    replaceNavcatMesh, exportNavcatMesh, setNavcatFilter, disposeNavcatManager,
+    extractNavcatGeometry, generateNavcatMesh, addNavcatConnection, removeNavcatConnection,
+    isNavcatConnectionConnected, createNavcatDebugGeometry,
+    type Mesh, type NavcatManager, type NavcatOptions, type NavcatGeometry, type NavcatConnection,
+} from "./index.js";
+declare const json: string;
+declare const meshes: readonly Mesh[];
+const options: NavcatOptions = { filter: { pass: n => n.flags !== 0, cost: (a,b,n,prev,next) => Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z) } };
+const manager: NavcatManager = await createNavcatManager(json, options);
+const point = {x: 1,y: 0,z: 2};
+const near = findNavcatNearestPoly(manager, point);
+if (near.success) {
+    raycastNavcat(manager, near.location, point);
+    moveAlongNavcatSurface(manager, near.location, point);
+}
+const path = findNavcatPath(manager, point, point);
+const complete: boolean = path.complete;
+const geometry: NavcatGeometry = extractNavcatGeometry(meshes);
+await generateNavcatMesh(geometry, { agentRadius: .3 });
+const link: NavcatConnection = await addNavcatConnection(manager, { start: point,end: point,radius: .5 });
+await isNavcatConnectionConnected(manager, link);
+await removeNavcatConnection(manager, link);
+await createNavcatDebugGeometry(manager, { search: path });
+setNavcatFilter(manager, null);
+replaceNavcatMesh(manager, exportNavcatMesh(manager));
+disposeNavcatManager(manager);
+// @ts-expect-error manager internals are not part of the published interface
+manager._mesh;
+// @ts-expect-error behavior is standalone, never attached to a public state handle
+manager.findPath(point, point);
+void complete;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probe,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+            const dts = readFileSync(DTS_PATH, "utf8");
+            expect(dts).not.toMatch(/from ["'](?:navcat|mathcat)(?:\/[^"']*)?["']/);
+        } finally {
+            rmSync(probe, { force: true });
+        }
+    });
+
+    it("ships both bundled MIT license texts", () => {
+        const notice = readFileSync(resolve(BUILD_DIR, "NOTICE.txt"), "utf8");
+        for (const [name, version] of [
+            ["navcat", "0.4.1"],
+            ["mathcat", "0.0.12"],
+        ]) {
+            const start = notice.indexOf(`${name} ${version}`);
+            expect(start).toBeGreaterThanOrEqual(0);
+            expect(notice.slice(start)).toContain("Copyright © 2025 Isaac Mason");
+            expect(notice.slice(start)).toContain("Permission is hereby granted");
+        }
+    });
+});

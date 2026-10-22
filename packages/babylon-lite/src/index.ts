@@ -1477,3 +1477,29 @@ export {
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
 export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
 export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+
+// Optional pure-JavaScript navigation, independently loaded alongside Recast.
+export type {
+    NavcatManager,
+    NavcatNode,
+    NavcatFilter,
+    NavcatOptions,
+    NavcatLocation,
+    NavcatNearestResult,
+    NavcatPathPoint,
+    NavcatPathResult,
+    NavcatRaycastResult,
+    NavcatMoveResult,
+    NavcatConnectionOptions,
+    NavcatConnection,
+    NavcatGeometry,
+    NavcatBuildOptions,
+    NavcatDebugGeometry,
+    NavcatDebugOptions,
+} from "./navigation/navcat-types.js";
+export { createNavcatManager, replaceNavcatMesh, exportNavcatMesh, setNavcatFilter, disposeNavcatManager } from "./navigation/navcat.js";
+export { findNavcatNearestPoly, findNavcatPath, raycastNavcat, moveAlongNavcatSurface } from "./navigation/navcat-queries.js";
+export { extractNavcatGeometry } from "./navigation/navcat-geometry.js";
+export { generateNavcatMesh } from "./navigation/navcat-generation.js";
+export { addNavcatConnection, removeNavcatConnection, isNavcatConnectionConnected } from "./navigation/navcat-connections.js";
+export { createNavcatDebugGeometry } from "./navigation/navcat-debug.js";
