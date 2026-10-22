@@ -197,7 +197,7 @@ function encodeBlit(ctx: ExportContext, encoder: GPUCommandEncoder, src: GPUText
     pass.end();
 }
 
-/** @internal Apply a slot's row order and channel inversion to read-back pixels, then return the
+/** @internal Apply a slot's row, channel and color conversions to read-back pixels, then return the
  *  index of a glTF image holding exactly those bytes: an existing one with equal content, or a new
  *  `{ mimeType: "image/png" }` image named after `slot`. Its bytes are encoded by {@link encodeImages}. */
 export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: SlotMapping, slot: string): number {
@@ -242,10 +242,14 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
         }
     }
     if (mapping.colorDecode) {
+        const toSrgb = new Uint8Array(256);
+        for (let value = 0; value < toSrgb.length; value++) {
+            const normalized = value / 255;
+            toSrgb[value] = linearToSrgbByte(mapping.colorDecode === "gamma" ? Math.pow(normalized, 2.2) : normalized);
+        }
         for (let i = 0; i < out.length; i += 4) {
             for (let c = 0; c < 3; c++) {
-                const value = out[i + c]! / 255;
-                out[i + c] = linearToSrgbByte(mapping.colorDecode === "gamma" ? Math.pow(value, 2.2) : value);
+                out[i + c] = toSrgb[out[i + c]!]!;
             }
         }
     }

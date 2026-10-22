@@ -5,6 +5,7 @@ import * as imageModule from "../../../../packages/babylon-lite/src/export-gltf/
 import * as pngModule from "../../../../packages/babylon-lite/src/export-gltf/export-png";
 import { resolveTextureSlots } from "../../../../packages/babylon-lite/src/export-gltf/export-textures";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { linearToSrgbByte } from "../../../../packages/babylon-lite/src/math/color";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
 import { createFakeDevice, createMesh, createScene, createTexture, decodePng, exportAndParse, parseGlb, readBufferView } from "./export-test-utils";
 import type { FakeDeviceStats, ParsedGlb } from "./export-test-utils";
@@ -139,6 +140,26 @@ describe("null engine", () => {
 });
 
 describe("image identity", () => {
+    it.each(["linear", "gamma"] as const)("converts every %s byte exactly with bounded transfer-curve work", (colorDecode) => {
+        const ctx = createExportContext(createScene().surface.engine, "test");
+        const rgba = Uint8Array.from({ length: 256 * 4 }, (_, i) => (i % 4 === 3 ? 255 - Math.floor(i / 4) : Math.floor(i / 4)));
+        const pow = vi.spyOn(Math, "pow");
+        let calls: number;
+        try {
+            imageModule.insertImage(ctx, { width: 256, height: 1, rgba }, { texCoord: 0, rowOrder: "storage", colorDecode }, "baseColorTexture");
+            calls = pow.mock.calls.length;
+        } finally {
+            pow.mockRestore();
+        }
+        const out = ctx.imagePixels[0]!.rgba;
+        for (let value = 0; value < 256; value++) {
+            const expected = linearToSrgbByte(colorDecode === "gamma" ? Math.pow(value / 255, 2.2) : value / 255);
+            expect(Array.from(out.subarray(value * 4, value * 4 + 4))).toEqual([expected, expected, expected, 255 - value]);
+        }
+        expect(calls).toBeLessThanOrEqual(512);
+        expect(rgba[128 * 4]).toBe(128);
+    });
+
     it("resolves shared pixels once per row-order and channel variant without sharing texture mappings", async () => {
         const ctx = createExportContext(createScene().surface.engine, "test");
         const gpu = createTexture(2, 2, PATTERN).texture;

@@ -874,7 +874,7 @@ The exporter submits readbacks during capture, one per distinct `GPUTexture`, at
 
 **Factor folds.** A 1×1 `baseColorTexture` or `ormTexture` that folds (PBR core) is read from the 4 bytes of its `PixelData` and produces no image. Any other 1×1 texture exports as a normal image.
 
-**Color encoding.** PBR color slots backed by linear-format textures convert RGB to glTF's sRGB image representation with `linearToSrgbByte`. Base color and spec-gloss diffuse first apply `pow(rgb, 2.2)` when `_gammaAlbedo` is set. Emissive, spec-gloss specular RGB and diffuse-transmission color use their sampled linear RGB directly. Sheen color applies the gamma power only when `albedoScaling` is disabled. Alpha and data slots are unchanged. Textures already stored in an sRGB format retain their bytes. The reflectance writer retains the loader's existing gamma-byte convention; see Open conformance notes.
+**Color encoding.** PBR color slots backed by linear-format textures convert RGB to glTF's sRGB image representation with `linearToSrgbByte`. A 256-entry lookup table per converted image bounds transfer-curve evaluation independently of image size. Base color and spec-gloss diffuse first apply `pow(rgb, 2.2)` when `_gammaAlbedo` is set. Emissive, spec-gloss specular RGB and diffuse-transmission color use their sampled linear RGB directly. Sheen color applies the gamma power only when `albedoScaling` is disabled. Alpha and data slots are unchanged. Textures already stored in an sRGB format retain their bytes. The reflectance writer retains the loader's existing gamma-byte convention; see Open conformance notes.
 
 **Content dedup.** Readback images dedupe by content in their emitted form. The key includes dimensions, row order, channel inversion, color conversion and FNV-1a of the emitted bytes. On a key match the bytes are compared, and a mismatch takes a fresh image. A new image keeps its emitted RGBA bytes (`ctx.imagePixels`) until encoding. Separate sources with identical emitted bytes and operations share one image.
 
@@ -1282,7 +1282,7 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 ### Unit tests — Vitest, `tests/lite/unit/export-gltf/`
 
-481 tests in ten files, built on one harness.
+483 tests in ten files, built on one harness.
 
 **Harness — `export-test-utils.ts`.** It supplies everything a test needs without a GPU:
 
