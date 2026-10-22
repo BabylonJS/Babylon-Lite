@@ -80,6 +80,6 @@ export default defineConfig({
         command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
-        timeout: 15_000,
+        timeout: 180_000,
     },
 });

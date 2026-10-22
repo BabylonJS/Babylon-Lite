@@ -1,3 +1,5 @@
+import { runInNewContext } from "node:vm";
+import { transform } from "esbuild";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { AbstractEngine } from "../src/engine/engine";
@@ -78,8 +80,12 @@ import {
     GaussianSplattingMaxPartCount,
     GetGaussianSplattingMaxPartCount,
     GetPartIndexVaryingDeclaration,
+    GaussianPointSplattingRenderer,
+    GaussianPointSplattingBlitMaterial,
+    GaussianPointSplattingDepthBlitMaterial,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
+import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import {
     GLTF1,
     GLTF2,
@@ -191,6 +197,9 @@ describe("Unsupported API stubs throw on construction", () => {
             "GaussianSplattingOverdrawMaterialPlugin",
             () => new GaussianSplattingOverdrawMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
         ],
+        ["GaussianPointSplattingRenderer", () => new GaussianPointSplattingRenderer({} as AbstractEngine)],
+        ["GaussianPointSplattingBlitMaterial", () => new GaussianPointSplattingBlitMaterial("blit", {} as Scene)],
+        ["GaussianPointSplattingDepthBlitMaterial", () => new GaussianPointSplattingDepthBlitMaterial("depth-blit", {} as Scene)],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
@@ -230,6 +239,70 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+
+    it("preserves passive point-splatting state and fails loudly when the mode is enabled", () => {
+        const mesh = Object.create(GaussianSplattingMesh.prototype) as GaussianSplattingMesh;
+        mesh.pointSplattingRenderScale = 0.5;
+        mesh.pointSplattingOcclusionCulling = true;
+        mesh.pointSplattingScale = 2;
+
+        expect(mesh.pointSplattingRenderScale).toBe(0.5);
+        expect(mesh.pointSplattingOcclusionCulling).toBe(true);
+        expect(mesh.pointSplattingScale).toBe(2);
+        expect(mesh.pointSplattingRenderMode).toBe(false);
+        expect(mesh.pointSplattingDepthRenderMode).toBe(false);
+        expect(mesh.pointSplattingProgress).toBeNull();
+        expect(() => {
+            mesh.pointSplattingRenderMode = false;
+            mesh.pointSplattingDepthRenderMode = false;
+        }).not.toThrow();
+        expect(() => {
+            mesh.pointSplattingRenderMode = true;
+        }).toThrow(/compute-renderer subsystem/);
+    });
+
+    it("exposes the Gaussian Point Splatting blit and renderer member shapes", () => {
+        expectTypeOf<GaussianPointSplattingRenderer["supportsWorkload"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingRenderer["_matchesPartData"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingBlitMaterial["setLogarithmicDepthConstant"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingDepthBlitMaterial["setDepthValues"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingDepthBlitMaterial["setReverseDepth"]>().toBeFunction();
+    });
+
+    it("preserves stable diagnostics in a minified consumer build", async () => {
+        const source = `
+            const capture = (construct) => {
+                try {
+                    construct();
+                } catch (error) {
+                    return error.message;
+                }
+                throw new Error("Expected construction to fail");
+            };
+            globalThis.messages = [
+                capture(() => new (class ConsumerShaderMaterial extends ShaderMaterial {})()),
+                capture(() => new (class ConsumerBlitMaterial extends GaussianPointSplattingBlitMaterial {})("blit", scene)),
+                capture(() => new (class ConsumerDepthBlitMaterial extends GaussianPointSplattingDepthBlitMaterial {})("depth-blit", scene)),
+            ];
+        `;
+        const { code } = await transform(source, { minify: true, format: "iife", target: "es2022" });
+        const context = {
+            ShaderMaterial,
+            GaussianPointSplattingBlitMaterial,
+            GaussianPointSplattingDepthBlitMaterial,
+            scene: {} as Scene,
+            messages: [] as string[],
+        };
+
+        runInNewContext(code, context);
+
+        expect(context.messages[0]).toContain("'ShaderMaterial'");
+        expect(context.messages[0]).toContain("shader preprocessing subsystem");
+        expect(context.messages[1]).toContain("'GaussianPointSplattingBlitMaterial'");
+        expect(context.messages[1]).toContain("compute-renderer subsystem");
+        expect(context.messages[2]).toContain("'GaussianPointSplattingDepthBlitMaterial'");
+        expect(context.messages[2]).toContain("compute-renderer subsystem");
     });
 
     describe("Gaussian splatting material stubs", () => {

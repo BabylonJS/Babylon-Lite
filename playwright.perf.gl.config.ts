@@ -52,6 +52,6 @@ export default defineConfig({
         port: labTestPort,
         env: { LAB_DEV_PORT: String(labTestPort) },
         reuseExistingServer: true,
-        timeout: 30_000,
+        timeout: 180_000,
     },
 });
