@@ -219,14 +219,17 @@ transform first (it comes earlier in the list) changes what its children inherit
 Keep the hierarchy and move the whole import:
 
 ```ts
+import { Mesh, SceneLoader } from "@babylonjs/lite-compat";
+
 const result = await SceneLoader.ImportMeshAsync("", rootUrl, "model.glb", scene);
 result.meshes[0]!.setParent(applicationRoot);
 ```
 
-Flatten only the renderable meshes, keeping their current world transforms:
+Flatten only the renderable meshes, keeping their current world transforms. `result.meshes` is typed as
+`TransformNode[]`, so narrow the entries to `Mesh` before calling mesh-only methods:
 
 ```ts
-const renderableMeshes = result.meshes.filter((mesh) => mesh.getTotalVertices() > 0);
+const renderableMeshes = result.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.getTotalVertices() > 0);
 for (const mesh of renderableMeshes) {
     mesh.setParent(applicationRoot);
 }
@@ -241,6 +244,13 @@ for (const mesh of renderableMeshes) {
     mesh.bakeCurrentTransformIntoVertices();
 }
 ```
+
+Bake only meshes whose composed transform is free of shear. `setParent()` keeps the exact affine local matrix, but
+`bakeCurrentTransformIntoVertices()` rebuilds the transform from position, rotation and scaling, and that cannot express
+shear. Shear appears when an ancestor has a non-uniform scale and a descendant below it is rotated: for example, a node
+scaled `(2, 1, 1)` above a primitive rotated 45 degrees around Z. Flattening such a primitive with `setParent()` keeps
+its appearance, but baking it afterwards drops the shear and changes the geometry. Leave those meshes flattened without
+baking.
 
 `setParent()` also preserves mirrored transforms, including the synthetic handedness root of glTF imports (#456).
 
