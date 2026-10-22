@@ -313,6 +313,36 @@ describe("attachControl — panning direction", () => {
         expect(dot(delta, right)).toBeCloseTo(0.6 * scale, 9);
         expect(dot(delta, up)).toBeCloseTo(-0.8 * scale, 9);
     });
+
+    // Beta is not clamped by the factory, the beta setter or panning. For sin(beta) < 0 the camera, which looks at its target
+    // with world up, has its right and up vectors flipped; panning must follow the camera rather than the beta formula.
+    it.each([
+        [0, -Math.PI / 2],
+        [0.8, -0.6],
+        [2.1, 4],
+        [-0.5, 3.6],
+    ])("follows the camera's right and up vectors when sin(beta) < 0 (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a level camera with a negative beta up along world Y", () => {
+        const { delta, up, scale } = pan(0, -Math.PI / 2, 0, 1);
+
+        expect(up[1]).toBeCloseTo(1, 9);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
 });
 
 describe("attachControl — pointer mappings", () => {
