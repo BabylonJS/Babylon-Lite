@@ -17,6 +17,7 @@
         "@babylonjs/havok": "^1.3.14",
         "@babylonjs/loaders": "^9.28.0",
         "@babylonjs/materials": "^9.28.0",
+        "@babylonjs/serializers": "^9.28.0",
         "@recast-navigation/core": "0.43.1",
         "@recast-navigation/generators": "0.43.1",
         "@recast-navigation/wasm": "0.43.1",
