@@ -26,7 +26,7 @@ This gives Babylon Lite enough structure for offscreen RTT passes, per-pass came
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export type { Task } from "./frame-graph/task.js";
 export { getFrameGraph } from "./scene/scene.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 
 export type { Pass } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
@@ -182,6 +182,7 @@ addTask(sceneOrGraph, task); // append at end
 addTaskAtStart(sceneOrGraph, task); // insert at start of user work, after built-in system tasks such as ShadowTask
 addTaskBefore(sceneOrGraph, task, beforeTask);
 addTaskAfter(sceneOrGraph, task, afterTask); // insert immediately after afterTask
+removeTask(sceneOrGraph, task); // detach every registration of this task; returns whether any were removed
 ```
 
 Rules:
@@ -192,6 +193,34 @@ Rules:
 - `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
 - If a task uses `addMeshToTask()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
+
+### Task removal and ownership
+
+```typescript
+export function removeTask(target: FrameGraph | SceneContext, task: Task): boolean;
+```
+
+`removeTask()` matches task object identity, removes every occurrence from the
+existing ordered task array, and preserves the order of all other tasks. It
+returns `true` when membership changed and `false` when the task was absent.
+Another task with the same name is unaffected. Both a scene and its graph select
+the same list. Perform this operation between graph builds/executions, such as
+in the scene's before-render update; mutation from task/pass callbacks is outside
+the scheduling contract.
+
+Removal transfers lifetime responsibility to the caller. It preserves recorded
+passes and task state and does not call `dispose()`, rebuild surviving tasks,
+rewire resource consumers, or cancel in-flight asynchronous preload work. The
+removed task is skipped by future graph builds, execution and graph disposal.
+A still-valid recorded task may be added back without rebuilding; an unrecorded
+or changed task uses `buildFrameGraphTask()` after re-addition. The owner releases
+a removed task only after its consumers and encoded/submitted GPU work no longer
+use its resources. Producer/consumer ordering remains the caller's responsibility.
+
+Validation covers direct and pass-backed tasks, graph/scene targets, absent and
+same-named tasks, duplicate registrations, retained pass state, disposal ownership
+and re-addition. Public declarations and tree shaking verify root access and
+absence of removal/renderer code from unrelated imports.
 
 ### Internal Shadow Adapter Task
 
