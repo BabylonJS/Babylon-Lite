@@ -2813,6 +2813,16 @@
         "skipPerf": true
     },
     {
+        "id": 318,
+        "slug": "scene318-gltf-export-morph-target-animation",
+        "name": "Scene 318 — glTF Export: Morph Target Animation",
+        "maxMad": 0.05,
+        "maxRawKB": 126.5,
+        "description": "Babylon.js visualization test “GLTF Serializer Morph Target Animation” (playground #84M2SR#107): A textured sphere with two animated morph targets, exported, reloaded and frozen mid-animation.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
         "id": 320,
         "slug": "scene320-gltf-export-draco",
         "name": "Scene 320 — glTF Export: Draco Source Round Trip",
