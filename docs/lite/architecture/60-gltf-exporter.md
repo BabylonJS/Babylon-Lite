@@ -4,6 +4,18 @@
 >
 > Behavioral reference: the Babylon.js glTF serializer (`@babylonjs/serializers` v9.30.0, released 2026-10-08; `master` @ `676f462`, 2026-10-14) wherever the two engines share a concept. Babylon.js test names, playground ids and `config.json` entries cited below are pinned to that commit. Every divergence is recorded in the Babylon.js Equivalence Map.
 
+## Quick start
+
+After you have added the content to a scene, call `exportSceneAsGlb` to get a downloadable binary glTF file as a `Blob`:
+
+```typescript
+import { exportSceneAsGlb } from "@babylonjs/lite";
+
+const glb = await exportSceneAsGlb(scene);
+```
+
+The exporter reads the scene without changing it. The returned Blob can be saved or uploaded by your application.
+
 ---
 
 ## Purpose
@@ -1392,7 +1404,7 @@ The Babylon.js `"GLTF Serializer"` visualization tests (`packages/tools/tests/te
 
 The golden (`reference/lite/<slug>/babylon-ref-golden.png`, committed) is captured once from the reference page at 1280×720. The spec compares the Lite page with it against the scene's `maxMad`. Variants that share one Babylon.js reference image share one golden.
 
-A test is kept only when its Lite page matches the golden closely. A test that would pass only through a threshold covering deliberately skipped work (an out-of-scope exporter capability, or a Lite renderer gap outside this module) is not kept. Its scene is preserved on branch `wip/gltf-export-parity-blocked`, and the gap is tracked in the follow-up issue.
+A test is kept only when its Lite page matches the golden closely. A test that would pass only through a threshold covering deliberately skipped work (an out-of-scope exporter capability, or a Lite renderer gap outside this module) is not kept. Its scene is preserved on branch `wip/gltf-export-parity-blocked`; the blockers are listed under Deferred follow-up work below.
 
 | Scene | Babylon.js test(s) · playground                                       | Lite MAD | `maxMad` | Notes                                                                                                                                                                                                                            |
 | ----- | --------------------------------------------------------------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1415,6 +1427,49 @@ Six of the 26 tests are ported, in the five scenes above (316 covers two). Not p
     - KHR punctual light, left-handed (`#FLXW8B#27`), scene 323: Lite PBR direct lighting without an environment is darker (MAD 2.36 without export, 2.77 with it) and Lite has no `FALLOFF_GLTF`; the exporter also clamps the snippet's 30-radian spot cone to a valid `outerConeAngle`.
     - un/compressed texture roundtrip (`#8NTR5X#8`), scene 325: the KTX2 source comes back re-encoded as PNG (original image bytes are out of scope): MAD 0.85, against 0.0005 without export.
     - multimaterial with raw texture (`#KU72PX`), scene 326: its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling).
+
+## Deferred follow-up work
+
+The following items are intentionally outside this exporter change. The Scope and Visual parity sections describe current behavior; this list records the work needed to extend it.
+
+### Exporter and loader capabilities
+
+- Add skin data retention to the loader and export glTF skins, joints, and inverse bind matrices.
+- Retain texture sampler descriptors so clamp, mirror, and filtering settings survive export.
+- Retain and pass through original encoded image bytes, and preserve morph-target names for `extras.targetNames`.
+- Keep tangents, UV2, colors, and 16-bit indices on the CPU for loaded meshes without requiring device-loss recovery.
+- Expose whether Standard `uvOffset` is active, and keep CPU geometry arrays in sync with partial GPU-only vertex updates.
+- Record loader-root and camera-fixup identity at load time instead of inferring it from shape.
+- Decide and implement multi-camera export; the current API exports only `scene.camera`.
+- Retain target paths for natively authored animation groups so they can be exported.
+
+### Loader and lifecycle fixes
+
+- Accept valid GLB files without a BIN chunk.
+- Guard `json.nodes` when loading documents that omit the property, so an empty-scene export can be loaded.
+- Decide whether hand-posed bones are included in exported poses, how cloned skinned characters identify skins, and whether removing an animation group stops or disposes its updates.
+
+### Deferred validation
+
+- Port the remaining Babylon.js serializer visual tests when their exporter capabilities or renderer prerequisites are available; see the unported tests and blockers above.
+- Add a glTF Validator gate for plumbing exports, allowing only the documented informational and generated-tangent warnings.
+- Add bundle-size checks for exporter isolation and the export demo scene without changing existing ceilings.
+- Add counterparts for the remaining Babylon.js skin round-trip, cached-texture, and morph-target-name unit assertions.
+
+### Related renderer work
+
+These are renderer prerequisites for blocked parity scenes, not exporter changes:
+
+- Match PBR direct lighting without an environment and metallic PBR under a hemispheric light.
+- Support gamma-space DDS environments and a glTF-equivalent light falloff mode.
+
+### Open conformance notes
+
+- Resolve the interaction between `KHR_materials_ior` and `KHR_materials_specular`, and whether to report the unrepresentable RGB tint of `_metallicReflectanceTexture`.
+- Export volume thickness from the intended texture channel and honor `thickness.min`.
+- Determine whether spot `innerConeAngle` can be derived from Lite's exponent falloff.
+- Review Standard-material alpha behavior for opacity maps, additive emissive, ambient occlusion, and diffuse alpha under BLEND.
+- Validate non-finite material/geometry values and index ranges; handle meshes parented only to the camera fixup node.
 
 ---
 
