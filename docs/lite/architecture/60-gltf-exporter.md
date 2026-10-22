@@ -44,6 +44,7 @@ The module is a leaf. It reads existing scene, engine and loader state, and chan
 - Node, shader, line and grid materials.
 - Gaussian splats, vertex-animation textures, particles, sprites and text.
 - Hand-posed bones (`enableBoneControl` overrides) and AnimationGroup playback state.
+- Natively authored animation groups (`createPropertyAnimationGroup` and other groups without loader-retained glTF clip data); only glTF-clip groups export (Animations).
 - Compressed or quantized output (Draco, meshopt, `KHR_mesh_quantization`), sparse accessors, and `KHR_texture_basisu` / `EXT_texture_webp` / `EXT_texture_avif` output.
 - `.gltf` + `.bin` output.
 - Cameras other than `scene.camera`.
@@ -1249,12 +1250,13 @@ Found while checking exporter output against what Lite renders. They are rendere
 
 ## Test Specification
 
-Two layers, mapped onto TESTING.md's categories:
+Three layers, mapped onto TESTING.md's categories:
 
 - Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`).
 - Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts` and `export-gltf-bjs-ports.spec.ts`, with the lab page `lab/lite/export-gltf-test.html`).
+- Playwright visual parity scenes 316–325 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
 
-Both layers include ports of the Babylon.js serializer tests (Babylon.js test ports, below).
+The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
 Because Lite entities are plain data, unit-test stubs are object literals; no engine or real GPU is required.
 
@@ -1381,51 +1383,86 @@ The Babylon.js serializer suites (`packages/dev/serializers/test/`, `master` @ `
 
 For glTF assets, `export(load(export(load(asset))))` is byte-identical to `export(load(asset))`, so `first === second === third`; for a native scene only `second === third` holds. The first export drops what is out of scope; after that, the output is a fixed point. `export-gltf.spec.ts` asserts this for every case.
 
+### Visual parity suite — Playwright, `tests/lite/parity/scenes/`
+
+The Babylon.js `"GLTF Serializer"` visualization tests (`packages/tools/tests/test/visualization/config.json`, 26 entries) are ported as Lite parity scenes, following GUIDANCE §2's scene checklist. Each scene has two pages:
+
+- **Babylon.js reference page** (`lab/lite/babylon-ref-sceneN.html`, `lab/lite/src/bjs/sceneN.ts`). It runs the test's playground as-is (same values, order and URLs), with the test's `replace` options as query-parameter variants and Babylon.js's seeded `Math.random`, through `@babylonjs/serializers` (a lab dev dependency). Before its golden was captured, each page was checked against Babylon.js's own reference image for that test, at the test's 600×400 size with antialiasing off (`?antialias=0`), using Babylon.js's pass rule (pixelmatch threshold 0.035, differing pixels ≤ the test's `errorRatio` %).
+- **Lite page** (`lab/lite/sceneN.html`, `lab/lite/src/lite/sceneN.ts`). It builds the same scene with the public Lite API, calls `exportSceneAsGlb`, reloads the Blob with `loadGltf`, and repeats the snippet's post-load steps. Every place where Lite cannot express a snippet step is named in the page header and the spec header.
+
+The golden (`reference/lite/<slug>/babylon-ref-golden.png`, committed) is captured once from the reference page at 1280×720. The spec compares the Lite page with it against the scene's `maxMad`. Variants that share one Babylon.js reference image share one golden.
+
+| Scene | Babylon.js test(s) · playground                                       | Lite MAD | `maxMad` | Notes                                                                                                                                                                                                                            |
+| ----- | --------------------------------------------------------------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 316   | with Negative World Matrix (left handed, once / twice) · `#KX53VK#88` | 0.015    | 0.05     | `?iterations=2` is the second test; the page enables `enableDeviceLostSceneRecovery` so the second export keeps vertex colors (Scope)                                                                                            |
+| 317   | Shared Buffer Conversions · `#KX53VK#85`                              | 0.015    | 0.05     | two meshes over one set of arrays                                                                                                                                                                                                |
+| 318   | Morph Target Animation · `#84M2SR#107`                                | 0.0006   | 0.05     | the influence animations are not authored (the exporter exports only glTF-clip animation groups); the frame-60 weights are applied after the reload. Upstream excludes this test on WebGPU, but the WebGPU reference page passes |
+| 320   | KHR draco mesh compression · `#F8BF8N#3`                              | 0.81     | 0.9      | Lite writes plain accessors. The reference page differs from the WebGL reference image by 3.2 % (limit 1.1 %) on the normal-mapped face, with or without export                                                                  |
+| 322   | KHR gpu instancing · `#1Q2BWN#10`                                     | 5.92     | 6.0      | Lite renders TeapotsGalore's metallic PBR under a hemispheric light brighter than Babylon.js; identical with and without export (renderer gap)                                                                                   |
+| 323   | KHR punctual light, left-handed · `#FLXW8B#27`                        | 2.77     | 2.9      | Lite PBR direct lighting without an environment is darker (2.36 without export) and has no `FALLOFF_GLTF`; the 30-radian spot cone is clamped to a valid `outerConeAngle`                                                        |
+| 324   | Rotation conversion, left-handed · `#UK7FLI#1`                        | 0.092    | 0.15     | Babylon.js's default material for material-less boxes is a Standard material, so the Lite boxes get `createStandardMaterial()`                                                                                                   |
+| 325   | un/compressed texture roundtrip · `#8NTR5X#8`                         | 0.85     | 0.9      | PBR `debugMode = 20` maps to `setPbrUnlit`; the remaining difference is the KTX2 source re-encoded as PNG (original image bytes are out of scope); 0.0005 without export                                                         |
+
+Not ported (16 of 26):
+
+- Right-handed variants (8): Negative World Matrix (right handed, once / twice), KHR punctual light right-handed, Camera right-handed (once / twice), and the camera rotation animation tests RH → LH, RH → RH, LH → RH. Lite has no right-handed scenes.
+- Skinning and Animation, and its right-handed twin (2): skins are out of scope.
+- Camera, left-handed (once / twice) and camera rotation animation LH → LH (3): they export two or eight cameras from one scene into split viewports. A Lite scene has one camera and the exporter exports `scene.camera` only.
+- Morph Target Animation Group (`#T087A8#29`): the alien is skinned, so its reloaded pose differs (skins).
+- KHR materials clearcoat (`#9N6CLU#23`): the snippet's DDS environment is gamma-space; Lite's DDS environment loader treats it as linear (MAD 54.5 with or without export).
+- multimaterial with raw texture (`#KU72PX#0`): its 2×1 textures use nearest sampling, which the reload loses because no samplers are exported (MAD 5.6; 0.12 with nearest sampling).
+- Export GLTF Extension KHR_texture_transform (`#20OAV9#15148`): written, awaiting its texture (`https://i.imgur.com/JbvoYlB.png`) for the golden.
+
 ---
 
 ## File Manifest
 
 Sizes are approximate (`wc -l`). The only production file outside `export-gltf/` is `index.ts`; the other rows outside it are tests, the lab page and docs.
 
-| File                                                            | Size              | Role                                                                                                             |
-| --------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `export-gltf/export-gltf.ts`                                    | ~115 lines        | entry, phase orchestration, JSON assembly                                                                        |
-| `export-gltf/export-gltf-types.ts`                              | ~190 lines        | glTF 2.0 JSON interfaces (type-only)                                                                             |
-| `export-gltf/export-context.ts`                                 | ~245 lines        | `ExportContext` and contract types, `createExportContext`, `attachExtension`, `snapshotExtras`, `cachedAccessor` |
-| `export-gltf/export-handedness.ts`                              | ~130 lines        | mirror conversions, `L`, sign pattern, `Rotate180Y`, `rotTo`, winding rule, tolerances                           |
-| `export-gltf/export-buffers.ts`                                 | ~145 lines        | `BufferBuilder`: bufferViews, accessors, alignment, min/max; component constants                                 |
-| `export-gltf/export-glb.ts`                                     | ~40 lines         | GLB framing                                                                                                      |
-| `export-gltf/export-nodes.ts`                                   | ~400 lines        | root collection and partitioning, traversal, TRS/matrix emission, extras, mesh grouping and dedup                |
-| `export-gltf/export-geometry.ts`                                | ~315 lines        | attributes, indices and width, modes, morph targets, zero-UV synthesis, GPU-only and skinned-mesh warnings       |
-| `export-gltf/export-materials.ts`                               | ~515 lines        | dispatch, PBR core, Standard→MR, writer list and sweep, fold resolution                                          |
-| `export-gltf/export-material-slots.ts`                          | ~130 lines        | PBR slot helpers: UV selection, slot capture, `_uv2Mask` bits, omission setters                                  |
-| `export-gltf/export-textures.ts`                                | ~65 lines         | slot capture and resolution, per-slot textureInfo                                                                |
-| `export-gltf/export-images.ts`                                  | ~275 lines        | readback, decode blit, row order, channel ops, content dedup, PNG encode step                                    |
-| `export-gltf/export-png.ts`                                     | ~95 lines         | PNG chunks, CRC-32, zlib via `CompressionStream`                                                                 |
-| `export-gltf/export-cameras.ts`                                 | ~175 lines        | camera node, fixup detection and collapse, projections                                                           |
-| `export-gltf/export-animations.ts`                              | ~190 lines        | `collectAnimatedNodes`, groups → animations, channel validation, conversion                                      |
-| `export-gltf/ext/export-ext-lights-punctual.ts`                 | ~170 lines        | lights array, node placement, collapse, world placement                                                          |
-| `export-gltf/ext/export-ext-instancing.ts`                      | ~75 lines         | thin instances → `EXT_mesh_gpu_instancing`                                                                       |
-| `export-gltf/ext/export-ext-texture-transform.ts`               | ~35 lines         | textureInfo transform extension                                                                                  |
-| `export-gltf/ext/export-ext-*.ts` (13 material writers)         | ~15–40 lines each | per-writer digests above                                                                                         |
-| `index.ts`                                                      | 1 line            | root re-export of `exportSceneAsGlb`                                                                             |
-| `docs/lite/architecture/00-overview.md`                         | 1 row             | index row for this document                                                                                      |
-| `docs/lite/architecture/60-gltf-exporter.md`                    | this file         | the one-shot architecture spec                                                                                   |
-| `tests/lite/unit/export-gltf/export-test-utils.ts`              | ~350 lines        | unit harness: fake WebGPU device, fake textures and meshes, scene builder, GLB parser                            |
-| `tests/lite/unit/export-gltf/handedness.test.ts`                | ~345 lines        | conversion math and winding rule                                                                                 |
-| `tests/lite/unit/export-gltf/buffers-glb-png.test.ts`           | ~335 lines        | `BufferBuilder`, `computeMinMax`, GLB framing, CRC-32, PNG                                                       |
-| `tests/lite/unit/export-gltf/geometry.test.ts`                  | ~530 lines        | geometry, indices, morph targets, skinned meshes, thin instances                                                 |
-| `tests/lite/unit/export-gltf/nodes.test.ts`                     | ~600 lines        | root collection, transforms, mesh folding, extras, determinism                                                   |
-| `tests/lite/unit/export-gltf/materials-pbr.test.ts`             | ~535 lines        | PBR core, UV states, slot mapping                                                                                |
-| `tests/lite/unit/export-gltf/materials-standard.test.ts`        | ~420 lines        | Standard→MR conversion and UV mapping                                                                            |
-| `tests/lite/unit/export-gltf/material-writers.test.ts`          | ~730 lines        | the 13 extension writers                                                                                         |
-| `tests/lite/unit/export-gltf/images.test.ts`                    | ~240 lines        | readback paths, image identity, failures, container                                                              |
-| `tests/lite/unit/export-gltf/bjs-ports.test.ts`                 | ~495 lines        | Babylon.js test ports over native scenes                                                                         |
-| `tests/lite/unit/export-gltf/cameras-lights-animations.test.ts` | ~910 lines        | cameras, lights, animations                                                                                      |
-| `lab/lite/export-gltf-test.html`                                | 11 lines          | plumbing lab page                                                                                                |
-| `lab/lite/src/export-gltf-test.ts`                              | ~170 lines        | `window.exportGltfTest`: three-stage round trip for assets and a native scene; single export of a GLB            |
-| `tests/lite/plumbing/export-gltf.spec.ts`                       | ~85 lines         | plumbing spec: 10 assets plus a native scene, idempotence assertions                                             |
-| `tests/lite/plumbing/export-gltf-bjs-ports.spec.ts`             | ~320 lines        | Babylon.js test ports over hand-built glTF documents                                                             |
-| `tests/lite/plumbing/export-gltf-helpers.ts`                    | ~160 lines        | triangle fixture, GLB building and parsing, accessor reads                                                       |
+| File                                                                                             | Size               | Role                                                                                                             |
+| ------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `export-gltf/export-gltf.ts`                                                                     | ~115 lines         | entry, phase orchestration, JSON assembly                                                                        |
+| `export-gltf/export-gltf-types.ts`                                                               | ~190 lines         | glTF 2.0 JSON interfaces (type-only)                                                                             |
+| `export-gltf/export-context.ts`                                                                  | ~245 lines         | `ExportContext` and contract types, `createExportContext`, `attachExtension`, `snapshotExtras`, `cachedAccessor` |
+| `export-gltf/export-handedness.ts`                                                               | ~130 lines         | mirror conversions, `L`, sign pattern, `Rotate180Y`, `rotTo`, winding rule, tolerances                           |
+| `export-gltf/export-buffers.ts`                                                                  | ~145 lines         | `BufferBuilder`: bufferViews, accessors, alignment, min/max; component constants                                 |
+| `export-gltf/export-glb.ts`                                                                      | ~40 lines          | GLB framing                                                                                                      |
+| `export-gltf/export-nodes.ts`                                                                    | ~400 lines         | root collection and partitioning, traversal, TRS/matrix emission, extras, mesh grouping and dedup                |
+| `export-gltf/export-geometry.ts`                                                                 | ~315 lines         | attributes, indices and width, modes, morph targets, zero-UV synthesis, GPU-only and skinned-mesh warnings       |
+| `export-gltf/export-materials.ts`                                                                | ~515 lines         | dispatch, PBR core, Standard→MR, writer list and sweep, fold resolution                                          |
+| `export-gltf/export-material-slots.ts`                                                           | ~130 lines         | PBR slot helpers: UV selection, slot capture, `_uv2Mask` bits, omission setters                                  |
+| `export-gltf/export-textures.ts`                                                                 | ~65 lines          | slot capture and resolution, per-slot textureInfo                                                                |
+| `export-gltf/export-images.ts`                                                                   | ~275 lines         | readback, decode blit, row order, channel ops, content dedup, PNG encode step                                    |
+| `export-gltf/export-png.ts`                                                                      | ~95 lines          | PNG chunks, CRC-32, zlib via `CompressionStream`                                                                 |
+| `export-gltf/export-cameras.ts`                                                                  | ~175 lines         | camera node, fixup detection and collapse, projections                                                           |
+| `export-gltf/export-animations.ts`                                                               | ~190 lines         | `collectAnimatedNodes`, groups → animations, channel validation, conversion                                      |
+| `export-gltf/ext/export-ext-lights-punctual.ts`                                                  | ~170 lines         | lights array, node placement, collapse, world placement                                                          |
+| `export-gltf/ext/export-ext-instancing.ts`                                                       | ~75 lines          | thin instances → `EXT_mesh_gpu_instancing`                                                                       |
+| `export-gltf/ext/export-ext-texture-transform.ts`                                                | ~35 lines          | textureInfo transform extension                                                                                  |
+| `export-gltf/ext/export-ext-*.ts` (13 material writers)                                          | ~15–40 lines each  | per-writer digests above                                                                                         |
+| `index.ts`                                                                                       | 1 line             | root re-export of `exportSceneAsGlb`                                                                             |
+| `docs/lite/architecture/00-overview.md`                                                          | 1 row              | index row for this document                                                                                      |
+| `docs/lite/architecture/60-gltf-exporter.md`                                                     | this file          | the one-shot architecture spec                                                                                   |
+| `tests/lite/unit/export-gltf/export-test-utils.ts`                                               | ~350 lines         | unit harness: fake WebGPU device, fake textures and meshes, scene builder, GLB parser                            |
+| `tests/lite/unit/export-gltf/handedness.test.ts`                                                 | ~345 lines         | conversion math and winding rule                                                                                 |
+| `tests/lite/unit/export-gltf/buffers-glb-png.test.ts`                                            | ~335 lines         | `BufferBuilder`, `computeMinMax`, GLB framing, CRC-32, PNG                                                       |
+| `tests/lite/unit/export-gltf/geometry.test.ts`                                                   | ~530 lines         | geometry, indices, morph targets, skinned meshes, thin instances                                                 |
+| `tests/lite/unit/export-gltf/nodes.test.ts`                                                      | ~600 lines         | root collection, transforms, mesh folding, extras, determinism                                                   |
+| `tests/lite/unit/export-gltf/materials-pbr.test.ts`                                              | ~535 lines         | PBR core, UV states, slot mapping                                                                                |
+| `tests/lite/unit/export-gltf/materials-standard.test.ts`                                         | ~420 lines         | Standard→MR conversion and UV mapping                                                                            |
+| `tests/lite/unit/export-gltf/material-writers.test.ts`                                           | ~730 lines         | the 13 extension writers                                                                                         |
+| `tests/lite/unit/export-gltf/images.test.ts`                                                     | ~240 lines         | readback paths, image identity, failures, container                                                              |
+| `tests/lite/unit/export-gltf/bjs-ports.test.ts`                                                  | ~495 lines         | Babylon.js test ports over native scenes                                                                         |
+| `tests/lite/unit/export-gltf/cameras-lights-animations.test.ts`                                  | ~910 lines         | cameras, lights, animations                                                                                      |
+| `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | ~50–180 lines each | visual parity scenes 316, 317, 318, 320, 322, 323, 324, 325: Lite page and Babylon.js reference page             |
+| `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | ~40–60 lines each  | visual parity specs                                                                                              |
+| `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | images             | goldens and gallery thumbnails                                                                                   |
+| `scene-config.json`                                                                              | 8 entries          | ids 316–318, 320, 322–325 with `maxMad` and `maxRawKB`                                                           |
+| `lab/package.json`                                                                               | 1 line             | `@babylonjs/serializers` dev dependency for the reference pages                                                  |
+| `lab/lite/export-gltf-test.html`                                                                 | 11 lines           | plumbing lab page                                                                                                |
+| `lab/lite/src/export-gltf-test.ts`                                                               | ~170 lines         | `window.exportGltfTest`: three-stage round trip for assets and a native scene; single export of a GLB            |
+| `tests/lite/plumbing/export-gltf.spec.ts`                                                        | ~85 lines          | plumbing spec: 10 assets plus a native scene, idempotence assertions                                             |
+| `tests/lite/plumbing/export-gltf-bjs-ports.spec.ts`                                              | ~320 lines         | Babylon.js test ports over hand-built glTF documents                                                             |
+| `tests/lite/plumbing/export-gltf-helpers.ts`                                                     | ~160 lines         | triangle fixture, GLB building and parsing, accessor reads                                                       |
 
 _End of spec. Regeneration target: deterministic GLB output, pass-through fidelity for glTF-sourced geometry and transforms, pixel-exact images, the documented warnings at the boundary, and no production change outside `export-gltf/` except the root re-export._
