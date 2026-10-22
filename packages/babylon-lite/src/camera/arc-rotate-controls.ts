@@ -249,6 +249,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
     const PANNING_EPSILON = 0.0001;
+    // Decay one inertial offset by `factor`, snapping it to 0 once its magnitude drops below `epsilon`. Kept local so
+    // the bundler can still inline attachControl into a scene that calls it once.
+    const decayInertia = (offset: number, factor: number, epsilon: number): number => (Math.abs((offset *= factor)) < epsilon ? 0 : offset);
 
     let isDragging = false;
     let isPanning = false;
@@ -435,15 +438,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             const eps = 0.01;
             camera.beta = Math.max(eps, Math.min(Math.PI - eps, camera.beta));
 
-            camera.inertialAlphaOffset *= camera.inertia;
-            camera.inertialBetaOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialAlphaOffset) < ROTATION_EPSILON) {
-                camera.inertialAlphaOffset = 0;
-            }
-            if (Math.abs(camera.inertialBetaOffset) < ROTATION_EPSILON) {
-                camera.inertialBetaOffset = 0;
-            }
+            camera.inertialAlphaOffset = decayInertia(camera.inertialAlphaOffset, camera.inertia, ROTATION_EPSILON);
+            camera.inertialBetaOffset = decayInertia(camera.inertialBetaOffset, camera.inertia, ROTATION_EPSILON);
         }
 
         // --- Zoom inertia ---
@@ -451,11 +447,7 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             camera.radius -= camera.inertialRadiusOffset;
             camera.radius = Math.max(0.01, camera.radius);
 
-            camera.inertialRadiusOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialRadiusOffset) < RADIUS_EPSILON) {
-                camera.inertialRadiusOffset = 0;
-            }
+            camera.inertialRadiusOffset = decayInertia(camera.inertialRadiusOffset, camera.inertia, RADIUS_EPSILON);
         }
 
         // --- Panning inertia ---
@@ -481,15 +473,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             target.y += sinB * panY;
             target.z += cosA * panX - sinA * panYAcross;
 
-            camera.inertialPanningX *= camera.panningInertia;
-            camera.inertialPanningY *= camera.panningInertia;
-
-            if (Math.abs(camera.inertialPanningX) < PANNING_EPSILON) {
-                camera.inertialPanningX = 0;
-            }
-            if (Math.abs(camera.inertialPanningY) < PANNING_EPSILON) {
-                camera.inertialPanningY = 0;
-            }
+            camera.inertialPanningX = decayInertia(camera.inertialPanningX, camera.panningInertia, PANNING_EPSILON);
+            camera.inertialPanningY = decayInertia(camera.inertialPanningY, camera.panningInertia, PANNING_EPSILON);
         }
     }
 
