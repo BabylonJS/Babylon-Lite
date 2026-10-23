@@ -79,10 +79,12 @@ instead of building it, so a later reinsertion creates a fresh group that the bo
 drain or the runtime build path materializes.
 Boot and device-lost recovery group builds receive a snapshot of the group's
 members, so a detach or removal while the builder awaits a lazy import cannot
-change the list it iterates. An unchanged group is confirmed after the build by a
-single linear comparison of the snapshot with the live group. Otherwise the
-removal-installed settler reconciles the build against the group's current
-sequence using constant-time membership lookups:
+change the list it iterates. Scenes that never remove or detach a mesh only queue
+meshes that joined meanwhile for the material-swap drain. Once removal is used it
+installs a settler that confirms an unchanged group after the build by a single
+linear comparison of the snapshot with the live group, and otherwise reconciles
+the build against the group's current sequence using constant-time membership
+lookups:
 
 - Output for a snapshot member that left meanwhile is evicted before it is
   committed (its renderables are dropped and its per-mesh teardown retires after

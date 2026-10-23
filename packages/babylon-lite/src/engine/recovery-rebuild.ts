@@ -116,14 +116,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
             return;
         }
         if (!result) {
-            // Abandoned: every member left, or the remaining ones were handed to the material-swap drain,
-            // which must not reuse the pre-loss rebuild closure or output.
+            // Abandoned: removal's settler dropped an emptied group or handed the remaining members to the
+            // material-swap drain, which must not reuse the pre-loss rebuild closure or output.
             scene._runtimeBuilds?.dropBase(build);
-            if (meshes.length) {
-                meshes.r = meshes.o = undefined;
-            } else {
-                scene._groups.delete(build);
-            }
+            meshes.r = meshes.o = undefined;
             continue;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;

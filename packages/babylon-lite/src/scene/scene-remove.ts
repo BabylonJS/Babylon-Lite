@@ -185,11 +185,11 @@ function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable
     }
 }
 
-/** Revalidate a boot or recovery group build whose membership changed while the builder awaited.
+/** Confirm or revalidate a settled boot or recovery group build against the group's current membership.
  *
- *  Only a member that left is fixed up in place, by evicting its per-mesh output, and only a mesh that
- *  joined is deferred to the swap drain. The build is obsolete, and is retried against the group's current
- *  sequence, when:
+ *  An unchanged group is confirmed by one linear comparison. Otherwise only a member that left is fixed up
+ *  in place, by evicting its per-mesh output, and only a mesh that joined is deferred to the swap drain. The
+ *  build is obsolete, and is retried against the group's current sequence, when:
  *  - the surviving members changed relative order (a detach and reinsertion): transparent ties follow
  *    admission order, so the output must match a fresh build of the current sequence;
  *  - a member left and the output merged it into a renderable without a `mesh` back-reference, which would
@@ -199,17 +199,26 @@ function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable
  *
  *  Per-mesh resources of an obsolete build are retired only after the replacement build (make-before-break,
  *  so shared textures it re-acquires never reach a zero refcount). Scene-level resources an obsolete build
- *  registered stay owned by the scene until it is disposed. A group that empties is abandoned, as is one
- *  that keeps changing: its remaining members are queued for the material-swap drain, which builds a group
- *  without a completed build through the runtime path. */
+ *  registered stay owned by the scene until it is disposed. A group that empties is abandoned and dropped,
+ *  as is one that keeps changing: its remaining members are queued for the material-swap drain, which builds
+ *  a group without a completed build through the runtime path. */
 async function settleGroupBuild(
     scene: SceneContext,
     build: MeshGroupBuilder,
     group: SceneMeshGroup,
     members: Mesh[],
-    result: MeshGroupBuildResult | undefined,
-    error: unknown
+    pending: Promise<MeshGroupBuildResult>
 ): Promise<MeshGroupBuildResult | undefined> {
+    if (group.length === members.length && group.every((mesh, i) => mesh === members[i])) {
+        return pending;
+    }
+    let result: MeshGroupBuildResult | undefined;
+    let error: unknown;
+    try {
+        result = await pending;
+    } catch (thrown) {
+        error = thrown;
+    }
     const superseded: (() => void)[] = [];
     try {
         for (let attempt = 1; ; attempt++) {
@@ -243,6 +252,9 @@ async function settleGroupBuild(
                 }
             }
             if (scene._z || !group.length || attempt >= MAX_GROUP_BUILD_ATTEMPTS) {
+                if (!group.length && scene._groups.get(build) === group) {
+                    scene._groups.delete(build);
+                }
                 if (!scene._z) {
                     for (const mesh of group) {
                         enqueueMaterialSwap(scene, mesh);

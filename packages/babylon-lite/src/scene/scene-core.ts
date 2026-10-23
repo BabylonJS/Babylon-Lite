@@ -249,15 +249,15 @@ export interface SceneContext extends RenderingContext {
      *  Undefined material detaches a mesh's main-material usage. */
     _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
     /** @internal Installed by mesh removal, the only path that drops or reorders a boot or recovery group's
-     *  members while its build awaits: revalidates that build against the group's current sequence. Resolves
-     *  `undefined` when the build was abandoned (see {@link _buildMeshGroup}). */
+     *  members while its build awaits: confirms an unchanged group or revalidates the settled `pending` build
+     *  against the group's current sequence. Resolves `undefined` when the build was abandoned (see
+     *  {@link _buildMeshGroup}). */
     _settleGroupBuild?: (
         scene: SceneContext,
         build: MeshGroupBuilder,
         group: SceneMeshGroup,
         members: Mesh[],
-        result: MeshGroupBuildResult | undefined,
-        error: unknown
+        pending: Promise<MeshGroupBuildResult>
     ) => Promise<MeshGroupBuildResult | undefined>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
@@ -464,36 +464,28 @@ export interface DeferredSceneRenderables {
 
 /**
  * @internal Build a material group from a membership snapshot. Removal and retained detach splice the live
- * group while a builder awaits its lazy imports, so builders get a stable list. An unchanged group is
- * confirmed by one linear comparison; otherwise removal's settler revalidates the build against the current
- * sequence, and meshes that only joined meanwhile are queued for the material-swap drain.
+ * group while a builder awaits its lazy imports, so builders get a stable list. Once the build settles,
+ * removal's settler (installed only when removal is used) confirms an unchanged group with one linear
+ * comparison or revalidates the build against the current sequence. Without it, meshes that joined meanwhile
+ * are queued for the material-swap drain.
  * Resolves `undefined` when the build was abandoned: every member left, or the membership kept changing and
  * the remaining members were handed to the material-swap drain.
  */
 export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
     const members = group.slice();
-    let result: MeshGroupBuildResult | undefined;
-    let error: unknown;
-    try {
-        result = await build(scene, members);
-    } catch (thrown) {
-        error = thrown;
+    const pending = Promise.resolve(build(scene, members));
+    // Wait without throwing: a failure caused by a membership change is the settler's to retry.
+    await pending.catch(() => 0);
+    if (scene._settleGroupBuild) {
+        return scene._settleGroupBuild(scene, build, group, members, pending);
     }
-    if (group.length !== members.length || group.some((mesh, i) => mesh !== members[i])) {
-        if (scene._settleGroupBuild) {
-            return scene._settleGroupBuild(scene, build, group, members, result, error);
-        }
-        const captured = new Set(members);
-        for (const mesh of group) {
-            if (!captured.has(mesh)) {
-                enqueueMaterialSwap(scene, mesh);
-            }
+    const captured = new Set(members);
+    for (const mesh of group) {
+        if (!captured.has(mesh)) {
+            enqueueMaterialSwap(scene, mesh);
         }
     }
-    if (!result) {
-        throw error;
-    }
-    return result;
+    return pending;
 }
 
 /** @internal Register optional scene-hosted render work without teaching `addToScene` about the feature. */
@@ -610,20 +602,16 @@ function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
                     return;
                 }
                 const result = await _buildMeshGroup(ctx, build, group!);
-                // The build was discarded (membership kept changing, or every member left while it awaited) and any
-                // remaining members were handed to the swap drain.
-                if (!result) {
-                    if (!group![0]) {
-                        ctx._groups.delete(build);
+                // Undefined when the build was abandoned: removal's settler dropped an emptied group and queued
+                // any remaining members for the swap drain.
+                if (result) {
+                    ctx._renderables.push(...result.renderables);
+                    group!.o = result.renderables;
+                    if (result.updater) {
+                        ctx._uniformUpdaters.push(result.updater);
                     }
-                    return;
+                    group!.r = result.rebuildSingle;
                 }
-                ctx._renderables.push(...result.renderables);
-                group!.o = result.renderables;
-                if (result.updater) {
-                    ctx._uniformUpdaters.push(result.updater);
-                }
-                group!.r = result.rebuildSingle;
             });
         }
     }

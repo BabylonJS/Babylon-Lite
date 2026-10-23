@@ -638,10 +638,10 @@ describe("retained mesh scene membership", () => {
         }
     });
 
-    it("confirms an unchanged boot group without the removal settler", async () => {
+    it("confirms an unchanged boot group through the removal settler without rebuilding", async () => {
         const { engine, scene, mesh: first } = fixture();
         const second = cloneTransformNode(first) as typeof first;
-        const builder: MeshGroupBuilder = vi.fn(async (_target: SceneContext, meshes: Mesh[]) => ({
+        const builder = vi.fn(async (_target: SceneContext, meshes: Mesh[]) => ({
             renderables: meshes.map((member) => ({ order: 1, mesh: member }) as never),
             rebuildSingle: (_scene: SceneContext, member: Mesh) => ({ order: 1, mesh: member }) as never,
         }));
@@ -654,7 +654,9 @@ describe("retained mesh scene membership", () => {
         addToScene(scene, second);
 
         await buildScene(scene);
-        expect(settle).not.toHaveBeenCalled();
+        expect(builder).toHaveBeenCalledTimes(1);
+        expect(settle).toHaveBeenCalledTimes(1);
+        expect(await settle.mock.results[0]!.value).toBe(await builder.mock.results[0]!.value);
         expect(scene._renderables.map((draw) => draw.mesh)).toEqual([first, second]);
 
         disposeScene(scene);
