@@ -5,6 +5,8 @@ import { _packSceneUniforms } from "../../../../packages/babylon-lite/src/frame-
 import { composeMeshLoDWgsl, meshLoDShaderKey, type MeshLoDShaderFeatures } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-compose.js";
 import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "../../../../packages/babylon-lite/src/material/pbr/pbr-image-processing-output-wgsl.js";
 import { createPbrTemplate } from "../../../../packages/babylon-lite/src/material/pbr/pbr-template.js";
+import * as cotangentNormalWgsl from "../../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-cotangent-wgsl.js";
+import * as tangentNormalWgsl from "../../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-tangent-wgsl.js";
 import { StandardToneMapping, type ToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/tone-mapping.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import { SCENE_UBO_BYTES } from "../../../../packages/babylon-lite/src/shader/scene-uniforms-size.js";
@@ -37,9 +39,9 @@ it("preserves the ordinary PBR image-processing WGSL byte-for-byte after extract
     expect(PBR_DISPLAY_OUTPUT_WGSL).toBe(originalPbrDisplayOutput);
     for (const toneMapping of [undefined, StandardToneMapping, customToneMapping]) {
         const call = toneMapping?.callWGSL ?? PBR_EXPOSURE_WGSL;
-        for (const _normalMode of ["none", "tangent", "cotangent"] as const) {
+        for (const normal of [{}, { _tangentNormal: tangentNormalWgsl }, { _cotangentNormal: cotangentNormalWgsl }]) {
             const shader = createPbrTemplate({
-                _normalMode,
+                ...normal,
                 _hasTonemap: !!toneMapping,
                 _toneMappingHelpers: toneMapping?.helpersWGSL,
                 _toneMappingCall: toneMapping?.callWGSL,

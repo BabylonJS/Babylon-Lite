@@ -48,6 +48,30 @@ import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, M
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
+
+// PBR shader paths whose WGSL a group build loads only when one of its meshes needs it. The group's
+// synchronous rebuild closure cannot compose a path its build did not load, so `group._w` (consulted on
+// material swaps) routes a mesh needing a missing one to the asynchronous group rebuild instead.
+const LAZY_CAP_GAMMA = 1;
+const LAZY_CAP_TANGENT_NORMAL = 2;
+const LAZY_CAP_COTANGENT_NORMAL = 4;
+const LAZY_CAP_SPEC_GLOSS = 8;
+const ALL_LAZY_CAPS = 15;
+type LazyCapsWidening = ((mesh: Mesh) => number) & { _c: number };
+
+function lazyPbrCaps(mesh: Mesh): number {
+    const mat = mesh.material as PbrMaterialProps | null;
+    if (!mat) {
+        return 0;
+    }
+    const normalCap = mesh._gpu.tangentBuffer ? LAZY_CAP_TANGENT_NORMAL : LAZY_CAP_COTANGENT_NORMAL;
+    return (mat._gammaAlbedo ? LAZY_CAP_GAMMA : 0) | (mat.normalTexture ? normalCap : 0) | (mat.specGlossTexture ? LAZY_CAP_SPEC_GLOSS : 0);
+}
+
+/** Widening predicate for a closure built with `caps` loaded (null when nothing can be missing). */
+function lazyCapsWidening(caps: number): LazyCapsWidening | null {
+    return caps === ALL_LAZY_CAPS ? null : Object.assign((mesh: Mesh) => lazyPbrCaps(mesh) & ~caps, { _c: caps });
+}
 interface SingleLightWgslModule {
     SINGLE_LIGHT_STRUCTS: string;
     getSingleLightBlock(): string;
@@ -112,7 +136,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
     let hasAnyFlatNormal = false;
-    let hasGammaAlbedo = false;
+    let lazyCaps = 0;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
@@ -128,12 +152,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
-        hasGammaAlbedo ||= !!mat._gammaAlbedo;
+        lazyCaps |= lazyPbrCaps(m);
     }
     const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
-    if (!hasGammaAlbedo || !group.r) {
-        group._w = hasGammaAlbedo ? null : (mesh) => (mesh.material as PbrMaterialProps | null)?._gammaAlbedo;
-    }
+    // While a previous build's closure is still live (`group.r`), a swap must also route around what IT
+    // lacks; the committed result's own predicate replaces this one (scene-rebuild).
+    const liveCaps = lazyCaps & (group.r ? ((group._w as LazyCapsWidening | null | undefined)?._c ?? ALL_LAZY_CAPS) : ALL_LAZY_CAPS);
+    group._w = lazyCapsWidening(liveCaps);
 
     // ── Dynamically import fragment creators based on scene capabilities ──
 
@@ -264,6 +289,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock,
         _createPbrTemplateExt,
         _flatNormalWgsl,
+        // Normal-map and spec-gloss WGSL, loaded only when a mesh of the group samples them.
+        _tangentNormal: lazyCaps & LAZY_CAP_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined,
+        _cotangentNormal: lazyCaps & LAZY_CAP_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined,
+        _specGloss: lazyCaps & LAZY_CAP_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,
@@ -518,7 +547,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     scene._disposables.push(clearPbrPipelineCache);
 
-    return { renderables, rebuildSingle, _G: hasGammaAlbedo };
+    return { renderables, rebuildSingle, _w: lazyCapsWidening(lazyCaps) };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`

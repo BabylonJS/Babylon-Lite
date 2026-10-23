@@ -6,7 +6,7 @@
 import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { composeShader } from "../../shader/shader-composer.js";
-import { createPbrTemplate } from "./pbr-template.js";
+import { createPbrTemplate, type PbrCotangentNormalWgsl, type PbrSpecGlossWgsl, type PbrTangentNormalWgsl } from "./pbr-template.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import {
     PBR_HAS_NORMAL_MAP,
@@ -63,6 +63,11 @@ interface PbrComposerDeps {
     /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
      *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
     readonly _flatNormalWgsl: string;
+    /** Normal-map and specular-glossiness WGSL, dynamically loaded by pbr-renderable only when a mesh
+     *  of the group needs that path; absent otherwise so scenes without them bundle zero bytes. */
+    readonly _tangentNormal?: PbrTangentNormalWgsl;
+    readonly _cotangentNormal?: PbrCotangentNormalWgsl;
+    readonly _specGloss?: PbrSpecGlossWgsl;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
@@ -104,6 +109,9 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _fogBlock,
         _createPbrTemplateExt,
         _flatNormalWgsl,
+        _tangentNormal,
+        _cotangentNormal,
+        _specGloss,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
@@ -134,6 +142,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
         const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
         const _hasAnyNormal = hasNormal || hasCotangent;
+        const hasSpecGloss = has(PBR_HAS_SPEC_GLOSS);
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         const extensionIbl = _extensionIblResolver?.(features, features2) ?? false;
         const _hasIbl = hasScene(PBR_HAS_ENV) || extensionIbl;
@@ -162,7 +171,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                       _features2: features2,
                       _hasAnyNormal,
                       _hasEmissiveTexture,
-                      _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+                      _hasSpecGloss: hasSpecGloss,
                   })
                 : undefined;
 
@@ -173,11 +182,12 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _singleLightBlock: lightMode === 1 && _getSingleLightBlock ? _getSingleLightBlock(singleLightType) : "",
             _multiLightWGSL,
             _multiLightLoop,
-            _normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
+            _tangentNormal: hasNormal ? _tangentNormal : undefined,
+            _cotangentNormal: hasCotangent ? _cotangentNormal : undefined,
             _flatGeometricNormal: !_hasAnyNormal && hasMesh(MSH_FLAT_NORMAL),
             _flatNormalWgsl,
             _hasEmissiveTexture,
-            _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+            _specGloss: hasSpecGloss ? _specGloss : undefined,
             _hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
