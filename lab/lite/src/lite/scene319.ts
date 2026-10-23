@@ -72,7 +72,7 @@ async function main(): Promise<void> {
         removeFromScene(scene, mesh);
     }
     addToScene(scene, await loadGltf(engine, blob));
-    // Lite's exporter has no node filter and exports the scene light, so the light joins the scene after the round trip.
+    // A hemispheric light has no KHR_lights_punctual form, so it joins the scene after the round trip.
     addToScene(scene, light);
 
     await registerScene(scene);
