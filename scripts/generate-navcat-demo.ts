@@ -18,10 +18,13 @@ async function main(): Promise<void> {
     }
     const json = await generateNavcatMesh({ positions: new Float64Array(positions), indices: new Uint32Array(indices) });
     // Author an optional higher-cost region in the lower passage; endpoints remain unrestricted.
-    const mesh = JSON.parse(json) as {
-        nodes: { type: number; tileId: number; polyIndex: number; area: number }[];
-        tiles: Record<number, { vertices: number[]; polys: { vertices: number[]; area: number }[] }>;
+    const asset = JSON.parse(json) as {
+        navMesh: {
+            nodes: { type: number; tileId: number; polyIndex: number; area: number }[];
+            tiles: Record<number, { vertices: number[]; polys: { vertices: number[]; area: number }[] }>;
+        };
     };
+    const mesh = asset.navMesh;
     for (const node of mesh.nodes) {
         if (node.type !== 0) {
             continue;
@@ -32,7 +35,7 @@ async function main(): Promise<void> {
         const z = poly.vertices.reduce((sum, index) => sum + tile.vertices[index * 3 + 2]!, 0) / poly.vertices.length;
         node.area = poly.area = Math.abs(x) < 1.8 && z > 2 ? 2 : 0;
     }
-    writeFileSync(resolve(__dirname, "../lab/public/navcat/demo-navmesh.json"), JSON.stringify(mesh) + "\n");
+    writeFileSync(resolve(__dirname, "../lab/public/navcat/demo-navmesh.json"), JSON.stringify(asset) + "\n");
 }
 void main().catch((error: unknown) => {
     console.error(error);

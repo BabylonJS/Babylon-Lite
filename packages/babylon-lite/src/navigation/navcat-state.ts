@@ -44,20 +44,30 @@ export function checkNavcatVersion(manager: NavcatManager, version: number): Nav
     return mesh;
 }
 
-export function copyNavcatVector(value: Vec3, name: string, nonnegative = false): Vec3 {
-    if (![value.x, value.y, value.z].every((n) => Number.isFinite(n) && (!nonnegative || n >= 0))) {
+export function validateNavcatVector(value: Vec3, name: string, nonnegative = false): void {
+    if (!Number.isFinite(value.x) || !Number.isFinite(value.y) || !Number.isFinite(value.z) || (nonnegative && (value.x < 0 || value.y < 0 || value.z < 0))) {
         throw new Error(`Navcat ${name} must have finite${nonnegative ? " nonnegative" : ""} components`);
     }
+}
+
+export function copyNavcatVector(value: Vec3, name: string, nonnegative = false): Vec3 {
+    validateNavcatVector(value, name, nonnegative);
     return { x: value.x, y: value.y, z: value.z };
 }
 
-export function toNavcat(value: Vec3): Vec3Tuple {
-    const v = copyNavcatVector(value, "position");
-    return [v.x, v.y, -v.z];
+export function toNavcat(value: Vec3, out: Vec3Tuple = [0, 0, 0]): Vec3Tuple {
+    validateNavcatVector(value, "position");
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = -value.z;
+    return out;
 }
 
-export function fromNavcat(value: readonly number[]): Vec3 {
-    return { x: value[0]!, y: value[1]!, z: -value[2]! || 0 };
+export function fromNavcat(value: readonly number[], out: Vec3 = { x: 0, y: 0, z: 0 }): Vec3 {
+    out.x = value[0]!;
+    out.y = value[1]!;
+    out.z = -value[2]! || 0;
+    return out;
 }
 
 export function navcatFlags(value: number): number {

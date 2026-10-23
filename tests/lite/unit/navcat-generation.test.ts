@@ -118,7 +118,8 @@ describe("Navcat extraction and real solo generation", () => {
         geometry.indices.fill(999);
         options.cellHeight = -1;
         const json = await pending;
-        const parsed = JSON.parse(json) as { tiles: Record<string, { cellHeight: number; walkableRadius: number; walkableHeight: number; walkableClimb: number }> };
+        const parsed = (JSON.parse(json) as { navMesh: { tiles: Record<string, { cellHeight: number; walkableRadius: number; walkableHeight: number; walkableClimb: number }> } })
+            .navMesh;
         expect(Object.values(parsed.tiles)[0]).toMatchObject({ cellHeight: 0.2, walkableRadius: 0.2, walkableHeight: 1.4, walkableClimb: 0.6 });
         const manager = await createNavcatManager(json);
         expect(findNavcatNearestPoly(manager, { x: 8, y: 2, z: 6 }).success).toBe(true);

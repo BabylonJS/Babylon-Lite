@@ -268,7 +268,7 @@ describe("Navcat optional connections and debug", () => {
 
     it("returns copied mesh/link/search primitives and rejects stale searches", async () => {
         const manager = await createNavcatManager(json);
-        const search = findNavcatPath(manager, start, end);
+        const search = findNavcatPath(manager, start, end, undefined, { keepSearch: true });
         const debug = await createNavcatDebugGeometry(manager, { search });
         expect(debug.some((p) => p.kind === "triangles")).toBe(true);
         expect(debug.some((p) => p.kind === "lines")).toBe(true);

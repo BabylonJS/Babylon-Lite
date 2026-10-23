@@ -33,6 +33,9 @@ interface NavcatPathPoint {
     nodeRef: number | null;
     offMesh: boolean;
 }
+interface NavcatPathOptions {
+    keepSearch?: boolean;
+}
 interface NavcatPathResult {
     success: boolean;
     complete: boolean;
@@ -57,12 +60,12 @@ exportNavcatMesh(manager: NavcatManager): string;
 setNavcatFilter(manager: NavcatManager, filter: NavcatFilter | null): void;
 disposeNavcatManager(manager: NavcatManager): void;
 findNavcatNearestPoly(manager: NavcatManager, point: Vec3, halfExtents?: Vec3): NavcatNearestResult;
-findNavcatPath(manager: NavcatManager, start: Vec3, end: Vec3, halfExtents?: Vec3): NavcatPathResult;
+findNavcatPath(manager: NavcatManager, start: Vec3, end: Vec3, halfExtents?: Vec3, options?: NavcatPathOptions): NavcatPathResult;
 raycastNavcat(manager: NavcatManager, start: NavcatLocation, end: Vec3): NavcatRaycastResult;
 moveAlongNavcatSurface(manager: NavcatManager, start: NavcatLocation, end: Vec3): NavcatMoveResult;
 ```
 
-Path `success` includes partial paths; `complete` is true only for SDK COMPLETE_PATH, never inferred from point count. Preserve SDK straight-point off-mesh flags. Failure has empty point/node arrays. The result retains a private search-node snapshot only for optional search debugging and never enters the manager.
+Path `success` includes partial paths; `complete` is true only for SDK COMPLETE_PATH, never inferred from point count. Preserve SDK straight-point off-mesh flags. Failure has empty point/node arrays. The result retains no A* search graph by default. Set the fifth argument to `{ keepSearch: true }` only when a debug overlay needs the private search snapshot; the snapshot never enters the manager.
 
 Surface raycasts ignore destination Y while traversing polygons. A miss uses `fraction=1`, zero normal and the endpoint projected onto the final polygon; a hit uses clamped SDK t, converted outward normal and projected hit position. SDK `Number.MAX_VALUE`/edge -1 is a miss. Locations must identify a valid passing polygon in the manager's current revision; ray/move throw when a later filter excludes their start. Movement returns the SDK's height-projected position and a fresh location.
 
@@ -79,4 +82,6 @@ isNavcatConnectionConnected(manager: NavcatManager, connection: NavcatConnection
 
 Connection handles privately store owner and SDK sequence. Successful graph changes increment the manager revision, invalidating old locations/search results while existing connection handles remain valid through their sequence and mesh identity. Repeated removal or a foreign/stale connection returns false. Other operations after manager disposal throw. Options default to bidirectional true, flags 1 and area 0. Radius must be positive. Inputs are copied before the first async boundary; completion after disposal/replacement rejects without mutating an obsolete mesh.
 
-Internal state lives on these same interfaces with `@internal` members: manager `_mesh`, `_api`, `_filter`, `_halfExtents`, `_revision`, `_meshVersion`, `_disposed`; location `_owner`; connection `_owner`, `_meshVersion`, `_sequence`, `_removed`; path `_owner`, `_search`. The d.ts trim removes these and every SDK-only type import. No public/internal companion interfaces or attached methods.
+Internal state lives on these same interfaces with `@internal` members: manager `_mesh`, `_api`, `_filter`, `_queryFilter`, `_halfExtents`, `_halfExtentsTuple`, `_revision`, `_meshVersion`, `_disposed`; location `_owner`; connection `_owner`, `_meshVersion`, `_sequence`, `_removed`; path `_owner`, `_search`. The d.ts trim removes these and every SDK-only type import. No public/internal companion interfaces or attached methods.
+
+Filter callbacks receive reusable LH vector/node views, valid only for the synchronous callback. Copy any values needed afterwards. Each manager caches its SDK filter and validated half-extents tuple; the unmodified filter delegates directly to the SDK default. Query scratch tuples and SDK nearest/closest results are reused behind the global reentry guard, while returned public vectors and arrays remain owned snapshots.

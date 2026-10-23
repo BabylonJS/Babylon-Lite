@@ -1,15 +1,26 @@
 import type { NavcatManager, NavcatOptions, NavcatFilter } from "./navcat-types.js";
 import { assertNavcatIdle, copyNavcatFilter, copyNavcatVector, navcatMesh } from "./navcat-state.js";
-import { parseNavcatMesh } from "./navcat-json.js";
+import { parseNavcatMesh, stringifyNavcatMesh } from "./navcat-json.js";
 
-/** Load exclusively owned raw Navcat 0.4.1 JSON. Loads query code only; no Wasm or generator. */
+/** Load an exclusively owned versioned Navcat 0.4.1 asset. Loads query code only; no Wasm or generator. */
 export async function createNavcatManager(json: string, options: NavcatOptions = {}): Promise<NavcatManager> {
     assertNavcatIdle();
     const filter = copyNavcatFilter(options.filter);
     const halfExtents = copyNavcatVector(options.halfExtents ?? { x: 1, y: 2, z: 1 }, "half extents", true);
     const mesh = parseNavcatMesh(json);
     const api = await import("./navcat-runtime.js");
-    return { backend: "navcat", _mesh: mesh, _api: api, _filter: filter, _halfExtents: halfExtents, _revision: 0, _meshVersion: 0, _disposed: false };
+    return {
+        backend: "navcat",
+        _mesh: mesh,
+        _api: api,
+        _filter: filter,
+        _queryFilter: api.createQueryFilter(filter),
+        _halfExtents: halfExtents,
+        _halfExtentsTuple: [halfExtents.x, halfExtents.y, halfExtents.z],
+        _revision: 0,
+        _meshVersion: 0,
+        _disposed: false,
+    };
 }
 
 /** Atomically replace the owned mesh; invalid JSON leaves the previous graph intact. */
@@ -22,17 +33,19 @@ export function replaceNavcatMesh(manager: NavcatManager, json: string): void {
     manager._meshVersion++;
 }
 
-/** Export a fresh raw SDK JSON string, including current connections. */
+/** Export a fresh versioned asset string, including current connections. */
 export function exportNavcatMesh(manager: NavcatManager): string {
     assertNavcatIdle();
-    return JSON.stringify(navcatMesh(manager));
+    return stringifyNavcatMesh(navcatMesh(manager));
 }
 
 /** Copy filter options, preserving callback identity. Null restores the default filter. */
 export function setNavcatFilter(manager: NavcatManager, filter: NavcatFilter | null): void {
     assertNavcatIdle();
     navcatMesh(manager);
-    manager._filter = copyNavcatFilter(filter);
+    const copy = copyNavcatFilter(filter);
+    manager._queryFilter = manager._api!.createQueryFilter(copy);
+    manager._filter = copy;
 }
 
 /** Idempotently release owned mesh data and callback references. Later queries throw. */
@@ -47,5 +60,7 @@ export function disposeNavcatManager(manager: NavcatManager): void {
     manager._mesh = null;
     manager._api = null;
     manager._filter = null;
+    manager._queryFilter = null;
     manager._halfExtents = null;
+    manager._halfExtentsTuple = null;
 }

@@ -7,8 +7,8 @@ export function extractNavcatGeometry(meshes: readonly Mesh[]): NavcatGeometry {
     if (meshes.length === 0) {
         throw new Error("Navcat geometry needs at least one mesh");
     }
-    const positions: number[] = [];
-    const indices: number[] = [];
+    let positionCount = 0;
+    let indexCount = 0;
     for (const mesh of meshes) {
         const p = mesh._cpuPositions;
         const ix = mesh._cpuIndices;
@@ -30,20 +30,27 @@ export function extractNavcatGeometry(meshes: readonly Mesh[]): NavcatGeometry {
         ) {
             throw new Error("Navcat extraction requires live static CPU triangle-list geometry");
         }
+        positionCount += p.length;
+        indexCount += ix.length;
+    }
+    const positions = new Float64Array(positionCount);
+    const indices = new Uint32Array(indexCount);
+    let positionOffset = 0;
+    let indexOffset = 0;
+    for (const mesh of meshes) {
+        const p = mesh._cpuPositions!;
+        const ix = mesh._cpuIndices!;
         const m = mesh.worldMatrix;
         const determinant = mat4Determinant3(m);
-        if (
-            !Array.from({ length: 16 }, (_, i) => m[i]!).every(Number.isFinite) ||
-            !Number.isFinite(determinant) ||
-            determinant === 0 ||
-            m[3] !== 0 ||
-            m[7] !== 0 ||
-            m[11] !== 0 ||
-            m[15] !== 1
-        ) {
+        for (let i = 0; i < 16; i++) {
+            if (!Number.isFinite(m[i])) {
+                throw new Error("Navcat extraction requires a nonsingular finite affine transform");
+            }
+        }
+        if (!Number.isFinite(determinant) || determinant === 0 || m[3] !== 0 || m[7] !== 0 || m[11] !== 0 || m[15] !== 1) {
             throw new Error("Navcat extraction requires a nonsingular finite affine transform");
         }
-        const offset = positions.length / 3;
+        const vertexOffset = positionOffset / 3;
         for (let i = 0; i < p.length; i += 3) {
             const x = p[i]!,
                 y = p[i + 1]!,
@@ -51,21 +58,26 @@ export function extractNavcatGeometry(meshes: readonly Mesh[]): NavcatGeometry {
             const wx = m[0]! * x + m[4]! * y + m[8]! * z + m[12]!;
             const wy = m[1]! * x + m[5]! * y + m[9]! * z + m[13]!;
             const wz = -(m[2]! * x + m[6]! * y + m[10]! * z + m[14]!);
-            if (![wx, wy, wz].every(Number.isFinite)) {
+            if (!Number.isFinite(wx) || !Number.isFinite(wy) || !Number.isFinite(wz)) {
                 throw new Error("Navcat geometry contains nonfinite positions");
             }
-            positions.push(wx, wy, wz);
+            positions[positionOffset++] = wx;
+            positions[positionOffset++] = wy;
+            positions[positionOffset++] = wz;
         }
         const reverse = (determinant < 0 ? -1 : 1) !== (mesh._authoredSign ?? 1);
+        const vertexCount = p.length / 3;
         for (let i = 0; i < ix.length; i += 3) {
             const a = ix[i]!,
                 b = ix[i + 1]!,
                 c = ix[i + 2]!;
-            if (![a, b, c].every((index) => Number.isInteger(index) && index >= 0 && index < p.length / 3)) {
+            if (!Number.isInteger(a) || a < 0 || a >= vertexCount || !Number.isInteger(b) || b < 0 || b >= vertexCount || !Number.isInteger(c) || c < 0 || c >= vertexCount) {
                 throw new Error("Navcat geometry has an invalid triangle index");
             }
-            indices.push(offset + a, offset + (reverse ? c : b), offset + (reverse ? b : c));
+            indices[indexOffset++] = vertexOffset + a;
+            indices[indexOffset++] = vertexOffset + (reverse ? c : b);
+            indices[indexOffset++] = vertexOffset + (reverse ? b : c);
         }
     }
-    return { positions: new Float64Array(positions), indices: new Uint32Array(indices) };
+    return { positions, indices };
 }

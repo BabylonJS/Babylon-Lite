@@ -1525,6 +1525,7 @@ export type {
     NavcatNearestResult,
     NavcatPathPoint,
     NavcatPathResult,
+    NavcatPathOptions,
     NavcatRaycastResult,
     NavcatMoveResult,
     NavcatConnectionOptions,

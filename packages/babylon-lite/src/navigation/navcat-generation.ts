@@ -1,14 +1,20 @@
 import type { NavcatBuildOptions, NavcatGeometry } from "./navcat-types.js";
 
-/** Generate raw RH Navcat JSON. Intended for offline tooling; never loaded by query-only use. */
+/** Generate a versioned RH Navcat JSON asset. Intended for offline tooling; never loaded by query-only use. */
 export async function generateNavcatMesh(geometry: NavcatGeometry, options: NavcatBuildOptions = {}): Promise<string> {
     if (geometry.positions.length === 0 || geometry.positions.length % 3 !== 0 || geometry.indices.length === 0 || geometry.indices.length % 3 !== 0) {
         throw new Error("Navcat generation requires indexed triangles");
     }
     const positions = new Float64Array(geometry.positions);
     const indices = new Uint32Array(geometry.indices);
-    if (!positions.every(Number.isFinite) || !Array.from(geometry.indices).every((i) => Number.isInteger(i) && i >= 0 && i < positions.length / 3)) {
+    if (!positions.every(Number.isFinite)) {
         throw new Error("Navcat generation has nonfinite positions or invalid indices");
+    }
+    for (let i = 0; i < geometry.indices.length; i++) {
+        const index = geometry.indices[i]!;
+        if (!Number.isInteger(index) || index < 0 || index >= positions.length / 3) {
+            throw new Error("Navcat generation has nonfinite positions or invalid indices");
+        }
     }
     const settings: Required<NavcatBuildOptions> = {
         cellSize: options.cellSize ?? 0.15,

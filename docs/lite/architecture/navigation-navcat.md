@@ -36,7 +36,7 @@ The native lib build bundles SDK code into ordinary chunks; query and generation
 2. Implement the specified modules and root exports, then the original offline-baked demo.
 3. Real-SDK units cover asymmetric coordinate conversion, zero references, complete/partial paths, ray miss/hit, movement, filters, invalid inputs, stale handles, callback reentry and teardown/reload.
 4. Generation tests cover physical option conversion, input ownership and transformed/mirrored/glTF ground. Debug tests cover owned arrays and stale search results.
-5. Published-root probes check clean declarations/metadata, Node without WebGPU and positive query runtime behavior. Bundle probes prove unused-backend elimination and query-only generation/crowd/Recast/WASM exclusion with positive generation controls.
+5. Published-root probes check clean declarations/metadata, Node without WebGPU and positive query runtime behavior. Bundle probes prove unused-backend elimination and query-only generation/crowd/debug/mutation/Recast/WASM exclusion with fixed query-only raw/gzip byte guards with positive generation controls.
 6. Build/run only the new demo and existing control scenes 165, 213 and Recast 170. Count all Navcat/mathcat runtime bytes; do not change thresholds, baseline data or goldens. Existing scene bytes must remain unchanged.
 7. Run formatting, lint, all six type projects, native builds, scoped tests and composition with related open PRs. Review code/provenance/privacy before commit and ready PR.
 
@@ -52,7 +52,7 @@ Native `navigation/navcat*.ts`; architecture `navigation-navcat*.md`; real-SDK u
 
 ```ts
 import { createNavcatManager, findNavcatPath, disposeNavcatManager } from "@babylonjs/lite";
-const manager = await createNavcatManager(bakedNavMeshJson); // raw RH Navcat 0.4.1 JSON
+const manager = await createNavcatManager(bakedNavMeshJson); // versioned RH asset for Navcat 0.4.1
 const path = findNavcatPath(manager, { x: -4, y: 0, z: 2 }, { x: 4, y: 0, z: -2 });
 // path.points are LH snapshots; path.success may describe a partial route.
 disposeNavcatManager(manager);
@@ -60,4 +60,4 @@ disposeNavcatManager(manager);
 
 ## Verified behavior
 
-The real-SDK suites cover 53 Navcat cases and 27 existing Recast cases. Published-root checks include external-SDK-free declarations, complete root API and both MIT texts. Shipped-library positive controls execute query-only and generation bundles; the unused backend is eliminated. Six intentional coordinate, partial-status, retention, stale-reference, winding and reentry mutants are detected. The original demo exercises desktop/mobile controls, replacement, disposal and reload without page/network errors. No parity or performance claim is made.
+The real-SDK suites cover navigation queries, versioned asset corruption/reload, allocation lifetimes and 27 existing Recast cases. Published-root checks include external-SDK-free declarations, complete root API and both MIT texts. Shipped-library positive controls execute query-only and generation bundles; the unused backend is eliminated. Six intentional coordinate, partial-status, retention, stale-reference, winding and reentry mutants are detected. The original demo exercises desktop/mobile controls, replacement, disposal and reload without page/network errors. No parity or performance claim is made.

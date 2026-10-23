@@ -1,4 +1,5 @@
 import { generateSoloNavMesh } from "navcat/blocks";
+import { stringifyNavcatMesh } from "./navcat-json.js";
 import type { NavcatBuildOptions, NavcatGeometry } from "./navcat-types.js";
 
 export function generate(geometry: NavcatGeometry, o: Required<NavcatBuildOptions>): string {
@@ -21,5 +22,5 @@ export function generate(geometry: NavcatGeometry, o: Required<NavcatBuildOption
         detailSampleDistance: o.detailSampleDistance,
         detailSampleMaxError: o.detailSampleMaxError,
     });
-    return JSON.stringify(result.navMesh);
+    return stringifyNavcatMesh(result.navMesh);
 }

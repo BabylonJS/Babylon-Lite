@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+import { minify } from "terser";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rollup } from "rollup";
 import { cleanupTempDirs, ensureLibBuilt, isExternalRequest, LIB_ENTRY, makeTempEntry } from "./bundler-harness.js";
@@ -26,7 +28,7 @@ async function bundle(source: string): Promise<string> {
     }
 }
 
-beforeAll(ensureLibBuilt);
+beforeAll(ensureLibBuilt, 300_000);
 afterAll(cleanupTempDirs);
 
 describe("Navcat shipped-library optional boundaries", () => {
@@ -40,7 +42,15 @@ describe("Navcat shipped-library optional boundaries", () => {
         const code = await bundle(`import { createNavcatManager, findNavcatPath, disposeNavcatManager } from ${JSON.stringify(LIB_ENTRY)};
 export async function exercise(json) { const manager = await createNavcatManager(json); const path = findNavcatPath(manager,{x:-4,y:0,z:2},{x:4,y:0,z:-2}); disposeNavcatManager(manager); return path; }`);
         expect(code).toContain("findNearestPoly");
-        expect(code).not.toMatch(/generateSoloNavMesh|rasterizeTriangles|createHeightfield|createCrowd|CrowdAgent|@recast-navigation|WebAssembly|from ["'](?:navcat|mathcat)/);
+        expect(code).not.toMatch(
+            /generateSoloNavMesh|rasterizeTriangles|createHeightfield|createCrowd|CrowdAgent|createNavMeshHelper|createSearchNodesHelper|addOffMeshConnection|@recast-navigation|WebAssembly|from ["'](?:navcat|mathcat)/
+        );
+        const minified = (await minify(code, { module: true, compress: { passes: 2 }, mangle: true, format: { comments: false } })).code!;
+        const rawBytes = Buffer.byteLength(minified);
+        const gzipBytes = gzipSync(minified).byteLength;
+        // Includes the complete query-side Navcat/mathcat runtime; no vendor-byte subtraction.
+        expect(rawBytes).toBeLessThanOrEqual(35 * 1024);
+        expect(gzipBytes).toBeLessThanOrEqual(12 * 1024);
         const json = readFileSync(new URL("../../../lab/public/navcat/demo-navmesh.json", import.meta.url), "utf8");
         const api = (await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
             exercise: (input: string) => Promise<{ success: boolean; complete: boolean; points: { position: { z: number } }[] }>;
@@ -51,6 +61,14 @@ export async function exercise(json) { const manager = await createNavcatManager
         expect(result.points.at(-1)!.position.z).toBe(-2);
     });
 
+    it.each([
+        ["createNavcatDebugGeometry", "createNavMeshHelper"],
+        ["addNavcatConnection", "addOffMeshConnection"],
+    ])("positive control retains optional %s only when requested", async (api, marker) => {
+        const code = await bundle(`import { ${api} } from ${JSON.stringify(LIB_ENTRY)}; export const exercise = ${api};`);
+        expect(code).toContain(marker);
+    });
+
     it("positive control retains and executes solo generation only when requested", async () => {
         const code = await bundle(`import { generateNavcatMesh } from ${JSON.stringify(LIB_ENTRY)}; export const exercise = generateNavcatMesh;`);
         expect(code).toContain("generateSoloNavMesh");
@@ -59,6 +77,6 @@ export async function exercise(json) { const manager = await createNavcatManager
             exercise: (geometry: { positions: Float64Array; indices: Uint32Array }) => Promise<string>;
         };
         const json = await api.exercise({ positions: new Float64Array([-6, 0, -4, 6, 0, -4, 6, 0, 4, -6, 0, 4]), indices: new Uint32Array([0, 2, 1, 0, 3, 2]) });
-        expect((JSON.parse(json) as { nodes: unknown[] }).nodes.length).toBeGreaterThan(0);
+        expect((JSON.parse(json) as { navMesh: { nodes: unknown[] } }).navMesh.nodes.length).toBeGreaterThan(0);
     });
 });

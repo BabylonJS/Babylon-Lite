@@ -6,6 +6,7 @@ import {
     createBox,
     createSphere,
     createStandardMaterial,
+    createLineMaterial,
     createMeshFromData,
     createLines,
     createLineSystem,
@@ -77,6 +78,11 @@ async function main(): Promise<void> {
     const json = await response.text();
     let manager: NavcatManager | null = await createNavcatManager(json);
     let overlays: Mesh[] = [];
+    const debugMaterial = createStandardMaterial();
+    debugMaterial.diffuseColor = [0.18, 0.48, 0.8];
+    debugMaterial.alpha = 0.4;
+    const pathMaterial = createLineMaterial({ color: { r: 1, g: 0.83, b: 0.3, a: 1 } });
+    const debugLineMaterial = createLineMaterial({ color: { r: 0.4, g: 0.8, b: 1, a: 1 } });
 
     function clearOverlays(): void {
         for (const mesh of overlays) {
@@ -103,9 +109,9 @@ async function main(): Promise<void> {
                     }
                   : null
         );
-        const path = findNavcatPath(manager, start, end);
+        const path = findNavcatPath(manager, start, end, undefined, { keepSearch: debugToggle.checked });
         if (path.points.length > 1) {
-            const line = createLines(engine, { points: path.points.map((p) => ({ ...p.position, y: p.position.y + 0.18 })), color: { r: 1, g: 0.83, b: 0.3, a: 1 } });
+            const line = createLines(engine, { points: path.points.map((p) => ({ ...p.position, y: p.position.y + 0.18 })), material: pathMaterial });
             overlays.push(line);
             addToScene(scene, line);
         }
@@ -118,11 +124,8 @@ async function main(): Promise<void> {
                     for (let i = 1; i < normals.length; i += 3) {
                         normals[i] = 1;
                     }
-                    mesh = createMeshFromData(engine, "navcat-debug", new Float32Array(primitive.positions), normals, primitive.indices!);
-                    const material = createStandardMaterial();
-                    material.diffuseColor = [0.18, 0.48, 0.8];
-                    material.alpha = 0.4;
-                    mesh.material = material;
+                    mesh = createMeshFromData(engine, "navcat-debug", primitive.positions, normals, primitive.indices!);
+                    mesh.material = debugMaterial;
                 } else if (primitive.kind === "lines") {
                     const lines: Vec3[][] = [];
                     for (let i = 0; i < primitive.positions.length; i += 6) {
@@ -134,7 +137,7 @@ async function main(): Promise<void> {
                     if (!lines.length) {
                         continue;
                     }
-                    mesh = createLineSystem(engine, { lines, color: { r: 0.4, g: 0.8, b: 1, a: 1 } });
+                    mesh = createLineSystem(engine, { lines, material: debugLineMaterial });
                 } else {
                     continue;
                 }

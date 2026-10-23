@@ -3,7 +3,7 @@
 ```ts
 interface NavcatDebugGeometry {
     kind: "triangles" | "lines" | "points";
-    positions: Float64Array; colors: Float32Array; indices?: Uint32Array;
+    positions: Float32Array; colors: Float32Array; indices?: Uint32Array;
 }
 interface NavcatDebugOptions { navMesh?: boolean; connections?: boolean; search?: NavcatPathResult }
 createNavcatDebugGeometry(manager: NavcatManager, options?: NavcatDebugOptions): Promise<NavcatDebugGeometry[]>;
@@ -11,9 +11,9 @@ createNavcatDebugGeometry(manager: NavcatManager, options?: NavcatDebugOptions):
 
 ## Debug behavior
 
-The optional debug runtime uses named Navcat helpers for the mesh, off-mesh links and retained path search nodes. Defaults are mesh true, connections true, no search. A supplied search must belong to this manager and current graph revision. Check liveness/mesh version after import and again before reading search results.
+The optional debug runtime uses named Navcat helpers for the mesh, off-mesh links and retained path search nodes. Defaults are mesh true, connections true, no search. Path search retention is opt-in with keepSearch; the demo enables it only while its debug toggle is checked. A supplied search must belong to this manager and current graph revision. Check liveness/mesh version after import and again before reading search results.
 
-Return copied LH CPU triangle/line/point primitives with parallel RGB colors. Reflect Z; triangles use Lite winding after the reflection. SDK helper results currently contain triangles, lines and points; reject unsupported kinds rather than silently dropping geometry. No GPU buffers, materials, scene references or hooks are stored or created by the adapter. Callers own rendering and release any meshes they create. The path itself is already a caller-owned polyline in `NavcatPathResult.points`.
+Return copied LH CPU triangle/line/point primitives with Float32 positions, without spread-based intermediate arrays with parallel RGB colors. Reflect Z; triangles use Lite winding after the reflection. SDK helper results currently contain triangles, lines and points; reject unsupported kinds rather than silently dropping geometry. No GPU buffers, materials, scene references or hooks are stored or created by the adapter. Callers own rendering and release any meshes they create. The demo removes retired overlays from the scene and uses current main's removeFromScene deferred GPU retirement (which calls disposeMeshGpu after submitted work), reusing the path line, debug line and triangle materials across queries so their material-owned uniform buffers stay bounded. The path itself is already a caller-owned polyline in `NavcatPathResult.points`.
 
 ## Demo
 
@@ -27,4 +27,4 @@ Do not modify golden references or scene-config thresholds: maintainers explicit
 
 ## Validation
 
-Build the native package and the single demo, exercise controls in Chrome, inspect actual network JS/WASM requests and the generated chunk graph. Query-only runtime must fetch no generator, crowd, Recast, Three or WASM. Full Navcat/mathcat bytes count toward runtime size; they are not excluded by the Recast/vendor accounting rules. Verify disposal/reload, no console/page errors and a representative thumbnail. Rendering uses existing APIs with no shader changes or parity claims.
+Build the native package and the single demo, exercise controls in Chrome, inspect actual network JS/WASM requests and the generated chunk graph. Query-only runtime must fetch no generator, crowd, Recast, Three or WASM. The minified query-only shipped-library probe has ceilings of 35 KiB raw and 12 KiB gzip, with all Navcat/mathcat code counted. Full Navcat/mathcat bytes count toward runtime size; they are not excluded by the Recast/vendor accounting rules. Verify disposal/reload, no console/page errors and a representative thumbnail. Rendering uses existing APIs with no shader changes or parity claims.

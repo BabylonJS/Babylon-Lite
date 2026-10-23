@@ -1,6 +1,6 @@
-import type { NavMesh, SearchNodePool } from "navcat";
+import type { NavMesh, SearchNodePool, QueryFilter } from "navcat";
 import type * as Runtime from "./navcat-runtime.js";
-import type { Vec3 } from "../math/types.js";
+import type { Vec3, Vec3Tuple } from "../math/types.js";
 
 /** Optional, exclusively owned Navcat backend. Use standalone navigation functions. */
 export interface NavcatManager {
@@ -8,13 +8,15 @@ export interface NavcatManager {
     /** @internal */ _mesh: NavMesh | null;
     /** @internal */ _api: typeof Runtime | null;
     /** @internal */ _filter: NavcatFilter | null;
+    /** @internal */ _queryFilter: QueryFilter | null;
     /** @internal */ _halfExtents: Vec3 | null;
+    /** @internal */ _halfExtentsTuple: Vec3Tuple | null;
     /** @internal */ _revision: number;
     /** @internal */ _meshVersion: number;
     /** @internal */ _disposed: boolean;
 }
 
-/** Caller-owned node metadata passed to query callbacks. */
+/** Borrowed node view, valid only during the synchronous query callback. Copy values to retain them. */
 export interface NavcatNode {
     readonly nodeRef: number;
     readonly flags: number;
@@ -22,12 +24,12 @@ export interface NavcatNode {
     readonly kind: "polygon" | "connection";
 }
 
-/** Synchronous query callbacks; do not reenter navigation from a callback. */
+/** Synchronous query callbacks receive borrowed views; copy retained values and do not reenter navigation. */
 export interface NavcatFilter {
     includeFlags?: number;
     excludeFlags?: number;
     pass?: (node: Readonly<NavcatNode>) => boolean;
-    /** Must return a finite nonnegative cost. Costs below distance inherit the SDK heuristic's limitations. */
+    /** Vector and node views are valid only during this call. Must return a finite nonnegative cost. Costs below distance inherit the SDK heuristic's limitations. */
     cost?: (from: Readonly<Vec3>, to: Readonly<Vec3>, current: Readonly<NavcatNode>, previous: Readonly<NavcatNode> | null, next: Readonly<NavcatNode> | null) => number;
 }
 
@@ -53,6 +55,11 @@ export interface NavcatPathPoint {
     position: Vec3;
     nodeRef: number | null;
     offMesh: boolean;
+}
+
+/** Optional search-debugging retention; ordinary paths release the SDK search graph. */
+export interface NavcatPathOptions {
+    keepSearch?: boolean;
 }
 
 /** A successful path may be partial; check complete before treating the destination as reachable. */
@@ -123,7 +130,7 @@ export interface NavcatBuildOptions {
 /** Caller-owned CPU debug primitive in Lite coordinates. Rendering/disposal belongs to the caller. */
 export interface NavcatDebugGeometry {
     kind: "triangles" | "lines" | "points";
-    positions: Float64Array;
+    positions: Float32Array;
     colors: Float32Array;
     indices?: Uint32Array;
 }
