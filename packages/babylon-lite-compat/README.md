@@ -152,6 +152,10 @@ overloads within a supported area may still be absent.
 | Gaussian Splatting (`.ply` / `.splat` / `.sog` / `.spz`)                                       |   ⚡   | `GaussianSplattingMesh` wraps eager Lite loaders; BJS streaming and the separate stochastic WebGPU point-splatting compute path resolve to named stubs because their budget, pass-lifecycle, and rendering models do not map to Lite's sorted-splat renderer |
 | `OBJ` / `STL` / `FBX` / `BVH`                                                                  |   ❌   | parser/materializer subsystems are not in Lite — convert to glTF                                                                                                                                                                  |
 
+> **glTF hierarchy:** `result.meshes` is a flattened view of the glTF node hierarchy (transform nodes plus the
+> primitive meshes beneath them), not one mesh per node as in Babylon.js. Reparent with `setParent()`, not `.parent =`,
+> when you flatten it — see [glTF import hierarchy and reparenting](#gltf-import-hierarchy-and-reparenting).
+
 ### `@babylonjs/addons` · `@recast-navigation/*`
 
 | Feature area                                                                           | Status | Notes                            |
@@ -173,6 +177,82 @@ The intended migration path is:
 ```
 @babylonjs/core  →  @babylonjs/lite-compat  →  babylon-lite (native)
 ```
+
+## glTF import hierarchy and reparenting
+
+Babylon Lite keeps the glTF node hierarchy: every glTF node becomes a transform node, and every primitive of its mesh
+becomes a mesh **under** that node. For a node with a single primitive, Babylon.js instead returns one `Mesh` that
+carries both the node transform and the geometry. The compat layer rebuilds Lite's hierarchy as canonical wrappers and
+returns it flattened, in hierarchy order, from `SceneLoader.ImportMeshAsync(...).meshes` and `AssetContainer.meshes`:
+
+- The list is a flattened view of a retained hierarchy, not a list of independent renderable meshes. A parent always
+  comes before its children.
+- It contains the synthetic `__root__` at index 0, the source glTF transform nodes, and the primitive meshes beneath
+  them.
+- Transform-only entries are wrapped as `Mesh` too, but carry no geometry: `getTotalVertices() === 0`. Do not treat an
+  entry as geometry just because it is a `Mesh`.
+
+### Why per-entry `.parent` breaks
+
+`mesh.parent = node` keeps the mesh's **local** transform and lets its world transform change under the new parent.
+`mesh.setParent(node)` keeps its **world** transform. Both behave as in Babylon.js, but a loop written for Babylon.js
+often assigns `.parent` to every returned entry:
+
+```ts
+// Fine in Babylon.js. Under compat it detaches each primitive from the glTF node that carries its transform.
+for (const mesh of result.meshes) {
+    mesh.parent = applicationRoot;
+}
+```
+
+Under compat every primitive mesh is then moved off the glTF node above it and keeps only its own local transform, so
+any scale, rotation or translation that came from an ancestor node is lost. A typical case is a hardware asset modelled
+in millimetres whose glTF node scales it by `0.001`: after the loop its primitives render 1000 times too large, so a
+40 mm connector becomes 40 m, often far outside the camera range.
+
+Baking in list order fails the same way. `bakeCurrentTransformIntoVertices()` bakes only the mesh's **local**
+transform: on a primitive that still sits under its glTF node it leaves the node's scale out, and resetting a node's
+transform first (it comes earlier in the list) changes what its children inherit before they are processed.
+
+### Safe patterns
+
+Keep the hierarchy and move the whole import:
+
+```ts
+import { Mesh, SceneLoader } from "@babylonjs/lite-compat";
+
+const result = await SceneLoader.ImportMeshAsync("", rootUrl, "model.glb", scene);
+result.meshes[0]!.setParent(applicationRoot);
+```
+
+Flatten only the renderable meshes, keeping their current world transforms. `result.meshes` is typed as
+`TransformNode[]`, so narrow the entries to `Mesh` before calling mesh-only methods:
+
+```ts
+const renderableMeshes = result.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh && mesh.getTotalVertices() > 0);
+for (const mesh of renderableMeshes) {
+    mesh.setParent(applicationRoot);
+}
+```
+
+Bake the composed transform into the geometry: call `setParent()` first, so the full hierarchy-composed world
+transform becomes the mesh's new local transform, then bake:
+
+```ts
+for (const mesh of renderableMeshes) {
+    mesh.setParent(applicationRoot);
+    mesh.bakeCurrentTransformIntoVertices();
+}
+```
+
+Bake only meshes whose composed transform is free of shear. `setParent()` keeps the exact affine local matrix, but
+`bakeCurrentTransformIntoVertices()` rebuilds the transform from position, rotation and scaling, and that cannot express
+shear. Shear appears when an ancestor has a non-uniform scale and a descendant below it is rotated: for example, a node
+scaled `(2, 1, 1)` above a primitive rotated 45 degrees around Z. Flattening such a primitive with `setParent()` keeps
+its appearance, but baking it afterwards drops the shear and changes the geometry. Leave those meshes flattened without
+baking.
+
+`setParent()` also preserves mirrored transforms, including the synthetic handedness root of glTF imports (#456).
 
 ## Missing an API you need?
 
