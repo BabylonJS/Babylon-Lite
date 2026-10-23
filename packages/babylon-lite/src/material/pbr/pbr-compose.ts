@@ -73,6 +73,20 @@ interface PbrComposerDeps {
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
 }
 
+/** @internal Lazily loaded WGSL paths a variant composes. */
+export const PBR_LAZY_TANGENT_NORMAL = 2;
+export const PBR_LAZY_COTANGENT_NORMAL = 4;
+export const PBR_LAZY_SPEC_GLOSS = 8;
+
+/** @internal The single rule mapping feature bits to the lazy WGSL modules a variant needs — shared by
+ *  `composePbr` (which consumes the modules) and the group build (which decides which ones to load). */
+export function _pbrLazyWgslNeeds(features: number, meshFeatures: number): number {
+    return (
+        ((features & PBR_HAS_NORMAL_MAP) !== 0 ? ((meshFeatures & MSH_HAS_TANGENTS) !== 0 ? PBR_LAZY_TANGENT_NORMAL : PBR_LAZY_COTANGENT_NORMAL) : 0) |
+        ((features & PBR_HAS_SPEC_GLOSS) !== 0 ? PBR_LAZY_SPEC_GLOSS : 0)
+    );
+}
+
 export type PbrLightMode = 0 | 1 | 2;
 type PbrComposeFn = (
     _features: number,
@@ -139,10 +153,11 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const has = (bit: number) => (features & bit) !== 0;
         const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
         const hasScene = (bit: number) => (sceneFeatures & bit) !== 0;
-        const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
-        const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
+        const lazyNeeds = _pbrLazyWgslNeeds(features, meshFeatures);
+        const hasNormal = (lazyNeeds & PBR_LAZY_TANGENT_NORMAL) !== 0;
+        const hasCotangent = (lazyNeeds & PBR_LAZY_COTANGENT_NORMAL) !== 0;
         const _hasAnyNormal = hasNormal || hasCotangent;
-        const hasSpecGloss = has(PBR_HAS_SPEC_GLOSS);
+        const hasSpecGloss = (lazyNeeds & PBR_LAZY_SPEC_GLOSS) !== 0;
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         const extensionIbl = _extensionIblResolver?.(features, features2) ?? false;
         const _hasIbl = hasScene(PBR_HAS_ENV) || extensionIbl;

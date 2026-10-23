@@ -34,7 +34,7 @@ import {
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
-import { createPbrComposer } from "./pbr-compose.js";
+import { createPbrComposer, _pbrLazyWgslNeeds, PBR_LAZY_COTANGENT_NORMAL, PBR_LAZY_SPEC_GLOSS, PBR_LAZY_TANGENT_NORMAL } from "./pbr-compose.js";
 import { StandardToneMapping, type ToneMapping } from "./tone-mapping.js";
 import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -44,7 +44,7 @@ import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import { _computeMeshFeatures, _meshTangentFeature, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
@@ -52,25 +52,26 @@ type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 // PBR shader paths whose WGSL a group build loads only when one of its meshes needs it. The group's
 // synchronous rebuild closure cannot compose a path its build did not load, so `group._w` (consulted on
 // material swaps) routes a mesh needing a missing one to the asynchronous group rebuild instead.
+// The normal-map / spec-gloss caps come from `_pbrLazyWgslNeeds` — the very rule `composePbr` applies.
 const LAZY_CAP_GAMMA = 1;
-const LAZY_CAP_TANGENT_NORMAL = 2;
-const LAZY_CAP_COTANGENT_NORMAL = 4;
-const LAZY_CAP_SPEC_GLOSS = 8;
-const ALL_LAZY_CAPS = 15;
+const ALL_LAZY_CAPS = LAZY_CAP_GAMMA | PBR_LAZY_TANGENT_NORMAL | PBR_LAZY_COTANGENT_NORMAL | PBR_LAZY_SPEC_GLOSS;
 type LazyCapsWidening = ((mesh: Mesh) => number) & { _c: number };
 
-function lazyPbrCaps(mesh: Mesh): number {
+/** @internal Lazy caps a mesh's current material needs (exported for the composition-parity test). */
+export function _lazyPbrCaps(mesh: Mesh): number {
     const mat = mesh.material as PbrMaterialProps | null;
     if (!mat) {
         return 0;
     }
-    const normalCap = mesh._gpu.tangentBuffer ? LAZY_CAP_TANGENT_NORMAL : LAZY_CAP_COTANGENT_NORMAL;
-    return (mat._gammaAlbedo ? LAZY_CAP_GAMMA : 0) | (mat.normalTexture ? normalCap : 0) | (mat.specGlossTexture ? LAZY_CAP_SPEC_GLOSS : 0);
+    // The feature bits `rebuildSingle` hands to `composePbr`; read without populating the cache, since
+    // extensions this build registers later may still contribute `detect` bits.
+    const features = ((mat._renderFeatures as MaterialRenderFeatures | undefined) ?? _computePbrMaterialFeatures(mat)).features;
+    return (mat._gammaAlbedo ? LAZY_CAP_GAMMA : 0) | _pbrLazyWgslNeeds(features, _meshTangentFeature(mesh));
 }
 
 /** Widening predicate for a closure built with `caps` loaded (null when nothing can be missing). */
 function lazyCapsWidening(caps: number): LazyCapsWidening | null {
-    return caps === ALL_LAZY_CAPS ? null : Object.assign((mesh: Mesh) => lazyPbrCaps(mesh) & ~caps, { _c: caps });
+    return caps === ALL_LAZY_CAPS ? null : Object.assign((mesh: Mesh) => _lazyPbrCaps(mesh) & ~caps, { _c: caps });
 }
 interface SingleLightWgslModule {
     SINGLE_LIGHT_STRUCTS: string;
@@ -152,7 +153,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && !!(mat as { _uv2Mask?: number })._uv2Mask;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
         hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
-        lazyCaps |= lazyPbrCaps(m);
+        lazyCaps |= _lazyPbrCaps(m);
     }
     const group = scene._groups.get(meshes[0]!.material!._buildGroup)!;
     // While a previous build's closure is still live (`group.r`), a swap must also route around what IT
@@ -279,6 +280,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock = fogMod.PBR_FOG_BLOCK;
     }
 
+    // Recomputed now that this build's extensions are registered, so any `detect` bit they add is seen.
+    let loadCaps = 0;
+    for (const m of meshes) {
+        loadCaps |= _lazyPbrCaps(m);
+    }
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -290,9 +296,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createPbrTemplateExt,
         _flatNormalWgsl,
         // Normal-map and spec-gloss WGSL, loaded only when a mesh of the group samples them.
-        _tangentNormal: lazyCaps & LAZY_CAP_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined,
-        _cotangentNormal: lazyCaps & LAZY_CAP_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined,
-        _specGloss: lazyCaps & LAZY_CAP_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined,
+        _tangentNormal: loadCaps & PBR_LAZY_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined,
+        _cotangentNormal: loadCaps & PBR_LAZY_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined,
+        _specGloss: loadCaps & PBR_LAZY_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,
@@ -547,7 +553,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     scene._disposables.push(clearPbrPipelineCache);
 
-    return { renderables, rebuildSingle, _w: lazyCapsWidening(lazyCaps) };
+    return { renderables, rebuildSingle, _w: lazyCapsWidening(loadCaps) };
 }
 
 /** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`
