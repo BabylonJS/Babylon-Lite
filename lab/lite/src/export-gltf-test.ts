@@ -1,7 +1,9 @@
 /** glTF export round-trip harness for tests/lite/plumbing/export-gltf.spec.ts.
  *
  *  Exposes `window.exportGltfTest`: load an asset (or build a native scene), export it, reload the
- *  export, and export again, returning both GLBs (base64) and every warning the exports logged. */
+ *  export, and export again, returning the GLBs (base64) and every warning the exports logged.
+ *  The spec shares one page and engine across tests, so every call disposes the scenes it creates
+ *  and leaves no engine opt-in enabled. */
 
 import {
     addToScene,
@@ -17,6 +19,7 @@ import {
     createStandardMaterial,
     createTexture2DFromPixels,
     createTransformNode,
+    disposeScene,
     enableDeviceLostSceneRecovery,
     enableGltfCameras,
     exportSceneAsGlb,
@@ -29,9 +32,10 @@ export interface ExportRoundTrip {
     first: string;
     /** Export of the reloaded first export, base64. */
     second: string;
-    /** Export of the reloaded second export, base64. */
-    third: string;
-    /** Warnings logged by the first and the second export, in order. */
+    /** Export of the reloaded second export, base64. Only `roundTripNative` produces it: an asset's
+     *  output is already a fixed point when `second === first`, while a native scene's is not. */
+    third?: string;
+    /** Warnings logged by every export, in order. */
     warnings: string[];
     /** Mesh / light counts of the source scene and of the reloaded scene. */
     counts: { meshes: number; lights: number; reloadedMeshes: number; reloadedLights: number; camera: boolean; reloadedCamera: boolean };
@@ -41,7 +45,8 @@ export interface ExportGltfTest {
     roundTripAsset(url: string): Promise<ExportRoundTrip>;
     roundTripNative(): Promise<ExportRoundTrip>;
     /** Load a GLB (base64) into a fresh scene, export it once and return the export (base64) and the warnings it logged.
-     *  `retainCpuVertexData` enables device-lost scene recovery before loading, the opt-in that keeps tangents, second UVs and vertex colors on the CPU. */
+     *  `retainCpuVertexData` enables device-lost scene recovery before loading, the opt-in that keeps tangents, second UVs and vertex colors on the CPU,
+     *  and disables it again afterwards. */
     exportGlb(glbBase64: string, options?: { retainCpuVertexData?: boolean }): Promise<{ glb: string; warnings: string[] }>;
 }
 
@@ -82,26 +87,33 @@ async function reload(engine: EngineContext, glb: Blob): Promise<SceneContext> {
     return scene;
 }
 
-async function roundTrip(engine: EngineContext, scene: SceneContext): Promise<ExportRoundTrip> {
+async function toBase64Blob(blob: Blob): Promise<string> {
+    return toBase64(new Uint8Array(await blob.arrayBuffer()));
+}
+
+/** Export `scene`, reload and export again; with `withThird`, reload and export once more. Disposes every scene, `scene` included. */
+async function roundTrip(engine: EngineContext, scene: SceneContext, withThird: boolean): Promise<ExportRoundTrip> {
     const warnings: string[] = [];
     const first = await exportCapturingWarnings(scene, warnings);
     const reloaded = await reload(engine, first);
     const second = await exportCapturingWarnings(reloaded, warnings);
-    const third = await exportCapturingWarnings(await reload(engine, second), warnings);
-    return {
-        first: toBase64(new Uint8Array(await first.arrayBuffer())),
-        second: toBase64(new Uint8Array(await second.arrayBuffer())),
-        third: toBase64(new Uint8Array(await third.arrayBuffer())),
-        warnings,
-        counts: {
-            meshes: scene.meshes.length,
-            lights: scene.lights.length,
-            reloadedMeshes: reloaded.meshes.length,
-            reloadedLights: reloaded.lights.length,
-            camera: !!scene.camera,
-            reloadedCamera: !!reloaded.camera,
-        },
+    const counts = {
+        meshes: scene.meshes.length,
+        lights: scene.lights.length,
+        reloadedMeshes: reloaded.meshes.length,
+        reloadedLights: reloaded.lights.length,
+        camera: !!scene.camera,
+        reloadedCamera: !!reloaded.camera,
     };
+    disposeScene(scene);
+    disposeScene(reloaded);
+    let third: string | undefined;
+    if (withThird) {
+        const reloadedAgain = await reload(engine, second);
+        third = await toBase64Blob(await exportCapturingWarnings(reloadedAgain, warnings));
+        disposeScene(reloadedAgain);
+    }
+    return { first: await toBase64Blob(first), second: await toBase64Blob(second), third, warnings, counts };
 }
 
 const api: ExportGltfTest = {
@@ -112,19 +124,22 @@ const api: ExportGltfTest = {
         const container = await loadGltf(engine, url);
         addToScene(scene, container);
         scene.camera ??= container.cameras?.[0] ?? null;
-        return roundTrip(engine, scene);
+        return roundTrip(engine, scene, false);
     },
     async exportGlb(glbBase64, options) {
         const engine = await getEngine();
-        if (options?.retainCpuVertexData) {
-            enableDeviceLostSceneRecovery(engine);
-        }
+        const recovery = options?.retainCpuVertexData ? enableDeviceLostSceneRecovery(engine) : null;
         enableGltfCameras();
-        const bytes = Uint8Array.from(atob(glbBase64), (c) => c.charCodeAt(0));
-        const scene = await reload(engine, new Blob([bytes], { type: "model/gltf-binary" }));
-        const warnings: string[] = [];
-        const exported = await exportCapturingWarnings(scene, warnings);
-        return { glb: toBase64(new Uint8Array(await exported.arrayBuffer())), warnings };
+        try {
+            const bytes = Uint8Array.from(atob(glbBase64), (c) => c.charCodeAt(0));
+            const scene = await reload(engine, new Blob([bytes], { type: "model/gltf-binary" }));
+            const warnings: string[] = [];
+            const exported = await exportCapturingWarnings(scene, warnings);
+            disposeScene(scene);
+            return { glb: await toBase64Blob(exported), warnings };
+        } finally {
+            recovery?.disable();
+        }
     },
     async roundTripNative() {
         const engine = await getEngine();
@@ -147,6 +162,8 @@ const api: ExportGltfTest = {
         std.name = "standard";
         std.diffuseColor = [0.9, 0.7, 0.2];
         std.diffuseTexture = createTexture2DFromPixels(engine, checker, 4, 4);
+        // Exports as KHR_texture_transform, which the reload turns into a loader texture transform.
+        std.uvScale = [2, 3];
         const sphere = createSphere(engine, { diameter: 1 });
         sphere.name = "sphere";
         sphere.material = std;
@@ -162,7 +179,7 @@ const api: ExportGltfTest = {
         addToScene(scene, createPointLight([2, 2, -2], 0.5));
         addToScene(scene, createDirectionalLight([0.3, -1, 0.2], 0.8));
         scene.camera = createFreeCamera({ x: 0, y: 2, z: -6 }, { x: 0, y: 0.5, z: 0 });
-        return roundTrip(engine, scene);
+        return roundTrip(engine, scene, true);
     },
 };
 

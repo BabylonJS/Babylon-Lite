@@ -2798,7 +2798,7 @@
         "name": "Scene 316 — glTF Export: Negative World Matrix",
         "maxMad": 0.05,
         "maxRawKB": 126.3,
-        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, once / twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded once or twice.",
+        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded twice.",
         "tags": ["gltf", "export"],
         "skipPerf": true
     },

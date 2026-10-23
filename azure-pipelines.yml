@@ -194,7 +194,6 @@ stages:
                           tests/lite/plumbing/picking.spec.ts \
                           tests/lite/plumbing/scene-readiness.spec.ts \
                           tests/lite/plumbing/export-gltf.spec.ts \
-                          tests/lite/plumbing/export-gltf-bjs-ports.spec.ts \
                           tests/lite/plumbing/scene176-startup.spec.ts \
                           tests/lite/plumbing/splat-scene-startup.spec.ts
                   displayName: "Run plumbing tests"

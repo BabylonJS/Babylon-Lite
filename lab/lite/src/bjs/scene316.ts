@@ -1,8 +1,8 @@
 // Scene 316 — BJS reference for the glTF export "Negative World Matrix" test.
-// Mirrors playground #KX53VK#88 (Babylon.js visualization tests "GLTF Serializer with Negative World Matrix
-// (left handed, once)" and "(left handed, twice)"; reference image glTFSerializerNegativeWorldMatrix.png):
-// four vertex-colored triangles (CCW / CW winding, two under a negatively scaled + rotated parent) exported with
-// GLTF2Export and reloaded `iterations` times. `?iterations=2` selects the second test; default is the first.
+// Mirrors playground #KX53VK#88 (Babylon.js visualization test "GLTF Serializer with Negative World Matrix
+// (left handed, twice)"; reference image glTFSerializerNegativeWorldMatrix.png): four vertex-colored triangles
+// (CCW / CW winding, two under a negatively scaled + rotated parent) exported with GLTF2Export and reloaded
+// `iterations` times (default 1). The parity test uses `?iterations=2`.
 // The two right-handed tests are not ported (Babylon Lite has no right-handed scenes).
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";

@@ -24,9 +24,10 @@ test("Scene 320 — Export GLTF Extension KHR_texture_transform matches Babylon.
     await captureGolden(page.context().browser()!, { sceneId: 320, timeout: 90_000 });
 
     await page.goto("/scene320.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 320 Lite" });
-    await page.locator("#loader-overlay").waitFor({ state: "detached", timeout: 10_000 });
-    await page.waitForTimeout(500);
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 320 Lite", pollMs: 100 });
+    // The scene is static and `ready` follows its first rendered frame, so remove the loader overlay
+    // instead of waiting out its fade.
+    await page.evaluate(() => document.getElementById("loader-overlay")?.remove());
 
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");
     await page.locator("canvas").screenshot({ path: screenshotPath });
