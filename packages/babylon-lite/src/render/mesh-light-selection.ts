@@ -6,19 +6,14 @@ import type { Mesh } from "../mesh/mesh.js";
 const MSH_LIGHT_INDEX_WORD_OFFSET = 20;
 
 function affectsMesh(light: LightBase, mesh: Mesh): boolean {
+    const isExcluded = light.excludedMeshes?.has(mesh);
     const includedMeshes = light.includedOnlyMeshes;
     if (includedMeshes?.size) {
-        return includedMeshes.has(mesh) && !light.excludedMeshes?.has(mesh);
-    }
-    if (light.excludedMeshes?.has(mesh)) {
-        return false;
+        return includedMeshes.has(mesh) && !isExcluded;
     }
     const meshId = mesh.id;
-    const included = light.includedOnlyMeshIds;
-    if (included?.size) {
-        return !!meshId && included.has(meshId);
-    }
-    return !meshId || !light.excludedMeshIds?.has(meshId);
+    const includedIds = light.includedOnlyMeshIds;
+    return isExcluded ? false : includedIds?.size ? !!meshId && includedIds.has(meshId) : !meshId || !light.excludedMeshIds?.has(meshId);
 }
 
 /** @internal Writes mesh light indices when data is provided.
