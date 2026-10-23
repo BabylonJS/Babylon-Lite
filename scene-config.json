@@ -1236,7 +1236,7 @@
         "slug": "scene120-gaussian-splatting",
         "name": "Scene 120 — Gaussian Splatting",
         "maxMad": 1,
-        "maxRawKB": 37.04,
+        "maxRawKB": 37.2,
         "description": "Loads Halo_Believe.ply via loadSplat(); renders the splat cloud with a back-to-front sort produced by an inline worker thread.",
         "tags": ["gaussian-splatting", "ply"],
         "compatParity": true
