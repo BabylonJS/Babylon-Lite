@@ -1,8 +1,8 @@
 /** glTF export round-trip harness for tests/lite/plumbing/export-gltf.spec.ts.
  *
- *  Exposes `window.exportGltfTest`: load an asset (or build a native scene), export it, reload the
- *  export, and export again, returning the GLBs (base64) and every warning the exports logged.
- *  The spec shares one page and engine across tests, so every call disposes the scenes it creates
+ *  Exposes `window.exportGltfTest`: export a loaded asset or a native scene, then reload and re-export it (once for
+ *  an asset, twice for a native scene), or export a GLB once. Results carry the GLBs (base64) and every warning the
+ *  exports logged. The spec shares one page and engine across tests, so every call disposes the scenes it creates
  *  and leaves no engine opt-in enabled. */
 
 import {
@@ -32,12 +32,11 @@ export interface ExportRoundTrip {
     first: string;
     /** Export of the reloaded first export, base64. */
     second: string;
-    /** Export of the reloaded second export, base64. Only `roundTripNative` produces it: an asset's
-     *  output is already a fixed point when `second === first`, while a native scene's is not. */
+    /** Export of the reloaded second export, base64. Only `roundTripNative` produces it. */
     third?: string;
     /** Warnings logged by every export, in order. */
     warnings: string[];
-    /** Mesh / light counts of the source scene and of the reloaded scene. */
+    /** Mesh and light counts, and whether a camera is set, for the source scene and the first reload. */
     counts: { meshes: number; lights: number; reloadedMeshes: number; reloadedLights: number; camera: boolean; reloadedCamera: boolean };
 }
 
@@ -82,7 +81,7 @@ async function reload(engine: EngineContext, glb: Blob): Promise<SceneContext> {
     const scene = createSceneContext(engine);
     const container = await loadGltf(engine, glb);
     addToScene(scene, container);
-    // Loaded cameras land in the container; make the first one the scene camera, as an app would.
+    // Loaded cameras land in the container; make the first one the scene camera.
     scene.camera ??= container.cameras?.[0] ?? null;
     return scene;
 }

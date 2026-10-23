@@ -3,13 +3,12 @@
  *
  * Babylon.js visualization test: "GLTF Serializer Morph Target Animation"
  * Playground: #84M2SR#107. Babylon.js reference image: gltfSerializerMorphTargetAnimation.png (errorRatio 1.1; the test is
- * excluded on WebGPU upstream, but the Babylon.js WebGPU render of this snippet matches that image, so the golden is
- * captured from the WebGPU reference page).
+ * excluded on WebGPU upstream, but the Babylon.js WebGPU render of this snippet matches that image).
  *
  * Not reproduced as in the snippet: the morph targets are position/normal deltas rather than absolute positions, and the
- * two influence animations are not authored, because the Lite exporter exports only glTF-clip animation groups
- * (natively authored animations are not exportable). The test therefore covers morph-target export and reload, not
- * morph-animation export; the weights Babylon.js reaches at frame 60 (1.25, 1.25) are applied directly after the reload.
+ * two influence animations are not authored, because the Lite exporter exports only glTF-clip animation groups.
+ * The test therefore covers morph-target export and reload, not morph-animation export; the weights Babylon.js
+ * reaches at frame 60 (1.25, 1.25) are applied directly after the reload.
  * See the header of lab/lite/src/lite/scene318.ts.
  */
 import { expect, test } from "../parity-fixtures";

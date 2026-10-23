@@ -8,7 +8,7 @@
 // Deviations from the snippet (Lite has no public equivalent):
 // - Morph targets are position/normal deltas (`createMorphTargets`), not absolute `MorphTarget.FromMesh` positions. The
 //   deltas are the noisy / Y-stretched sphere minus the base sphere, with normals recomputed the way Babylon.js does it.
-// - The snippet's two "influence" animations are NOT authored. The Lite exporter exports only glTF-clip animation groups;
+// - The snippet's two "influence" animations are not authored. The Lite exporter exports only glTF-clip animation groups;
 //   natively authored animations (createPropertyAnimationGroup) are not exportable. So this test covers morph-target export
 //   and reload, not morph-animation export. The weights of the frozen frame are applied directly after the reload: Babylon.js
 //   reaches 1.25 for both targets (base 0.25 plus each additive clip's value at frame 60), written with `setMorphTargetWeights`.

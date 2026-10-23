@@ -36,8 +36,8 @@ function createRotatedParentChild(engine: EngineContext, scene: SceneContext, xO
 
     const child = createBox(engine, 1);
     child.name = "child";
-    // The Babylon.js boxes have no material and render, and export, with the engine's default material: a default StandardMaterial.
-    // Lite meshes need an explicit material, and Lite's exporter writes none for a mesh without one, so the default is made explicit.
+    // The Babylon.js boxes have no material, so they render and export with a default StandardMaterial. Lite's exporter
+    // writes no material for a mesh without one.
     child.material = createStandardMaterial();
     child.rotationQuaternion.set(...childQuaternion);
     child.parent = parent;

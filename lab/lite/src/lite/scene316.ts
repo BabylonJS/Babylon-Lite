@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     // Loaded meshes keep no CPU copy of their vertex colors unless this opt-in is active at load time; without it the second
-    // export would drop them (Babylon.js keeps all vertex data). Closest public Lite equivalent for the 'twice' test.
+    // export would drop them (Babylon.js keeps all vertex data).
     enableDeviceLostSceneRecovery(engine);
     const scene = createSceneContext(engine);
 

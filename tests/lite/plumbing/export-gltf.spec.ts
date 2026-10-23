@@ -1,5 +1,5 @@
 /** Playwright plumbing tests over real exports, through lab/lite/export-gltf-test.html:
- *  - round trips of local glTF assets and of a native scene (export → reload → export is a fixed point);
+ *  - round trips of local glTF assets and of a native scene (export → reload → export reaches a fixed point);
  *  - ports of the Babylon.js glTF serializer unit tests that start from a hand-built glTF document: the
  *    document is loaded by Lite's real loader (which needs WebGPU), exported once, and the exported GLB is
  *    checked. The native-scene ports live in tests/lite/unit/export-gltf/bjs-ports.test.ts. */
@@ -94,11 +94,9 @@ test.describe("glTF export round trip", () => {
             const first = parseGlb(result.first);
             parseGlb(result.second);
             expect(first.json.asset).toMatchObject({ version: "2.0" });
-            // The exported asset reloads into the same scene content.
             expect(result.counts.reloadedMeshes).toBe(result.counts.meshes);
             expect(result.counts.reloadedLights).toBe(result.counts.lights);
-            // Idempotence: everything out of scope is dropped by the first export, after which the
-            // output is a fixed point (export is deterministic, so a further reload and export would repeat it).
+            // Everything out of scope is dropped by the first export, after which the output is a fixed point.
             expect(result.second).toBe(result.first);
         });
     }

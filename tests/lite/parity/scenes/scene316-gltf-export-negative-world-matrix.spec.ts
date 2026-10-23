@@ -4,9 +4,7 @@
  * Babylon.js visualization test: "GLTF Serializer with Negative World Matrix (left handed, twice)", run as `?iterations=2`.
  * Playground: #KX53VK#88. Reference image: glTFSerializerNegativeWorldMatrix.png (errorRatio 1.1), shared by all variants.
  *
- * Merged: "left handed, once". Its single export and reload is the first iteration here and compares to the same golden.
- * A winding error that a second round trip would cancel out fails the export fixed-point check in
- * tests/lite/plumbing/export-gltf.spec.ts (NegativeScaleTest, Node_NegativeScale_01, MirroredDoubleSided).
+ * Also covers "left handed, once": its single export and reload is the first iteration here and compares to the same golden.
  * Not ported: the two right-handed tests ("right handed, once / twice"); Lite has no right-handed scenes.
  * Not reproduced one-to-one: Lite has no per-material sideOrientation, so the "CW" triangles keep their vertices and
  * get reversed indices. The page opts into `enableDeviceLostSceneRecovery` so loaded meshes keep their vertex colors
