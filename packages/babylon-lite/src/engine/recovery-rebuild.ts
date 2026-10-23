@@ -115,6 +115,17 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
         if (scene._z) {
             return;
         }
+        if (!result) {
+            // Abandoned: every member left, or the remaining ones were handed to the material-swap drain,
+            // which must not reuse the pre-loss rebuild closure or output.
+            scene._runtimeBuilds?.dropBase(build);
+            if (meshes.length) {
+                meshes.r = meshes.o = undefined;
+            } else {
+                scene._groups.delete(build);
+            }
+            continue;
+        }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
         meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);

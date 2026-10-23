@@ -79,10 +79,27 @@ instead of building it, so a later reinsertion creates a fresh group that the bo
 drain or the runtime build path materializes.
 Boot and device-lost recovery group builds receive a snapshot of the group's
 members, so a detach or removal while the builder awaits a lazy import cannot
-change the list it iterates. After the build, output for a snapshot member that
-left meanwhile is evicted before it is committed (its renderables are dropped and
-its per-mesh teardown retires after GPU submission), and a mesh that joined
-meanwhile is queued for the material-swap drain, so it is built exactly once.
+change the list it iterates. An unchanged group is confirmed after the build by a
+single linear comparison of the snapshot with the live group. Otherwise the
+removal-installed settler reconciles the build against the group's current
+sequence using constant-time membership lookups:
+
+- Output for a snapshot member that left meanwhile is evicted before it is
+  committed (its renderables are dropped and its per-mesh teardown retires after
+  GPU submission), and a mesh that joined meanwhile is queued for the
+  material-swap drain, so it is built exactly once.
+- The build is obsolete and is retried against the current sequence when the
+  surviving members changed relative order (a detach and reinsertion, which
+  changes transparent tie order), or when a member left and the build either
+  merged it into a renderable without a mesh back-reference or threw. A throw is
+  how a builder fails on a member detached, re-materialed into another family and
+  reinserted while it awaited; that mesh is built by its current family's group.
+  A failure that persists without a membership change is rethrown.
+- Per-mesh resources of an obsolete build retire only after the replacement build.
+  A group that empties is cancelled like an emptied boot group. A group whose
+  membership keeps changing for three attempts is abandoned and its members are
+  queued for the material-swap drain, which builds a group without a completed
+  build through the runtime path.
 
 Reinsertion builds ordinary fresh scene-local renderables and appends normal
 admission order. Explicit render order still takes precedence over stable depth

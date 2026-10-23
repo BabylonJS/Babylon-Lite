@@ -31,6 +31,7 @@ import type { LightBase } from "../../../packages/babylon-lite/src/light/types.j
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { getPbrGroupBuilder } from "../../../packages/babylon-lite/src/material/pbr/pbr-group-builder.js";
+import { getShaderGroupBuilder } from "../../../packages/babylon-lite/src/material/shader/shader-group-builder.js";
 import type * as PbrRenderable from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable.js";
 
 type BuildPbrRenderables = typeof PbrRenderable.buildPbrRenderables;
@@ -78,16 +79,8 @@ function freshMesh(engine: EngineContext, name: string): Mesh {
     });
 }
 
-function fixture() {
-    const createBuffer = vi.fn((descriptor: GPUBufferDescriptor): GPUBuffer => {
-        const bytes = new ArrayBuffer(Number(descriptor.size));
-        return stub<GPUBuffer>({ destroy: vi.fn(), getMappedRange: () => bytes, unmap: () => undefined });
-    });
-    const device = stub<GPUDevice>({ createBuffer, queue: stub<GPUQueue>({ onSubmittedWorkDone: async () => undefined }), destroy: vi.fn() });
-    const surface = stub<SceneContext["surface"]>({ _renderingContexts: [], _context: stub<GPUCanvasContext>({ unconfigure: vi.fn() }) });
-    const engine = stub<EngineContext>({ _device: device, surfaces: [surface], _surfaces: [surface], _animFrameId: 0, _renderFn: null });
-    Object.defineProperty(surface, "engine", { value: engine });
-    const scene = stub<SceneContext>({
+function stubScene(surface: SceneContext["surface"]): SceneContext {
+    return stub<SceneContext>({
         surface,
         meshes: [],
         lights: [],
@@ -107,6 +100,18 @@ function fixture() {
         _renderableVersion: 0,
         _frameGraph: stub<SceneContext["_frameGraph"]>({ _tasks: [] }),
     });
+}
+
+function fixture() {
+    const createBuffer = vi.fn((descriptor: GPUBufferDescriptor): GPUBuffer => {
+        const bytes = new ArrayBuffer(Number(descriptor.size));
+        return stub<GPUBuffer>({ destroy: vi.fn(), getMappedRange: () => bytes, unmap: () => undefined });
+    });
+    const device = stub<GPUDevice>({ createBuffer, queue: stub<GPUQueue>({ onSubmittedWorkDone: async () => undefined }), destroy: vi.fn() });
+    const surface = stub<SceneContext["surface"]>({ _renderingContexts: [], _context: stub<GPUCanvasContext>({ unconfigure: vi.fn() }) });
+    const engine = stub<EngineContext>({ _device: device, surfaces: [surface], _surfaces: [surface], _animFrameId: 0, _renderFn: null });
+    Object.defineProperty(surface, "engine", { value: engine });
+    const scene = stubScene(surface);
     const mesh = initMeshTransform({
         name: "card",
         id: "same-card",
@@ -536,6 +541,120 @@ describe("retained mesh scene membership", () => {
         expect(builder).toHaveBeenCalledOnce();
         expect(scene._renderables.map((draw) => draw.mesh)).toEqual([first, second]);
         expect(scene._groups.get(builder)!.o!.map((draw) => draw.mesh)).toEqual([first, second]);
+
+        disposeScene(scene);
+        await waitForGpuResourceRetirements(engine);
+    });
+
+    it("builds a mesh re-materialed into another family during the boot shader group build through its current family", async () => {
+        const { engine, scene, mesh } = fixture();
+        mesh.material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn vertexMain(@location(0) position: vec3f) -> @builtin(position) vec4f { return vec4f(position, 1); }`,
+            fragmentSource: wgsl`@fragment fn fragmentMain() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+        });
+        const shaderBuilder = getShaderGroupBuilder();
+        expect(mesh.material._buildGroup).toBe(shaderBuilder);
+        const standard = createStandardMaterial();
+        const standardBuilder: MeshGroupBuilder = vi.fn(async (_target: SceneContext, meshes: Mesh[]) => ({
+            renderables: meshes.map((member) => ({ order: 1, mesh: member, material: member.material }) as never),
+            rebuildSingle: (_scene: SceneContext, member: Mesh) => ({ order: 1, mesh: member, material: member.material }) as never,
+        }));
+        Object.defineProperty(standard, "_buildGroup", { value: standardBuilder });
+        addToScene(scene, mesh);
+        const lease = retainMeshResources(engine, mesh);
+
+        try {
+            // The real shader group builder snapshots [mesh] and yields to its lazy renderable import; when it
+            // resumes it reads the mesh's NEW StandardMaterial as a ShaderMaterial and throws.
+            const registration = buildScene(scene);
+            detachMeshFromScene(scene, mesh);
+            mesh.material = standard;
+            addToScene(scene, mesh);
+            await registration;
+            expect(scene._groups.has(shaderBuilder)).toBe(false);
+            expect(standardBuilder).toHaveBeenCalledOnce();
+            expect(standardBuilder).toHaveBeenCalledWith(scene, [mesh]);
+            expect(scene._renderables).toEqual([{ order: 1, mesh, material: standard }]);
+        } finally {
+            disposeScene(scene);
+            releaseMeshResources(lease);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+
+    it("rebuilds a boot group in current admission order when a member is detached and reinserted while it awaits", async () => {
+        const { engine, scene, mesh: first } = fixture();
+        const second = cloneTransformNode(first) as typeof first;
+        const teardowns: ReturnType<typeof vi.fn>[] = [];
+        const rebuildSingle = (target: SceneContext, member: Mesh) => {
+            const dispose = vi.fn();
+            teardowns.push(dispose);
+            target._meshDisposables.set(member, [dispose]);
+            return { order: 1, mesh: member } as never;
+        };
+        const build = vi.fn(async (target: SceneContext, meshes: Mesh[]) => ({ renderables: meshes.map((member) => rebuildSingle(target, member)), rebuildSingle }));
+        pbrBuild.fn = build;
+        const builder = getPbrGroupBuilder();
+        Object.defineProperty(first.material, "_buildGroup", { value: builder });
+        expect(second.material).toBe(first.material);
+        addToScene(scene, first);
+        addToScene(scene, second);
+        const lease = retainMeshResources(engine, first);
+        const freshScene = stubScene(scene.surface);
+
+        try {
+            // The PBR group builder yields to its lazy renderable import before reading its [first, second] snapshot.
+            const registration = buildScene(scene);
+            detachMeshFromScene(scene, first);
+            addToScene(scene, first);
+            await registration;
+            expect(build.mock.calls.map(([, meshes]) => meshes)).toEqual([
+                [first, second],
+                [second, first],
+            ]);
+            expect(scene._renderables.map((draw) => draw.mesh)).toEqual([second, first]);
+            expect(scene._groups.get(builder)!.o!.map((draw) => draw.mesh)).toEqual([second, first]);
+            expect([...scene._meshDisposables.values()].flat()).toEqual(teardowns.slice(2));
+            await waitForGpuResourceRetirements(engine);
+            for (const superseded of teardowns.slice(0, 2)) {
+                expect(superseded).toHaveBeenCalledOnce();
+            }
+            for (const current of teardowns.slice(2)) {
+                expect(current).not.toHaveBeenCalled();
+            }
+
+            addToScene(freshScene, second);
+            addToScene(freshScene, first);
+            await buildScene(freshScene);
+            expect(freshScene._renderables).toEqual(scene._renderables);
+        } finally {
+            pbrBuild.fn = null;
+            disposeScene(freshScene);
+            disposeScene(scene);
+            releaseMeshResources(lease);
+            await waitForGpuResourceRetirements(engine);
+        }
+    });
+
+    it("confirms an unchanged boot group without the removal settler", async () => {
+        const { engine, scene, mesh: first } = fixture();
+        const second = cloneTransformNode(first) as typeof first;
+        const builder: MeshGroupBuilder = vi.fn(async (_target: SceneContext, meshes: Mesh[]) => ({
+            renderables: meshes.map((member) => ({ order: 1, mesh: member }) as never),
+            rebuildSingle: (_scene: SceneContext, member: Mesh) => ({ order: 1, mesh: member }) as never,
+        }));
+        Object.defineProperty(first.material, "_buildGroup", { value: builder });
+        const removed = freshMesh(engine, "removed");
+        addToScene(scene, removed);
+        removeFromScene(scene, removed);
+        const settle = vi.spyOn(scene, "_settleGroupBuild");
+        addToScene(scene, first);
+        addToScene(scene, second);
+
+        await buildScene(scene);
+        expect(settle).not.toHaveBeenCalled();
+        expect(scene._renderables.map((draw) => draw.mesh)).toEqual([first, second]);
 
         disposeScene(scene);
         await waitForGpuResourceRetirements(engine);

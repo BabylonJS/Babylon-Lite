@@ -246,9 +246,17 @@ export interface SceneContext extends RenderingContext {
     /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
      *  Undefined material detaches a mesh's main-material usage. */
     _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
-    /** @internal Installed by mesh removal: drops the output a group build produced for a mesh that left
-     *  the scene while that build awaited. */
-    _evictBuiltMesh?: (scene: SceneContext, mesh: Mesh, renderables: Renderable[]) => void;
+    /** @internal Installed by mesh removal, the only path that drops or reorders a boot or recovery group's
+     *  members while its build awaits: revalidates that build against the group's current sequence. Resolves
+     *  `undefined` when the build was abandoned (see {@link _buildMeshGroup}). */
+    _settleGroupBuild?: (
+        scene: SceneContext,
+        build: MeshGroupBuilder,
+        group: SceneMeshGroup,
+        members: Mesh[],
+        result: MeshGroupBuildResult | undefined,
+        error: unknown
+    ) => Promise<MeshGroupBuildResult | undefined>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -448,21 +456,34 @@ export interface DeferredSceneRenderables {
 
 /**
  * @internal Build a material group from a membership snapshot. Removal and retained detach splice the live
- * group while a builder awaits its lazy imports, so builders get a stable list. Output for snapshot meshes
- * that left meanwhile is evicted; meshes that joined meanwhile are queued for the material-swap drain.
+ * group while a builder awaits its lazy imports, so builders get a stable list. An unchanged group is
+ * confirmed by one linear comparison; otherwise removal's settler revalidates the build against the current
+ * sequence, and meshes that only joined meanwhile are queued for the material-swap drain.
+ * Resolves `undefined` when the build was abandoned: every member left, or the membership kept changing and
+ * the remaining members were handed to the material-swap drain.
  */
-export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult> {
+export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
     const members = group.slice();
-    const result = await build(scene, members);
-    for (const mesh of members) {
-        if (!group.includes(mesh)) {
-            scene._evictBuiltMesh?.(scene, mesh, result.renderables);
+    let result: MeshGroupBuildResult | undefined;
+    let error: unknown;
+    try {
+        result = await build(scene, members);
+    } catch (thrown) {
+        error = thrown;
+    }
+    if (group.length !== members.length || group.some((mesh, i) => mesh !== members[i])) {
+        if (scene._settleGroupBuild) {
+            return scene._settleGroupBuild(scene, build, group, members, result, error);
+        }
+        const captured = new Set(members);
+        for (const mesh of group) {
+            if (!captured.has(mesh)) {
+                enqueueMaterialSwap(scene, mesh);
+            }
         }
     }
-    for (const mesh of group) {
-        if (!members.includes(mesh)) {
-            enqueueMaterialSwap(scene, mesh);
-        }
+    if (!result) {
+        throw error;
     }
     return result;
 }
@@ -557,6 +578,12 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
                                 return;
                             }
                             const result = await _buildMeshGroup(ctx, build, group!);
+                            if (!result) {
+                                if (!group!.length) {
+                                    ctx._groups.delete(build);
+                                }
+                                return;
+                            }
                             ctx._renderables.push(...result.renderables);
                             group!.o = result.renderables;
                             if (result.updater) {
