@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light";
+import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import type { LightBase } from "../../../packages/babylon-lite/src/light/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { writeMeshLightSelection } from "../../../packages/babylon-lite/src/render/mesh-light-selection";
@@ -98,6 +99,31 @@ describe("per-mesh light selection", () => {
 
         expect(selectedCount(firstImport, [sun])).toBe(1);
         expect(selectedCount(secondImport, [sun])).toBe(0);
+    });
+
+    it("keeps an object exclusion when the light is cloned", () => {
+        const sun = light();
+        const floor = mesh();
+        const box = mesh();
+        sun.excludedMeshes = new Set([floor]);
+
+        const clone = cloneTransformNode(sun as never) as unknown as LightBase;
+
+        expect(selectedCount(floor, [clone])).toBe(0);
+        expect(selectedCount(box, [clone])).toBe(1);
+    });
+
+    it("keeps an object inclusion when the light is cloned", () => {
+        const sun = light();
+        const box = mesh();
+        const floor = mesh();
+        sun.includedOnlyMeshes = new Set([box]);
+
+        const clone = cloneTransformNode(sun as never) as unknown as LightBase;
+
+        // A lost restriction would make the clone an unrestricted light, not a scoped one.
+        expect(selectedCount(box, [clone])).toBe(1);
+        expect(selectedCount(floor, [clone])).toBe(0);
     });
 
     it("still filters by id, so a loaded light list keeps working", () => {
