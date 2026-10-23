@@ -6,7 +6,7 @@ import { getMaterialFamily } from "../material/material-family.js";
 import { getMaterialSource } from "../material/material-view.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
-import { srgbByteToLinear } from "../math/color.js";
+import { linearToSrgbByte, srgbByteToLinear } from "../math/color.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { getTextureTransform } from "../texture/texture-metadata.js";
 import type { ExportContext, MaterialExtensionWriter, PendingFold, PendingSlot, SlotMapping, SlotTransform, UvState } from "./export-context.js";
@@ -133,11 +133,13 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
     // sample.rgb × f.rgb and sample.a × f.a × alpha.
     const f = m.baseColorFactor ?? [1, 1, 1, 1];
     const alpha = m.alpha ?? 1;
+    const cutoff = m._alphaCutOff ?? 0;
+    const alphaMode = cutoff > 0 ? "MASK" : m.alphaBlend === true || alpha < 1 ? "BLEND" : undefined;
     const baseFactor = [f[0], f[1], f[2], f[3] * alpha];
     if (isOneByOne(m.baseColorTexture)) {
         const tex = m.baseColorTexture!;
         const decode = tex.texture.format.endsWith("-srgb") ? "srgb" : m._gammaAlbedo ? "gamma" : "linear";
-        recordFold(ctx, pmr, "baseColor", tex, baseFactor, name, decode);
+        recordFold(ctx, pmr, "baseColor", tex, baseFactor, name, decode, { opaque: !alphaMode });
     } else {
         capturePbrSlot(ctx, m, uvState, pmr, {
             ...pbrCoreSlot(m, "baseColorTexture", m.baseColorTexture, UV2_BASE_COLOR),
@@ -170,7 +172,7 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 }
             }
         }
-        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, "linear", ormFallback);
+        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, "linear", { fallbackSlots: ormFallback });
     } else {
         if (orm) {
             capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "metallicRoughnessTexture", orm, UV2_ORM));
@@ -226,14 +228,11 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
         out.emissiveFactor = [1, 1, 1];
     }
 
-    const cutoff = m._alphaCutOff ?? 0;
-    if (cutoff > 0) {
-        out.alphaMode = "MASK";
-        if (cutoff !== 0.5) {
-            out.alphaCutoff = cutoff;
-        }
-    } else if (m.alphaBlend === true || alpha < 1) {
-        out.alphaMode = "BLEND";
+    if (alphaMode) {
+        out.alphaMode = alphaMode;
+    }
+    if (alphaMode === "MASK" && cutoff !== 0.5) {
+        out.alphaCutoff = cutoff;
     }
     if (m.doubleSided === true) {
         out.doubleSided = true;
@@ -298,7 +297,7 @@ function recordFold(
     factor: number[],
     materialName: string,
     decode: PendingFold["decode"],
-    fallbackSlots?: PendingSlot[]
+    extra?: Pick<PendingFold, "opaque" | "fallbackSlots">
 ): void {
     if (textureReadIssue(ctx, texture) !== null) {
         ctx.warn(`1×1 factor texture for material "${materialName}" is not readable on this engine; exporting its factors without the texture.`);
@@ -317,11 +316,12 @@ function recordFold(
         owner.metallicFactor = undefined;
         owner.roughnessFactor = undefined;
     }
-    ctx.folds.push({ owner, kind, gpu: texture.texture, decode, factor, materialName, fallbackSlots });
+    ctx.folds.push({ owner, kind, gpu: texture.texture, decode, factor, materialName, ...extra });
 }
 
 /** @internal Resolve every 1×1 factor fold in capture order (synchronous, after readbacks settle and
- *  before the texture slots resolve). */
+ *  before the texture slots resolve). Folded RGB, metallic and roughness snap to the bytes the loader
+ *  bakes factors into, so exporting a reload reproduces them (a no-op for the loader's own bakes). */
 export function resolveFolds(ctx: ExportContext): void {
     for (const fold of ctx.folds) {
         const pixels = ctx.resolvedPixels.get(fold.gpu);
@@ -329,7 +329,8 @@ export function resolveFolds(ctx: ExportContext): void {
         if (fold.kind === "baseColor") {
             const decode = (b: number): number => (fold.decode === "srgb" ? srgbByteToLinear(b) : fold.decode === "gamma" ? Math.pow(b / 255, 2.2) : b / 255);
             const f = fold.factor;
-            writeBaseColorFactor(ctx, fold.owner, [decode(t[0]!) * f[0]!, decode(t[1]!) * f[1]!, decode(t[2]!) * f[2]!, (t[3]! / 255) * f[3]!], fold.materialName);
+            const rgb = (i: number): number => onBakeGrid(decode(t[i]!) * f[i]!, (v) => srgbByteToLinear(linearToSrgbByte(v)));
+            writeBaseColorFactor(ctx, fold.owner, [rgb(0), rgb(1), rgb(2), fold.opaque ? f[3]! : (t[3]! / 255) * f[3]!], fold.materialName);
             continue;
         }
         const [metallic, roughness] = fold.factor;
@@ -342,8 +343,14 @@ export function resolveFolds(ctx: ExportContext): void {
         for (const slot of fold.fallbackSlots ?? []) {
             slot.cancelled = true;
         }
-        writeMetallicRoughness(ctx, fold.owner, metallic! * (t[2]! / 255), roughness! * (t[1]! / 255), fold.materialName);
+        const byte = (v: number): number => Math.round(v * 255) / 255;
+        writeMetallicRoughness(ctx, fold.owner, onBakeGrid(metallic! * (t[2]! / 255), byte), onBakeGrid(roughness! * (t[1]! / 255), byte), fold.materialName);
     }
+}
+
+/** Snap an in-range folded factor; out-of-range values pass through so the writers clamp and warn. */
+function onBakeGrid(v: number, snap: (v: number) => number): number {
+    return v >= 0 && v <= 1 ? snap(v) : v;
 }
 
 const WHITE_TEXEL: readonly number[] = [255, 255, 255, 255];

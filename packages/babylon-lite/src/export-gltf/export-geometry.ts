@@ -97,7 +97,7 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
     const morph = m.morphTargets;
     let weights: number[] | undefined;
     if (morph && morph.targets.length > 0) {
-        if (morph.targets.some((t) => t.positions.length !== count * 3)) {
+        if (!morphTargetsFit(m)) {
             ctx.warn(`Mesh "${m.name}" has morph targets whose length does not match its positions; exporting the mesh without them.`);
         } else {
             // glTF requires a base attribute for every morphed one, so NORMAL deltas need NORMAL.
@@ -115,6 +115,13 @@ export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean
         }
     }
     return { primitive, uvState, weights, vertexCount: count };
+}
+
+/** @internal Whether every morph target's positions match the mesh's vertex count. Targets that do
+ *  not fit are dropped from the primitive, so mesh folding treats such a mesh as having none. */
+export function morphTargetsFit(mesh: Mesh): boolean {
+    const count = Math.floor((mesh._cpuPositions?.length ?? 0) / 3);
+    return mesh.morphTargets?.targets.every((t) => t.positions.length === count * 3) ?? false;
 }
 
 /** @internal A zero-filled TEXCOORD_0 accessor for `count` vertices: what Lite samples for a mesh

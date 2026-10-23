@@ -686,7 +686,8 @@ describe("KHR_materials_pbrSpecularGlossiness", () => {
         const r = await run({ specGlossTexture: tex(10), baseColorTexture: texel, baseColorFactor: [1, 0.5, 1, 1] });
         const sg = expectEmitted(r, NAME);
         expect(sg.diffuseTexture).toBeUndefined();
-        const expected = [srgbByteToLinear(128), srgbByteToLinear(64) * 0.5, srgbByteToLinear(255), 1];
+        // The fold snaps RGB to the factor the loader's sRGB bake decodes back to.
+        const expected = [srgbByteToLinear(128), srgbByteToLinear(linearToSrgbByte(srgbByteToLinear(64) * 0.5)), srgbByteToLinear(255), 1];
         sg.diffuseFactor.forEach((v: number, i: number) => expect(v).toBeCloseTo(expected[i]!, 6));
         expect(r.mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
         expect(r.json.images).toHaveLength(1);

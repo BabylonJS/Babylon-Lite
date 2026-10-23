@@ -10,7 +10,7 @@ import type { ExportContext } from "./export-context.js";
 import { snapshotExtras } from "./export-context.js";
 import type { GltfMesh, GltfNode, GltfPrimitive } from "./export-gltf-types.js";
 import type { ExportedPrimitive } from "./export-geometry.js";
-import { exportPrimitive, zeroUvAccessor } from "./export-geometry.js";
+import { exportPrimitive, morphTargetsFit, zeroUvAccessor } from "./export-geometry.js";
 import { convertMatrix, convertRotation, isIdentityRotation, nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
 import { exportMaterial } from "./export-materials.js";
 import { writeInstancing } from "./ext/export-ext-instancing.js";
@@ -23,7 +23,8 @@ export interface ExportRoot {
     /** Converting (Lite left-handed data) or pass-through (right-handed data under a stripped loader root). */
     readonly convert: boolean;
     /** True when the root has a parent that does not export (a camera, a light or another
-     *  world-matrix provider); the root then exports at its current world transform. */
+     *  world-matrix provider); the root then exports at its current world transform, or under an
+     *  anchor node holding the parent's world transform when it is an animation target. */
     readonly world: boolean;
 }
 
@@ -201,6 +202,18 @@ function childrenOf(node: SceneNode, extras: ReadonlyMap<object, readonly SceneN
 /** @internal Export every root depth-first and append the root indices to `scenes[0].nodes`. */
 export function exportNodeTrees(ctx: ExportContext, sweep: NodeSweep): void {
     for (const root of sweep.roots) {
+        if (root.world && sweep.animated.has(root.node) && !ctx.nodeIndex.has(root.node)) {
+            // Channel keys are local TRS and would replace a baked world transform, so an unnamed
+            // anchor root carries the foreign parent's world transform instead.
+            ctx.warn(
+                `Node "${root.node.name}" is an animation target parented to a camera, light or other non-node object; exporting it under a scene-root node at the parent's current world transform.`
+            );
+            const anchor: GltfNode = {};
+            ctx.doc.sceneNodes.push(ctx.doc.nodes.push(anchor) - 1);
+            writeTransform(ctx, anchor, root.node, root.convert, false, root.node.parent!.worldMatrix);
+            anchor.children = [exportNode(ctx, sweep, root.node, root.convert, false)!];
+            continue;
+        }
         if (root.world) {
             ctx.warn(`Node "${root.node.name}" is parented to a camera, light or other non-node object; exporting it as a scene root at its current world transform.`);
         }
@@ -273,11 +286,12 @@ function canFold(mesh: Mesh, first: Mesh | undefined, sweep: NodeSweep): boolean
     }
     const a = mesh.thinInstances && mesh.thinInstances.count > 0 ? mesh.thinInstances : null;
     const b = first.thinInstances && first.thinInstances.count > 0 ? first.thinInstances : null;
-    if (a !== b && (!a || !b || a.matrices !== b.matrices || a.count !== b.count)) {
+    if (a !== b && (!a || !b || a.matrices !== b.matrices || a.count !== b.count || a.colors !== b.colors)) {
         return false;
     }
-    const ma = mesh.morphTargets?.targets.length ? mesh.morphTargets : null;
-    const mb = first.morphTargets?.targets.length ? first.morphTargets : null;
+    // glTF requires every primitive of a mesh to have the same number of morph targets.
+    const ma = mesh.morphTargets?.targets.length && morphTargetsFit(mesh) ? mesh.morphTargets : null;
+    const mb = first.morphTargets?.targets.length && morphTargetsFit(first) ? first.morphTargets : null;
     if (!ma || !mb) {
         return ma === mb;
     }

@@ -9,6 +9,9 @@ import { createFreeCamera } from "../../../../packages/babylon-lite/src/camera/f
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { INTERP_LINEAR, PATH_TRANSLATION } from "../../../../packages/babylon-lite/src/animation/types";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
+import { multiplyMat4 } from "../../../../packages/babylon-lite/src/math/multiply-mat4";
+import { convertMatrix } from "../../../../packages/babylon-lite/src/export-gltf/export-handedness";
 
 type AnimationGroups = SceneContext["animationGroups"];
 
@@ -20,6 +23,14 @@ function expectClose(actual: ArrayLike<number> | undefined, expected: number[]):
     for (let i = 0; i < expected.length; i++) {
         expect(actual![i]).toBeCloseTo(expected[i]!, 5);
     }
+}
+
+/** An exported node's local TRS as a matrix (glTF defaults for absent members). */
+function gltfLocalMatrix(node: { translation?: number[]; rotation?: number[]; scale?: number[] }): Mat4 {
+    const [tx, ty, tz] = node.translation ?? [0, 0, 0];
+    const [qx, qy, qz, qw] = node.rotation ?? [0, 0, 0, 1];
+    const [sx, sy, sz] = node.scale ?? [1, 1, 1];
+    return composeMat4(tx!, ty!, tz!, qx!, qy!, qz!, qw!, sx!, sy!, sz!);
 }
 
 /** The loader's conversion root. */
@@ -179,6 +190,51 @@ describe("root collection", () => {
         expect(glb.json.scenes[0].nodes).toEqual([0]);
         expect(glb.warnings).toContain('Node "hud" is parented to a camera, light or other non-node object; exporting it as a scene root at its current world transform.');
         expectClose(glb.json.nodes[0].matrix, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 2, 3, 1]);
+    });
+
+    it("anchors an animated node parented to a camera so its local animation keys keep the parent transform", async () => {
+        const camera = createFreeCamera({ x: 1, y: 2, z: 3 }, { x: 2, y: 2, z: 3 });
+        const target = createTransformNode("spinner", 0, 1, 0.5);
+        (target as { parent: unknown }).parent = camera;
+        const glb = await exportAndParse(createScene({ animationGroups: [translationGroup("g", target)] }));
+        expect(glb.warnings).toContain(
+            'Node "spinner" is an animation target parented to a camera, light or other non-node object; exporting it under a scene-root node at the parent\'s current world transform.'
+        );
+        // The anchor root carries the camera's world transform; the target keeps its local TRS, which the channel replaces.
+        expect(glb.json.scenes[0].nodes).toEqual([0]);
+        expect(glb.json.nodes[0].children).toEqual([1]);
+        expect(glb.json.nodes[1].name).toBe("spinner");
+        expectClose(glb.json.nodes[1].translation, [0, 1, 0.5]);
+        expect(glb.json.animations[0].channels[0].target).toEqual({ node: 1, path: "translation" });
+        const anchor = glb.json.nodes[0].matrix as number[];
+        expectClose(anchor, convertMatrix(camera.worldMatrix));
+        expectClose(multiplyMat4(new Float32Array(anchor) as unknown as Mat4, gltfLocalMatrix(glb.json.nodes[1])), convertMatrix(target.worldMatrix));
+    });
+
+    it("anchors an animated rotated and scaled node under a rotated and scaled foreign parent", async () => {
+        const h = Math.sqrt(0.5);
+        const parentMatrix = composeMat4(2, -1, 4, 0.5, 0.5, 0.5, 0.5, 2, 0.5, 1.5);
+        const parent = { worldMatrix: parentMatrix, worldMatrixVersion: 1 };
+        const target = createTransformNode("arm", 0.3, 1, -2, 0, h, 0, h, 1, 2, 1);
+        (target as { parent: unknown }).parent = parent;
+        const glb = await exportAndParse(createScene({ animationGroups: [translationGroup("g", target)] }));
+        expect(glb.json.nodes[0].name).toBeUndefined();
+        expect(glb.json.nodes[0].children).toEqual([1]);
+        expectClose(glb.json.nodes[0].matrix, convertMatrix(parentMatrix));
+        expectClose(multiplyMat4(new Float32Array(glb.json.nodes[0].matrix) as unknown as Mat4, gltfLocalMatrix(glb.json.nodes[1])), convertMatrix(target.worldMatrix));
+    });
+
+    it("keeps a non-animated child of an animated foreign-parented node local under the anchored target", async () => {
+        const camera = createFreeCamera({ x: 1, y: 2, z: 3 }, { x: 2, y: 2, z: 3 });
+        const target = createTransformNode("spinner", 0, 1, 0);
+        (target as { parent: unknown }).parent = camera;
+        const child = attach(createMesh("blade"), target);
+        child.position.set(0, 0, 2);
+        const glb = await exportAndParse(createScene({ meshes: [child], animationGroups: [translationGroup("g", target)] }));
+        expect(glb.json.scenes[0].nodes).toEqual([0]);
+        expect(names(glb.json, [1, 2])).toEqual(["spinner", "blade"]);
+        expect(glb.json.nodes[1].children).toEqual([2]);
+        expectClose(glb.json.nodes[2].translation, [0, 0, 2]);
     });
 });
 
@@ -354,6 +410,41 @@ describe("mesh folding", () => {
         expect(glb.json.meshes[0].primitives).toHaveLength(2);
         expect(glb.json.meshes[0].weights).toEqual([0.5]);
         expect(glb.json.meshes[1].weights).toEqual([0.25]);
+    });
+
+    it("does not fold children that share thin-instance matrices but not instance colors", async () => {
+        const holder = createTransformNode("holder");
+        const matrices = new Float32Array([...IDENTITY]);
+        const red = new Float32Array([1, 0, 0, 1]);
+        const a = attach(quad("a", 1, { extra: { thinInstances: { matrices, count: 1, colors: red } } }), holder);
+        const sameAsA = attach(quad("a2", 2, { extra: { thinInstances: { matrices, count: 1, colors: red } } }), holder);
+        const blue = attach(quad("b", 3, { extra: { thinInstances: { matrices, count: 1, colors: new Float32Array([0, 0, 1, 1]) } } }), holder);
+        const plain = attach(quad("c", 4, { extra: { thinInstances: { matrices, count: 1 } } }), holder);
+        const glb = await exportAndParse(createScene({ meshes: [a, sameAsA, blue, plain] }));
+        expect(glb.json.nodes).toHaveLength(3);
+        expect(glb.json.meshes[0].primitives).toHaveLength(2);
+        const colorOf = (node: { extensions?: Record<string, { attributes: { _COLOR_0?: number } }> }) => {
+            const accessor = node.extensions?.EXT_mesh_gpu_instancing?.attributes._COLOR_0;
+            return accessor === undefined ? undefined : readAccessor(glb, accessor);
+        };
+        expect(glb.json.nodes.map(colorOf)).toEqual([[1, 0, 0], [0, 0, 1], undefined]);
+    });
+
+    it("does not fold a child whose morph targets would be dropped next to one whose targets export", async () => {
+        const morph = (positions: number) => ({
+            morphTargets: { targets: [{ positions: new Float32Array(positions).fill(0.5), normals: null }], weights: new Float32Array([0.5]), count: 1 },
+        });
+        const holder = createTransformNode("holder");
+        const a = attach(quad("a", 1, { extra: morph(12) }), holder);
+        const bad = attach(quad("bad", 2, { extra: morph(9) }), holder);
+        const glb = await exportAndParse(createScene({ meshes: [a, bad] }));
+        for (const mesh of glb.json.meshes) {
+            const counts = mesh.primitives.map((p: { targets?: unknown[] }) => p.targets?.length ?? 0);
+            expect(new Set(counts).size).toBe(1);
+        }
+        expect(glb.json.meshes).toHaveLength(2);
+        expect(glb.json.meshes[0].weights).toEqual([0.5]);
+        expect(glb.json.meshes[1].weights).toBeUndefined();
     });
 
     it("does not fold an animated child", async () => {

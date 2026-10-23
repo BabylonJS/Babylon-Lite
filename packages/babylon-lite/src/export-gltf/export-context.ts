@@ -88,6 +88,9 @@ export interface PendingFold {
      *  (alpha already includes the material alpha), `[metallic, roughness]` for ORM. */
     readonly factor: readonly number[];
     readonly materialName: string;
+    /** Base color only: the material neither blends nor alpha-tests, so the shader's alpha is unused
+     *  and the texel's alpha byte does not fold (the loader would drop it on reload). */
+    readonly opaque?: boolean;
     /** 1×1 ORM only: the slots that export the texture as an image when it cannot fold (its R byte
      *  is not 255 while occlusion reads it). Resolution cancels them when the fold applies. */
     readonly fallbackSlots?: readonly PendingSlot[];

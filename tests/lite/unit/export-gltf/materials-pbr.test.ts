@@ -49,6 +49,10 @@ const close = (actual: number[], expected: number[], digits = 6): void => {
     expected.forEach((e, i) => expect(actual[i]).toBeCloseTo(e, digits));
 };
 
+/** The factor the loader's 1×1 bake of `v` decodes back to: sRGB bytes for base color, linear bytes for ORM. */
+const srgbGrid = (v: number): number => srgbByteToLinear(linearToSrgbByte(v));
+const byteGrid = (v: number): number => Math.round(v * 255) / 255;
+
 describe("PBR core: base color", () => {
     it("preserves the bytes of an sRGB base-color image", async () => {
         const pixels = [128, 64, 32, 79, 16, 8, 4, 143];
@@ -99,7 +103,7 @@ describe("PBR core: base color", () => {
     it("folds a 1x1 rgba8unorm-srgb base color into the factor (sRGB decoded, alpha byte / 255)", async () => {
         const texture = createTexture(1, 1, [128, 64, 255, 128], { format: "rgba8unorm-srgb" });
         const r = await run(createPbrMaterial({ baseColorTexture: texture, baseColorFactor: [0.5, 1, 0.25, 0.5], alpha: 0.5 }));
-        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbByteToLinear(128) * 0.5, srgbByteToLinear(64), srgbByteToLinear(255) * 0.25, (128 / 255) * 0.5 * 0.5]);
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbGrid(srgbByteToLinear(128) * 0.5), srgbByteToLinear(64), srgbGrid(0.25), (128 / 255) * 0.5 * 0.5]);
         expect(r.mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
         expect(r.json.images).toBeUndefined();
         expect(r.json.textures).toBeUndefined();
@@ -127,7 +131,7 @@ describe("PBR core: base color", () => {
     it("decodes a 1x1 linear-format base color with (byte / 255)^2.2 when the material has _gammaAlbedo", async () => {
         const texture = createTexture(1, 1, [128, 64, 255, 255], { format: "rgba8unorm" });
         const r = await run(createPbrMaterial({ baseColorTexture: texture, _gammaAlbedo: true }));
-        close(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(128 / 255, 2.2), Math.pow(64 / 255, 2.2), 1, 1]);
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbGrid(Math.pow(128 / 255, 2.2)), srgbGrid(Math.pow(64 / 255, 2.2)), 1, 1]);
     });
 
     it("decodes a 1x1 -srgb base color with the sRGB curve even when the material has _gammaAlbedo", async () => {
@@ -139,14 +143,35 @@ describe("PBR core: base color", () => {
     it("folds a 1x1 linear-format base color as byte / 255 without _gammaAlbedo", async () => {
         const texture = createTexture(1, 1, [128, 64, 255, 255], { format: "rgba8unorm" });
         const r = await run(createPbrMaterial({ baseColorTexture: texture, _gammaAlbedo: false }));
-        close(r.mat.pbrMetallicRoughness.baseColorFactor, [128 / 255, 64 / 255, 1, 1]);
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbGrid(128 / 255), srgbGrid(64 / 255), 1, 1]);
     });
 
-    it("folds a 1x1 rgba8unorm base color as byte / 255", async () => {
+    it("folds a 1x1 rgba8unorm base color as byte / 255 (alpha byte included on a MASK material)", async () => {
         const texture = createTexture(1, 1, [128, 64, 255, 128], { format: "rgba8unorm" });
-        const r = await run(createPbrMaterial({ baseColorTexture: texture, baseColorFactor: [0.5, 1, 0.25, 1] }));
-        close(r.mat.pbrMetallicRoughness.baseColorFactor, [(128 / 255) * 0.5, 64 / 255, 0.25, 128 / 255]);
+        const r = await run(createPbrMaterial({ baseColorTexture: texture, baseColorFactor: [0.5, 1, 0.25, 1], _alphaCutOff: 0.5 }));
+        close(r.mat.pbrMetallicRoughness.baseColorFactor, [srgbGrid((128 / 255) * 0.5), srgbGrid(64 / 255), srgbGrid(0.25), 128 / 255]);
+        expect(r.mat.alphaMode).toBe("MASK");
         expect(r.json.images).toBeUndefined();
+    });
+
+    it("folds a genuine 1x1 base color onto the loader's bake grid, so exporting the reloaded bake reproduces it exactly", async () => {
+        const texture = createTexture(1, 1, [255, 200, 128, 255], { format: "rgba8unorm-srgb" });
+        const first = (await run(createPbrMaterial({ baseColorTexture: texture, baseColorFactor: [0.5, 0.7, 0.3, 1], alpha: 0.4 }))).mat.pbrMetallicRoughness.baseColorFactor;
+        close(first, [0.5, srgbByteToLinear(200) * 0.7, srgbByteToLinear(128) * 0.3, 0.4], 2);
+        // The reload bakes the RGB factor into a 1×1 sRGB texel and keeps the BLEND alpha in `alpha`.
+        const bake = createTexture(1, 1, [linearToSrgbByte(first[0]), linearToSrgbByte(first[1]), linearToSrgbByte(first[2]), 255], { format: "rgba8unorm-srgb" });
+        const second = (await run(createPbrMaterial({ baseColorTexture: bake, alpha: first[3], alphaBlend: true }))).mat.pbrMetallicRoughness.baseColorFactor;
+        expect(second).toEqual(first);
+    });
+
+    it("ignores a folded texel's alpha on an opaque material, which the reload would drop", async () => {
+        const texture = createTexture(1, 1, [255, 200, 128, 128], { format: "rgba8unorm-srgb" });
+        const r = await run(createPbrMaterial({ baseColorTexture: texture }));
+        const first = r.mat.pbrMetallicRoughness.baseColorFactor;
+        expect(first[3]).toBe(1);
+        expect(r.mat.alphaMode).toBeUndefined();
+        const bake = createTexture(1, 1, [linearToSrgbByte(first[0]), linearToSrgbByte(first[1]), linearToSrgbByte(first[2]), 255], { format: "rgba8unorm-srgb" });
+        expect((await run(createPbrMaterial({ baseColorTexture: bake }))).mat.pbrMetallicRoughness.baseColorFactor).toEqual(first);
     });
 
     it("exports a larger base color texture as an image and keeps the factor", async () => {
@@ -175,14 +200,25 @@ describe("PBR core: metallic-roughness and occlusion", () => {
         expect(r.json.textures).toHaveLength(1);
     });
 
-    it("folds a 1x1 ORM [255, g, b, 255] into metallic * b/255 and roughness * g/255 without an image", async () => {
+    it("folds a 1x1 ORM [255, g, b, 255] into metallic * b/255 and roughness * g/255 (on the byte grid) without an image", async () => {
         const orm = createTexture(1, 1, [255, 128, 64, 255]);
         const r = await run(createPbrMaterial({ ormTexture: orm, metallicFactor: 0.5, roughnessFactor: 0.8 }));
-        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBeCloseTo(0.5 * (64 / 255), 6);
-        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeCloseTo(0.8 * (128 / 255), 6);
+        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBeCloseTo(byteGrid(0.5 * (64 / 255)), 6);
+        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeCloseTo(byteGrid(0.8 * (128 / 255)), 6);
         expect(r.mat.pbrMetallicRoughness.metallicRoughnessTexture).toBeUndefined();
         expect(r.mat.occlusionTexture).toBeUndefined();
         expect(r.json.images).toBeUndefined();
+    });
+
+    it("folds a genuine 1x1 ORM onto the loader's bake grid, so exporting the reloaded bake reproduces it exactly", async () => {
+        const orm = createTexture(1, 1, [255, 128, 64, 255]);
+        const first = (await run(createPbrMaterial({ ormTexture: orm, metallicFactor: 0.5, roughnessFactor: 0.8 }))).mat.pbrMetallicRoughness;
+        expect(first.metallicFactor).toBeCloseTo(0.5 * (64 / 255), 2);
+        expect(first.roughnessFactor).toBeCloseTo(0.8 * (128 / 255), 2);
+        // The reload bakes both factors into a 1×1 ORM [255, round(roughness × 255), round(metallic × 255), 255].
+        const bake = createTexture(1, 1, [255, Math.round(first.roughnessFactor * 255), Math.round(first.metallicFactor * 255), 255]);
+        const second = (await run(createPbrMaterial({ ormTexture: bake }))).mat.pbrMetallicRoughness;
+        expect(second).toEqual(first);
     });
 
     it("exports a 1x1 ORM with R != 255 as a 1x1 image used by both slots when occlusion reads it", async () => {

@@ -275,6 +275,29 @@ describe("image encoding", () => {
             encode.mockRestore();
         }
     });
+
+    it("takes the pixel buffers off the context before encoding and writes every image's bufferView in index order", async () => {
+        const ctx = createExportContext(createScene().surface.engine, "test");
+        const images = [PATTERN, PATTERN.map((v) => 255 - v), PATTERN.map((v) => v * 10)];
+        for (const rgba of images) {
+            ctx.doc.images.push({ mimeType: "image/png" });
+            ctx.imagePixels.push({ width: 2, height: 2, rgba: new Uint8Array(rgba) });
+        }
+        const pending = imageModule.encodeImages(ctx);
+        // Emptied synchronously, so the context retains no pixel buffer while the PNGs encode.
+        expect(ctx.imagePixels).toEqual([]);
+        await pending;
+        expect(ctx.imagePixels).toEqual([]);
+        expect(ctx.doc.images.map((image) => image.bufferView)).toEqual([0, 1, 2]);
+        const bin = ctx.buffers.finalize();
+        const decoded = [];
+        for (const image of ctx.doc.images) {
+            const view = ctx.buffers.bufferViews[image.bufferView!]!;
+            const offset = view.byteOffset ?? 0;
+            decoded.push(Array.from((await decodePng(bin.subarray(offset, offset + view.byteLength))).rgba));
+        }
+        expect(decoded).toEqual(images);
+    });
 });
 
 describe("readback failure", () => {

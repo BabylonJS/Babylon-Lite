@@ -3,8 +3,11 @@ import { createFakeDevice, createMesh, createScene, createTexture, decodePng, ex
 import type { FakeTextureOptions, ParsedGlb } from "./export-test-utils";
 import { createStandardMaterial } from "../../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import type { StandardMaterialProps } from "../../../../packages/babylon-lite/src/material/standard/standard-material";
+import { stdUvTransformExt } from "../../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
 import { specularPowerToRoughness } from "../../../../packages/babylon-lite/src/export-gltf/export-materials";
+import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
+import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
 
 type State = "uv1" | "uv0" | "lost";
 
@@ -273,6 +276,28 @@ describe("Standard UV mapping: per-texture path (_hasUvTx)", () => {
         const emissive = r.mat.emissiveTexture;
         expect(emissive.extensions.KHR_texture_transform).toEqual({ offset: O, scale: S });
         expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual(STORAGE);
+    });
+
+    it("emits a transform that reproduces the shader's diffuse UV matrix under the Khronos sample renderer convention", async () => {
+        let uniform: Float32Array | undefined;
+        const engine = {
+            _device: {
+                createBuffer: () => ({}),
+                queue: {
+                    writeBuffer: (_buffer: GPUBuffer, _offset: number, source: ArrayBuffer, byteOffset: number, byteLength: number) => {
+                        uniform = new Float32Array(source.slice(byteOffset, byteOffset + byteLength));
+                    },
+                },
+            },
+        } as unknown as EngineContext;
+        const material = std({ _hasUvTx: true, uvScale: [1.5, 2], uvOffset: [0.3, 0.4], diffuseTexture: column(TOP, BOTTOM, { invertY: false, wrapper }) });
+        stdUvTransformExt._bind!(material, [], 0, undefined, { surface: { engine } } as SceneContext);
+        const r = await run(material);
+        const { offset, scale, rotation } = r.mat.pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform;
+        // glTF-Sample-Renderer: uv' = T * R * S * uv with R's columns (cos, -sin) and (sin, cos), so u' = cos*u + sin*v.
+        const c = Math.cos(rotation);
+        const s = Math.sin(rotation);
+        close(Array.from(uniform!.subarray(0, 6)), [c * scale[0], s * scale[1], -s * scale[0], c * scale[1], offset[0], offset[1]]);
     });
 
     it("does not let the diffuse texture's invertY flip the other slots", async () => {

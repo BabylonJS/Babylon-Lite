@@ -1,7 +1,7 @@
 /** Ports of the Babylon.js glTF serializer unit tests that build a scene natively (meshes, sub meshes,
  *  morph targets) and export it. Each test keeps its Babylon.js title and values; the scenes are
  *  expressed in Lite's plain-data model. The tests that start from a hand-built glTF document run
- *  through the real loader in tests/lite/plumbing/export-gltf-bjs-ports.spec.ts.
+ *  through the real loader in tests/lite/plumbing/export-gltf.spec.ts.
  *
  *  Lite has no sub meshes or multi-materials: a Babylon.js mesh with several sub meshes corresponds
  *  to a transform node whose child meshes each hold one material and one index range, exactly the
