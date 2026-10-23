@@ -142,6 +142,7 @@ export abstract class Light extends Node {
     private _excludedMeshes: AbstractMesh[] = this._hookMeshList([]);
     private _includedOnlyMeshes: AbstractMesh[] = this._hookMeshList([]);
     private _meshListSyncScheduled = false;
+    private _hookedMeshLists?: WeakSet<AbstractMesh[]>;
 
     /**
      * Meshes this light does not light. Babylon.js hands out the light's own array, and
@@ -171,6 +172,11 @@ export abstract class Light extends Node {
      * assignment — do not publish in Babylon.js either, so matching the hook set is parity.
      */
     private _hookMeshList(array: AbstractMesh[]): AbstractMesh[] {
+        const hooked = (this._hookedMeshLists ??= new WeakSet<AbstractMesh[]>());
+        if (hooked.has(array)) {
+            return array;
+        }
+        hooked.add(array);
         const push = array.push.bind(array);
         const splice = array.splice.bind(array);
         // Non-enumerable, like the prototype methods they shadow: an own enumerable "push" would
@@ -299,22 +305,22 @@ function liteMeshSet(meshes: readonly AbstractMesh[]): Set<LiteMesh> | undefined
 }
 
 /** @internal Lite scenes whose renderables a published list change has invalidated this tick. */
-const pendingSceneRebuilds = new Set<Parameters<typeof rebuildSceneRenderables>[0]>();
+let pendingSceneRebuilds: Set<Parameters<typeof rebuildSceneRenderables>[0]> | undefined;
 let sceneRebuildScheduled = false;
 
 /**
  * @internal Request one rebuild per scene per tick.
  */
 function requestSceneRebuild(liteScene: Parameters<typeof rebuildSceneRenderables>[0]): void {
-    pendingSceneRebuilds.add(liteScene);
+    (pendingSceneRebuilds ??= new Set()).add(liteScene);
     if (sceneRebuildScheduled) {
         return;
     }
     sceneRebuildScheduled = true;
     queueMicrotask(() => {
         sceneRebuildScheduled = false;
-        const scenes = [...pendingSceneRebuilds];
-        pendingSceneRebuilds.clear();
+        const scenes = [...(pendingSceneRebuilds ?? [])];
+        pendingSceneRebuilds = undefined;
         for (const scene of scenes) {
             void rebuildSceneRenderables(scene).catch((error: unknown) => {
                 console.error(error);

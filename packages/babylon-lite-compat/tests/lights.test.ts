@@ -413,6 +413,53 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(rebuildMock).not.toHaveBeenCalled();
     });
 
+    it("hooks an array once per light, however often it is reassigned", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        const floor = mesh("floor");
+        const list = [floor];
+
+        rim.excludedMeshes = list;
+        const hookedPush = list.push;
+        const hookedSplice = list.splice;
+
+        for (let i = 0; i < 1000; i++) {
+            const current = rim.excludedMeshes;
+            rim.excludedMeshes = current;
+            rim.excludedMeshes = list;
+        }
+        expect(list.push).toBe(hookedPush);
+        expect(list.splice).toBe(hookedSplice);
+        await flush();
+
+        const wall = mesh("wall");
+        rim.excludedMeshes.push(wall);
+        rim.excludedMeshes.splice(0, 1);
+        await flush();
+
+        expect(rim.excludedMeshes).toBe(list);
+        expect(rim.excludedMeshes).toEqual([wall]);
+        expect(excluded(rim)).toEqual([wall._lite]);
+    });
+
+    it("still hooks an array shared with a second light, so both publish", async () => {
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2);
+        const shared = [mesh("floor")];
+
+        rim.excludedMeshes = shared;
+        led.excludedMeshes = shared;
+        await flush();
+
+        const wall = mesh("wall");
+        shared.push(wall);
+        await flush();
+
+        // Skipping the second hook because the array was already hooked would leave this light
+        // publishing a stale set.
+        expect(excluded(rim)).toEqual(shared.map((m) => m._lite));
+        expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+    });
+
     it("keeps Array.splice semantics for an omitted and an explicitly undefined deleteCount", async () => {
         const rim = new DirectionalLight("rim", new Vector3(0, -1, 0));
         const floor = mesh("floor");
