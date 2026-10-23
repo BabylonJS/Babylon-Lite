@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { _vis } from "../../../packages/babylon-lite/src/engine/engine";
 import { createSceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import type { _WritableVisibility } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility";
 
 describe("setSubtreeVisible", () => {
@@ -28,9 +29,16 @@ describe("setSubtreeVisible", () => {
         setSubtreeVisible(root, false);
         expect(_vis).toBe(stableEpoch);
 
-        child.visible = true;
+        (child as _WritableVisibility).visible = true;
         setSubtreeVisible(root, false);
         expect(child.visible).toBe(false);
         expect(_vis).toBe((stableEpoch + 1) | 0);
+    });
+
+    it("keeps the public visible field read-only", () => {
+        const node = createSceneNode("node");
+        // @ts-expect-error Runtime visibility changes must go through setMeshVisible.
+        node.visible = false;
+        expect(node.visible).toBe(false);
     });
 });

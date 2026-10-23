@@ -27,8 +27,8 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
  *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
  *  re-adding it there is fine. An explicit `retainMeshResources` lease opts out of last-scene
  *  disposal until the lease is released. To remove only membership without changing parenting,
- *  use `detachMeshFromScene` with that lease. To change only rendering visibility, use
- *  `mesh.visible = false` (or `setSubtreeVisible`).
+ *  use `detachMeshFromScene` with that lease. To hide a mesh temporarily, call
+ *  `setMeshVisible(mesh, false)` instead of removing it.
  *
  *  Standalone function for tree-shaking — only included when actually used. */
 export function removeFromScene(scene: SceneContext, entity: SceneEntity): void {

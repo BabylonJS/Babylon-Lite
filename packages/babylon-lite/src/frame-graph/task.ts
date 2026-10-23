@@ -30,7 +30,7 @@ import type { Pass } from "./pass.js";
 export interface Task {
     readonly name: string;
 
-    /** Runtime frame-graph execution gate, default true. When false, the frame graph keeps the task recorded
+    /** Runtime frame-graph execution gate; undefined means enabled. When false, the frame graph keeps the task recorded
      *  and its resources alive but skips every pass or built-in `execute()` call for that frame. This is
      *  independent from any task-specific `enabled` state whose disabled transition may still execute work. */
     executionEnabled?: boolean;

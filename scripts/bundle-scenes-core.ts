@@ -33,6 +33,7 @@ import {
     type SceneHeadroomInput,
 } from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
+import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 /**
  * Vite plugin: mangle underscore-prefixed properties via Terser.
@@ -1428,6 +1429,9 @@ export async function buildBundleScenes(): Promise<void> {
         if (unknown.length > 0) {
             throw new Error(`Unknown bundle scene(s): ${unknown.join(", ")}.`);
         }
+    }
+    if (scenesToBuild.includes("scene112") || bjsScenesRequested.includes("bjs-scene112")) {
+        await fetchFlightHelmet();
     }
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).

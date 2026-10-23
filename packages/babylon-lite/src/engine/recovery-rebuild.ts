@@ -151,7 +151,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
 export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
     const rebuilt: Renderable[] = [];
     for (const rebuild of rebuilds) {
-        rebuilt.push(await rebuild());
+        const renderable = await rebuild();
+        if (renderable) {
+            rebuilt.push(renderable);
+        }
     }
     return rebuilt;
 }

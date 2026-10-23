@@ -12,6 +12,7 @@
 import { spawnSync } from "child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { extname, resolve } from "path";
+import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 const ROOT = resolve(__dirname, "..");
 const LAB_DIR = resolve(ROOT, "lab");
@@ -52,6 +53,7 @@ const ROOT_RELATIVE_PREFIXES = [
     "scene",
     "scene-config.json",
     "scene-config-webgl.json",
+    "splats",
     "textures",
     "thumbnails",
     "vendor",
@@ -81,7 +83,9 @@ function escapeHtml(value: string): string {
 function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
     const tagList = demo.tags ?? [];
     const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    const sizeRow = size
+        ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
+        : "";
     const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
     return [
         `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
@@ -244,12 +248,20 @@ function rewriteFilesForBasePath(dir: string, basePath: string): void {
     }
 }
 
-const basePath = normalizeBasePath(process.env.LAB_BASE_PATH);
-runViteBuild(basePath);
-copyStaticRuntimeData();
+async function main(): Promise<void> {
+    const basePath = normalizeBasePath(process.env.LAB_BASE_PATH);
+    await fetchFlightHelmet();
+    runViteBuild(basePath);
+    copyStaticRuntimeData();
 
-if (basePath !== "/") {
-    rewriteFilesForBasePath(DIST_DIR, basePath);
+    if (basePath !== "/") {
+        rewriteFilesForBasePath(DIST_DIR, basePath);
+    }
+
+    console.log(`Lab static site built to ${DIST_DIR}`);
 }
 
-console.log(`Lab static site built to ${DIST_DIR}`);
+main().catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+});

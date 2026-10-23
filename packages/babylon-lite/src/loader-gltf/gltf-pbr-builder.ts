@@ -57,14 +57,7 @@ export function uploadTex(
 }
 
 export function uploadBaseColorFactorTexture(engine: EngineContext, factor: readonly number[], sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
-    return uploadTex(
-        engine,
-        null,
-        true,
-        sampler,
-        generateMipmaps,
-        new U8([linearToSrgbByte(factor[0]!), linearToSrgbByte(factor[1]!), linearToSrgbByte(factor[2]!), Math.round(Math.max(0, Math.min(1, factor[3]!)) * 255)])
-    );
+    return uploadTex(engine, null, true, sampler, generateMipmaps, new U8([linearToSrgbByte(factor[0]!), linearToSrgbByte(factor[1]!), linearToSrgbByte(factor[2]!), 255]));
 }
 
 export function uploadOrmFactorTexture(engine: EngineContext, roughness: number, metallic: number, sampler: GPUSampler, generateMipmaps: GenerateMipmapsFn): Texture2D {
@@ -119,6 +112,7 @@ export async function applyGltfOptInPbrFeatures(props: PbrMaterialProps, mat: Gl
         const { setPbrAlphaCutoff } = await import("../material/pbr/set-alpha-cutoff.js");
         setPbrAlphaCutoff(props, mat._alphaCutoff);
     }
+    mat._onMaterialCreated?.(props);
 }
 
 /** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
@@ -133,12 +127,13 @@ export function assemblePbrProps(
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialProps {
+    const baseColorFactor = mat._baseColorImage ? getGltfBaseColorRgbFactor(mat._baseColorFactor) : undefined;
     const props = {
         baseColorTexture,
         normalTexture,
         ormTexture,
         emissiveTexture,
-        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
+        ...(baseColorFactor ? { baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
@@ -154,8 +149,9 @@ export function assemblePbrProps(
     return props;
 }
 
-function isDefaultBaseColorFactor(f: readonly number[]): boolean {
-    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
+/** BLEND/MASK already carry factor alpha in material.alpha; only RGB belongs here. */
+export function getGltfBaseColorRgbFactor(f: readonly number[]): [number, number, number, number] | undefined {
+    return f[0] !== 1 || f[1] !== 1 || f[2] !== 1 ? [f[0]!, f[1]!, f[2]!, 1] : undefined;
 }
 
 /** Build the default textures (base color + ORM) from a parsed glTF material.

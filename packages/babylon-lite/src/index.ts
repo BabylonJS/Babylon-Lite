@@ -83,8 +83,8 @@ export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinit
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
+export { buildFrameGraphTask, getFrameGraphTasks } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 export {
     createFrameGraphContext,
     registerFrameGraphContext,
@@ -104,6 +104,8 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createCustomPostProcessTask } from "./post-process/custom.js";
+export type { CustomPostProcessTaskConfig } from "./post-process/custom.js";
 export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
 export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
@@ -892,7 +894,10 @@ export { createLookAtMat4LH } from "./math/create-look-at-mat4-lh.js";
 export { createPerspectiveMat4LH } from "./math/create-perspective-mat4-lh.js";
 export { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "./math/create-mat4-from-quat.js";
 export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat4.js";
+export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
 export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
+export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
+export { _getGaussianPointSplattingPackedShBytesPerSplat, _hasGaussianPointSplattingProjectedDepth } from "./math/gaussian-point-splatting-compat-helpers.js";
 export { decomposeMat4 } from "./math/decompose-mat4.js";
 export type { DecomposedTransform } from "./math/decompose-mat4.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
@@ -1451,6 +1456,41 @@ export {
     tickFlowGraph,
 } from "./flow-graph/index.js";
 
+// ─── MeshLoD (opt-in, tree-shakable) ─────────────────────────────────
+// Clustered level-of-detail streaming for large static meshes. Importing the
+// facade has no side effects and pulls in no runtime/decoder/material chunks;
+// those load only when loadMeshLoD is first called, so non-MeshLoD scenes fetch
+// zero MeshLoD bytes.
+export {
+    loadMeshLoD,
+    createMeshLoDInstance,
+    addMeshLoDToScene,
+    removeMeshLoDFromScene,
+    setMeshLoDScreenSpaceError,
+    setMeshLoDCacheBudget,
+    setMeshLoDStreamingPaused,
+    setMeshLoDDebugView,
+    setMeshLoDSelectionMode,
+    getMeshLoDDiagnostics,
+    disposeMeshLoDAsset,
+    isMeshLoDError,
+} from "./mesh-lod/mesh-lod.js";
+export type {
+    MeshLoDSource,
+    MeshLoDAssetState,
+    MeshLoDSelectionMode,
+    MeshLoDDebugView,
+    MeshLoDRequestOptions,
+    MeshLoDLoadOptions,
+    MeshLoDMetadata,
+    MeshLoDDiagnostics,
+    MeshLoDAsset,
+    MeshLoDInstanceOptions,
+    MeshLoDInstance,
+    MeshLoDError,
+    MeshLoDErrorCode,
+} from "./mesh-lod/mesh-lod.js";
+
 // Accessibility (optional scene descriptions, roles, and ARIA attributes).
 export {
     createAccessibilityTree,
@@ -1476,3 +1516,5 @@ export {
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
 export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
 export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
+export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";

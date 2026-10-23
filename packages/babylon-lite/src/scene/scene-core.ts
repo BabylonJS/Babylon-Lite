@@ -27,6 +27,8 @@ import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
+import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
+import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
 
 /** Image processing configuration. */
@@ -311,6 +313,12 @@ export interface SceneContext extends RenderingContext {
     _flowGraphPointerCleanup?: () => void;
     /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
     _flowGraphPointerRefresh?: () => void;
+    /** @internal Optional scene-owned MeshLoD registry. Populated lazily by the
+     *  MeshLoD feature's `addMeshLoDToScene`; absent (and zero-cost) for every scene
+     *  that never uses MeshLoD. */
+    _meshLoDRegistry?: MeshLoDSceneRegistry;
+    /** @internal Opt-in material rebuild work for scene-owned non-mesh renderables. */
+    _materialRebuild?: (matches: (material: Material) => boolean) => Promise<void>;
 }
 
 /** Options passed to the scene-context factory. */
@@ -563,47 +571,7 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
             // scene must be left untouched when it does.
             registerMeshScene(ctx, mesh);
             ctx.meshes.push(mesh);
-            const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
-            if (build) {
-                let group = ctx._groups.get(build);
-                if (!group) {
-                    group = [] as SceneMeshGroup;
-                    ctx._groups.set(build, group);
-                    if (!ctx._built) {
-                        ctx._deferredBuilders.push(async () => {
-                            // Every member left before boot (removal or retained detach). Cancel the group so a
-                            // later reinsertion creates a fresh one, built by the drain or the runtime path.
-                            if (!group!.length) {
-                                ctx._groups.delete(build);
-                                return;
-                            }
-                            const result = await _buildMeshGroup(ctx, build, group!);
-                            if (!result) {
-                                if (!group!.length) {
-                                    ctx._groups.delete(build);
-                                }
-                                return;
-                            }
-                            ctx._renderables.push(...result.renderables);
-                            group!.o = result.renderables;
-                            if (result.updater) {
-                                ctx._uniformUpdaters.push(result.updater);
-                            }
-                            group!.r = result.rebuildSingle;
-                        });
-                    }
-                }
-                group.push(mesh);
-                // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
-                // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
-                // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
-                // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
-                // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
-                // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
-                if (ctx._built || group.r) {
-                    enqueueMaterialSwap(ctx, mesh);
-                }
-            }
+            joinMaterialGroup(ctx, mesh);
             ctx._meshMaterialChange?.(mesh, mesh.material);
         } else if ("lightType" in entity) {
             ctx.lights.push(entity as LightBase);
@@ -619,6 +587,55 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
             addToScene(scene, child as SceneEntity);
         }
+    }
+}
+
+/** Add `mesh` to the scene group of its current material's builder, creating the group (and, before the initial
+ *  build, its deferred builder) on first use. */
+function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
+    const build = mesh.material?._buildGroup;
+    if (!build) {
+        return;
+    }
+    let group = ctx._groups.get(build);
+    if (!group) {
+        group = [] as SceneMeshGroup;
+        ctx._groups.set(build, group);
+        if (!ctx._built) {
+            ctx._deferredBuilders.push(async () => {
+                // Every mesh left this group before boot (re-materialed into another family, removed, or detached).
+                // Builders require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
+                if (!group![0]) {
+                    ctx._groups.delete(build);
+                    return;
+                }
+                const result = await _buildMeshGroup(ctx, build, group!);
+                // The build was discarded (membership kept changing, or every member left while it awaited) and any
+                // remaining members were handed to the swap drain.
+                if (!result) {
+                    if (!group![0]) {
+                        ctx._groups.delete(build);
+                    }
+                    return;
+                }
+                ctx._renderables.push(...result.renderables);
+                group!.o = result.renderables;
+                if (result.updater) {
+                    ctx._uniformUpdaters.push(result.updater);
+                }
+                group!.r = result.rebuildSingle;
+            });
+        }
+    }
+    group.push(mesh);
+    // Materialize this mesh's renderable through the per-frame material-swap drain when the boot-only
+    // deferred builder won't cover it: either after the initial build (`_built`), or when joining a group
+    // whose builder has ALREADY completed (`group.r`) — e.g. a glTF prop whose async load resolves
+    // mid-drain and joins an already-built group. A mesh joining a group whose builder has NOT yet run (a
+    // brand-new group, or one still pending in the drain) is built by that builder, so it must NOT enqueue
+    // here — that would insert a SECOND renderable for it. buildScene drains the queue at the end.
+    if (ctx._built || group.r) {
+        enqueueMaterialSwap(ctx, mesh);
     }
 }
 
@@ -684,13 +701,16 @@ export function disposeScene(scene: SceneContext): void {
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    // Discard material-swap requests enqueued during INITIAL scene setup — a mesh added, then re-materialed before
-    // boot via the mesh.material setter (e.g. scene12 assigns each row's material AFTER addToScene). The deferred
-    // builders below build every group's meshes fresh with their FINAL material, so those swaps are redundant;
-    // processing them would insert a SECOND renderable per mesh (double-draw). On re-registration the queued swaps
-    // are real runtime changes and must survive so a newly introduced material group can be built below.
-    if (!ctx._built) {
-        ctx._materialSwapQueue.length = 0;
+    // A mesh added, then re-materialed before boot via the mesh.material setter (e.g. scene12 assigns each row's
+    // material AFTER addToScene), is built by the deferred builders below with its FINAL material. Its queued swap
+    // is redundant and would insert a SECOND renderable (double-draw), so it is dropped. Its group membership was
+    // fixed at addToScene time and may be stale (no group for a material assigned later, or the old family's
+    // group), so when any swap was queued the still-unbuilt groups are refilled from every mesh's current material,
+    // in add order. On re-registration the queued swaps are real runtime changes and must survive so a newly
+    // introduced material group can be built.
+    if (!ctx._built && ctx._materialSwapQueue.splice(0)[0]) {
+        ctx._groups.forEach((group) => (group.length = 0));
+        ctx.meshes.forEach((mesh) => joinMaterialGroup(ctx, mesh));
     }
     while (ctx._deferredBuilders.length) {
         const builders = ctx._deferredBuilders.splice(0);

@@ -9,6 +9,7 @@ import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/s
 import { createSceneAccessibility, disposeSceneAccessibility, getAccessibilityNode } from "../../../packages/babylon-lite/src/accessibility/scene-accessibility.js";
 import { onSceneChange } from "../../../packages/babylon-lite/src/scene/scene-change.js";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove.js";
+import { setMeshVisible } from "../../../packages/babylon-lite/src/scene/scene.js";
 import { createTransformNode, cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import { pickWithRay } from "../../../packages/babylon-lite/src/picking/ray-pick.js";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material.js";
@@ -244,7 +245,7 @@ describe("retained mesh scene membership", () => {
         const gpu = mesh._gpu;
         const parent = createTransformNode("parent");
         mesh.parent = parent;
-        mesh.visible = false;
+        setMeshVisible(mesh, false);
         mesh.metadata = { value: "unchanged" };
         const peer = fixture().mesh;
         addToScene(scene, peer);
