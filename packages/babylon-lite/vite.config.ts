@@ -380,30 +380,40 @@ function minifyBrowserChunks(): Plugin {
  * bundler — like a `?raw` WGSL string, a consumer's minifier cannot shrink code that
  * lives inside a string literal. So the worker must be minified here, at package build
  * time, regardless of the (intentionally unminified) `lib` output: otherwise every
- * consumer ships the full-fat worker source. esbuild minify (incl. whitespace) is run
- * in the worker sub-build's `renderChunk` — the worker is a normal Rollup bundle (not
- * lib mode), so its `renderChunk` return value is honoured.
+ * consumer ships the full-fat worker source. esbuild minify (incl. whitespace) runs
+ * in the worker sub-build's `generateBundle`, the last hook before Vite embeds the
+ * string: Vite 8 builds the worker with Rolldown's `minify: "dce-only"` when
+ * `build.minify` is false, and that pass re-prints `renderChunk` output with
+ * indentation and newlines.
  */
 function minifyInlinedWorker(): Plugin {
     return {
         name: "minify-inlined-worker",
         enforce: "post",
-        async renderChunk(code, chunk) {
-            const result = await transformWithEsbuild(code, chunk.fileName, {
-                minify: true,
-                // Bundle as an IIFE so the worker's (otherwise top-level) ES-module
-                // bindings become function-scoped and esbuild's identifier minifier can
-                // rename them. With the default `format: "es"`, top-level names are treated
-                // as potential exports and left unmangled, bloating the inlined blob — the
-                // scene/demo harness builds the same worker as an IIFE, so this keeps the
-                // package's inlined worker byte-aligned with a from-source build.
-                format: "iife",
-                legalComments: "none",
-                sourcemap: false,
-            });
-            return { code: result.code, map: null };
+        async generateBundle(_options, bundle) {
+            for (const chunk of Object.values(bundle)) {
+                if (chunk.type === "chunk") {
+                    chunk.code = await minifyWorkerChunk(chunk.code, chunk.fileName);
+                }
+            }
         },
     };
+}
+
+async function minifyWorkerChunk(code: string, fileName: string): Promise<string> {
+    const result = await transformWithEsbuild(code, fileName, {
+        minify: true,
+        // Bundle as an IIFE so the worker's (otherwise top-level) ES-module
+        // bindings become function-scoped and esbuild's identifier minifier can
+        // rename them. With the default `format: "es"`, top-level names are treated
+        // as potential exports and left unmangled, bloating the inlined blob — the
+        // scene/demo harness builds the same worker as an IIFE, so this keeps the
+        // package's inlined worker byte-aligned with a from-source build.
+        format: "iife",
+        legalComments: "none",
+        sourcemap: false,
+    });
+    return result.code;
 }
 
 /**
