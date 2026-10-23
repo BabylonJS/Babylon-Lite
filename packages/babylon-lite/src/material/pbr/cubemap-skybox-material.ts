@@ -1,17 +1,73 @@
-/** Shared cubemap skybox material factory — used by DDS and HDR skyboxes.
+/** Shared cubemap skybox material factory, cube geometry and Renderable shell — used by DDS and HDR skyboxes.
  *  BGL: binding 0 = uniform buffer, binding 1 = cube texture, binding 2 = sampler. */
 
-import { SS } from "../../engine/gpu-flags.js";
+import { F32, U16 } from "../../engine/typed-arrays.js";
+import { BU, SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
+import type { Renderable } from "../../render/renderable.js";
+import type { EnvironmentSkyboxKind, SceneContext } from "../../scene/scene-core.js";
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
+import { createMappedBuffer } from "../../resource/mapped-buffer.js";
 
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 export interface CubemapSkyboxMaterial {
     getPipeline(engine: EngineContext, sig: RenderTargetSignature): GPURenderPipeline;
     createBindGroup(engine: EngineContext, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
+}
+
+/** Create the unit-cube vertex and index buffers shared by the DDS and HDR skyboxes. */
+export function createSkyboxBuffers(engine: EngineContext, S: number): [positionBuffer: GPUBuffer, indexBuffer: GPUBuffer] {
+    // prettier-ignore
+    const positions = new F32([
+    -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
+    -S,-S, S,  S,-S, S, -S, S, S,  S, S, S,
+  ]);
+    // prettier-ignore
+    const indices = new U16([
+    6,4,5, 7,6,5,  0,2,3, 1,0,3,
+    5,1,3, 7,5,3,  0,4,6, 2,0,6,
+    3,2,6, 7,3,6,  0,1,5, 4,0,5,
+  ]);
+    return [createMappedBuffer(engine, positions, BU.VERTEX), createMappedBuffer(engine, indices, BU.INDEX)];
+}
+
+/** Apply the scene's environment skybox shader patches to a fragment, or return it unchanged.
+ *  Taking the fragment as a parameter keeps each raw WGSL import referenced once per caller,
+ *  so minifiers cannot inline the shader string twice. */
+export async function composeSkyboxFragment(scene: SceneContext, fragment: string, kind: EnvironmentSkyboxKind): Promise<string> {
+    return (await scene._environmentSkyboxShaderComposer?.(fragment, kind)) ?? fragment;
+}
+
+/** Wrap a cubemap skybox material, bind group and cube buffers as an opaque order-0 Renderable. */
+export function createCubemapSkyboxRenderable(
+    mat: CubemapSkyboxMaterial,
+    bindGroup: GPUBindGroup,
+    positionBuffer: GPUBuffer,
+    indexBuffer: GPUBuffer,
+    rebuild: () => Promise<Renderable>
+): Renderable {
+    const r: Renderable = {
+        order: 0,
+        isTransparent: false,
+        bind(eng, sig) {
+            return {
+                renderable: r,
+                pipeline: mat.getPipeline(eng as EngineContext, sig),
+                draw(pass) {
+                    pass.setBindGroup(1, bindGroup);
+                    pass.setVertexBuffer(0, positionBuffer);
+                    pass.setIndexBuffer(indexBuffer, "uint16");
+                    pass.drawIndexed(36);
+                    return 1;
+                },
+            };
+        },
+    };
+    r._rebuild = rebuild;
+    return r;
 }
 
 /** Module-global pipeline + layout caches shared across all cubemap-skybox instances.
