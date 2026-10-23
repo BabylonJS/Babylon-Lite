@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
 import { QuadraticEase } from "../src/animations/easing";
-import type { IEasingFunction } from "../src/index";
+import type { IAnimationKey, IEasingFunction } from "../src/index";
 import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
 
@@ -59,6 +59,77 @@ describe("Animation", () => {
         anim.setEasingFunction(null);
         expect(anim.getEasingFunction()).toBeNull();
         expect(anim.evaluate(5)).toBeCloseTo(5);
+    });
+
+    it("uses each start-key easing before the animation default or linear progress", () => {
+        const anim = new Animation("perKey", "x", 10);
+        const firstEasing = new QuadraticEase();
+        const unusedEasing = { ease: vi.fn(() => 0) };
+        const keys: IAnimationKey[] = [
+            { frame: 20, value: 20, easingFunction: { ease: (gradient) => gradient ** 3 } },
+            { frame: 0, value: 0, easingFunction: firstEasing },
+            { frame: 30, value: 30, easingFunction: unusedEasing },
+            { frame: 10, value: 10 },
+        ];
+        anim.setKeys(keys);
+        anim.setEasingFunction({ ease: (gradient) => Math.sqrt(gradient) });
+
+        expect(anim.getKeys()[0]!.easingFunction).toBe(firstEasing);
+        expect(anim.evaluate(5)).toBeCloseTo(2.5);
+        expect(anim.evaluate(15)).toBeCloseTo(10 + 10 * Math.sqrt(0.5));
+        expect(anim.evaluate(25)).toBeCloseTo(21.25);
+        anim.setEasingFunction(null);
+        expect(anim.evaluate(5)).toBeCloseTo(2.5);
+        expect(anim.evaluate(15)).toBe(15);
+        expect(anim.evaluate(25)).toBeCloseTo(21.25);
+        expect(anim.evaluate(30)).toBe(30);
+        expect(unusedEasing.ease).not.toHaveBeenCalled();
+    });
+
+    it("applies per-key vector overshoot while keeping clamped endpoints exact", () => {
+        const anim = new Animation("perKeyVector", "position", 10, Animation.ANIMATIONTYPE_VECTOR3);
+        const easing = { ease: vi.fn(() => 1.25) };
+        const start = new Vector3(0, 0, 0);
+        const end = new Vector3(4, 8, 12);
+        anim.setKeys([
+            { frame: 0, value: start, easingFunction: easing },
+            { frame: 10, value: end },
+        ]);
+
+        expect(anim.evaluate(-5)).toBe(start);
+        expect(anim.evaluate(0)).toBe(start);
+        expect(anim.evaluate(10)).toBe(end);
+        expect(anim.evaluate(15)).toBe(end);
+        expect(easing.ease).not.toHaveBeenCalled();
+        expect((anim.evaluate(5) as Vector3).asArray()).toEqual([5, 10, 15]);
+        expect(easing.ease).toHaveBeenCalledExactlyOnceWith(0.5);
+    });
+
+    it("uses per-key easing for quaternion slerp without clamping overshoot", () => {
+        const anim = new Animation("perKeyQuaternion", "rotationQuaternion", 10, Animation.ANIMATIONTYPE_QUATERNION);
+        anim.setKeys([
+            { frame: 0, value: new Quaternion(0, 0, 0, 1), easingFunction: { ease: () => 1.25 } },
+            { frame: 10, value: new Quaternion(0, 1, 0, 0) },
+        ]);
+
+        const value = anim.evaluate(5) as Quaternion;
+        expect(value.y).toBeCloseTo(Math.sin((5 * Math.PI) / 8));
+        expect(value.w).toBeCloseTo(Math.cos((5 * Math.PI) / 8));
+    });
+
+    it("bypasses per-key easing on STEP segments and advances at the next key", () => {
+        const anim = new Animation("perKeyStep", "x", 10);
+        const ignored = { ease: vi.fn(() => 0.75) };
+        anim.setKeys([
+            { frame: 0, value: 0, interpolation: AnimationKeyInterpolation.STEP, easingFunction: ignored },
+            { frame: 10, value: 10, easingFunction: new QuadraticEase() },
+            { frame: 20, value: 20 },
+        ]);
+
+        expect(anim.evaluate(5)).toBe(0);
+        expect(anim.evaluate(10)).toBe(10);
+        expect(anim.evaluate(15)).toBeCloseTo(12.5);
+        expect(ignored.ease).not.toHaveBeenCalled();
     });
 
     it("applies easing to vector values while preserving exact endpoints and overshoot", () => {
@@ -257,6 +328,22 @@ describe("AnimationGroup structural weighted blending", () => {
         group.goToFrame(10);
         expect(target.position.asArray()).toEqual([5, 0, 0]);
         expect(target.rotationQuaternion.asArray()).toEqual([0, 0, 0.5, 0.5]);
+    });
+
+    it("uses per-key easing while evaluating structural groups", () => {
+        const host = new TestHost();
+        const box = { position: { x: 0 } };
+        const eased = slide("perKey", 4);
+        eased.getKeys()[0]!.easingFunction = new QuadraticEase();
+        eased.setEasingFunction({ ease: () => 0.75 });
+        const group = new AnimationGroup("perKeyStructural", host);
+        group.addTargetedAnimation(eased, box);
+        group.start(false, 1, 0, 20);
+
+        group.goToFrame(5);
+        expect(box.position.x).toBeCloseTo(1);
+        group.goToFrame(15);
+        expect(box.position.x).toBeCloseTo(1);
     });
 
     it("uses animation-level easing while evaluating structural groups", () => {

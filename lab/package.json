@@ -4,9 +4,9 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "vite",
-        "dev:https": "vite --mode https",
-        "build": "vite build"
+        "dev": "pnpm --dir .. fetch:flight-helmet && vite",
+        "dev:https": "pnpm --dir .. fetch:flight-helmet && vite --mode https",
+        "build": "pnpm --dir .. fetch:flight-helmet && vite build"
     },
     "dependencies": {
         "babylon-lite": "workspace:*"

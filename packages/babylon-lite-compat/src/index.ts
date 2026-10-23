@@ -98,8 +98,8 @@ export {
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
-export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
-export type { ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
+export { _GetPackedShBytesPerSplat, _HasGaussianPointSplattingProjectedDepth, GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
+export type { IGaussianPointSplattingProgress, ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 export {
     MeshBlendingRadiusClass,
     PackMeshBlendingTag,
@@ -390,6 +390,9 @@ export {
     RegisterGaussianSplattingSizeMaterialPlugin,
     RegisterGaussianSplattingOverdrawMaterialPlugin,
     RegisterGaussianSplattingMaterial,
+    GaussianPointSplattingRenderer,
+    GaussianPointSplattingBlitMaterial,
+    GaussianPointSplattingDepthBlitMaterial,
     GaussianSplattingMaxPartCount,
     GetGaussianSplattingMaxPartCount,
     GetPartIndexVaryingDeclaration,

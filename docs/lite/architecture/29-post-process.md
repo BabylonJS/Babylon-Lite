@@ -23,6 +23,8 @@ module remains fully tree-shakable and follows the same source/target,
 viewport, clear, alpha-mode, device-rebuild, and owned-internal-target
 conventions. See `55-mesh-blending.md` for the complete contract.
 
+The public [custom post-process adapter](custom-post-process.md) exposes this RenderTarget-based fullscreen path for application WGSL, additional color inputs, and explicit uniform updates. Built-in task factories keep their existing implementation and bundle cost.
+
 ## Public API Surface (types, functions, constants — full signatures)
 
 ```ts
