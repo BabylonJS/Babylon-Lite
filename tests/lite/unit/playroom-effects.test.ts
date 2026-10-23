@@ -59,6 +59,7 @@ describe("The Playroom source effects", () => {
             },
             aiming: {
                 visible: false,
+                children: [],
                 position: {
                     set(x: number, y: number, z: number): void {
                         this.x = x;

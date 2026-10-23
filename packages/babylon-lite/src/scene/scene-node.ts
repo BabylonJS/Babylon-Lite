@@ -45,12 +45,21 @@ export interface SceneNode {
     /** @internal Raw glTF matrices ignore TRS writes until `setParent` seeds an editable baseline. */
     _localMatrixLocked?: boolean;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
-     *  Cascade is materialized at write-time by `setSubtreeVisible`. */
-    visible?: boolean;
+     *
+     *  Read-only: change it with `setMeshVisible(node, visible)`, which cascades the value to
+     *  descendants and invalidates cached opaque render bundles. A plain field write would do
+     *  neither, leaving a hidden mesh drawing or a revealed mesh missing. */
+    readonly visible?: boolean;
     /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
     metadata?: LiteMetadata;
     /** @internal Creates an independent clone for specialized SceneNode implementations. */
     _cloneNode?: () => SceneNode;
+}
+
+/** @internal Write view of `SceneNode.visible`. Engine code uses it to seed visibility while
+ *  building a node, before it can be in a recorded render bundle, and in `setMeshVisible`. */
+export interface _WritableVisibility {
+    visible?: boolean;
 }
 
 /** Create a live bidirectional EulerProxy backed by the given ObservableQuat.

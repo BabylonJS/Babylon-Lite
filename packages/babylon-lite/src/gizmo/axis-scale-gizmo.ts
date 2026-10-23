@@ -16,7 +16,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Vec3 } from "../math/types.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
@@ -94,7 +94,7 @@ function buildScaleArrow(
         head.parent = root;
         addToScene(utilityScene, head);
         if (isCollider) {
-            head.visible = false;
+            (head as _WritableVisibility).visible = false;
         }
         return [head];
     }
@@ -122,8 +122,8 @@ function buildScaleArrow(
     addToScene(utilityScene, tail);
 
     if (isCollider) {
-        head.visible = false;
-        tail.visible = false;
+        (head as _WritableVisibility).visible = false;
+        (tail as _WritableVisibility).visible = false;
     }
     return [head, tail];
 }
@@ -148,7 +148,7 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
 
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = materials.colored;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     addToScene(utilityScene, root);
 
     // Baked local-frame orientation of the gizmo's +Z onto its drag axis,
