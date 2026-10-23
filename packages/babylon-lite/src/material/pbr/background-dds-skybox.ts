@@ -1,37 +1,21 @@
 /** DDS cube skybox — lazy-loaded only when skyboxUrl ends with .dds.
  *  Loads backgroundSkybox.dds and renders it with BJS image processing. */
 
-import { F32, I32, U16, U8 } from "../../engine/typed-arrays.js";
-import { TU, BU } from "../../engine/gpu-flags.js";
+import { F32, I32, U8 } from "../../engine/typed-arrays.js";
+import { TU } from "../../engine/gpu-flags.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/texture-sampler-pool.js";
-import { createMappedBuffer } from "../../resource/mapped-buffer.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
-import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
+import { composeSkyboxFragment, createCubemapSkyboxMaterial, createCubemapSkyboxRenderable, createSkyboxBuffers } from "./cubemap-skybox-material.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
 import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
-
-function createSkyboxBuffers(engine: EngineContext, S: number): [posBuffer: GPUBuffer, indexBuffer: GPUBuffer] {
-    // prettier-ignore
-    const positions = new F32([
-    -S,-S,-S,  S,-S,-S, -S, S,-S,  S, S,-S,
-    -S,-S, S,  S,-S, S, -S, S, S,  S, S, S,
-  ]);
-    // prettier-ignore
-    const indices = new U16([
-    6,4,5, 7,6,5,  0,2,3, 1,0,3,
-    5,1,3, 7,5,3,  0,4,6, 2,0,6,
-    3,2,6, 7,3,6,  0,1,5, 4,0,5,
-  ]);
-    return [createMappedBuffer(engine, positions, BU.VERTEX), createMappedBuffer(engine, indices, BU.INDEX)];
-}
 
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
 export async function buildDdsSkyboxRenderable(
@@ -46,31 +30,15 @@ export async function buildDdsSkyboxRenderable(
 
     const [positionBuffer, indexBuffer] = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
-    const skyboxFragment = (await scene._environmentSkyboxShaderComposer?.(ddsSkyboxFragSrc, "dds")) ?? ddsSkyboxFragSrc;
+    const skyboxFragment = await composeSkyboxFragment(scene, ddsSkyboxFragSrc, "dds");
     const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + skyboxFragment;
     const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
-    const r: Renderable = {
-        order: 0,
-        isTransparent: false,
-        bind(eng, sig) {
-            return {
-                renderable: r,
-                pipeline: mat.getPipeline(eng as EngineContext, sig),
-                draw(pass) {
-                    pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, positionBuffer);
-                    pass.setIndexBuffer(indexBuffer, "uint16");
-                    pass.drawIndexed(36);
-                    return 1;
-                },
-            };
-        },
-    };
-    r._rebuild = () => buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxTextureUrl, enableNoise);
-    return r;
+    return createCubemapSkyboxRenderable(mat, bindGroup, positionBuffer, indexBuffer, () =>
+        buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxTextureUrl, enableNoise)
+    );
 }
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
