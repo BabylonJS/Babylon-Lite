@@ -249,6 +249,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
     const PANNING_EPSILON = 0.0001;
+    // Decay one inertial offset by `factor`, snapping it to 0 once its magnitude drops below `epsilon`. Kept local so
+    // the bundler can still inline attachControl into a scene that calls it once.
+    const decayInertia = (offset: number, factor: number, epsilon: number): number => (Math.abs((offset *= factor)) < epsilon ? 0 : offset);
 
     let isDragging = false;
     let isPanning = false;
@@ -435,15 +438,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             const eps = 0.01;
             camera.beta = Math.max(eps, Math.min(Math.PI - eps, camera.beta));
 
-            camera.inertialAlphaOffset *= camera.inertia;
-            camera.inertialBetaOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialAlphaOffset) < ROTATION_EPSILON) {
-                camera.inertialAlphaOffset = 0;
-            }
-            if (Math.abs(camera.inertialBetaOffset) < ROTATION_EPSILON) {
-                camera.inertialBetaOffset = 0;
-            }
+            camera.inertialAlphaOffset = decayInertia(camera.inertialAlphaOffset, camera.inertia, ROTATION_EPSILON);
+            camera.inertialBetaOffset = decayInertia(camera.inertialBetaOffset, camera.inertia, ROTATION_EPSILON);
         }
 
         // --- Zoom inertia ---
@@ -451,36 +447,34 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             camera.radius -= camera.inertialRadiusOffset;
             camera.radius = Math.max(0.01, camera.radius);
 
-            camera.inertialRadiusOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialRadiusOffset) < RADIUS_EPSILON) {
-                camera.inertialRadiusOffset = 0;
-            }
+            camera.inertialRadiusOffset = decayInertia(camera.inertialRadiusOffset, camera.inertia, RADIUS_EPSILON);
         }
 
         // --- Panning inertia ---
         if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
             const cosA = Math.cos(camera.alpha);
             const sinA = Math.sin(camera.alpha);
-            const rightX = -sinA;
-            const rightZ = cosA;
-            const panScale = camera.radius * 0.001;
+            const sinB = Math.sin(camera.beta);
+            // The camera looks at its target with world up, so for sinβ < 0 (an unclamped β below 0 or above π) its right
+            // and up vectors both flip. Fold that sign into the scale; sinβ = 0 counts as positive, as in the camera.
+            const panScale = camera.radius / (sinB < 0 ? -1000 : 1000);
+            const panX = camera.inertialPanningX * panScale;
+            const panY = camera.inertialPanningY * panScale;
+            const panYAcross = Math.cos(camera.beta) * panY;
 
+            // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector ±(-sinα, 0, cosα), Y
+            // along its up vector ±(-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
+            // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
+            // target never moves towards or away from the eye.
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.
-            camera.target.x += rightX * camera.inertialPanningX * panScale;
-            camera.target.y += camera.inertialPanningY * panScale;
-            camera.target.z += rightZ * camera.inertialPanningX * panScale;
+            const target = camera.target;
+            target.x -= sinA * panX + cosA * panYAcross;
+            target.y += sinB * panY;
+            target.z += cosA * panX - sinA * panYAcross;
 
-            camera.inertialPanningX *= camera.panningInertia;
-            camera.inertialPanningY *= camera.panningInertia;
-
-            if (Math.abs(camera.inertialPanningX) < PANNING_EPSILON) {
-                camera.inertialPanningX = 0;
-            }
-            if (Math.abs(camera.inertialPanningY) < PANNING_EPSILON) {
-                camera.inertialPanningY = 0;
-            }
+            camera.inertialPanningX = decayInertia(camera.inertialPanningX, camera.panningInertia, PANNING_EPSILON);
+            camera.inertialPanningY = decayInertia(camera.inertialPanningY, camera.panningInertia, PANNING_EPSILON);
         }
     }
 
