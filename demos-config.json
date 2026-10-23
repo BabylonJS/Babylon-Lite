@@ -23,7 +23,7 @@
     {
         "slug": "trogir-streaming",
         "name": "Trogir Gaussian Splat Streaming",
-        "description": "Stream Paolo Tosolini’s public Trogir capture while Babylon Lite draws a coarse shared Gaussian-splat representation first, then refines visible detail under live screen-error and splat-budget controls. An asset-root override supports local or alternate hosted copies.",
+        "description": "Stream Paolo Tosolini’s public Trogir capture with live detail controls, optional point sampling and accumulation settings, and an FPS counter. An asset-root override supports local or alternate hosted copies.",
         "tags": ["showcase", "gaussian splatting", "streaming"],
         "mobile": false
     },
@@ -136,6 +136,13 @@
         "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
         "tags": ["showcase"],
         "mobile": true
+    },
+    {
+        "slug": "mesh-lod",
+        "name": "MeshLoD Statue",
+        "description": "Experimental MeshLoD streaming: a 311k-triangle photogrammetry statue served as three range-addressable .mlod primitives through Babylon Lite's opt-in MeshLoD path. GPU compute selects meshlets by screen-space error and streams only the pages the current view needs, refining from a tiny always-resident coarse fallback up to full detail. Live diagnostics, debug views, and simulated bandwidth/latency let you watch selection, streaming, residency, and coarse fallback react to the camera. \"Harvard-Yenching Institute statue\" by Alexandre Tokovinine (https://sketchfab.com/tokovinin3d), CC BY 4.0.",
+        "tags": ["gltf", "streaming", "showcase"],
+        "mobile": false
     },
     {
         "slug": "sandblox",

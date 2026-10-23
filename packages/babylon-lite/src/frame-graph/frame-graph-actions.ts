@@ -56,6 +56,23 @@ export function addTaskAfter(target: FrameGraph | SceneContext, task: Task, afte
     }
 }
 
+/** Detach every registration of a task without disposing its passes or resources.
+ *  Call between graph builds/executions; the caller owns cleanup and consumer rewiring.
+ *  @returns Whether the task was registered in the selected graph.
+ */
+export function removeTask(target: FrameGraph | SceneContext, task: Task): boolean {
+    const tasks = resolveFg(target)._tasks;
+    let count = 0;
+    for (const current of tasks) {
+        if (current !== task) {
+            tasks[count++] = current;
+        }
+    }
+    const removed = count !== tasks.length;
+    tasks.length = count;
+    return removed;
+}
+
 /** Create a `RenderPass`, wire it to the task currently recording, and return
  *  it. Must be called from inside `Task.record()` so the FG can associate the
  *  new pass with the right task (mirrors BJS `frameGraph.addRenderPass`).

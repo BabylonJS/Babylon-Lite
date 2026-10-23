@@ -55,6 +55,30 @@ async function initialViteCode(source: string): Promise<string> {
 }
 
 describe("rendering opt-in boundaries", () => {
+    it.each([false, true])("retains the custom post-process adapter only when requested (%s)", async (custom) => {
+        const result = await runRollup({
+            entrySource: `export { ${custom ? "createCustomPostProcessTask" : "createBlackAndWhitePostProcessTask"} } from ${JSON.stringify(LIB_ENTRY)};`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("function createCustomPostProcessTask")).toBe(custom);
+    });
+
+    it("emits identical built-in post-process code when the custom adapter is imported but unused", async () => {
+        const source = `export { createBlackAndWhitePostProcessTask } from ${JSON.stringify(LIB_ENTRY)};`;
+        const baseline = await runRollup({ entrySource: source, format: "es", minify: false });
+        const unused = await runRollup({
+            entrySource: `import { createCustomPostProcessTask } from ${JSON.stringify(LIB_ENTRY)}; ${source}`,
+            format: "es",
+            minify: false,
+        });
+        expect(baseline.errors).toEqual([]);
+        expect(unused.errors).toEqual([]);
+        expect(unused.code).toBe(baseline.code);
+    });
+
     it.each([false, true])("retains hidden ShaderMaterial policy only with its explicit enabler (%s)", async (enabled) => {
         const code = await initialViteCode(`import { createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""} } from ${JSON.stringify(LIB_ENTRY)};
 console.log(createShaderMaterial${enabled ? ", enableShaderMaterialVisiblePacketUpdates" : ""});`);

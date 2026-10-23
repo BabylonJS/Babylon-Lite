@@ -11,6 +11,7 @@ import { createFrameGraphContext, disposeFrameGraphContext, registerFrameGraphCo
 import { addTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { createGenerateMipMapsTask } from "../../../packages/babylon-lite/src/frame-graph/generate-mipmaps-task";
 import { createPostProcessTask } from "../../../packages/babylon-lite/src/frame-graph/post-process-task";
+import { createCustomPostProcessTask } from "../../../packages/babylon-lite/src/post-process/custom";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { createRenderDraw } from "../../../packages/babylon-lite/src/render-shader/render-draw";
 import { addRenderDraw, createRenderDrawTask, setRenderDrawTaskTarget } from "../../../packages/babylon-lite/src/render-shader/render-draw-task";
@@ -48,6 +49,7 @@ function mockGpu(features: GPUFeatureName[] = []) {
             textures.push(texture);
             return texture;
         }),
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer),
         createShaderModule: vi.fn(() => ({}) as GPUShaderModule),
         createSampler: vi.fn(() => ({}) as GPUSampler),
         createBindGroupLayout: vi.fn(() => ({}) as GPUBindGroupLayout),
@@ -55,7 +57,7 @@ function mockGpu(features: GPUFeatureName[] = []) {
         createRenderPipeline: vi.fn((_descriptor: GPURenderPipelineDescriptor) => ({}) as GPURenderPipeline),
         createBindGroup: vi.fn((_descriptor: GPUBindGroupDescriptor) => ({}) as GPUBindGroup),
         createCommandEncoder: vi.fn(() => encoder),
-        queue: { submit: vi.fn(), onSubmittedWorkDone: vi.fn(() => Promise.resolve()) },
+        queue: { submit: vi.fn(), onSubmittedWorkDone: vi.fn(() => Promise.resolve()), writeBuffer: vi.fn((..._args: Parameters<GPUQueue["writeBuffer"]>) => undefined) },
     };
     const engine = {
         _device: device,
@@ -1060,5 +1062,155 @@ describe("Mipmapped render target allocation", () => {
         expect(entries[2]!.resource).toBe(extra._colorSamplingView);
         expect(entries[1]!.resource).not.toBe(source._colorView);
         expect(entries[2]!.resource).not.toBe(extra._colorView);
+    });
+});
+
+describe("custom post-process public adapter", () => {
+    it("records two color producers before a custom uniform-driven composite and reuses bindings while executing", () => {
+        const { engine, device, encoder, pass } = mockGpu();
+        const source = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 64, height: 32 } });
+        const extra = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 64, height: 32 } });
+        const output = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 64, height: 32 } });
+        let intensity = 0.6;
+        const task = createCustomPostProcessTask(
+            {
+                name: "custom-merge",
+                sourceTexture: source,
+                extraTextures: [extra],
+                targetTexture: output,
+                sourceSamplingMode: "nearest",
+                alphaMode: 1,
+                clear: false,
+                viewport: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+                extraTextureWGSL: wgsl`@group(0) @binding(2) var second:texture_2d<f32>;`,
+                uniformWGSL: wgsl`@group(0) @binding(3) var<uniform> gain:vec4f;`,
+                uniformByteLength: 4,
+                writeUniforms: (data) => {
+                    data[0] = intensity;
+                },
+                fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return vec4f((c.rgb+textureSample(second,sourceSampler,uv).rgb)*gain.x,1);}`,
+            },
+            engine
+        );
+        const graph = createFrameGraph(engine);
+        addTask(graph, createClearTextureTask({ targetTexture: source }, engine));
+        addTask(graph, createClearTextureTask({ targetTexture: extra }, engine));
+        addTask(graph, task);
+        expect(device.createTexture).not.toHaveBeenCalled();
+        graph.build();
+
+        const entries = Array.from(device.createBindGroup.mock.lastCall![0].entries);
+        const resources = new Map(entries.map((entry) => [entry.binding, entry.resource]));
+        expect(resources.get(1)).toBe(source._colorView);
+        expect(resources.get(2)).toBe(extra._colorView);
+        const buffer = (resources.get(3) as GPUBufferBinding).buffer;
+        expect(buffer.size).toBe(16);
+        expect(device.createSampler).toHaveBeenCalledWith(expect.objectContaining({ magFilter: "nearest", minFilter: "nearest" }));
+        const code = vi.mocked(engine._device.createShaderModule).mock.lastCall![0].code;
+        expect(code).toContain("var second:texture_2d<f32>");
+        expect(code).toContain("var<uniform> gain:vec4f");
+        expect(code).toContain("textureSample(second,sourceSampler,uv)");
+        expect(device.queue.writeBuffer.mock.lastCall![2]).toEqual(new Float32Array([intensity, 0, 0, 0]));
+        intensity = 0.25;
+        task.updateUniforms();
+        expect(device.queue.writeBuffer.mock.lastCall![2]).toEqual(new Float32Array([0.25, 0, 0, 0]));
+
+        const allocations = device.createTexture.mock.calls.length;
+        expect(graph.execute()).toBe(1);
+        expect(graph.execute()).toBe(1);
+        expect(device.createTexture).toHaveBeenCalledTimes(allocations);
+        expect(device.createBuffer).toHaveBeenCalledOnce();
+        expect(device.createBindGroup).toHaveBeenCalledOnce();
+        expect(device.queue.writeBuffer).toHaveBeenCalledTimes(2);
+        expect(pass.setViewport).toHaveBeenLastCalledWith(16, 8, 32, 16, 0, 1);
+        expect(Array.from(encoder.beginRenderPass.mock.lastCall![0].colorAttachments)[0]).toMatchObject({ view: output._colorView, loadOp: "load" });
+        const pipeline = device.createRenderPipeline.mock.lastCall![0];
+        expect(Array.from(pipeline.fragment!.targets)[0]!.blend?.color).toEqual({ srcFactor: "src-alpha", dstFactor: "one", operation: "add" });
+        task.dispose();
+        expect(buffer.destroy).toHaveBeenCalledOnce();
+        for (const texture of [source._colorTexture!, extra._colorTexture!, output._colorTexture!]) {
+            expect(texture.destroy).not.toHaveBeenCalled();
+        }
+    });
+
+    it("owns only an automatically created output and needs no uniform allocation for a plain copy", () => {
+        const { engine, device } = mockGpu();
+        const source = target(engine);
+        const task = createCustomPostProcessTask({ sourceTexture: source, fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}` }, engine);
+        const graph = graphFor(task);
+        expect(task.outputTexture).not.toBe(source);
+        expect([task.outputTexture._width, task.outputTexture._height]).toEqual([32, 16]);
+        expect(graph.execute()).toBe(1);
+        expect(device.createBuffer).not.toHaveBeenCalled();
+        const output = task.outputTexture._colorTexture!;
+        graph.dispose();
+        expect(output.destroy).toHaveBeenCalledOnce();
+        expect(source._colorTexture!.destroy).not.toHaveBeenCalled();
+    });
+
+    it("rebinds both source and extra producer views after a registered graph resizes", () => {
+        const { engine, device } = mockGpu();
+        const source = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { surface: engine, scale: 0.5 } });
+        const extra = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { surface: engine, scale: 0.25 } });
+        const task = createCustomPostProcessTask(
+            {
+                sourceTexture: source,
+                extraTextures: [extra],
+                extraTextureWGSL: wgsl`@group(0) @binding(2) var second:texture_2d<f32>;`,
+                fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c+textureSample(second,sourceSampler,uv);}`,
+            },
+            engine
+        );
+        const context = createFrameGraphContext(engine);
+        addTask(context.frameGraph, createClearTextureTask({ targetTexture: source }, engine));
+        addTask(context.frameGraph, createClearTextureTask({ targetTexture: extra }, engine));
+        addTask(context.frameGraph, task);
+        registerFrameGraphContext(context);
+        const previous = [source._colorView, extra._colorView];
+        setSurfaceSize(engine, 128, 64);
+        const entries = Array.from(device.createBindGroup.mock.lastCall![0].entries);
+        expect(entries[1]!.resource).toBe(source._colorView);
+        expect(entries[2]!.resource).toBe(extra._colorView);
+        expect(source._colorView).not.toBe(previous[0]);
+        expect(extra._colorView).not.toBe(previous[1]);
+        expect([task.outputTexture._width, task.outputTexture._height]).toEqual([64, 32]);
+        expect(context.frameGraph.execute()).toBe(1);
+        disposeFrameGraphContext(context);
+    });
+
+    it("keeps the optional owning scene and samples full mip chains for every input", () => {
+        const { engine, device } = mockGpu();
+        const source = createMipMappedRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 32, height: 16 } });
+        const extra = createMipMappedRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 32, height: 16 } });
+        buildRenderTarget(source, engine);
+        buildRenderTarget(extra, engine);
+        const scene = {} as SceneContext;
+        const task = createCustomPostProcessTask(
+            {
+                sourceTexture: source,
+                extraTextures: [extra],
+                extraTextureWGSL: wgsl`@group(0) @binding(2) var second:texture_2d<f32>;`,
+                fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}`,
+            },
+            engine,
+            scene
+        );
+        expect(task.scene).toBe(scene);
+        graphFor(task);
+        const entries = Array.from(device.createBindGroup.mock.lastCall![0].entries);
+        expect(entries[1]!.resource).toBe(source._colorSamplingView);
+        expect(entries[2]!.resource).toBe(extra._colorSamplingView);
+        task.dispose();
+    });
+
+    it.each([false, true])("preserves diagnostics for invalid primary sources (multisampled=%s)", (multisampled) => {
+        const { engine } = mockGpu();
+        const source = createRenderTarget({ format: "rgba8unorm", samples: multisampled ? 4 : 1, size: { width: 16, height: 16 } });
+        if (multisampled) {
+            buildRenderTarget(source, engine);
+        }
+        const task = createCustomPostProcessTask({ sourceTexture: source, fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}` }, engine);
+        expect(() => task.record()).toThrow(multisampled ? /multisampled source/ : /sourceTexture has no color texture/);
+        task.dispose();
     });
 });

@@ -20,7 +20,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/MosquitoInAmber/glTF/";
+const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroupArchives/glTF-Sample-Models/d7a3cc8e51d7c573771ae77a57f16b0662a905c6/2.0/MosquitoInAmber/glTF/";
 const MODEL_FILE = "MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
@@ -31,6 +31,7 @@ const CAM = { alpha: 1.9445, beta: 1.5454, radius: 0.1458, target: new Vector3(0
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
+    engine.displayLoadingUI = () => {};
 
     const scene = new Scene(engine);
 
@@ -73,4 +74,8 @@ const CAM = { alpha: 1.9445, beta: 1.5454, radius: 0.1458, target: new Vector3(0
     canvas.dataset.camFov = String(cam.fov);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
-})().catch(console.error);
+})().catch((error: unknown) => {
+    console.error(error);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    canvas.dataset.error = error instanceof Error ? error.message : String(error);
+});
