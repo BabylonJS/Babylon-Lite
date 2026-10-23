@@ -5,7 +5,6 @@ import {
     convertMatrix,
     convertRotation,
     convertTranslation,
-    mirrorQuat,
     multiplyQuat,
     nearlyEqual,
     needsWindingFlip,
@@ -157,22 +156,6 @@ describe("convertRotation", () => {
     it("maps the identity to the identity", () => {
         const q = convertRotation(0, 0, 0, 1);
         expect(q.map((v) => v + 0)).toEqual([0, 0, 0, 1]);
-    });
-});
-
-describe("mirrorQuat", () => {
-    it("is the linear map (x, −y, −z, w)", () => {
-        expect(mirrorQuat(1, 2, 3, 4)).toEqual([1, -2, -3, 4]);
-    });
-
-    it("equals quat(C·mat(q)·C) up to sign and is an involution", () => {
-        const random = createRandom(99);
-        for (let i = 0; i < 50; i++) {
-            const q = randomUnitQuat(random);
-            const mirrored = mirrorQuat(...q);
-            expectSameRotation(mirrored, referenceChangeOfBasis(q));
-            expect(mirrorQuat(...mirrored)).toEqual(q);
-        }
     });
 });
 
@@ -341,5 +324,12 @@ describe("canonicalizeQuat and normalizeQuat", () => {
     it("normalizeQuat turns a zero quaternion into the identity", () => {
         expect(normalizeQuat(0, 0, 0, 0)).toEqual([0, 0, 0, 1]);
         expect(normalizeQuat(0, 3, 0, 4)).toEqual([0, 0.6, 0, 0.8]);
+    });
+
+    it("normalizeQuat returns a quaternion within the tolerance of unit length verbatim", () => {
+        const near: Quat = [0, 0, 0, 1 + 5e-7];
+        expect(normalizeQuat(...near, 1e-6)).toEqual(near);
+        expect(normalizeQuat(...near)).toEqual([0, 0, 0, 1]);
+        expect(normalizeQuat(0, 0, 0, 1.01, 1e-6)).toEqual([0, 0, 0, 1]);
     });
 });

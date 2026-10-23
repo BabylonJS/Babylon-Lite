@@ -11,7 +11,7 @@ import { snapshotExtras } from "./export-context.js";
 import type { GltfMesh, GltfNode, GltfPrimitive } from "./export-gltf-types.js";
 import type { ExportedPrimitive } from "./export-geometry.js";
 import { exportPrimitive, morphTargetsFit, zeroUvAccessor } from "./export-geometry.js";
-import { convertMatrix, convertRotation, isIdentityRotation, nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
+import { convertMatrix, convertRotation, isIdentityRotation, nearlyEqual, normalizeQuat, OMIT_EPSILON } from "./export-handedness.js";
 import { exportMaterial } from "./export-materials.js";
 import { writeInstancing } from "./ext/export-ext-instancing.js";
 
@@ -346,23 +346,14 @@ function writeTrs(out: GltfNode, convert: boolean, t: Xyz, q: Xyz & { readonly w
     if (!nearlyEqual([t.x, t.y, t.z], [0, 0, 0], OMIT_EPSILON)) {
         out.translation = [convert ? -t.x : t.x, t.y, t.z];
     }
-    const r = convert ? convertRotation(q.x, q.y, q.z, q.w) : unitQuat(q.x, q.y, q.z, q.w);
+    // Pass-through keeps an already-unit rotation verbatim, so round trips stay byte-stable.
+    const r = convert ? convertRotation(q.x, q.y, q.z, q.w) : normalizeQuat(q.x, q.y, q.z, q.w, 1e-6);
     if (!isIdentityRotation(r)) {
         out.rotation = r;
     }
     if (!nearlyEqual([s.x, s.y, s.z], [1, 1, 1], OMIT_EPSILON)) {
         out.scale = [s.x, s.y, s.z];
     }
-}
-
-/** A quaternion as emitted in pass-through: verbatim when already unit length (keeps round trips
- *  byte-stable), normalized otherwise. */
-function unitQuat(x: number, y: number, z: number, w: number): [number, number, number, number] {
-    const len = Math.hypot(x, y, z, w);
-    if (!(len > 0)) {
-        return [0, 0, 0, 1];
-    }
-    return Math.abs(len - 1) <= 1e-6 ? [x, y, z, w] : [x / len, y / len, z / len, w / len];
 }
 
 /** Build (or reuse) the glTF mesh for a node's contributing Lite meshes and attach it, together

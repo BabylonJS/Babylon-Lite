@@ -18,6 +18,11 @@ return V(vec4f(p,0,1));
 return clamp(textureLoad(src,vec2i(v.p.xy),0),vec4f(0),vec4f(1));
 }`;
 
+/** Staging-buffer bytes per RGBA8 row: WebGPU requires `bytesPerRow` to be a multiple of 256. */
+function alignedRowBytes(width: number): number {
+    return Math.ceil((width * 4) / 256) * 256;
+}
+
 /** @internal Why a texture cannot be read back on this engine, or null when it can: no GPU device
  *  (null engine) or a format/usage combination neither path can copy ("engine"), not a single
  *  single-sampled 2D image ("dimension"), or a staging buffer beyond the device's `maxBufferSize`
@@ -31,7 +36,7 @@ export function textureReadIssue(ctx: ExportContext, tex: Texture2D): "engine" |
         return "dimension";
     }
     const maxBufferSize = ctx.engine._device.limits?.maxBufferSize;
-    if (maxBufferSize !== undefined && Math.ceil((gpu.width * 4) / 256) * 256 * gpu.height > maxBufferSize) {
+    if (maxBufferSize !== undefined && alignedRowBytes(gpu.width) * gpu.height > maxBufferSize) {
         return "size";
     }
     return readbackPath(gpu) === null ? "engine" : null;
@@ -75,35 +80,27 @@ function isFloatSampleable(format: GPUTextureFormat): boolean {
     return !(format.startsWith("depth") || format.startsWith("stencil") || format.endsWith("sint") || format.endsWith("uint"));
 }
 
-/** @internal Return the cached pixel promise for a texture, submitting its readback on first use.
- *  Must only be called for textures that passed {@link checkTextureReadable}. The GPU copy is
- *  encoded and submitted synchronously, so the pixels are those of the call's capture step. */
-export function requestPixels(ctx: ExportContext, tex: Texture2D): Promise<PixelData | null> {
+/** @internal Submit a texture's readback unless one is already in flight; the promise lands in
+ *  `ctx.pixelCache`. Must only be called for textures that passed {@link checkTextureReadable}. The
+ *  GPU copy is encoded and submitted synchronously, so the pixels are those of the call's capture step. */
+export function requestPixels(ctx: ExportContext, tex: Texture2D): void {
     const gpu = tex.texture;
-    let pending = ctx.pixelCache.get(gpu);
-    if (!pending) {
-        const errorSlot = ctx.readbackErrors.length;
-        ctx.readbackErrors.push(undefined);
-        let submitted: Promise<PixelData>;
+    if (!ctx.pixelCache.has(gpu)) {
+        let pending: Promise<PixelData>;
         try {
-            submitted = submitReadback(ctx, gpu);
+            pending = submitReadback(ctx, gpu);
         } catch (error) {
-            submitted = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+            pending = Promise.reject(error instanceof Error ? error : new Error(String(error)));
         }
-        pending = submitted.catch((error: unknown) => {
-            ctx.readbackErrors[errorSlot] = error ?? new Error("Texture readback failed");
-            return null;
-        });
         ctx.pixelCache.set(gpu, pending);
     }
-    return pending;
 }
 
 function submitReadback(ctx: ExportContext, gpu: GPUTexture): Promise<PixelData> {
     const device = ctx.engine._device;
     const width = gpu.width;
     const height = gpu.height;
-    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    const bytesPerRow = alignedRowBytes(width);
     const direct = readbackPath(gpu) === "direct";
     let target: GPUTexture | null = null;
     let staging: GPUBuffer | null = null;
@@ -198,11 +195,11 @@ function encodeBlit(ctx: ExportContext, encoder: GPUCommandEncoder, src: GPUText
 }
 
 /** @internal Apply a slot's row, channel and color conversions to read-back pixels, then return the
- *  index of a glTF image holding exactly those bytes: an existing one with equal content, or a new
- *  `{ mimeType: "image/png" }` image named after `slot`. Its bytes are encoded by {@link encodeImages}. */
-export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: SlotMapping, slot: string): number {
+ *  index of a glTF image holding exactly those bytes: an existing one with equal size and content, or
+ *  a new `{ mimeType: "image/png" }` image named `name`. Its bytes are encoded by {@link encodeImages}. */
+export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: SlotMapping, name: string): number {
     const bytes = applyChannelOps(pixels, mapping);
-    const key = `${pixels.width}x${pixels.height}:${mapping.rowOrder}:${mapping.invert ?? ""}:${mapping.colorDecode ?? ""}:${fnv1a32(bytes)}`;
+    const key = `${pixels.width}x${pixels.height}:${fnv1a32(bytes)}`;
     const candidates = ctx.imageIndex.get(key);
     if (candidates) {
         for (const index of candidates) {
@@ -211,7 +208,7 @@ export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: Slot
             }
         }
     }
-    const index = ctx.doc.images.push({ name: slot, mimeType: "image/png" }) - 1;
+    const index = ctx.doc.images.push({ name, mimeType: "image/png" }) - 1;
     ctx.imagePixels[index] = { width: pixels.width, height: pixels.height, rgba: bytes };
     if (candidates) {
         candidates.push(index);
@@ -245,7 +242,7 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
         const toSrgb = new Uint8Array(256);
         for (let value = 0; value < toSrgb.length; value++) {
             const normalized = value / 255;
-            toSrgb[value] = linearToSrgbByte(mapping.colorDecode === "gamma" ? Math.pow(normalized, 2.2) : normalized);
+            toSrgb[value] = linearToSrgbByte(mapping.colorDecode === "gamma" ? gammaToLinear(normalized) : normalized);
         }
         for (let i = 0; i < out.length; i += 4) {
             for (let c = 0; c < 3; c++) {
@@ -254,6 +251,11 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
         }
     }
     return out;
+}
+
+/** @internal `c^2.2`: the Babylon.js default gamma-to-linear decode (`_gammaAlbedo` texels, Standard colors). */
+export function gammaToLinear(c: number): number {
+    return Math.pow(c, 2.2);
 }
 
 /** @internal FNV-1a 32-bit hash. */

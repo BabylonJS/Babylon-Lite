@@ -55,15 +55,13 @@ export interface SlotMapping {
     readonly colorDecode?: "linear" | "gamma";
 }
 
-/** @internal A texture slot recorded during capture. Resolution writes `owner[key]`, or leaves it
- *  unset when the texture's pixels are unreadable. */
+/** @internal A texture slot recorded during capture. Resolution writes `owner[key]` unless fold
+ *  resolution cancelled the slot. */
 export interface PendingSlot {
     /** The JSON object that receives the textureInfo: a material, `pbrMetallicRoughness`, or an extension object. */
     readonly owner: GltfJsonObject;
-    /** Member name in `owner`, e.g. "baseColorTexture". */
+    /** Member name in `owner`, e.g. "baseColorTexture"; also the `name` of an image the slot creates. */
     readonly key: string;
-    /** glTF slot string used as the image `name`, e.g. "baseColorTexture" or "clearcoatTexture". */
-    readonly slot: string;
     /** The texture's GPU texture, captured synchronously (the wrapper may change after capture). */
     readonly gpu: GPUTexture;
     readonly mapping: SlotMapping;
@@ -109,15 +107,12 @@ export interface ExportContext {
     /** Source material (after `getMaterialSource`) → glTF material index, per mesh UV state. */
     readonly materialIndex: Map<Material, Map<UvState, number>>;
     /** GPUTexture → its mip-0 pixels in storage row order, read back once per call. Submitted
-     *  during capture; resolves to null when the texture is unreadable. Never rejects: GPU
-     *  failures are recorded in {@link ExportContext.readbackErrors}. */
-    readonly pixelCache: Map<GPUTexture, Promise<PixelData | null>>;
-    /** GPU readback failures, in submission order. */
-    readonly readbackErrors: unknown[];
+     *  during capture; rejects when the GPU readback fails. */
+    readonly pixelCache: Map<GPUTexture, Promise<PixelData>>;
     /** Decode-blit resources, created on the first blit of the call. */
     blit?: BlitResources;
     /** GPUTexture → its settled pixels; filled by the settle step, read by resolution. */
-    readonly resolvedPixels: Map<GPUTexture, PixelData | null>;
+    readonly resolvedPixels: Map<GPUTexture, PixelData>;
     /** Texture slots recorded during capture, resolved after readbacks settle. */
     readonly slots: PendingSlot[];
     /** 1×1 factor folds recorded during capture, resolved before the slots. */
@@ -125,12 +120,10 @@ export interface ExportContext {
     /** Callbacks that need resolved factors or slots (unlit, spec-gloss); run in registration order
      *  after folds and slots resolve. */
     readonly afterResolve: (() => void)[];
-    /** Content key (size, row order, channel ops, FNV-1a of the bytes) → glTF image indices with that key. */
+    /** Content key (size and FNV-1a of the emitted bytes) → glTF image indices with that key. */
     readonly imageIndex: Map<string, number[]>;
     /** glTF image index → its emitted RGBA bytes, kept until encoding. */
     readonly imagePixels: PixelData[];
-    /** glTF image index → glTF texture index (one texture per image; samplers are out of scope). */
-    readonly textureIndex: Map<number, number>;
     /** Typed-array identity → (conversion variant → accessor index). */
     readonly accessorIndex: Map<ArrayBufferView, Map<string, number>>;
     /** Primitive-list signature → glTF mesh index. */
@@ -154,17 +147,12 @@ export interface BlitResources {
     readonly pipelines: Map<GPUTextureFormat, GPURenderPipeline>;
 }
 
-/** @internal One glTF material extension writer. Writers form a static ordered array in
- *  `export-materials.ts`. */
-export interface MaterialExtensionWriter {
-    /** glTF extension name, e.g. "KHR_materials_clearcoat". */
-    readonly name: string;
-    /** Runs during capture (synchronous). When the material carries this extension's state, the
-     *  writer attaches its payload with {@link attachExtension} (which records the name in
-     *  `ctx.extensionsUsed`) and captures any texture slots through `captureTextureSlot`. Values
-     *  that depend on resolved factors are written from a `ctx.afterResolve` callback. */
-    write(ctx: ExportContext, material: PbrMaterialProps, out: GltfMaterial, uvState: UvState): void;
-}
+/** @internal One glTF material extension writer; writers form a static ordered array in
+ *  `export-materials.ts`. Runs during capture (synchronous). When the material carries the writer's
+ *  extension state, the writer attaches its payload with {@link attachExtension} (which records the
+ *  name in `ctx.extensionsUsed`) and captures any texture slots through `capturePbrSlot`. Values
+ *  that depend on resolved factors are written from a `ctx.afterResolve` callback. */
+export type MaterialExtensionWriter = (ctx: ExportContext, material: PbrMaterialProps, out: GltfMaterial, uvState: UvState) => void;
 
 /** @internal Create the per-call context. */
 export function createExportContext(engine: EngineContext, generator: string): ExportContext {
@@ -188,14 +176,12 @@ export function createExportContext(engine: EngineContext, generator: string): E
         nodeConvert: new Map(),
         materialIndex: new Map(),
         pixelCache: new Map(),
-        readbackErrors: [],
         resolvedPixels: new Map(),
         slots: [],
         folds: [],
         afterResolve: [],
         imageIndex: new Map(),
         imagePixels: [],
-        textureIndex: new Map(),
         accessorIndex: new Map(),
         meshIndex: new Map(),
         materialsUsingUv0: new Set(),

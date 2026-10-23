@@ -33,7 +33,7 @@ The module handles four concerns:
 
 ### Scope
 
-The module is a leaf. It reads existing scene, engine and loader state, and changes no code outside `packages/babylon-lite/src/export-gltf/` except the one root re-export of `exportSceneAsGlb` in `index.ts`. Capabilities that would need a change anywhere else are **out of scope** and listed below, with what the exporter does instead. The design decisions behind them are deferred. The module's own tests, lab page and documentation are part of the module and do not count as outside changes.
+The module is a leaf. It reads existing scene, engine and loader state, and changes no code outside `packages/babylon-lite/src/export-gltf/` except the one root re-export of `exportSceneAsGlb` in `index.ts` and a type-only `/** @internal */ _flatNormal` declaration on `Mesh` (`mesh/mesh.ts`), which documents a field the glTF loader already writes. Capabilities that would need a change anywhere else are **out of scope** and listed below, with what the exporter does instead. The design decisions behind them are deferred. The module's own tests, lab page and documentation are part of the module and do not count as outside changes.
 
 **Out of scope: needs a change outside `export-gltf/`**
 
@@ -150,14 +150,12 @@ export interface SlotMapping {
     readonly colorDecode?: "linear" | "gamma";
 }
 
-/** A texture slot recorded during capture. Resolution writes `owner[key]`, or leaves it unset when the pixels are unreadable. */
+/** A texture slot recorded during capture. Resolution writes `owner[key]` unless fold resolution cancelled the slot. */
 export interface PendingSlot {
     /** The JSON object that receives the textureInfo: a material, `pbrMetallicRoughness`, or an extension object. */
     readonly owner: GltfJsonObject;
-    /** Member name in `owner`, e.g. "baseColorTexture". */
+    /** Member name in `owner`, e.g. "baseColorTexture"; also the `name` of an image the slot creates. */
     readonly key: string;
-    /** glTF slot string used as the image `name`, e.g. "baseColorTexture" or "clearcoatTexture". */
-    readonly slot: string;
     /** The GPU texture, captured synchronously (the wrapper may change after capture). */
     readonly gpu: GPUTexture;
     readonly mapping: SlotMapping;
@@ -205,23 +203,19 @@ export interface ExportContext {
     readonly nodeConvert: Map<object, boolean>;
     /** Source material (after getMaterialSource) → glTF material index, per mesh UV state. */
     readonly materialIndex: Map<Material, Map<UvState, number>>;
-    /** GPUTexture → mip-0 pixels, read back once per call. Never rejects; resolves to null when unreadable. */
-    readonly pixelCache: Map<GPUTexture, Promise<PixelData | null>>;
-    /** GPU readback failures, in submission order. */
-    readonly readbackErrors: unknown[];
+    /** GPUTexture → mip-0 pixels, read back once per call. Rejects when the GPU readback fails. */
+    readonly pixelCache: Map<GPUTexture, Promise<PixelData>>;
     blit?: BlitResources;
     /** GPUTexture → settled pixels; filled by the settle step, read by resolution. */
-    readonly resolvedPixels: Map<GPUTexture, PixelData | null>;
+    readonly resolvedPixels: Map<GPUTexture, PixelData>;
     readonly slots: PendingSlot[];
     readonly folds: PendingFold[];
     /** Callbacks that need resolved factors or slots (unlit, spec-gloss); run in registration order. */
     readonly afterResolve: (() => void)[];
-    /** Content key (size, row order, channel ops, FNV-1a of the bytes) → glTF image indices with that key. */
+    /** Content key (size and FNV-1a of the emitted bytes) → glTF image indices with that key. */
     readonly imageIndex: Map<string, number[]>;
     /** glTF image index → its emitted RGBA bytes, kept until encoding. */
     readonly imagePixels: PixelData[];
-    /** glTF image index → glTF texture index (one texture per image; samplers are out of scope). */
-    readonly textureIndex: Map<number, number>;
     /** Typed-array identity → (conversion variant → accessor index). */
     readonly accessorIndex: Map<ArrayBufferView, Map<string, number>>;
     /** Primitive-list signature → glTF mesh index. */
@@ -236,15 +230,11 @@ export interface ExportContext {
     warn(message: string): void;
 }
 
-/** One glTF material extension writer. Writers form a static ordered array in export-materials.ts. */
-export interface MaterialExtensionWriter {
-    /** glTF extension name, e.g. "KHR_materials_clearcoat". */
-    readonly name: string;
-    /** Runs during capture (synchronous). When the material carries this extension's state, attaches
-     *  its payload with `attachExtension` and captures texture slots through `captureTextureSlot`.
-     *  Values that depend on resolved factors are written from a `ctx.afterResolve` callback. */
-    write(ctx: ExportContext, material: PbrMaterialProps, out: GltfMaterial, uvState: UvState): void;
-}
+/** One glTF material extension writer. Writers form a static ordered array in export-materials.ts.
+ *  Runs during capture (synchronous). When the material carries the writer's extension state, the
+ *  writer attaches its payload with `attachExtension` and captures any texture slots through
+ *  `capturePbrSlot`. Values that depend on resolved factors are written from a `ctx.afterResolve` callback. */
+export type MaterialExtensionWriter = (ctx: ExportContext, material: PbrMaterialProps, out: GltfMaterial, uvState: UvState) => void;
 
 // Shared helpers (export-context.ts)
 
@@ -267,11 +257,9 @@ export function cachedAccessor(ctx: ExportContext, source: ArrayBufferView, vari
 /** One accessor request. */
 export interface AccessorDesc {
     readonly bufferView: number;
-    readonly byteOffset?: number;
     readonly componentType: GltfComponentType; // 5121 | 5123 | 5125 | 5126
     readonly count: number;
     readonly type: GltfAccessorType; // "SCALAR" | "VEC2" | "VEC3" | "VEC4" | "MAT4"
-    readonly normalized?: boolean;
     readonly min?: number[];
     readonly max?: number[];
 }
@@ -283,8 +271,8 @@ export interface BufferBuilder {
     /** The glTF `accessors` array. */
     readonly accessors: GltfAccessor[];
     /** Snapshot `bytes` into a new bufferView and return its index. The bytes are copied on the call.
-     *  The same view object with the same stride and target returns the existing index. */
-    addBufferView(bytes: ArrayBufferView, byteStride?: number, target?: GltfBufferViewTarget): number;
+     *  The same view object with the same target returns the existing index. */
+    addBufferView(bytes: ArrayBufferView, target?: GltfBufferViewTarget): number;
     /** Record an accessor and return its index. */
     addAccessor(desc: AccessorDesc): number;
     /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added). */
@@ -314,7 +302,7 @@ The loader types the glTF JSON as `any`, so it has no schema typings to import. 
 - **Omit defaults.** Values equal to their glTF defaults are omitted (see the consolidated table). Materials, textures, images and cameras are emitted only when referenced.
 - **Warn and continue.** Content outside the exportable set logs a `console.warn` and degrades to a defined fallback. Every message starts with `[babylon-lite] glTF export: ` and logs once per call. The only thrown error is a GPU readback failure (see Warnings & Errors).
 - **Deterministic.** The same scene exports to a byte-identical GLB: stable traversal order, insertion-ordered maps, a fixed writer order, fixed JSON member order, and no time- or randomness-dependent output.
-- **Leaf module.** Nothing outside `export-gltf/` changes except the root re-export (see Scope).
+- **Leaf module.** Nothing outside `export-gltf/` changes except the root re-export and one type-only `Mesh` field declaration (see Scope).
 - **Two tolerances.** `export-handedness.ts` holds both. They are not interchangeable.
     - **Omission tolerance**, `OMIT_EPSILON = 1e-9`. It absorbs float noise when deciding whether a value equals its glTF default: node TRS and `matrix`, light and camera node transforms, base color and emissive values, and the identity tests behind light collapse and mesh folding. Small but real values (sub-millimetre offsets, tiny rotations) are therefore never dropped.
     - **Detection tolerance**, `EXPORT_EPSILON = 0.001`, written `≈` in this document. It is used only by shape-recognition heuristics: the loader root `(−1,1,1)`, the camera fixup shape and its pristine check, whether a matrix is TRS-decomposable, whether a thin-instance attribute deviates from identity, and orthographic off-center bounds.
@@ -380,14 +368,14 @@ export-gltf/
   ext/export-ext-spec-gloss.ts            KHR_materials_pbrSpecularGlossiness
 ```
 
-The 13 material writers are assembled into `const MATERIAL_EXTENSION_WRITERS: readonly MaterialExtensionWriter[]` in `export-materials.ts`, in this order: unlit → emissive-strength → clearcoat → sheen → iridescence → anisotropy → ior → specular → transmission → volume → dispersion → diffuse-transmission → spec-gloss. Each file exports one writer object (`unlitWriter`, `clearcoatWriter`, …). The order is part of the output contract: it fixes the `extensionsUsed` ordering and the order of `afterResolve` callbacks.
+The 13 material writers are assembled into `const MATERIAL_EXTENSION_WRITERS: readonly MaterialExtensionWriter[]` in `export-materials.ts`, in this order: unlit → emissive-strength → clearcoat → sheen → iridescence → anisotropy → ior → specular → transmission → volume → dispersion → diffuse-transmission → spec-gloss. Each file exports one writer function (`unlitWriter`, `clearcoatWriter`, …). The order is part of the output contract: it fixes the member order of each material's `extensions` object and the order of `afterResolve` callbacks.
 
 Internal imports are static. The tree-shaking boundary is the feature itself: scenes without the exporter import carry none of its bytes.
 
 ### `BufferBuilder` — `export-buffers.ts`
 
-- `addBufferView(bytes, byteStride?, target?)` copies the bytes at the call, so later writes to the source never reach the output, and records a bufferView with a deferred `byteOffset`. It returns the bufferView index. The same view object with the same stride and target returns the same index.
-- `addAccessor(desc)` records an accessor that references a bufferView index, with `componentType`, `count`, `type`, and optional `byteOffset` (written only when non-zero), `normalized` (written only when true), `min` and `max`.
+- `addBufferView(bytes, target?)` copies the bytes at the call, so later writes to the source never reach the output, and records a bufferView with a deferred `byteOffset`. It returns the bufferView index. The same view object with the same target returns the same index.
+- `addAccessor(desc)` records an accessor that references a bufferView index, with `componentType`, `count`, `type`, and optional `min` and `max`.
 - `finalize()` orders bufferViews by descending alignment need (`byteLength % 4 === 0` → 4, `% 2 === 0` → 2, else 1; this is the Babylon.js packing rule). The sort is stable. It concatenates the views in that order with no padding, assigns offsets (`byteOffset` is omitted on the view placed at offset 0), and returns the BIN payload. The sort alone satisfies glTF's alignment rules: every view whose length is a multiple of 4 starts at a 4-aligned offset, and every view whose length is a multiple of 2 at a 2-aligned one. Every emitted vertex attribute, matrix and float array has a length that is a multiple of 4, as glTF's 4-byte vertex-attribute rule requires. All data targets `buffers[0]`. This matches Babylon.js.
 
 `min`/`max` come from `computeMinMax`, per component, over the emitted (converted) data, for every `POSITION` attribute accessor, every morph-target `POSITION` accessor, and every animation input accessor. These are the places where the glTF specification requires them. Zero elements give zero bounds.
@@ -460,7 +448,7 @@ Let `C = diag(−1, 1, 1, 1)`, so `C⁻¹ = C`.
 
 **Vertex data (converting passes).** On copied arrays, negate component 0 of every `POSITION`, `NORMAL` and `TANGENT` element, and of every morph position and normal delta. Renormalize `NORMAL` and `TANGENT` xyz; zero-length vectors are left as they are. **Negate tangent `w`:** a mirror reverses the bitangent's handedness, since `cross(C·n, C·t) = −C·cross(n, t)`. Babylon.js keeps `w` (see the Equivalence Map). Morph normal deltas are only mirrored, not renormalized. UVs and colors are untouched.
 
-**Vertex data (pass-through).** Attribute arrays are emitted as the source array itself, with one repair. When every `NORMAL` and `TANGENT` xyz is unit length within 0.0005 (glTF-Validator's `ACCESSOR_VECTOR3_NON_UNIT` tolerance), the source bytes export verbatim, which keeps round trips byte-stable. Otherwise the array is copied and each non-zero vector whose length is outside that tolerance is renormalized; zero vectors and tangent `w` are left alone. Loaded assets do contain such normals (LittlestTokyo). Positions, UVs, colors and morph deltas are always verbatim.
+**Vertex data (pass-through).** Attribute arrays are emitted as the source array itself, with one repair. When every `NORMAL` and `TANGENT` xyz is unit length within 0.0005, the source bytes export verbatim, which keeps round trips byte-stable. Otherwise the array is copied and each non-zero vector whose length is outside that tolerance is renormalized; zero vectors and tangent `w` are left alone. Loaded assets do contain such normals (LittlestTokyo). Positions, UVs, colors and morph deltas are always verbatim.
 
 **Translation.** `(x, y, z) → (−x, y, z)`.
 
@@ -610,7 +598,7 @@ The exporter resolves `getMaterialSource(material)` first: a `MaterialView` only
 
 A mesh without a material also exports without `primitive.material`, silently. Every emitted material carries `name` and, last, `extras` when present. `pbrMetallicRoughness` is created first, so slot and factor members appear in capture order (see Determinism); a `pbrMetallicRoughness` that ends up with no members is removed after resolution. The writer sweep runs the fixed `MATERIAL_EXTENSION_WRITERS` order for PBR materials; each writer attaches its own extension, which records the name in `extensionsUsed`. Standard materials have no writer sweep.
 
-`export-material-slots.ts` holds the helpers every material path shares: `capturePbrSlot(ctx, material, uvState, owner, req)` (one PBR slot: UV selection, mesh UV state, transform gate, then `captureTextureSlot`; `req` is a `PbrSlotRequest` `{ key, slot? (image name, defaults to key), texture, transform: boolean (the slot's gate), uv1?: boolean, extra? }`), `pbrCoreSlot` (a core-slot request from its `_uv2Mask` bit), `pbrUv1TexCoord`, `warnLostUv1`, `textureTransformOf`, `hasTx`, `isOneByOne`, `materialLabel`, `setUnlessDefault` / `setVecUnlessDefault` (exact-equality omission), and the `_uv2Mask` bit constants `UV2_BASE_COLOR` (1), `UV2_ORM` (2), `UV2_NORMAL` (4), `UV2_EMISSIVE` (8), `UV2_SPEC_GLOSS` (16) and `UV2_OCCLUSION` (32).
+`export-material-slots.ts` holds the helpers every material path shares: `capturePbrSlot(ctx, material, uvState, owner, req)` (one PBR slot: UV selection, mesh UV state, transform gate, then `captureTextureSlot`; returns the `PendingSlot`, or null when nothing was captured; `req` is a `PbrSlotRequest` `{ key (also the image name), texture, transform: boolean (the slot's gate), uv1?: boolean, extra?, colorDecode? }`), `pbrCoreSlot` (a core-slot request from its `_uv2Mask` bit), `samplesUv1` (whether a texture wrapper selects the second UV set, via `getTextureCoordinateIndex`), `pbrUv1TexCoord`, `warnLostUv1`, `textureTransformOf`, `hasTx`, `isOneByOne`, `materialLabel`, `setUnlessDefault` / `setVecUnlessDefault` (exact-equality omission), and the `_uv2Mask` bit constants `UV2_BASE_COLOR` (1), `UV2_ORM` (2), `UV2_NORMAL` (4), `UV2_EMISSIVE` (8), `UV2_SPEC_GLOSS` (16) and `UV2_OCCLUSION` (32).
 
 #### UV states
 
@@ -812,7 +800,6 @@ function captureTextureSlot(
     ctx: ExportContext,
     owner: GltfJsonObject,
     key: string,
-    slot: string,
     tex: Texture2D,
     mapping: SlotMapping,
     materialName: string,
@@ -825,9 +812,9 @@ function resolveTextureSlots(ctx: ExportContext): void;
 
 The material modules call `captureTextureSlot` for every slot, with the `SlotMapping` that PBR slot mapping or Standard UV mapping produces. Capture checks that the texture can be read back (see Images) and, when it can, submits the readback and sets `owner[key] = undefined` so the member's JSON position follows capture order; an unresolved slot stays `undefined`, which `JSON.stringify` omits. Resolution, per pending slot in capture order:
 
-- **Skip** a slot that fold resolution cancelled, or whose pixels are null.
+- **Skip** a slot that fold resolution cancelled.
 - **Image.** The slot takes its texture's `PixelData`, applies `mapping.rowOrder` and `mapping.invert`, and inserts or reuses an image by content (see Images).
-- **Texture.** One glTF texture per image (`textureIndex`), with no `sampler` (see Samplers).
+- **Texture.** One glTF texture per image, at the image's own index, with no `sampler` (see Samplers).
 - **TextureInfo.** `owner[key]` is set to `{ index, texCoord?, ...extra, extensions? }`. It carries `texCoord` when it is 1, and `KHR_texture_transform` built from `mapping.transform`. Two slots that reference one image with different transforms emit two textureInfos over one texture.
 
 #### `ext/export-ext-texture-transform.ts` — KHR_texture_transform
@@ -862,7 +849,7 @@ Original encoded bytes are never re-embedded: the loader keeps none (see Scope).
 
 #### Readback
 
-The exporter submits readbacks during capture, one per distinct `GPUTexture`, at the first slot or fold that needs one, and stores the promise in `pixelCache`. The promise never rejects: a failure is recorded in `readbackErrors` (at the readback's submission position) and the promise resolves to null, so a failure never surfaces as an unhandled rejection. The settle step reports it (State Machine). The procedure produces pixels in storage row order:
+The exporter submits readbacks during capture, one per distinct `GPUTexture`, at the first slot or fold that needs one, and stores the promise in `pixelCache`. The promise rejects when the readback fails; the settle step attaches handlers to every promise before awaiting, so a failure never surfaces as an unhandled rejection, and reports the first failure in submission order (State Machine). The procedure produces pixels in storage row order:
 
 1. **Preconditions.** `textureReadIssue(ctx, tex)` returns the reason a texture cannot be read, or null. Slots whose texture cannot be read are omitted, each with its own warning:
     - `"engine"`: no `engine._device` (null engine), no GPU texture, or neither readback path below applies. Warning: `Texture pixels for material "<name>" are not readable on this engine; exporting the material without that texture.`
@@ -870,7 +857,7 @@ The exporter submits readbacks during capture, one per distinct `GPUTexture`, at
     - `"size"`: the padded staging buffer (`align(width × 4, 256) × height`) exceeds `device.limits.maxBufferSize` (when the device reports one). Warning: `Texture for material "<name>" is too large to read back on this device; exporting the material without that texture.`
 2. **Direct copy.** If the format is `rgba8unorm`, `rgba8unorm-srgb`, `bgra8unorm` or `bgra8unorm-srgb` and `usage` includes `COPY_SRC`, copy mip 0 directly. glTF-loader raster images qualify: they are uploaded with `COPY_SRC`, unflipped, with `premultipliedAlpha: false` and `colorSpaceConversion: "none"`.
 3. **Decode blit.** Otherwise, if `usage` includes `TEXTURE_BINDING` and the format is float-sampleable (not `depth*`, `stencil*`, `*sint` or `*uint`), blit mip 0 into a transient RGBA8 target of the same size (see Pipeline Configuration and Shader Logic), then copy the target. This covers textures created without `COPY_SRC`, and float and block-compressed formats. Textures without `COPY_SRC` include `loadTexture2D`, solid textures, and KTX2 (also when it comes from glTF `KHR_texture_basisu`). A format that fits neither path is `"engine"`.
-4. **Copy and map.** `copyTextureToBuffer` into a `MAP_READ | COPY_DST` staging buffer with `bytesPerRow = align(width × 4, 256)`, submit, then `mapAsync(0x0001)`. The map mode is the literal `GPUMapMode.READ`, so the module never dereferences the WebGPU global namespace. A failure while encoding or submitting destroys the staging buffer and target created so far and is recorded as a readback error like an asynchronous one.
+4. **Copy and map.** `copyTextureToBuffer` into a `MAP_READ | COPY_DST` staging buffer with `bytesPerRow = align(width × 4, 256)`, submit, then `mapAsync(0x0001)`. The map mode is the literal `GPUMapMode.READ`, so the module never dereferences the WebGPU global namespace. A failure while encoding or submitting destroys the staging buffer and target created so far and is stored as a rejected promise, like an asynchronous one.
 5. **Repack and release.** Repack rows tight into an RGBA8 `PixelData`. For a direct copy of a `bgra8*` source, swap B and R; the decode blit already writes RGBA. The staging buffer and any transient target are destroyed in a `finally`.
 
 **Row order and channel ops.** Each slot asks for `"storage"` or `"reversed"` rows (`SlotMapping.rowOrder`). In `"reversed"` order, row `r` of the image is storage row `height − 1 − r`. `invert` then applies `v → 255 − v` to the named channels. With the slot's texCoord and transform, this reproduces what Lite samples:
@@ -883,7 +870,7 @@ The exporter submits readbacks during capture, one per distinct `GPUTexture`, at
 
 **Color encoding.** PBR color slots backed by linear-format textures convert RGB to glTF's sRGB image representation with `linearToSrgbByte`. A 256-entry lookup table per converted image bounds transfer-curve evaluation independently of image size. Base color and spec-gloss diffuse first apply `pow(rgb, 2.2)` when `_gammaAlbedo` is set. Emissive, spec-gloss specular RGB and diffuse-transmission color use their sampled linear RGB directly. Sheen color applies the gamma power only when `albedoScaling` is disabled. Alpha and data slots are unchanged. Textures already stored in an sRGB format retain their bytes. The reflectance writer retains the loader's existing gamma-byte convention; see Open conformance notes.
 
-**Content dedup.** Readback images dedupe by content in their emitted form. The key includes dimensions, row order, channel inversion, color conversion and FNV-1a of the emitted bytes. On a key match the bytes are compared, and a mismatch takes a fresh image. A new image keeps its emitted RGBA bytes (`ctx.imagePixels`) until encoding. Separate sources with identical emitted bytes and operations share one image.
+**Content dedup.** Readback images dedupe by content in their emitted form. The key is the dimensions and FNV-1a of the emitted bytes, which already carry the row order, channel inversion and color conversion. On a key match the bytes are compared, and a mismatch takes a fresh image. A new image keeps its emitted RGBA bytes (`ctx.imagePixels`) until encoding. Slots with identical emitted bytes share one image, even across sources or operations.
 
 **HDR clamp.** Float sources (`rgba16float`, `rgba32float`, any format ending in `float`) are clamped to [0, 1] by the blit, with `Texture for material "<name>" has a floating-point format; exporting it clamped to 8 bits.` The warning comes from the slot check, not from folds.
 
@@ -1050,7 +1037,7 @@ The JSON is compact (`JSON.stringify`) and encoded with `TextEncoder`. The BIN c
 - **Array order:** first-emission order for every top-level array. Image and texture indices are assigned during resolution in capture order, never by GPU completion order. bufferView byte order follows the stable alignment sort.
 - **Extensions:** `extensionsUsed` uses insertion order, which is capture order: `EXT_mesh_gpu_instancing` and the material extensions as the node sweep meets them (material extensions in the fixed writer order), then `KHR_lights_punctual`, then `KHR_texture_transform` at resolution. `extensionsRequired` is never written.
 - **Accessor and bufferView order:** per primitive, `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_0`, `TEXCOORD_1`, `COLOR_0`, then indices, then per morph target `POSITION` then `NORMAL`; a synthesized zero `TEXCOORD_0` is created after the material, so it comes last in `attributes`. Instance attributes follow their mesh, camera and light data have no accessors, animation accessors follow the node sweep, and PNG bufferViews are appended last, in image-index order. The stable alignment sort then fixes byte offsets.
-- **Member order:** primitive `attributes`, `indices`, `mode`, `targets`, `material`; accessor `bufferView`, `componentType`, `count`, `type`, `byteOffset`, `normalized`, `max`, `min`; bufferView `buffer`, `byteLength`, `byteStride`, `target`, `byteOffset`; image `name`, `mimeType`, `bufferView`; camera `type`, `name`, then the projection object.
+- **Member order:** primitive `attributes`, `indices`, `mode`, `targets`, `material`; accessor `bufferView`, `componentType`, `count`, `type`, `max`, `min`; bufferView `buffer`, `byteLength`, `target`, `byteOffset`; image `name`, `mimeType`, `bufferView`; camera `type`, `name`, then the projection object.
 - **JSON member order:** top-level members serialize in the fixed order `asset`, `extensionsUsed`, `extensionsRequired`, `extensions`, `scene`, `scenes`, `nodes`, `meshes`, `materials`, `textures`, `images`, `cameras`, `animations`, `accessors`, `bufferViews`, `buffers`. Nested objects insert members in a fixed order at each construction site: node members as listed under Nodes, and texture slots, factor folds and `pbrMetallicRoughness` reserve their key at capture, so their position follows capture order whatever the readback completion order.
 - **No volatile data:** there are no timestamps or random identifiers. Byte identity is guaranteed within one runtime only. PNG IDAT bytes come from the runtime's `CompressionStream`, and browsers may decode the same JPEG or WebP source to slightly different pixels before readback. Across browser engines, readback image bytes can therefore differ, and with them the bufferView offsets and lengths in the JSON.
 
@@ -1084,7 +1071,7 @@ The JSON is compact (`JSON.stringify`) and encoded with `TextEncoder`. The BIN c
 
 ### Warnings & errors (consolidated)
 
-**Thrown** (promise rejection): a GPU readback failure only. A failure is a rejected `mapAsync` (for example on device loss), or a synchronous failure while encoding or submitting the copy (a throwing `createBuffer`, `createTexture` or `submit`). Each readback destroys its own transient GPU objects on both paths. The failures are recorded in submission order, and the call rejects with the first one after every readback has settled. A non-`Error` value from `mapAsync` is thrown as it is, and a rejection with no reason (`undefined` or `null`) becomes `Error("Texture readback failed")`; a non-`Error` thrown synchronously while encoding or submitting is wrapped as `new Error(String(value))`.
+**Thrown** (promise rejection): a GPU readback failure only. A failure is a rejected `mapAsync` (for example on device loss), or a synchronous failure while encoding or submitting the copy (a throwing `createBuffer`, `createTexture` or `submit`). Each readback destroys its own transient GPU objects on both paths. After every readback has settled, the call rejects with the first failure in submission order. A non-`Error` value from `mapAsync` is thrown as it is, and a rejection with no reason (`undefined` or `null`) becomes `Error("Texture readback failed")`; a non-`Error` thrown synchronously while encoding or submitting is wrapped as `new Error(String(value))`.
 
 Everything else degrades. **Warn and continue**, with every message the exporter can log (each is prefixed `[babylon-lite] glTF export: ` and logs once per distinct text per call):
 
@@ -1184,7 +1171,7 @@ return clamp(textureLoad(src,vec2i(v.p.xy),0),vec4f(0),vec4f(1));
     3. `collectRoots`: collect and partition roots, recording extra children for parent-only links and the first stripped root's extras. Snapshot those extras into `asset.extras`.
     4. `exportNodeTrees`: `export-nodes.ts` recurses depth-first per root. Nodes emit meshes (`export-geometry.ts`; geometry is copied into the BufferBuilder as it is emitted), and meshes emit materials (`export-materials.ts`). Materials write every non-texture member and call `captureTextureSlot` for each slot and record each fold. That records the pending slot and submits its readback, so the GPU copy is queued in this synchronous step too.
     5. `exportCamera`, `exportLights` and `exportAnimations`, in that order.
-2. **Settle.** `await Promise.all` over every `pixelCache` promise (they never reject) and store each result in `resolvedPixels`. If any readback error was recorded, throw the first one in submission order. Each readback has already destroyed its own transient GPU objects.
+2. **Settle.** `await Promise.allSettled` over every `pixelCache` promise, in submission order. Throw the first rejection; otherwise store each result in `resolvedPixels`. Each readback has already destroyed its own transient GPU objects.
 3. **Resolve** (synchronous), in this order: `resolveFolds` (write the factor values, applying the omission rules, and cancel fallback slots of folded ORMs); `resolveTextureSlots` (write every textureInfo, or leave the slot unset when its pixels are null); the `afterResolve` callbacks in registration order; `finalizeMaterials` (remove empty `pbrMetallicRoughness` objects). Image and texture indices are assigned here, in capture order, so they never depend on GPU completion order.
 4. **Encode.** `encodeImages` encodes each new image to PNG (`export-png.ts`) and adds its bytes as a bufferView, in image-index order.
 5. **Assemble.**
@@ -1290,7 +1277,7 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 ### Unit tests — Vitest, `tests/lite/unit/export-gltf/`
 
-493 tests in ten files, built on one harness.
+492 tests in ten files, built on one harness.
 
 **Harness — `export-test-utils.ts`.** It supplies everything a test needs without a GPU:
 
@@ -1304,7 +1291,7 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 | File                                | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `handedness.test.ts`                | the quaternion sign pattern against `quat(C·mat(q)·C)` over randomized quaternions, pivot non-negative, exact ties (y over x, w over z), `L` alone for animation keys, translation and matrix conversion, `Rotate180Y`, `rotTo` including the opposite case, `needsWindingFlip` for the four policy cases, `nearlyEqual`, `canonicalizeQuat` / `normalizeQuat`                                                                                                                                                                                               |
+| `handedness.test.ts`                | the quaternion sign pattern against `quat(C·mat(q)·C)` over randomized quaternions, pivot non-negative, exact ties (y over x, w over z), translation and matrix conversion, `Rotate180Y`, `rotTo` including the opposite case, `needsWindingFlip` for the four policy cases, `nearlyEqual`, `canonicalizeQuat` / `normalizeQuat`                                                                                                                                                                                                                             |
 | `buffers-glb-png.test.ts`           | `BufferBuilder` (stable alignment sort, no padding, component alignment, deferred and omitted `byteOffset`, dedup, snapshotting, optional accessor members), `computeMinMax`, `frameGlb` (header, chunk types, padding, UTF-8 measuring, zero-length BIN), `crc32` (against `zlib.crc32`), `encodePng` (inflate round trip, storage and reversed rows)                                                                                                                                                                                                       |
 | `geometry.test.ts`                  | attributes (`_flatNormal`, GPU-only and length-mismatch omission with warnings), converting-pass conversion (position and normal mirror, tangent `w` negation, pass-through unit-length repair), index width and narrowing, winding (incl. strip expansion), topology modes, non-indexed and empty geometry, morph targets (mismatch drop, normals need a base `NORMAL`, weights), skinned meshes, thin instances (decomposition, identity-attribute omission, `count` vs capacity, colors and alpha warning)                                                |
 | `nodes.test.ts`                     | root collection (order, animated meshless roots, loader-root stripping and its fences, parent-only children, removed nodes, lights and cameras in `children`, non-node parents as world-placed roots or anchors, parent cycles), node transforms (omission tolerance, small real values kept, `matrix` conversion, shear warning, animated nodes), mesh folding and its fences (incl. instance colors and dropped morph targets), mesh sharing, extras (first contributor, shared-object rule, snapshot, non-serializable), determinism and read-only export |
@@ -1498,7 +1485,7 @@ These are renderer prerequisites for blocked parity scenes, not exporter changes
 
 ## File Manifest
 
-The only production file outside `export-gltf/` is `index.ts`; the other rows outside it are tests, lab pages, CI configuration and docs.
+The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.ts` (type-only); the other rows outside it are tests, lab pages, CI configuration and docs.
 
 | File                                                                                             | Role                                                                                                             |
 | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -1522,6 +1509,7 @@ The only production file outside `export-gltf/` is `index.ts`; the other rows ou
 | `export-gltf/ext/export-ext-texture-transform.ts`                                                | textureInfo transform extension                                                                                  |
 | `export-gltf/ext/export-ext-*.ts` (13 material writers)                                          | per-writer digests above                                                                                         |
 | `index.ts`                                                                                       | root re-export of `exportSceneAsGlb`                                                                             |
+| `mesh/mesh.ts`                                                                                   | type-only `/** @internal */ _flatNormal` declaration on `Mesh`                                                   |
 | `docs/lite/architecture/00-overview.md`                                                          | index row for this document                                                                                      |
 | `docs/lite/architecture/60-gltf-exporter.md`                                                     | this file: the one-shot architecture spec                                                                        |
 | `tests/lite/unit/export-gltf/export-test-utils.ts`                                               | unit harness: fake WebGPU device, fake textures and meshes, scene builder, GLB parser                            |
@@ -1546,4 +1534,4 @@ The only production file outside `export-gltf/` is `index.ts`; the other rows ou
 | `tests/lite/plumbing/export-gltf-helpers.ts`                                                     | triangle fixture, GLB building and parsing, accessor reads                                                       |
 | `azure-pipelines.yml`                                                                            | adds `tests/lite/plumbing/export-gltf.spec.ts` to the CI plumbing job                                            |
 
-_End of spec. Regeneration target: deterministic GLB output, pass-through fidelity for glTF-sourced geometry and transforms, pixel-exact images, the documented warnings at the boundary, and no production change outside `export-gltf/` except the root re-export._
+_End of spec. Regeneration target: deterministic GLB output, pass-through fidelity for glTF-sourced geometry and transforms, pixel-exact images, the documented warnings at the boundary, and no production change outside `export-gltf/` except the root re-export and the type-only `Mesh._flatNormal` declaration._

@@ -89,31 +89,27 @@ describe("createBufferBuilder", () => {
         expect(b.bufferViews[0]!.byteOffset).toBe(4);
     });
 
-    it("returns the same index for the same array object, stride and target", () => {
+    it("returns the same index for the same array object and target", () => {
         const b = createBufferBuilder();
         const data = new Float32Array([1, 2, 3, 4]);
-        const first = b.addBufferView(data, 8, ARRAY_BUFFER);
-        expect(b.addBufferView(data, 8, ARRAY_BUFFER)).toBe(first);
+        const first = b.addBufferView(data, ARRAY_BUFFER);
+        expect(b.addBufferView(data, ARRAY_BUFFER)).toBe(first);
         expect(b.bufferViews).toHaveLength(1);
-        // A different stride or target is a different view of the same bytes.
-        const otherStride = b.addBufferView(data, 16, ARRAY_BUFFER);
-        const otherTarget = b.addBufferView(data, 8, ELEMENT_ARRAY_BUFFER);
+        // A different target is a different view of the same bytes.
+        const otherTarget = b.addBufferView(data, ELEMENT_ARRAY_BUFFER);
         const noTarget = b.addBufferView(data);
-        expect(new Set([first, otherStride, otherTarget, noTarget]).size).toBe(4);
+        expect(new Set([first, otherTarget, noTarget]).size).toBe(3);
         expect(b.addBufferView(data)).toBe(noTarget);
         // An equal-content but distinct array is a distinct view.
-        expect(b.addBufferView(new Float32Array([1, 2, 3, 4]), 8, ARRAY_BUFFER)).not.toBe(first);
+        expect(b.addBufferView(new Float32Array([1, 2, 3, 4]), ARRAY_BUFFER)).not.toBe(first);
     });
 
-    it("writes byteStride and target only when given", () => {
+    it("writes target only when given", () => {
         const b = createBufferBuilder();
         b.addBufferView(new Float32Array(2));
-        b.addBufferView(new Float32Array(2), 8, ARRAY_BUFFER);
-        b.addBufferView(new Uint16Array(2), undefined, ELEMENT_ARRAY_BUFFER);
+        b.addBufferView(new Uint16Array(2), ELEMENT_ARRAY_BUFFER);
         expect(Object.keys(b.bufferViews[0]!).sort()).toEqual(["buffer", "byteLength"]);
-        expect(b.bufferViews[1]).toMatchObject({ byteStride: 8, target: ARRAY_BUFFER });
-        expect(b.bufferViews[2]!.target).toBe(ELEMENT_ARRAY_BUFFER);
-        expect("byteStride" in b.bufferViews[2]!).toBe(false);
+        expect(b.bufferViews[1]).toEqual({ buffer: 0, byteLength: 4, target: ELEMENT_ARRAY_BUFFER });
     });
 
     it("snapshots the payload: later writes to the source do not change finalize()", () => {
@@ -144,12 +140,9 @@ describe("createBufferBuilder", () => {
         expect(b.accessors[minimal]).toEqual({ bufferView: view, componentType: FLOAT, count: 2, type: "VEC3" });
         expect(Object.keys(b.accessors[minimal]!).sort()).toEqual(["bufferView", "componentType", "count", "type"]);
 
-        const zeroOffset = b.addAccessor({ bufferView: view, byteOffset: 0, normalized: false, componentType: FLOAT, count: 2, type: "VEC3" });
-        expect(Object.keys(b.accessors[zeroOffset]!).sort()).toEqual(["bufferView", "componentType", "count", "type"]);
-
-        const full = b.addAccessor({ bufferView: view, byteOffset: 12, normalized: true, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
-        expect(b.accessors[full]).toEqual({ bufferView: view, byteOffset: 12, normalized: true, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
-        expect(full).toBe(2);
+        const full = b.addAccessor({ bufferView: view, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
+        expect(b.accessors[full]).toEqual({ bufferView: view, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
+        expect(full).toBe(1);
     });
 });
 

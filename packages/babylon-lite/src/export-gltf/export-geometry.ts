@@ -18,13 +18,9 @@ export interface ExportedPrimitive {
     readonly vertexCount: number;
 }
 
-/** Mesh fields the exporter reads that are not declared on the public `Mesh` interface. */
-type MeshExportView = Mesh & { readonly _flatNormal?: boolean; readonly _primitive?: GPUPrimitiveState };
-
 /** @internal Emit the primitive for one Lite mesh (synchronous). Returns null, after logging when
  *  the cause is unexpected, when the mesh has no exportable CPU geometry. */
-export function exportPrimitive(ctx: ExportContext, mesh: Mesh, convert: boolean): ExportedPrimitive | null {
-    const m = mesh as MeshExportView;
+export function exportPrimitive(ctx: ExportContext, m: Mesh, convert: boolean): ExportedPrimitive | null {
     const positions = m._cpuPositions;
     if (!positions) {
         ctx.warn(`Mesh "${m.name}" has no retained CPU geometry; exporting its node without a mesh.`);
@@ -129,7 +125,7 @@ export function morphTargetsFit(mesh: Mesh): boolean {
 export function zeroUvAccessor(ctx: ExportContext, count: number): number {
     let index = ctx.zeroUvAccessors.get(count);
     if (index === undefined) {
-        const bufferView = ctx.buffers.addBufferView(new Float32Array(count * 2), undefined, ARRAY_BUFFER);
+        const bufferView = ctx.buffers.addBufferView(new Float32Array(count * 2), ARRAY_BUFFER);
         index = ctx.buffers.addAccessor({ bufferView, componentType: FLOAT, count, type: "VEC2" });
         ctx.zeroUvAccessors.set(count, index);
     }
@@ -138,7 +134,7 @@ export function zeroUvAccessor(ctx: ExportContext, count: number): number {
 
 /** glTF numeric primitive mode for a mesh: `_topology` (1 points, 2 lines, 3 line strip, 4 triangle
  *  strip), else the glTF loader's `_primitive.topology`, else TRIANGLES. */
-function primitiveMode(m: MeshExportView): number {
+function primitiveMode(m: Mesh): number {
     switch (m._topology) {
         case 1:
             return 0;
@@ -149,7 +145,7 @@ function primitiveMode(m: MeshExportView): number {
         case 4:
             return 5;
     }
-    switch (m._primitive?.topology) {
+    switch ((m as Mesh & { _primitive?: GPUPrimitiveState })._primitive?.topology) {
         case "point-list":
             return 0;
         case "line-list":
@@ -189,31 +185,33 @@ function vectorAccessor(
 ): number {
     return cachedAccessor(ctx, source, `${variant}:${components}:${count}:${withBounds}`, () => {
         const data = convert ? convert(source, components) : source;
-        const bufferView = ctx.buffers.addBufferView(data, undefined, ARRAY_BUFFER);
+        const bufferView = ctx.buffers.addBufferView(data, ARRAY_BUFFER);
         const bounds = withBounds ? computeMinMax(data, components, count) : undefined;
         return ctx.buffers.addAccessor({ bufferView, componentType: FLOAT, count, type: ACCESSOR_TYPES[components]!, min: bounds?.min, max: bounds?.max });
     });
 }
 
-/** Pass-through normals and tangents: the source array itself when every xyz is unit length within
- *  glTF-Validator's tolerance (keeping round trips byte-stable), otherwise a copy with the
- *  offending non-zero vectors renormalized. */
-function repairUnitLength(src: Float32Array, components: number): Float32Array {
+/** @internal Pass-through unit vectors: the source array itself when the first `unit` components
+ *  of every element (xyz of normals and tangents, all four of rotation keys) are unit length within
+ *  0.0005 (keeping round trips byte-stable), otherwise a copy with the offending non-zero vectors
+ *  renormalized. */
+export function repairUnitLength(src: Float32Array, components: number, unit = 3): Float32Array {
     let out: Float32Array | null = null;
     for (let i = 0; i < src.length; i += components) {
-        const len = Math.hypot(src[i]!, src[i + 1]!, src[i + 2]!);
+        const len = unit > 3 ? Math.hypot(src[i]!, src[i + 1]!, src[i + 2]!, src[i + 3]!) : Math.hypot(src[i]!, src[i + 1]!, src[i + 2]!);
         if (len > 0 && Math.abs(len - 1) > 0.0005) {
             out ??= src.slice();
-            out[i] = src[i]! / len;
-            out[i + 1] = src[i + 1]! / len;
-            out[i + 2] = src[i + 2]! / len;
+            for (let c = 0; c < unit; c++) {
+                out[i + c] = src[i + c]! / len;
+            }
         }
     }
     return out ?? src;
 }
 
-/** Copy with component 0 of every element negated (positions and morph deltas). */
-function mirrorX(src: Float32Array, components: number): Float32Array {
+/** @internal Copy with component 0 of every element negated (positions, morph deltas and
+ *  translation keys). */
+export function mirrorX(src: Float32Array, components: number): Float32Array {
     const out = src.slice();
     for (let i = 0; i < out.length; i += components) {
         out[i] = -out[i]!;
@@ -315,6 +313,6 @@ function sequence(count: number): number[] {
 }
 
 function addIndexAccessor(ctx: ExportContext, data: Uint16Array | Uint32Array): number {
-    const bufferView = ctx.buffers.addBufferView(data, undefined, ELEMENT_ARRAY_BUFFER);
+    const bufferView = ctx.buffers.addBufferView(data, ELEMENT_ARRAY_BUFFER);
     return ctx.buffers.addAccessor({ bufferView, componentType: data instanceof Uint16Array ? UNSIGNED_SHORT : UNSIGNED_INT, count: data.length, type: "SCALAR" });
 }

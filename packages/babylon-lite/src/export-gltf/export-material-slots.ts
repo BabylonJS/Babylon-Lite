@@ -3,8 +3,8 @@
 
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import { getTextureTransform } from "../texture/texture-metadata.js";
-import type { ExportContext, SlotTransform, UvState } from "./export-context.js";
+import { getTextureCoordinateIndex, getTextureTransform } from "../texture/texture-metadata.js";
+import type { ExportContext, PendingSlot, SlotTransform, UvState } from "./export-context.js";
 import type { GltfJsonObject } from "./export-gltf-types.js";
 import { captureTextureSlot } from "./export-textures.js";
 
@@ -12,8 +12,6 @@ import { captureTextureSlot } from "./export-textures.js";
 export interface PbrSlotRequest {
     /** Member name in the owner object, e.g. "clearcoatTexture". */
     readonly key: string;
-    /** glTF slot string used as the image name; defaults to `key`. */
-    readonly slot?: string;
     readonly texture: Texture2D | null | undefined;
     /** Whether Lite's shader applies this slot's `KHR_texture_transform` (the slot's gate). */
     readonly transform: boolean;
@@ -46,6 +44,11 @@ export function hasTx(tex: Texture2D | null | undefined): boolean {
     return !!(tex as { _hasTx?: boolean } | null | undefined)?._hasTx;
 }
 
+/** @internal Whether a texture wrapper selects the second UV set (the loader's `_texCoord` stamp). */
+export function samplesUv1(tex: Texture2D | null | undefined): boolean {
+    return !!tex && getTextureCoordinateIndex(tex) === 1;
+}
+
 /** @internal The texCoord a UV1-selected slot exports with, for the mesh's UV state: 1 in `"uv1"`,
  *  0 in `"uv0"` (Lite's PBR shader samples UV0 when the mesh has no UV2 buffer), or null in
  *  `"lost"`, after logging the lost-UV1 warning. */
@@ -67,24 +70,25 @@ export function warnLostUv1(ctx: ExportContext, materialName: string): void {
 
 /** @internal Capture one PBR texture slot into `owner[req.key]`: storage row order, no channel
  *  inversion, texCoord from the slot's UV selection and the mesh's UV state, and the texture's
- *  transform when the slot's gate is on. Does nothing when `req.texture` is unset. */
-export function capturePbrSlot(ctx: ExportContext, material: PbrMaterialProps, uvState: UvState, owner: GltfJsonObject, req: PbrSlotRequest): void {
+ *  transform when the slot's gate is on. Returns the pending slot, or null when nothing was
+ *  captured (`req.texture` unset, UV1 lost, or the texture unreadable). */
+export function capturePbrSlot(ctx: ExportContext, material: PbrMaterialProps, uvState: UvState, owner: GltfJsonObject, req: PbrSlotRequest): PendingSlot | null {
     const tex = req.texture;
     if (!tex) {
-        return;
+        return null;
     }
     const name = materialLabel(material);
     let texCoord: 0 | 1 = 0;
     if (req.uv1) {
         const resolved = pbrUv1TexCoord(ctx, uvState, name);
         if (resolved === null) {
-            return;
+            return null;
         }
         texCoord = resolved;
     }
     const transform = req.transform ? textureTransformOf(tex) : undefined;
     const colorDecode = tex.texture.format.endsWith("-srgb") ? undefined : req.colorDecode;
-    captureTextureSlot(ctx, owner, req.key, req.slot ?? req.key, tex, { texCoord, transform, rowOrder: "storage", colorDecode }, name, req.extra);
+    return captureTextureSlot(ctx, owner, req.key, tex, { texCoord, transform, rowOrder: "storage", colorDecode }, name, req.extra);
 }
 
 /** @internal Set `owner[key] = value` unless `value` equals `omitAt` exactly. */

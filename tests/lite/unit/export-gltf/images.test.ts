@@ -173,7 +173,7 @@ describe("image identity", () => {
             { rowOrder: "storage" as const, texCoord: 0 as const, invert: "r" as const },
         ];
         for (const mapping of mappings) {
-            ctx.slots.push({ owner: {}, key: "texture", slot: "metallicRoughnessTexture", gpu, mapping, materialName: "test" });
+            ctx.slots.push({ owner: {}, key: "texture", gpu, mapping, materialName: "test" });
         }
         const insert = vi.spyOn(imageModule, "insertImage");
         try {

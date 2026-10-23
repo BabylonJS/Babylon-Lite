@@ -6,6 +6,7 @@ import type { AnimationSampler } from "../animation/types.js";
 import { computeMinMax, FLOAT } from "./export-buffers.js";
 import type { ExportContext } from "./export-context.js";
 import { cachedAccessor } from "./export-context.js";
+import { mirrorX, repairUnitLength } from "./export-geometry.js";
 import { isExportableNode } from "./export-nodes.js";
 import type { GltfAccessorType, GltfAnimation, GltfAnimationChannel, GltfAnimationSampler } from "./export-gltf-types.js";
 
@@ -51,12 +52,9 @@ export function collectAnimatedNodes(groups: readonly AnimationGroup[]): Set<obj
  *  are not unit length are renormalized, as glTF requires; otherwise pass-through output is the
  *  source array itself. */
 function exportedOutput(output: Float32Array, pathName: AnimPathName, convert: boolean, cubic: boolean): Float32Array {
-    let out: Float32Array | null = null;
+    let out = output;
     if (convert && pathName === "translation") {
-        out = output.slice();
-        for (let i = 0; i + 2 < out.length; i += 3) {
-            out[i] = -out[i]!;
-        }
+        out = mirrorX(output, 3);
     } else if (convert && pathName === "rotation") {
         out = output.slice();
         for (let i = 0; i + 3 < out.length; i += 4) {
@@ -64,19 +62,7 @@ function exportedOutput(output: Float32Array, pathName: AnimPathName, convert: b
             out[i + 2] = -out[i + 2]!;
         }
     }
-    if (pathName === "rotation" && !cubic) {
-        const src = out ?? output;
-        for (let i = 0; i + 3 < src.length; i += 4) {
-            const len = Math.hypot(src[i]!, src[i + 1]!, src[i + 2]!, src[i + 3]!);
-            if (len > 0 && Math.abs(len - 1) > 0.0005) {
-                out ??= output.slice();
-                for (let c = 0; c < 4; c++) {
-                    out[i + c] = src[i + c]! / len;
-                }
-            }
-        }
-    }
-    return out ?? output;
+    return pathName === "rotation" && !cubic ? repairUnitLength(out, 4, 4) : out;
 }
 
 function inputAccessor(ctx: ExportContext, input: Float32Array): number {

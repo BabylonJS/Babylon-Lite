@@ -13,7 +13,6 @@ export function captureTextureSlot(
     ctx: ExportContext,
     owner: GltfJsonObject,
     key: string,
-    slot: string,
     tex: Texture2D,
     mapping: SlotMapping,
     materialName: string,
@@ -22,47 +21,42 @@ export function captureTextureSlot(
     if (!checkTextureReadable(ctx, tex, materialName)) {
         return null;
     }
-    void requestPixels(ctx, tex);
+    requestPixels(ctx, tex);
     // Reserve the member's position so the JSON key order follows capture order; an unresolved
     // slot stays undefined and JSON.stringify omits it.
     if (!(key in owner)) {
         owner[key] = undefined;
     }
-    const pending: PendingSlot = { owner, key, slot, gpu: tex.texture, mapping, extra, materialName };
+    const pending: PendingSlot = { owner, key, gpu: tex.texture, mapping, extra, materialName };
     ctx.slots.push(pending);
     return pending;
 }
 
 /** @internal Resolve every captured slot, in capture order, after all readbacks have settled
  *  (synchronous). Image and texture indices are assigned here, so they never depend on GPU
- *  completion order. */
+ *  completion order. Each image gets one texture at its own index (samplers are out of scope). */
 export function resolveTextureSlots(ctx: ExportContext): void {
     const imagesByTexture = new Map<GPUTexture, Map<string, number>>();
     for (const slot of ctx.slots) {
         if (slot.cancelled) {
             continue;
         }
-        const pixels = ctx.resolvedPixels.get(slot.gpu);
-        if (!pixels) {
-            continue;
-        }
+        const pixels = ctx.resolvedPixels.get(slot.gpu)!;
         const variant = `${slot.mapping.rowOrder}:${slot.mapping.invert ?? ""}:${slot.mapping.colorDecode ?? ""}`;
         let byVariant = imagesByTexture.get(slot.gpu);
         let image = byVariant?.get(variant);
         if (image === undefined) {
-            image = insertImage(ctx, pixels, slot.mapping, slot.slot);
+            image = insertImage(ctx, pixels, slot.mapping, slot.key);
+            if (image === ctx.doc.textures.length) {
+                ctx.doc.textures.push({ source: image });
+            }
             if (!byVariant) {
                 byVariant = new Map();
                 imagesByTexture.set(slot.gpu, byVariant);
             }
             byVariant.set(variant, image);
         }
-        let index = ctx.textureIndex.get(image);
-        if (index === undefined) {
-            index = ctx.doc.textures.push({ source: image }) - 1;
-            ctx.textureIndex.set(image, index);
-        }
-        const info: GltfTextureInfo = { index };
+        const info: GltfTextureInfo = { index: image };
         if (slot.mapping.texCoord === 1) {
             info.texCoord = 1;
         }

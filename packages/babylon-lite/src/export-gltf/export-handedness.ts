@@ -24,15 +24,9 @@ export function convertTranslation(x: number, y: number, z: number): [number, nu
     return [-x, y, z];
 }
 
-/** The quaternion change of basis `quat(C · mat(q) · C)`, which is the linear map
- *  `L(x, y, z, w) = (x, −y, −z, w)`. Used without sign canonicalization for animation keys
- *  and CUBICSPLINE tangents, where a per-key sign flip would break hemisphere continuity. */
-export function mirrorQuat(x: number, y: number, z: number, w: number): [number, number, number, number] {
-    return [x, -y, -z, w];
-}
-
-/** Convert a static rotation (node TRS, instance rotation, light and camera nodes): apply
- *  {@link mirrorQuat}, canonicalize the sign with the Babylon.js pattern, then normalize.
+/** Convert a static rotation (node TRS, instance rotation, light and camera nodes): apply the
+ *  quaternion change of basis `quat(C · mat(q) · C)`, which is the linear map
+ *  `L(x, y, z, w) = (x, −y, −z, w)`, canonicalize the sign with the Babylon.js pattern, then normalize.
  *
  *  The pivot is the larger of |x| and |y| when `x² + y² > 0.5`, otherwise the larger of |z| and
  *  |w|; ties go to the later component (y over x, w over z), matching Babylon.js's strict `>`
@@ -54,13 +48,14 @@ export function canonicalizeQuat(x: number, y: number, z: number, w: number): [n
     return [x * s, y * s, z * s, w * s];
 }
 
-/** Normalize a quaternion tuple; a zero quaternion becomes identity. */
-export function normalizeQuat(x: number, y: number, z: number, w: number): [number, number, number, number] {
+/** Normalize a quaternion tuple; a zero quaternion becomes identity. Returned verbatim when its
+ *  length is within `tolerance` of 1. */
+export function normalizeQuat(x: number, y: number, z: number, w: number, tolerance = 0): [number, number, number, number] {
     const len = Math.hypot(x, y, z, w);
     if (!(len > 0)) {
         return [0, 0, 0, 1];
     }
-    return [x / len, y / len, z / len, w / len];
+    return Math.abs(len - 1) <= tolerance ? [x, y, z, w] : [x / len, y / len, z / len, w / len];
 }
 
 /** Column-major `C · M · C`: negates the entries where exactly one of row and column is 0. */

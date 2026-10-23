@@ -137,7 +137,6 @@ function projectionOf(ctx: ExportContext, scene: SceneContext, camera: Camera): 
     }
     const ortho = camera.ortho;
     if (!ortho) {
-        out.type = "perspective";
         out.perspective = { yfov: camera.fov, znear: camera.nearPlane };
         if (camera.farPlane < INFINITE_FAR && camera.farPlane > camera.nearPlane) {
             out.perspective.zfar = camera.farPlane;

@@ -13,20 +13,19 @@ import type { ExportContext, MaterialExtensionWriter, PendingFold, PendingSlot, 
 import { attachExtension, snapshotExtras } from "./export-context.js";
 import type { GltfJsonObject, GltfMaterial } from "./export-gltf-types.js";
 import { nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
-import { requestPixels, textureReadIssue } from "./export-images.js";
+import { gammaToLinear, requestPixels, textureReadIssue } from "./export-images.js";
 import {
     capturePbrSlot,
     isOneByOne,
     materialLabel,
     pbrCoreSlot,
-    pbrUv1TexCoord,
+    samplesUv1,
     UV2_BASE_COLOR,
     UV2_EMISSIVE,
     UV2_NORMAL,
     UV2_OCCLUSION,
     UV2_ORM,
     UV2_SPEC_GLOSS,
-    textureTransformOf,
     warnLostUv1,
 } from "./export-material-slots.js";
 import { captureTextureSlot } from "./export-textures.js";
@@ -44,8 +43,8 @@ import { transmissionWriter } from "./ext/export-ext-transmission.js";
 import { unlitWriter } from "./ext/export-ext-unlit.js";
 import { volumeWriter } from "./ext/export-ext-volume.js";
 
-/** The material extension writers, in output-contract order: it fixes the `extensionsUsed` order
- *  and the order of `afterResolve` callbacks. */
+/** The material extension writers, in output-contract order: it fixes the member order of each
+ *  material's `extensions` object and the order of `afterResolve` callbacks. */
 const MATERIAL_EXTENSION_WRITERS: readonly MaterialExtensionWriter[] = [
     unlitWriter,
     emissiveStrengthWriter,
@@ -112,15 +111,11 @@ export function exportMaterial(ctx: ExportContext, material: Material | null | u
 
 function pbrSelectsUv1(m: PbrMaterialProps): boolean {
     const iri = m._iridescence;
-    return ((m._uv2Mask ?? 0) & EXPORTED_UV2_BITS) !== 0 || texCoordOf(iri?.texture) === 1 || texCoordOf(iri?.thicknessTexture) === 1;
+    return ((m._uv2Mask ?? 0) & EXPORTED_UV2_BITS) !== 0 || samplesUv1(iri?.texture) || samplesUv1(iri?.thicknessTexture);
 }
 
 function standardSelectsUv1(m: StandardMaterialProps): boolean {
     return (!!m.diffuseTexture && m.diffuseCoordIndex === 1) || (!!m._ambientTexture && m.ambientCoordIndex === 1);
-}
-
-function texCoordOf(tex: Texture2D | null | undefined): number | undefined {
-    return (tex as { _texCoord?: number } | null | undefined)?._texCoord;
 }
 
 function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMaterial, uvState: UvState): void {
@@ -161,14 +156,11 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
         const occlusionReadsOrm = occlusionStrength !== 0 && !m.occlusionTexture;
         ormFallback = [];
         if (occlusionReadsOrm && textureReadIssue(ctx, orm) === null) {
-            const mapping = coreMapping(ctx, m, orm, UV2_ORM, uvState);
-            if (mapping) {
-                const mr = captureTextureSlot(ctx, pmr, "metallicRoughnessTexture", "metallicRoughnessTexture", orm, mapping, name);
-                const occ = captureTextureSlot(ctx, obj, "occlusionTexture", "occlusionTexture", orm, mapping, name, strengthExtra(occlusionStrength));
-                for (const slot of [mr, occ]) {
-                    if (slot) {
-                        ormFallback.push(slot);
-                    }
+            const mr = capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "metallicRoughnessTexture", orm, UV2_ORM));
+            const occ = capturePbrSlot(ctx, m, uvState, obj, pbrCoreSlot(m, "occlusionTexture", orm, UV2_ORM, strengthExtra(occlusionStrength)));
+            for (const slot of [mr, occ]) {
+                if (slot) {
+                    ormFallback.push(slot);
                 }
             }
         }
@@ -190,16 +182,7 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 // A UV1 occlusion texture: sampled from raw input.uv2 with no transform, and not at all
                 // when the mesh has no UV2 buffer.
                 if (uvState === "uv1") {
-                    captureTextureSlot(
-                        ctx,
-                        obj,
-                        "occlusionTexture",
-                        "occlusionTexture",
-                        m.occlusionTexture,
-                        { texCoord: 1, rowOrder: "storage" },
-                        name,
-                        strengthExtra(occlusionStrength)
-                    );
+                    captureTextureSlot(ctx, obj, "occlusionTexture", m.occlusionTexture, { texCoord: 1, rowOrder: "storage" }, name, strengthExtra(occlusionStrength));
                 } else if (uvState === "lost") {
                     warnLostUv1(ctx, name);
                 }
@@ -239,26 +222,12 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
     }
 
     for (const writer of MATERIAL_EXTENSION_WRITERS) {
-        writer.write(ctx, m, out, uvState);
+        writer(ctx, m, out, uvState);
     }
 }
 
 function strengthExtra(strength: number): Readonly<Record<string, number>> | undefined {
     return strength !== 1 ? { strength } : undefined;
-}
-
-/** A core slot's mapping (`_uv2Mask` bit, `_hasUvTx` transform gate), or null when the slot does
- *  not export in this UV state. */
-function coreMapping(ctx: ExportContext, m: PbrMaterialProps, tex: Texture2D, bit: number, uvState: UvState): SlotMapping | null {
-    let texCoord: 0 | 1 = 0;
-    if (((m._uv2Mask ?? 0) & bit) !== 0) {
-        const resolved = pbrUv1TexCoord(ctx, uvState, materialLabel(m));
-        if (resolved === null) {
-            return null;
-        }
-        texCoord = resolved;
-    }
-    return { texCoord, transform: m._hasUvTx ? textureTransformOf(tex) : undefined, rowOrder: "storage" };
 }
 
 /** Clamp material factors to glTF's [0, 1] range, warning when any was outside it. */
@@ -287,8 +256,8 @@ function writeMetallicRoughness(ctx: ExportContext, pmr: GltfJsonObject, metalli
     }
 }
 
-/** Record a 1×1 factor fold. Its texel is read back with the other textures; an unreadable texel
- *  (null engine) is taken as white, so the props' factors export alone. */
+/** Record a 1×1 factor fold. Its texel is read back with the other textures; when the texture is
+ *  unreadable (null engine), the props' factors are written alone and no fold is recorded. */
 function recordFold(
     ctx: ExportContext,
     owner: GltfJsonObject,
@@ -308,7 +277,7 @@ function recordFold(
         }
         return;
     }
-    void requestPixels(ctx, texture);
+    requestPixels(ctx, texture);
     // Reserve the factor members' position in the JSON key order.
     if (kind === "baseColor") {
         owner.baseColorFactor = undefined;
@@ -324,10 +293,9 @@ function recordFold(
  *  bakes factors into, so exporting a reload reproduces them (a no-op for the loader's own bakes). */
 export function resolveFolds(ctx: ExportContext): void {
     for (const fold of ctx.folds) {
-        const pixels = ctx.resolvedPixels.get(fold.gpu);
-        const t = pixels ? pixels.rgba : WHITE_TEXEL;
+        const t = ctx.resolvedPixels.get(fold.gpu)!.rgba;
         if (fold.kind === "baseColor") {
-            const decode = (b: number): number => (fold.decode === "srgb" ? srgbByteToLinear(b) : fold.decode === "gamma" ? Math.pow(b / 255, 2.2) : b / 255);
+            const decode = (b: number): number => (fold.decode === "srgb" ? srgbByteToLinear(b) : fold.decode === "gamma" ? gammaToLinear(b / 255) : b / 255);
             const f = fold.factor;
             const rgb = (i: number): number => onBakeGrid(decode(t[i]!) * f[i]!, (v) => srgbByteToLinear(linearToSrgbByte(v)));
             writeBaseColorFactor(ctx, fold.owner, [rgb(0), rgb(1), rgb(2), fold.opaque ? f[3]! : (t[3]! / 255) * f[3]!], fold.materialName);
@@ -352,8 +320,6 @@ export function resolveFolds(ctx: ExportContext): void {
 function onBakeGrid(v: number, snap: (v: number) => number): number {
     return v >= 0 && v <= 1 ? snap(v) : v;
 }
-
-const WHITE_TEXEL: readonly number[] = [255, 255, 255, 255];
 
 /** @internal Remove `pbrMetallicRoughness` objects that ended up with no members (after every slot,
  *  fold and `afterResolve` callback ran). */
@@ -400,7 +366,7 @@ function exportStandardMaterial(ctx: ExportContext, m: StandardMaterialProps, ou
         }
         const mapping = standardMapping(ctx, m, tex, coordIndex === 1, flippedMaterialWide, bump, uvState, name);
         if (mapping) {
-            captureTextureSlot(ctx, owner, key, key, tex, mapping, name, extra);
+            captureTextureSlot(ctx, owner, key, tex, mapping, name, extra);
         }
     };
     slot(pmr, "baseColorTexture", m.diffuseTexture, m.diffuseCoordIndex ?? 0, false);
@@ -436,11 +402,6 @@ function exportStandardMaterial(ctx: ExportContext, m: StandardMaterialProps, ou
     if (m.backFaceCulling === false) {
         out.doubleSided = true;
     }
-}
-
-/** `c^2.2` per channel: the Babylon.js default gamma-to-linear conversion. */
-function gammaToLinear(c: number): number {
-    return Math.pow(c, 2.2);
 }
 
 /** @internal The Babylon.js Blinn-Phong specular power → roughness approximation. */

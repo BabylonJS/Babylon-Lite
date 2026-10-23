@@ -45,15 +45,15 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     exportLights(ctx, scene.lights);
     exportAnimations(ctx, scene.animationGroups);
 
-    // 2. Settle every readback. They never reject; failures are recorded in submission order.
+    // 2. Settle every readback, then throw the first failure in submission order.
     const textures = [...ctx.pixelCache.keys()];
-    const pixels = await Promise.all(ctx.pixelCache.values());
+    const settled = await Promise.allSettled(ctx.pixelCache.values());
     for (let i = 0; i < textures.length; i++) {
-        ctx.resolvedPixels.set(textures[i]!, pixels[i]!);
-    }
-    const failure = ctx.readbackErrors.find((e) => e !== undefined);
-    if (failure !== undefined) {
-        throw failure;
+        const result = settled[i]!;
+        if (result.status === "rejected") {
+            throw result.reason ?? new Error("Texture readback failed");
+        }
+        ctx.resolvedPixels.set(textures[i]!, result.value);
     }
 
     // 3. Resolve (synchronous): factor folds, then texture slots, then dependent values.

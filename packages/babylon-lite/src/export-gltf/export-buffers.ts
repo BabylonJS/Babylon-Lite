@@ -16,11 +16,9 @@ export const ELEMENT_ARRAY_BUFFER = 34963;
 /** @internal One accessor request. */
 export interface AccessorDesc {
     readonly bufferView: number;
-    readonly byteOffset?: number;
     readonly componentType: GltfComponentType;
     readonly count: number;
     readonly type: GltfAccessorType;
-    readonly normalized?: boolean;
     readonly min?: number[];
     readonly max?: number[];
 }
@@ -32,8 +30,8 @@ export interface BufferBuilder {
     readonly accessors: GltfAccessor[];
     /** Snapshot `bytes` into a new bufferView and return its index. The bytes are copied on the
      *  call, so later writes to the source never reach the output. A repeated call with the same
-     *  view object, stride and target returns the existing index. */
-    addBufferView(bytes: ArrayBufferView, byteStride?: number, target?: GltfBufferViewTarget): number;
+     *  view object and target returns the existing index. */
+    addBufferView(bytes: ArrayBufferView, target?: GltfBufferViewTarget): number;
     addAccessor(desc: AccessorDesc): number;
     /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added). */
     finalize(): Uint8Array;
@@ -44,43 +42,33 @@ export function createBufferBuilder(): BufferBuilder {
     const bufferViews: GltfBufferView[] = [];
     const accessors: GltfAccessor[] = [];
     const payloads: Uint8Array[] = [];
-    const viewIndex = new WeakMap<ArrayBufferView, Map<string, number>>();
+    const viewIndex = new WeakMap<ArrayBufferView, Map<GltfBufferViewTarget | undefined, number>>();
 
     return {
         bufferViews,
         accessors,
-        addBufferView(bytes, byteStride, target) {
-            const key = `${byteStride ?? ""}:${target ?? ""}`;
-            let byKey = viewIndex.get(bytes);
-            const existing = byKey?.get(key);
+        addBufferView(bytes, target) {
+            let byTarget = viewIndex.get(bytes);
+            const existing = byTarget?.get(target);
             if (existing !== undefined) {
                 return existing;
             }
             const copy = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength).slice();
             const view: GltfBufferView = { buffer: 0, byteLength: copy.byteLength };
-            if (byteStride !== undefined) {
-                view.byteStride = byteStride;
-            }
             if (target !== undefined) {
                 view.target = target;
             }
             const index = bufferViews.push(view) - 1;
             payloads.push(copy);
-            if (!byKey) {
-                byKey = new Map();
-                viewIndex.set(bytes, byKey);
+            if (!byTarget) {
+                byTarget = new Map();
+                viewIndex.set(bytes, byTarget);
             }
-            byKey.set(key, index);
+            byTarget.set(target, index);
             return index;
         },
         addAccessor(desc) {
             const accessor: GltfAccessor = { bufferView: desc.bufferView, componentType: desc.componentType, count: desc.count, type: desc.type };
-            if (desc.byteOffset) {
-                accessor.byteOffset = desc.byteOffset;
-            }
-            if (desc.normalized) {
-                accessor.normalized = true;
-            }
             if (desc.max) {
                 accessor.max = desc.max;
             }

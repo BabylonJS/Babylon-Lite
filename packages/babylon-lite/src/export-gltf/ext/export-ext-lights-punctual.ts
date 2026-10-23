@@ -121,7 +121,6 @@ export function exportLights(ctx: ExportContext, lights: readonly LightBase[]): 
             ctx.doc.nodes.push(node);
             const pn = ctx.doc.nodes[pNode]!;
             (pn.children ??= []).push(nodeIdx);
-            holders.add(nodeIdx);
             ctx.nodeIndex.set(light, nodeIdx);
             ctx.nodeConvert.set(light, convert);
             continue;
@@ -144,7 +143,6 @@ export function exportLights(ctx: ExportContext, lights: readonly LightBase[]): 
         attachExtension(ctx, node, EXT, { light: lightIndex });
         ctx.doc.nodes.push(node);
         ctx.doc.sceneNodes.push(nodeIdx);
-        holders.add(nodeIdx);
         ctx.nodeIndex.set(light, nodeIdx);
         ctx.nodeConvert.set(light, true);
     }
