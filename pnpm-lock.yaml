@@ -147,6 +147,9 @@ importers:
       '@babylonjs/materials':
         specifier: ^9.28.0
         version: 9.28.0(@babylonjs/core@9.28.0)
+      '@babylonjs/serializers':
+        specifier: ^9.28.0
+        version: 9.28.0(@babylonjs/core@9.28.0)(babylonjs-gltf2interface@9.28.0)
       '@recast-navigation/core':
         specifier: 0.43.1
         version: 0.43.1
@@ -373,6 +376,12 @@ packages:
     resolution: {integrity: sha512-olXqwo5iupEilyJTn3mgHgDjJHmys29hsx8+gWf7X/dtFCYoDTbuZ8lvVDJN2MT0eN1SFD0TzrXModSiSSsUkw==}
     peerDependencies:
       '@babylonjs/core': ^9.0.0
+
+  '@babylonjs/serializers@9.28.0':
+    resolution: {integrity: sha512-oqjuP5YHM6U56E6dpTPWx1h4DY2Twjh8AlOv+Lk532AWUdQQzYmiH4st3ZNXCiPe7qwsh087Tj4JDxE7LHfZ3A==}
+    peerDependencies:
+      '@babylonjs/core': ^9.0.0
+      babylonjs-gltf2interface: ^9.0.0
 
   '@cacheable/memory@2.2.0':
     resolution: {integrity: sha512-CTLKqLItRCEixEAewD3/j9DB3/o96gpTPD4eJ1v+DGOlxZRZncRQkGYqqnAGCscYd6RNeXfGeiuCphsPtqyIfQ==}
@@ -4249,6 +4258,11 @@ snapshots:
   '@babylonjs/materials@9.28.0(@babylonjs/core@9.28.0)':
     dependencies:
       '@babylonjs/core': 9.28.0
+
+  '@babylonjs/serializers@9.28.0(@babylonjs/core@9.28.0)(babylonjs-gltf2interface@9.28.0)':
+    dependencies:
+      '@babylonjs/core': 9.28.0
+      babylonjs-gltf2interface: 9.28.0
 
   '@cacheable/memory@2.2.0':
     dependencies:
