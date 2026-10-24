@@ -268,31 +268,23 @@ function buildMaterialRenderables(
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
     const packets = meshes.map((mesh, index) => createPacket(scene, material, bindings.systemSpec, mesh, resources, missing?.[index]));
-    if (material.needAlphaBlending) {
-        return packets.map((packet) =>
-            createTransparentRenderable(
-                scene,
-                material,
-                packet,
-                isOverride,
-                getUniformBatch,
-                vbRender?._forMesh(material, bindings, packet.mesh, packet._vertexMask ?? 0) ?? undefined
-            )
-        );
-    }
-    // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
-    // describe their own vertex packing cannot share it with tightly-packed ones.
-    const buildOpaque = (group: readonly ShaderPacket[]): Renderable =>
-        createOpaqueRenderable(
+    const build = (group: readonly ShaderPacket[], transparent?: boolean): Renderable =>
+        createShaderRenderable(
             scene,
             material,
             group,
             isOverride,
             getUniformBatch,
-            vbRender?._forMesh(material, bindings, group[0]!.mesh, group[0]!._vertexMask ?? 0) ?? undefined
+            vbRender?._forMesh(material, bindings, group[0]!.mesh, group[0]!._vertexMask ?? 0) ?? undefined,
+            transparent
         );
+    if (material.needAlphaBlending) {
+        return packets.map((packet) => build([packet], true));
+    }
+    // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
+    // describe their own vertex packing cannot share it with tightly-packed ones.
     const groups = vbRender?._group(packets);
-    return groups ? Array.from(groups, buildOpaque) : [buildOpaque(packets)];
+    return groups ? Array.from(groups, (group) => build(group)) : [build(packets)];
 }
 
 function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources, vertexMask?: number): ShaderPacket {
@@ -326,15 +318,20 @@ function isPacketInactive(packet: ShaderPacket, material: ShaderMaterial, isOver
     return !!packet._disposed || (!isOverride && packet.mesh.material !== material);
 }
 
-function createOpaqueRenderable(
+/** Build the renderable drawing `packets`. Opaque renderables may merge several packets behind one
+ *  pipeline; a transparent one wraps exactly one packet, skips all work while that packet is inactive,
+ *  and tracks its mesh's world position for back-to-front sorting. */
+function createShaderRenderable(
     scene: SceneContext,
     material: ShaderMaterial,
     packets: readonly ShaderPacket[],
     isOverride: boolean,
     getUniformBatch?: UniformBatchFactory,
-    asyncVertexLayout?: ShaderAsyncVertexLayout
+    asyncVertexLayout?: ShaderAsyncVertexLayout,
+    transparent?: boolean
 ): Renderable {
-    let order = packets.length === 1 ? (packets[0]!.mesh.renderOrder ?? 100) : Infinity;
+    const first = packets[0]!;
+    let order = packets.length === 1 ? (first.mesh.renderOrder ?? (transparent ? 200 : 100)) : Infinity;
     // Only merged renderables (>1 mesh) can outlive an individual packet's mesh,
     // so give those packets a back-reference enabling disposal-time compaction.
     if (packets.length > 1) {
@@ -343,7 +340,20 @@ function createOpaqueRenderable(
             order = Math.min(order, packet.mesh.renderOrder ?? 100);
         }
     }
+    const sortCenter: [number, number, number] | undefined = transparent ? [0, 0, 0] : undefined;
+    const syncSortCenter = (): void => {
+        if (sortCenter) {
+            const m = first.mesh.worldMatrix as unknown as ArrayLike<number>;
+            sortCenter[0] = m[12]!;
+            sortCenter[1] = m[13]!;
+            sortCenter[2] = m[14]!;
+        }
+    };
+    syncSortCenter();
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
+        if (sortCenter && isPacketInactive(first, material, isOverride)) {
+            return;
+        }
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
             if (isPacketInactive(packet, material, isOverride)) {
@@ -351,11 +361,12 @@ function createOpaqueRenderable(
             }
             updatePacket(scene, material, packet, context, uniformBatch);
         }
+        syncSortCenter();
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
-            if (isPacketInactive(packet, material, isOverride) || packet.mesh.visible === false) {
+            if (isPacketInactive(packet, material, isOverride) || (!transparent && packet.mesh.visible === false)) {
                 continue;
             }
             drawPacket(pass, engine, material, packet);
@@ -365,50 +376,10 @@ function createOpaqueRenderable(
     };
     const r: Renderable = {
         order,
-        isTransparent: false,
+        isTransparent: !!transparent,
+        _transmissive: transparent && material.transmissive,
         _direct: _externalTextureResolver?.active(material) ?? false,
-        mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
-        bind(eng, sig) {
-            return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
-        },
-    };
-    _asyncPipelineRegistrar?.(scene, material, r, undefined, asyncVertexLayout);
-    return r;
-}
-
-function createTransparentRenderable(
-    scene: SceneContext,
-    material: ShaderMaterial,
-    packet: ShaderPacket,
-    isOverride: boolean,
-    getUniformBatch?: UniformBatchFactory,
-    asyncVertexLayout?: ShaderAsyncVertexLayout
-): Renderable {
-    const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
-    const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
-    const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
-        if (isPacketInactive(packet, material, isOverride)) {
-            return;
-        }
-        updateCustomUbo(scene.surface.engine, material, uniformBatch);
-        updatePacket(scene, material, packet, context, uniformBatch);
-        const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
-        sortCenter[0] = m[12]!;
-        sortCenter[1] = m[13]!;
-        sortCenter[2] = m[14]!;
-    };
-    const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
-        if (isPacketInactive(packet, material, isOverride)) {
-            return 0;
-        }
-        drawPacket(pass, engine, material, packet);
-        return 1;
-    };
-    const r: Renderable = {
-        order: packet.mesh.renderOrder ?? 200,
-        isTransparent: true,
-        _transmissive: material.transmissive,
-        mesh: packet.mesh,
+        mesh: packets.length === 1 ? first.mesh : undefined,
         _worldCenter: sortCenter,
         bind(eng, sig) {
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
