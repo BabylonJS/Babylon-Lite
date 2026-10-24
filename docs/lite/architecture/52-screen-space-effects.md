@@ -4,9 +4,9 @@
 
 ## Purpose
 
-Provide opt-in screen-space contact shadows and one-bounce screen-space global illumination for WebGPU scenes that already render color and depth into a single-sample offscreen target.
+Provide opt-in screen-space ambient occlusion, contact shadows, and one-bounce screen-space global illumination for WebGPU scenes that already render color and depth into a single-sample offscreen target.
 
-The implementation shares depth reconstruction, dual-surface ray intersection, normal reconstruction, temporal reprojection, depth rejection, and neighborhood clamping. Applications pay no runtime bytes unless they import one of the two public task factories.
+The implementation shares depth reconstruction, normal reconstruction, temporal reprojection, depth rejection, and neighborhood clamping. Contact shadows and GI also share dual-surface ray intersection. Applications pay no runtime bytes unless they import one of the public task factories.
 
 The effects are frame-graph tasks. They own every intermediate render target and GPU resource, expose their effect buffer and composited output as managed `RenderTarget` values, and never expose raw WebGPU handles.
 
@@ -114,11 +114,61 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
     engine: EngineContext,
     scene?: SceneContext
 ): ScreenSpaceGlobalIlluminationPostProcessTask;
+
+export interface ScreenSpaceAmbientOcclusionPostProcessTaskConfig {
+    name?: string;
+    sourceTexture: RenderTarget;
+    depthTexture?: RenderTarget;
+    camera: Camera;
+    targetTexture?: RenderTarget | null;
+    resolutionScale?: number;
+    intensity?: number;
+    radius?: number;
+    bias?: number;
+    power?: number;
+    sliceCount?: number;
+    stepCount?: number;
+    fadeStart?: number;
+    fadeEnd?: number;
+    temporalWeight?: number;
+    temporalSamples?: number;
+    resetVersion?: number;
+    composition?: "none" | "multiply";
+}
+
+export interface ScreenSpaceAmbientOcclusionPostProcessTask extends Task {
+    readonly name: string;
+    readonly sourceTexture: RenderTarget;
+    readonly depthTexture: RenderTarget;
+    readonly targetTexture: RenderTarget | null;
+    outputTexture: RenderTarget;
+    /** Temporally resolved occlusion amount (`rg16float`: occlusion in `.r`, view distance in `.g`). */
+    readonly occlusionTexture: RenderTarget;
+    enabled: boolean;
+    intensity: number;
+    radius: number;
+    bias: number;
+    power: number;
+    sliceCount: number;
+    stepCount: number;
+    fadeStart: number;
+    fadeEnd: number;
+    temporalWeight: number;
+    resetVersion: number;
+}
+
+export function createScreenSpaceAmbientOcclusionPostProcessTask(
+    config: ScreenSpaceAmbientOcclusionPostProcessTaskConfig,
+    engine: EngineContext,
+    scene?: SceneContext
+): ScreenSpaceAmbientOcclusionPostProcessTask;
 ```
 
 The mutable fields are sampled immediately before each frame is encoded. Applications can tune or toggle the effects without rebuilding the frame graph. Incrementing `resetVersion` invalidates history and restarts the bounded temporal sample window.
 
 The composite target must differ from `sourceTexture`; sampling and rendering the same texture in one WebGPU pass is invalid. Callers use two render targets when chaining effects.
+
+The ambient-occlusion task reads scene depth directly and reconstructs normals from the closest valid depth neighbours. It needs no application-managed normal prepass or mesh-registration list. Its texture stores `0` for unoccluded pixels and `1` for full occlusion, so the temporal owner's zero-clear identity is correct.
 
 ### Defaults and clamps
 
@@ -141,13 +191,31 @@ The composite target must differ from `sourceTexture`; sampling and rendering th
 | `colorBleedGain`            |             n/a |                 `1` |                    `[0, 16]` |
 | `colorBleedMax`             |             n/a |              `0.45` |                     `[0, 1]` |
 
-The default contact tint is `[0.35, 0.38, 0.48]`. The default compositions are `"multiply"` for contact shadows and `"additive"` for global illumination.
+The default contact tint is `[0.35, 0.38, 0.48]`. The default compositions are `"multiply"` for contact shadows and ambient occlusion, and `"additive"` for global illumination.
+
+### Ambient-occlusion defaults and clamps
+
+| Setting           | Default | Clamp                               |
+| ----------------- | ------: | ----------------------------------: |
+| `resolutionScale` | `0.5`   | `[0.25, 1]`                         |
+| `intensity`       | `1`     | `[0, 4]`                            |
+| `radius`          | `0.5`   | `[0.01, 20]` scene units            |
+| `bias`            | `0.05`  | `[0, 0.99]` cosine horizon cutoff   |
+| `power`           | `1.5`   | `[0.1, 8]`                          |
+| `sliceCount`      | `3`     | integer `[1, 8]`                    |
+| `stepCount`       | `4`     | integer `[1, 8]`                    |
+| `fadeStart`       | `20`    | `[0, 100000]` scene units           |
+| `fadeEnd`         | `60`    | at least `fadeStart + 0.001`        |
+| `temporalWeight`  | `1/32`  | `[0, 1]`                            |
+| `temporalSamples` | `64`    | integer `[1, 256]`                  |
+
+The default composition is `"multiply"`. The producer and temporal history store raw occlusion; `intensity` is applied by the composite. With `composition: "none"`, callers can compose the raw `occlusionTexture` themselves.
 
 ## Internal Architecture
 
 ### Shared shader owner
 
-`screen-space-raymarch-wgsl.ts` owns WGSL functions used by both producers:
+`screen-space-raymarch-wgsl.ts` owns WGSL functions shared by the screen-space effects:
 
 - reverse-Z depth load and clear-depth rejection;
 - world-position reconstruction from inverse view-projection;
@@ -159,9 +227,17 @@ The default contact tint is `[0.35, 0.38, 0.48]`. The default compositions are `
 
 The source is a pure string factory. It performs no module-level allocation and has no side effects.
 
+### Ambient-occlusion producer and blur
+
+The depth-horizon producer uses scene depth as both receiver and occluder data. It reconstructs the receiver position and closest-neighbour geometric normal, transforms both to view space, then samples `sliceCount` azimuthal directions. The world-space radius is converted independently along U and V to preserve its extent across aspect ratios. Each direction marches `stepCount` taps in both directions and keeps the largest normalized positive cosine between the receiver normal and a sample direction, weighted by `1 - (distance / radius)^2`. Spatially offset per-pixel hashes rotate the slices and jitter the taps. Both hashes share the same additive temporal phase, so their difference modulo one stays fixed for each pixel; they are not temporally independent. Taps closer than one depth texel to the receiver are skipped to avoid repeatedly sampling the center depth at distant radii.
+
+World-space `radius` is converted to UV distance by unprojecting one depth texel at the receiver depth, so the projection does not require a camera-specific FOV formula. Cleared depth produces zero occlusion. The producer fades occlusion between `fadeStart` and `fadeEnd`, then writes raw occlusion to `r8unorm`.
+
+Horizontal and vertical bilateral blur passes denoise the low-slice estimate. Spatial weights decrease with tap distance; depth weights compare reconstructed view distances to prevent bleeding across silhouettes. The shared scalar temporal owner accumulates blurred occlusion through camera reprojection and clamps accepted history to the current raw neighborhood.
+
 ### Shared temporal owner
 
-`screen-space-temporal.ts` creates the two internal passes used after either producer:
+`screen-space-temporal.ts` creates the two internal passes used after each producer:
 
 1. **Resolve:** reconstruct the current world position, select the contact-shadow tap from a depth-validated temporal disk when resolving scalar data, reproject through the previous view-projection, reject off-screen or depth-mismatched history, clamp accepted history to the current 3x3 neighborhood, and blend the current estimate.
 2. **History copy:** copy the resolved stable target into the history target used by the next frame.
@@ -169,7 +245,7 @@ The source is a pure string factory. It performs no module-level allocation and 
 Scalar history uses `rg16float`: effect value in `.r`, current view distance in `.g`.
 Color history uses `rgba16float`: indirect color in `.rgb`, current view distance in `.a`.
 
-The scalar resolve first applies a depth-aware 3x3 filter so the initial frame does not expose the producer's binary march pattern. It then rotates that filtered tap continuously through a disk of `spatialRadius` effect pixels. Taps are accepted only when their reconstructed view distance is within the same 4% threshold as temporal history, preventing silhouettes from bleeding while turning contact hits into a continuous stable contour.
+The scalar resolve first applies a depth-aware 3x3 filter so the initial frame does not expose the producer's raw sampling pattern. Contact shadows then rotate that filtered tap continuously through a disk of `spatialRadius` effect pixels; ambient occlusion sets this radius to zero because its producer already applies bilateral filtering. Taps are accepted only when their reconstructed view distance is within the same 4% threshold as temporal history, preventing silhouettes from bleeding.
 
 The temporal state owns two independent counters:
 
@@ -238,6 +314,21 @@ The producer runs at full resolution by default.
 
 The producer runs at half linear resolution by default.
 
+### Ambient occlusion
+
+| Pass               | Target            | Format        | Sampling                            |
+| ------------------ | ----------------- | ------------- | ----------------------------------- |
+| AO depth producer  | raw occlusion     | `r8unorm`     | nearest scene depth                 |
+| Horizontal blur    | temporary AO      | `r8unorm`     | nearest raw AO and scene depth      |
+| Vertical blur      | blurred AO        | `r8unorm`     | nearest temporary AO and depth      |
+| Temporal resolve   | stable occlusion  | `rg16float`   | nearest AO/depth, linear history    |
+| History copy       | occlusion history | `rg16float`   | nearest                             |
+| Optional composite | configured target | source format | linear source/occlusion             |
+
+The producer and blur targets run at `resolutionScale`; the default half-resolution path shades one quarter of the full-resolution pixels.
+
+Ambient occlusion currently requires a fullscreen camera viewport: omit `camera.viewport` or use `{ x: 0, y: 0, width: 1, height: 1 }`. The factory, `record`, and `execute` reject any other viewport with a descriptive error, including in-place viewport mutations after creation and while the effect is disabled. This restriction keeps reconstruction and temporal reprojection in the same full-target coordinate system until sub-viewports are supported.
+
 The global-illumination temporal resolve applies a fused five-tap cross filter to the current raw estimate. Neighbor weights combine a fixed spatial weight with relative view-depth agreement. This removes independent pixel noise without allocating another target or pass.
 
 ## Shader Logic
@@ -259,6 +350,22 @@ The multiply composite is:
 ```wgsl
 let amount = shadow * intensity;
 result.rgb = source.rgb * mix(vec3f(1), tint, amount);
+```
+
+### Ambient-occlusion producer
+
+1. Map the effect pixel to an integer scene-depth coordinate and load its depth. Cleared depth returns zero occlusion.
+2. Reconstruct world position at that depth texel's center UV (not the unsnapped effect UV) and transform it into view space. Compute `fade = 1 - smoothstep(fadeStart, fadeEnd, abs(viewPos.z))` immediately; if zero, return zero before reconstructing the normal or marching. Otherwise reconstruct the closest-neighbour world normal and transform it into view space. Orient it toward the viewer using the vector between unprojected reverse-Z depths `0.5` and `1` at the same depth UV, transformed as a direction into view space. This ray points toward the perspective eye or along the parallel orthographic viewing direction, including off-center orthographic volumes; the depths avoid unprojecting an infinite far plane.
+3. Unproject offsets of one depth texel from the snapped receiver UV at the receiver depth to convert the world-space radius into a screen-space march radius.
+4. Convert the radius to a UV vector using independent horizontal/vertical world-units-per-UV scales. For each rotated and step-jittered slice and both directions, reconstruct each loaded sample at its own depth texel's center UV. Retain the largest normalized positive normal/sample cosine above `bias`, attenuated by `1 - (distance / radius)^2`; average those directional occlusion estimates. Snapping both receiver and sample positions keeps a sloping plane coplanar at reduced effect resolutions instead of generating false horizons.
+5. Shape the average occlusion with `pow(averageOcclusion, power)` and multiply by the previously computed fade, preserving the smooth transition interval.
+6. Apply horizontal and vertical depth-aware bilateral blur, then temporal reprojection, rejection, and neighborhood clamp.
+
+The multiply composite is:
+
+```wgsl
+let amount = clamp(occlusion * intensity, 0.0, 1.0);
+result.rgb = source.rgb * (1.0 - amount);
 ```
 
 ### Global-illumination producer
@@ -349,24 +456,30 @@ Camera-only reprojection cannot preserve history for independently moving object
 - reprojection compares history against previous-camera view distance;
 - UV → world → UV round-trips with the documented top-left convention;
 - public factories clamp invalid resolution, step, and temporal settings;
-- generated WGSL contains the scalar/color history layouts and the dual-surface/tangent-plane contracts.
+- generated WGSL contains the scalar/color history layouts and the dual-surface/tangent-plane contracts;
+- Ambient-occlusion defaults, depth-only requirements, target alias rejection, disabled identity, depth-binding replacement, target resizing, and default multiply composition are covered by unit/mock lifecycle tests.
+- AO rejects non-fullscreen camera viewports at creation, record, and execute, including later in-place mutations and disabled execution.
+- A numerical sloping-plane regression checks nearest-depth texel-center reconstruction at quarter, half, and full resolution; paired shader-contract assertions tie both receiver and march reconstruction to those coordinates.
+- Numerical projection-ray regressions cover perspective and off-center orthographic normal orientation, a sloped receiver, and foreground occlusion. Shader contracts bind the orientation to the unprojected ray, not the camera-origin vector.
+- Fade contracts require the zero-fade exit before normal reconstruction and horizon sampling, while retaining the smoothstep multiplier for the transition interval.
+- AO WGSL assertions check source contracts only; aspect-ratio consistency, jitter quality, silhouette halos, blur quality, and moving-object trails require WebGPU rendering.
 
 ### Demo validation
 
-`demo-screen-space-effects` loads the locally stored Cornell Box GLB from `zuuhr/GlobalIlumination-BabylonJS` into an offscreen color/depth target. Buttons independently toggle contact shadows, global illumination, and auto-orbit. The initial camera looks into the open box; auto-orbit is opt-in so the temporally accumulated effects can converge from a stable view.
+`demo-screen-space-effects` loads the locally stored Cornell Box GLB from `zuuhr/GlobalIlumination-BabylonJS` into an offscreen color/depth target. Buttons independently toggle contact shadows, ambient occlusion, global illumination, and auto-orbit. Contact shadows feed GI, then AO multiplies the combined color into the screen target so added indirect light is also occluded. The initial camera looks into the open box; auto-orbit is opt-in so the temporally accumulated effects can converge from a stable view.
 
 The demo must:
 
 - reach `canvas.dataset.ready = "true"`;
 - emit no WebGPU validation errors;
-- show non-zero contact and illumination buffers;
+- show non-zero contact, occlusion, and illumination buffers;
 - remain interactive while toggling each effect and auto-orbit;
 - have a generated demo bundle manifest and 1280x720 JPG thumbnail.
 
 ### Bundle validation
 
 - A targeted demo build records the feature cost.
-- Representative non-feature scene byte counts remain unchanged; scene1 stays exactly 90,780 raw bytes.
+- Representative non-feature scene byte counts remain unchanged; scene1 stays exactly 88,861 raw bytes.
 - No bundle ceiling is changed.
 
 ## File Manifest
@@ -375,6 +488,7 @@ The demo must:
 packages/babylon-lite/src/post-process/screen-space-raymarch-wgsl.ts
 packages/babylon-lite/src/post-process/screen-space-temporal.ts
 packages/babylon-lite/src/post-process/screen-space-contact-shadows.ts
+packages/babylon-lite/src/post-process/screen-space-ambient-occlusion.ts
 packages/babylon-lite/src/post-process/screen-space-global-illumination.ts
 packages/babylon-lite/src/index.ts
 tests/lite/unit/screen-space-effects.test.ts
