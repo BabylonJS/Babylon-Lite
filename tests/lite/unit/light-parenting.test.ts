@@ -150,6 +150,41 @@ describe("light SceneNode parenting", () => {
         expect(light.position.x).toBe(sourceX);
     });
 
+    it("copies the shared light state when cloning every light type", () => {
+        const lights: LightBase[] = [createHemisphericLight(), createDirectionalLight([0, -1, 0]), createPointLight([1, 2, 3]), createSpotLight([1, 2, 3], [0, 0, 1], 1, 2)];
+        for (const light of lights) {
+            const metadata = { tag: light.lightType };
+            light.name = `${light.lightType}-light`;
+            light.position.set(4, 5, 6);
+            light.rotationQuaternion.set(0, Math.sin(0.25), 0, Math.cos(0.25));
+            light.scaling.set(2, 3, 4);
+            light.metadata = metadata;
+            light.excludedMeshIds = [7];
+            light.includedOnlyMeshIds = [8, 9];
+            (light as { visible: boolean }).visible = false;
+
+            const clone = cloneTransformNode(light) as LightBase;
+
+            expect(clone).not.toBe(light);
+            expect(clone.lightType).toBe(light.lightType);
+            expect(clone.name).toBe(`${light.lightType}-light_clone`);
+            expect([clone.position.x, clone.position.y, clone.position.z]).toEqual([4, 5, 6]);
+            expect(clone.rotationQuaternion.y).toBeCloseTo(Math.sin(0.25));
+            expect([clone.scaling.x, clone.scaling.y, clone.scaling.z]).toEqual([2, 3, 4]);
+            expect(clone.visible).toBe(false);
+            expect(clone.metadata).toBe(metadata);
+            expect(clone.excludedMeshIds).toEqual([7]);
+            expect(clone.includedOnlyMeshIds).toEqual([8, 9]);
+        }
+    });
+
+    it("keeps identity defaults when TRS arguments are omitted", () => {
+        const node = createTransformNode("defaults", 1);
+        expect([node.position.x, node.position.y, node.position.z]).toEqual([1, 0, 0]);
+        expect([node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w]).toEqual([0, 0, 0, 1]);
+        expect([node.scaling.x, node.scaling.y, node.scaling.z]).toEqual([1, 1, 1]);
+    });
+
     it("refreshes the scene light UBO after parent motion", () => {
         const writeBuffer = vi.fn();
         const engine = {
