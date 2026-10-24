@@ -321,7 +321,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Solid Particle System                   |  —   | ✅  |                                                                                                                                                        |
 | Fluid Rendering                         |  —   | ✅  |                                                                                                                                                        |
 | Bones IK                                |  —   | ✅  |                                                                                                                                                        |
-| Navigation Mesh                         |  ⚡  | ✅  | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)                                                   |
+| Navigation Mesh                         |  ⚡  | ✅  | Recast V2 with crowds, obstacles, links and raycasts (Scenes 170-175); optional pure-JS Navcat queries, solo generation, links and debug (Navcat demo) |
 | Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind WebGPU device-loss recovery via enableDeviceLost*Recovery APIs (Scene 164: Scene)                                                      |
 | OffscreenCanvas / Worker Rendering      |  ✅  | ✅  | Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)                                               |
 | Text Rendering                          |  ✅  | ✅  | GPU text renderer with layered layout + editor (Scenes 180-181)                                                                                        |

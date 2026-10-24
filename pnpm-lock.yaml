@@ -189,6 +189,12 @@ importers:
       manifold-3d:
         specifier: 3.5.4
         version: 3.5.4(@gltf-transform/core@4.3.0)(@gltf-transform/extensions@4.3.0)(@gltf-transform/functions@4.3.0(@types/node@26.6.3))(esbuild-wasm@0.28.2)
+      mathcat:
+        specifier: 0.0.12
+        version: 0.0.12
+      navcat:
+        specifier: 0.4.1
+        version: 0.4.1
       text-shaper:
         specifier: ^0.1.28
         version: 0.1.28
@@ -2884,6 +2890,9 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
+  mathcat@0.0.12:
+    resolution: {integrity: sha512-gUBe1U/sh7JQ+aSMJDiLG++B3t5rSGAYdEIqPBSEEFUHK9mAcC7yE0f7RZ1SjXI57bDLSYJyrA74XQPT1tJxoA==}
+
   mdurl@2.1.0:
     resolution: {integrity: sha512-1+HBaOx0zi/dQWht8rNv9MYf9qqpqL/kxI0hXImU6Y547zM6Sni8BQibt7ifgMcYtQg41ao3Ivd6cnSM86inpg==}
 
@@ -3020,6 +3029,14 @@ packages:
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
+
+  navcat@0.4.1:
+    resolution: {integrity: sha512-dMsXyMh06V5MZaDx93C+xO9GnGIU6TczsnNI8zD41EL1ybOxHgk0uqVTiVZel8cmysR2E+hJA4bK1EOTSM+S6Q==}
+    peerDependencies:
+      three: '>=0.180.0'
+    peerDependenciesMeta:
+      three:
+        optional: true
 
   ndarray-lanczos@0.3.0:
     resolution: {integrity: sha512-5kBmmG3Zvyj77qxIAC4QFLKuYdDIBJwCG+DukT6jQHNa1Ft74/hPH1z5mbQXeHBt8yvGPBGVrr3wEOdJPYYZYg==}
@@ -6788,6 +6805,8 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  mathcat@0.0.12: {}
+
   mdurl@2.1.0: {}
 
   merge-stream@2.0.0: {}
@@ -6862,6 +6881,10 @@ snapshots:
   nanoid@3.3.18: {}
 
   natural-compare@1.4.0: {}
+
+  navcat@0.4.1:
+    dependencies:
+      mathcat: 0.0.12
 
   ndarray-lanczos@0.3.0:
     dependencies:
