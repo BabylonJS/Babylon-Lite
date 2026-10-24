@@ -53,6 +53,44 @@ function makeEngine() {
 }
 
 describe("device-lost shared geometry recovery", () => {
+    it("leaves a retired cache invalid after an upload failure and retries with a fresh owner set", () => {
+        const oldGpu = makeGpu();
+        _installSharedRecovery(oldGpu);
+        const recover = oldGpu._recoverShared!;
+        _installSharedRecovery(oldGpu);
+        expect(oldGpu._recoverShared).toBe(recover);
+        const first = makeMesh(oldGpu);
+        const second = makeMesh(oldGpu);
+        const third = makeMesh(oldGpu);
+        const { engine } = makeEngine();
+        const retired = makeGpu();
+        const live = makeGpu();
+        const upload = vi.fn<(engine: EngineContext, mesh: Mesh) => MeshGPU>();
+        upload.mockReturnValueOnce(retired).mockImplementationOnce(() => {
+            throw new Error("controlled upload failure");
+        });
+        first._gpu = recover(engine, first, upload);
+        disposeMeshGpu(first);
+        expect(() => recover(engine, second, upload)).toThrow("controlled upload failure");
+        for (const buffer of [retired.positionBuffer, retired.normalBuffer, retired.uvBuffer, retired.indexBuffer]) {
+            expect(buffer.destroy).toHaveBeenCalledTimes(1);
+        }
+        upload.mockReturnValue(live);
+        second._gpu = recover(engine, second, upload);
+        third._gpu = recover(engine, third, upload);
+        expect(second._gpu).toBe(live);
+        expect(third._gpu).toBe(live);
+        expect(live._refCount).toBe(2);
+        expect(upload).toHaveBeenCalledTimes(3);
+        expect(recover(engine, second, upload)).toBe(live);
+        expect(live._refCount).toBe(2);
+        disposeMeshGpu(second);
+        disposeMeshGpu(third);
+        for (const buffer of [live.positionBuffer, live.normalBuffer, live.uvBuffer, live.indexBuffer]) {
+            expect(buffer.destroy).toHaveBeenCalledTimes(1);
+        }
+    });
+
     it("rebuilds one MeshGPU and retains it for every existing owner", async () => {
         const oldGpu = makeGpu();
         _installSharedRecovery(oldGpu);

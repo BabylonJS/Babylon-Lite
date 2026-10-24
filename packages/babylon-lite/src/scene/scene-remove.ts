@@ -1,7 +1,8 @@
 import { _hasSceneChangeHook, _notifySceneChange, _runSceneChange } from "./scene-core.js";
-import type { addToScene, SceneContext, SceneEntity } from "./scene-core.js";
-import { unregisterMeshScene } from "./mesh-scene-registry.js";
+import type { addToScene, SceneContext, SceneEntity, SceneMeshGroup } from "./scene-core.js";
+import { unregisterMeshScene, hasMeshRetention, enqueueMaterialSwap } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { MeshGroupBuilder, MeshGroupBuildResult, Renderable } from "../render/renderable.js";
 import type { LightBase } from "../light/types.js";
 import type { Camera } from "../camera/camera.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
@@ -24,7 +25,9 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
  *  retired permanently and `addToScene` throws if it is added back: its buffers may be gone, and
  *  releasing a second claim it no longer holds would free buffers a surviving sibling still
  *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
- *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, call
+ *  re-adding it there is fine. An explicit `retainMeshResources` lease opts out of last-scene
+ *  disposal until the lease is released. To remove only membership without changing parenting,
+ *  use `detachMeshFromScene` with that lease. To hide a mesh temporarily, call
  *  `setMeshVisible(mesh, false)` instead of removing it.
  *
  *  Standalone function for tree-shaking — only included when actually used. */
@@ -121,7 +124,7 @@ interface DetachablePacket {
 }
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
-/** Retire a mesh's GPU teardown, but take its DRAW-VISIBILITY bookkeeping out synchronously first.
+/** Take a mesh's DRAW-VISIBILITY bookkeeping out synchronously, without taking GPU teardown ownership.
  *
  *  A renderable that merges several meshes sharing one material has `mesh: undefined`, so the
  *  synchronous `_renderables` sweep in `removeMeshFromScene` cannot find it. Its packet keeps being
@@ -129,7 +132,7 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
  *  visible until the retirement fence resolves — a frame or more later. Marking the packet disposed
  *  and unlinking it from its owner list is pure CPU bookkeeping and safe to do mid-frame; only the
  *  actual GPU destruction has to wait. Twin of the detach in `scene-runtime-mesh-build.ts`. */
-function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
+function evictMeshPackets(scene: SceneContext, teardown: (() => void)[]): void {
     for (const dispose of teardown) {
         spliceOut(scene._disposables, dispose);
         const packet = (dispose as DetachableDisposer).p;
@@ -153,11 +156,125 @@ function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void
             }
         }
     }
+}
+
+function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
+    evictMeshPackets(scene, teardown);
     retireSceneGpu(scene, () => {
         for (const fn of teardown) {
             fn();
         }
     });
+}
+
+/** Builds of one boot or recovery group before membership that keeps changing is handed to the swap drain. */
+const MAX_GROUP_BUILD_ATTEMPTS = 3;
+
+/** Drop what an in-flight group build produced for a mesh that was removed or detached while the build
+ *  awaited: removal found nothing to tear down then, and the builder installed it afterwards. */
+function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable[]): void {
+    const teardown = scene._meshDisposables.get(mesh);
+    if (teardown) {
+        scene._meshDisposables.delete(mesh);
+        retireMeshTeardown(scene, teardown);
+    }
+    for (let i = renderables.length; i--;) {
+        if (renderables[i]!.mesh === mesh) {
+            renderables.splice(i, 1);
+        }
+    }
+}
+
+/** Confirm or revalidate a settled boot or recovery group build against the group's current membership.
+ *
+ *  An unchanged group is confirmed by one linear comparison. Otherwise only a member that left is fixed up
+ *  in place, by evicting its per-mesh output, and only a mesh that joined is deferred to the swap drain. The
+ *  build is obsolete, and is retried against the group's current sequence, when:
+ *  - the surviving members changed relative order (a detach and reinsertion): transparent ties follow
+ *    admission order, so the output must match a fresh build of the current sequence;
+ *  - a member left and the output merged it into a renderable without a `mesh` back-reference, which would
+ *    keep drawing it; or
+ *  - a member left and the build threw: it may have read a material the mesh was given after leaving,
+ *    which can belong to another family. A failure that persists without a membership change is rethrown.
+ *
+ *  Per-mesh resources of an obsolete build are retired only after the replacement build (make-before-break,
+ *  so shared textures it re-acquires never reach a zero refcount). Scene-level resources an obsolete build
+ *  registered stay owned by the scene until it is disposed. A group that empties is abandoned and dropped,
+ *  as is one that keeps changing: its remaining members are queued for the material-swap drain, which builds
+ *  a group without a completed build through the runtime path. */
+async function settleGroupBuild(
+    scene: SceneContext,
+    build: MeshGroupBuilder,
+    group: SceneMeshGroup,
+    members: Mesh[],
+    pending: Promise<MeshGroupBuildResult>
+): Promise<MeshGroupBuildResult | undefined> {
+    if (group.length === members.length && group.every((mesh, i) => mesh === members[i])) {
+        return pending;
+    }
+    let result: MeshGroupBuildResult | undefined;
+    let error: unknown;
+    try {
+        result = await pending;
+    } catch (thrown) {
+        error = thrown;
+    }
+    const superseded: (() => void)[] = [];
+    try {
+        for (let attempt = 1; ; attempt++) {
+            const captured = new Set(members);
+            const live = new Set(group);
+            const surviving = members.filter((mesh) => live.has(mesh));
+            let next = 0;
+            const reordered = group.some((mesh) => captured.has(mesh) && mesh !== surviving[next++]);
+            const left = surviving.length !== members.length;
+            if (!reordered && !(left && (!result || result.renderables.some((renderable) => !renderable.mesh)))) {
+                if (!result) {
+                    throw error;
+                }
+                for (const mesh of members) {
+                    if (!live.has(mesh)) {
+                        evictBuiltMesh(scene, mesh, result.renderables);
+                    }
+                }
+                for (const mesh of group) {
+                    if (!captured.has(mesh)) {
+                        enqueueMaterialSwap(scene, mesh);
+                    }
+                }
+                return result;
+            }
+            for (const mesh of members) {
+                const teardown = scene._meshDisposables.get(mesh);
+                if (teardown) {
+                    scene._meshDisposables.delete(mesh);
+                    superseded.push(...teardown);
+                }
+            }
+            if (scene._z || !group.length || attempt >= MAX_GROUP_BUILD_ATTEMPTS) {
+                if (!group.length && scene._groups.get(build) === group) {
+                    scene._groups.delete(build);
+                }
+                if (!scene._z) {
+                    for (const mesh of group) {
+                        enqueueMaterialSwap(scene, mesh);
+                    }
+                }
+                return undefined;
+            }
+            members = group.slice();
+            result = undefined;
+            try {
+                result = await build(scene, members);
+            } catch (thrown) {
+                error = thrown;
+            }
+        }
+    } finally {
+        if (superseded.length) {
+            retireMeshTeardown(scene, superseded);
+        }
+    }
 }
 
 /** Run GPU teardown only after the next frame submission has drained.
@@ -298,9 +415,10 @@ function removeChildren(scene: SceneContext, node: SceneNode): void {
     }
 }
 
-/** Remove a mesh from the scene and destroy its GPU resources.
+/** @internal Remove mesh membership and release unretained GPU ownership.
  *  Internal helper — `removeFromScene` dispatches here for the Mesh case. */
-function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
+export function removeMeshFromScene(scene: SceneContext, mesh: Mesh, preserveParent = false): void {
+    scene._settleGroupBuild ??= settleGroupBuild;
     scene._meshMaterialChange?.(mesh);
     // Notify tasks that retain their own per-mesh bindings before this mesh's
     // UBOs and shared geometry are destroyed below. The hook is optional so core
@@ -322,15 +440,23 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
         teardown.push(...fns);
         scene._meshDisposables.delete(mesh);
     }
-    const mi2 = scene.meshes.indexOf(mesh);
-    if (mi2 >= 0) {
-        scene.meshes.splice(mi2, 1);
+    const pending = scene._runtimeBuilds?.pendingDisposers(mesh);
+    if (pending && pending !== fns) {
+        // The in-flight build still owns exactly-once GPU teardown; remove only its live packets now.
+        evictMeshPackets(scene, pending);
         didMutate = true;
     }
-    const i = scene._renderables.findIndex((r) => r.mesh === mesh);
-    if (i >= 0) {
-        scene._renderables.splice(i, 1);
-        didMutate = true;
+    for (let i = scene.meshes.length; i-- > 0;) {
+        if (scene.meshes[i] === mesh) {
+            scene.meshes.splice(i, 1);
+            didMutate = true;
+        }
+    }
+    for (let i = scene._renderables.length; i-- > 0;) {
+        if (scene._renderables[i]!.mesh === mesh) {
+            scene._renderables.splice(i, 1);
+            didMutate = true;
+        }
     }
     // Invalidate any auto-mirroring render task so it rebuilds its binding lists +
     // cached opaque bundle without this mesh BEFORE its GPU buffers (vertex data +
@@ -348,9 +474,18 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     // the group's tracked output (`o`): runtime builds append to it, and a retired renderable left
     // there keeps its bind groups and packets reachable until the scene is disposed.
     for (const group of scene._groups.values()) {
-        const gi = group.indexOf(mesh);
-        if (gi >= 0) {
-            group.splice(gi, 1);
+        for (let gi = group.length; gi-- > 0;) {
+            if (group[gi] === mesh) {
+                group.splice(gi, 1);
+            }
+        }
+        const output = group.o;
+        if (output) {
+            for (let oi = output.length; oi-- > 0;) {
+                if (output[oi]!.mesh === mesh) {
+                    output.splice(oi, 1);
+                }
+            }
         }
         const o = group.o;
         if (o) {
@@ -371,7 +506,9 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     // retaining/traversing this disposed child on every invalidation. (The parent→
     // child reference is new with the push model; reparent already deregisters, but
     // removal does not go through the parent setter otherwise.)
-    mesh.parent = null;
+    if (!preserveParent) {
+        mesh.parent = null;
+    }
     // Frame-graph eviction: the scene always has a frame graph (created in
     // createSceneContext). Walk its render-pass tasks and drop any binding whose
     // source mesh matches. RenderTasks are identified by carrying `_renderables`
@@ -388,7 +525,11 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     // idempotent via `mesh._disposed`, so a repeat removal queued before this one drains cannot
     // release a shared resource twice.
     if (unregisterMeshScene(scene, mesh)) {
-        teardown.push(() => disposeMeshGpu(mesh));
+        teardown.push(() => {
+            if (!hasMeshRetention(mesh)) {
+                disposeMeshGpu(mesh);
+            }
+        });
     }
     if (teardown.length) {
         retireMeshTeardown(scene, teardown);

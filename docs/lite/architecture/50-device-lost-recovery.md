@@ -85,6 +85,12 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
+Mesh recovery rechecks terminal mesh disposal after each awaited shared-geometry,
+skeleton, and morph factory import, before allocating or assigning replacement
+resources. A detached mesh whose final lease retires during an import is skipped;
+its already-uploaded geometry is released by the normal retirement path, and no
+deformation resources are allocated for the disposed identity.
+
 Automatic reconstruction of storage-backed meshes and writable/vertex/index/indirect storage is not part
 of this integration. Their recovery-specific registry, retained sources, and handle-refresh
 pass have been removed pending the recovery redesign. The existing CPU-backed storage
@@ -295,6 +301,14 @@ kind. A rebuilt `GPUTexture` starts unowned, so recovery reads how many owners
 the outgoing texture had and tops the replacement up to that number. Without it
 the first consumer to bind and then unbind a rebuilt texture destroys it while
 the application still holds the wrapper.
+
+The count is queued, together with the outgoing handle, before the rebuild's
+first await rather than after the replacement is installed. A url rebuild awaits
+a network fetch, and mesh retention can acquire or release lease claims during
+it. Queuing early lets those changes adjust the carried total, and matching on the
+outgoing handle also covers sibling wrappers that still point at it before
+adoption. A total released to zero, with no handler claim left on the
+replacement, retires the replacement at settlement instead of leaking it.
 
 The top-up is deferred until every per-context handler has run, and that is what
 makes the count correct rather than inflated. Recovery re-establishes part of the

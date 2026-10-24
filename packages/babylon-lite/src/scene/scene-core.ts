@@ -11,7 +11,7 @@ import type { AnimationGroup } from "../animation/animation-group.js";
 import { tickAnimation } from "../animation/animation-tick.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
-import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
+import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder, MeshGroupBuildResult } from "../render/renderable.js";
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
@@ -248,6 +248,17 @@ export interface SceneContext extends RenderingContext {
     /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
      *  Undefined material detaches a mesh's main-material usage. */
     _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
+    /** @internal Installed by mesh removal, the only path that drops or reorders a boot or recovery group's
+     *  members while its build awaits: confirms an unchanged group or revalidates the settled `pending` build
+     *  against the group's current sequence. Resolves `undefined` when the build was abandoned (see
+     *  {@link _buildMeshGroup}). */
+    _settleGroupBuild?: (
+        scene: SceneContext,
+        build: MeshGroupBuilder,
+        group: SceneMeshGroup,
+        members: Mesh[],
+        pending: Promise<MeshGroupBuildResult>
+    ) => Promise<MeshGroupBuildResult | undefined>;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -451,6 +462,32 @@ export interface DeferredSceneRenderables {
     dispose?: () => void;
 }
 
+/**
+ * @internal Build a material group from a membership snapshot. Removal and retained detach splice the live
+ * group while a builder awaits its lazy imports, so builders get a stable list. Once the build settles,
+ * removal's settler (installed only when removal is used) confirms an unchanged group with one linear
+ * comparison or revalidates the build against the current sequence. Without it, meshes that joined meanwhile
+ * are queued for the material-swap drain.
+ * Resolves `undefined` when the build was abandoned: every member left, or the membership kept changing and
+ * the remaining members were handed to the material-swap drain.
+ */
+export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
+    const members = group.slice();
+    const pending = Promise.resolve(build(scene, members));
+    // Wait without throwing: a failure caused by a membership change is the settler's to retry.
+    await pending.catch(() => 0);
+    if (scene._settleGroupBuild) {
+        return scene._settleGroupBuild(scene, build, group, members, pending);
+    }
+    const captured = new Set(members);
+    for (const mesh of group) {
+        if (!captured.has(mesh)) {
+            enqueueMaterialSwap(scene, mesh);
+        }
+    }
+    return pending;
+}
+
 /** @internal Register optional scene-hosted render work without teaching `addToScene` about the feature. */
 export function addDeferredSceneRenderables(
     scene: SceneContext,
@@ -489,53 +526,55 @@ export function addToScene(scene: SceneContext, entity: SceneEntity): void {
         return;
     }
     const ctx = scene as SceneContext;
-    // AssetContainer from loadGltf / loadBabylon — process each field present
-    if ("entities" in entity) {
-        const result = entity as AssetContainer;
-        for (const e of result.entities) {
-            addToScene(scene, e);
+    if (ctx.surface.engine._admitSceneEntity?.(ctx, entity) !== false) {
+        // AssetContainer from loadGltf / loadBabylon — process each field present
+        if ("entities" in entity) {
+            const result = entity as AssetContainer;
+            for (const e of result.entities) {
+                addToScene(scene, e);
+            }
+            if (result.clearColor) {
+                ctx.clearColor = result.clearColor;
+            }
+            if (result.camera && !ctx.camera) {
+                ctx.camera = result.camera;
+            }
+            if (result.animationGroups?.length) {
+                const engine = ctx.surface.engine;
+                const groups = result.animationGroups;
+                ctx.animationGroups.push(...groups);
+                const hook = (deltaMs: number): void => {
+                    for (const g of groups) {
+                        tickAnimation(g, deltaMs, engine);
+                    }
+                };
+                result._beforeRenderHook = hook;
+                ctx._beforeRender.push(hook);
+            }
+            // Feature-owned scene wiring runs synchronously before registerScene() builds
+            // renderables. Lazy features also own any cleanup registration they require.
+            result._sceneSetup?.(ctx, result);
+            _notifySceneChange(ctx, entity, "added");
+            return;
         }
-        if (result.clearColor) {
-            ctx.clearColor = result.clearColor;
+        if ("_gpu" in entity && "material" in entity) {
+            const mesh = entity as unknown as Mesh;
+            // Register BEFORE mutating scene state: registering a disposed mesh throws, and the
+            // scene must be left untouched when it does.
+            registerMeshScene(ctx, mesh);
+            ctx.meshes.push(mesh);
+            joinMaterialGroup(ctx, mesh);
+            ctx._meshMaterialChange?.(mesh, mesh.material);
+        } else if ("lightType" in entity) {
+            ctx.lights.push(entity as LightBase);
+        } else if ("fov" in entity) {
+            ctx.camera = entity as Camera;
         }
-        if (result.camera && !ctx.camera) {
-            ctx.camera = result.camera;
-        }
-        if (result.animationGroups?.length) {
-            const engine = ctx.surface.engine;
-            const groups = result.animationGroups;
-            ctx.animationGroups.push(...groups);
-            const hook = (deltaMs: number): void => {
-                for (const g of groups) {
-                    tickAnimation(g, deltaMs, engine);
-                }
-            };
-            result._beforeRenderHook = hook;
-            ctx._beforeRender.push(hook);
-        }
-        // Feature-owned scene wiring runs synchronously before registerScene() builds
-        // renderables. Lazy features also own any cleanup registration they require.
-        result._sceneSetup?.(ctx, result);
         _notifySceneChange(ctx, entity, "added");
-        return;
     }
-    if ("_gpu" in entity && "material" in entity) {
-        const mesh = entity as unknown as Mesh;
-        // Register BEFORE mutating scene state: registering a disposed mesh throws, and the
-        // scene must be left untouched when it does.
-        registerMeshScene(ctx, mesh);
-        ctx.meshes.push(mesh);
-        joinMaterialGroup(ctx, mesh);
-        ctx._meshMaterialChange?.(mesh, mesh.material);
-    } else if ("lightType" in entity) {
-        ctx.lights.push(entity as LightBase);
-    } else if ("fov" in entity) {
-        ctx.camera = entity as Camera;
-    }
-    _notifySceneChange(ctx, entity, "added");
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
-    if (kids?.length) {
+    if (kids) {
         for (const child of kids) {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
             addToScene(scene, child as SceneEntity);
@@ -556,19 +595,23 @@ function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
         ctx._groups.set(build, group);
         if (!ctx._built) {
             ctx._deferredBuilders.push(async () => {
-                // Every mesh left this group before boot (re-materialed into another family or removed). Builders
-                // require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
+                // Every mesh left this group before boot (re-materialed into another family, removed, or detached).
+                // Builders require at least one mesh, so drop the group unbuilt; a later join creates a fresh one.
                 if (!group![0]) {
                     ctx._groups.delete(build);
                     return;
                 }
-                const result = await build(ctx, group!);
-                ctx._renderables.push(...result.renderables);
-                group!.o = result.renderables;
-                if (result.updater) {
-                    ctx._uniformUpdaters.push(result.updater);
+                const result = await _buildMeshGroup(ctx, build, group!);
+                // Undefined when the build was abandoned: removal's settler dropped an emptied group and queued
+                // any remaining members for the swap drain.
+                if (result) {
+                    ctx._renderables.push(...result.renderables);
+                    group!.o = result.renderables;
+                    if (result.updater) {
+                        ctx._uniformUpdaters.push(result.updater);
+                    }
+                    group!.r = result.rebuildSingle;
                 }
-                group!.r = result.rebuildSingle;
             });
         }
     }

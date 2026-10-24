@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
     createHavokWorld,
+    createSceneContext,
     createTransformNode,
     disposePhysics,
     PhysicsConstraintType,
@@ -11,7 +12,7 @@ import {
     releasePhysicsShape,
     setPhysicsBodyTransform,
 } from "../../../packages/babylon-lite/src/index.js";
-import type { PhysicsWorld, SceneContext, Skeleton, Vec3 } from "../../../packages/babylon-lite/src/index.js";
+import type { EngineContext, PhysicsWorld, SurfaceContext, Skeleton, Vec3 } from "../../../packages/babylon-lite/src/index.js";
 import { createBunnyRagdoll, syncBunnyPose } from "../../../lab/lite/src/demos/playroom/ragdoll.js";
 import type { BunnyRigMetadata, PlayroomAssets, WorldState } from "../../../lab/lite/src/demos/playroom/types.js";
 import source from "../fixtures/playroom-source-ragdoll.json";
@@ -38,8 +39,14 @@ function vector(value: Vec3): number[] {
     return [value.x, value.y, value.z];
 }
 
+function stub<T extends object>(value: Partial<T>): T {
+    return value as T;
+}
+
 function fixture() {
-    const scene = { _beforeRender: [], fixedDeltaMs: 1000 / 60 } as unknown as SceneContext;
+    const surface = stub<SurfaceContext>({ engine: stub<EngineContext>({}) });
+    const scene = createSceneContext(surface, { defaultRenderTask: false });
+    scene.fixedDeltaMs = 1000 / 60;
     const physics = createHavokWorld(scene, hknp);
     const bones = rig.joints.map((joint, index) => ({ name: joint.name, _nodeIndex: index }));
     const skeleton: Skeleton = {

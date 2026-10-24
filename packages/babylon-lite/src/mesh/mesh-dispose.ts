@@ -49,6 +49,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
     _retirementObserver?.(mesh);
     const g = mesh._gpu;
     if (release(g)) {
+        g._refCount = 0;
         if (_borrowAwareDisposer) {
             _borrowAwareDisposer(g, disposeVertexBuffers);
         } else {
