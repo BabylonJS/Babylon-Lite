@@ -159,8 +159,10 @@ describe("light SceneNode parenting", () => {
             light.rotationQuaternion.set(0, Math.sin(0.25), 0, Math.cos(0.25));
             light.scaling.set(2, 3, 4);
             light.metadata = metadata;
-            light.excludedMeshIds = [7];
-            light.includedOnlyMeshIds = [8, 9];
+            const excluded = new Set(["excluded"]);
+            const includedOnly = new Set(["a", "b"]);
+            light.excludedMeshIds = excluded;
+            light.includedOnlyMeshIds = includedOnly;
             (light as { visible: boolean }).visible = false;
 
             const clone = cloneTransformNode(light) as LightBase;
@@ -173,8 +175,8 @@ describe("light SceneNode parenting", () => {
             expect([clone.scaling.x, clone.scaling.y, clone.scaling.z]).toEqual([2, 3, 4]);
             expect(clone.visible).toBe(false);
             expect(clone.metadata).toBe(metadata);
-            expect(clone.excludedMeshIds).toEqual([7]);
-            expect(clone.includedOnlyMeshIds).toEqual([8, 9]);
+            expect(clone.excludedMeshIds).toBe(excluded);
+            expect(clone.includedOnlyMeshIds).toBe(includedOnly);
         }
     });
 
