@@ -24,13 +24,15 @@ export function _installMeshFeatureExtra(encode: (mesh: Mesh) => number): void {
     _meshFeatureExtra = encode;
 }
 
+/** @internal The tangent bit alone — side-effect free, unlike `_computeMeshFeatures` (see `_meshFeatureExtra`). */
+export function _meshTangentFeature(mesh: Mesh): number {
+    return mesh._gpu.tangentBuffer ? MSH_HAS_TANGENTS : 0;
+}
+
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
     const gpu = mesh._gpu;
-    let features = 0;
-    if (gpu.tangentBuffer) {
-        features |= MSH_HAS_TANGENTS;
-    }
+    let features = _meshTangentFeature(mesh);
     if (mesh.vat) {
         // Baked vertex animation: the VAT vertex path replaces live skinning (still uses the 8-bone
         // joints1 attribute flag when present), so don't also set MSH_HAS_SKELETON.

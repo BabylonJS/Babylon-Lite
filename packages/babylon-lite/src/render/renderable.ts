@@ -143,8 +143,9 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
-    /** @internal True when this build result captured gamma-albedo PBR support. */
-    _G?: boolean;
+    /** @internal Widening predicate of this build's rebuild closure: truthy for a mesh it cannot compose
+     *  (installed as the group's `_w` once committed). Omitted by builders whose closure handles every mesh. */
+    _w?: ((mesh: Mesh) => unknown) | null;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The scene stores it on its material group as `r`;
