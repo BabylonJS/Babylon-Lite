@@ -222,8 +222,6 @@ export interface GLSpriteRenderer {
     disableDepthWrite: boolean;
     /** Maximum sprites per draw, fixed at creation. */
     readonly capacity: number;
-    /** @internal The engine the renderer was created for. */
-    _engine: GLEngineContext;
     /** @internal The compiled sprite effect this renderer owns. */
     _effect: GLEffect;
     /** @internal Sprite VAO (attribute pointers + element binding). Null until
@@ -304,7 +302,6 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
         autoResetAlpha: options.autoResetAlpha ?? true,
         disableDepthWrite: options.disableDepthWrite ?? false,
         capacity,
-        _engine: engine,
         _effect: effect,
         _vao: null,
         _vbo: null,
@@ -316,10 +313,10 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
     };
 
     renderer._restore = (): void => {
-        buildSpriteBuffers(renderer);
+        buildSpriteBuffers(engine, renderer);
     };
     onContextRestored(engine, renderer._restore);
-    buildSpriteBuffers(renderer);
+    buildSpriteBuffers(engine, renderer);
     return renderer;
 }
 
@@ -334,6 +331,7 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  * {@link GLBlendMode.DISABLE} afterwards (matching Babylon's
  * `autoResetAlpha = true`), so a subsequent `drawEffect` is unaffected.
  *
+ * @param engine - The engine the renderer was created on.
  * @param renderer - The renderer to draw with.
  * @param sprites - The sprites to draw (only `isVisible !== false` are drawn;
  *  excess beyond `capacity` is ignored, matching Babylon).
@@ -343,13 +341,13 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  * @param projectionMatrix - Column-major 4x4 projection matrix.
  */
 export function renderSprites(
+    engine: GLEngineContext,
     renderer: GLSpriteRenderer,
     sprites: readonly GLSprite[],
     deltaTime: number,
     viewMatrix: Float32Array | number[],
     projectionMatrix: Float32Array | number[]
 ): void {
-    const engine = renderer._engine;
     if (engine._isLost || engine._disposed || renderer._disposed) {
         return;
     }
@@ -498,8 +496,14 @@ export function renderSprites(
 /** Swap the sprite-sheet texture (≙ Babylon assigning `SpriteRenderer.texture`
  *  after an async load). The cell size is unchanged — adjust `cellWidth` /
  *  `cellHeight` on the renderer directly if the new sheet differs. No-op when
- *  the renderer is disposed. */
-export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void {
+ *  the renderer is disposed.
+ *
+ *  @param engine - The engine the renderer was created on (taken for API
+ *   consistency; no GL call is made — the texture is bound at draw time).
+ *  @param renderer - The renderer to update.
+ *  @param texture - The new sprite-sheet texture. */
+export function setSpriteRendererTexture(engine: GLEngineContext, renderer: GLSpriteRenderer, texture: GLTexture): void {
+    void engine;
     if (renderer._disposed) {
         return;
     }
@@ -508,13 +512,15 @@ export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GL
 
 /** Release the renderer's VAO/VBO/IBO and the effect it owns, and unregister
  *  its context-restore handler. Idempotent. Does NOT dispose the texture — the
- *  consumer that supplied it owns its lifetime. */
-export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void {
+ *  consumer that supplied it owns its lifetime.
+ *
+ *  @param engine - The engine the renderer was created on.
+ *  @param renderer - The renderer to dispose. */
+export function disposeSpriteRenderer(engine: GLEngineContext, renderer: GLSpriteRenderer): void {
     if (renderer._disposed) {
         return;
     }
     renderer._disposed = true;
-    const engine = renderer._engine;
     offContextRestored(engine, renderer._restore);
     disposeEffect(engine, renderer._effect);
     if (!engine._isLost && !engine._disposed) {
@@ -550,8 +556,7 @@ export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void {
  *  Called from `createSpriteRenderer` and from the `webglcontextrestored`
  *  handler (the prior handles are dead per the WebGL spec — not deleted here).
  *  No-op when the context is lost/disposed. */
-function buildSpriteBuffers(renderer: GLSpriteRenderer): void {
-    const engine = renderer._engine;
+function buildSpriteBuffers(engine: GLEngineContext, renderer: GLSpriteRenderer): void {
     if (engine._isLost || engine._disposed) {
         return;
     }

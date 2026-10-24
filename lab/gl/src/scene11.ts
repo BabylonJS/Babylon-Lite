@@ -169,7 +169,7 @@ runRenderLoop(engine, () => {
         opZFail: gl.KEEP,
         opZPass: gl.REPLACE,
     });
-    applyEffectWrapper(discWrapper);
+    applyEffectWrapper(engine, discWrapper);
     drawEffect(engine);
 
     // ── PASS 2: draw the gradient only where stencil == 1 ──
@@ -184,7 +184,7 @@ runRenderLoop(engine, () => {
         opZFail: gl.KEEP,
         opZPass: gl.KEEP,
     });
-    applyEffectWrapper(gradientWrapper);
+    applyEffectWrapper(engine, gradientWrapper);
     setEffectFloat(engine, gradientWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
@@ -192,7 +192,7 @@ runRenderLoop(engine, () => {
     bindRenderTarget(engine, null); // default framebuffer + canvas viewport
     setStencilState(engine, { test: false });
     setColorMask(engine, true, true, true, true);
-    applyEffectWrapper(compositeWrapper);
+    applyEffectWrapper(engine, compositeWrapper);
     setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
     setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);

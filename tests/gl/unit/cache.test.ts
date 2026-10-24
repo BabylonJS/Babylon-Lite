@@ -4,6 +4,7 @@ import {
     bindTexture,
     createEffect,
     createEffectWrapper,
+    createEffectWrapperFromEffect,
     createRawTexture,
     createGLEngine,
     disposeEffect,
@@ -253,9 +254,9 @@ describe("lite-gl cache: program + viewport + quad", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
         mock.clear();
-        applyEffectWrapper(wrapper);
-        applyEffectWrapper(wrapper);
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
+        applyEffectWrapper(engine, wrapper);
+        applyEffectWrapper(engine, wrapper);
         // Quad VAO created on the first call only.
         expect(mock.count("createVertexArray")).toBe(1);
         // The wrapper's program is bound once, then cached.
@@ -265,9 +266,9 @@ describe("lite-gl cache: program + viewport + quad", () => {
     it("useProgram is cached — same program swap is a no-op", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         mock.clear();
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         expect(mock.count("useProgram")).toBe(0);
     });
 });
@@ -407,11 +408,11 @@ describe("lite-gl cache: wipeGLStateCache", () => {
     it("wipeGLStateCache re-binds the program but PRESERVES the shared quad (no rebuild)", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
-        applyEffectWrapper(wrapper); // builds the quad VAO + binds the program once
+        applyEffectWrapper(engine, wrapper); // builds the quad VAO + binds the program once
         expect(mock.count("createVertexArray")).toBe(1);
         mock.clear();
         wipeGLStateCache(engine);
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         // Program binding cache was wiped → re-issued …
         expect(mock.count("useProgram")).toBe(1);
         // … but the owned quad GL objects survive → NOT recreated.
@@ -472,14 +473,14 @@ describe("lite-gl: context loss / restore", () => {
             samplerNames: ["s0", "s1"],
         });
         expect(isEffectReady(engine, wrapper.effect)).toBe(true);
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         const vaosBefore = mock.count("createVertexArray");
         fireLost(canvas);
         fireRestored(canvas);
         mock.clear();
         // Restart the cycle
         expect(isEffectReady(engine, wrapper.effect)).toBe(true);
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         const vaosAfter = vaosBefore + mock.count("createVertexArray");
         expect(vaosAfter).toBe(vaosBefore + 1); // exactly one new VAO
         // sampler1i should have been re-issued exactly once per declared sampler
@@ -507,7 +508,7 @@ describe("lite-gl: effect wrapper ownership", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
         mock.clear();
-        disposeEffectWrapper(wrapper);
+        disposeEffectWrapper(engine, wrapper);
         expect(mock.count("deleteProgram")).toBe(1);
         expect(wrapper.effect._disposed).toBe(true);
     });
@@ -516,20 +517,89 @@ describe("lite-gl: effect wrapper ownership", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
         mock.clear();
-        disposeEffectWrapper(wrapper);
-        disposeEffectWrapper(wrapper);
-        disposeEffectWrapper(wrapper);
+        disposeEffectWrapper(engine, wrapper);
+        disposeEffectWrapper(engine, wrapper);
+        disposeEffectWrapper(engine, wrapper);
         expect(mock.count("deleteProgram")).toBe(1);
     });
 
     it("applyEffectWrapper is a no-op after the wrapper is disposed", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
-        disposeEffectWrapper(wrapper);
+        disposeEffectWrapper(engine, wrapper);
         mock.clear();
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         expect(mock.count("createVertexArray")).toBe(0);
         expect(mock.count("useProgram")).toBe(0);
+    });
+
+    it("applyEffectWrapper returns false and binds nothing while the effect is still linking (#82)", () => {
+        const mock = createMockGL();
+        mock.setParallelComplete(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        expect(mock.count("createVertexArray")).toBe(0);
+        mock.setParallelComplete(true);
+        expect(applyEffectWrapper(engine, wrapper)).toBe(true);
+        expect(wrapper.effect.isReady).toBe(true);
+        expect(engine._state.currentProgram).toBe(wrapper.effect.program);
+    });
+
+    it("applyEffectWrapper returns false for an effect that failed to link (#82)", () => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const mock = createMockGL();
+        mock.setLinkSuccess(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        vi.restoreAllMocks();
+    });
+
+    it("applyEffectWrapper binds nothing when a ready callback disposes the wrapper or engine (#82)", () => {
+        for (const disposeEngine of [false, true]) {
+            const mock = createMockGL();
+            mock.setParallelComplete(false);
+            const engine = createGLEngine(createMockCanvas(mock));
+            const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+            executeWhenCompiled(engine, wrapper.effect, () => {
+                if (disposeEngine) {
+                    disposeGLEngine(engine);
+                } else {
+                    disposeEffectWrapper(engine, wrapper);
+                }
+            });
+            mock.setParallelComplete(true);
+            mock.clear();
+            expect(applyEffectWrapper(engine, wrapper)).toBe(false);
+            expect(mock.count("createVertexArray")).toBe(0);
+            expect(mock.count("bindVertexArray")).toBe(0);
+        }
+    });
+
+    it("createEffectWrapperFromEffect wraps an existing effect with its own reference (#82)", () => {
+        const { mock, engine, effect } = makeReadyEffect();
+        mock.clear();
+        const wrapper = createEffectWrapperFromEffect(engine, effect);
+        expect(wrapper.effect).toBe(effect);
+        expect(wrapper.name).toBe("test");
+        expect(mock.count("createProgram")).toBe(0);
+        expect(applyEffectWrapper(engine, wrapper)).toBe(true);
+        disposeEffectWrapper(engine, wrapper);
+        expect(mock.count("deleteProgram")).toBe(0);
+        expect(effect._disposed).toBe(false);
+        disposeEffect(engine, effect);
+        expect(mock.count("deleteProgram")).toBe(1);
+    });
+
+    it("createEffectWrapperFromEffect rejects a disposed effect (#82)", () => {
+        const { engine, effect } = makeReadyEffect();
+        disposeEffect(engine, effect);
+        expect(() => createEffectWrapperFromEffect(engine, effect, "late")).toThrow(/disposed/);
     });
 
     it("createEffectWrapper defaults to the built-in fullscreen vertex shader", () => {

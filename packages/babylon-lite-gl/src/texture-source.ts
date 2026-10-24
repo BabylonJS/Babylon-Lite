@@ -29,10 +29,9 @@ export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internal
  * `onContextRestored` callback. This function never closes a bitmap or video
  * frame.
  *
- * Restoration replays level 0 and the sampling parameters only. When using a
- * mipmapped `minFilter`, call `generateTextureMipMaps` after creation and
- * again from an `onContextRestored` callback, otherwise the restored texture
- * is mipmap-incomplete and samples black.
+ * Restoration replays level 0 and the sampling parameters. When using a
+ * mipmapped `minFilter`, call `generateTextureMipMaps` once after creation:
+ * the mip intent is retained, so restoration rebuilds the chain too.
  *
  * WebGL ignores unpack flip/premultiplication for `ImageBitmap`; select
  * `imageOrientation` / `premultiplyAlpha` when decoding those sources instead.

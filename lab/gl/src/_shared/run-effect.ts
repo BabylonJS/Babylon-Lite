@@ -77,7 +77,7 @@ export function runFullscreenEffect(opts: FullscreenEffectOptions): void {
         }
         resizeGLEngine(engine);
         setViewport(engine);
-        applyEffectWrapper(wrapper);
+        applyEffectWrapper(engine, wrapper);
         // Frozen capture pins uTime to seekTime; otherwise advance on wall clock.
         const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
         setEffectFloat(engine, effect, "uTime", uTime);

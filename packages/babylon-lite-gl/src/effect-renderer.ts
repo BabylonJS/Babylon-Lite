@@ -1,5 +1,5 @@
 import type { GLEngineContext } from "./context.js";
-import { createEffect, disposeEffect, type GLEffect, useEffect } from "./effect.js";
+import { createEffect, disposeEffect, type GLEffect, isEffectReady, useEffect } from "./effect.js";
 import { applyGLStates } from "./apply-states.js";
 
 /** Built-in fullscreen-quad vertex shader, used when `GLEffectWrapperOptions`
@@ -39,9 +39,9 @@ export interface GLEffectWrapperOptions {
 }
 
 /** A reusable fullscreen effect that compiles and OWNS its `GLEffect` — the
- *  WebGL counterpart of lite's `EffectWrapper`. The wrapper retains the engine
- *  it was created for, so `disposeEffectWrapper` / `applyEffectWrapper` take
- *  only the wrapper. */
+ *  WebGL counterpart of lite's `EffectWrapper`. Like every lite-gl function,
+ *  the wrapper functions take the owning engine first:
+ *  `applyEffectWrapper(engine, wrapper)` / `disposeEffectWrapper(engine, wrapper)`. */
 export interface GLEffectWrapper {
     /** Name alias for the wrapper (and its effect). */
     readonly name: string;
@@ -49,8 +49,6 @@ export interface GLEffectWrapper {
      *  setters (`setEffectFloat`/`setEffectTexture`/…) can target it — the
      *  WebGL divergence from lite's UBO-based `setEffectUniforms(wrapper, …)`. */
     readonly effect: GLEffect;
-    /** @internal The engine the wrapper was created for. */
-    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
 }
@@ -70,17 +68,45 @@ export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWr
         attributeNames: options.attributeNames,
         defines: options.defines,
     });
-    return { name, effect, _engine: engine, _disposed: false };
+    return { name, effect, _disposed: false };
 }
 
-/** Dispose the wrapper and the effect it owns (idempotent). Mirrors lite's
- *  `disposeEffectWrapper(wrapper)`. */
-export function disposeEffectWrapper(wrapper: GLEffectWrapper): void {
+/** Wrap an EXISTING effect (e.g. one from `createEffect`, or shared with a
+ *  mesh pass) in a fullscreen {@link GLEffectWrapper} instead of compiling a
+ *  new one — the counterpart of assigning Babylon's `EffectWrapper.effect`.
+ *  Use this when you already own a `GLEffect`; otherwise
+ *  {@link createEffectWrapper} compiles one from source.
+ *
+ *  The wrapper takes its own reference on the effect, so
+ *  `disposeEffectWrapper(engine, wrapper)` and the caller's
+ *  `disposeEffect(engine, effect)` are independent: the program is deleted
+ *  only once both have run. The effect's vertex shader must consume the
+ *  fullscreen-quad positions at attribute location 0 (as
+ *  `createEffectWrapper`'s default vertex shader does).
+ *
+ *  @param engine - The engine the effect was created on.
+ *  @param effect - The effect to wrap; must not be disposed.
+ *  @param name - Wrapper name. Defaults to the effect's name.
+ *  @returns A wrapper usable with {@link applyEffectWrapper}. */
+export function createEffectWrapperFromEffect(engine: GLEngineContext, effect: GLEffect, name?: string): GLEffectWrapper {
+    void engine;
+    if (effect._disposed) {
+        throw new Error(`lite-gl: cannot wrap disposed effect ${effect.name}`);
+    }
+    effect._refCount++;
+    return { name: name ?? effect.name, effect, _disposed: false };
+}
+
+/** Dispose the wrapper and the effect it owns (idempotent).
+ *
+ *  @param engine - The engine the wrapper was created on.
+ *  @param wrapper - The wrapper to dispose. */
+export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void {
     if (wrapper._disposed) {
         return;
     }
     wrapper._disposed = true;
-    disposeEffect(wrapper._engine, wrapper.effect);
+    disposeEffect(engine, wrapper.effect);
 }
 
 /** Pixel-space viewport rectangle passed to `setViewport`. */
@@ -116,16 +142,34 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
 }
 
 /** Make `wrapper.effect` current and ensure the shared fullscreen quad VAO
- *  is bound. This MUST be called BEFORE any `setEffect*` call for the same
- *  effect in the current frame (uniform setters write to the currently bound
- *  program). */
-export function applyEffectWrapper(wrapper: GLEffectWrapper): void {
-    const engine = wrapper._engine;
-    if (engine._isLost || engine._disposed || wrapper._disposed) {
-        return;
+ *  is bound — the counterpart of Babylon's `EffectRenderer.applyEffectWrapper`
+ *  (lite-gl has no `setEffectWrapper`; this is the only "activate" call).
+ *
+ *  The wrapper's effect must be ready: this polls {@link isEffectReady} itself
+ *  (finalizing the effect on its first ready poll) and returns `false` without
+ *  binding anything while the shaders are still compiling, failed to compile,
+ *  or the context is lost/disposed — skip the frame's `setEffect*` /
+ *  `drawEffect` calls in that case, otherwise they target whatever program
+ *  was current before.
+ *
+ *  This MUST be called BEFORE any `setEffect*` call for the same effect in the
+ *  current frame (uniform setters write to the currently bound program).
+ *  Typical frame:
+ *  `if (!applyEffectWrapper(engine, w)) return;` →
+ *  `setEffectFloat(engine, w.effect, …)` → `drawEffect(engine)`.
+ *
+ *  @param engine - The engine the wrapper was created on.
+ *  @param wrapper - The wrapper whose effect to make current.
+ *  @returns `true` when the effect is ready and now current; `false` when
+ *   nothing was bound. */
+export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean {
+    // Poll first: ready callbacks fired by the poll may dispose the wrapper.
+    if (!isEffectReady(engine, wrapper.effect) || wrapper._disposed) {
+        return false;
     }
     ensureQuad(engine);
     useEffect(engine, wrapper.effect);
+    return true;
 }
 
 /** `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. No-op when the

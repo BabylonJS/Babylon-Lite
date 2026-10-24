@@ -132,13 +132,13 @@ runRenderLoop(engine, () => {
 
     // ── PASS 1: render the HDR pattern into the half-float render target ──
     bindRenderTarget(engine, rt); // binds the FBO + sets viewport to RT_SIZE
-    applyEffectWrapper(patternWrapper);
+    applyEffectWrapper(engine, patternWrapper);
     setEffectFloat(engine, patternWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
     // ── PASS 2: tone-map the float RT to the LDR screen ──
     bindRenderTarget(engine, null); // default framebuffer + canvas viewport
-    applyEffectWrapper(compositeWrapper);
+    applyEffectWrapper(engine, compositeWrapper);
     setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
     setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);

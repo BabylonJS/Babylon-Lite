@@ -154,7 +154,7 @@ runRenderLoop(engine, () => {
 
     // ── SEED: write P0 into `write`, then swap so it becomes `read`. ──
     bindRenderTarget(engine, pingpong.write);
-    applyEffectWrapper(seedWrapper);
+    applyEffectWrapper(engine, seedWrapper);
     setEffectFloat(engine, seedWrapper.effect, "uTime", uTime);
     drawEffect(engine);
     pingpong.swap();
@@ -163,7 +163,7 @@ runRenderLoop(engine, () => {
     //    rendering into `write`, then swapping — the ping-pong feedback loop. ──
     for (let k = 1; k <= FEEDBACK_ITERATIONS; k++) {
         bindRenderTarget(engine, pingpong.write);
-        applyEffectWrapper(feedbackWrapper);
+        applyEffectWrapper(engine, feedbackWrapper);
         setEffectFloat(engine, feedbackWrapper.effect, "uTime", uTime);
         setEffectFloat(engine, feedbackWrapper.effect, "uK", k);
         setEffectTexture(engine, feedbackWrapper.effect, "uPrev", pingpong.read.texture);
@@ -173,7 +173,7 @@ runRenderLoop(engine, () => {
 
     // ── COMPOSITE: sample the final feedback result to the screen + vignette. ──
     bindRenderTarget(engine, null); // default framebuffer + canvas viewport
-    applyEffectWrapper(compositeWrapper);
+    applyEffectWrapper(engine, compositeWrapper);
     setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
     setEffectTexture(engine, compositeWrapper.effect, "uTex", pingpong.read.texture);
     drawEffect(engine);

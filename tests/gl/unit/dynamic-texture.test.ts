@@ -52,7 +52,7 @@ describe("lite-gl updateDynamicTexture()", () => {
         const tex = createDynamicTexture(engine, 64, 64);
         // Prime the cache to the opposite (flip + premultiply ON) so the default
         // update's explicit reset-to-0 is observable — the state cache elides no-ops.
-        updateDynamicTexture(engine, tex, fakeSource(64, 64), true, true);
+        updateDynamicTexture(engine, tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
         mock.clear();
         updateDynamicTexture(engine, tex, fakeSource(64, 64));
         const flips = callsNamed(mock, "pixelStorei");
@@ -69,7 +69,7 @@ describe("lite-gl updateDynamicTexture()", () => {
         const { mock, engine } = setup();
         const tex = createDynamicTexture(engine, 64, 64);
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(64, 64), true, true);
+        updateDynamicTexture(engine, tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
         const flips = callsNamed(mock, "pixelStorei");
         expect(flips.some((c) => c.args[0] === engine.gl.UNPACK_FLIP_Y_WEBGL && c.args[1] === 1)).toBe(true);
         expect(flips.some((c) => c.args[0] === (engine.gl as { UNPACK_PREMULTIPLY_ALPHA_WEBGL: number }).UNPACK_PREMULTIPLY_ALPHA_WEBGL && c.args[1] === 1)).toBe(true);
@@ -117,7 +117,7 @@ describe("lite-gl clearDynamicTextureSource()", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 32, 16);
         updateDynamicTexture(engine, tex, fakeSource(32, 16));
-        clearDynamicTextureSource(tex);
+        clearDynamicTextureSource(engine, tex);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);

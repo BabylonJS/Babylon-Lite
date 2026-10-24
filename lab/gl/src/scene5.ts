@@ -130,14 +130,14 @@ runRenderLoop(engine, () => {
     setViewport(engine);
 
     // Opaque background — blending explicitly disabled so it overwrites.
-    applyEffectWrapper(background);
+    applyEffectWrapper(engine, background);
     setBlendMode(engine, GLBlendMode.DISABLE);
     drawEffect(engine);
 
     // Three clusters, one blend mode each. Frozen capture pins the disc-ring
     // animation clock to seekTime; otherwise advance on the wall clock.
     const t = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
-    applyEffectWrapper(discs);
+    applyEffectWrapper(engine, discs);
     setEffectFloat2(engine, discEffect, "uResolution", canvas.width, canvas.height);
     for (const cluster of CLUSTERS) {
         setEffectFloat3(engine, discEffect, "uColor", cluster.r, cluster.g, cluster.b);

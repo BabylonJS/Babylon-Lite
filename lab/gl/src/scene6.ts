@@ -1,12 +1,25 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, createHtmlElementTexture, drawEffect, GLSamplingMode, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop, updateHtmlElementTexture } from "babylon-lite-gl";
+import {
+    applyEffectWrapper,
+    createEffectWrapper,
+    createGLEngine,
+    createHtmlElementTexture,
+    drawEffect,
+    isEffectReady,
+    resizeGLEngine,
+    runRenderLoop,
+    setEffectTexture,
+    setViewport,
+    stopRenderLoop,
+    updateHtmlElementTexture,
+} from "babylon-lite-gl";
 
 /**
  * Scene 6 — HTML-Element Texture.
  *
  * Demonstrates HTML-element textures:
  *   - An offscreen 2D `<canvas>` is animated every frame with the Canvas 2D API.
- *   - `createHtmlElementTexture(engine, surface, { samplingMode: BILINEAR })`
- *     wraps it as a GL texture.
+ *   - `createHtmlElementTexture(engine, surface)` wraps it as a GL texture
+ *     (default linear min/mag ≙ Babylon's BILINEAR sampling without mipmaps).
  *   - `updateHtmlElementTexture` re-uploads the canvas each frame; the result is
  *     sampled by a fullscreen effect via `setEffectTexture`.
  *
@@ -122,7 +135,7 @@ const initStart = performance.now();
 const startMs = performance.now();
 drawSurface(0);
 
-const tex = createHtmlElementTexture(engine, surface, { samplingMode: GLSamplingMode.BILINEAR });
+const tex = createHtmlElementTexture(engine, surface);
 
 const wrapper = createEffectWrapper(engine, {
     name: "gl-scene6-html-texture",
@@ -145,7 +158,7 @@ runRenderLoop(engine, () => {
 
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
+    applyEffectWrapper(engine, wrapper);
     setEffectTexture(engine, effect, "uTex", tex);
     drawEffect(engine);
 

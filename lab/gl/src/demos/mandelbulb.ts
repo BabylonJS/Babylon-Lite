@@ -411,7 +411,7 @@ runRenderLoop(engine, () => {
 
     // Pass 1 — Buffer A: raymarch the mandelbulb into the (capped) render target.
     bindRenderTarget(engine, rt);
-    applyEffectWrapper(bufferWrapper);
+    applyEffectWrapper(engine, bufferWrapper);
     setEffectFloat(engine, bufferEffect, "iTime", time);
     setEffectFloat3(engine, bufferEffect, "iResolution", rtW, rtH, 1);
     drawEffect(engine);
@@ -420,7 +420,7 @@ runRenderLoop(engine, () => {
     // full-size canvas. iResolution is the render-target size so the FXAA texel
     // offsets land on adjacent Buffer-A texels.
     bindRenderTarget(engine, null);
-    applyEffectWrapper(imageWrapper);
+    applyEffectWrapper(engine, imageWrapper);
     setEffectFloat3(engine, imageEffect, "iResolution", rtW, rtH, 1);
     setEffectTexture(engine, imageEffect, "iChannel0", rt.texture);
     drawEffect(engine);

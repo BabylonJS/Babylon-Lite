@@ -25,7 +25,7 @@ npm install @babylonjs/lite-gl
 ## Quick start — an animated fullscreen effect
 
 ```ts
-import { createGLEngine, createEffectWrapper, isEffectReady, applyEffectWrapper, drawEffect, setViewport, setEffectFloat, runRenderLoop, resizeGLEngine } from "@babylonjs/lite-gl";
+import { createGLEngine, createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, setEffectFloat, runRenderLoop, resizeGLEngine } from "@babylonjs/lite-gl";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
@@ -48,10 +48,10 @@ const wrapper = createEffectWrapper(engine, {
 
 const start = performance.now();
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, wrapper.effect)) return; // shaders compile async
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
+    // false (and nothing bound) until the shaders finish compiling asynchronously
+    if (!applyEffectWrapper(engine, wrapper)) return;
     setEffectFloat(engine, wrapper.effect, "uTime", (performance.now() - start) / 1000);
     drawEffect(engine);
 });
@@ -116,24 +116,38 @@ use.
   `getRenderWidth`, `getRenderHeight`, `get/setHardwareScalingLevel`,
   `getRenderingCanvas`, and `on/offContextLost` + `on/offContextRestored`
   (context-loss is handled: effects and textures are rebuilt on restore).
-- **Render loop** — `runRenderLoop`, `stopRenderLoop`.
+- **Render loop** — `runRenderLoop`, `stopRenderLoop`, plus `beginFrame` /
+  `endFrame` for hosts that drive their own frame.
+- **GPU frame timing (optional)** — `captureGPUFrameTime`,
+  `getGPUFrameTimeCounter` (`EXT_disjoint_timer_query_webgl2`; ≙ Babylon's
+  `ThinEngine` APIs, tree-shaken unless imported).
 - **Effects** — `createEffect`, `isEffectReady`, `getEffectCompilationError`,
   `executeWhenCompiled`, `waitForEffect` (optional cancellable readiness promise),
   `useEffect`, `disposeEffect`, and the cached uniform setters
   `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` / `…Int` /
   `…Color3` / `…Color4` / `…Texture`.
-- **Fullscreen renderer** — `createEffectWrapper`, `applyEffectWrapper`,
-  `drawEffect`, `setViewport`, `disposeEffectWrapper`.
+- **Fullscreen renderer** — `createEffectWrapper`, `createEffectWrapperFromEffect`
+  (wrap an existing effect), `applyEffectWrapper`, `drawEffect`, `setViewport`,
+  `disposeEffectWrapper`. A wrapper always holds an effect (there is no
+  `setEffectWrapper`); `applyEffectWrapper` returns `false` and binds nothing
+  until that effect is ready, so skip the frame's setters and draw on `false`.
 - **Textures** — `createRawTexture` (typed-array upload, LDR byte formats),
   `createTextureFromSource` (single upload from already-decoded bitmaps/canvases/images),
   `createTexture3DFromPixels` + `setEffectTexture3D` (optional native RGBA8
   LUT volumes with trilinear sampling and zero 2D-only bundle cost),
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
-  `disposeTexture`, plus `updateRawTexture`, `updateTextureSamplingMode`,
-  `updateTextureWrapMode`, `createTextureFromHandle`.
+  `disposeTexture`, `isTextureReady`, plus `updateRawTexture`,
+  `updateTextureSamplingMode` (Babylon preset + `generateMipMaps`, or raw
+  filters), `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
+  takes the same `GLTextureOptions` (`invertY`, `premultiplyAlpha`, filters /
+  wraps). Babylon-style `GLSamplingMode` presets resolve to filters via the
+  opt-in `getSamplingModeFilters`; `generateTextureMipMaps` builds the chain
+  and keeps it current on every later upload and context restore.
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
+  `updateRawTexture` / `updateDynamicTexture` / `updateHtmlElementTexture` take
+  optional `GLTextureUpdateOptions` (`invertY`, `premultiplyAlpha`).
 - **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
   (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),
@@ -179,9 +193,9 @@ produces a ready, transparent-black texture at the original size. Recreate
 the texture after restore (for example from `onContextRestored`) to recover its
 content. Mutable retained sources replay their current pixels and intrinsic
 size. If a retained source was closed anyway, restore logs an error and falls
-back to transparent black for that texture only. Mipmaps generated with
-`generateTextureMipMaps` are not replayed; regenerate them after restore. No
-source is closed by lite-gl.
+back to transparent black for that texture only. Mipmaps requested with
+`generateTextureMipMaps` are rebuilt after the restored upload. No source is
+closed by lite-gl.
 
 ## Demos
 

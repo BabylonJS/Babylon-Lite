@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/index";
-import { GLSamplingMode, createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
-import { bindTexture } from "../../../packages/babylon-lite-gl/src/texture";
+import { createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
+import { GLSamplingMode, bindTexture, generateTextureMipMaps, getSamplingModeFilters } from "../../../packages/babylon-lite-gl/src/texture";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockGL } from "./_lite-gl-mock";
 
 // The gl-unit project runs in the `node` environment, which has no DOM globals.
@@ -85,10 +85,10 @@ describe("lite-gl: html-texture source uploads", () => {
     });
 });
 
-describe("lite-gl: html-texture samplingMode", () => {
+describe("lite-gl: html-texture sampling presets (getSamplingModeFilters)", () => {
     it("NEAREST sets nearest min + mag, no mipmaps", () => {
         const { mock, engine } = makeCtx();
-        createHtmlElementTexture(engine, sourceElement(), { samplingMode: GLSamplingMode.NEAREST });
+        createHtmlElementTexture(engine, sourceElement(), { ...getSamplingModeFilters(GLSamplingMode.NEAREST) });
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_NEAREST);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_NEAREST);
         expect(mock.count("generateMipmap")).toBe(0);
@@ -96,17 +96,19 @@ describe("lite-gl: html-texture samplingMode", () => {
 
     it("BILINEAR sets linear min + mag, no mipmaps", () => {
         const { mock, engine } = makeCtx();
-        createHtmlElementTexture(engine, sourceElement(), { samplingMode: GLSamplingMode.BILINEAR });
+        createHtmlElementTexture(engine, sourceElement(), { ...getSamplingModeFilters(GLSamplingMode.BILINEAR) });
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_LINEAR);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
-    it("TRILINEAR sets a mipmap min filter and generates mipmaps", () => {
+    it("TRILINEAR with mipmaps sets a mipmap min filter; generateTextureMipMaps builds the chain", () => {
         const { mock, engine } = makeCtx();
-        createHtmlElementTexture(engine, sourceElement(), { samplingMode: GLSamplingMode.TRILINEAR });
+        const tex = createHtmlElementTexture(engine, sourceElement(), { ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) });
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR_MIPMAP_LINEAR);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_LINEAR);
+        expect(mock.count("generateMipmap")).toBe(0);
+        generateTextureMipMaps(engine, tex);
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
@@ -117,17 +119,17 @@ describe("lite-gl: html-texture samplingMode", () => {
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
-    it("explicit minFilter/magFilter override the preset", () => {
+    it("explicit minFilter/magFilter after the spread override the preset", () => {
         const { mock, engine } = makeCtx();
-        createHtmlElementTexture(engine, sourceElement(), { samplingMode: GLSamplingMode.NEAREST, minFilter: GL_LINEAR, magFilter: GL_LINEAR });
+        createHtmlElementTexture(engine, sourceElement(), { ...getSamplingModeFilters(GLSamplingMode.NEAREST), minFilter: GL_LINEAR, magFilter: GL_LINEAR });
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_LINEAR);
     });
 
     it("accepts a raw Babylon sampling-mode integer (3 = TRILINEAR)", () => {
         const { mock, engine } = makeCtx();
-        createHtmlElementTexture(engine, sourceElement(), { samplingMode: 3 });
-        expect(mock.count("generateMipmap")).toBe(1);
+        createHtmlElementTexture(engine, sourceElement(), { ...getSamplingModeFilters(3, true) });
+        expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR_MIPMAP_LINEAR);
     });
 });
 
@@ -146,12 +148,18 @@ describe("lite-gl: updateHtmlElementTexture", () => {
         expect(mock.count("texParameteri")).toBe(0);
     });
 
-    it("regenerates mipmaps after a dynamic update when enabled", () => {
+    it("regenerates mipmaps after every update once generateTextureMipMaps was called", () => {
         const { mock, engine } = makeCtx();
-        const tex = createHtmlElementTexture(engine, sourceElement(), { generateMipMaps: true });
+        const tex = createHtmlElementTexture(engine, sourceElement());
+        mock.clear();
+        updateHtmlElementTexture(engine, tex);
+        expect(mock.count("generateMipmap")).toBe(0);
+        generateTextureMipMaps(engine, tex);
         mock.clear();
         updateHtmlElementTexture(engine, tex);
         expect(mock.count("generateMipmap")).toBe(1);
+        // The chain is rebuilt AFTER the level-0 upload.
+        expect(mock.log.findIndex((c) => c.name === "generateMipmap")).toBeGreaterThan(mock.log.findIndex((c) => c.name === "texImage2D"));
     });
 
     it("reuploads RGBA8 pixels and texture parameters during context restoration", () => {
