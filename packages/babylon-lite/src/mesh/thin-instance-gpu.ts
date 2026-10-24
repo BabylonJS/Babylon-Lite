@@ -139,6 +139,7 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
 /** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
 export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: MeshGPU): GPUBuffer | null {
     syncThinInstanceGpuData(engine, ti, hasColor);
+    ti._drawCountPolicy?._sync(ti.count);
     if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
         return null;
     }

@@ -69,6 +69,13 @@ export interface ThinInstanceData {
     _drawArgsData?: Uint32Array;
     /** @internal Instance count captured by a direct draw or uploaded indirect arguments; -1 forces upload. */
     _drawArgsInstanceCount?: number;
+    /** @internal Optional draw-count synchronization policy, installed only by its enabler. */
+    _drawCountPolicy?: {
+        /** @internal Synchronize the count captured by cached draws. */
+        readonly _sync: (count: number) => void;
+        /** @internal Validate a request for an indirect-only feature. */
+        readonly _requireIndirect: (enabled: boolean) => void;
+    };
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
      *  writeBuffer fast-path. Sized in floats = `_capacity * 16`. */
@@ -133,7 +140,8 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
  *  draw FRAME-TO-FRAME on an established thin-instanced mesh WITHOUT recreating the GPU buffer (which would
  *  invalidate any cached render/shadow bundle that captured the old buffer handle). Pre-size the buffer once
  *  with `setThinInstances(mesh, matrices, capacity)`, then call this each update with `count <= capacity`.
- *  Count changes promote cached direct draws to stable indirect arguments, so the bundle stays valid.
+ *  By default count changes promote cached direct draws to stable indirect arguments. With
+ *  enableThinInstanceDirectDraws(), they instead invalidate bundles while keeping draws direct.
  *  Caller must keep writing into the SAME `matrices` array the mesh already references. No-op if the mesh
  *  isn't thin-instanced yet. */
 export function setThinInstanceCount(mesh: Mesh, count: number): void {
@@ -178,6 +186,7 @@ export function enableThinInstanceDynamicDrawCount(mesh: Mesh): void {
     if (!ti) {
         throw new Error("enableThinInstanceDynamicDrawCount requires mesh.thinInstances");
     }
+    ti._drawCountPolicy?._requireIndirect(true);
     if (!ti._drawArgsBuffer) {
         ti._drawArgsInstanceCount = -1;
     }
@@ -297,6 +306,7 @@ export function enableThinInstanceGpuCulling(mesh: Mesh, enabled = true): void {
     if (!ti) {
         throw new Error("enableThinInstanceGpuCulling requires mesh.thinInstances");
     }
+    ti._drawCountPolicy?._requireIndirect(enabled);
     if (ti._gpuCullingEnabled === enabled) {
         return;
     }
@@ -348,6 +358,8 @@ export function setThinInstanceLodPartner(fullMesh: Mesh, lodMesh: Mesh, options
     if (!ti || !lodTi) {
         throw new Error("setThinInstanceLodPartner requires thinInstances on both meshes");
     }
+    ti._drawCountPolicy?._requireIndirect(true);
+    lodTi._drawCountPolicy?._requireIndirect(true);
     if (fullMesh === lodMesh) {
         throw new Error("setThinInstanceLodPartner requires two distinct meshes");
     }
