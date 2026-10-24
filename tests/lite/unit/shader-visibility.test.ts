@@ -91,13 +91,13 @@ describe("ShaderMaterial visibility", () => {
 
         const binding = transparent[0]!.bind(engine, signature);
         meshes[0].position.x = 5;
-        binding.update({ targetWidth: 64, targetHeight: 64 });
+        binding.update!({ targetWidth: 64, targetHeight: 64 });
         expect(transparent[0]!._worldCenter).toEqual([5, 0, 0]);
 
         // A packet whose mesh moved to another material is inactive: neither updated nor drawn.
         meshes[0].material = source;
         meshes[0].position.x = 9;
-        binding.update({ targetWidth: 64, targetHeight: 64 });
+        binding.update!({ targetWidth: 64, targetHeight: 64 });
         expect(transparent[0]!._worldCenter).toEqual([5, 0, 0]);
         const pass = { setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), setBindGroup: vi.fn(), drawIndexed: vi.fn() } as unknown as GPURenderPassEncoder;
         expect(binding.draw(pass, engine)).toBe(0);
