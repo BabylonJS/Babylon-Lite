@@ -1,8 +1,8 @@
 /** DirectionalLight — plain data (pillar 4b: no scene reference).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase } from "./types.js";
-import { ObservableVec3, createLightBase, applyLightBase, copyLightBase, writeWorldLightDirection } from "./light-base.js";
+import type { LightBase, LightBaseCopier } from "./types.js";
+import { ObservableVec3, createLightBase, applyLightBase, writeWorldLightDirection } from "./light-base.js";
 
 export interface DirectionalLight extends LightBase {
     readonly lightType: "directional";
@@ -29,11 +29,11 @@ export function createDirectionalLight(direction: [number, number, number], inte
             diffuse: [1, 1, 1] as [number, number, number],
             specular: [1, 1, 1] as [number, number, number],
             intensity,
-            _cloneNode: () => {
+            _cloneNode: (copyBase: LightBaseCopier) => {
                 const clone = createDirectionalLight([light.direction.x, light.direction.y, light.direction.z], light.intensity);
                 clone.diffuse = [...light.diffuse];
                 clone.specular = [...light.specular];
-                copyLightBase(light, clone);
+                copyBase(light, clone);
                 return clone;
             },
 

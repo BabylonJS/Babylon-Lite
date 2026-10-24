@@ -6,6 +6,7 @@
 import type { Mat4, Mat4Storage, Quat, Vec3 } from "../math/types.js";
 import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
+import type { LightBaseCopier } from "../light/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrixIntoBuffer } from "./world-matrix-state.js";
@@ -52,8 +53,10 @@ export interface SceneNode {
     readonly visible?: boolean;
     /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
     metadata?: LiteMetadata;
-    /** @internal Creates an independent clone for specialized SceneNode implementations. */
-    _cloneNode?: () => SceneNode;
+    /** @internal Creates an independent clone for specialized SceneNode implementations.
+     *  `cloneTransformNode` passes the shared light-state copier, so only scenes that clone
+     *  nodes ship it; non-light implementations ignore it. */
+    _cloneNode?: (copyLightBase: LightBaseCopier) => SceneNode;
 }
 
 /** @internal Write view of `SceneNode.visible`. Engine code uses it to seed visibility while
@@ -129,8 +132,21 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
 
 // ─── Factory ──────────────────────────────────────────────────────────
 
-/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion). */
-export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion).
+ *  Omitted values default to the identity transform (applied once, in `initSceneNodeTransform`). */
+export function createSceneNode(
+    name: string,
+    px?: number,
+    py?: number,
+    pz?: number,
+    qx?: number,
+    qy?: number,
+    qz?: number,
+    qw?: number,
+    sx?: number,
+    sy?: number,
+    sz?: number
+): SceneNode {
     return createSceneNodeCore(name, null, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
@@ -153,7 +169,20 @@ export function createSceneNodeFromMatrix(name: string, matrix: Mat4, translatio
     return node;
 }
 
-function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+function createSceneNodeCore(
+    name: string,
+    matrix: Mat4 | null,
+    px?: number,
+    py?: number,
+    pz?: number,
+    qx?: number,
+    qy?: number,
+    qz?: number,
+    qw?: number,
+    sx?: number,
+    sy?: number,
+    sz?: number
+): SceneNode {
     const node = initSceneNodeTransform({ name, children: [] }, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
     if (matrix) {
         node._localMatrix = matrix;
