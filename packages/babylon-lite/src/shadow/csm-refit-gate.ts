@@ -10,10 +10,15 @@
  *  updates) lives in `csm-shadow-cache.ts`, which drives this gate through the
  *  promote/demote callbacks.
  *
- *  Correctness invariant owned by the caller: cascade matrices, the receiver UBO and
- *  the shadow-camera versions may change ONLY on frames where `update()` returns
- *  `refit: true`. The dynamic overlay is depth-tested against the cached static depth,
- *  so both halves must be rendered with the same cameras or the shadows tear.
+ *  Correctness invariant owned by the caller, per cascade: a cascade's matrix, its receiver UBO slot and its
+ *  shadow-camera version may change ONLY in a frame where that cascade's static layer is re-rendered and its
+ *  dynamic overlay redrawn over it. The dynamic overlay is depth-tested against the cached static depth, so both
+ *  halves must be rendered with the same camera or the shadows tear.
+ *
+ *  Which frames re-render a cascade: every cascade on a frame where `update()` returns `refit: true` (one per frame
+ *  over the next frames when the refit is spread, `CsmStaticRefitScheduler`), and, with the opt-in camera-coverage
+ *  refit (`cascadeCoveragePadding`, see `csm-shadow-cache.ts`), the cascades whose map stopped covering the camera,
+ *  on frames where `update()` returned `refit: false`.
  */
 
 /** Minimal caster shape the gate reads. Matches the fields `casterVersionSum` uses. */
@@ -281,6 +286,9 @@ export interface CsmStaticRefitScheduler {
     /** The cascades to re-render now, in round-robin order so no cascade can starve when refits
      *  arrive faster than the budget drains; each returned cascade leaves the pending set. */
     take(): number[];
+    /** Remove one cascade from the pending set because the caller re-renders it outside the budget this frame (the
+     *  static cache's camera-coverage refit). No effect when that cascade is not pending. */
+    claim(cascade: number): void;
     /** The largest number of frames a cascade can lag behind the refit that armed it: 0 when the
      *  spread is disabled, ceil(cascades / budget) - 1 otherwise. */
     maxLagFrames(): number;
@@ -327,6 +335,15 @@ export function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerF
                 immediate = false;
             }
             return out;
+        },
+        claim(cascade: number): void {
+            if (waiting[cascade]) {
+                waiting[cascade] = false;
+                waitingCount--;
+                if (waitingCount === 0) {
+                    immediate = false;
+                }
+            }
         },
         maxLagFrames(): number {
             return budget === 0 ? 0 : Math.ceil(count / budget) - 1;

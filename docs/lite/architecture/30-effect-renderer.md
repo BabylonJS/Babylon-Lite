@@ -76,6 +76,8 @@ export interface EffectRenderTaskConfig {
 
 export interface EffectRenderTask extends Task {
     readonly name: string;
+    /** Optional draw region, normalized to the target, origin bottom-left (the `NormalizedViewport` convention). */
+    scissor?: NormalizedViewport | null;
     readonly _config: EffectRenderTaskConfig;
     readonly _rt: RenderTarget;
 }
@@ -214,7 +216,8 @@ If a custom `vertexWGSL` is supplied, it must provide an `@vertex` entry point n
 3. `createEffectRenderTask(config, engine, scene)` creates a frame-graph `Task`. If `target` is a `RenderTarget`, the task renders into it; the `Texture2D` from step 2 can then be bound to a scene material.
 4. `addTaskAtStart(scene, task)` (or `addTask`) schedules the pass before the scene's default render pass.
 5. `registerScene` / `startEngine` as normal.
-6. `disposeEffectWrapper(wrapper)` when done.
+6. Optional: set `task.scissor` (any frame) to rasterize only that normalized rectangle of the target without changing the fullscreen viewport or UVs. `execute()` converts it to pixels with the same rounding as a post-process viewport (`floor` on the low edges, `ceil` on the high edges), clamps it to the target, and calls `setScissorRect` before the draw. A non-positive normalized width/height or an empty clamped rectangle ends the pass without drawing and returns `0`; a draw returns `1`. A clear still happens when `clear` is on, since the clear belongs to the attachment. `null` or absent draws the whole target. The region and current target dimensions are read on each execution, so mutations and target resizing require no re-recording.
+7. `disposeEffectWrapper(wrapper)` when done.
 
 ### Uniform-only frame-graph path (`createUniformEffectRenderTask`)
 
@@ -250,6 +253,7 @@ The API intentionally does not implement Babylon.js shader-store lookup, GLSL in
 
 ## Test Specification
 
+- `effect-render-task-scissor.test.ts` records render-pass calls to verify absent/null behavior, bottom-left origin, outward pixel rounding, clamping on every edge, zero/negative dimensions (including fractional edges), off-target rectangles, live updates/resizing, draw counts, and attachment clears for empty regions. Scissoring never changes the viewport or fullscreen UV mapping.
 - Scene 74 renders a deterministic fullscreen procedural effect through Babylon.js `EffectRenderer` and Babylon Lite's direct effect renderer.
 - Scene 75 renders an effect into a `RenderTarget` and maps that texture onto a sphere, matching the Babylon.js playground-style RTT workflow.
 - Scene 76 binds a `Texture2D` through `setEffectTexture()` and samples it with an associated sampler binding through the direct effect renderer.
@@ -258,6 +262,7 @@ The API intentionally does not implement Babylon.js shader-store lookup, GLSL in
 
 ## File Manifest
 
+- `tests/lite/unit/effect-render-task-scissor.test.ts`
 - `packages/babylon-lite/src/effect/effect-renderer.ts`
 - `packages/babylon-lite/src/effect/uniform-effect-renderer.ts`
 - `docs/lite/architecture/30-effect-renderer.md`

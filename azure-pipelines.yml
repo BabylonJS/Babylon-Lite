@@ -1,6 +1,6 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Eight parallel jobs:
+# Runs on every PR targeting master. Ten parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
 #   2. API Report       — public API diff comment + breaking-change validation
 #   3. Unit Tests       — vitest + plumbing (Playwright)
@@ -9,6 +9,8 @@
 #   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
 #   7. Lint             — ESLint + TypeScript type-check
 #   8. Playground Snapshot — per-PR playground deploy + PR comment
+#   9. Compat           — compatibility-layer build + unit tests
+#  10. WebGPU Integration — nonvisual shader/readback checks on BrowserStack
 #
 
 trigger: none
@@ -134,8 +136,8 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
-                - script: npx vitest run --project unit --project gl-unit --project no-webgpu
-                  displayName: "Run vitest unit tests"
+                - script: npx vitest run --project unit --project gl-unit --project no-webgpu --project lite-integration
+                  displayName: "Run vitest unit and Lite integration tests"
                   env:
                       CI: "true"
 
@@ -182,11 +184,17 @@ stages:
 
                 - script: |
                       npx playwright test \
+                          tests/lite/plumbing/accessibility.spec.ts \
                           tests/lite/plumbing/compute-lifecycle.spec.ts \
                           tests/lite/plumbing/dispose.spec.ts \
                           tests/lite/plumbing/material-swap.spec.ts \
+                          tests/lite/plumbing/mesh-lod-demand.spec.ts \
+                          tests/lite/plumbing/mesh-lod-pbr.spec.ts \
                           tests/lite/plumbing/memory-leak.spec.ts \
-                          tests/lite/plumbing/picking.spec.ts
+                          tests/lite/plumbing/picking.spec.ts \
+                          tests/lite/plumbing/scene-readiness.spec.ts \
+                          tests/lite/plumbing/scene176-startup.spec.ts \
+                          tests/lite/plumbing/splat-scene-startup.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"
@@ -204,6 +212,66 @@ stages:
                   condition: always()
                   continueOnError: true
                   displayName: "Report test results"
+
+          # ──────────────────────────────────────────────────────────────
+          # Nonvisual WebGPU integration runs independently so a unit/parity
+          # failure cannot prevent the point-splatting GPU checks from running.
+          # Reuses the parity CDP browser + Local tunnel, but needs no bundles.
+          # ──────────────────────────────────────────────────────────────
+          - job: WebGPUIntegration
+            displayName: "WebGPU Integration (Cloud Browser)"
+            timeoutInMinutes: 30
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                ArtifactsSafe: "false"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: bash scripts/browserstack-wait.sh pnpm test:integration-cloud
+                  displayName: "Run nonvisual point-splatting WebGPU tests"
+                  env:
+                      CI: "true"
+                      LAB_TEST_PORT: "5179"
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+                      BSTACK_SESSIONS_REQUIRED: "1"
+                      BSTACK_LOCAL_IDENTIFIER: "bstack-lite-integration-$(Build.BuildId)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/webgpu-integration-junit.xml
+                      npx tsx scripts/redact-secrets.ts verify test-results/webgpu-integration-junit.xml
+                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
+                  condition: always()
+                  displayName: "Sanitize and verify publishable WebGPU integration results"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "test-results/webgpu-integration-junit.xml"
+                      testRunTitle: "WebGPU Integration"
+                      publishRunAttachments: false
+
+                - script: npx tsx scripts/report-test-results.ts test-results/webgpu-integration-junit.xml
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  displayName: "Report WebGPU integration results"
 
           # ──────────────────────────────────────────────────────────────
           # Job 3: Bundle Size

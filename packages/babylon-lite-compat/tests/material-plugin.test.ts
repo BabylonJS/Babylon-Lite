@@ -123,19 +123,45 @@ describe("MaterialPluginBase", () => {
 
     it("shares the Babylon.js plugin-manager surface across material plugins", () => {
         class ManagerAwarePlugin extends MaterialPluginBase {
+            public constructor(material: StandardMaterial, name: string, priority: number, addToPluginList = true) {
+                super(material, name, priority, {}, addToPluginList);
+            }
+
             public find(name: string): MaterialPluginBase | null {
                 return this._pluginManager.getPlugin(name);
+            }
+
+            public attach(): boolean {
+                return this._pluginManager._addPlugin(this);
             }
         }
 
         const material = new StandardMaterial("material");
         const first = new ManagerAwarePlugin(material, "First", 200);
         const second = new ManagerAwarePlugin(material, "Second", 100);
+        const detached = new ManagerAwarePlugin(material, "Detached", 300, false);
+        const duplicate = new ManagerAwarePlugin(material, "First", 300, false);
 
         expect(material.pluginManager).toBeInstanceOf(MaterialPluginManager);
         expect(first.find("Second")).toBe(second);
+        expect(detached.find("First")).toBe(first);
+        expect(detached.attach()).toBe(true);
+        expect(material.pluginManager?.getPlugin("Detached")).toBe(detached);
+        expect(duplicate.attach()).toBe(false);
+        expect(material.pluginManager?.getPlugin("First")).toBe(first);
         second.dispose();
         expect(first.find("Second")).toBeNull();
+
+        const freshMaterial = new StandardMaterial("fresh-material");
+        const firstDetached = new ManagerAwarePlugin(freshMaterial, "FirstDetached", 200, false);
+        expect(freshMaterial.pluginManager).toBeInstanceOf(MaterialPluginManager);
+        expect(firstDetached.attach()).toBe(true);
+
+        const laterDetached = new ManagerAwarePlugin(freshMaterial, "LaterDetached", 100, false);
+        const detachedDuplicate = new ManagerAwarePlugin(freshMaterial, "FirstDetached", 300, false);
+        expect(laterDetached.find("FirstDetached")).toBe(firstDetached);
+        expect(detachedDuplicate.attach()).toBe(false);
+        expect(freshMaterial.pluginManager?.getPlugin("FirstDetached")).toBe(firstDetached);
     });
 
     it("rejects unsupported include values through construction, mutation, copying, and parsing", () => {

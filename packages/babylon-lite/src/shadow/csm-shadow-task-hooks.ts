@@ -18,17 +18,8 @@ import { _enableTaskMeshPopulation, addMeshToTask, createRenderTask, type Render
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import {
-    getNoColorView,
-    hasNoColorViewFactory,
-    preloadPcfShadowTaskState,
-    resolveShadowCasterMaterial,
-    shadowCasterMaterialChanged,
-    snapshotShadowCasterMaterial,
-} from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
-import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -69,6 +60,9 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _lastLightVersion: number;
     /** @internal */
     _lastCamVersion: number;
+    /** @internal Camera the cascades were last fit for. `_lastCamVersion` sums counters kept on each camera, so two
+     *  cameras can share it: a camera swap is detected by identity. */
+    _lastCamera: Camera | null;
     /** @internal Effective aspect ratio the cascades were last fit against. */
     _lastCamAspect: number;
     /** @internal */
@@ -241,6 +235,7 @@ export function ensureCsmShadowTaskState(
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
+        _lastCamera: null,
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
@@ -263,7 +258,7 @@ export function ensureCsmShadowTaskState(
  *  from it: the caster switched material or got its first one, or it joins with an unseen material, whose chain may
  *  hold a view another caster's chain cached before the terminal was rebuilt.
  *
- *  A changed caster whose view cannot be built yet (`holdCsmCaster`) is held instead, without holding back any other
+ *  A changed caster whose view cannot be built yet (`holdShadowCaster`) is held instead, without holding back any other
  *  caster: it leaves every task once, its packets retired behind the frame fence, since they may reference per-mesh
  *  resources retired with its previous material, possibly in a frame this reconcile did not see (the generator was
  *  parked). A registered one keeps its cap entry, and its material is not snapshotted, so it still reads as changed and
@@ -301,7 +296,7 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
                 (held ??= new Set()).add(mesh);
             }
         } else if (shadowCasterMaterialChanged(material, materials, gens)) {
-            if (holdCsmCaster(scene, sg, material)) {
+            if (holdShadowCaster(scene, sg, material)) {
                 (held ??= new Set()).add(mesh);
             } else {
                 (stale ??= new Set()).add(material);
@@ -450,28 +445,6 @@ export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undef
     }
 }
 
-/** Whether the no-colour view of a caster material cannot be built yet. When the view factory of the family the caster
- *  casts through is not imported, building the view would call an undefined factory: this re-supplies the generator's
- *  registered caster set through `setShadowTaskCasterMeshes`, which parks the generator while the factory imports, as any
- *  re-supplied set does. A caster casting through its own material also waits while that material's group is not built
- *  in this scene, or recording the view would throw inside the frame: the mesh's swap drain or runtime build builds it.
- *  A build that fails reports its own error, and the hold lasts until the caster's material is reassigned or the caster
- *  leaves the set. A `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's
- *  lifecycle builds it: recording it throws as before, naming the problem. */
-function holdCsmCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
-    const terminal = resolveShadowCasterMaterial(material);
-    if (!hasNoColorViewFactory(terminal)) {
-        // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
-        // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
-        const registered = _getShadowTaskCasterMeshes(sg);
-        if (registered && !sg._preloadPending) {
-            setShadowTaskCasterMeshes(sg, registered);
-        }
-        return true;
-    }
-    return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
-}
-
 /** Render every cascade layer for this frame, recomputing splits/matrices from the active camera. */
 export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig): number {
     const casterMeshes = state._casterMeshes;
@@ -490,6 +463,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         casterVersion === state._lastCasterVersion &&
         lightVersion === state._lastLightVersion &&
         camVersion === state._lastCamVersion &&
+        camera === state._lastCamera &&
         camAspect === state._lastCamAspect
     ) {
         return 0;
@@ -519,6 +493,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastCamVersion = camVersion;
+    state._lastCamera = camera;
     state._lastCamAspect = camAspect;
     return state._task.execute?.() ?? 0;
 }
@@ -637,13 +612,41 @@ export function csmCameraAspect(scene: SceneContext, camera: Camera): number {
     return getEffectiveAspectRatio(camera, rt._width, rt._height);
 }
 
+/** @internal Write the eight world-space corners of the camera frustum slice between the fractions `nearSplit` and
+ *  `farSplit` of the camera depth range into `corners` (near quad first, then far quad). `invViewProj` is the inverse
+ *  of the camera view-projection. The one owner of the slice geometry the cascade fit covers. */
+export function _csmSliceCornersInto(corners: number[][], invViewProj: ArrayLike<number>, nearSplit: number, farSplit: number): void {
+    for (let k = 0; k < 8; k++) {
+        const ndc = FRUSTUM_NDC[k]!;
+        transformCoordInto(corners[k]!, invViewProj, ndc[0], ndc[1], ndc[2]);
+    }
+    // Interpolate near/far corners to cascade slice boundaries
+    for (let k = 0; k < 4; k++) {
+        const nearCorner = corners[k]!;
+        const farCorner = corners[k + 4]!;
+        const rx = farCorner[0]! - nearCorner[0]!;
+        const ry = farCorner[1]! - nearCorner[1]!;
+        const rz = farCorner[2]! - nearCorner[2]!;
+        farCorner[0] = nearCorner[0]! + rx * farSplit;
+        farCorner[1] = nearCorner[1]! + ry * farSplit;
+        farCorner[2] = nearCorner[2]! + rz * farSplit;
+        nearCorner[0] = nearCorner[0]! + rx * nearSplit;
+        nearCorner[1] = nearCorner[1]! + ry * nearSplit;
+        nearCorner[2] = nearCorner[2]! + rz * nearSplit;
+    }
+}
+
+/** Fit every cascade to its slice of the camera frustum. `radiusScale` (stabilized cascades only, default 1) widens
+ *  each cascade's bounding sphere by that factor before the 1/16 rounding, so the fitted map keeps covering its
+ *  slice while the camera moves a little (the static cache's opt-in camera-coverage refit). */
 export function _computeCsmCascades(
     scene: SceneContext,
     camera: Camera,
     light: DirectionalLight,
     cfg: CsmConfig,
     casterMeshes: readonly Mesh[],
-    scratch: CsmCascadeScratch
+    scratch: CsmCascadeScratch,
+    radiusScale = 1
 ): CsmCascades {
     const near = camera.nearPlane;
     const far = camera.farPlane;
@@ -699,24 +702,7 @@ export function _computeCsmCascades(
         const split = prevSplit + frustumLengths[c]! / cameraRange;
 
         // World-space frustum corners of this slice.
-        for (let k = 0; k < 8; k++) {
-            const ndc = FRUSTUM_NDC[k]!;
-            transformCoordInto(corners[k]!, invViewProj, ndc[0], ndc[1], ndc[2]);
-        }
-        // Interpolate near/far corners to cascade slice boundaries
-        for (let k = 0; k < 4; k++) {
-            const nearCorner = corners[k]!;
-            const farCorner = corners[k + 4]!;
-            const rx = farCorner[0]! - nearCorner[0]!;
-            const ry = farCorner[1]! - nearCorner[1]!;
-            const rz = farCorner[2]! - nearCorner[2]!;
-            farCorner[0] = nearCorner[0]! + rx * split;
-            farCorner[1] = nearCorner[1]! + ry * split;
-            farCorner[2] = nearCorner[2]! + rz * split;
-            nearCorner[0] = nearCorner[0]! + rx * prevSplit;
-            nearCorner[1] = nearCorner[1]! + ry * prevSplit;
-            nearCorner[2] = nearCorner[2]! + rz * prevSplit;
-        }
+        _csmSliceCornersInto(corners, invViewProj, prevSplit, split);
         prevSplit = split;
 
         // Centroid.
@@ -742,7 +728,7 @@ export function _computeCsmCascades(
             for (const corner of corners) {
                 radius = Math.max(radius, Math.hypot(corner[0]! - cx, corner[1]! - cy, corner[2]! - cz));
             }
-            radius = Math.ceil(radius * 16) / 16;
+            radius = Math.ceil(radius * radiusScale * 16) / 16;
             stableRadius = radius;
             minX = minY = minEz = -radius;
             maxX = maxY = maxEz = radius;

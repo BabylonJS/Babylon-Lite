@@ -157,6 +157,8 @@ export interface EngineContext extends SurfaceContext {
     _cbs: GPUCommandBuffer[];
     /** @internal Frame-boundary flush installed on the first queued GPU resource retirement. */
     _flushGpuRetirements?: (engine: EngineContext) => void;
+    /** @internal Opt-in frame boundary for features collecting per-draw work. */
+    _finishOptionalFrame?: (submitted: boolean) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
@@ -189,7 +191,7 @@ export interface EngineContext extends SurfaceContext {
         scene: import("../scene/scene-core.js").SceneContext
     ) => (view: Float32Array, mat: import("../math/types.js").Mat4 | Float32Array | Float64Array, offsetFloats: number, srcOffsetFloats: number) => void;
 
-    /** @internal Active-camera `worldMatrixVersion` for the lights UBO version,
+    /** @internal Active-camera floating-origin revision for the lights UBO version,
      *  and the floating-origin offset applier for positional light entries.
      *  Both are set only when the engine was created with
      *  `useFloatingOrigin: true` (dynamic-imported from
@@ -617,6 +619,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
+    let submitted = false;
     try {
         // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
         // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
@@ -658,6 +661,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
+        submitted = true;
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
@@ -665,6 +669,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerResolve?.();
     } finally {
         engine._currentEncoder = undefined!;
+        engine._finishOptionalFrame?.(submitted);
     }
 }
 

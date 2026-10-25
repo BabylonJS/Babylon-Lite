@@ -101,7 +101,8 @@ function collectVisible(node: StreamTreeNode, matrix: ArrayLike<number>, planes:
     }
 }
 
-function nearestDistance(bound: StreamBound, position: ArrayLike<number>): number {
+/** @internal Distance from a camera to the nearest point of a world-space AABB. */
+export function distanceToStreamBound(bound: StreamBound, position: ArrayLike<number>): number {
     let squared = 0;
     for (let axis = 0; axis < 3; axis++) {
         const coordinate = position[axis]!;
@@ -256,7 +257,7 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
     visible.sort((a, b) => a.leaf.id - b.leaf.id);
     const focalScale = (input.targetHeight * Math.abs(input.projectionP11)) / 2;
     const candidates: Candidate[] = visible.map((entry) => {
-        const distanceToCamera = nearestDistance(entry.bound, input.cameraPosition);
+        const distanceToCamera = distanceToStreamBound(entry.bound, input.cameraPosition);
         return {
             leaf: entry.leaf,
             currentIndex: 0,

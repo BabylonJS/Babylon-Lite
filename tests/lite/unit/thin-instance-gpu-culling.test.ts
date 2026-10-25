@@ -331,6 +331,11 @@ describe("thin-instance GPU culling submission", () => {
         const mainArgsWrite = writeBuffer.mock.calls.find((call) => call[0] === state._argsBuffer);
         expect(mainArgsWrite).toBeDefined();
         expect(uploadedArgs.get(state._argsBuffer!)).toEqual([3, 0, 0, 4, 0]);
+        mesh._gpu._firstIndex = 3;
+        lodMesh._gpu._firstIndex = 6;
+        prepareTiCull(engine, state, mesh, gpu, ti, false, { targetWidth: 800, targetHeight: 600, _camera: makeCamera() }, undefined, lodMesh);
+        expect(uploadedArgs.get(state._argsBuffer!)).toEqual([3, 0, 3, 4, 0]);
+        expect(uploadedArgs.get(state._lodArgsBuffer!)).toEqual([12, 0, 6, 20, 0]);
     });
 });
 

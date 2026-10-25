@@ -103,6 +103,8 @@ describe("thin-instance stable draw arguments", () => {
         syncThinInstanceDrawArgs(engine, ti, gpu);
         expect(writes[4]).toEqual([36, 3, 0, 0xfffffff4, 0]);
         expect(engine._device.createBuffer).toHaveBeenCalledTimes(2);
+        syncThinInstanceDrawArgs(engine, ti, { ...gpu, _firstIndex: 6 });
+        expect(writes[5]).toEqual([36, 3, 6, 0xfffffff4, 0]);
     });
 
     it("retries a failed argument upload even when its CPU words already match", () => {

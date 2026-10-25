@@ -91,6 +91,14 @@ function dynamicTask(execute: () => number) {
     };
 }
 
+/** The cache's owned per-cascade copies of the matrices it publishes to the shadow cameras. */
+function publishedMatrices(cascadeCount: number) {
+    return {
+        _publishedViews: Array.from({ length: cascadeCount }, () => new Float32Array(16)),
+        _publishedTransforms: Array.from({ length: cascadeCount }, () => new Float32Array(16)),
+    };
+}
+
 function lightWorldMatrix(): Float32Array {
     const world = new Float32Array(16);
     world[0] = 1;
@@ -125,6 +133,7 @@ function makeHarness() {
         _cachedContentVersion: -1,
         _lastCamVersion: -1,
         _lastCamAspect: -1,
+        ...publishedMatrices(1),
     };
     const engine = {
         _device: { queue: { writeBuffer: vi.fn() } },
@@ -229,6 +238,16 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
         h.render();
         expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
     });
+
+    it("refits when the active camera is REPLACED by one with the same change key", () => {
+        const before = h.staticExecute.mock.calls.length;
+        h.scene.camera = { key: h.scene.camera.key };
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+
+        h.render();
+        expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+    });
 });
 
 describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)", () => {
@@ -253,6 +272,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
             _cachedContentVersion: -1,
             _lastCamVersion: -1,
             _lastCamAspect: -1,
+            ...publishedMatrices(3),
         };
         const copy = vi.fn();
         const engine = {
@@ -368,6 +388,7 @@ describe("renderCsmShadowMapCached spread static refit: a drift refit during the
             _cachedContentVersion: -1,
             _lastCamVersion: -1,
             _lastCamAspect: -1,
+            ...publishedMatrices(3),
         };
         const engine = { _device: { queue: { writeBuffer: vi.fn() } }, _currentEncoder: { copyTextureToTexture: vi.fn() } };
         const sg = { _light: { direction: { x: 0, y: -1, z: 0 }, worldMatrix: lightWorldMatrix() }, _shadowUBO: {}, _version: 0, _depthTexture: {} };

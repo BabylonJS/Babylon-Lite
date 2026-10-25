@@ -50,6 +50,12 @@ export abstract class Light extends Node {
      */
     public _clusteredContainer: object | null = null;
 
+    /**
+     * @internal The compat shadow generator logically owned by this light,
+     * including before its deferred Lite generator is built.
+     */
+    public _shadowGenerator: object | null = null;
+
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
         scene?._registerLight(this);

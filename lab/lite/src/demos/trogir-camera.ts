@@ -16,15 +16,12 @@ export function createTrogirCamera(): FreeCamera {
     });
     camera.nearPlane = 0.1;
     camera.farPlane = 1500;
+    camera.speed = 0.8;
+    camera.inertia = 0.6;
     return camera;
 }
 
-export function attachTrogirCameraControls(
-    camera: FreeCamera,
-    canvas: HTMLCanvasElement,
-    scene: SceneContext,
-    attach: AttachFirstPersonControl = attachFreeControl
-): () => void {
+export function attachTrogirCameraControls(camera: FreeCamera, canvas: HTMLCanvasElement, scene: SceneContext, attach: AttachFirstPersonControl = attachFreeControl): () => void {
     const detach = attach(camera, canvas, scene);
     let attached = true;
     return () => {

@@ -45,6 +45,7 @@ import type {
     PickingInfo as LitePickingInfo,
     Mat4,
     Material as LiteMaterial,
+    EngineContext,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -78,6 +79,7 @@ const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backg
 const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
+type CompatShadowGenerator = { _build(engine: EngineContext): void; _liteGen?: unknown };
 
 export type MeshPredicate = (mesh: AbstractMesh, thinInstanceIndex: number) => boolean;
 export type TrianglePickingPredicate = (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray, i0: number, i1: number, i2: number) => boolean;
@@ -189,7 +191,7 @@ export class Scene extends AbstractScene {
     private _envTexture: CubeTexture | HDRCubeTexture | null = null;
     private _brdfTexture: BaseTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
-    private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
+    private readonly _shadowGenerators: CompatShadowGenerator[] = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
@@ -388,8 +390,16 @@ export class Scene extends AbstractScene {
     }
 
     /** @internal Register a compat `ShadowGenerator` to be built at engine start. */
-    public _registerShadowGenerator(gen: { _build(engine: import("babylon-lite").EngineContext): void }): void {
+    public _registerShadowGenerator(gen: CompatShadowGenerator): void {
         this._shadowGenerators.push(gen);
+    }
+
+    /** @internal Drop a disposed compat `ShadowGenerator` from the pending/build list. */
+    public _unregisterShadowGenerator(gen: CompatShadowGenerator): void {
+        const index = this._shadowGenerators.indexOf(gen);
+        if (index !== -1) {
+            this._shadowGenerators.splice(index, 1);
+        }
     }
 
     /** @internal Track an async texture load so the engine can await it before building the scene. */

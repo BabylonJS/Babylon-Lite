@@ -11,7 +11,7 @@ export interface StorageBuffer {
     readonly [storageBufferBrand]: true;
     /** Writable capacity in bytes, padded to WebGPU's four-byte alignment. */
     readonly byteLength: number;
-    /** @internal */
+    /** @internal Null after disposal, or after device recovery for GPU-role allocations (no CPU shadow to rebuild from). */
     _buffer: GPUBuffer | null;
     /** @internal */
     _destroyed: boolean;
@@ -120,6 +120,9 @@ export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBu
     // GPU-role allocations intentionally have no `_data` shadow, so liveness is
     // decided by `_buffer` rather than by the mirror.
     if (buffer._destroyed || !buffer._buffer) {
+        if (!buffer._destroyed && buffer._engine?._storageBuffers?.has(buffer)) {
+            throw new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss.");
+        }
         throw new Error("StorageBuffer has been disposed.");
     }
     if (buffer._engine !== engine) {
@@ -128,7 +131,7 @@ export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBu
     if (!engine._storageBuffers?.has(buffer)) {
         throw new Error("StorageBuffer is not a live registered allocation.");
     }
-    return buffer._buffer!;
+    return buffer._buffer;
 }
 
 /** Replace a byte range without changing the storage buffer's binding identity. */
@@ -145,6 +148,7 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
     if (!engine._storageBuffers?.has(buffer)) {
         throw new Error("StorageBuffer is not a live registered allocation.");
     }
+    _getStorageBufferHandle(engine, buffer);
     if (!Number.isInteger(byteOffset) || byteOffset < 0 || (byteOffset & 3) !== 0) {
         throw new Error("StorageBuffer byteOffset must be a non-negative multiple of 4.");
     }
@@ -171,11 +175,14 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
 export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
 export function readStorageBuffer(buffer: StorageBuffer, byteOffset: number, byteLength?: number): Promise<ArrayBuffer>;
 export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLength = buffer.byteLength - byteOffset): Promise<ArrayBuffer> {
-    if (buffer._destroyed || !buffer._buffer || !buffer._engine._storageBuffers?.has(buffer)) {
+    if (buffer._destroyed || !buffer._engine._storageBuffers?.has(buffer)) {
         return Promise.reject(new Error("StorageBuffer is not a live registered allocation."));
     }
     if (!buffer._writable) {
         return Promise.reject(new Error("readStorageBuffer requires a writable StorageBuffer created with COPY_SRC usage."));
+    }
+    if (!buffer._buffer) {
+        return Promise.reject(new Error("StorageBuffer belongs to a previous device; recreate GPU-role allocations and rerun their producers after device loss."));
     }
     if (buffer._engine._currentEncoder) {
         return Promise.reject(new Error("readStorageBuffer cannot run while a frame encoder is active; wait until the producing frame is submitted."));

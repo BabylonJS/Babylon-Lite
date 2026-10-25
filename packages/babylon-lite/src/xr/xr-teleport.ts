@@ -36,6 +36,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { createRayPickSnapshot, pickWithRaySnapshot } from "../picking/ray-pick.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
+import type { _WritableVisibility } from "../scene/scene-node.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -269,14 +270,14 @@ function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit
     arc.material = arcMat as unknown as Mesh["material"];
     arc.pickable = false;
     arc.receiveShadows = false;
-    arc.visible = false;
+    (arc as _WritableVisibility).visible = false;
 
     const reticle = createTorus(engine, { diameter: RETICLE_DIAMETER, thickness: RETICLE_DIAMETER * 0.14, tessellation: 40 });
     reticle.name = "xr-teleport-reticle";
     reticle.material = tintMaterial(color, 1, false) as unknown as Mesh["material"];
     reticle.pickable = false;
     reticle.receiveShadows = false;
-    reticle.visible = false;
+    (reticle as _WritableVisibility).visible = false;
 
     // Flat arrow triangle in the XZ plane pointing +Z (tip forward), laid on the floor.
     const w = INDICATOR_HALF_WIDTH;
@@ -291,7 +292,7 @@ function ensureUnit(tp: XrTeleportation, source: DomXrInputSource): TeleportUnit
     indicator.material = tintMaterial(color, 1, true) as unknown as Mesh["material"];
     indicator.pickable = false;
     indicator.receiveShadows = false;
-    indicator.visible = false;
+    (indicator as _WritableVisibility).visible = false;
 
     addToScene(tp._scene, arc);
     addToScene(tp._scene, reticle);

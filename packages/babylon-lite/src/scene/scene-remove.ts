@@ -1,10 +1,10 @@
-import type { addToScene, SceneContext } from "./scene-core.js";
+import { _hasSceneChangeHook, _notifySceneChange, _runSceneChange } from "./scene-core.js";
+import type { addToScene, SceneContext, SceneEntity } from "./scene-core.js";
 import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { LightBase } from "../light/types.js";
 import type { Camera } from "../camera/camera.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
-import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { AssetContainer } from "../asset-container.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
@@ -24,16 +24,20 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
  *  retired permanently and `addToScene` throws if it is added back: its buffers may be gone, and
  *  releasing a second claim it no longer holds would free buffers a surviving sibling still
  *  renders with. Removing a mesh from one of SEVERAL scenes holding it is not a disposal, so
- *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, set
- *  `mesh.visible = false` (or `setSubtreeVisible`) instead of removing it.
+ *  re-adding it there is fine. Otherwise create a new mesh — and to hide a mesh temporarily, call
+ *  `setMeshVisible(mesh, false)` instead of removing it.
  *
  *  Standalone function for tree-shaking — only included when actually used. */
-export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+export function removeFromScene(scene: SceneContext, entity: SceneEntity): void {
+    if (_hasSceneChangeHook() && scene._sceneChanges && scene._sceneChanges.depth === 0) {
+        _runSceneChange(scene, () => removeFromScene(scene, entity));
+        return;
+    }
     // AssetContainer — undo addToScene(scene, container) field by field.
     if ("entities" in entity) {
         const container = entity as AssetContainer;
         for (const e of container.entities) {
-            removeFromScene(scene, e as Mesh | LightBase | TransformNode);
+            removeFromScene(scene, e as SceneEntity);
         }
         if (container.camera && scene.camera === container.camera) {
             scene.camera = null;
@@ -60,11 +64,13 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
                 }
             }
         }
+        _notifySceneChange(scene, entity, "removed");
         return;
     }
     // Mesh — carries GPU geometry + material. Owns the only heavy removal path.
     if ("_gpu" in entity && "material" in entity) {
         removeMeshFromScene(scene, entity as unknown as Mesh);
+        _notifySceneChange(scene, entity, "removed");
         removeChildren(scene, entity as unknown as SceneNode);
         return;
     }
@@ -92,6 +98,7 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
     }
     // TransformNode / any other scene-graph node needs no bookkeeping of its own.
     detachParent(entity);
+    _notifySceneChange(scene, entity, "removed");
     removeChildren(scene, entity as unknown as SceneNode);
 }
 
@@ -286,7 +293,7 @@ function removeChildren(scene: SceneContext, node: SceneNode): void {
     const kids = node.children;
     if (kids?.length) {
         for (const child of [...kids]) {
-            removeFromScene(scene, child as Mesh);
+            removeFromScene(scene, child as SceneEntity);
         }
     }
 }
@@ -337,11 +344,21 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
         scene._renderableVersion++;
     }
     // Drop from the material group registry so a later full rebuild (e.g. device-lost
-    // recovery) doesn't try to re-materialize a disposed mesh.
+    // recovery) doesn't try to re-materialize a disposed mesh. Also drop the mesh's entries from
+    // the group's tracked output (`o`): runtime builds append to it, and a retired renderable left
+    // there keeps its bind groups and packets reachable until the scene is disposed.
     for (const group of scene._groups.values()) {
         const gi = group.indexOf(mesh);
         if (gi >= 0) {
             group.splice(gi, 1);
+        }
+        const o = group.o;
+        if (o) {
+            for (let oi = o.length; oi--;) {
+                if (o[oi]!.mesh === mesh) {
+                    o.splice(oi, 1);
+                }
+            }
         }
     }
     // Drop any pending swap-queue entry (mesh added then removed before the drain).

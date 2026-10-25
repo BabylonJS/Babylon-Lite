@@ -91,7 +91,7 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
         _dynPremultiplyAlpha: false,
     };
     upload(engine);
-    engine._textures.push(tex);
+    engine._textures.add(tex);
     return tex;
 }
 

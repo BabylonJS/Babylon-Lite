@@ -45,16 +45,19 @@ export interface Camera {
     /** @internal Marker: when set by an LWR-enabled scene, `getViewMatrix`
      *  zeros the view matrix translation column (the GPU sees the camera at
      *  the origin in the eye-relative frame, matching the mesh-world UBO
-     *  pack that subtracted the camera position). Set by scene `_update` when
-     *  the engine has `useFloatingOrigin: true`; never unset. Non-LWR cameras
-     *  leave the field undefined and `getViewMatrix` produces a standard view
-     *  matrix. */
+     *  pack that subtracted the camera position). Synced to the engine's
+     *  `useFloatingOrigin` by scene `_update` for the active camera every frame,
+     *  in both directions, so a camera moved between engines adopts the
+     *  destination's mode. Fresh cameras on non-LWR engines leave the field
+     *  undefined and `getViewMatrix` produces a standard view matrix. */
     _useFloatingOrigin?: boolean;
     /** @internal Monotonic counter bumped whenever the *projection* changes
      *  independently of the camera transform: by `_cameraChangeKey` when it
      *  observes a `fov` / `nearPlane` / `farPlane` write, and by the orthographic
      *  feature module (`enableOrthographicCamera` / `disableOrthographicCamera`
-     *  and every `ortho` bounds setter).
+     *  and every `ortho` bounds setter). Scene `_update` clears `_projFov` when it
+     *  flips `_useFloatingOrigin` (the view frame changes without moving the
+     *  transform), so the next `_cameraChangeKey` call bumps it.
      *
      *  Projection-dependent per-frame consumers gate their GPU uploads on the
      *  camera's `worldMatrixVersion`, which does not move when only the view

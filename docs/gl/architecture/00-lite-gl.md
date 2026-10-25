@@ -198,11 +198,10 @@ export interface GLEngineContext {
      *  `disposeEffect`. Used by the context-lost/restored protocol (§4.7)
      *  to rebuild programs. */
     _effects: GLEffect[];
-    /** Live texture registry — populated by `createRawTexture` /
-     *  `loadTexture2D` / `createHtmlElementTexture`, removed by
-     *  `disposeTexture`. Used by the context-restored protocol to replay
-     *  uploads. */
-    _textures: GLTexture[];
+    /** Live texture registry — all managed 2D/3D factories add their textures;
+     *  the matching dispose function deletes them in expected O(1) time.
+     *  Set iteration preserves creation order among surviving textures. */
+    _textures: Set<GLTexture | GLTexture3D>;
     /** Context-lost / restored callback lists. */
     _onLost: (() => void)[];
     _onRestored: (() => void)[];
@@ -405,7 +404,8 @@ export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTextur
 /** Sets `tex._disposed=true`, calls `gl.deleteTexture(tex.handle)`, walks
  *  the matching target's binding cache and clears every unit that still references the
  *  handle (so a later `bindTexture(..., otherTex)` to the same unit is NOT
- *  incorrectly elided). Removes the texture from `engine._textures`. */
+ *  incorrectly elided). Deregisters via `engine._textures.delete(tex)` in
+ *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 
 /** Build a full mip chain for `tex` (a single `gl.generateMipmap`). Mipmaps are
@@ -413,6 +413,109 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
  *  `generateMipMaps` flag. No-op when `tex._disposed` or `engine._isLost`. */
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 ```
+
+The engine-owned texture registry is a `Set`, allocated inside
+`createGLEngine` (never at module scope). All managed factories register via
+`add`; `disposeTexture` and `disposeTexture3D` use `delete`, avoiding both the
+linear membership search and the array shift on every eviction. Deletion of
+an absent entry is harmless. External-handle wrappers and render-target-owned
+color textures remain unregistered, with their existing ownership semantics.
+Dropping a shared texture's reference count does not unregister it until its
+final release. Binding-cache invalidation still scans only the fixed number
+of hardware texture units, not the number of live textures.
+
+The `Set` preserves insertion order for context-loss/restore replay; deleting
+the current or another entry during traversal cannot shift unvisited entries
+behind the iterator. Loss finishes marking readiness before firing loss
+callbacks, so those callbacks may evict textures without corrupting replay.
+Restore skips disposed textures and replays the surviving set. There is no
+separate suspend/dispose-all API in lite-gl; clients may dispose each texture
+while traversing the live set without skipping entries.
+
+Engine teardown snapshots the live set and clears it before issuing texture
+deletions. Every handle in that snapshot is force-disposed exactly once, even
+if another disposal is triggered during a GL deletion; shared reference counts
+cannot keep resources alive after engine disposal. Unit tests cover a 15,000
+texture registry, arbitrary eviction batches, refcounts, unregistered handles,
+mixed 2D/3D restoration, mutation during restore and reentrant engine teardown.
+
+#### 3.4.0 Already-decoded 2D sources (optional)
+
+```ts
+export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internalFormat"> {
+    /** Default true: retain the source for context-restore replay. */
+    retainSource?: boolean;
+}
+export function createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture;
+```
+
+`createTextureFromSource` synchronously creates an immediately ready 2D RGBA
+texture from an already-decoded `ImageBitmap`, `ImageData`, canvas,
+`OffscreenCanvas`, image, video or `VideoFrame`. It performs exactly one
+source-overload `texImage2D(TEXTURE_2D, 0, RGBA, RGBA, UNSIGNED_BYTE, source)`:
+there is no placeholder or blank allocation before the source upload. It
+applies the four min/mag/S/T parameters once to the new handle, defaulting to
+`LINEAR` / `LINEAR` and `CLAMP_TO_EDGE` / `CLAMP_TO_EDGE`. Mipmaps remain a
+separate opt-in via `generateTextureMipMaps`; a mipmap minification filter
+requires the caller to generate its chain.
+
+The factory reads intrinsic dimensions: `naturalWidth` / `naturalHeight` for
+images, `videoWidth` / `videoHeight` for videos, `displayWidth` / `displayHeight`
+for video frames, and `width` / `height` otherwise. Dimensions must be positive
+integers within `engine.caps.maxTextureSize`. Invalid dimensions, invalid
+`unpackAlignment` (anything other than 1/2/4/8), a lost/disposed engine or a
+null texture allocation throw explicitly. An `ImageData` whose buffer was
+transferred (empty `data`) is also rejected up front, because WebGL would only
+raise `INVALID_VALUE` without throwing. Video elements must have a decoded
+current frame (`readyState >= 2`, `HAVE_CURRENT_DATA`); positive dimensions at
+`HAVE_METADATA` alone are insufficient. The shared validation rejects videos
+without a current frame before any GL call during creation and routes them
+through the logged blank fallback during restoration. This check uses the
+numeric readiness value without referencing DOM constructors.
+SVG and density-selected (`srcset`)
+image elements can upload at a size other than their natural size; convert
+them to an `ImageBitmap` first. No DOM constructor globals are
+needed, so bitmap/offscreen uploads also work in workers.
+
+Uploads use `setUnpackState` (defaults: `invertY=false`,
+`premultiplyAlpha=false`, alignment 4) and `bindTextureForUpload` (unit 0).
+The helpers elide unchanged pixel-store and binding state and correctly select
+unit 0 after multi-sampler use. WebGL ignores flip/premultiplication flags for
+`ImageBitmap`: callers must choose `imageOrientation` and `premultiplyAlpha`
+when decoding their bitmap. The factory neither decodes nor closes sources.
+
+The returned `GLTexture` is registered in `engine._textures` and disposed with
+`disposeTexture`. It has no update API: to change its pixels, dispose it and
+create a new one; `updateDynamicTexture` and `updateHtmlElementTexture` are
+only valid for their own factories' textures. By default its `_upload` closure retains the source for
+offline context restoration; callers must keep it usable (do not close a
+retained bitmap/video frame). Mutable sources are replayed with their current
+pixels and intrinsic size, not a creation-time snapshot. The standard restore
+protocol installs a new handle, replays one upload and invokes
+`_initializeParameters` to apply the four creation-time sampling parameters.
+If the retained source is unusable at restore time (closed bitmap, zero-size
+video, video without a current frame, upload exception), the closure logs the error, drops the source and
+allocates transparent-black RGBA8 storage at the last uploaded size instead.
+The failure stays local to that texture: it never aborts the engine-wide
+restore replay, so later textures, render targets and buffers still rebuild
+and the engine leaves the lost state.
+With `retainSource: false`, the closure drops its source reference immediately
+after the initial upload; callers may then close their bitmap/frame. Restore
+allocates transparent-black RGBA8 storage at the original dimensions and
+marks it ready. Applications needing the original pixels must re-upload or
+dispose/recreate the texture themselves, typically from `onContextRestored`.
+Restore replays level 0 only: callers using a mipmapped `minFilter` must call
+`generateTextureMipMaps` again from `onContextRestored`, otherwise the restored
+texture is mipmap-incomplete. This does not change
+`createDynamicTexture`'s immediately sampleable blank-allocation contract.
+
+Implementation lives in side-effect-free `texture-source.ts`, explicitly
+exported from the root barrel (no new package subpath). Non-users ship none of
+its source sizing, validation or retention logic. Unit tests assert the exact
+single-upload GL stream, repeated-upload state elision, nonzero active-unit
+transitions, source dimensions, validation, disposal, both restore modes and
+the unusable-retained-source fallback, including metadata-only video creation
+and restoration.
 
 #### 3.4.1 Native 3D pixel textures (optional)
 
@@ -936,21 +1039,22 @@ kept in sync with actual GL state. Two protocols enforce that:
 
 ### 4.2 Cache contract — which GL calls are elided
 
-| Operation                                  | Cache key                                 | Elided when                                                                   |
-| ------------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `gl.useProgram`                            | `_state.currentProgram`                   | Same program already current                                                  |
-| `gl.activeTexture`                         | `_state.activeTextureUnit`                | Already on that unit                                                          |
-| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`              | Same 2D texture already on that unit                                          |
-| `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`           | Same 3D texture already on that unit                                          |
-| `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                | Always — never re-issued per frame                                            |
-| `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`       | Value bit-equal to last                                                       |
-| `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                    | Value equal to last                                                           |
-| `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                 | Same buffer                                                                   |
-| `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`               | Same buffer                                                                   |
-| `gl.bindVertexArray`                       | `_state.boundVao`                         | Same VAO (the shared quad VAO lives forever)                                  |
-| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                 | Same FBO already bound (`bindRenderTarget`; null = canvas)                    |
-| `gl.viewport`                              | `_state.viewportX/Y/W/H`                  | All four match                                                                |
-| blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1) | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
+| Operation                                  | Cache key                                       | Elided when                                                                   |
+| ------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `gl.useProgram`                            | `_state.currentProgram`                         | Same program already current                                                  |
+| `gl.activeTexture`                         | `_state.activeTextureUnit`                      | Already on that unit                                                          |
+| `gl.pixelStorei` (2D unpack flags)         | `_state.unpackFlipY/PremultiplyAlpha/Alignment` | Same flag/alignment already applied, including decoded-source uploads         |
+| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`                    | Same 2D texture already on that unit                                          |
+| `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`                 | Same 3D texture already on that unit                                          |
+| `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                      | Always — never re-issued per frame                                            |
+| `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`             | Value bit-equal to last                                                       |
+| `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                          | Value equal to last                                                           |
+| `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
+| `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
+| `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
+| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget`; null = canvas)                    |
+| `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
+| blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 
 For the typical NeonBrush per-frame pattern (one effect, ~5 uniforms, 1–2 textures), after the first frame every steady-state frame issues exactly:
 
@@ -1326,7 +1430,8 @@ The application's `onContextLost` callback may e.g. hide the canvas.
 2. For each `tex` in `engine._textures`: allocate a fresh `WebGLTexture`,
    assign to `tex.handle`, call `tex._upload(engine)` to replay the original
    upload (raw bytes for `createRawTexture`; retained `ImageBitmap` for
-   `loadTexture2D`; source HTML element for `createHtmlElementTexture`), then
+   `loadTexture2D`; source HTML element for `createHtmlElementTexture`;
+   retained decoded source or blank storage for `createTextureFromSource`), then
    call `tex._initializeParameters?.(engine)` while that fresh handle remains
    bound. Set `tex.isReady=true` once the replay completes.
 3. `engine._isLost = false`.

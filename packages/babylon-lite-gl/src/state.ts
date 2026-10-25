@@ -176,6 +176,7 @@ export interface GLState {
     /**
      * Attribute locations currently configured with a non-default vertex divisor
      * (instanced attributes), mirroring Babylon's `_currentInstanceLocations`.
+     * Each location is recorded once, so repeated binds without an unbind stay bounded.
      * `unbindInstanceAttributes` resets each back to divisor 0 and clears this.
      */
     instanceLocations: number[];

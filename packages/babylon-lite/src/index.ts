@@ -44,6 +44,7 @@ export {
     removeFromScene,
     setMeshVisible,
     onBeforeRender,
+    onSceneChange,
     onSceneDispose,
     addToScene,
     disposeScene,
@@ -52,7 +53,7 @@ export {
     unregisterScene,
 } from "./scene/scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
-export type { SceneContextOptions } from "./scene/scene.js";
+export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
 export { setEnvironmentRotation } from "./scene/set-environment-rotation.js";
@@ -82,8 +83,8 @@ export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinit
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
+export { buildFrameGraphTask, getFrameGraphTasks } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 export {
     createFrameGraphContext,
     registerFrameGraphContext,
@@ -103,6 +104,8 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createCustomPostProcessTask } from "./post-process/custom.js";
+export type { CustomPostProcessTaskConfig } from "./post-process/custom.js";
 export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
 export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
@@ -277,6 +280,7 @@ export {
     createMeshFromData,
     updateMeshGeometry,
     updateMeshGeometryCapacity,
+    setMeshDrawRange,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -287,7 +291,7 @@ export {
     resizeSharedMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
-export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges, MeshDrawRange } from "./mesh/mesh-factories.js";
 export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
 export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
@@ -320,6 +324,8 @@ export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-unif
 // caller's business. Tree-shaken away when unused.
 export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
 export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
+export { setMeshIndexedIndirect, getMeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
+export type { MeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
 // data in .w). Opt-in: costs nothing in scenes that never declare one.
 export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
@@ -538,6 +544,7 @@ export { getShaderExternalTexture, setShaderExternalTexture } from "./material/s
 export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
+export { enableShaderMaterialVisiblePacketUpdates } from "./material/shader/enable-shader-material-visible-packet-updates.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
 export { enableShaderMaterialFinalColor } from "./material/shader/enable-shader-material-final-color.js";
 export { enableShaderMaterialPipelineSharing } from "./material/shader/enable-shader-material-pipeline-sharing.js";
@@ -745,9 +752,13 @@ export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
 export { loadSPZ } from "./loader-splat/load-spz.js";
 export { loadGaussianSplatStream, attachGaussianSplatStream, disposeGaussianSplatStream } from "./loader-splat-stream/load-gaussian-splat-stream.js";
+export { loadSplatVoxelCollision, parseSplatVoxelCollision, moveSplatVoxelCamera } from "./collision/splat-voxel-collision.js";
+export type { SplatVoxelCollision } from "./collision/splat-voxel-collision.js";
 export type { GaussianSplatStream, GaussianSplatStreamOptions, GaussianSplatStreamPhase, GaussianSplatStreamStats } from "./loader-splat-stream/splat-stream-types.js";
 export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";
+export { GAUSSIAN_SPLATTING_MAX_PART_COUNT, getGaussianSplattingPartIndexVaryingDeclaration } from "./material/gaussian-splatting-plugin-helpers.js";
+export { getGaussianSplattingMaxPartCount } from "./material/gaussian-splatting-part-count.js";
 export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { createProceduralGaussianSplattingMesh } from "./mesh/GaussianSplatting/create-gaussian-splatting-mesh.js";
 export { gsLinearDepthFragment, gsAlphaBlendedDepthFragment } from "./mesh/GaussianSplatting/gs-depth-fragments.js";
@@ -853,6 +864,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { inverseLerp } from "./math/inverse-lerp.js";
 export { sampleHermiteSpline, sampleCatmullRomSpline } from "./math/curve-splines.js";
 export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
@@ -883,7 +895,10 @@ export { createLookAtMat4LH } from "./math/create-look-at-mat4-lh.js";
 export { createPerspectiveMat4LH } from "./math/create-perspective-mat4-lh.js";
 export { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "./math/create-mat4-from-quat.js";
 export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat4.js";
+export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
 export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
+export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
+export { _getGaussianPointSplattingPackedShBytesPerSplat, _hasGaussianPointSplattingProjectedDepth } from "./math/gaussian-point-splatting-compat-helpers.js";
 export { decomposeMat4 } from "./math/decompose-mat4.js";
 export type { DecomposedTransform } from "./math/decompose-mat4.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
@@ -1093,6 +1108,8 @@ export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisi
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
+export type { Sprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
+export { enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
@@ -1437,3 +1454,66 @@ export {
     stillPending,
     tickFlowGraph,
 } from "./flow-graph/index.js";
+
+// ─── MeshLoD (opt-in, tree-shakable) ─────────────────────────────────
+// Clustered level-of-detail streaming for large static meshes. Importing the
+// facade has no side effects and pulls in no runtime/decoder/material chunks;
+// those load only when loadMeshLoD is first called, so non-MeshLoD scenes fetch
+// zero MeshLoD bytes.
+export {
+    loadMeshLoD,
+    createMeshLoDInstance,
+    addMeshLoDToScene,
+    removeMeshLoDFromScene,
+    setMeshLoDScreenSpaceError,
+    setMeshLoDCacheBudget,
+    setMeshLoDStreamingPaused,
+    setMeshLoDDebugView,
+    setMeshLoDSelectionMode,
+    getMeshLoDDiagnostics,
+    disposeMeshLoDAsset,
+    isMeshLoDError,
+} from "./mesh-lod/mesh-lod.js";
+export type {
+    MeshLoDSource,
+    MeshLoDAssetState,
+    MeshLoDSelectionMode,
+    MeshLoDDebugView,
+    MeshLoDRequestOptions,
+    MeshLoDLoadOptions,
+    MeshLoDMetadata,
+    MeshLoDDiagnostics,
+    MeshLoDAsset,
+    MeshLoDInstanceOptions,
+    MeshLoDInstance,
+    MeshLoDError,
+    MeshLoDErrorCode,
+} from "./mesh-lod/mesh-lod.js";
+
+// Accessibility (optional scene descriptions, roles, and ARIA attributes).
+export {
+    createAccessibilityTree,
+    addAccessibilityNode,
+    updateAccessibilityNode,
+    removeAccessibilityNode,
+    disposeAccessibilityTree,
+    onAccessibilityTreeChanged,
+    batchAccessibilityUpdates,
+} from "./accessibility/accessibility-tree.js";
+export type { AccessibilityTag, AccessibilityNode, AccessibilityNodeOptions, AccessibilityTree } from "./accessibility/accessibility-tree.js";
+export { createHtmlTwin, updateHtmlTwin, getHtmlTwinElement, disposeHtmlTwin } from "./accessibility/html-twin.js";
+export type { HtmlTwin, HtmlTwinOptions } from "./accessibility/html-twin.js";
+export {
+    createSceneAccessibility,
+    updateSceneAccessibility,
+    getAccessibilityNode,
+    getAccessibilityTag,
+    setAccessibilityTag,
+    setAccessibilityParent,
+    disposeSceneAccessibility,
+} from "./accessibility/scene-accessibility.js";
+export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
+export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
+export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
+export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";

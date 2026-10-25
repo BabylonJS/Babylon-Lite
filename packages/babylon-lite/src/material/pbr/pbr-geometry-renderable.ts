@@ -359,7 +359,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
+            pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, gpu._firstIndex ?? 0, gpu._baseVertex);
         }
         return 1;
     };

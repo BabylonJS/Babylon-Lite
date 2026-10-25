@@ -3,6 +3,8 @@ import type { EngineContext } from "./engine.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
+import { uploadMeshToGPU } from "../mesh/mesh.js";
+import { setMeshDrawRangeSource } from "../mesh/mesh-draw-range-state.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -104,6 +106,9 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             return;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        if (result._w !== undefined) {
+            meshes._w = result._w;
+        }
         meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
@@ -128,7 +133,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
     const rebuilt: Renderable[] = [];
     for (const rebuild of rebuilds) {
-        rebuilt.push(await rebuild());
+        const renderable = await rebuild();
+        if (renderable) {
+            rebuilt.push(renderable);
+        }
     }
     return rebuilt;
 }
@@ -197,6 +205,17 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
+    const old = mesh._gpu;
+    const source = old._drawRangeSource;
+    if (source) {
+        const gpu = uploadMeshToGPU(engine, source.positions, source.normals, source.indices, source.uvs, source.uvs2, source.tangents, source.colors);
+        setMeshDrawRangeSource(gpu, { ...source });
+        gpu._firstIndex = old._firstIndex;
+        gpu._baseVertex = old._baseVertex;
+        gpu._vertexCapacity = source.positions.length / 3;
+        gpu._indexCapacity = source.indices.length;
+        return gpu;
+    }
     const positions = mesh._cpuPositions!;
     const normals = mesh._cpuNormals!;
     const uvs = mesh._cpuUvs;

@@ -44,6 +44,7 @@ interface CsmStaticCacheOptions {
     refitAngle: number;
     refitMaxIntervalMs?: number;
     staticCascadesPerFrame?: number; // 0 or omitted: every cascade re-renders in the refit frame
+    cascadeCoveragePadding?: number; // 0 or omitted: off; otherwise 2 / mapSize through 1, stabilizeCascades only
 }
 
 function enableCsmStaticCache(engine: EngineContext, shadowGenerator: ShadowGenerator, options: CsmStaticCacheOptions): Promise<void>;
@@ -154,8 +155,9 @@ shadow cache before scene registration or receiver-texture access. Casters begin
 overlay, become static after 120 quiet frames, and return to the dynamic set
 immediately when their world or thin-instance version changes. A refit recomputes
 the cascades and refreshes the private static depth array after the light drifts by
-`options.refitAngle`, the camera changes, caster membership changes, a static caster
-moves, or `options.refitMaxIntervalMs` expires. The interval remains active while the
+`options.refitAngle`, the camera changes (with `options.cascadeCoveragePadding`, only the
+changes listed under _Camera-coverage refit_ below), caster membership changes, a static
+caster moves, or `options.refitMaxIntervalMs` expires. The interval remains active while the
 light is paused so GPU-clock-animated static casters continue refreshing. Generators
 that are not explicitly enabled preserve the original single-task path, allocate no
 cache texture, and do not load the cache implementation.
@@ -168,12 +170,71 @@ rendered, only that array layer is copied to the live shadow map, and only that 
 overlay is rendered. Cascades still waiting retain both their previous depth and previous
 receiver transform, so the sampled data remains coherent throughout the spread.
 
-A refit caused by the camera, scene content, caster set, promotion or demotion updates every
-cascade in its own frame, as without the option. A drift refit that lands while a spread is
+Published cascades keep owned copies of their light view and caster view-projection. A shadow
+camera holds references to the arrays it is given, and a refit recomputes the shared fit scratch
+for every cascade while some stay published: a spread publishes them over several frames, and a
+coverage refit (below) republishes only the cascades that fail. With references, a waiting
+cascade's camera (and so the culling of its dynamic overlay) would take the new fit before its
+static layer is rendered with it.
+
+A refit caused by the camera (without `cascadeCoveragePadding`; see below; a change of active
+camera counts too, by identity, since the camera change key is a per-camera counter sum that two
+cameras can share), scene content,
+caster set, promotion or demotion updates every cascade in its own frame, as without the option. A drift refit that lands while a spread is
 still draining also updates every cascade immediately, preventing a fast-moving light from
 continually replacing the pending generation. If a dynamic caster changes during a spread,
 the cache is copied and the dynamic overlay is redrawn for every cascade, while each static
 layer remains paired with its currently published transform.
+
+#### Camera-coverage refit (`cascadeCoveragePadding`)
+
+Off by default (`0` or omitted): every camera change refits and re-renders all cascades,
+as described above. A positive value must lie between `2 / mapSize` and `1` and requires
+`stabilizeCascades: true`; `enableCsmStaticCache` rejects any other value. The floor exists
+because texel snapping shifts a fit by up to `sqrt(2) / mapSize` of its radius: a fresh fit
+then reaches at most `1 / (1 + padding) + sqrt(2) / mapSize` of its own coverage disc, which
+stays at or below 1 from `2 / mapSize`. It is a worst-case bound, not a measured threshold.
+
+- **Padded fit.** Every fit of the cached generator passes `radiusScale = 1 + padding` to
+  `_computeCsmCascades`, which widens each stabilized bounding sphere by that factor before
+  the 1/16 rounding. Texels grow by about the same factor.
+- **Coverage test.** On each frame where the camera's transform version changed, the
+  current slice of every cascade is tested against that cascade's **published** map: its
+  eight corners (from `_csmSliceCornersInto`, the slice geometry shared with the fit, using
+  the published split distances) must lie inside the unit disc of the cascade's shadow clip
+  space (read from the receiver UBO) and inside the light-depth range `[0, 2R]` (read from the
+  published light view, before the caster-bound depth tightening).
+- **Same-frame refit.** The cascades that fail are refit and re-rendered in that frame, alone:
+  a fresh fit is computed, and each failed cascade's camera, receiver UBO slot, static layer,
+  array-layer copy and dynamic overlay advance together, as in a spread. Cascades that still
+  pass keep their map, camera and transform.
+- **Full refit.** A change of active camera (identity, read from the camera the cascades were
+  last fit for, `CsmTaskState._lastCamera`: `_projRev` is a per-camera counter, so two cameras can
+  share a revision), of its projection revision (fov, near/far, orthographic
+  bounds) or of the effective aspect refits every cascade, because the splits or slice shapes
+  change. The light, content, caster and interval causes are unchanged.
+- **Spread publication.** A cascade a spread refit publishes one or two frames after its fit is
+  refit first when the camera moved since that fit, so every cascade published while the
+  camera moves is fit to the pose it is shown with.
+- **Scheduler.** A cascade that fails while a spread still waits to render it is re-rendered
+  now, outside the per-frame budget, and removed from the pending set with the internal
+  scheduler's `claim()`, so the spread does not render it a second time.
+- **Floating origin.** Under a floating origin the camera view-projection is eye-relative
+  (`getViewMatrix`), so a pure translation moves no slice corner; the option then falls back
+  to refitting every cascade on every camera change.
+- **Receiver callbacks.** `onCsmReceiverUpdate` callbacks keep the per-frame cadence they have
+  without the option: they are invoked on every frame the camera's change key moves, with the
+  current receiver data, even when that frame redraws no cascade (consumers re-upload their own
+  camera-dependent terms from them). A still camera invokes them only on the frames that publish
+  cascades, as without the option.
+
+What this covers: after every frame, each cascade's map contains the eight corners of the
+camera's current slice for that cascade by the rule above, so the whole (convex) slice. That
+is the level a fresh unpadded stabilized fit already reaches (texel snapping takes it to about
+1.0005 of the disc), not a stronger one. It does not cover the 5×5 PCF footprint at the disc
+edge, nor the cross-fade band: fragments in the last `cascadeBlendPercentage` of a slice
+sample the next cascade, outside that cascade's slice, and with the option that band reaches
+further into the next cascade's map than with a fresh fit.
 
 `createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
 that need the same policy without engine or WebGPU dependencies. The spread scheduler and its
@@ -326,14 +387,18 @@ For `p = (i+1)/N`: `log = minZ*ratio^p`, `uniform = minZ + range*p`,
 they live as long as the generator, and later caster changes are reconciled into them
 (see the caster reconcile below).
 `_renderShadowMap` → per frame, dirty-checked on `casterVersion + lightVersion +
-cameraVersion`; recomputes splits + matrices, writes the 320-byte UBO (bumping
+cameraVersion`, the aspect and the camera's identity (`CsmTaskState._lastCamera`, since two
+cameras can share a change key); recomputes splits + matrices, writes the 320-byte UBO (bumping
 `_version`), updates each cascade camera, executes all cascade tasks.
 
 With static caching enabled, the dynamically imported `csm-shadow-cache.ts` owns the
 GPU task split and `csm-refit-gate.ts` owns the caster partition and refit decision.
-Cascade matrices, the receiver UBO, and shadow-camera versions change only on refit
-frames; dynamic-only frames reuse the last refit's cameras so cached and overlay
-depth stay in the same coordinate system. Quiet dynamic casters demote only during a
+A cascade's matrix, receiver UBO slot and shadow-camera version change only in a frame that
+re-renders that cascade's static layer and redraws its overlay: every cascade on a refit
+frame (spread over the following frames for a drift refit), and, with
+`cascadeCoveragePadding`, the cascades whose map stopped covering the camera on frames where
+the gate decided no refit. Dynamic-only frames reuse the published cameras so cached and
+overlay depth stay in the same coordinate system. Quiet dynamic casters demote only during a
 refit. A changed static caster promotes immediately and forces that refit. Resolved
 renderables transfer between task sets without rebuilding their per-mesh packets.
 The cache state (tasks, cache texture, gate) is created on the first ensure (or when it
@@ -558,6 +623,38 @@ renders.
 
 `tests/lite/unit/csm-refit-gate.test.ts` validates stable re-supply, version-sum
 collision handling, promotion/demotion timing, angular drift, and interval refits.
+
+`tests/lite/unit/csm-static-refit-scheduler.test.ts` validates the spread budget, round-robin
+order and maximum lag, and that `claim()` removes only a pending cascade and leaves the next
+spread budgeted.
+
+`tests/lite/unit/enable-csm-static-cache.test.ts` additionally validates that
+`cascadeCoveragePadding` defaults to 0, is stored when valid, and is rejected outside `[0, 1]`,
+below `2 / mapSize`, or without `stabilizeCascades`.
+
+`tests/lite/unit/csm-camera-coverage-refit.test.ts` drives the real cached render, cascade fit,
+arc-rotate camera and directional light (only the GPU tasks are stubbed) and counts static
+re-renders. It proves that without the option an orbit re-renders every cascade every frame,
+and that with it the same orbit re-renders far fewer; that after every frame the published
+maps satisfy the coverage rule (checked by re-implementing that rule from the receiver UBO and
+shadow cameras, so it catches a bypassed test, not a wrong rule), with and without the
+interval floor, for a camera sliding along the light direction, and for seeded back-and-forth
+yaw jumps that publish spread cascades late; that texels widen by the padding factor; that a
+still camera costs only the interval floor; that a coverage miss re-renders only the missed
+cascades, once, while the others keep their camera matrices; and that a field-of-view change,
+a swap to a camera sharing the previous one's projection revision, or a floating origin
+refits every cascade, and that without the option a swap to a camera sharing the previous one's
+change key still refits every cascade, once. It also checks that the receiver callbacks fire on every frame the camera
+key changes, as without the option, and that a still camera adds none beyond the default path.
+
+`tests/lite/unit/csm-default-camera-swap.test.ts` drives the real default (uncached)
+`renderCsmShadowMap` and proves that a swap to a camera sharing the previous one's change key and
+aspect refits every cascade to the new camera's splits, once.
+
+`tests/lite/unit/csm-static-spread-camera-ownership.test.ts` drives the real cache through a
+drift refit spread over several frames and proves that a cascade not yet re-rendered keeps the
+camera matrix its static layer was rendered with, and that every dynamic overlay is drawn with
+its static layer's matrix while the spread drains.
 
 `tests/lite/unit/light-version.test.ts` validates that direct scalar light mutations
 can bump the light UBO version without dirtying the world matrix.

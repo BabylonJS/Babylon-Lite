@@ -185,7 +185,7 @@ export function createTexture3DFromPixels(
     };
     upload(engine);
     initializeParameters(engine);
-    engine._textures.push(tex);
+    engine._textures.add(tex);
     return tex;
 }
 
@@ -257,7 +257,9 @@ export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3
     }
 }
 
-/** Dispose a 3D texture and invalidate any units that still reference its handle. */
+/** Dispose a 3D texture and invalidate any units that still reference its handle.
+ * Deregistration is expected O(1); shared references retain their registry entry
+ * until the final release, and repeated disposal is a no-op. */
 export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): void {
     if (tex._disposed) {
         return;
@@ -267,10 +269,7 @@ export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): voi
         return;
     }
     tex._disposed = true;
-    const index = engine._textures.indexOf(tex);
-    if (index !== -1) {
-        engine._textures.splice(index, 1);
-    }
+    engine._textures.delete(tex);
     if (!engine._isLost && !engine._disposed) {
         engine.gl.deleteTexture(tex.handle);
     }

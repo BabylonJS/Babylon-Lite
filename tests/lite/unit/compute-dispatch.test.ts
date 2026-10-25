@@ -13,6 +13,7 @@ import { createComputeShader, prepareComputeShader } from "../../../packages/bab
 import { computeStorageBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-storage-buffer-binding";
 import { computeUniformBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer-binding";
 import { createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
+import { rebuildCpuStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery";
 
 const gpuGlobals = globalThis as unknown as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage"> & {
     GPUBufferUsage?: Record<string, number>;
@@ -138,6 +139,16 @@ describe("scheduled compute dispatch", () => {
 
         await expect(prepareComputeShader(shader)).rejects.toThrow(/recreate the compute graph/);
         expect(() => setComputeIndirectDispatch(indirectDispatch, indirect)).toThrow(/recreate the compute graph/);
+    });
+
+    it("rejects an unrecovered GPU-role allocation when a replacement-device binding set is built", () => {
+        const { engine } = makeEngine();
+        const output = createStorageBuffer(engine, 16, { writable: true });
+        engine._device = makeEngine().device;
+        rebuildCpuStorageBuffers(engine);
+        const params = createComputeUniformArena(createComputeTask(engine), 16, 1).buffer;
+
+        expect(() => createComputeBindingSet(createProgram(engine), { params, output })).toThrow(/previous device/);
     });
 
     it("uses shader-derived layouts when automatic layout is requested", () => {

@@ -13,12 +13,13 @@
  */
 
 import { unsupported } from "../error.js";
+import { GAUSSIAN_SPLATTING_MAX_PART_COUNT, encodeIdToColor, getGaussianSplattingMaxPartCount, getGaussianSplattingPartIndexVaryingDeclaration } from "babylon-lite";
 import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
-import type { ShaderLanguage } from "../misc/engine-constants.js";
+import { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
@@ -26,13 +27,21 @@ import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
 import type { TransformNode } from "../meshes/meshes.js";
 import type { Vector3 } from "../math/vector.js";
+import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
+import type { Matrix } from "../math/matrix.js";
+import type { StorageBuffer } from "../buffers/storage-buffer.js";
 
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
 const DITHERED_TILE_FADE_UNSUPPORTED =
     "Lite's material-plugin bridge supports shared shader injection, but not Babylon.js per-draw mesh uniforms, hardware-instance bounds, or custom thin-instance attributes/varyings. Adding those requires an opt-in per-renderable plugin-data design.";
-
+const GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED =
+    "Lite's Gaussian-splat renderable fixes shader fragments and render state at load time and exposes no post-load material replacement or pipeline-rebuild lifecycle. Supporting Babylon.js GaussianSplattingMaterial plugins requires an opt-in Lite splat-material lifecycle design.";
+const GAUSSIAN_POINT_SPLATTING_UNSUPPORTED =
+    "Babylon.js Gaussian Point Splatting is a separate stochastic WebGPU compute-renderer subsystem with accumulation, Hi-Z culling, depth-pass integration, and fullscreen compositing lifecycles. Lite's sorted-splat renderer has no equivalent compute or pass-ownership model, and adding one requires broad engine design rather than a small mechanical export.";
+const SHADER_MATERIAL_UNSUPPORTED =
+    "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -253,6 +262,283 @@ export interface IDitheredTileFadeBounds {
     upperBound: number;
 }
 
+export interface IGaussianSplattingDebugOptions {
+    clippingBox: { min: Vector3; max: Vector3 } | null;
+    opacityCulling: { min: number; max: number } | null;
+    sizeCulling: { min: number; max: number } | null;
+    opacityScale: number;
+    opacitySaturate: boolean;
+    shDc: boolean;
+    shOrder1: boolean;
+    shOrder2: boolean;
+    shOrder3: boolean;
+    shOrder4: boolean;
+}
+
+export const GaussianSplattingMaxPartCount = GAUSSIAN_SPLATTING_MAX_PART_COUNT;
+
+export function GetGaussianSplattingMaxPartCount(engine: AbstractEngine): number {
+    return getGaussianSplattingMaxPartCount(engine._lite);
+}
+
+export function GetPartIndexVaryingDeclaration(shaderLanguage: ShaderLanguage): string {
+    return getGaussianSplattingPartIndexVaryingDeclaration(shaderLanguage === ShaderLanguage.WGSL);
+}
+
+export class GaussianSplattingMaterial extends PushMaterial {
+    /** @internal The unsupported material has no Lite backing. */
+    public get _lite(): never {
+        return unsupported("GaussianSplattingMaterial._lite", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public constructor(name: string, scene?: Scene) {
+        super(name);
+        void scene;
+        unsupported("GaussianSplattingMaterial", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public override clone(_name: string): GaussianSplattingMaterial {
+        return unsupported("GaussianSplattingMaterial.clone", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingDebugMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingDebug", 200, {}, false);
+        unsupported("GaussianSplattingDebugMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingGpuPickingMaterialPlugin extends MaterialPluginBase {
+    public static EncodeIdToColor(id: number): [number, number, number] {
+        return encodeIdToColor(id);
+    }
+
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial, _maxPartCount?: number) {
+        super(material, "GaussianSplatGpuPicking", 230, {}, false);
+        unsupported("GaussianSplattingGpuPickingMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingSolidColorMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial, _partColors: Color3[], _maxPartCount?: number) {
+        super(material, "GaussianSplatSolidColor", 200, {}, false);
+        unsupported("GaussianSplattingSolidColorMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingSizeMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingSize", 210, {}, false);
+        unsupported("GaussianSplattingSizeMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get isEnabled(): boolean {
+        return unsupported("GaussianSplattingSizeMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set isEnabled(_value: boolean) {
+        unsupported("GaussianSplattingSizeMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get sizeScale(): number {
+        return unsupported("GaussianSplattingSizeMaterialPlugin.sizeScale", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set sizeScale(_value: number) {
+        unsupported("GaussianSplattingSizeMaterialPlugin.sizeScale", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export class GaussianSplattingOverdrawMaterialPlugin extends MaterialPluginBase {
+    /** @internal An unsupported plugin must not attach to a Lite material. */
+    protected override get _attachToLite(): boolean {
+        return false;
+    }
+
+    public constructor(material: GaussianSplattingMaterial) {
+        super(material, "GaussianSplattingOverdraw", 220, {}, false);
+        unsupported("GaussianSplattingOverdrawMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get isEnabled(): boolean {
+        return unsupported("GaussianSplattingOverdrawMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set isEnabled(_value: boolean) {
+        unsupported("GaussianSplattingOverdrawMaterialPlugin.isEnabled", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public get intensity(): number {
+        return unsupported("GaussianSplattingOverdrawMaterialPlugin.intensity", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+
+    public set intensity(_value: number) {
+        unsupported("GaussianSplattingOverdrawMaterialPlugin.intensity", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+    }
+}
+
+export function RegisterGaussianSplattingDebugMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingDebugMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingGpuPickingMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingGpuPickingMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingSolidColorMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingSolidColorMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingSizeMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingSizeMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingOverdrawMaterialPlugin(): void {
+    unsupported("RegisterGaussianSplattingOverdrawMaterialPlugin", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export function RegisterGaussianSplattingMaterial(): void {
+    unsupported("RegisterGaussianSplattingMaterial", GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED);
+}
+
+export class GaussianPointSplattingRenderer {
+    public pointScale = 1;
+    public kernelSize = 0.3;
+    public minPixelSize = 0;
+    public rightHandedSystem = false;
+    public debugActive = 0;
+    public isOrthographic = false;
+    public compensation = false;
+    public occlusionCulling = false;
+    public maxAccumFrames = 255;
+
+    public constructor(_engine: AbstractEngine) {
+        unsupported("GaussianPointSplattingRenderer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public supportsWorkload(_gaussianCount: number, _shDegree: number, _outWidth: number, _outHeight: number): boolean {
+        return unsupported("GaussianPointSplattingRenderer.supportsWorkload", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get accumBuffer(): StorageBuffer | null {
+        return unsupported("GaussianPointSplattingRenderer.accumBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get accumDepthBuffer(): StorageBuffer | null {
+        return unsupported("GaussianPointSplattingRenderer.accumDepthBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get renderedFrameCount(): number {
+        return unsupported("GaussianPointSplattingRenderer.renderedFrameCount", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get accumulationVersion(): number {
+        return unsupported("GaussianPointSplattingRenderer.accumulationVersion", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get pixelCycleLength(): number {
+        return unsupported("GaussianPointSplattingRenderer.pixelCycleLength", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public async readPointCountAsync(): Promise<number> {
+        return unsupported("GaussianPointSplattingRenderer.readPointCountAsync", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get width(): number {
+        return unsupported("GaussianPointSplattingRenderer.width", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get height(): number {
+        return unsupported("GaussianPointSplattingRenderer.height", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get outputWidth(): number {
+        return unsupported("GaussianPointSplattingRenderer.outputWidth", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get outputHeight(): number {
+        return unsupported("GaussianPointSplattingRenderer.outputHeight", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public get gaussianCount(): number {
+        return unsupported("GaussianPointSplattingRenderer.gaussianCount", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public isReady(): boolean {
+        return unsupported("GaussianPointSplattingRenderer.isReady", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public updateSplats(_means: Float32Array, _cov3d: Uint32Array, _colorOpacity: Uint32Array, _sh: Uint32Array | null, _shDegree: number, _count: number): void {
+        unsupported("GaussianPointSplattingRenderer.updateSplats", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public resetAccumulation(): void {
+        unsupported("GaussianPointSplattingRenderer.resetAccumulation", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setCamera(
+        _view: Matrix,
+        _viewProjection: Matrix,
+        _near: number,
+        _far: number,
+        _focalX: number,
+        _focalY: number,
+        _camX: number,
+        _camY: number,
+        _camZ: number,
+        _viewZMin: number,
+        _viewZMax: number
+    ): void {
+        unsupported("GaussianPointSplattingRenderer.setCamera", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setProjectionZ(_m10: number, _m11: number, _m14: number, _m15: number): void {
+        unsupported("GaussianPointSplattingRenderer.setProjectionZ", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setProjectionMatrix(_projection: Matrix, _inverseProjection: Matrix, _reverseDepth = false): void {
+        unsupported("GaussianPointSplattingRenderer.setProjectionMatrix", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setPartData(_packed: Float32Array, _count: number): void {
+        unsupported("GaussianPointSplattingRenderer.setPartData", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    /** @internal */
+    public _matchesPartData(_packed: Float32Array, _count: number): boolean {
+        return unsupported("GaussianPointSplattingRenderer._matchesPartData", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public renderToBuffer(_width: number, _height: number, _outWidth = _width, _outHeight = _height, _upsampleN = 1, _jitterX = 0, _jitterY = 0): boolean {
+        return unsupported("GaussianPointSplattingRenderer.renderToBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public dispose(): void {
+        unsupported("GaussianPointSplattingRenderer.dispose", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+}
+
 export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
     public static readonly Name = "DitheredTileFade";
 
@@ -262,7 +548,7 @@ export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
     }
 
     public constructor(material: DitheredTileFadeSupportedMaterial) {
-        super(material, DitheredTileFadeMaterialPlugin.Name, 190);
+        super(material, DitheredTileFadeMaterialPlugin.Name, 190, {}, false);
         unsupported("DitheredTileFadeMaterialPlugin", DITHERED_TILE_FADE_UNSUPPORTED);
     }
 
@@ -328,11 +614,90 @@ export class DitheredTileFadeMaterialPlugin extends MaterialPluginBase {
 }
 
 export class ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by unsupported subclasses. */
+    protected static readonly _UnsupportedApi: string = "ShaderMaterial";
+
+    /** @internal Stable structural blocker inherited by unsupported subclasses. */
+    protected static readonly _UnsupportedReason: string = SHADER_MATERIAL_UNSUPPORTED;
+
     public constructor() {
-        unsupported(
-            "ShaderMaterial",
-            "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem."
-        );
+        unsupported(new.target._UnsupportedApi, new.target._UnsupportedReason);
+    }
+}
+
+export class GaussianPointSplattingBlitMaterial extends ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedApi = "GaussianPointSplattingBlitMaterial";
+
+    /** @internal Stable structural blocker inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedReason = GAUSSIAN_POINT_SPLATTING_UNSUPPORTED;
+
+    public constructor(_name: string, _scene: Scene) {
+        super();
+    }
+
+    public setAccumBuffer(_buffer: StorageBuffer): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setAccumBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setAccumDepthBuffer(_buffer: StorageBuffer): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setAccumDepthBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setResolution(_width: number, _height: number): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setResolution", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setProjectionZ(_m10: number, _m11: number, _m14: number, _m15: number): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setProjectionZ", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setInverseProjection(_inverseProjection: Matrix): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setInverseProjection", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setLogarithmicDepthConstant(_constant: number): void {
+        unsupported("GaussianPointSplattingBlitMaterial.setLogarithmicDepthConstant", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+}
+
+export class GaussianPointSplattingDepthBlitMaterial extends ShaderMaterial {
+    /** @internal Stable diagnostic API inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedApi = "GaussianPointSplattingDepthBlitMaterial";
+
+    /** @internal Stable structural blocker inherited by consumer subclasses. */
+    protected static override readonly _UnsupportedReason = GAUSSIAN_POINT_SPLATTING_UNSUPPORTED;
+
+    public constructor(_name: string, _scene: Scene) {
+        super();
+    }
+
+    public setAccumBuffer(_buffer: StorageBuffer): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setAccumBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setAccumDepthBuffer(_buffer: StorageBuffer): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setAccumDepthBuffer", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setResolution(_width: number, _height: number): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setResolution", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setProjectionZ(_m10: number, _m11: number, _m14: number, _m15: number): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setProjectionZ", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setInverseProjection(_inverseProjection: Matrix): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setInverseProjection", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setDepthValues(_minZ: number, _minZPlusMaxZ: number): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setDepthValues", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
+    }
+
+    public setReverseDepth(_reverse: boolean): void {
+        unsupported("GaussianPointSplattingDepthBlitMaterial.setReverseDepth", GAUSSIAN_POINT_SPLATTING_UNSUPPORTED);
     }
 }
 

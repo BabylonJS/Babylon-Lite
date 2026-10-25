@@ -190,6 +190,8 @@ export interface ThinInstanceGpuCullState {
     _indexCount: number;
     /** @internal */
     _baseVertex: number;
+    /** @internal Last first index written to the near-bucket arguments. */
+    _firstIndex?: number;
     /** @internal */
     _active: boolean;
     /** @internal Whether the current pipeline/bind-group/params target the two-bucket LOD variant. */
@@ -204,6 +206,8 @@ export interface ThinInstanceGpuCullState {
     _lodIndexCount: number;
     /** @internal Last base vertex (the partner mesh's) written to `_lodArgsBuffer`. */
     _lodBaseVertex: number;
+    /** @internal Last first index written to the far-bucket arguments. */
+    _lodFirstIndex?: number;
     /** @internal True once the far-bucket args were zeroed for a fallback frame (reset when culling runs). */
     _lodArgsZeroed: boolean;
 }
@@ -654,12 +658,13 @@ function writeCullParams(
     }
 
     const baseVertex = gpu._baseVertex ?? 0;
-    if (state._indexCount !== gpu.indexCount || state._baseVertex !== baseVertex) {
+    if (state._indexCount !== gpu.indexCount || state._baseVertex !== baseVertex || state._firstIndex !== (gpu._firstIndex ?? 0)) {
         const args = state._argsData;
         writeMeshIndexedIndirectArgs(args, gpu, 0);
         engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
         state._indexCount = gpu.indexCount;
         state._baseVertex = baseVertex;
+        state._firstIndex = gpu._firstIndex ?? 0;
     } else {
         engine._currentEncoder.clearBuffer(state._argsBuffer!, 4, 4);
     }
@@ -668,12 +673,13 @@ function writeCullParams(
         const lodGpu = lodMesh._gpu as MeshGPU | undefined;
         const lodIndexCount = lodGpu ? lodGpu.indexCount : 0;
         const lodBaseVertex = lodGpu?._baseVertex ?? 0;
-        if (lodGpu && (state._lodIndexCount !== lodIndexCount || state._lodBaseVertex !== lodBaseVertex)) {
+        if (lodGpu && (state._lodIndexCount !== lodIndexCount || state._lodBaseVertex !== lodBaseVertex || state._lodFirstIndex !== (lodGpu._firstIndex ?? 0))) {
             const args = state._argsData;
             writeMeshIndexedIndirectArgs(args, lodGpu, 0);
             engine._device.queue.writeBuffer(state._lodArgsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
             state._lodIndexCount = lodIndexCount;
             state._lodBaseVertex = lodBaseVertex;
+            state._lodFirstIndex = lodGpu._firstIndex ?? 0;
         } else {
             engine._currentEncoder.clearBuffer(state._lodArgsBuffer!, 4, 4);
         }

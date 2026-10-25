@@ -16,7 +16,7 @@ import {
 } from "babylon-lite";
 import { addDdsEnvironmentBackground } from "babylon-lite/material/pbr/background-dds-environment.js";
 
-const MODEL_URL = "https://cdn.jsdelivr.net/gh/BabylonJS/Assets@master/meshes/FlightHelmetKTX/FlightHelmet.gltf";
+const MODEL_URL = "/models/FlightHelmetKTX/FlightHelmet.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -56,4 +56,10 @@ async function main(): Promise<void> {
     canvas.dataset.ready = "true";
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+    console.error(error);
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = error instanceof Error ? error.message : String(error);
+    }
+});

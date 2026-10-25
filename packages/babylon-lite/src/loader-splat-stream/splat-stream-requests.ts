@@ -23,6 +23,7 @@ export interface SplatSourceRequest {
     readonly fileId: number;
     readonly generation: number;
     readonly priority: SplatRequestPriority;
+    readonly distance?: number;
     readonly intervals: readonly SogInterval[];
     readonly signal?: AbortSignal;
 }
@@ -75,7 +76,7 @@ export interface SplatStreamRequestManager {
     readonly queuedFiles: number;
     readonly disposed: boolean;
     request(request: SplatSourceRequest): Promise<PreparedSplatSource>;
-    promote(url: string, generation: number, priority: SplatRequestPriority): boolean;
+    promote(url: string, generation: number, priority: SplatRequestPriority, distance?: number): boolean;
     cancel(url: string): void;
     dispose(): void;
 }
@@ -91,6 +92,7 @@ interface RequestJob {
     state: "queued" | "active";
     cancelled: boolean;
     preemptRequested: boolean;
+    exclusive: boolean;
     detachSignal?: () => void;
 }
 
@@ -107,11 +109,22 @@ interface CpuWaiter {
     readonly signal: AbortSignal;
 }
 
+function hasJobFlag(jobs: ReadonlySet<RequestJob>, flag: "exclusive" | "preemptRequested"): boolean {
+    for (const job of jobs) {
+        if (job[flag]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function abortError(): DOMException {
     return new DOMException("The operation was aborted", "AbortError");
 }
 
 class PreparationPreemptedError extends Error {}
+
+class ExclusiveAdmissionRequired extends Error {}
 
 function asError(reason: unknown): Error {
     return reason instanceof Error ? reason : abortError();
@@ -224,17 +237,15 @@ export function createSplatStreamRequestManager(
     const queue: RequestJob[] = [];
     const httpWaiters: Waiter[] = [];
     const decodeWaiters: Waiter[] = [];
-    const payloadWaiters: Waiter[] = [];
     const cpuWaiters: CpuWaiter[] = [];
     let sequence = 0;
-    let activePreparations = 0;
-    let activeJob: RequestJob | null = null;
+    const activeJobs = new Set<RequestJob>();
     let activeHttp = 0;
     let activeDecodes = 0;
-    let activePayload = false;
     let cpuBytes = 0;
     let fetchedBytes = 0;
     let disposed = false;
+    let pumpPending = false;
 
     const runLimited = <T>(limit: number, kind: "http" | "decode", signal: AbortSignal, operation: () => Promise<T>): Promise<T> =>
         new Promise<T>((resolve, reject) => {
@@ -275,55 +286,6 @@ export function createSplatStreamRequestManager(
                 waiters.push(waiter);
             }
         });
-    const acquirePayload = (signal: AbortSignal): Promise<void> =>
-        new Promise<void>((resolve, reject) => {
-            const abort = (): void => {
-                const index = payloadWaiters.indexOf(waiter);
-                if (index >= 0) {
-                    payloadWaiters.splice(index, 1);
-                }
-                reject(asError(signal.reason));
-            };
-            const run = (): void => {
-                signal.removeEventListener("abort", abort);
-                if (signal.aborted || disposed) {
-                    reject(asError(signal.reason));
-                    return;
-                }
-                activePayload = true;
-                resolve();
-            };
-            const waiter: Waiter = {
-                run,
-                signal,
-                reject: (reason) => {
-                    signal.removeEventListener("abort", abort);
-                    reject(reason instanceof Error ? reason : asError(reason));
-                },
-            };
-            if (!activePayload) {
-                run();
-            } else {
-                payloadWaiters.push(waiter);
-                if (signal.aborted) {
-                    abort();
-                } else {
-                    signal.addEventListener("abort", abort, { once: true });
-                }
-            }
-        });
-    const releasePayload = (): void => {
-        activePayload = false;
-        while (payloadWaiters.length > 0) {
-            const next = payloadWaiters.shift()!;
-            if (!next.signal.aborted) {
-                next.run();
-                break;
-            }
-            next.reject(asError(next.signal.reason));
-        }
-    };
-
     const pumpCpu = (): void => {
         for (let index = 0; index < cpuWaiters.length;) {
             const waiter = cpuWaiters[index]!;
@@ -375,9 +337,12 @@ export function createSplatStreamRequestManager(
             }
         });
     };
-    const reserveOwned = async (bytes: number, ownedBytes: number, context: string, signal: AbortSignal): Promise<void> => {
+    const reserveOwned = async (bytes: number, ownedBytes: number, context: string, signal: AbortSignal, allowance: number): Promise<void> => {
         if (!Number.isSafeInteger(ownedBytes) || ownedBytes < 0 || ownedBytes + bytes > maxCpuBytes) {
             throw new Error(`${PREFIX} ${context}: maxCpuBytes cannot admit ${bytes} bytes without blocking payloads retained by the same preparation`);
+        }
+        if (ownedBytes + bytes > allowance) {
+            throw new ExclusiveAdmissionRequired();
         }
         await reserve(bytes, context, signal);
     };
@@ -392,7 +357,7 @@ export function createSplatStreamRequestManager(
         readonly bytes: number;
         release(): void;
     }
-    const fetchWithRetry = async (url: string, fileId: number, signal: AbortSignal, retainedBytes = (): number => 0): Promise<FetchedBody> => {
+    const fetchWithRetry = async (url: string, fileId: number, signal: AbortSignal, allowance: number, retainedBytes = (): number => 0): Promise<FetchedBody> => {
         for (let attempt = 0; ; attempt++) {
             try {
                 return await runLimited(maxConcurrentRequests, "http", signal, async () => {
@@ -410,7 +375,7 @@ export function createSplatStreamRequestManager(
                     const declared = contentLength(response, url);
                     try {
                         if (declared !== null) {
-                            await reserveOwned(declared, retainedBytes(), `response ${url}`, signal);
+                            await reserveOwned(declared, retainedBytes(), `response ${url}`, signal, allowance);
                         }
                     } catch (reason) {
                         await response.body?.cancel();
@@ -436,12 +401,15 @@ export function createSplatStreamRequestManager(
                                 }
                                 if (total + part.value.byteLength > reserved) {
                                     const extra = total + part.value.byteLength - reserved;
-                                    await reserveOwned(extra, retainedBytes() + reserved, `streamed response ${url}`, signal);
+                                    await reserveOwned(extra, retainedBytes() + reserved, `streamed response ${url}`, signal, allowance);
                                     reserved += extra;
                                 }
                                 total += part.value.byteLength;
                                 chunks.push(new Uint8Array(part.value));
                             }
+                        } catch (reason) {
+                            await reader.cancel().catch(() => undefined);
+                            throw reason;
                         } finally {
                             reader.releaseLock();
                         }
@@ -481,6 +449,9 @@ export function createSplatStreamRequestManager(
                 if (signal.aborted) {
                     throw signal.reason ?? abortError();
                 }
+                if (error instanceof ExclusiveAdmissionRequired) {
+                    throw error;
+                }
                 if (error instanceof TransientHttpError) {
                     // Retry below.
                 } else if (error instanceof Error && error.message.startsWith(PREFIX)) {
@@ -493,8 +464,8 @@ export function createSplatStreamRequestManager(
         }
     };
 
-    const readJson = async (url: string, fileId: number, signal: AbortSignal): Promise<unknown> => {
-        const body = await fetchWithRetry(url, fileId, signal);
+    const readJson = async (url: string, fileId: number, signal: AbortSignal, allowance: number): Promise<unknown> => {
+        const body = await fetchWithRetry(url, fileId, signal, allowance);
         try {
             return JSON.parse(await body.blob.text()) as unknown;
         } catch (error) {
@@ -504,9 +475,8 @@ export function createSplatStreamRequestManager(
         }
     };
 
-    const prepare = async (job: RequestJob, signal: AbortSignal): Promise<PreparedSplatSource> => {
+    const prepare = async (job: RequestJob, signal: AbortSignal, allowance: number): Promise<PreparedSplatSource> => {
         const request = job.request;
-        await acquirePayload(signal);
         const bitmaps: ImageBitmap[] = [];
         const textures: GPUTexture[] = [];
         const mimeTypes: string[] = [];
@@ -515,9 +485,9 @@ export function createSplatStreamRequestManager(
         let metadataBuffer: GPUBuffer | null = null;
         let gpuReserved = false;
         try {
-            const metadata = parseLooseSogV2Metadata(await readJson(request.url, request.fileId, signal), request.url);
+            const metadata = parseLooseSogV2Metadata(await readJson(request.url, request.fileId, signal, allowance), request.url);
             for (const imageUrl of metadata.imageUrls) {
-                const body = await fetchWithRetry(imageUrl, request.fileId, signal, () => reservedDecodedBytes);
+                const body = await fetchWithRetry(imageUrl, request.fileId, signal, allowance, () => reservedDecodedBytes);
                 mimeTypes.push(body.mimeType);
                 let bitmap: ImageBitmap;
                 try {
@@ -531,7 +501,7 @@ export function createSplatStreamRequestManager(
                             maxCpuBytes,
                             job.intervals
                         );
-                        await reserveOwned(totalDecodedBytes, body.bytes, `decoded images ${request.url}`, signal);
+                        await reserveOwned(totalDecodedBytes, body.bytes, `decoded images ${request.url}`, signal, allowance);
                         reservedDecodedBytes = totalDecodedBytes;
                     } else if (dimensions.width !== bitmaps[0]!.width || dimensions.height !== bitmaps[0]!.height) {
                         throw new Error(`${PREFIX} image ${imageUrl}: dimensions do not match the source`);
@@ -612,23 +582,21 @@ export function createSplatStreamRequestManager(
                 bitmap.close();
             }
             release(reservedDecodedBytes);
-            releasePayload();
         }
     };
 
     const pump = (): void => {
+        pumpPending = false;
         if (disposed) {
             return;
         }
-        queue.sort((a, b) => a.request.priority - b.request.priority || a.sequence - b.sequence);
-        const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
-        if (activeJob && next && next.request.priority < activeJob.request.priority && !activeJob.preemptRequested) {
-            activeJob.preemptRequested = true;
-            activeJob.attemptController.abort(new PreparationPreemptedError());
-        }
-        while (activePreparations < 1 && queue.length > 0) {
+        queue.sort((a, b) => a.request.priority - b.request.priority || (a.request.distance ?? Infinity) - (b.request.distance ?? Infinity) || a.sequence - b.sequence);
+        while (activeJobs.size < maxConcurrentRequests && queue.length > 0) {
+            if (hasJobFlag(activeJobs, "exclusive")) {
+                break;
+            }
             const index = queue.findIndex((candidate) => !activeUrls.has(candidate.request.url));
-            if (index < 0) {
+            if (index < 0 || (queue[index]!.exclusive && activeJobs.size > 0)) {
                 break;
             }
             const job = queue.splice(index, 1)[0]!;
@@ -636,11 +604,10 @@ export function createSplatStreamRequestManager(
                 continue;
             }
             job.state = "active";
-            activeJob = job;
+            activeJobs.add(job);
             activeUrls.add(job.request.url);
-            activePreparations++;
             let requeue = false;
-            void prepare(job, job.attemptController.signal)
+            void prepare(job, job.attemptController.signal, job.exclusive ? maxCpuBytes : Math.floor(maxCpuBytes / maxConcurrentRequests))
                 .then((source) => {
                     if (jobs.get(job.request.url) !== job) {
                         destroyPrepared(source);
@@ -651,7 +618,13 @@ export function createSplatStreamRequestManager(
                     job.resolve(source);
                 })
                 .catch((error: unknown) => {
-                    if (error instanceof PreparationPreemptedError && jobs.get(job.request.url) === job && !job.cancelled && !disposed) {
+                    if (
+                        (error instanceof PreparationPreemptedError || error instanceof ExclusiveAdmissionRequired) &&
+                        jobs.get(job.request.url) === job &&
+                        !job.cancelled &&
+                        !disposed
+                    ) {
+                        job.exclusive ||= error instanceof ExclusiveAdmissionRequired;
                         requeue = true;
                         return;
                     }
@@ -664,10 +637,7 @@ export function createSplatStreamRequestManager(
                 })
                 .finally(() => {
                     activeUrls.delete(job.request.url);
-                    if (activeJob === job) {
-                        activeJob = null;
-                    }
-                    activePreparations--;
+                    activeJobs.delete(job);
                     if (requeue && jobs.get(job.request.url) === job && !job.cancelled && !disposed) {
                         job.state = "queued";
                         job.preemptRequested = false;
@@ -679,6 +649,35 @@ export function createSplatStreamRequestManager(
                     }
                     pump();
                 });
+        }
+        // Reclaim the next needed slot after admission, including when preemption cleanup refills the pool.
+        const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
+        if (
+            next &&
+            (activeJobs.size >= maxConcurrentRequests || next.exclusive || hasJobFlag(activeJobs, "exclusive")) &&
+            (next.exclusive || !hasJobFlag(activeJobs, "preemptRequested"))
+        ) {
+            for (const job of [...activeJobs].sort((a, b) => b.request.priority - a.request.priority || b.sequence - a.sequence)) {
+                if (next.request.priority < job.request.priority && !job.preemptRequested) {
+                    job.preemptRequested = true;
+                    job.attemptController.abort(new PreparationPreemptedError());
+                    if (!next.exclusive) {
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    const schedulePump = (): void => {
+        if (!pumpPending) {
+            // Coalesce queue removals and distance changes from the same camera update.
+            pumpPending = true;
+            queueMicrotask(() => {
+                if (pumpPending) {
+                    pump();
+                }
+            });
         }
     };
 
@@ -748,6 +747,7 @@ export function createSplatStreamRequestManager(
                 state: "queued",
                 cancelled: false,
                 preemptRequested: false,
+                exclusive: normalized.priority === SplatRequestPriority.Bootstrap,
             };
             if (request.signal) {
                 if (request.signal.aborted) {
@@ -764,6 +764,7 @@ export function createSplatStreamRequestManager(
                         jobs.delete(url);
                         job.detachSignal?.();
                         job.reject(abortError());
+                        schedulePump();
                     }
                 };
                 request.signal.addEventListener("abort", abort, { once: true });
@@ -774,7 +775,7 @@ export function createSplatStreamRequestManager(
             pump();
             return promise;
         },
-        promote(rawUrl, generation, priority) {
+        promote(rawUrl, generation, priority, distance) {
             let url: string;
             try {
                 url = new URL(rawUrl).href;
@@ -782,11 +783,21 @@ export function createSplatStreamRequestManager(
                 return false;
             }
             const job = jobs.get(url);
-            if (!job || job.cancelled || job.request.generation !== generation || priority >= job.request.priority) {
+            if (
+                !job ||
+                job.cancelled ||
+                job.request.generation !== generation ||
+                (priority >= job.request.priority && (distance === undefined || distance === job.request.distance))
+            ) {
                 return false;
             }
-            job.request = { ...job.request, priority };
-            pump();
+            const priorityChanged = priority < job.request.priority;
+            job.request = { ...job.request, priority: Math.min(priority, job.request.priority), distance: distance ?? job.request.distance };
+            if (priorityChanged) {
+                pump();
+            } else {
+                schedulePump();
+            }
             return true;
         },
         cancel(rawUrl) {
@@ -807,6 +818,7 @@ export function createSplatStreamRequestManager(
                 jobs.delete(url);
                 job.detachSignal?.();
                 job.reject(abortError());
+                schedulePump();
             }
         },
         dispose() {
@@ -824,12 +836,11 @@ export function createSplatStreamRequestManager(
             }
             jobs.clear();
             queue.length = 0;
-            for (const waiter of [...httpWaiters, ...decodeWaiters, ...payloadWaiters]) {
+            for (const waiter of [...httpWaiters, ...decodeWaiters]) {
                 waiter.reject(abortError());
             }
             httpWaiters.length = 0;
             decodeWaiters.length = 0;
-            payloadWaiters.length = 0;
             for (const waiter of cpuWaiters) {
                 waiter.reject(abortError());
             }

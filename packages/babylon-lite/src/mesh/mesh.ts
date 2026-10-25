@@ -54,10 +54,23 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal First index element for exact active draw ranges. Undefined means zero. */
+    _firstIndex?: number;
+    /** @internal Complete initialized geometry retained independently of active CPU views. */
+    _drawRangeSource?: {
+        indexCount: number;
+        positions: Float32Array;
+        normals: Float32Array;
+        indices: Uint32Array;
+        uvs?: Float32Array;
+        uvs2?: Float32Array;
+        tangents?: Float32Array;
+        colors?: Float32Array;
+    };
     /** @internal First vertex of this mesh within a shared vertex allocation, applied as the
      *  draw call's `baseVertex`. Lets many meshes take slots in one GPU-resident slab without
      *  a non-zero `setVertexBuffer` bind offset. Undefined/0 → canonical behaviour. */
-    readonly _baseVertex?: number;
+    _baseVertex?: number;
     /** @internal Logical vertex count in a GPU-produced mesh's slot. Does not include
      *  `_baseVertex` or unused capacity elsewhere in its shared allocation. */
     readonly _vertexCount?: number;

@@ -1,3 +1,5 @@
+import { runInNewContext } from "node:vm";
+import { transform } from "esbuild";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { AbstractEngine } from "../src/engine/engine";
@@ -67,8 +69,23 @@ import {
     RootMotionClip,
     RootMotionController,
     DitheredTileFadeMaterialPlugin,
+    GaussianSplattingMaterial,
+    GaussianSplattingDebugMaterialPlugin,
+    GaussianSplattingGpuPickingMaterialPlugin,
+    GaussianSplattingSolidColorMaterialPlugin,
+    GaussianSplattingSizeMaterialPlugin,
+    GaussianSplattingOverdrawMaterialPlugin,
+    RegisterGaussianSplattingMaterial,
+    RegisterGaussianSplattingSizeMaterialPlugin,
+    GaussianSplattingMaxPartCount,
+    GetGaussianSplattingMaxPartCount,
+    GetPartIndexVaryingDeclaration,
+    GaussianPointSplattingRenderer,
+    GaussianPointSplattingBlitMaterial,
+    GaussianPointSplattingDepthBlitMaterial,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
+import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import {
     GLTF1,
     GLTF2,
@@ -95,6 +112,7 @@ import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
+import { ShaderLanguage } from "../src/misc/engine-constants";
 import type { EffectWrapperCreationOptions } from "../src/unsupported/unsupported-extended";
 
 describe("LiteCompatError", () => {
@@ -164,6 +182,24 @@ describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
         ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
+        ["GaussianSplattingMaterial", () => new GaussianSplattingMaterial("material")],
+        ["GaussianSplattingDebugMaterialPlugin", () => new GaussianSplattingDebugMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial)],
+        [
+            "GaussianSplattingGpuPickingMaterialPlugin",
+            () => new GaussianSplattingGpuPickingMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
+        [
+            "GaussianSplattingSolidColorMaterialPlugin",
+            () => new GaussianSplattingSolidColorMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial, []),
+        ],
+        ["GaussianSplattingSizeMaterialPlugin", () => new GaussianSplattingSizeMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial)],
+        [
+            "GaussianSplattingOverdrawMaterialPlugin",
+            () => new GaussianSplattingOverdrawMaterialPlugin(Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial),
+        ],
+        ["GaussianPointSplattingRenderer", () => new GaussianPointSplattingRenderer({} as AbstractEngine)],
+        ["GaussianPointSplattingBlitMaterial", () => new GaussianPointSplattingBlitMaterial("blit", {} as Scene)],
+        ["GaussianPointSplattingDepthBlitMaterial", () => new GaussianPointSplattingDepthBlitMaterial("depth-blit", {} as Scene)],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
@@ -203,6 +239,126 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+
+    it("preserves passive point-splatting state and fails loudly when the mode is enabled", () => {
+        const mesh = Object.create(GaussianSplattingMesh.prototype) as GaussianSplattingMesh;
+        mesh.pointSplattingRenderScale = 0.5;
+        mesh.pointSplattingOcclusionCulling = true;
+        mesh.pointSplattingScale = 2;
+
+        expect(mesh.pointSplattingRenderScale).toBe(0.5);
+        expect(mesh.pointSplattingOcclusionCulling).toBe(true);
+        expect(mesh.pointSplattingScale).toBe(2);
+        expect(mesh.pointSplattingRenderMode).toBe(false);
+        expect(mesh.pointSplattingDepthRenderMode).toBe(false);
+        expect(mesh.pointSplattingProgress).toBeNull();
+        expect(() => {
+            mesh.pointSplattingRenderMode = false;
+            mesh.pointSplattingDepthRenderMode = false;
+        }).not.toThrow();
+        expect(() => {
+            mesh.pointSplattingRenderMode = true;
+        }).toThrow(/compute-renderer subsystem/);
+    });
+
+    it("exposes the Gaussian Point Splatting blit and renderer member shapes", () => {
+        expectTypeOf<GaussianPointSplattingRenderer["supportsWorkload"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingRenderer["_matchesPartData"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingBlitMaterial["setLogarithmicDepthConstant"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingDepthBlitMaterial["setDepthValues"]>().toBeFunction();
+        expectTypeOf<GaussianPointSplattingDepthBlitMaterial["setReverseDepth"]>().toBeFunction();
+    });
+
+    it("preserves stable diagnostics in a minified consumer build", async () => {
+        const source = `
+            const capture = (construct) => {
+                try {
+                    construct();
+                } catch (error) {
+                    return error.message;
+                }
+                throw new Error("Expected construction to fail");
+            };
+            globalThis.messages = [
+                capture(() => new (class ConsumerShaderMaterial extends ShaderMaterial {})()),
+                capture(() => new (class ConsumerBlitMaterial extends GaussianPointSplattingBlitMaterial {})("blit", scene)),
+                capture(() => new (class ConsumerDepthBlitMaterial extends GaussianPointSplattingDepthBlitMaterial {})("depth-blit", scene)),
+            ];
+        `;
+        const { code } = await transform(source, { minify: true, format: "iife", target: "es2022" });
+        const context = {
+            ShaderMaterial,
+            GaussianPointSplattingBlitMaterial,
+            GaussianPointSplattingDepthBlitMaterial,
+            scene: {} as Scene,
+            messages: [] as string[],
+        };
+
+        runInNewContext(code, context);
+
+        expect(context.messages[0]).toContain("'ShaderMaterial'");
+        expect(context.messages[0]).toContain("shader preprocessing subsystem");
+        expect(context.messages[1]).toContain("'GaussianPointSplattingBlitMaterial'");
+        expect(context.messages[1]).toContain("compute-renderer subsystem");
+        expect(context.messages[2]).toContain("'GaussianPointSplattingDepthBlitMaterial'");
+        expect(context.messages[2]).toContain("compute-renderer subsystem");
+    });
+
+    describe("Gaussian splatting material stubs", () => {
+        it("does not retain a failed plugin on the supplied material", () => {
+            const material = Object.create(GaussianSplattingMaterial.prototype) as GaussianSplattingMaterial;
+
+            expect(() => new GaussianSplattingSizeMaterialPlugin(material)).toThrow(LiteCompatError);
+            expect(material.pluginManager).toBeUndefined();
+        });
+
+        it("does not register a failed material with the supplied scene", () => {
+            const registered: Material[] = [];
+            const scene = { _registerMaterial: (material: Material) => registered.push(material) } as unknown as Scene;
+
+            expect(() => new GaussianSplattingMaterial("material", scene)).toThrow(LiteCompatError);
+            expect(registered).toHaveLength(0);
+        });
+
+        it("exposes the mechanical constant, part-count query, picking encoder, and varying helper", () => {
+            const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
+            engine._lite = {
+                _device: {
+                    limits: { maxUniformBufferBindingSize: 500 },
+                },
+            } as AbstractEngine["_lite"];
+
+            expect(GaussianSplattingMaxPartCount).toBe(128);
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(17);
+            expectTypeOf(GetGaussianSplattingMaxPartCount).returns.toBeNumber();
+            expect(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor(0x123456)).toEqual([0x12 / 255, 0x34 / 255, 0x56 / 255]);
+            expectTypeOf(GaussianSplattingGpuPickingMaterialPlugin.EncodeIdToColor).returns.toEqualTypeOf<[number, number, number]>();
+            expect(GetPartIndexVaryingDeclaration(ShaderLanguage.GLSL)).toContain("varying float vPartIndex;");
+            expect(GetPartIndexVaryingDeclaration(ShaderLanguage.WGSL)).toContain("varying vPartIndex: f32;");
+        });
+
+        it("clamps the part-count query to the upstream bounds", () => {
+            const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
+            const limits = { maxUniformBufferBindingSize: 0 };
+            engine._lite = { _device: { limits } } as AbstractEngine["_lite"];
+
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(1);
+            limits.maxUniformBufferBindingSize = 65536;
+            expect(GetGaussianSplattingMaxPartCount(engine)).toBe(256);
+        });
+
+        it("preserves the new visualization plugin property shapes", () => {
+            expectTypeOf<GaussianSplattingSizeMaterialPlugin["isEnabled"]>().toEqualTypeOf<boolean>();
+            expectTypeOf<GaussianSplattingSizeMaterialPlugin["sizeScale"]>().toEqualTypeOf<number>();
+            expectTypeOf<GaussianSplattingOverdrawMaterialPlugin["isEnabled"]>().toEqualTypeOf<boolean>();
+            expectTypeOf<GaussianSplattingOverdrawMaterialPlugin["intensity"]>().toEqualTypeOf<number>();
+        });
+
+        it("exposes registration functions with the material-lifecycle blocker", () => {
+            expect(() => RegisterGaussianSplattingMaterial()).toThrow(LiteCompatError);
+            expect(() => RegisterGaussianSplattingSizeMaterialPlugin()).toThrow(LiteCompatError);
+        });
     });
 });
 

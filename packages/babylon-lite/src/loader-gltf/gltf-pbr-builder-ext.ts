@@ -11,11 +11,13 @@ import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { getPbrGroupBuilder } from "../material/pbr/pbr-group-builder.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
-import { uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
+import { getGltfBaseColorRgbFactor, uploadBaseColorFactorTexture, uploadOrmFactorTexture, uploadTex } from "./gltf-pbr-builder.js";
 
 export interface PbrTexturesExt {
-    baseColorTexture: Texture2D;
-    ormTexture: Texture2D;
+    /** `undefined` only when `extLayers` supply the slot and it had no core image. */
+    baseColorTexture: Texture2D | undefined;
+    /** `undefined` only when `extLayers` supply the slot and it had no core image. */
+    ormTexture: Texture2D | undefined;
     normalTexture: Texture2D | undefined;
     emissiveTexture: Texture2D | undefined;
     occlusionTexture: Texture2D | undefined;
@@ -53,7 +55,8 @@ function occlusionNeedsSplit(raw: {
 
 /** Build textures with wrapTex + occlusionOnUv2 support. Mirrors master's
  *  default texture building but honors per-textureInfo wrapping so
- *  KHR_texture_transform can attach per-texture UV state. */
+ *  KHR_texture_transform can attach per-texture UV state. Like the fast path, nothing is
+ *  uploaded for a slot the already-resolved `extLayers` supply — see `buildDefaultPbrTextures`. */
 export function buildDefaultPbrTexturesExt(
     engine: EngineContext,
     mat: GltfMaterialData,
@@ -61,6 +64,7 @@ export function buildDefaultPbrTexturesExt(
     generateMipmaps: GenerateMipmapsFn,
     getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D,
     wrapTex: TextureWrapFn,
+    extLayers: Partial<PbrMaterialProps> | undefined,
     samplerFor?: (texInfo: unknown) => GPUSampler
 ): PbrTexturesExt {
     const wrap: TextureWrapFn = (tex, ti) => wrapTexCoord(wrapTex(tex, ti), ti);
@@ -93,28 +97,43 @@ export function buildDefaultPbrTexturesExt(
         }
         return tex;
     };
+    // The slot's core image, wrapped with its textureInfo's UV state. When `extLayers` supply the
+    // slot, the supplied texture wins in assembly, so the image is not uploaded. The UV state is
+    // still taken from the core textureInfo, as before: `_uv2Mask` and the uv-transform opt-in read
+    // `_texCoord`/`_hasTx` off these wrappers. `wrap` derives both from the textureInfo alone
+    // (the only `wrapTexture` hook is KHR_texture_transform's), so wrapping a view of the supplied
+    // GPU texture that carries no UV state of its own yields the bits the upload would have
+    // yielded. That view is never bound: assembly binds the supplied texture itself.
+    const coreTex = (image: ImageBitmap, srgb: boolean, ti: unknown, supplied: Texture2D | undefined): Texture2D =>
+        wrap(
+            supplied ? { texture: supplied.texture, view: supplied.view, sampler: supplied.sampler, width: supplied.width, height: supplied.height } : pickTex(image, srgb, ti),
+            ti
+        );
     const raw = mat._rawMatDef ?? {};
     const pbr = raw.pbrMetallicRoughness ?? {};
+    const suppliedOrm = extLayers?.ormTexture;
     const baseColorTexture = mat._baseColorImage
-        ? wrap(pickTex(mat._baseColorImage, true, pbr.baseColorTexture), pbr.baseColorTexture)
-        : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
+        ? coreTex(mat._baseColorImage, true, pbr.baseColorTexture, extLayers?.baseColorTexture)
+        : extLayers?.baseColorTexture
+          ? undefined
+          : uploadBaseColorFactorTexture(engine, mat._baseColorFactor, sampler, generateMipmaps);
     const normalTexture = mat._normalImage ? wrap(pickTex(mat._normalImage, false, raw.normalTexture), raw.normalTexture) : undefined;
     const emissiveTexture = mat._emissiveImage ? wrap(pickTex(mat._emissiveImage, true, raw.emissiveTexture), raw.emissiveTexture) : undefined;
 
     const occlusionOnUv2 = mat._occlusionTexCoord !== 0 && mat._occlusionImage && !mat._metallicRoughnessImage;
     let occlusionTexture: Texture2D | undefined;
     const single = mat._metallicRoughnessImage ?? (occlusionOnUv2 ? null : mat._occlusionImage);
-    let ormTexture: Texture2D;
+    let ormTexture: Texture2D | undefined;
     if (occlusionOnUv2) {
-        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
+        ormTexture = suppliedOrm ? undefined : uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
         occlusionTexture = wrap(pickTex(mat._occlusionImage!, false, raw.occlusionTexture), raw.occlusionTexture);
     } else if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         const ormTi = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : raw.occlusionTexture;
-        ormTexture = wrap(pickTex(single, false, ormTi), ormTi);
+        ormTexture = coreTex(single, false, ormTi, suppliedOrm);
     } else if (!single) {
-        ormTexture = uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
+        ormTexture = suppliedOrm ? undefined : uploadOrmFactorTexture(engine, mat._roughnessFactor, mat._metallicFactor, sampler, generateMipmaps);
     } else {
-        ormTexture = wrap(pickTex(mat._metallicRoughnessImage!, false, pbr.metallicRoughnessTexture), pbr.metallicRoughnessTexture);
+        ormTexture = coreTex(mat._metallicRoughnessImage!, false, pbr.metallicRoughnessTexture, suppliedOrm);
     }
     // Independent-occlusion UV transform (orm-unpack): occlusion and metallic-roughness
     // share the ORM texture (same image), but the glTF gives occlusion its OWN
@@ -137,9 +156,9 @@ export function buildDefaultPbrTexturesExt(
 function needsGltfUvTransform(tex: PbrTexturesExt): boolean {
     // Checked here rather than in the renderer so it doesn't scan 5 textures per mesh.
     return (
-        !!(tex.baseColorTexture as { _hasTx?: true })._hasTx ||
+        !!(tex.baseColorTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.normalTexture as { _hasTx?: true } | undefined)?._hasTx ||
-        !!(tex.ormTexture as { _hasTx?: true })._hasTx ||
+        !!(tex.ormTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.emissiveTexture as { _hasTx?: true } | undefined)?._hasTx ||
         !!(tex.occlusionTexture as { _hasTx?: true } | undefined)?._hasTx
     );
@@ -170,6 +189,7 @@ export async function applyGltfUvTransform(props: PbrMaterialProps, tex: PbrText
  *  UV-transform and emissive are applied by the caller — see `applyGltfUvTransform`
  *  above and `needsGltfEmissive` in gltf-pbr-builder.ts. */
 export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
+    const baseColorFactor = mat._baseColorImage ? getGltfBaseColorRgbFactor(mat._baseColorFactor) : undefined;
     // Per-channel UV1 (TEXCOORD_1) selection bitmask. Computed here on the slow path — the only
     // place a texture can carry texCoord:1 — so the always-loaded fast path just reads `_uv2Mask`.
     // Bit literals are a private contract with createPbrTemplateExt's decode (baseColor=1, orm=2,
@@ -189,7 +209,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
         emissiveTexture: tex.emissiveTexture,
-        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
+        ...(baseColorFactor ? { baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._occlusionTexCoord ? { occlusionTexCoord: mat._occlusionTexCoord } : undefined),
@@ -206,8 +226,4 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         _uboVersion: 0,
     } as PbrMaterialProps;
     return props;
-}
-
-function isDefaultBaseColorFactor(f: readonly number[]): boolean {
-    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }

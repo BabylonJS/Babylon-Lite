@@ -35,6 +35,241 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("type-checks for a strict consumer that loads no ambient @types packages", () => {
+        // A consumer with `compilerOptions.types: []` (or one that never lists `webxr`) gets no
+        // automatic @types inclusion. The public WebXR API still references ambient XR globals, so the
+        // rolled-up declaration must pull `@types/webxr` in itself via a reference directive.
+        const probePath = resolve(BUILD_DIR, "no-ambient-types.probe.ts");
+        const configPath = resolve(BUILD_DIR, "no-ambient-types.tsconfig.json");
+        try {
+            writeFileSync(probePath, `import type { EngineContext, XrSessionContext } from "./index.js";\nexport type Probe = [EngineContext, XrSessionContext];\n`);
+            writeFileSync(
+                configPath,
+                JSON.stringify({
+                    compilerOptions: {
+                        strict: true,
+                        noEmit: true,
+                        skipLibCheck: false,
+                        target: "es2022",
+                        module: "esnext",
+                        moduleResolution: "bundler",
+                        lib: ["es2022", "dom", "dom.iterable"],
+                        types: [],
+                    },
+                    files: ["no-ambient-types.probe.ts"],
+                })
+            );
+            expect(readFileSync(DTS_PATH, "utf-8").startsWith('/// <reference types="webxr" />\n')).toBe(true);
+            const result = spawnSync(NODE, [TSC_JS, "-p", configPath], { cwd: BUILD_DIR, encoding: "utf-8" });
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+            rmSync(configPath, { force: true });
+        }
+    });
+
+    it("exposes optional sprite instance parameters through the root API without internal GPU descriptors", () => {
+        const probePath = resolve(BUILD_DIR, "sprite-instance-params.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams,
+    type Sprite2DInstanceParams, type Sprite2DLayer, type Sprite2DHandle,
+} from "./index.js";
+declare const layer: Sprite2DLayer;
+declare const handle: Sprite2DHandle;
+const tuple: Sprite2DInstanceParams = [1, 2, 3, 4] as const;
+const buffer: Sprite2DInstanceParams = new Float32Array(4);
+enableSprite2DInstanceParams(layer);
+setSprite2DInstanceParamsIndex(layer, 0, tuple);
+setSprite2DInstanceParamsIndex(layer, 0, buffer);
+setSprite2DInstanceParams(handle, tuple);
+// @ts-expect-error A tuple must contain exactly four components.
+setSprite2DInstanceParams(handle, [1, 2, 3]);
+// @ts-expect-error Instance vertex descriptors are internal.
+layer._vertexExtension;
+// @ts-expect-error Raw GPU extension types are not part of the public root API.
+import type { SpriteVertexExtension } from "./index.js";
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes voxel collision through the root API without GPU types", () => {
+        const probePath = resolve(BUILD_DIR, "voxel-collision.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { loadSplatVoxelCollision, parseSplatVoxelCollision, moveSplatVoxelCamera, type SplatVoxelCollision } from "./index.js";
+declare const metadata: unknown;
+declare const buffer: ArrayBuffer;
+const collision: SplatVoxelCollision = parseSplatVoxelCollision(metadata, buffer);
+const position: [number, number, number] = moveSplatVoxelCamera(collision, [1, 2, 3], [4, 5, 6], 0.2);
+const loaded: Promise<SplatVoxelCollision> = loadSplatVoxelCollision("https://example.test/scene.voxel.json", new AbortController().signal);
+void [position, loaded];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes task removal for graphs and scenes through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "remove-task.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { removeTask, type FrameGraph, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const task: Task;
+const removedFromGraph: boolean = removeTask(graph, task);
+const removedFromScene: boolean = removeTask(scene, task);
+// @ts-expect-error A target must be a graph or scene.
+removeTask({}, task);
+// @ts-expect-error A task must satisfy the Task contract.
+removeTask(graph, { name: "incomplete" });
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes readonly live task discovery through the root API without internal storage", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).toContain("export declare function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];");
+        expect(dts.match(/declare function getFrameGraphTasks\(/g)).toHaveLength(1);
+        expect(dts).not.toMatch(/^\s*_tasks:/m);
+        const probePath = resolve(BUILD_DIR, "frame-graph-task-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getFrameGraph, getFrameGraphTasks, type FrameGraph, type FrameGraphContext, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const context: FrameGraphContext;
+declare const task: Task;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+const exactSignature: Equal<typeof getFrameGraphTasks, (frameGraph: FrameGraph) => readonly Task[]> = true;
+const sceneTasks: readonly Task[] = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks: readonly Task[] = getFrameGraphTasks(context.frameGraph);
+const tasks = getFrameGraphTasks(graph);
+// The array is readonly; task execution gates remain writable.
+tasks[0]!.executionEnabled = false;
+// @ts-expect-error The live list is not a mutable array.
+const mutable: Task[] = tasks;
+// @ts-expect-error Consumers must not append to the live list.
+tasks.push(task);
+// @ts-expect-error Consumers must not replace entries.
+tasks[0] = task;
+// @ts-expect-error Consumers must not clear the live list.
+tasks.length = 0;
+// @ts-expect-error There is no SceneContext overload.
+getFrameGraphTasks(scene);
+// @ts-expect-error Internal storage is not public.
+graph._tasks;
+// @ts-expect-error The argument must be a frame graph.
+getFrameGraphTasks({});
+void [exactSignature, sceneTasks, standaloneTasks];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes frame graph texture tasks through the root API with typed output aliases", () => {
         const probePath = resolve(BUILD_DIR, "frame-graph-texture-tasks.probe.ts");
         try {
@@ -265,9 +500,11 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
     createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
-    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry, setMeshDrawRange,
+    enableShaderMaterialVisiblePacketUpdates,
     prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
+    type MeshDrawRange, type MeshGeometryRange, type MeshGPU,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -314,6 +551,11 @@ const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptio
 const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
 void unsupportedOffsets;
 const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+enableShaderMaterialVisiblePacketUpdates(shader);
+// @ts-expect-error The packet seam is internal, not a public material property.
+shader._deferPacketUpdate;
+// @ts-expect-error The policy requires a ShaderMaterial.
+enableShaderMaterialVisiblePacketUpdates({});
 setShaderAttributeFormats(shader, { position: "float32x4" });
 storageMesh.material = shader;
 const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
@@ -327,6 +569,16 @@ void rangedReadback;
 // @ts-expect-error GPU allocation handles remain internal.
 storage._buffer;
 resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+const vertices: MeshGeometryRange = { offset: 1, count: 3 };
+const range: MeshDrawRange = { vertices, indices: { offset: 3, count: 3 } };
+setMeshDrawRange(engine, mesh, range);
+// @ts-expect-error Draw ranges are immutable inputs, not mesh-owned mutable state.
+range.vertices.count = 4;
+declare const geometry: MeshGPU;
+const activeIndexCount: number = geometry.indexCount;
+void activeIndexCount;
+// @ts-expect-error Geometry counts remain readonly public observations.
+geometry.indexCount = 3;
 `
             );
             const result = spawnSync(
@@ -456,13 +708,13 @@ uniforms._buffer;
         // here: doing so duplicates those declarations and, without skipLibCheck,
         // trips TS6200/TS2717 conflicts between the package and the native lib.
         //
-        // WebXR types are NOT in the `dom` lib, so `@types/webxr` (a declared
-        // optional peer) is loaded via `--types webxr` to stand in for the
-        // consumer's own compile path. The public WebXR API references ambient
-        // WebXR globals (`XRSession`, `XRFrame`, `XRView`, `XRReferenceSpace`,
-        // `XRProjectionLayer`, `XRSubImage`, ...) that the rollup treats as
-        // consumer-provided, exactly like `@webgpu/types` — see the design note in
-        // src/xr/xr-webgpu-binding.ts.
+        // WebXR types are NOT in the `dom` lib. The rollup loads `@types/webxr` (a
+        // published types-only dependency) with `/// <reference types="webxr" />`;
+        // `--types webxr` is kept so this check does not depend on that directive,
+        // which the strict `types: []` consumer test above covers. The public WebXR
+        // API references ambient WebXR globals (`XRSession`, `XRFrame`, `XRView`,
+        // `XRReferenceSpace`, `XRProjectionLayer`, `XRSubImage`, ...) — see the
+        // design note in src/xr/xr-webgpu-binding.ts.
         const result = spawnSync(
             NODE,
             [
@@ -648,7 +900,10 @@ float64Result satisfies Float64Array;
         // Any specifier that is not a relative path is a leaked external type:
         // the rolled-up d.ts is supposed to be fully self-contained so that
         // consumers never need to install any of our build-time dependencies.
-        const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
+        // The one sanctioned exception is the `webxr` reference directive, backed
+        // by the published types-only `@types/webxr` dependency (see the
+        // package.json assertions below).
+        const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../") && s !== "webxr");
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
@@ -701,6 +956,58 @@ void options;
             );
             const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
             expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes custom RenderTarget post-processes without internal shader fields", () => {
+        const probePath = resolve(BUILD_DIR, "custom-post-process.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createCustomPostProcessTask, wgsl,
+    type CustomPostProcessTaskConfig, type PostProcessTask, type EngineContext,
+    type SceneContext, type RenderTarget,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const source: RenderTarget;
+declare const destination: RenderTarget;
+const config: CustomPostProcessTaskConfig = {
+    sourceTexture: source, targetTexture: destination,
+    fragmentWGSL: wgsl\`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}\`,
+    extraTextures: [source],
+    extraTextureWGSL: "@group(0) @binding(2) var second:texture_2d<f32>;",
+    uniformWGSL: "@group(0) @binding(3) var<uniform> gain:vec4f;",
+    uniformByteLength: 16,
+    writeUniforms: data => { data[0] = 0.5; },
+};
+const standalone: PostProcessTask = createCustomPostProcessTask(config, engine);
+const inScene: PostProcessTask = createCustomPostProcessTask(config, engine, scene);
+standalone.updateUniforms();
+const output: RenderTarget = inScene.outputTexture;
+void output;
+// @ts-expect-error Application shaders are required.
+createCustomPostProcessTask({ sourceTexture: source }, engine);
+// @ts-expect-error The internal shader configuration is not public.
+config._shader;
+// @ts-expect-error Bindings follow the public fixed convention.
+config.uniformBinding = 7;
+// @ts-expect-error Internal GPU rebuild hooks are not public.
+standalone._rebuildGpuState();
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", probePath],
+                {
+                    cwd: BUILD_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
         } finally {
             rmSync(probePath, { force: true });
         }
@@ -1111,15 +1418,18 @@ describe("build/package.json", () => {
         });
     });
 
-    it("declares no runtime dependencies and only strictly-optional allowlisted peers", () => {
+    it("declares only the WebXR type dependency and strictly-optional allowlisted peers", () => {
         expect(existsSync(PACKAGE_JSON_PATH)).toBe(true);
 
         const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8")) as Record<string, unknown>;
 
         // The published package must bundle every transitive *runtime* dep as an
-        // opaque implementation detail, so `dependencies` is always empty and a
-        // plain `npm i @babylonjs/lite` (or CDN usage) pulls in nothing else.
-        expect(pkg.dependencies ?? {}).toEqual({});
+        // opaque implementation detail, so a plain `npm i @babylonjs/lite` (or CDN
+        // usage) pulls in no runtime code. The single dependency is the types-only
+        // `@types/webxr`: the rolled-up index.d.ts references it with
+        // `/// <reference types="webxr" />`, so it must install with the package for
+        // strict consumers that do not use WebXR to type-check (LITE-002).
+        expect(Object.keys((pkg.dependencies ?? {}) as Record<string, string>)).toEqual(["@types/webxr"]);
 
         // A small, curated allowlist of OPTIONAL peer dependencies is permitted.
         // These are never bundled and — being optional — are never auto-installed
@@ -1128,11 +1438,9 @@ describe("build/package.json", () => {
         //     Lite never imports it. The peer entry only advertises the supported range.
         //   - @webgpu/types: ambient/global types referenced by the public .d.ts;
         //     TypeScript consumers need them at compile time.
-        //   - @types/webxr: ambient/global WebXR types referenced by the public
-        //     .d.ts (the WebXR API); TypeScript consumers need them at compile time.
         // Every allowlisted peer MUST be marked optional. Keep this allowlist in sync
         // with `emitPackageJson()` in packages/babylon-lite/vite.config.ts.
-        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types", "@types/webxr"];
+        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types"];
         const peers = (pkg.peerDependencies ?? {}) as Record<string, string>;
         const peerMeta = (pkg.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
 

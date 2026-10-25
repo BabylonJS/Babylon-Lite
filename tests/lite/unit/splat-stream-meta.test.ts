@@ -41,6 +41,17 @@ function sog(extra: Record<string, unknown> = {}): Record<string, unknown> {
 }
 
 describe("lod-meta v1", () => {
+    it("keeps per-resource queries without inheriting the manifest or chunk query", () => {
+        const parsed = parseSplatStreamManifest(
+            manifest(leaf({ "0": rep(0, 0, 10), "2": rep(1, 0, 5) }), { filenames: ["coarse/meta.json?sig=chunk", "fine/meta.json"] }),
+            META_URL + "?sig=manifest"
+        );
+        expect(parsed.sources.map((source) => source.url)).toEqual(["https://assets.example/scene/coarse/meta.json?sig=chunk", "https://assets.example/scene/fine/meta.json"]);
+        const chunk = parseLooseSogV2Metadata(sog({ quats: { files: ["quats.webp?sig=image"] } }), parsed.sources[0]!.url);
+        expect(chunk.imageUrls[0]).toBe("https://assets.example/scene/coarse/means-l.webp");
+        expect(chunk.imageUrls[3]).toBe("https://assets.example/scene/coarse/quats.webp?sig=image");
+    });
+
     it("parses sparse LODs, derives errors, converts handedness, and aggregates duplicate URLs", () => {
         const input = manifest(
             {

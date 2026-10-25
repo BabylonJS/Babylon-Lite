@@ -48,6 +48,24 @@ describe("CSM static refit scheduler", () => {
         expect(scheduler.pending()).toBe(false);
     });
 
+    it("claim removes a cascade the caller re-renders out of budget, and only a pending one", () => {
+        const scheduler = createCsmStaticRefitScheduler(3, 1);
+        scheduler.claim(1); // nothing pending: no effect
+        expect(scheduler.pending()).toBe(false);
+        scheduler.arm(true);
+        expect(scheduler.take()).toEqual([0]);
+        scheduler.claim(2); // the camera-coverage refit re-renders cascade 2 now
+        expect(scheduler.take()).toEqual([1]);
+        expect(scheduler.pending()).toBe(false);
+        scheduler.arm(true);
+        scheduler.claim(0);
+        scheduler.claim(1);
+        scheduler.claim(2);
+        expect(scheduler.pending()).toBe(false);
+        scheduler.arm(true); // an emptied spread does not leave the next one in single-frame mode
+        expect(scheduler.take()).toHaveLength(1);
+    });
+
     it("lets a full refit interrupt a spread and returns to the budget afterwards", () => {
         const scheduler = createCsmStaticRefitScheduler(4, 2);
         expect(scheduler.maxLagFrames()).toBe(1);

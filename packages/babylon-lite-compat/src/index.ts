@@ -47,6 +47,7 @@ export { UniformBuffer } from "./materials/uniform-buffer.js";
 
 // ─── Scene graph ─────────────────────────────────────────────────────
 export { Node } from "./node/node.js";
+export type { IAccessibilityTag } from "./node/node.js";
 export { AbstractScene } from "./scene/abstract-scene.js";
 export { Scene } from "./scene/scene.js";
 export type { MeshPredicate, TrianglePickingPredicate } from "./scene/scene.js";
@@ -97,8 +98,8 @@ export {
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
-export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
-export type { ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
+export { _GetPackedShBytesPerSplat, _HasGaussianPointSplattingProjectedDepth, GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
+export type { IGaussianPointSplattingProgress, ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 export {
     MeshBlendingRadiusClass,
     PackMeshBlendingTag,
@@ -377,6 +378,24 @@ export {
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
     DitheredTileFadeMaterialPlugin,
+    GaussianSplattingMaterial,
+    GaussianSplattingDebugMaterialPlugin,
+    GaussianSplattingGpuPickingMaterialPlugin,
+    GaussianSplattingSolidColorMaterialPlugin,
+    GaussianSplattingSizeMaterialPlugin,
+    GaussianSplattingOverdrawMaterialPlugin,
+    RegisterGaussianSplattingDebugMaterialPlugin,
+    RegisterGaussianSplattingGpuPickingMaterialPlugin,
+    RegisterGaussianSplattingSolidColorMaterialPlugin,
+    RegisterGaussianSplattingSizeMaterialPlugin,
+    RegisterGaussianSplattingOverdrawMaterialPlugin,
+    RegisterGaussianSplattingMaterial,
+    GaussianPointSplattingRenderer,
+    GaussianPointSplattingBlitMaterial,
+    GaussianPointSplattingDepthBlitMaterial,
+    GaussianSplattingMaxPartCount,
+    GetGaussianSplattingMaxPartCount,
+    GetPartIndexVaryingDeclaration,
     RootMotionSource,
     RootMotionClip,
     RootMotionController,
@@ -396,6 +415,7 @@ export type {
     DitheredTileFadeSupportedMaterial,
     DitheredTileFadeMesh,
     IDitheredTileFadeBounds,
+    IGaussianSplattingDebugOptions,
     IFlowGraphValidationIssue,
     IFlowGraphValidationResult,
     IRootMotionClipOptions,

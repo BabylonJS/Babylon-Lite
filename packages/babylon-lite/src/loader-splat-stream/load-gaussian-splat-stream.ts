@@ -31,7 +31,7 @@ import {
     type PreparedSplatSource,
     type SplatStreamRequestManager,
 } from "./splat-stream-requests.js";
-import { planMergedStreamSelection, planStreamSelection, selectBootstrapSource } from "./splat-stream-selection.js";
+import { distanceToStreamBound, planMergedStreamSelection, planStreamSelection, selectBootstrapSource, transformStreamBound } from "./splat-stream-selection.js";
 import type {
     GaussianSplatStream,
     GaussianSplatStreamOptions,
@@ -216,6 +216,28 @@ function makeGpuSource(prepared: PreparedSplatSource) {
 
 function markProtectionsDirty(stream: GaussianSplatStream): void {
     stream._protectionsDirty = true;
+}
+
+function sourceDistanceToCamera(stream: GaussianSplatStream, url: string): number {
+    const source = stream._sourceStates.find((state) => state.source.url === url)?.source;
+    const views = [...stream._bindingSelections.values()].filter((view) => view.frame >= stream._bindingFrame - 1);
+    if (!source || views.length === 0) {
+        return Infinity;
+    }
+    let distance = Infinity;
+    const visited = new Set<number>();
+    const world = stream.worldMatrix;
+    for (const consumer of source.consumers) {
+        if (visited.has(consumer.leafId)) {
+            continue;
+        }
+        visited.add(consumer.leafId);
+        const bound = transformStreamBound(stream._manifest.leaves[consumer.leafId]!, world);
+        for (const view of views) {
+            distance = Math.min(distance, distanceToStreamBound(bound, view.cameraPosition));
+        }
+    }
+    return distance;
 }
 
 function setPending(stream: GaussianSplatStream, state: StreamLeafRuntime, pending: StreamRepresentation | null): void {
@@ -523,14 +545,14 @@ function settleBootstrapFailure(stream: GaussianSplatStream, reason: unknown): v
     stream.stats._values.phase = "error";
 }
 
-function requestSource(stream: GaussianSplatStream, sourceId: number, priority: SplatRequestPriority): void {
+function requestSource(stream: GaussianSplatStream, sourceId: number, priority: SplatRequestPriority, distance = Infinity): void {
     const state = stream._sourceStates[sourceId]!;
     if (stream._disposed || state.state === "resident" || state.state === "failed") {
         return;
     }
     if (state.request) {
         if (!stream._runtime.prepareSource) {
-            stream._requests.promote(state.source.url, state.generation, priority);
+            stream._requests.promote(state.source.url, state.generation, priority, distance);
         }
         return;
     }
@@ -548,6 +570,7 @@ function requestSource(stream: GaussianSplatStream, sourceId: number, priority: 
             fileId: sourceId,
             generation,
             priority,
+            distance,
             intervals,
             signal: stream._options.signal,
         });
@@ -647,7 +670,7 @@ function requestSource(stream: GaussianSplatStream, sourceId: number, priority: 
     updateStats(stream);
 }
 
-function scheduleTargets(stream: GaussianSplatStream): void {
+function scheduleTargets(stream: GaussianSplatStream, plans: Iterable<StreamSelectionPlan> = Array.from(stream._bindingSelections.values(), (selection) => selection.plan)): void {
     if (stream._disposed) {
         return;
     }
@@ -661,6 +684,14 @@ function scheduleTargets(stream: GaussianSplatStream): void {
         return;
     }
     const demand = new Uint32Array(stream._sourceStates.length);
+    const uncovered = new Uint8Array(stream._sourceStates.length);
+    const distances = new Float64Array(stream._sourceStates.length).fill(Infinity);
+    const leafDistances = new Map<number, number>();
+    for (const plan of plans) {
+        for (const selection of plan.selections) {
+            leafDistances.set(selection.leaf.id, Math.min(leafDistances.get(selection.leaf.id) ?? Infinity, selection.distanceToCamera));
+        }
+    }
     for (const leafState of stream._leafStates) {
         if (!leafState.visible) {
             continue;
@@ -672,9 +703,16 @@ function scheduleTargets(stream: GaussianSplatStream): void {
               : null;
         if (requested) {
             demand[requested.fileId] = demand[requested.fileId]! + 1;
+            distances[requested.fileId] = Math.min(distances[requested.fileId]!, leafDistances.get(requested.leafId) ?? Infinity);
+            if (!leafState.displayed) {
+                uncovered[requested.fileId] = 1;
+            }
         }
     }
-    for (const state of stream._sourceStates) {
+    const orderedSources = stream._sourceStates
+        .slice()
+        .sort((a, b) => uncovered[b.source.id]! - uncovered[a.source.id]! || distances[a.source.id]! - distances[b.source.id]! || a.source.id - b.source.id);
+    for (const state of orderedSources) {
         const environmentDemand = stream._refinementEnabled && state.source.id === stream._environmentSourceId ? 1 : 0;
         const leafDemand = demand[state.source.id]!;
         state.demandCount = leafDemand + environmentDemand;
@@ -691,9 +729,10 @@ function scheduleTargets(stream: GaussianSplatStream): void {
                         ? SplatRequestPriority.Environment
                         : state.gpu
                           ? SplatRequestPriority.Upgrade
-                          : leafUncovered(stream, state.source.id)
+                          : uncovered[state.source.id]
                             ? SplatRequestPriority.Uncovered
-                            : SplatRequestPriority.Upgrade
+                            : SplatRequestPriority.Upgrade,
+                    distances[state.source.id]
                 );
             }
         } else if (state.request && state.source.id !== stream._bootstrapSourceId) {
@@ -709,10 +748,6 @@ function scheduleTargets(stream: GaussianSplatStream): void {
             state.blockedAdmissionVersion = -1;
         }
     }
-}
-
-function leafUncovered(stream: GaussianSplatStream, sourceId: number): boolean {
-    return stream._leafStates.some((state) => state.visible && !state.displayed && stream._manifest.leaves[state.target.leafId]!.alternatives[0]!.fileId === sourceId);
 }
 
 function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext, binding: object): void {
@@ -792,6 +827,7 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
             frame: stream._bindingFrame,
             plan: plan!,
             inputValues,
+            cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
         });
         const bindingPlans: StreamSelectionPlan[] = [];
         for (const selection of stream._bindingSelections.values()) {
@@ -882,7 +918,7 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
             }
         }
         commitDisplayed(stream, true);
-        scheduleTargets(stream);
+        scheduleTargets(stream, [aggregatePlan]);
         if (stream._selectionError && stream.stats._values.error === stream._selectionError) {
             stream.stats._values.error = null;
             stream.stats._values.phase = stream._refinementEnabled ? "streaming" : "bootstrap";
@@ -1169,7 +1205,7 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
         })),
         _sourceStates: sourceStates,
         _requests: requests,
-        _cache: createSplatSourceCache(normalized.maxGpuBytes, normalized.maxCpuBytes, retirement, gpu.ledger),
+        _cache: createSplatSourceCache(normalized.maxGpuBytes, normalized.maxCpuBytes, retirement, gpu.ledger, (url) => sourceDistanceToCamera(streamRef!, url)),
         _gpu: gpu,
         _renderable: null,
         _generation: 1,

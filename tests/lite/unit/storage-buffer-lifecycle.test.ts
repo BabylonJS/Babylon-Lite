@@ -7,7 +7,7 @@ import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/s
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { _getStorageBufferHandle, createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import { getCpuStorageRecoveryLimits, rebuildCpuStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
-import { updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { readStorageBuffer, updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
@@ -186,6 +186,24 @@ describe("StorageBuffer lifecycle", () => {
         const recoveredDescriptor = replacement.createBindGroup.mock.calls.at(-1)![0];
         expect((Array.from(recoveredDescriptor.entries).at(-1)!.resource as GPUBufferBinding).buffer).toBe(storage._buffer);
         expect(storage._buffer).not.toBe(initialHandle);
+    });
+
+    it("rejects unrecovered GPU-role storage in rebuilt ShaderMaterial bind groups and direct APIs", async () => {
+        const fixture = makeRenderableFixture();
+        const storage = createStorageBuffer(fixture.engine, 16, { writable: true });
+        setShaderStorageBuffer(fixture.material, "cells", storage);
+        buildShaderMaterialRenderables(fixture.scene, [fixture.mesh]);
+
+        fixture.engine._device = makeRenderableFixture().device;
+        rebuildCpuStorageBuffers(fixture.engine);
+
+        expect(storage._buffer).toBeNull();
+        expect(() => buildShaderMaterialRenderables(fixture.scene, [fixture.mesh])).toThrow("is invalid");
+        expect(() => _getStorageBufferHandle(fixture.engine, storage)).toThrow(/previous device/);
+        expect(() => updateStorageBuffer(fixture.engine, storage, new Float32Array(4))).toThrow(/previous device/);
+        await expect(readStorageBuffer(storage)).rejects.toThrow(/previous device/);
+        disposeStorageBuffer(storage);
+        expect(storage._destroyed).toBe(true);
     });
 
     it("rejects wrong-engine and disposed resources through the render path", () => {

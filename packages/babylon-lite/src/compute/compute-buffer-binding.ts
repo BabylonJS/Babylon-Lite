@@ -49,7 +49,7 @@ export function _resolveComputeBufferBinding(
         throw new Error(`ComputeBindingSet: binding "${decl.name}" received the wrong buffer resource type.`);
     }
     if (buffer._destroyed || !buffer._buffer) {
-        throw new Error(`ComputeBindingSet: resource for "${decl.name}" has been disposed.`);
+        throw new Error(`ComputeBindingSet: resource for "${decl.name}" has been disposed or lost with its previous device; recreate it.`);
     }
     if (buffer._engine !== engine) {
         throw new Error(`ComputeBindingSet: resource for "${decl.name}" belongs to a different engine.`);
