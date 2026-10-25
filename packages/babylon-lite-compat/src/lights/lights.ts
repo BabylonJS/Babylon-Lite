@@ -145,10 +145,9 @@ export abstract class Light extends Node {
         }
     }
 
-    private _excludedMeshes: AbstractMesh[] = this._hookMeshList([]);
-    private _includedOnlyMeshes: AbstractMesh[] = this._hookMeshList([]);
+    private _excludedMeshes: AbstractMesh[] = this._subscribeMeshList([]);
+    private _includedOnlyMeshes: AbstractMesh[] = this._subscribeMeshList([]);
     private _meshListSyncScheduled = false;
-    private _hookedMeshLists?: WeakSet<AbstractMesh[]>;
 
     /**
      * Meshes this light does not light. Babylon.js hands out the light's own array, and
@@ -159,7 +158,9 @@ export abstract class Light extends Node {
         return this._excludedMeshes;
     }
     public set excludedMeshes(value: AbstractMesh[]) {
-        this._excludedMeshes = this._hookMeshList(value);
+        const previous = this._excludedMeshes;
+        this._excludedMeshes = this._subscribeMeshList(value);
+        this._unsubscribeMeshList(previous);
         this._scheduleMeshListSync();
     }
 
@@ -168,7 +169,9 @@ export abstract class Light extends Node {
         return this._includedOnlyMeshes;
     }
     public set includedOnlyMeshes(value: AbstractMesh[]) {
-        this._includedOnlyMeshes = this._hookMeshList(value);
+        const previous = this._includedOnlyMeshes;
+        this._includedOnlyMeshes = this._subscribeMeshList(value);
+        this._unsubscribeMeshList(previous);
         this._scheduleMeshListSync();
     }
 
@@ -177,27 +180,44 @@ export abstract class Light extends Node {
      * `_hookArrayForExcluded`). In-place writes through any other method — `pop`, `shift`, an index
      * assignment — do not publish in Babylon.js either, so matching the hook set is parity.
      */
-    private _hookMeshList(array: AbstractMesh[]): AbstractMesh[] {
-        const hooked = (this._hookedMeshLists ??= new WeakSet<AbstractMesh[]>());
-        if (hooked.has(array)) {
-            return array;
+    private _subscribeMeshList(array: AbstractMesh[]): AbstractMesh[] {
+        const registry = (meshListSubscribers ??= new WeakMap<AbstractMesh[], Set<Light>>());
+        let lights = registry.get(array);
+        if (!lights) {
+            lights = new Set<Light>();
+            registry.set(array, lights);
+            const subscribers = lights;
+            const push = array.push.bind(array);
+            const splice = array.splice.bind(array);
+            const notify = (): void => {
+                for (const light of subscribers) {
+                    light._scheduleMeshListSync();
+                }
+            };
+            // Non-enumerable, like the prototype methods they shadow: an own enumerable "push" would
+            // surface in `for...in` over the list and in deep-equality checks against a plain array.
+            defineHook(array, "push", (...items: AbstractMesh[]): number => {
+                const length = push(...items);
+                notify();
+                return length;
+            });
+            defineHook(array, "splice", (...args: SpliceArgs): AbstractMesh[] => {
+                const removed = splice(...(args as Parameters<typeof splice>));
+                notify();
+                return removed;
+            });
         }
-        hooked.add(array);
-        const push = array.push.bind(array);
-        const splice = array.splice.bind(array);
-        // Non-enumerable, like the prototype methods they shadow: an own enumerable "push" would
-        // surface in `for...in` over the list and in deep-equality checks against a plain array.
-        defineHook(array, "push", (...items: AbstractMesh[]): number => {
-            const length = push(...items);
-            this._scheduleMeshListSync();
-            return length;
-        });
-        defineHook(array, "splice", (...args: SpliceArgs): AbstractMesh[] => {
-            const removed = splice(...(args as Parameters<typeof splice>));
-            this._scheduleMeshListSync();
-            return removed;
-        });
+        lights.add(this);
         return array;
+    }
+
+    /** @internal Stop observing an array this light no longer holds, leaving other lights on it. */
+    private _unsubscribeMeshList(array: AbstractMesh[]): void {
+        // The same array can back both of this light's lists; keep it while either one holds it.
+        if (array === this._excludedMeshes || array === this._includedOnlyMeshes) {
+            return;
+        }
+        meshListSubscribers?.get(array)?.delete(this);
     }
 
     /**
@@ -249,6 +269,8 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
+        meshListSubscribers?.get(this._excludedMeshes)?.delete(this);
+        meshListSubscribers?.get(this._includedOnlyMeshes)?.delete(this);
         if (this._scene) {
             removeFromScene(this._scene._lite, this._lite);
         } else {
@@ -292,6 +314,9 @@ function ensureLightVersionBump(lite: LightBase): () => void {
 
 /** @internal The arguments `Array.prototype.splice` accepts, including the no-argument call. */
 type SpliceArgs = [] | [start: number] | [start: number, deleteCount?: number, ...items: AbstractMesh[]];
+
+/** @internal Lights currently observing each hooked mesh list. Allocated on the first hooked list. */
+let meshListSubscribers: WeakMap<AbstractMesh[], Set<Light>> | undefined;
 
 /** @internal Install a mesh-list method override that behaves like the prototype method it shadows. */
 function defineHook(array: AbstractMesh[], method: "push" | "splice", value: unknown): void {

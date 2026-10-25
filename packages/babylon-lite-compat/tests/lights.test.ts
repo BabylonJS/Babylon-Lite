@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The light factories are device-free and stay real. Only the two scene-facing calls a light makes
- * are mocked: `addToScene` (the stand-in scene below is not a Lite scene context) and
- * `rebuildSceneRenderables`, which the mesh-list sync triggers and which the tests count.
+ * The light factories are device-free and stay real. Only the scene-facing calls a light makes are
+ * mocked, because the stand-in scene below is not a Lite scene context: `addToScene`,
+ * `removeFromScene` (reached through `dispose`) and `rebuildSceneRenderables`, which the mesh-list
+ * sync triggers and which the tests count.
  */
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
-    return { ...actual, addToScene: vi.fn(), rebuildSceneRenderables: vi.fn(() => Promise.resolve()) };
+    return { ...actual, addToScene: vi.fn(), removeFromScene: vi.fn(), rebuildSceneRenderables: vi.fn(() => Promise.resolve()) };
 });
 
 import { rebuildSceneRenderables } from "babylon-lite";
@@ -543,6 +544,118 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         // publishing a stale set.
         expect(excluded(rim)).toEqual(shared.map((m) => m._lite));
         expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+    });
+
+    it("stops publishing from a list it no longer holds", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const retired = [mesh("floor")];
+
+        rim.excludedMeshes = retired;
+        await flush();
+        rim.excludedMeshes = [mesh("door")];
+        await flush();
+        rebuildMock.mockClear();
+
+        // The application still owns the old array; mutating it must no longer reach this light.
+        retired.push(mesh("wall"));
+        await flush();
+
+        expect(rim.excludedMeshes.map((m) => m.name)).toEqual(["door"]);
+        expect(excluded(rim)).toEqual([rim.excludedMeshes[0]!._lite]);
+        expect(rebuildMock).not.toHaveBeenCalled();
+    });
+
+    it("stops publishing once disposed, so a retained list releases it", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const moduleMeshes = [mesh("floor")];
+
+        rim.excludedMeshes = moduleMeshes;
+        await flush();
+        rim.dispose();
+        rebuildMock.mockClear();
+
+        // A configurator that swaps modules keeps this array and drops the light. Scheduling a sync,
+        // and a scene rebuild, for a disposed light is work nothing reads.
+        moduleMeshes.push(mesh("wall"));
+        await flush();
+
+        expect(rebuildMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps a surviving light publishing when another moves off their shared list", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+        const shared = [mesh("floor")];
+
+        rim.excludedMeshes = shared;
+        led.excludedMeshes = shared;
+        await flush();
+
+        // `rim` moves to its own list; `led` still holds the shared one.
+        rim.excludedMeshes = [mesh("door")];
+        await flush();
+
+        const wall = mesh("wall");
+        shared.push(wall);
+        await flush();
+
+        // Releasing `rim` from the array must leave `led` subscribed to it.
+        expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+        expect(excluded(rim)).toEqual([rim.excludedMeshes[0]!._lite]);
+    });
+
+    it("keeps a surviving light publishing when a light sharing its list is disposed", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+        const shared = [mesh("floor")];
+
+        rim.excludedMeshes = shared;
+        led.excludedMeshes = shared;
+        await flush();
+        rim.dispose();
+
+        const wall = mesh("wall");
+        shared.push(wall);
+        await flush();
+
+        // Releasing one light must not take the array's other live consumers with it.
+        expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+    });
+
+    it("survives repeated create, dispose and reuse against one retained list", async () => {
+        const scene = sceneStub(true);
+        const moduleMeshes = [mesh("floor")];
+        const hookedPush = (() => {
+            const first = new DirectionalLight("probe", new Vector3(0, -1, 0), scene);
+            first.excludedMeshes = moduleMeshes;
+            first.dispose();
+            return moduleMeshes.push;
+        })();
+
+        for (let i = 0; i < 500; i++) {
+            const light = new DirectionalLight(`module-${i}`, new Vector3(0, -1, 0), scene);
+            light.excludedMeshes = moduleMeshes;
+            light.dispose();
+        }
+        // One wrapper for the array's whole lifetime, however many lights pass through it.
+        expect(moduleMeshes.push).toBe(hookedPush);
+
+        const live = new DirectionalLight("live", new Vector3(0, -1, 0), scene);
+        live.excludedMeshes = moduleMeshes;
+        await flush();
+        rebuildMock.mockClear();
+
+        const wall = mesh("wall");
+        moduleMeshes.push(wall);
+        await flush();
+
+        // Only the one live light publishes, and it does so exactly once.
+        expect(excluded(live)).toEqual(moduleMeshes.map((m) => m._lite));
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
     });
 
     it("keeps Array.splice semantics for an omitted and an explicitly undefined deleteCount", async () => {
