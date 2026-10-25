@@ -237,7 +237,7 @@ export abstract class Light extends Node {
         // The selection is baked into each renderable at build time (the shader's light-count
         // permutation and the mesh UBO's light indices) and the per-frame updater only revisits it
         // when the light COUNT changes. A list edit after start therefore needs the rebuild.
-        requestSceneRebuild(scene._lite);
+        requestSceneRebuild(scene);
     }
 
     /** Detach this light's shadow generator (compat for `light.shadowEnabled = false`). */
@@ -314,10 +314,31 @@ function liteMeshSet(meshes: readonly AbstractMesh[]): Set<LiteMesh> | undefined
 let pendingSceneRebuilds: Set<Parameters<typeof rebuildSceneRenderables>[0]> | undefined;
 let sceneRebuildScheduled = false;
 
+/** @internal Scenes already holding a rebuild for when the initial build finishes. */
+let pendingStartupRebuilds: WeakSet<Scene> | undefined;
+
 /**
  * @internal Request one rebuild per scene per tick.
  */
-function requestSceneRebuild(liteScene: Parameters<typeof rebuildSceneRenderables>[0]): void {
+function requestSceneRebuild(scene: Scene): void {
+    const liteScene = scene._lite;
+    // `_hasStarted` flips when deferred adds are flushed, several awaits before `registerScene`
+    // sets `_built`, and a rebuild is a documented no-op until then. Requesting one inside that
+    // window would drop the invalidation: a group that already baked its light indices keeps them,
+    // since the per-frame updater only revisits the selection when the light count or the mesh's
+    // world matrix changes. Hold it until startup can rebuild every group, already-built included.
+    if (!liteScene._built) {
+        const held = (pendingStartupRebuilds ??= new WeakSet<Scene>());
+        if (held.has(scene)) {
+            return;
+        }
+        held.add(scene);
+        scene.getEngine()._registerLateWork(async () => {
+            held.delete(scene);
+            await rebuildSceneRenderables(liteScene);
+        });
+        return;
+    }
     (pendingSceneRebuilds ??= new Set()).add(liteScene);
     if (sceneRebuildScheduled) {
         return;

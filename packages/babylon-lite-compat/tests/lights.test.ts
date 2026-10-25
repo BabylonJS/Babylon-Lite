@@ -210,9 +210,33 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         return Mesh._fromLite({ name, children: [], ...(liteId === undefined ? {} : { id: liteId }) } as never);
     }
 
-    /** Minimal compat-`Scene` stand-in: the light only needs registration, `_lite` and the started flag. */
-    function sceneStub(started: boolean): Scene {
-        return { _hasStarted: started, _lite: { id: "scene-lite" }, _registerLight: vi.fn(), _unregisterNode: vi.fn() } as unknown as Scene;
+    type LateWork = () => Promise<void>;
+    /** A scene stand-in that also collects the engine's late work, so a test can run startup's tail. */
+    type SceneStub = Scene & { _lateWork: LateWork[] };
+
+    /**
+     * Minimal compat-`Scene` stand-in: the light needs registration, `_lite` and the started flag.
+     * `built` is the native `_built`, false only inside the window where the scene has started but
+     * `registerScene` is still building its groups.
+     */
+    function sceneStub(started: boolean, built = true): SceneStub {
+        const lateWork: LateWork[] = [];
+        return {
+            _hasStarted: started,
+            _lite: { id: "scene-lite", _built: built },
+            _registerLight: vi.fn(),
+            _unregisterNode: vi.fn(),
+            getEngine: () => ({
+                _registerLateWork: (work: LateWork) => {
+                    lateWork.push(work);
+                },
+            }),
+            _lateWork: lateWork,
+        } as unknown as SceneStub;
+    }
+
+    function markBuilt(scene: SceneStub): void {
+        (scene._lite as unknown as { _built: boolean })._built = true;
     }
 
     /**
@@ -395,6 +419,67 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         // lights have published by the time it runs, so one is enough for the whole update.
         expect(rebuildMock).toHaveBeenCalledTimes(1);
         expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
+    });
+
+    it("holds the rebuild across the initial-build window instead of dropping it", async () => {
+        // `_hasStarted` is already true while `registerScene` is still building material groups, and
+        // a rebuild is a no-op until `_built`. Requesting one here would be discarded, leaving a
+        // group that baked its light indices early lit by a light that no longer reaches it.
+        const scene = sceneStub(true, false);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const floor = mesh("floor");
+
+        rim.excludedMeshes = [floor];
+        await flush();
+
+        // Published immediately, so a group built after this point bakes the new selection.
+        expect(excluded(rim)).toEqual([floor._lite]);
+        expect(rebuildMock).not.toHaveBeenCalled();
+        expect(scene._lateWork).toHaveLength(1);
+
+        markBuilt(scene);
+        await scene._lateWork[0]!();
+
+        // One rebuild once the scene is built, which rebakes the groups built during the window.
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
+        expect(rebuildMock).toHaveBeenCalledWith(scene._lite);
+    });
+
+    it("holds one rebuild for every edit made inside the initial-build window", async () => {
+        const scene = sceneStub(true, false);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+
+        rim.excludedMeshes = [mesh("floor")];
+        await flush();
+        led.includedOnlyMeshes = [mesh("door")];
+        await flush();
+        rim.excludedMeshes.push(mesh("wall"));
+        await flush();
+
+        expect(scene._lateWork).toHaveLength(1);
+
+        markBuilt(scene);
+        await scene._lateWork[0]!();
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("rebuilds on the tick again once the window has passed", async () => {
+        const scene = sceneStub(true, false);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+
+        rim.excludedMeshes = [mesh("floor")];
+        await flush();
+        markBuilt(scene);
+        await scene._lateWork[0]!();
+        rebuildMock.mockClear();
+
+        // A later edit is past the window, so it takes the normal per-tick path, not late work.
+        rim.excludedMeshes = [mesh("wall")];
+        await flush();
+
+        expect(scene._lateWork).toHaveLength(1);
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
     });
 
     it("does not rebuild before the scene has started, or without a scene", async () => {
