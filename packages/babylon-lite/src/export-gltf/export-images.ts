@@ -132,8 +132,7 @@ function submitReadback(ctx: ExportContext, gpu: GPUTexture): Promise<PixelData>
 
 async function finishReadback(staging: GPUBuffer, target: GPUTexture | null, width: number, height: number, bytesPerRow: number, swapRB: boolean): Promise<PixelData> {
     try {
-        // GPUMapMode.READ, as a literal so the module never dereferences the WebGPU global namespace.
-        await staging.mapAsync(0x0001);
+        await staging.mapAsync(GPUMapMode.READ);
         const src = new Uint8Array(staging.getMappedRange());
         const rgba = new Uint8Array(width * height * 4);
         const rowBytes = width * 4;

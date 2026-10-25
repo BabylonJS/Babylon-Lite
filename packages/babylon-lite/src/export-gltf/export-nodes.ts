@@ -59,7 +59,7 @@ export function isExportableNode(o: object | null | undefined): o is SceneNode {
 
 /** @internal Whether a scene node carries mesh geometry. */
 export function isMesh(o: object): o is Mesh {
-    return "_gpu" in o;
+    return "_gpu" in o && "material" in o;
 }
 
 /** @internal Collect and partition the export roots (see "Root collection and partitioning").

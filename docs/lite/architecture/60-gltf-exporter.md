@@ -225,7 +225,6 @@ export interface ExportContext {
     /** Vertex count → zero-filled TEXCOORD_0 accessor. */
     readonly zeroUvAccessors: Map<number, number>;
     readonly extensionsUsed: Set<string>;
-    readonly extensionsRequired: Set<string>;
     /** Logs each distinct message once per call, as `[babylon-lite] glTF export: <message>`. */
     warn(message: string): void;
 }
@@ -275,8 +274,9 @@ export interface BufferBuilder {
     addBufferView(bytes: ArrayBufferView, target?: GltfBufferViewTarget): number;
     /** Record an accessor and return its index. */
     addAccessor(desc: AccessorDesc): number;
-    /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added). */
-    finalize(): Uint8Array;
+    /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added).
+     *  Releases the staged copies, so it is called once, after the last bufferView is added. */
+    finalize(): Uint8Array<ArrayBuffer>;
 }
 
 export function createBufferBuilder(): BufferBuilder;
@@ -376,7 +376,7 @@ Internal imports are static. The tree-shaking boundary is the feature itself: sc
 
 - `addBufferView(bytes, target?)` copies the bytes at the call, so later writes to the source never reach the output, and records a bufferView with a deferred `byteOffset`. It returns the bufferView index. The same view object with the same target returns the same index.
 - `addAccessor(desc)` records an accessor that references a bufferView index, with `componentType`, `count`, `type`, and optional `min` and `max`.
-- `finalize()` orders bufferViews by descending alignment need (`byteLength % 4 === 0` → 4, `% 2 === 0` → 2, else 1; this is the Babylon.js packing rule). The sort is stable. It concatenates the views in that order with no padding, assigns offsets (`byteOffset` is omitted on the view placed at offset 0), and returns the BIN payload. The sort alone satisfies glTF's alignment rules: every view whose length is a multiple of 4 starts at a 4-aligned offset, and every view whose length is a multiple of 2 at a 2-aligned one. Every emitted vertex attribute, matrix and float array has a length that is a multiple of 4, as glTF's 4-byte vertex-attribute rule requires. All data targets `buffers[0]`. This matches Babylon.js.
+- `finalize()` orders bufferViews by descending alignment need (`byteLength % 4 === 0` → 4, `% 2 === 0` → 2, else 1; this is the Babylon.js packing rule). The sort is stable. It concatenates the views in that order with no padding, assigns offsets (`byteOffset` is omitted on the view placed at offset 0), drops its staged copies, and returns the BIN payload. The sort alone satisfies glTF's alignment rules: every view whose length is a multiple of 4 starts at a 4-aligned offset, and every view whose length is a multiple of 2 at a 2-aligned one. Every emitted vertex attribute, matrix and float array has a length that is a multiple of 4, as glTF's 4-byte vertex-attribute rule requires. All data targets `buffers[0]`. This matches Babylon.js.
 
 `min`/`max` come from `computeMinMax`, per component, over the emitted (converted) data, for every `POSITION` attribute accessor, every morph-target `POSITION` accessor, and every animation input accessor. These are the places where the glTF specification requires them. Zero elements give zero bounds.
 
@@ -407,7 +407,7 @@ interface NodeSweep {
 }
 ```
 
-Helper predicates: `isLight(o)` (`"lightType" in o`), `isCamera(o)` (`"nearPlane" in o`), `isMesh(o)` (`"_gpu" in o`), and `isExportableNode(o)`: an object with `rotationQuaternion` and a `children` array that is neither a light nor a camera. Any other object a node can be parented to (a camera, a light, some other world-matrix provider) is **foreign**.
+Helper predicates: `isLight(o)` (`"lightType" in o`), `isCamera(o)` (`"nearPlane" in o`), `isMesh(o)` (`"_gpu" in o && "material" in o`, the repo-wide mesh test; Gaussian splat streams also carry `_gpu`), and `isExportableNode(o)`: an object with `rotationQuaternion` and a `children` array that is neither a light nor a camera. Any other object a node can be parented to (a camera, a light, some other world-matrix provider) is **foreign**.
 
 1. **Seed and walk.** Walk the `parent` chain upward from each of these seeds: every mesh in `scene.meshes`; every exportable light in `scene.lights`, through its parent when that is an exportable node; the scene camera, through its parent when that is an exportable node and not the camera's fixup; and every animation-bound node (`animated`, the targets of translation, rotation, scale and weights channels of a defined `_gltfMixer` clip). Collect the distinct topmost ancestors in first-encounter order: meshes first, then lights, then the camera, then animation targets. Seeding from bound targets keeps channel-only hierarchies in the export, such as an animated meshless `TransformNode` root.
 
@@ -857,7 +857,7 @@ The exporter submits readbacks during capture, one per distinct `GPUTexture`, at
     - `"size"`: the padded staging buffer (`align(width × 4, 256) × height`) exceeds `device.limits.maxBufferSize` (when the device reports one). Warning: `Texture for material "<name>" is too large to read back on this device; exporting the material without that texture.`
 2. **Direct copy.** If the format is `rgba8unorm`, `rgba8unorm-srgb`, `bgra8unorm` or `bgra8unorm-srgb` and `usage` includes `COPY_SRC`, copy mip 0 directly. glTF-loader raster images qualify: they are uploaded with `COPY_SRC`, unflipped, with `premultipliedAlpha: false` and `colorSpaceConversion: "none"`.
 3. **Decode blit.** Otherwise, if `usage` includes `TEXTURE_BINDING` and the format is float-sampleable (not `depth*`, `stencil*`, `*sint` or `*uint`), blit mip 0 into a transient RGBA8 target of the same size (see Pipeline Configuration and Shader Logic), then copy the target. This covers textures created without `COPY_SRC`, and float and block-compressed formats. Textures without `COPY_SRC` include `loadTexture2D`, solid textures, and KTX2 (also when it comes from glTF `KHR_texture_basisu`). A format that fits neither path is `"engine"`.
-4. **Copy and map.** `copyTextureToBuffer` into a `MAP_READ | COPY_DST` staging buffer with `bytesPerRow = align(width × 4, 256)`, submit, then `mapAsync(0x0001)`. The map mode is the literal `GPUMapMode.READ`, so the module never dereferences the WebGPU global namespace. A failure while encoding or submitting destroys the staging buffer and target created so far and is stored as a rejected promise, like an asynchronous one.
+4. **Copy and map.** `copyTextureToBuffer` into a `MAP_READ | COPY_DST` staging buffer with `bytesPerRow = align(width × 4, 256)`, submit, then `mapAsync(GPUMapMode.READ)`. A failure while encoding or submitting destroys the staging buffer and target created so far and is stored as a rejected promise, like an asynchronous one.
 5. **Repack and release.** Repack rows tight into an RGBA8 `PixelData`. For a direct copy of a `bgra8*` source, swap B and R; the decode blit already writes RGBA. The staging buffer and any transient target are destroyed in a `finally`.
 
 **Row order and channel ops.** Each slot asks for `"storage"` or `"reversed"` rows (`SlotMapping.rowOrder`). In `"reversed"` order, row `r` of the image is storage row `height − 1 − r`. `invert` then applies `v → 255 − v` to the named channels. With the slot's texCoord and transform, this reproduces what Lite samples:
@@ -1029,7 +1029,7 @@ JSON chunk:         length · type 0x4E4F534A ("JSON") · UTF-8 JSON, padded to 
 BIN chunk:          length · type 0x004E4942 ("BIN\0") · binary, padded to 4 with 0x00
 ```
 
-The JSON is compact (`JSON.stringify`) and encoded with `TextEncoder`. The BIN chunk is always written, with length 0 when there is no binary data; Babylon.js does the same. The GLB specification allows omitting an empty BIN chunk, and glTF-Validator reports one only as information (`GLB_EMPTY_BIN_CHUNK`). But Lite's own GLB parser requires the chunk (see Known loader issues), and writing it keeps every export reloadable in Lite without a loader change. `buffers` is written only when the chunk has bytes. The result is `new Blob([bytes], { type: "model/gltf-binary" })`.
+The JSON is compact (`JSON.stringify`) and encoded with `TextEncoder`. The BIN chunk is always written, with length 0 when there is no binary data; Babylon.js does the same. The GLB specification allows omitting an empty BIN chunk, and glTF-Validator reports one only as information (`GLB_EMPTY_BIN_CHUNK`). But Lite's own GLB parser requires the chunk (see Known loader issues), and writing it keeps every export reloadable in Lite without a loader change. `buffers` is written only when the chunk has bytes. `frameGlb(json, bin)` returns the container as parts in file order (header with the padded JSON chunk, BIN chunk header, the BIN payload itself, BIN padding), so the payload is not copied into another full-size array; the result is `new Blob(parts, { type: "model/gltf-binary" })`.
 
 ### Determinism & ordering
 
@@ -1038,7 +1038,7 @@ The JSON is compact (`JSON.stringify`) and encoded with `TextEncoder`. The BIN c
 - **Extensions:** `extensionsUsed` uses insertion order, which is capture order: `EXT_mesh_gpu_instancing` and the material extensions as the node sweep meets them (material extensions in the fixed writer order), then `KHR_lights_punctual`, then `KHR_texture_transform` at resolution. `extensionsRequired` is never written.
 - **Accessor and bufferView order:** per primitive, `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_0`, `TEXCOORD_1`, `COLOR_0`, then indices, then per morph target `POSITION` then `NORMAL`; a synthesized zero `TEXCOORD_0` is created after the material, so it comes last in `attributes`. Instance attributes follow their mesh, camera and light data have no accessors, animation accessors follow the node sweep, and PNG bufferViews are appended last, in image-index order. The stable alignment sort then fixes byte offsets.
 - **Member order:** primitive `attributes`, `indices`, `mode`, `targets`, `material`; accessor `bufferView`, `componentType`, `count`, `type`, `max`, `min`; bufferView `buffer`, `byteLength`, `target`, `byteOffset`; image `name`, `mimeType`, `bufferView`; camera `type`, `name`, then the projection object.
-- **JSON member order:** top-level members serialize in the fixed order `asset`, `extensionsUsed`, `extensionsRequired`, `extensions`, `scene`, `scenes`, `nodes`, `meshes`, `materials`, `textures`, `images`, `cameras`, `animations`, `accessors`, `bufferViews`, `buffers`. Nested objects insert members in a fixed order at each construction site: node members as listed under Nodes, and texture slots, factor folds and `pbrMetallicRoughness` reserve their key at capture, so their position follows capture order whatever the readback completion order.
+- **JSON member order:** top-level members serialize in the fixed order `asset`, `extensionsUsed`, `extensions`, `scene`, `scenes`, `nodes`, `meshes`, `materials`, `textures`, `images`, `cameras`, `animations`, `accessors`, `bufferViews`, `buffers`. Nested objects insert members in a fixed order at each construction site: node members as listed under Nodes, and texture slots, factor folds and `pbrMetallicRoughness` reserve their key at capture, so their position follows capture order whatever the readback completion order.
 - **No volatile data:** there are no timestamps or random identifiers. Byte identity is guaranteed within one runtime only. PNG IDAT bytes come from the runtime's `CompressionStream`, and browsers may decode the same JPEG or WebP source to slightly different pixels before readback. Across browser engines, readback image bytes can therefore differ, and with them the bufferView offsets and lengths in the JSON.
 
 ### Default-value omission (consolidated)
@@ -1136,7 +1136,7 @@ The exporter creates render pipelines only for the decode blit (Readback, step 3
 | Primitive         | `triangle-list`, `cullMode: "none"`                                                                                                                                                                            |
 | Depth / stencil   | none                                                                                                                                                                                                           |
 | Target texture    | same width and height as mip 0, `usage: RENDER_ATTACHMENT \| COPY_SRC`, destroyed after readback                                                                                                               |
-| Staging buffer    | `size: bytesPerRow × height`, `usage: MAP_READ \| COPY_DST`, mapped with `mapAsync(0x0001)`, destroyed after readback                                                                                          |
+| Staging buffer    | `size: bytesPerRow × height`, `usage: MAP_READ \| COPY_DST`, mapped with `mapAsync(GPUMapMode.READ)`, destroyed after readback                                                                                 |
 | Render pass       | one color attachment, `loadOp: "clear"`, `clearValue: (0, 0, 0, 0)`, `storeOp: "store"`, one `draw(3)`                                                                                                         |
 
 Matching the target's color space to the source is what keeps sRGB content byte-stable. Sampling an `-srgb` source returns linear values, and writing to an `-srgb` target re-encodes them, so the stored bytes come back as the source's stored bytes. A linear target would store linear values and produce a dark PNG.
@@ -1171,12 +1171,12 @@ return clamp(textureLoad(src,vec2i(v.p.xy),0),vec4f(0),vec4f(1));
     3. `collectRoots`: collect and partition roots, recording extra children for parent-only links and the first stripped root's extras. Snapshot those extras into `asset.extras`.
     4. `exportNodeTrees`: `export-nodes.ts` recurses depth-first per root. Nodes emit meshes (`export-geometry.ts`; geometry is copied into the BufferBuilder as it is emitted), and meshes emit materials (`export-materials.ts`). Materials write every non-texture member and call `captureTextureSlot` for each slot and record each fold. That records the pending slot and submits its readback, so the GPU copy is queued in this synchronous step too.
     5. `exportCamera`, `exportLights` and `exportAnimations`, in that order.
-2. **Settle.** `await Promise.allSettled` over every `pixelCache` promise, in submission order. Throw the first rejection; otherwise store each result in `resolvedPixels`. Each readback has already destroyed its own transient GPU objects.
+2. **Settle.** `settleReadbacks(ctx)`: `await Promise.allSettled` over every `pixelCache` promise, in submission order. Throw the first rejection; otherwise store each result in `resolvedPixels`. The helper returns before resolution, so the settled array is unreachable once resolution clears `pixelCache` and `resolvedPixels`. Each readback has already destroyed its own transient GPU objects.
 3. **Resolve** (synchronous), in this order: `resolveFolds` (write the factor values, applying the omission rules, and cancel fallback slots of folded ORMs); `resolveTextureSlots` (write every textureInfo, or leave the slot unset when its pixels are null); the `afterResolve` callbacks in registration order; `finalizeMaterials` (remove empty `pbrMetallicRoughness` objects). Image and texture indices are assigned here, in capture order, so they never depend on GPU completion order.
 4. **Encode.** `encodeImages` encodes each new image to PNG (`export-png.ts`) and adds its bytes as a bufferView, in image-index order.
 5. **Assemble.**
     1. `buffers.finalize()` produces the BIN payload.
-    2. `assembleDocument` builds the JSON: `extensionsUsed` / `extensionsRequired` from the context sets, the document-level `extensions` (the lights writer's `KHR_lights_punctual.lights`), `scene: 0` and `scenes` only when at least one root node exported, each non-empty top-level array, and `buffers: [{ byteLength }]` only when the BIN payload has bytes. Members follow the fixed order (Determinism).
+    2. `assembleDocument` builds the JSON: `extensionsUsed` from the context set, the document-level `extensions` (the lights writer's `KHR_lights_punctual.lights`), `scene: 0` and `scenes` only when at least one root node exported, each non-empty top-level array, and `buffers: [{ byteLength }]` only when the BIN payload has bytes. Members follow the fixed order (Determinism).
     3. `export-glb.ts` frames the JSON (`JSON.stringify`) and BIN chunks, and the Blob of type `model/gltf-binary` resolves.
 
 GPU objects created by readbacks (staging buffers, blit targets) are destroyed by each readback before the promise settles, on both the success and the failure path; the blit pipeline objects are dropped with the context.
@@ -1233,7 +1233,7 @@ Serializer features with no Lite counterpart are absent from this module: `KHR_m
 
 Imports are from the module files, not the package root.
 
-- **Math** (`math/`): `decomposeMat4(m): { translation, rotation, scale }` (folds a negative determinant into −Y scale), `composeMat4` (the TRS-decomposability check), `multiplyMat4(a, b)`, `invertMat4(m): Mat4 | null`, `mat4Determinant3(m)` (the mirrored-view test), `srgbByteToLinear(b)` (`math/color.js`) and the `Mat4` type. The conversion formulas in `export-handedness.ts` are self-contained. `Mat4` is a branded readonly type; raw arrays such as a glTF `_localMatrix` are cast.
+- **Math** (`math/`): `decomposeMat4(m): { translation, rotation, scale }` (folds a negative determinant into −Y scale), `composeMat4` (the TRS-decomposability check), `multiplyMat4(a, b)`, `invertMat4(m): Mat4 | null`, `mat4Determinant3(m)` (the mirrored-view test), `srgbByteToLinear(b)` and `linearToSrgbByte(v)` (`math/color.js`) and the `Mat4` type. The conversion formulas in `export-handedness.ts` are self-contained. `Mat4` is a branded readonly type; raw arrays such as a glTF `_localMatrix` are cast.
 - **Scene state:** the Inputs table, including the retained CPU arrays, `MorphTargetData`, `ThinInstanceData` and `AnimationGroup._gltfMixer`.
 - **Engine:** `_device` for readback and the decode blit; `gpu-flags.js` (`BU`, `SS`, `TU`) for buffer, shader-stage and texture usage bits; `scene.surface.canvas` for the camera aspect; `VERSION` (`engine/version.js`) for `asset.generator`. A null engine is detected by an absent `_device`.
 - **Material helpers:** `getMaterialSource`, `getMaterialFamily`.

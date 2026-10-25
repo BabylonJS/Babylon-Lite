@@ -46,15 +46,7 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     exportAnimations(ctx, scene.animationGroups);
 
     // 2. Settle every readback, then throw the first failure in submission order.
-    const textures = [...ctx.pixelCache.keys()];
-    const settled = await Promise.allSettled(ctx.pixelCache.values());
-    for (let i = 0; i < textures.length; i++) {
-        const result = settled[i]!;
-        if (result.status === "rejected") {
-            throw result.reason ?? new Error("Texture readback failed");
-        }
-        ctx.resolvedPixels.set(textures[i]!, result.value);
-    }
+    await settleReadbacks(ctx);
 
     // 3. Resolve (synchronous): factor folds, then texture slots, then dependent values.
     resolveFolds(ctx);
@@ -72,7 +64,21 @@ export async function exportSceneAsGlb(scene: SceneContext): Promise<Blob> {
     // 5. Assemble the GLB.
     const bin = ctx.buffers.finalize();
     const json = JSON.stringify(assembleDocument(ctx, bin.byteLength));
-    return new Blob([frameGlb(json, bin)], { type: "model/gltf-binary" });
+    return new Blob(frameGlb(json, bin), { type: "model/gltf-binary" });
+}
+
+/** Move settled readback pixels into `resolvedPixels`. A separate frame, so the settled results are
+ *  unreachable once resolution clears the context maps. */
+async function settleReadbacks(ctx: ExportContext): Promise<void> {
+    const textures = [...ctx.pixelCache.keys()];
+    const settled = await Promise.allSettled(ctx.pixelCache.values());
+    for (let i = 0; i < textures.length; i++) {
+        const result = settled[i]!;
+        if (result.status === "rejected") {
+            throw result.reason ?? new Error("Texture readback failed");
+        }
+        ctx.resolvedPixels.set(textures[i]!, result.value);
+    }
 }
 
 /** The glTF document with only non-empty top-level members, in a fixed member order. */
@@ -81,9 +87,6 @@ function assembleDocument(ctx: ExportContext, binLength: number): GltfDocument {
     const doc: GltfDocument = { asset: d.asset };
     if (ctx.extensionsUsed.size > 0) {
         doc.extensionsUsed = [...ctx.extensionsUsed];
-    }
-    if (ctx.extensionsRequired.size > 0) {
-        doc.extensionsRequired = [...ctx.extensionsRequired];
     }
     if (Object.keys(d.extensions).length > 0) {
         doc.extensions = d.extensions;

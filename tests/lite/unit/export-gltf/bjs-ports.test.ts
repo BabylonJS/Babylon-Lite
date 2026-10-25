@@ -304,7 +304,7 @@ describe("Babylon.js glTFSerializer.test.ts", () => {
     describe("lights", () => {
         const RED: [number, number, number] = [1, 0, 0];
 
-        // innerConeAngle is not asserted: Lite never exports it (spec, Light export: it stays at the schema default).
+        // Lite never exports innerConeAngle (spec, Light export: it stays at the schema default), so it is asserted absent.
         it("should serialize spot light to glTF", async () => {
             const intensity = 0.2;
             const angle = Math.PI / 4;

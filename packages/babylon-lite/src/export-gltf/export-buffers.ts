@@ -33,8 +33,9 @@ export interface BufferBuilder {
      *  view object and target returns the existing index. */
     addBufferView(bytes: ArrayBufferView, target?: GltfBufferViewTarget): number;
     addAccessor(desc: AccessorDesc): number;
-    /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added). */
-    finalize(): Uint8Array;
+    /** Lay out every bufferView and return the BIN payload (length 0 when nothing was added).
+     *  Releases the staged copies, so it is called once, after the last bufferView is added. */
+    finalize(): Uint8Array<ArrayBuffer>;
 }
 
 /** @internal Create an empty {@link BufferBuilder}. */
@@ -97,6 +98,7 @@ export function createBufferBuilder(): BufferBuilder {
                 }
                 offset += bytes.byteLength;
             }
+            payloads.length = 0;
             return out;
         },
     };

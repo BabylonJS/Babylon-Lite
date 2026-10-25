@@ -155,6 +155,17 @@ describe("root collection", () => {
         expect(glb.json.nodes[1].mesh).toBe(0);
     });
 
+    it("exports a child with `_gpu` but no material (a splat stream) as a plain node, not a mesh", async () => {
+        const parent = createTransformNode("parent");
+        const stream = attach(createTransformNode("splats", 0, 1, 0), parent);
+        (stream as { _gpu?: object })._gpu = {};
+        const glb = await exportAndParse(createScene({ meshes: [attach(createMesh("m"), parent)] }));
+        expect(glb.warnings).toEqual([]);
+        const splatNode = glb.json.nodes.find((n: { name?: string }) => n.name === "splats");
+        expect(splatNode).toBeDefined();
+        expect(splatNode.mesh).toBeUndefined();
+    });
+
     it("skips a node still listed in parent.children whose parent is null", async () => {
         const parent = createTransformNode("parent");
         const kept = attach(createMesh("kept"), parent);

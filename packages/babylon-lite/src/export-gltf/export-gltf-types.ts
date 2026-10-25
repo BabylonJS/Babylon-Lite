@@ -31,7 +31,6 @@ export interface GltfNode extends GltfProperty {
     rotation?: number[];
     scale?: number[];
     translation?: number[];
-    weights?: number[];
 }
 
 /** Attribute semantic → accessor index. */
@@ -137,16 +136,14 @@ export interface GltfAnimation extends GltfProperty {
     samplers: GltfAnimationSampler[];
 }
 
-/** glTF accessor component types: UNSIGNED_BYTE, UNSIGNED_SHORT, UNSIGNED_INT, FLOAT. */
-export type GltfComponentType = 5121 | 5123 | 5125 | 5126;
+/** glTF accessor component types: UNSIGNED_SHORT, UNSIGNED_INT, FLOAT. */
+export type GltfComponentType = 5123 | 5125 | 5126;
 
-export type GltfAccessorType = "SCALAR" | "VEC2" | "VEC3" | "VEC4" | "MAT4";
+export type GltfAccessorType = "SCALAR" | "VEC2" | "VEC3" | "VEC4";
 
 export interface GltfAccessor extends GltfProperty {
     bufferView?: number;
-    byteOffset?: number;
     componentType: GltfComponentType;
-    normalized?: boolean;
     count: number;
     type: GltfAccessorType;
     max?: number[];
@@ -160,7 +157,6 @@ export interface GltfBufferView extends GltfProperty {
     buffer: number;
     byteOffset?: number;
     byteLength: number;
-    byteStride?: number;
     target?: GltfBufferViewTarget;
 }
 
@@ -172,7 +168,6 @@ export interface GltfBuffer extends GltfProperty {
 export interface GltfDocument extends GltfProperty {
     asset: GltfAsset;
     extensionsUsed?: string[];
-    extensionsRequired?: string[];
     scene?: number;
     scenes?: GltfScene[];
     nodes?: GltfNode[];

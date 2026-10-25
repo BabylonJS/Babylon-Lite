@@ -69,8 +69,8 @@ export function convertMatrix(m: ArrayLike<number>): number[] {
     return out;
 }
 
-/** `q ⊗ (0, 1, 0, 0)`: a 180° yaw applied in the quaternion's local frame. Linear, so it also
- *  applies to animation keys and tangents. Lite cameras look along local +Z; glTF cameras look along −Z. */
+/** `q ⊗ (0, 1, 0, 0)`: a 180° yaw applied in the quaternion's local frame. Lite cameras look along
+ *  local +Z; glTF cameras look along −Z. */
 export function rotate180Y(x: number, y: number, z: number, w: number): [number, number, number, number] {
     return [-z, w, x, -y];
 }

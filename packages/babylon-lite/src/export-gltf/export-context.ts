@@ -133,7 +133,6 @@ export interface ExportContext {
     /** Vertex count → zero-filled TEXCOORD_0 accessor (for UV-less meshes with textured materials). */
     readonly zeroUvAccessors: Map<number, number>;
     readonly extensionsUsed: Set<string>;
-    readonly extensionsRequired: Set<string>;
     /** Logs each distinct message once per call, as `[babylon-lite] glTF export: <message>`. */
     warn(message: string): void;
 }
@@ -187,7 +186,6 @@ export function createExportContext(engine: EngineContext, generator: string): E
         materialsUsingUv0: new Set(),
         zeroUvAccessors: new Map(),
         extensionsUsed: new Set(),
-        extensionsRequired: new Set(),
         warn(message) {
             if (!logged.has(message)) {
                 logged.add(message);

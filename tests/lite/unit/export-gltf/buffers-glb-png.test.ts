@@ -140,8 +140,8 @@ describe("createBufferBuilder", () => {
         expect(b.accessors[minimal]).toEqual({ bufferView: view, componentType: FLOAT, count: 2, type: "VEC3" });
         expect(Object.keys(b.accessors[minimal]!).sort()).toEqual(["bufferView", "componentType", "count", "type"]);
 
-        const full = b.addAccessor({ bufferView: view, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
-        expect(b.accessors[full]).toEqual({ bufferView: view, componentType: 5121, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
+        const full = b.addAccessor({ bufferView: view, componentType: FLOAT, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
+        expect(b.accessors[full]).toEqual({ bufferView: view, componentType: FLOAT, count: 1, type: "VEC3", min: [0, 0, 0], max: [1, 1, 1] });
         expect(full).toBe(1);
     });
 });
@@ -165,6 +165,17 @@ describe("computeMinMax", () => {
 });
 
 describe("frameGlb", () => {
+    function frame(json: string, bin: Uint8Array<ArrayBuffer>): Uint8Array {
+        const parts = frameGlb(json, bin);
+        const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+        let offset = 0;
+        for (const p of parts) {
+            out.set(p, offset);
+            offset += p.byteLength;
+        }
+        return out;
+    }
+
     function chunks(glb: Uint8Array): {
         header: [number, number, number];
         json: { length: number; type: number; bytes: Uint8Array };
@@ -182,7 +193,7 @@ describe("frameGlb", () => {
     }
 
     it("writes the magic, version and total length", () => {
-        const glb = frameGlb('{"asset":{"version":"2.0"}}', new Uint8Array([1, 2, 3, 4]));
+        const glb = frame('{"asset":{"version":"2.0"}}', new Uint8Array([1, 2, 3, 4]));
         const { header } = chunks(glb);
         expect(header[0]).toBe(0x46546c67);
         expect(String.fromCharCode(...glb.subarray(0, 4))).toBe("glTF");
@@ -191,14 +202,14 @@ describe("frameGlb", () => {
     });
 
     it("types the chunks JSON and BIN\\0", () => {
-        const c = chunks(frameGlb("{}", new Uint8Array([1, 2, 3, 4])));
+        const c = chunks(frame("{}", new Uint8Array([1, 2, 3, 4])));
         expect(c.json.type).toBe(0x4e4f534a);
         expect(c.bin.type).toBe(0x004e4942);
     });
 
     it("pads the JSON chunk with 0x20 to a multiple of 4", () => {
         for (const json of ["{}", "{ }", '{"a":1}', '{"a":12}']) {
-            const c = chunks(frameGlb(json, new Uint8Array(0)));
+            const c = chunks(frame(json, new Uint8Array(0)));
             const bytes = new TextEncoder().encode(json);
             expect(c.json.length % 4).toBe(0);
             expect(c.json.length).toBe(Math.ceil(bytes.length / 4) * 4);
@@ -209,7 +220,7 @@ describe("frameGlb", () => {
 
     it("measures the JSON chunk in UTF-8 bytes, not characters", () => {
         const json = '{"name":"é€"}';
-        const c = chunks(frameGlb(json, new Uint8Array(0)));
+        const c = chunks(frame(json, new Uint8Array(0)));
         const bytes = new TextEncoder().encode(json);
         expect(bytes.length).toBeGreaterThan(json.length);
         expect(c.json.length).toBe(Math.ceil(bytes.length / 4) * 4);
@@ -218,7 +229,7 @@ describe("frameGlb", () => {
     it("pads the BIN chunk with zeros to a multiple of 4", () => {
         for (const n of [1, 2, 3, 4, 5]) {
             const bin = new Uint8Array(n).fill(0xff);
-            const glb = frameGlb("{}", bin);
+            const glb = frame("{}", bin);
             const c = chunks(glb);
             expect(c.bin.length).toBe(Math.ceil(n / 4) * 4);
             expect(Array.from(c.bin.bytes.subarray(0, n))).toEqual(Array.from(bin));
@@ -227,8 +238,13 @@ describe("frameGlb", () => {
         }
     });
 
+    it("references the BIN payload instead of copying it", () => {
+        const bin = new Uint8Array([1, 2, 3, 4, 5]);
+        expect(frameGlb("{}", bin)).toContain(bin);
+    });
+
     it("still writes a zero-length BIN chunk when the payload is empty", () => {
-        const glb = frameGlb("{}", new Uint8Array(0));
+        const glb = frame("{}", new Uint8Array(0));
         const c = chunks(glb);
         expect(c.bin.length).toBe(0);
         expect(c.bin.type).toBe(0x004e4942);

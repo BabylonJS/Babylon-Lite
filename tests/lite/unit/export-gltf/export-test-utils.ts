@@ -8,7 +8,7 @@ import type { Mesh, MeshGPU } from "../../../../packages/babylon-lite/src/mesh/m
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
 
-/** A fake GPUTexture carrying its mip-0 pixels (tight RGBA8, or one float per channel for float formats). */
+/** A fake GPUTexture carrying its mip-0 bytes in storage order (RGBA8 for every format, float formats included). */
 export interface FakeGpuTexture {
     width: number;
     height: number;
@@ -61,7 +61,7 @@ export function createFakeDevice(options: { failMap?: boolean; maxBufferSize?: n
                         },
                         draw() {
                             stats.blits++;
-                            // The blit copies texels verbatim (clamped); fake float sources store bytes already.
+                            // The blit copies texels verbatim; fake float sources store bytes already.
                             target.__pixels.set(source!.__pixels.subarray(0, target.__pixels.length));
                         },
                         end() {},
