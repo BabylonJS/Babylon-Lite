@@ -295,6 +295,14 @@ describe("KHR_materials_iridescence", () => {
         });
     });
 
+    it("keeps the bytes of -srgb intensity and thickness textures, which the loader uploads as sRGB", async () => {
+        const pixels = [128, 64, 32, 255, 16, 8, 200, 255];
+        const texture = createTexture(2, 1, pixels, { format: "rgba8unorm-srgb" });
+        const r = await run({ _iridescence: { isEnabled: true, texture, thicknessTexture: texture } });
+        expect(r.json.images).toHaveLength(1);
+        expect(Array.from((await decodePng(readBufferView(r, r.json.images[0].bufferView))).rgba)).toEqual(pixels);
+    });
+
     it("exports the intensity and thickness textures on texCoord 0", async () => {
         const r = await run({ _iridescence: { isEnabled: true, texture: tex(10), thicknessTexture: tex(20) } });
         const ir = expectEmitted(r, "KHR_materials_iridescence");
