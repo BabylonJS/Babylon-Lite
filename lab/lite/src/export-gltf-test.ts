@@ -25,7 +25,7 @@ import {
     exportSceneAsGlb,
     loadGltf,
 } from "babylon-lite";
-import type { EngineContext, SceneContext } from "babylon-lite";
+import type { EngineContext, SceneContext, Texture2D } from "babylon-lite";
 
 export interface ExportRoundTrip {
     /** First export, base64. */
@@ -47,6 +47,10 @@ export interface ExportGltfTest {
      *  `retainCpuVertexData` enables device-lost scene recovery before loading, the opt-in that keeps tangents, second UVs and vertex colors on the CPU,
      *  and disables it again afterwards. */
     exportGlb(glbBase64: string, options?: { retainCpuVertexData?: boolean }): Promise<{ glb: string; warnings: string[] }>;
+    /** Export one box per readback path, each with a single `-srgb` texture as both base color (a color slot)
+     *  and ORM (a data slot): the direct path uses the first loaded sRGB base-color texture of `assetUrl`
+     *  (loader textures carry COPY_SRC), the blit path a `createTexture2DFromPixels` texture (no COPY_SRC). */
+    exportSrgbData(assetUrl: string): Promise<{ glb: string; warnings: string[] }>;
 }
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -139,6 +143,34 @@ const api: ExportGltfTest = {
         } finally {
             recovery?.disable();
         }
+    },
+    async exportSrgbData(assetUrl) {
+        const engine = await getEngine();
+        const source = createSceneContext(engine);
+        addToScene(source, await loadGltf(engine, assetUrl));
+        const loaded = source.meshes
+            .map((m) => (m.material as { baseColorTexture?: Texture2D } | null)?.baseColorTexture)
+            // The loader uploads every base-color image as sRGB.
+            .find((t) => t !== undefined && t.width > 1);
+        if (!loaded) {
+            throw new Error(`${assetUrl} has no sRGB base-color texture`);
+        }
+        const pixels = new Uint8Array(4 * 4 * 4).map((_, i) => (i % 4 === 3 ? 255 : (i * 37) % 256));
+        const scene = createSceneContext(engine);
+        for (const [name, texture] of [
+            ["direct", loaded],
+            ["blit", createTexture2DFromPixels(engine, pixels, 4, 4, { srgb: true })],
+        ] as const) {
+            const box = createBox(engine, 1);
+            box.name = name;
+            box.material = createPbrMaterial({ baseColorTexture: texture, ormTexture: texture });
+            addToScene(scene, box);
+        }
+        const warnings: string[] = [];
+        const exported = await exportCapturingWarnings(scene, warnings);
+        disposeScene(scene);
+        disposeScene(source);
+        return { glb: await toBase64Blob(exported), warnings };
     },
     async roundTripNative() {
         const engine = await getEngine();

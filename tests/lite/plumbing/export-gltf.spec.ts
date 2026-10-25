@@ -8,7 +8,7 @@ import { test, expect, acquireReferencePage } from "../parity/parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { createTriangleFixture, parseGlb, readAccessor } from "./export-gltf-helpers";
+import { createTriangleFixture, decodeExportedPng, parseGlb, readAccessor } from "./export-gltf-helpers";
 import type { GltfFixture, GltfJson, ParsedGlb } from "./export-gltf-helpers";
 
 /** Mirrors `ExportRoundTrip` in lab/lite/src/export-gltf-test.ts. */
@@ -121,6 +121,39 @@ test.describe("glTF export round trip", () => {
         // The first reload quantizes what the loader bakes (1×1 factor textures) and names unnamed
         // cameras; from the second export on, the output is a fixed point.
         expect(result.third).toBe(result.second);
+    });
+});
+
+test.describe("glTF export of sRGB textures", () => {
+    test("an -srgb texture exports its bytes as base color and the decoded values Lite samples as ORM, on both readback paths", async () => {
+        const result = await page.evaluate(
+            (url) => (window as unknown as { exportGltfTest: { exportSrgbData(u: string): Promise<ExportGlbResult> } }).exportGltfTest.exportSrgbData(url),
+            "/gltf-assets/NegativeScaleTest/NegativeScaleTest.glb"
+        );
+        expect(result.warnings).toEqual([]);
+        const { json, bin } = parseGlb(result.glb);
+        const image = (textureIndex: number): Uint8Array => {
+            const view = json.bufferViews[json.images[json.textures[textureIndex].source].bufferView];
+            return decodeExportedPng(bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength));
+        };
+        const toLinearByte = (b: number): number => {
+            const c = b / 255;
+            return Math.round((c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)) * 255);
+        };
+        const byName = new Map((json.nodes as { name?: string; mesh?: number }[]).map((n) => [n.name, json.meshes[n.mesh!].primitives[0].material as number]));
+        for (const path of ["direct", "blit"]) {
+            const material = json.materials[byName.get(path)!];
+            const color = image(material.pbrMetallicRoughness.baseColorTexture.index);
+            const orm = image(material.pbrMetallicRoughness.metallicRoughnessTexture.index);
+            expect(material.occlusionTexture.index).toBe(material.pbrMetallicRoughness.metallicRoughnessTexture.index);
+            expect(orm).toHaveLength(color.length);
+            expect(Array.from(orm), path).toEqual(Array.from(color, (v, i) => (i % 4 === 3 ? v : toLinearByte(v))));
+            // A non-trivial texture: the decode changed at least one byte.
+            expect(
+                Array.from(orm).some((v, i) => v !== color[i]),
+                path
+            ).toBe(true);
+        }
     });
 });
 

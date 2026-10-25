@@ -1,6 +1,7 @@
 /** Node-side helpers for the glTF export plumbing specs: GLB framing in both directions, accessor
  *  reading, and a hand-built triangle glTF fixture that tests extend with extra accessors. */
 
+import { inflateSync } from "zlib";
 import { expect } from "../parity/parity-fixtures";
 
 /** A glTF document as plain JSON. Tests index into it freely. */
@@ -154,4 +155,26 @@ export function createTriangleFixture(): GltfFixture {
         toGlb: () => buildGlb(fixture.json, fixture.bin),
     };
     return fixture;
+}
+
+/** Decode an exported PNG image (RGBA8, filter 0 on every row, as `export-png.ts` writes it) to RGBA bytes. */
+export function decodeExportedPng(png: Uint8Array): Uint8Array {
+    const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    const width = view.getUint32(16);
+    const height = view.getUint32(20);
+    const idat: Uint8Array[] = [];
+    for (let offset = 8; offset < png.length;) {
+        const length = view.getUint32(offset);
+        if (String.fromCharCode(...png.subarray(offset + 4, offset + 8)) === "IDAT") {
+            idat.push(png.subarray(offset + 8, offset + 8 + length));
+        }
+        offset += 12 + length;
+    }
+    const raw = inflateSync(Buffer.concat(idat));
+    const rgba = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        expect(raw[y * (width * 4 + 1)]).toBe(0);
+        rgba.set(raw.subarray(y * (width * 4 + 1) + 1, (y + 1) * (width * 4 + 1)), y * width * 4);
+    }
+    return rgba;
 }
