@@ -250,6 +250,37 @@ describe("camera", () => {
             expectClose(glb.json.nodes[cameraNode].translation, [-w[12]!, w[13]!, w[14]!]);
         });
 
+        it("keeps the pristine collapse onto a mirrored node from the source glTF (under a stripped loader root)", async () => {
+            const root = loaderRoot();
+            const holder = attach(createTransformNode("holder", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1), root);
+            const mesh = attach(createMesh("m"), holder);
+            const fixup = attach(createTransformNode("cam_fixup", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1), holder);
+            const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });
+            setParent(camera, fixup);
+            const glb = await exportAndParse(createScene({ meshes: [mesh], camera }));
+            expect(glb.warnings).toEqual([]);
+            expect(glb.json.nodes[0].name).toBe("holder");
+            expect(glb.json.nodes[0].camera).toBe(0);
+        });
+
+        it("unmirrors a camera dropped from a mirrored converting parent, keeping its forward and up", async () => {
+            // Translated, so it is not the loader-root shape and exports as a converting node.
+            const parent = createTransformNode("mirror", 0, 1, 0, 0, 0, 0, 1, -1, 1, 1);
+            const mesh = attach(createMesh("m"), parent);
+            const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+            setParent(camera, parent);
+            parent.children.push(camera as unknown as SceneNode);
+            const glb = await exportAndParse(createScene({ meshes: [mesh], camera }));
+            expect(glb.warnings).toContain('Camera parent "mirror" has a mirrored glTF frame; exporting the camera as a scene root.');
+            expect(glb.warnings).toContain('Camera "" has a mirrored view under its parent; exporting it unmirrored.');
+            const node = glb.json.nodes.find((n: { camera?: number }) => n.camera === 0);
+            const q = node.rotation ?? [0, 0, 0, 1];
+            // The Lite view looks along world +Z with +Y up; handedness conversion keeps both directions, and a
+            // glTF camera looks along its local -Z.
+            expectClose(rotate(q, [0, 1, 0]), [0, 1, 0]);
+            expectClose(rotate(q, [0, 0, -1]), [0, 0, 1]);
+        });
+
         it("exports a camera under a fixup with no exported parent as its own scene root", async () => {
             const fixup = createTransformNode("cam_fixup", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
             const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });

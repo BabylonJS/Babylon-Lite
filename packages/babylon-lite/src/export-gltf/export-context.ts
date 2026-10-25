@@ -83,7 +83,7 @@ export interface PendingFold {
     /** The 1×1 texture's GPU texture, captured synchronously. */
     readonly gpu: GPUTexture;
     /** How the shader decodes the texel's RGB bytes: the sRGB curve (`-srgb` format), `^2.2`
-     *  (`_gammaAlbedo` on a linear format), or byte / 255. Base color only. */
+     *  (`_gammaAlbedo` on a linear format, base color only), or byte / 255. */
     readonly decode: "srgb" | "gamma" | "linear";
     /** The props' own factors, multiplied into the texel: `[r, g, b, a]` for base color
      *  (alpha already includes the material alpha), `[metallic, roughness]` for ORM. */

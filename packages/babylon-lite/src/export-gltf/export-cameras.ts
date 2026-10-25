@@ -47,9 +47,10 @@ export function exportCamera(ctx: ExportContext, scene: SceneContext, fixup: Sce
     // parent — in both cases only when that node exported through another seed.
     const candidate = fixup ? (fixup.parent as object | null) : (camera.parent ?? null);
     let parent: object | null = candidate && ctx.nodeIndex.has(candidate) ? candidate : null;
-    // The parent's glTF global basis has the sign of its Lite world determinant in a converting pass and
-    // the opposite sign under a stripped loader root. A camera under a mirrored glTF frame has no defined view.
-    if (parent && (ctx.nodeConvert.get(parent) === true ? 1 : -1) * mat4Determinant3((parent as SceneNode).worldMatrix) < 0) {
+    // In a converting pass the parent's glTF global basis has the sign of its Lite world determinant; a
+    // negative one (a loader root kept under an app node) would leave the camera's view undefined. Under a
+    // stripped loader root any mirror comes from the source glTF and is kept as it was.
+    if (parent && ctx.nodeConvert.get(parent) === true && mat4Determinant3((parent as SceneNode).worldMatrix) < 0) {
         ctx.warn(`Camera parent "${(parent as SceneNode).name}" has a mirrored glTF frame; exporting the camera as a scene root.`);
         parent = null;
     }
@@ -83,6 +84,16 @@ export function exportCamera(ctx: ExportContext, scene: SceneContext, fixup: Sce
     let translation: number[];
     let rotation: number[];
     if (convert) {
+        if (mat4Determinant3(relative) < 0) {
+            // A mirrored view would fold into −Y scale and flip the camera upside down; negating the X
+            // column keeps its forward and up.
+            ctx.warn(`Camera "${camera.name ?? ""}" has a mirrored view under its parent; exporting it unmirrored.`);
+            const m = Array.from(relative as ArrayLike<number>);
+            m[0] = -m[0]!;
+            m[1] = -m[1]!;
+            m[2] = -m[2]!;
+            relative = m as unknown as Mat4;
+        }
         // Lite cameras look along local +Z; glTF cameras look along −Z.
         const { translation: t, rotation: q } = decomposeMat4(relative);
         translation = [-t.x, t.y, t.z];

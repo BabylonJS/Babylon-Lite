@@ -17,7 +17,7 @@ export const specularWriter: MaterialExtensionWriter = (ctx, material, out, uvSt
     const payload: GltfJsonObject = {};
     const transform = hasTx(specTex) || hasTx(colorTex);
     setUnlessDefault(payload, "specularFactor", w, 1);
-    capturePbrSlot(ctx, material, uvState, payload, { key: "specularTexture", texture: specTex, transform });
+    capturePbrSlot(ctx, material, uvState, payload, { key: "specularTexture", texture: specTex, transform, color: true });
     setVecUnlessDefault(payload, "specularColorFactor", c, [1, 1, 1]);
     capturePbrSlot(ctx, material, uvState, payload, { key: "specularColorTexture", texture: colorTex, transform, color: true });
     attachExtension(ctx, out, "KHR_materials_specular", payload);

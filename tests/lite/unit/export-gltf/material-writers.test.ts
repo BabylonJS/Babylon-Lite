@@ -600,6 +600,14 @@ describe("KHR_materials_diffuse_transmission", () => {
         expect(Array.from(intensityPng.rgba)).toEqual(pixels);
     });
 
+    it("shares one image for an -srgb texture used as both color and alpha-only intensity", async () => {
+        const texture = createTexture(2, 1, [128, 64, 32, 79, 16, 8, 4, 143], { format: "rgba8unorm-srgb" });
+        const r = await run({ _subsurface: { translucency: { intensityTexture: texture, colorTexture: texture }, thickness: { min: 0, max: 0 } } });
+        const dt = expectEmitted(r, "KHR_materials_diffuse_transmission");
+        expect(r.json.images).toHaveLength(1);
+        expect(dt.diffuseTransmissionTexture.index).toBe(dt.diffuseTransmissionColorTexture.index);
+    });
+
     const marker = { min: 0, max: 0 };
 
     it("is emitted only with the zero-thickness marker", async () => {

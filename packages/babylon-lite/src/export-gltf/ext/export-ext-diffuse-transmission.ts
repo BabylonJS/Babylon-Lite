@@ -14,7 +14,7 @@ export const diffuseTransmissionWriter: MaterialExtensionWriter = (ctx, material
     const payload: GltfJsonObject = {};
     const transform = hasTx(t.intensityTexture) || hasTx(t.colorTexture);
     setUnlessDefault(payload, "diffuseTransmissionFactor", t.intensity ?? 1, 0);
-    capturePbrSlot(ctx, material, uvState, payload, { key: "diffuseTransmissionTexture", texture: t.intensityTexture, transform });
+    capturePbrSlot(ctx, material, uvState, payload, { key: "diffuseTransmissionTexture", texture: t.intensityTexture, transform, color: true });
     if (t.color) {
         setVecUnlessDefault(payload, "diffuseTransmissionColorFactor", t.color, [1, 1, 1]);
     }
