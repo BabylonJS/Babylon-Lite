@@ -272,6 +272,10 @@ file is the live status record for each:
 | `ColorGradient` / `FactorGradient`         | ✅ Full | misc-utils                                                                                                                                     |
 | `Logger` / `PrecisionDate`                 | ✅ Full | [misc/misc-utils.ts](src/misc/misc-utils.ts)                                                                                                   |
 
+`Tools.Now` is a read-only numeric timestamp property, matching Babylon.js. Each read delegates to `PrecisionDate.Now`, using `performance.now()` when available and `Date.now()` otherwise; module import does not read the clock.
+
+Migration: replace the previously exposed compat-only call `Tools.Now()` with the Babylon.js property access `Tools.Now`.
+
 ## Materials
 
 | BJS API                                                                                                                                                                                        | Status             | Module                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

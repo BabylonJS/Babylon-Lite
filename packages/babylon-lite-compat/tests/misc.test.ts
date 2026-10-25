@@ -145,9 +145,41 @@ describe("Observable", () => {
 
 describe("Tools", () => {
     afterEach(() => {
+        vi.unstubAllGlobals();
         vi.restoreAllMocks();
         vi.doUnmock("../src/misc/guid");
         vi.resetModules();
+    });
+
+    it("reads a fresh numeric high-resolution timestamp on each Now property access", () => {
+        const now = vi.fn().mockReturnValueOnce(11.25).mockReturnValueOnce(19.5);
+        vi.stubGlobal("performance", { now });
+
+        const start: number = Tools.Now;
+        const end: number = Tools.Now;
+
+        expect(start).toBe(11.25);
+        expect(end - start).toBe(8.25);
+        expect(now).toHaveBeenCalledTimes(2);
+    });
+
+    it("falls back to the current Date timestamp when performance is unavailable", () => {
+        vi.stubGlobal("performance", undefined);
+        vi.spyOn(Date, "now").mockReturnValueOnce(1000).mockReturnValueOnce(1025);
+
+        expect(Tools.Now).toBe(1000);
+        expect(Tools.Now).toBe(1025);
+    });
+
+    it("does not read a clock while importing Tools", async () => {
+        vi.resetModules();
+        const now = vi.fn().mockReturnValue(42.5);
+        vi.stubGlobal("performance", { now });
+
+        const { Tools: importedTools } = await import("../src/misc/tools");
+        expect(now).not.toHaveBeenCalled();
+        expect(importedTools.Now).toBe(42.5);
+        expect(now).toHaveBeenCalledOnce();
     });
 
     it("converts degrees and radians", () => {
