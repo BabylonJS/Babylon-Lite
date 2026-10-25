@@ -200,6 +200,27 @@ describe("PBR core: metallic-roughness and occlusion", () => {
         expect(r.json.textures).toHaveLength(1);
     });
 
+    it("decodes the RGB of an -srgb ORM to linear bytes (what Lite samples) and keeps alpha", async () => {
+        const pixels = [128, 64, 200, 77, 255, 0, 32, 140];
+        const r = await run(createPbrMaterial({ ormTexture: createTexture(2, 1, pixels, { format: "rgba8unorm-srgb" }) }));
+        const png = await decodePng(readBufferView(r, r.json.images[0].bufferView));
+        expect(Array.from(png.rgba)).toEqual(pixels.map((v, i) => (i % 4 === 3 ? v : Math.round(srgbByteToLinear(v) * 255))));
+    });
+
+    it("splits one -srgb texture used as base color and ORM into a color image and a decoded data image", async () => {
+        const shared = createTexture(2, 1, [128, 64, 200, 255, 10, 20, 30, 255], { format: "rgba8unorm-srgb" });
+        const r = await run(createPbrMaterial({ baseColorTexture: shared, ormTexture: shared }));
+        expect(r.json.images).toHaveLength(2);
+        expect(r.mat.pbrMetallicRoughness.baseColorTexture.index).not.toBe(r.mat.pbrMetallicRoughness.metallicRoughnessTexture.index);
+    });
+
+    it("folds a 1x1 -srgb ORM with sRGB-decoded metallic and roughness", async () => {
+        const r = await run(createPbrMaterial({ ormTexture: createTexture(1, 1, [255, 128, 64, 255], { format: "rgba8unorm-srgb" }) }));
+        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBeCloseTo(byteGrid(srgbByteToLinear(64)), 6);
+        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeCloseTo(byteGrid(srgbByteToLinear(128)), 6);
+        expect(r.json.images).toBeUndefined();
+    });
+
     it("folds a 1x1 ORM [255, g, b, 255] into metallic * b/255 and roughness * g/255 (on the byte grid) without an image", async () => {
         const orm = createTexture(1, 1, [255, 128, 64, 255]);
         const r = await run(createPbrMaterial({ ormTexture: orm, metallicFactor: 0.5, roughnessFactor: 0.8 }));

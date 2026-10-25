@@ -17,6 +17,7 @@ import { gammaToLinear, requestPixels, textureReadIssue } from "./export-images.
 import {
     capturePbrSlot,
     isOneByOne,
+    isSrgb,
     materialLabel,
     pbrCoreSlot,
     samplesUv1,
@@ -133,7 +134,7 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
     const baseFactor = [f[0], f[1], f[2], f[3] * alpha];
     if (isOneByOne(m.baseColorTexture)) {
         const tex = m.baseColorTexture!;
-        const decode = tex.texture.format.endsWith("-srgb") ? "srgb" : m._gammaAlbedo ? "gamma" : "linear";
+        const decode = isSrgb(tex) ? "srgb" : m._gammaAlbedo ? "gamma" : "linear";
         recordFold(ctx, pmr, "baseColor", tex, baseFactor, name, decode, { opaque: !alphaMode });
     } else {
         capturePbrSlot(ctx, m, uvState, pmr, {
@@ -164,7 +165,7 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 }
             }
         }
-        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, "linear", { fallbackSlots: ormFallback });
+        recordFold(ctx, pmr, "metallicRoughness", orm, [metallic, roughness], name, isSrgb(orm) ? "srgb" : "linear", { fallbackSlots: ormFallback });
     } else {
         if (orm) {
             capturePbrSlot(ctx, m, uvState, pmr, pbrCoreSlot(m, "metallicRoughnessTexture", orm, UV2_ORM));
@@ -182,7 +183,15 @@ function exportPbrMaterial(ctx: ExportContext, m: PbrMaterialProps, out: GltfMat
                 // A UV1 occlusion texture: sampled from raw input.uv2 with no transform, and not at all
                 // when the mesh has no UV2 buffer.
                 if (uvState === "uv1") {
-                    captureTextureSlot(ctx, obj, "occlusionTexture", m.occlusionTexture, { texCoord: 1, rowOrder: "storage" }, name, strengthExtra(occlusionStrength));
+                    captureTextureSlot(
+                        ctx,
+                        obj,
+                        "occlusionTexture",
+                        m.occlusionTexture,
+                        { texCoord: 1, rowOrder: "storage", srgbData: isSrgb(m.occlusionTexture) },
+                        name,
+                        strengthExtra(occlusionStrength)
+                    );
                 } else if (uvState === "lost") {
                     warnLostUv1(ctx, name);
                 }
@@ -312,7 +321,8 @@ export function resolveFolds(ctx: ExportContext): void {
             slot.cancelled = true;
         }
         const byte = (v: number): number => Math.round(v * 255) / 255;
-        writeMetallicRoughness(ctx, fold.owner, onBakeGrid(metallic! * (t[2]! / 255), byte), onBakeGrid(roughness! * (t[1]! / 255), byte), fold.materialName);
+        const decode = (b: number): number => (fold.decode === "srgb" ? srgbByteToLinear(b) : b / 255);
+        writeMetallicRoughness(ctx, fold.owner, onBakeGrid(metallic! * decode(t[2]!), byte), onBakeGrid(roughness! * decode(t[1]!), byte), fold.materialName);
     }
 }
 
@@ -473,6 +483,8 @@ function standardMapping(
         // Lite's perturbNormal frame is (−T₀, −B₀) where the PBR cotangent frame is (T₀, −B₀): invert
         // red always, and green too when the slot is flipped.
         invert: bump ? (flipped ? "rg" : "r") : undefined,
+        // The Standard shader uses the sampled value as its byte value, so an -srgb source exports decoded.
+        srgbData: isSrgb(tex),
     };
     return mapping;
 }

@@ -16,8 +16,13 @@ const TEXTURE_BINDING = GPUTextureUsage.TEXTURE_BINDING;
 /** 2×2 RGBA test pattern; 1×1 textures would be folded into factors instead of exported as images. */
 const PATTERN = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
+/** Each texture in a slot that exports its bytes unchanged: ORM (data) for linear formats, base color
+ *  (color) for `-srgb` formats. */
 function sceneWithTextures(device: GPUDevice | undefined, ...textures: Texture2D[]): ReturnType<typeof createScene> {
-    const meshes = textures.map((t, i) => createMesh(`m${i}`, { material: createPbrMaterial({ name: `mat${i}`, ormTexture: t, metallicFactor: i / 10 }) }));
+    const meshes = textures.map((t, i) => {
+        const slot = t.texture?.format.endsWith("-srgb") ? { baseColorTexture: t } : { ormTexture: t };
+        return createMesh(`m${i}`, { material: createPbrMaterial({ name: `mat${i}`, ...slot, metallicFactor: i / 10 }) });
+    });
     return createScene({ meshes, ...(device ? { device } : {}) });
 }
 

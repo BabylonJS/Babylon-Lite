@@ -42,7 +42,7 @@ export function resolveTextureSlots(ctx: ExportContext): void {
             continue;
         }
         const pixels = ctx.resolvedPixels.get(slot.gpu)!;
-        const variant = `${slot.mapping.rowOrder}:${slot.mapping.invert ?? ""}:${slot.mapping.colorDecode ?? ""}`;
+        const variant = `${slot.mapping.rowOrder}:${slot.mapping.invert ?? ""}:${slot.mapping.colorDecode ?? ""}:${slot.mapping.srgbData ?? ""}`;
         let byVariant = imagesByTexture.get(slot.gpu);
         let image = byVariant?.get(variant);
         if (image === undefined) {

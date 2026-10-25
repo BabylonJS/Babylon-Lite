@@ -53,6 +53,9 @@ export interface SlotMapping {
     readonly invert?: "r" | "rg";
     /** Convert linear-format color RGB to glTF sRGB; alpha is unchanged. */
     readonly colorDecode?: "linear" | "gamma";
+    /** Decode `-srgb`-format RGB to the linear bytes the GPU samples (data slots, Standard slots);
+     *  alpha is unchanged. Applied before `invert`. */
+    readonly srgbData?: boolean;
 }
 
 /** @internal A texture slot recorded during capture. Resolution writes `owner[key]` unless fold

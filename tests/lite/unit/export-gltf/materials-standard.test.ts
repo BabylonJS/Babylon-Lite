@@ -8,6 +8,7 @@ import { specularPowerToRoughness } from "../../../../packages/babylon-lite/src/
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import { srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
 
 type State = "uv1" | "uv0" | "lost";
 
@@ -100,6 +101,12 @@ describe("Standard to metallic-roughness: factors", () => {
 });
 
 describe("Standard: texture slots and UV sets", () => {
+    it("exports an -srgb diffuse texture's sampled (decoded) RGB, which the Standard shader treats as its bytes", async () => {
+        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM, { format: "rgba8unorm-srgb" }) }));
+        const decoded = (px: number[]) => px.map((v, i) => (i === 3 ? v : Math.round(srgbByteToLinear(v) * 255)));
+        expect(await imageRows(r, 0)).toEqual([decoded(TOP), decoded(BOTTOM)]);
+    });
+
     it("exports the diffuse texture as baseColorTexture on texCoord 0", async () => {
         const r = await run(std({ diffuseTexture: column(TOP, BOTTOM) }));
         expect(r.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });

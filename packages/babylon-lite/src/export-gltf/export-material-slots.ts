@@ -21,6 +21,9 @@ export interface PbrSlotRequest {
     readonly extra?: Readonly<Record<string, number>>;
     /** How a linear-format color texture is decoded before glTF sRGB encoding. */
     readonly colorDecode?: "linear" | "gamma";
+    /** A glTF color slot without `colorDecode` (keeps `-srgb` bytes). Slots with neither are data:
+     *  an `-srgb` source exports the linear bytes the GPU samples. */
+    readonly color?: boolean;
 }
 
 /** @internal The material's name as used in warnings. */
@@ -87,8 +90,15 @@ export function capturePbrSlot(ctx: ExportContext, material: PbrMaterialProps, u
         texCoord = resolved;
     }
     const transform = req.transform ? textureTransformOf(tex) : undefined;
-    const colorDecode = tex.texture.format.endsWith("-srgb") ? undefined : req.colorDecode;
-    return captureTextureSlot(ctx, owner, req.key, tex, { texCoord, transform, rowOrder: "storage", colorDecode }, name, req.extra);
+    const srgb = isSrgb(tex);
+    const colorDecode = srgb ? undefined : req.colorDecode;
+    const srgbData = srgb && !req.colorDecode && !req.color;
+    return captureTextureSlot(ctx, owner, req.key, tex, { texCoord, transform, rowOrder: "storage", colorDecode, srgbData }, name, req.extra);
+}
+
+/** @internal Whether the texture's GPU format is sRGB-encoded (the sampler decodes it to linear). */
+export function isSrgb(tex: Texture2D): boolean {
+    return tex.texture.format.endsWith("-srgb");
 }
 
 /** @internal Set `owner[key] = value` unless `value` equals `omitAt` exactly. */

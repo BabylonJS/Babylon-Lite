@@ -2,7 +2,7 @@
 
 import { BU, SS, TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import { linearToSrgbByte } from "../math/color.js";
+import { linearToSrgbByte, srgbByteToLinear } from "../math/color.js";
 import type { ExportContext, PixelData, SlotMapping } from "./export-context.js";
 import { encodePng } from "./export-png.js";
 
@@ -219,7 +219,7 @@ export function insertImage(ctx: ExportContext, pixels: PixelData, mapping: Slot
 
 function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
     const { width, height, rgba } = pixels;
-    if (mapping.rowOrder === "storage" && !mapping.invert && !mapping.colorDecode) {
+    if (mapping.rowOrder === "storage" && !mapping.invert && !mapping.colorDecode && !mapping.srgbData) {
         return rgba;
     }
     const out = new Uint8Array(rgba.length);
@@ -227,6 +227,9 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
     for (let y = 0; y < height; y++) {
         const srcRow = mapping.rowOrder === "reversed" ? height - 1 - y : y;
         out.set(rgba.subarray(srcRow * rowBytes, srcRow * rowBytes + rowBytes), y * rowBytes);
+    }
+    if (mapping.srgbData) {
+        applyRgbLut(out, (v) => Math.round(srgbByteToLinear(v) * 255));
     }
     if (mapping.invert) {
         const invertG = mapping.invert === "rg";
@@ -237,19 +240,24 @@ function applyChannelOps(pixels: PixelData, mapping: SlotMapping): Uint8Array {
             }
         }
     }
-    if (mapping.colorDecode) {
-        const toSrgb = new Uint8Array(256);
-        for (let value = 0; value < toSrgb.length; value++) {
-            const normalized = value / 255;
-            toSrgb[value] = linearToSrgbByte(mapping.colorDecode === "gamma" ? gammaToLinear(normalized) : normalized);
-        }
-        for (let i = 0; i < out.length; i += 4) {
-            for (let c = 0; c < 3; c++) {
-                out[i + c] = toSrgb[out[i + c]!]!;
-            }
-        }
+    const colorDecode = mapping.colorDecode;
+    if (colorDecode) {
+        applyRgbLut(out, (v) => linearToSrgbByte(colorDecode === "gamma" ? gammaToLinear(v / 255) : v / 255));
     }
     return out;
+}
+
+/** Map every RGB byte through a 256-entry table built from `byte`; alpha is unchanged. */
+function applyRgbLut(rgba: Uint8Array, byte: (v: number) => number): void {
+    const lut = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) {
+        lut[v] = byte(v);
+    }
+    for (let i = 0; i < rgba.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+            rgba[i + c] = lut[rgba[i + c]!]!;
+        }
+    }
 }
 
 /** @internal `c^2.2`: the Babylon.js default gamma-to-linear decode (`_gammaAlbedo` texels, Standard colors). */
