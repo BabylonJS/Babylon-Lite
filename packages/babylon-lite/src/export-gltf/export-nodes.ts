@@ -210,7 +210,8 @@ export function exportNodeTrees(ctx: ExportContext, sweep: NodeSweep): void {
             );
             const anchor: GltfNode = {};
             ctx.doc.sceneNodes.push(ctx.doc.nodes.push(anchor) - 1);
-            writeTransform(ctx, anchor, root.node, root.convert, false, root.node.parent!.worldMatrix);
+            const parent = root.node.parent as { readonly worldMatrix: Mat4; readonly name?: string };
+            writeTransform(ctx, anchor, root.node, root.convert, false, parent.worldMatrix, parent.name ?? "");
             anchor.children = [exportNode(ctx, sweep, root.node, root.convert, false)!];
             continue;
         }
@@ -314,8 +315,9 @@ function isIdentityTrs(node: SceneNode): boolean {
 }
 
 /** Write a node's local transform. `matrix` is the node's `_localMatrix`, or its world matrix for a
- *  root whose parent does not export; otherwise the observable TRS is used. */
-function writeTransform(ctx: ExportContext, out: GltfNode, node: SceneNode, convert: boolean, animated: boolean, matrix: Mat4 | undefined): void {
+ *  root whose parent does not export; otherwise the observable TRS is used. `label` names the matrix's
+ *  owner in the shear warning (the foreign parent for an anchor). */
+function writeTransform(ctx: ExportContext, out: GltfNode, node: SceneNode, convert: boolean, animated: boolean, matrix: Mat4 | undefined, label = node.name): void {
     if (matrix) {
         const d = decomposeMat4(matrix);
         const recomposed = composeMat4(d.translation.x, d.translation.y, d.translation.z, d.rotation.x, d.rotation.y, d.rotation.z, d.rotation.w, d.scale.x, d.scale.y, d.scale.z);
@@ -328,7 +330,7 @@ function writeTransform(ctx: ExportContext, out: GltfNode, node: SceneNode, conv
             return;
         }
         if (!decomposable) {
-            ctx.warn(`Node "${node.name}" has a sheared local transform, which glTF cannot represent; exporting the nearest TRS.`);
+            ctx.warn(`Node "${label}" has a sheared local transform, which glTF cannot represent; exporting the nearest TRS.`);
         }
         writeTrs(out, convert, d.translation, d.rotation, d.scale);
         return;

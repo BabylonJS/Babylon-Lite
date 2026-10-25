@@ -231,6 +231,25 @@ describe("camera", () => {
             expect(glb.json.nodes[1].camera).toBe(0);
         });
 
+        it("does not collapse onto a parent whose glTF frame is mirrored (a loader root kept under an app node)", async () => {
+            const app = createTransformNode("app");
+            const root = attach(loaderRoot(), app);
+            const holder = attach(createTransformNode("holder", 0, 1, 0), root);
+            const mesh = attach(createMesh("m"), holder);
+            const fixup = attach(createTransformNode("cam_fixup", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1), holder);
+            const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });
+            setParent(camera, fixup);
+            const glb = await exportAndParse(createScene({ meshes: [mesh], camera }));
+            expect(glb.warnings).toContain('Camera parent "holder" has a mirrored glTF frame; exporting the camera as a scene root.');
+            const cameraNode = glb.json.nodes.findIndex((n: { camera?: number }) => n.camera === 0);
+            expect(glb.json.nodes[cameraNode].name).not.toBe("holder");
+            expect(glb.json.scenes[0].nodes).toContain(cameraNode);
+            // A scene-root camera node is a pure TRS without scale, so its global basis is proper (det +1).
+            expect(glb.json.nodes[cameraNode].scale).toBeUndefined();
+            const w = camera.worldMatrix as unknown as number[];
+            expectClose(glb.json.nodes[cameraNode].translation, [-w[12]!, w[13]!, w[14]!]);
+        });
+
         it("exports a camera under a fixup with no exported parent as its own scene root", async () => {
             const fixup = createTransformNode("cam_fixup", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
             const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 });

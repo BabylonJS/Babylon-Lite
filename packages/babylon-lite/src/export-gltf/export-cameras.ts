@@ -47,6 +47,12 @@ export function exportCamera(ctx: ExportContext, scene: SceneContext, fixup: Sce
     // parent — in both cases only when that node exported through another seed.
     const candidate = fixup ? (fixup.parent as object | null) : (camera.parent ?? null);
     let parent: object | null = candidate && ctx.nodeIndex.has(candidate) ? candidate : null;
+    // The parent's glTF global basis has the sign of its Lite world determinant in a converting pass and
+    // the opposite sign under a stripped loader root. A camera under a mirrored glTF frame has no defined view.
+    if (parent && (ctx.nodeConvert.get(parent) === true ? 1 : -1) * mat4Determinant3((parent as SceneNode).worldMatrix) < 0) {
+        ctx.warn(`Camera parent "${(parent as SceneNode).name}" has a mirrored glTF frame; exporting the camera as a scene root.`);
+        parent = null;
+    }
 
     if (fixup && parent) {
         if (isPristineFixup(fixup, camera)) {

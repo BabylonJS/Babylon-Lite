@@ -235,6 +235,17 @@ describe("root collection", () => {
         expectClose(multiplyMat4(new Float32Array(glb.json.nodes[0].matrix) as unknown as Mat4, gltfLocalMatrix(glb.json.nodes[1])), convertMatrix(target.worldMatrix));
     });
 
+    it("names the foreign parent in the shear warning for a sheared anchor", async () => {
+        const sheared = composeMat4(0, 0, 0, 0, 0, 0, 1, 1, 1, 1) as unknown as number[];
+        sheared[4] = 0.5;
+        const parent = { name: "rig", worldMatrix: sheared as unknown as Mat4, worldMatrixVersion: 1 };
+        const target = createTransformNode("arm");
+        (target as { parent: unknown }).parent = parent;
+        const glb = await exportAndParse(createScene({ animationGroups: [translationGroup("g", target)] }));
+        expect(glb.warnings).toContain('Node "rig" has a sheared local transform, which glTF cannot represent; exporting the nearest TRS.');
+        expect(glb.warnings.join("\n")).not.toContain('Node "arm" has a sheared');
+    });
+
     it("keeps a non-animated child of an animated foreign-parented node local under the anchored target", async () => {
         const camera = createFreeCamera({ x: 1, y: 2, z: 3 }, { x: 2, y: 2, z: 3 });
         const target = createTransformNode("spinner", 0, 1, 0);
