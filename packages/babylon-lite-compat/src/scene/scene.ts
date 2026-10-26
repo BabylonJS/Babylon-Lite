@@ -173,6 +173,9 @@ export class Scene extends AbstractScene {
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
     public cameraToUseForPointers: Camera | null = null;
+    /** Babylon.js `scene.pointerX` / `pointerY`: the last pointer position in CSS pixels relative to the canvas. */
+    public pointerX = 0;
+    public pointerY = 0;
     private _defaultMaterial: StandardMaterial | null = null;
     private _fogMode = 0;
     private _fogStart = 0;
@@ -269,7 +272,18 @@ export class Scene extends AbstractScene {
                 default:
                     return;
             }
-            this.onPointerObservable.notifyObservers(new PointerInfo(type, event as PointerEvent | WheelEvent, null), type);
+            const pointerEvent = event as PointerEvent | WheelEvent;
+            const rect = this._engine.getRenderingCanvasClientRect();
+            if (rect && typeof pointerEvent.clientX === "number") {
+                this.pointerX = pointerEvent.clientX - rect.x;
+                this.pointerY = pointerEvent.clientY - rect.y;
+            }
+            // As in Babylon.js, the pick at this event's position runs only if an observer reads `pickInfo`, through the
+            // pointer camera when one is set (`scene.pick` alone prefers the active camera).
+            const x = this.pointerX;
+            const y = this.pointerY;
+            const camera = this.cameraToUseForPointers;
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, pointerEvent, null, () => this.pick(x, y, undefined, false, camera)), type);
         };
 
         for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
