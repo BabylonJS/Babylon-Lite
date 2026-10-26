@@ -66,6 +66,82 @@ describe("Observable", () => {
         expect(cb).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        ["normal", "normal"],
+        ["normal", "safe"],
+        ["safe", "normal"],
+        ["safe", "safe"],
+    ] as const)("delivers addOnce once across %s outer and %s nested notifications", (outer, inner) => {
+        const obs = new Observable<number>();
+        const notify = (kind: "normal" | "safe", value: number): void => {
+            if (kind === "safe") {
+                obs._notifyObserversSafely(value);
+            } else {
+                obs.notifyObservers(value);
+            }
+        };
+        obs.add((value) => {
+            if (value === 1) {
+                notify(inner, 2);
+            }
+        });
+        const cb = vi.fn();
+        obs.addOnce(cb);
+
+        notify(outer, 1);
+        notify(outer, 3);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+    });
+
+    it("consumes a throwing one-shot callback before a nested safe notification returns", () => {
+        const obs = new Observable<number>();
+        const failure = new Error("one-shot failed");
+        let nestedResult: { hasError: boolean; error: unknown } | undefined;
+        obs.add((value) => {
+            if (value === 1) {
+                nestedResult = obs._notifyObserversSafely(2);
+            }
+        });
+        const cb = vi.fn(() => {
+            throw failure;
+        });
+        obs.addOnce(cb);
+
+        const outerResult = obs._notifyObserversSafely(1);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(nestedResult).toEqual({ hasError: true, error: failure });
+        expect(outerResult).toEqual({ hasError: false, error: undefined });
+    });
+
+    it("does not replay a one-shot already delivered by the observer-added hook", () => {
+        const obs = new Observable<number>(() => obs.notifyObservers(2), true);
+        const cb = vi.fn();
+        obs.notifyObservers(1);
+
+        obs.addOnce(cb);
+        obs.notifyObservers(3);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(obs.hasObservers()).toBe(false);
+    });
+
+    it("preserves one-shot subscriptions until a matching mask is notified", () => {
+        const obs = new Observable<number>();
+        const cb = vi.fn();
+        const observer = obs.addOnce(cb, 2);
+        obs.notifyObservers(1, 1);
+        expect(cb).not.toHaveBeenCalled();
+
+        obs.notifyObservers(2, 2);
+        obs.notifyObservers(3, 2);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(obs.remove(observer)).toBe(false);
+        expect(obs.hasObservers()).toBe(false);
+    });
+
     it("allows mutation during notification", () => {
         const obs = new Observable<void>();
         const cb = vi.fn();
