@@ -88,7 +88,23 @@ export function _pbrLazyWgslNeeds(features: number, meshFeatures: number): numbe
 }
 
 export type PbrLightMode = 0 | 1 | 2;
-type PbrComposeFn = (
+
+/** @internal The key a composer caches a variant under: also how `_pbrRebuildsComposed` asks whether one was composed. */
+export function _pbrComposeKey(
+    features: number,
+    features2: number,
+    meshFeatures: number,
+    sceneFeatures: number,
+    lightMode: PbrLightMode,
+    singleLightType: string,
+    vbKey: string,
+    uv2Mask: number,
+    pluginIndex: number
+): string {
+    return `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}`;
+}
+
+type PbrComposeFn = ((
     _features: number,
     _features2?: number,
     _meshFeatures?: number,
@@ -100,7 +116,10 @@ type PbrComposeFn = (
     _vbKey?: string,
     _uv2Mask?: number,
     _pi?: number
-) => ComposedShader;
+) => ComposedShader) & {
+    /** @internal The variants composed so far, by `_pbrComposeKey`. */
+    readonly _c: ReadonlyMap<string, ComposedShader>;
+};
 
 /** Local-IBL resolver installed only by `enablePbrLocalCubemap`, keeping extension
  * detection behind the opt-in feature seam instead of scanning every PBR extension. */
@@ -131,7 +150,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _createThinInstanceFragment,
     } = deps;
 
-    return function composePbr(
+    function composePbr(
         features: number,
         features2: number = 0,
         meshFeatures = 0,
@@ -144,7 +163,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         uv2Mask = 0,
         pluginIndex = 0
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}`;
+        const ckey = _pbrComposeKey(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, vbKey, uv2Mask, pluginIndex);
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -264,5 +283,6 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const composed = frags.reduce((shader, fragment) => fragment._pc?.(shader) ?? shader, composeShader(template, frags, vbStrides));
         cache.set(ckey, composed);
         return composed;
-    };
+    }
+    return Object.assign(composePbr, { _c: cache });
 }
