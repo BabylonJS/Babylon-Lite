@@ -36,7 +36,7 @@ export { PickingInfo } from "./culling/picking-info.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
-export type { WebGPUEngineOptions } from "./engine/engine.js";
+export type { AbstractEngineOptions, EngineOptions, WebGPUEngineOptions } from "./engine/engine.js";
 
 // ─── Compute and buffers ─────────────────────────────────────────────
 export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
@@ -402,6 +402,8 @@ export {
     FlowGraphValidationSeverity,
     ValidateFlowGraph,
     ValidateFlowGraphWithBlockList,
+    RemoveFlowGraphAnimationGroupObservers,
+    defaultValueParseFunction,
 } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
@@ -418,6 +420,10 @@ export type {
     IGaussianSplattingDebugOptions,
     IFlowGraphValidationIssue,
     IFlowGraphValidationResult,
+    IFlowGraphAnimationObserverSet,
+    FlowGraphContext,
+    FlowGraphPlayAnimationBlock,
+    Observer,
     IRootMotionClipOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
@@ -430,6 +436,9 @@ export type {
     GaussianSplattingStreamDebugLodSource,
     GaussianSplattingStreamLod0SplatCount,
     IGaussianSplattingStreamOptions,
+    IGaussianSplattingStreamRangePack,
+    IGaussianSplattingStreamRangeResidencyStats,
+    IGaussianSplattingStreamSourceRange,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
 } from "./meshes/gaussian-splatting-stream.js";

@@ -310,7 +310,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionLHToRef(forward, up, result)`. */
     public static LookDirectionLHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 
@@ -321,7 +321,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionRHToRef(forward, up, result)`. */
     public static LookDirectionRHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 

@@ -273,17 +273,17 @@ describe("Matrix", () => {
         const lh = Matrix.LookDirectionLH(forward, up);
         const rh = Matrix.LookDirectionRH(forward, up);
 
-        expect(Vector3.TransformNormal(Vector3.Forward(), lh).asArray()).toEqual([1, 0, 0]);
-        expect(Vector3.TransformNormal(new Vector3(0, 0, -1), rh).asArray()).toEqual([1, 0, 0]);
+        expect(Vector3.TransformNormal(new Vector3(0, 0, -1), lh).asArray()).toEqual([1, 0, 0]);
+        expect(Vector3.TransformNormal(Vector3.Forward(), rh).asArray()).toEqual([1, 0, 0]);
 
         const result = Matrix.Translation(7, 8, 9);
-        expect(Matrix.LookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
+        expect(Matrix.LookDirectionLHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
         expect(result.toArray()).toEqual(
             Matrix.Identity()
                 .toArray()
                 .map((value) => expect.closeTo(value))
         );
-        expect(Matrix.LookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
+        expect(Matrix.LookDirectionRHToRef(Vector3.Forward(), up, result)).toBe(result);
         expect(result.toArray()).toEqual(
             Matrix.Identity()
                 .toArray()
@@ -419,8 +419,8 @@ describe("Quaternion", () => {
         const lh = Quaternion.FromLookDirectionLH(forward, up);
         const rh = Quaternion.FromLookDirectionRH(forward, up);
 
-        const lhForward = Vector3.TransformNormal(Vector3.Forward(), Matrix.Compose(new Vector3(1, 1, 1), lh, Vector3.Zero()));
-        const rhForward = Vector3.TransformNormal(new Vector3(0, 0, -1), Matrix.Compose(new Vector3(1, 1, 1), rh, Vector3.Zero()));
+        const lhForward = Vector3.TransformNormal(new Vector3(0, 0, -1), Matrix.Compose(new Vector3(1, 1, 1), lh, Vector3.Zero()));
+        const rhForward = Vector3.TransformNormal(Vector3.Forward(), Matrix.Compose(new Vector3(1, 1, 1), rh, Vector3.Zero()));
         for (const transformed of [lhForward, rhForward]) {
             expect(transformed.x).toBeCloseTo(1);
             expect(transformed.y).toBeCloseTo(0);
@@ -428,9 +428,9 @@ describe("Quaternion", () => {
         }
 
         const result = new Quaternion(7, 8, 9, 10);
-        expect(Quaternion.FromLookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
+        expect(Quaternion.FromLookDirectionLHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
         expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
-        expect(Quaternion.FromLookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
+        expect(Quaternion.FromLookDirectionRHToRef(Vector3.Forward(), up, result)).toBe(result);
         expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
     });
 });

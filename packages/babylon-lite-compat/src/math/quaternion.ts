@@ -173,7 +173,7 @@ export class Quaternion {
     /** Babylon.js `Quaternion.FromLookDirectionLHToRef(forward, up, result)`. */
     public static FromLookDirectionLHToRef<T extends Quaternion>(forward: Vector3, up: Vector3, result: T): T {
         const matrix = (lookDirectionRotationScratch ??= new Float32Array(16));
-        writeMat4FromLookDirectionLHIntoBuffer(matrix, forward, up);
+        writeMat4FromLookDirectionRHIntoBuffer(matrix, forward, up);
         return Quaternion._FromRotationStorageToRef(matrix, result);
     }
 
@@ -185,7 +185,7 @@ export class Quaternion {
     /** Babylon.js `Quaternion.FromLookDirectionRHToRef(forward, up, result)`. */
     public static FromLookDirectionRHToRef<T extends Quaternion>(forward: Vector3, up: Vector3, result: T): T {
         const matrix = (lookDirectionRotationScratch ??= new Float32Array(16));
-        writeMat4FromLookDirectionRHIntoBuffer(matrix, forward, up);
+        writeMat4FromLookDirectionLHIntoBuffer(matrix, forward, up);
         return Quaternion._FromRotationStorageToRef(matrix, result);
     }
 
