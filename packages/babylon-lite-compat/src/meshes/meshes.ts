@@ -283,7 +283,19 @@ export class TransformNode extends Node {
         // Babylon.js `node.parent = x` keeps the child's LOCAL transform and lets
         // its world position move under the new parent (unlike `setParent`, which
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
-        this._node.parent = liteNodeOf(parent);
+        const node = this._node;
+        const liteParent = liteNodeOf(parent);
+        // Leave the previous Lite parent's `children`, as Lite's `setParent` does: removing that parent walks the
+        // list and would otherwise take this node out of the scene with it.
+        const previous = node.parent as SceneNode | null;
+        if (previous && previous !== liteParent) {
+            const siblings = previous.children;
+            const index = siblings ? siblings.indexOf(node) : -1;
+            if (index !== -1) {
+                siblings.splice(index, 1);
+            }
+        }
+        node.parent = liteParent;
     }
 
     /** @internal Remove this wrapper's node without letting Lite recurse for `dispose(true)`. */
