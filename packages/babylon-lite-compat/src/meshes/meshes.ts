@@ -641,7 +641,7 @@ export class AbstractMesh extends TransformNode {
         if (normals) {
             // Transform normals by the inverse-transpose upper 3×3 so they stay
             // correct under non-uniform scale/shear, then renormalize.
-            const nm = matrix.invert().transpose().m;
+            const nm = matrix.invertToRef(new Matrix()).transpose().m;
             newNormals = new Float32Array(normals.length);
             for (let i = 0; i < normals.length; i += 3) {
                 const x = normals[i]!,
