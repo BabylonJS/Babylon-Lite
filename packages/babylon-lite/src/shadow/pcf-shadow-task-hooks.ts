@@ -12,6 +12,8 @@ import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateS
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
+import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
 export interface PcfLightMatrix {
     /** @internal */
@@ -45,6 +47,8 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _casterMaterials: (Material | null)[];
     /** @internal Generation of each terminal caster material when the task was built. */
     _casterMatGens: number[];
+    /** @internal Casters the build left out of the task because their view could not be built yet (`holdShadowCaster`). */
+    _held?: Set<Mesh>;
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
 }
@@ -117,16 +121,18 @@ export function ensurePcfShadowTaskState(
 ): PcfTaskState {
     const existing = existingState as PcfTaskState | null;
     if (existing) {
-        let casterMaterialChanged = false;
-        for (let i = 0; i < casterMeshes.length; i++) {
-            const material = casterMeshes[i]!.material;
+        let changed = existing._casterMeshes !== casterMeshes;
+        for (let i = 0; !changed && i < casterMeshes.length; i++) {
+            const mesh = casterMeshes[i]!;
+            const material = mesh.material;
             const terminal = material ? resolveShadowCasterMaterial(material) : null;
             if (existing._casterMaterials[i] !== terminal || existing._casterMatGens[i] !== (terminal?._csmGen ?? 0)) {
-                casterMaterialChanged = true;
-                break;
+                // A caster the last build held stays out of the task while its view still cannot be built, so an
+                // unresolved hold costs a check per frame and no task.
+                changed = !(material && existing._held?.has(mesh) && holdShadowCaster(scene, sg, material));
             }
         }
-        if (existing._casterMeshes === casterMeshes && !casterMaterialChanged) {
+        if (!changed) {
             return existing;
         }
         // The old task's GPU buffers may still be referenced by the frame command buffer that is being
@@ -168,6 +174,14 @@ export function ensurePcfShadowTaskState(
 
     for (const mesh of casterMeshes) {
         const material = mesh.material;
+        // The first build holds too: a caster can switch to another family while the registration preload imports.
+        // A held caster is snapshotted as having no material, so it reads as changed and joins once its hold lifts.
+        if (material && holdShadowCaster(scene, sg, material)) {
+            (state._held ??= new Set()).add(mesh);
+            casterMaterials.push(null);
+            casterMatGens.push(0);
+            continue;
+        }
         const terminal = material ? resolveShadowCasterMaterial(material) : null;
         casterMaterials.push(terminal);
         casterMatGens.push(terminal?._csmGen ?? 0);
@@ -177,6 +191,29 @@ export function ensurePcfShadowTaskState(
     }
 
     return state;
+}
+
+/** @internal Whether the no-colour view of a caster material cannot be built yet, so the caster has to stay out of the
+ *  shadow task for now. When the view factory of the family the caster casts through is not imported, building the view
+ *  would call an undefined factory: this re-supplies the generator's registered caster set through
+ *  `setShadowTaskCasterMeshes`, which parks the generator while the factory imports, as any re-supplied set does. A caster
+ *  casting through its own material also waits while that material's group is not built in this scene, or recording the
+ *  view would throw inside the frame: the mesh's swap drain or runtime build builds it. A build that fails reports its own
+ *  error, and the hold lasts until the caster's material is reassigned or the caster leaves the set. A
+ *  `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's lifecycle builds it:
+ *  recording it throws as before, naming the problem. Shared by the PCF and CSM hooks. */
+export function holdShadowCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
+    const terminal = resolveShadowCasterMaterial(material);
+    if (!hasNoColorViewFactory(terminal)) {
+        // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
+        // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
+        const registered = _getShadowTaskCasterMeshes(sg);
+        if (registered && !sg._preloadPending) {
+            setShadowTaskCasterMeshes(sg, registered);
+        }
+        return true;
+    }
+    return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
 }
 
 /** @internal Resolve the terminal material used by the shadow caster view. */
@@ -202,9 +239,9 @@ export function shadowCasterMaterialChanged(material: Material, terminals: Map<M
     return terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen;
 }
 
-/** @internal Whether `getNoColorView` can build the view of a terminal caster material now: the no-colour view factory of
- *  its family has been imported. A family without a factory builds no view, so it needs none. */
-export function hasNoColorViewFactory(terminal: Material): boolean {
+/** Whether `getNoColorView` can build the view of a terminal caster material now: the no-colour view factory of its family
+ *  has been imported. A family without a factory builds no view, so it needs none. */
+function hasNoColorViewFactory(terminal: Material): boolean {
     const family = terminal._buildGroup._materialFamily;
     return !!(family === "standard"
         ? createStandardNoColorMaterialView

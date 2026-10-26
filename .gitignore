@@ -41,6 +41,7 @@ lab/public/bundle-baseline/
 lab/bundle-baseline-scene*.html
 lab/lite/bundle-baseline-scene*.html
 lab/public/vendor/
+lab/public/models/FlightHelmetKTX/
 lab/public/doom/*.wad
 lab/public/doom/COPYING.txt
 lab/public/doom/CREDITS.txt

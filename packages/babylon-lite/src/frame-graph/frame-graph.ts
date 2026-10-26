@@ -95,6 +95,16 @@ export function createFrameGraph(_engine: EngineContext): FrameGraph {
     return fg;
 }
 
+/**
+ * Returns the tasks registered on a frame graph, in execution order.
+ * The returned array is the graph's live task list (not a snapshot): it reflects later
+ * task additions/removals and is emptied by dispose. Do not mutate it; copy it if a stable
+ * snapshot is needed. Composite tasks appear once; their internal sub-passes are not listed.
+ */
+export function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[] {
+    return frameGraph._tasks;
+}
+
 /** Record and initialize one task already present in a live graph without rebuilding existing tasks. */
 export function buildFrameGraphTask(fg: FrameGraph, task: Task): void {
     if (!fg._tasks.includes(task)) {

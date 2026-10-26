@@ -27,6 +27,7 @@ import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types.js";
 import { rebuildSceneRenderables } from "../../../packages/babylon-lite/src/scene/scene-rebuild.js";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
+import { copyLightBase } from "../../../packages/babylon-lite/src/light/light-clone.js";
 
 const originalCapacity = MAX_LIGHTS;
 
@@ -123,7 +124,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
         const b = createRectAreaLight([0, 0, 1], 2, 2);
         a.emissionTexture = one;
         b.emissionTexture = two;
-        const clone = a._cloneNode!();
+        const clone = a._cloneNode!(copyLightBase);
         clone.emissionTexture = cloneTexture2D(one, { uScale: 2 });
         b.includedOnlyMeshIds = new Set(["other"]);
         scene.lights.push(createPointLight([0, 0, 1]), solid, a, b, clone);
@@ -160,7 +161,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
         const one = f.image();
         const two = f.image();
         const a = createRectAreaLight([0, 0, 1], 1, 1);
-        const b = a._cloneNode!();
+        const b = a._cloneNode!(copyLightBase);
         a.emissionTexture = one;
         b.emissionTexture = two;
         f.scene.lights.push(a, b);
@@ -202,7 +203,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
         const f = fixture();
         const beyond = createRectAreaLight([0, 0, 1], 1, 1);
         beyond.emissionTexture = f.image();
-        const writerless = beyond._cloneNode!();
+        const writerless = beyond._cloneNode!(copyLightBase);
         Object.defineProperty(writerless, "_writeLightUbo", { value: undefined });
         f.scene.lights.push(writerless, ...Array.from({ length: MAX_LIGHTS }, () => createPointLight([0, 0, 0])), beyond);
         f.device.createTexture.mockClear();
@@ -293,7 +294,7 @@ describe("scene-local compact emission image mapping and ownership", () => {
         light.emissionTexture = texture;
         light.emissionTexture = texture;
         expect(light._lightVersion).toBe(version + 1);
-        const clone = light._cloneNode!();
+        const clone = light._cloneNode!(copyLightBase);
         expect(clone.emissionTexture).toBe(texture);
         expect(_textureOwners(texture)).toBe(1);
         light.emissionTexture = null;
@@ -477,11 +478,11 @@ describe("textured area bindings through real material builders", () => {
         const one = f.image();
         const two = f.image();
         const a = createRectAreaLight([0, 0, 1], 2, 2);
-        const b = a._cloneNode!();
+        const b = a._cloneNode!(copyLightBase);
         a.emissionTexture = one;
         b.emissionTexture = two;
         a.excludedMeshIds = new Set(["single"]);
-        const solid = a._cloneNode!();
+        const solid = a._cloneNode!(copyLightBase);
         solid.emissionTexture = null;
         solid.excludedMeshIds = new Set(["single"]);
         f.scene.lights.push(createPointLight([0, 0, 1]), solid, a, b);

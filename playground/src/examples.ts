@@ -19,6 +19,7 @@ import SPINNING_POLYHEDRA from "../examples/spinning-polyhedra.ts?raw";
 import GRID_STUDIO from "../examples/grid-studio.ts?raw";
 import RAY_PICKING from "../examples/ray-picking.ts?raw";
 import TEXTURED_AREA_LIGHT from "../examples/textured-area-light.ts?raw";
+import DEVICE_INPUT from "../examples/device-input.ts?raw";
 
 const BOOMBOX = `import {
     addToScene,
@@ -169,6 +170,7 @@ export const EXAMPLES: Example[] = [
     { id: "primitives", label: "Primitives — box + ground", code: PRIMITIVES },
     { id: "textured-area-light", label: "Lights — Textured area light", code: TEXTURED_AREA_LIGHT },
     { id: "ray-picking", label: "Interaction — Ray picking", code: RAY_PICKING },
+    { id: "device-input", label: "Input — Keyboard, pointer and gamepad", code: DEVICE_INPUT },
     { id: "spinning-polyhedra", label: "Animation — Spinning Polyhedra", code: SPINNING_POLYHEDRA },
     { id: "pbr-material-grid", label: "PBR — Metalness × Roughness grid", code: PBR_MATERIAL_GRID },
     { id: "grid-studio", label: "Grid material — Studio staging", code: GRID_STUDIO },

@@ -4,11 +4,13 @@
  *
  *  This helper is the sole place that bumps the module-scoped visibility
  *  epoch (see `visibility-epoch.ts`). The bump invalidates the cached opaque
- *  render bundle so a hidden mesh actually stops drawing — a bare
- *  `node.visible = …` field write does NOT, by design, so the hot SceneNode
- *  write path stays a plain field assignment and bundle invalidation is O(1). */
+ *  render bundle so a hidden mesh actually stops drawing. `SceneNode.visible`
+ *  is read-only in the public API so callers cannot bypass the bump; engine
+ *  code writes it through `_WritableVisibility` only while building a node,
+ *  before it can be in a recorded bundle. The field itself stays a plain
+ *  property so the render hot path reads one boolean per mesh. */
 
-import type { SceneNode } from "./scene-node.js";
+import type { SceneNode, _WritableVisibility } from "./scene-node.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 
 /** Set `visible` on `node` and all descendants (via `node.children`). glTF
@@ -30,7 +32,7 @@ export function setSubtreeVisible(node: SceneNode, v: boolean): void {
 
 function cascade(node: SceneNode, v: boolean): boolean {
     let changed = node.visible !== v;
-    node.visible = v;
+    (node as _WritableVisibility).visible = v;
     const kids = node.children;
     for (let i = 0; i < kids.length; i++) {
         if (cascade(kids[i]!, v)) {

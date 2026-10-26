@@ -106,6 +106,9 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
             return;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        if (result._w !== undefined) {
+            meshes._w = result._w;
+        }
         meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {
@@ -130,7 +133,10 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 export async function rebuildRenderables(rebuilds: readonly NonNullable<Renderable["_rebuild"]>[]): Promise<Renderable[]> {
     const rebuilt: Renderable[] = [];
     for (const rebuild of rebuilds) {
-        rebuilt.push(await rebuild());
+        const renderable = await rebuild();
+        if (renderable) {
+            rebuilt.push(renderable);
+        }
     }
     return rebuilt;
 }

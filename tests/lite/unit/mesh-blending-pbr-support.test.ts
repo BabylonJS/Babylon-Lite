@@ -47,7 +47,8 @@ describe("mesh-blending PBR opt-in support", () => {
         const previousAttachments = _setActivePbrGeometryAttachments([GeometryTextureType.MESH_BLEND_TAG]);
         const fragment = extension.frag!(context)!;
         _setActivePbrGeometryAttachments(previousAttachments);
-        const composed = composeShader(createPbrTemplate({ _normalMode: "tangent" }), [fragment]);
+        const tangentNormal = await import("../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-tangent-wgsl");
+        const composed = composeShader(createPbrTemplate({ _tangentNormal: tangentNormal }), [fragment]);
 
         expect(fragment._pc).toBeUndefined();
         expect(composed._vertexWGSL).toContain("meshBlendNormalWorld=transposeMat3(inverseMat3(meshBlendNormalWorld));");

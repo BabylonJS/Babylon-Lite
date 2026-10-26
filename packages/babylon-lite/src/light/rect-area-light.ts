@@ -1,5 +1,5 @@
-import type { LightBase } from "./types.js";
-import { applyLightBase, copyLightBase, createLightBase } from "./light-base.js";
+import type { LightBase, LightBaseCopier } from "./types.js";
+import { applyLightBase, createLightBase } from "./light-base.js";
 import type { SceneLightingExtension } from "./lighting-extension.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
@@ -17,7 +17,7 @@ export interface RectAreaLight extends LightBase {
     /** Preprocessed emitter image, or null for solid emission. Changes require a scene lighting rebuild. */
     emissionTexture: Texture2D | null;
     /** @internal Specialized clone constructor consumed by cloneTransformNode. */
-    _cloneNode?: () => RectAreaLight;
+    _cloneNode?: (copyBase: LightBaseCopier) => RectAreaLight;
 }
 
 function validateSize(value: number, name: string): void {
@@ -50,12 +50,12 @@ export function createRectAreaLight(position: [number, number, number], width: n
                     throw new Error("RectAreaLight: await enableRectAreaLights(scene) before registering this scene");
                 }
             },
-            _cloneNode: () => {
+            _cloneNode: (copyBase: LightBaseCopier) => {
                 const clone = createRectAreaLight([light.position.x, light.position.y, light.position.z], light.width, light.height, light.intensity);
                 clone.diffuse = [...light.diffuse];
                 clone.specular = [...light.specular];
                 clone.emissionTexture = light.emissionTexture;
-                copyLightBase(light, clone);
+                copyBase(light, clone);
                 return clone;
             },
             _writeLightUbo: (data: Float32Array, o: number) => {

@@ -1,25 +1,26 @@
 # Testing
 
 Babylon Lite uses four categories of automated tests, all orchestrated by
-Playwright and/or Vitest. An Azure Pipelines CI pipeline runs five parallel
+Playwright and/or Vitest. An Azure Pipelines CI pipeline runs parallel
 jobs on every PR targeting `master`.
 
 ---
 
 ## Quick Reference
 
-| Command                  | What it runs                                             |
-| ------------------------ | -------------------------------------------------------- |
-| `pnpm test`              | Build bundles → parity tests (local)                     |
-| `pnpm test:parity`       | Parity pixel-diff tests (local Chrome)                   |
-| `pnpm test:parity-cloud` | Parity tests on BrowserStack (macOS Chrome, real WebGPU) |
-| `pnpm test:perf`         | Performance regression tests (local)                     |
-| `pnpm test:perf-cloud`   | Performance regression on BrowserStack                   |
-| `pnpm test:bundle-size`  | Bundle size ceiling checks                               |
-| `pnpm test:bundle-delta` | Bundle size delta vs committed baseline                  |
-| `pnpm test:all`          | Parity + perf tests (local)                              |
-| `pnpm test:watch`        | Vitest in watch mode (unit tests)                        |
-| `pnpm lint`              | ESLint + TypeScript type-check                           |
+| Command                       | What it runs                                             |
+| ----------------------------- | -------------------------------------------------------- |
+| `pnpm test`                   | Build bundles → parity tests (local)                     |
+| `pnpm test:parity`            | Parity pixel-diff tests (local Chrome)                   |
+| `pnpm test:parity-cloud`      | Parity tests on BrowserStack (macOS Chrome, real WebGPU) |
+| `pnpm test:integration-cloud` | Nonvisual point-splatting WebGPU readback tests          |
+| `pnpm test:perf`              | Performance regression tests (local)                     |
+| `pnpm test:perf-cloud`        | Performance regression on BrowserStack                   |
+| `pnpm test:bundle-size`       | Bundle size ceiling checks                               |
+| `pnpm test:bundle-delta`      | Bundle size delta vs committed baseline                  |
+| `pnpm test:all`               | Parity + perf tests (local)                              |
+| `pnpm test:watch`             | Vitest in watch mode (unit tests)                        |
+| `pnpm lint`                   | ESLint + TypeScript type-check                           |
 
 ---
 
@@ -53,6 +54,27 @@ Browser-based integration tests that exercise engine lifecycle:
 ```sh
 pnpm exec playwright test tests/lite/plumbing/
 ```
+
+### Nonvisual WebGPU Integration
+
+**Config:** `config/playwright.integration-cloud.config.ts`
+
+**Specs:** `tests/lite/integration/gaussian-point-{reprojection,sampling}.spec.ts`
+
+An independent PR CI job runs these two GPU tests on one BrowserStack macOS
+Chrome session, using the existing CDP connection and Local tunnel. It starts
+Vite on `LAB_TEST_PORT` (default `5179`), matching the specs' navigation URL,
+and does not build scene bundles or run screenshots, parity, or performance tests.
+There is no adapter-unavailable skip: missing WebGPU or GPU validation errors
+fail the tests. Only sanitized, verified JUnit results are published; tracing,
+video, screenshots, and raw artifact publication remain disabled.
+
+```sh
+BSTACK_SESSIONS_REQUIRED=1 bash scripts/browserstack-wait.sh pnpm test:integration-cloud
+```
+
+Without BrowserStack credentials, the config uses local Chrome (SwiftShader
+when `CI=true`) for a focused nonvisual development run.
 
 ---
 
@@ -96,7 +118,7 @@ The cloud parity config connects to remote Chrome **directly over CDP**
 so specs shard across `CIWORKERS` parallel cloud browsers. The local Vite dev
 server is exposed to the remote browser through a BrowserStack Local tunnel
 started by the config's `globalSetup` (`config/browserstack-local-tunnel.ts`).
-Both BrowserStack Playwright configs explicitly disable tracing, including
+All BrowserStack Playwright configs explicitly disable tracing, including
 retry tracing, because BrowserStack connection metadata can embed credentials.
 
 ```sh
@@ -258,12 +280,13 @@ A missing baseline is not an error: the delta report is skipped and the
 
 ## BrowserStack Configuration
 
-Two jobs use BrowserStack differently:
+Three jobs use BrowserStack:
 
-| Job             | How it connects                                  | Config                                     |
-| --------------- | ------------------------------------------------ | ------------------------------------------ |
-| Parity (Cloud)  | Direct **CDP** (no SDK), sharded across sessions | `config/playwright.parity-cloud.config.ts` |
-| Perf Regression | `browserstack-node-sdk` (SDK-managed tunnel)     | `config/browserstack.yml`                  |
+| Job                | How it connects                                  | Config                                          |
+| ------------------ | ------------------------------------------------ | ----------------------------------------------- |
+| Parity (Cloud)     | Direct **CDP** (no SDK), sharded across sessions | `config/playwright.parity-cloud.config.ts`      |
+| WebGPU Integration | Direct **CDP** (no SDK), one session             | `config/playwright.integration-cloud.config.ts` |
+| Perf Regression    | `browserstack-node-sdk` (SDK-managed tunnel)     | `config/browserstack.yml`                       |
 
 ### Parity (CDP)
 
@@ -303,15 +326,16 @@ For local development, add these to `.env.local` (git-ignored).
 **Config:** `azure-pipelines.yml`  
 **Trigger:** PRs targeting `master`
 
-Five parallel jobs:
+Parallel jobs include:
 
-| Job                 | What it does                                           |
-| ------------------- | ------------------------------------------------------ |
-| **Unit Tests**      | Vitest unit tests + Playwright plumbing tests          |
-| **Bundle Size**     | Ceiling checks + delta vs baseline                     |
-| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)     |
-| **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) |
-| **Lint**            | ESLint + TypeScript `--noEmit` type-check              |
+| Job                    | What it does                                                   |
+| ---------------------- | -------------------------------------------------------------- |
+| **Unit Tests**         | Vitest unit tests + Playwright plumbing tests                  |
+| **Bundle Size**        | Ceiling checks + delta vs baseline                             |
+| **Perf Regression**    | Current vs baseline on BrowserStack (macOS Chrome)             |
+| **Parity (Cloud)**     | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)         |
+| **WebGPU Integration** | Nonvisual point-splatting shader/readback tests on real WebGPU |
+| **Lint**               | ESLint + TypeScript `--noEmit` type-check                      |
 
 ### Required Pipeline Variable Groups
 

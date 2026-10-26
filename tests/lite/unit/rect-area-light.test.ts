@@ -7,6 +7,7 @@ import { writeMeshLightSelection } from "../../../packages/babylon-lite/src/rend
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { applyLightFoOffset } from "../../../packages/babylon-lite/src/large-world/floating-origin.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene.js";
+import { copyLightBase } from "../../../packages/babylon-lite/src/light/light-clone.js";
 
 describe("RectAreaLight data", () => {
     it("copies caller-owned color tuples before tracking and preserves same-value writes", () => {
@@ -27,7 +28,7 @@ describe("RectAreaLight data", () => {
         expect(light._lightVersion).toBe(version);
         light.diffuse[0] = 0.1;
         expect(light._lightVersion).toBe(version + 1);
-        expect(light._cloneNode!().diffuse).not.toBe(light.diffuse);
+        expect(light._cloneNode!(copyLightBase).diffuse).not.toBe(light.diffuse);
     });
     it("packs center, independent colors, intensity and six half-axis scalars into exactly 64 bytes", () => {
         const light = createRectAreaLight([3, 4, 5], 6, 8, 2);
@@ -113,7 +114,7 @@ describe("RectAreaLight data", () => {
         light.diffuse = [0.1, 0.2, 0.3];
         light.specular = [0.4, 0.5, 0.6];
         light.includedOnlyMeshIds = new Set(["receiver"]);
-        const clone = light._cloneNode!();
+        const clone = light._cloneNode!(copyLightBase);
         expect(clone).toMatchObject({ lightType: "rectArea", width: 2.5, height: 3.5, intensity: 4, name: "rect_clone" });
         expect(Array.from(clone.worldMatrix)).toEqual(Array.from(light.worldMatrix));
         expect(clone.includedOnlyMeshIds).toBe(light.includedOnlyMeshIds);

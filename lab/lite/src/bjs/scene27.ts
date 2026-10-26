@@ -6,7 +6,8 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/loaders/glTF";
 
-const MODEL_URL = "https://brave-engine-bucket.s3.ap-southeast-1.amazonaws.com/s3-public/assets/models/props/var_Refrigerator.glb";
+// Model: Babylon.js Assets, meshes/shoe_variants.glb (CC BY 4.0).
+const MODEL_URL = "https://assets.babylonjs.com/meshes/shoe_variants.glb";
 
 (async function () {
     const __initStart = performance.now();
@@ -18,11 +19,10 @@ const MODEL_URL = "https://brave-engine-bucket.s3.ap-southeast-1.amazonaws.com/s
 
     const result = await SceneLoader.ImportMeshAsync("", MODEL_URL, undefined, scene);
 
-    // Select "White" variant (matches playground #C1QH9J#78 final state)
     const KHR = (await import("@babylonjs/loaders/glTF/2.0/Extensions/KHR_materials_variants")).KHR_materials_variants;
-    KHR.SelectVariant(result.meshes[0]!, "White");
+    KHR.SelectVariant(result.meshes[0]!, "beach");
 
-    const cam = new ArcRotateCamera("cam", 2.372, 1, 5, new Vector3(0, 1, 0), scene);
+    const cam = new ArcRotateCamera("cam", 2.372, 1, 0.5, new Vector3(0, 0.076, 0), scene);
     cam.minZ = 0.01;
 
     const light = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
