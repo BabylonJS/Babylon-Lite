@@ -130,10 +130,9 @@ export class Matrix {
         return determinant(this.m);
     }
 
+    /** Babylon.js `invert`: inverts this matrix in place and returns it. */
     public invert(): Matrix {
-        const result = new Matrix();
-        this.invertToRef(result);
-        return result;
+        return this.invertToRef(this);
     }
 
     public invertToRef(result: Matrix): Matrix {
