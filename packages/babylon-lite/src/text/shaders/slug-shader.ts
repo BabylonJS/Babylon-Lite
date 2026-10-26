@@ -131,7 +131,7 @@ return out;
 }`;
 
     const _frag = wgsl`@group(0)@binding(1) var ct:texture_2d<f32>;
-@group(0)@binding(2) var bt:texture_2d<f32>;
+@group(0)@binding(2) var bt:texture_2d<u32>;
 ${TEXT_UNIFORM}
 // Pipeline-overridable: when true, output straight (non-premultiplied) alpha so the hardware
 // can derive sample coverage from alpha alone. Keyed by number (@id(0)) because a JS-side
@@ -209,11 +209,11 @@ var yc=0.0;
 var yw=0.0;
 // Horizontal band: signed crossings of the +x ray through this pixel.
 let hr=textureLoad(bt,vec2i(gp.x+bi.y,gp.y),0);
-let hn=i32(hr.x+0.5);
-let hl=bloc(gp,i32(hr.y+0.5));
+let hn=i32(hr.x);
+let hl=bloc(gp,i32(hr.y));
 for(var i:i32=0;i<hn;i=i+1){
 let lr=textureLoad(bt,bloc(hl,i),0);
-let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
+let cv=vec2i(lr.xy);
 let p12=textureLoad(ct,cv,0)-vec4f(rc,rc);
 let p3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy-rc;
 // Curves are sorted along the band axis: once one is fully behind the pixel, so are the rest.
@@ -233,11 +233,11 @@ xw=max(xw,cwgt(r.y));
 }
 // Vertical band: same walk along +y (signs mirrored).
 let vr=textureLoad(bt,vec2i(gp.x+bm.y+1+bi.x,gp.y),0);
-let vn=i32(vr.x+0.5);
-let vl=bloc(gp,i32(vr.y+0.5));
+let vn=i32(vr.x);
+let vl=bloc(gp,i32(vr.y));
 for(var i:i32=0;i<vn;i=i+1){
 let lr=textureLoad(bt,bloc(vl,i),0);
-let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
+let cv=vec2i(lr.xy);
 let p12=textureLoad(ct,cv,0)-vec4f(rc,rc);
 let p3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy-rc;
 if(max(max(p12.y,p12.w),p3.y)*pe.y < -0.5){break;}
@@ -262,8 +262,8 @@ ${f?.CO ?? ""}
 // Coverage gamma: raise edge coverage to 1/coverageGamma so anti-aliased edges composite
 // heavier (mimics gamma-space stem darkening). tu.col.x is 1 by default (no-op).
 cov=pow(cov,tu.col.x);
-// a2c false -> RGB is coverage-weighted (premultiplied). a2c true -> coverage lives in alpha only.
-let rw=select(cov,1.0,a2c);
+// Blended RGB is premultiplied by effective alpha; A2C keeps straight RGB.
+let rw=select(in.cl.a*cov,1.0,a2c);
 return vec4f(in.cl.rgb*rw,in.cl.a*cov);
 }`;
 

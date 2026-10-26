@@ -1,4 +1,4 @@
-/** Owns the curve + band rgba32float GPU textures shared across a SharedAtlas's lifetime.
+/** Owns the rgba32float curve and rg32uint band textures shared across an atlas's lifetime.
  *  Lazy-init: created on first bind, recreated only when capacity grows. */
 
 import { GLYPH_METADATA_FLOATS } from "../glyph-storage.js";
@@ -9,9 +9,6 @@ import type { SharedAtlas, SharedAtlasGpu } from "../glyph-storage.js";
  *  text-textures module body executes before glyph-storage's `TEX_WIDTH` const is
  *  initialized. Same Slug-protocol invariant; never changes. */
 const TEX_WIDTH = 4096;
-
-const ROW_FLOATS = TEX_WIDTH * 4;
-const BYTES_PER_ROW = ROW_FLOATS * 4;
 
 const GLYPH_METADATA_BYTES = GLYPH_METADATA_FLOATS * 4;
 
@@ -38,17 +35,17 @@ function rowsForTexels(texels: number): number {
     return Math.ceil(texels / TEX_WIDTH);
 }
 
-function createAtlasTexture(device: GPUDevice, rows: number, label: string): GPUTexture {
+function createAtlasTexture(device: GPUDevice, rows: number, label: string, format: GPUTextureFormat): GPUTexture {
     return device.createTexture({
         label,
-        format: "rgba32float",
+        format,
         size: { width: TEX_WIDTH, height: rows, depthOrArrayLayers: 1 },
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
     });
 }
 
 /** Upload all used texels (rows up to rowsUsed) of `cpuData` to `tex`. */
-function uploadAll(device: GPUDevice, tex: GPUTexture, cpuData: Float32Array, texelsUsed: number): void {
+function uploadAll(device: GPUDevice, tex: GPUTexture, cpuData: Float32Array | Uint32Array, texelsUsed: number, componentsPerTexel: 2 | 4): void {
     if (texelsUsed === 0) {
         return;
     }
@@ -56,7 +53,7 @@ function uploadAll(device: GPUDevice, tex: GPUTexture, cpuData: Float32Array, te
     device.queue.writeTexture(
         { texture: tex },
         cpuData.buffer as ArrayBuffer,
-        { offset: cpuData.byteOffset, bytesPerRow: BYTES_PER_ROW, rowsPerImage: rows },
+        { offset: cpuData.byteOffset, bytesPerRow: TEX_WIDTH * componentsPerTexel * 4, rowsPerImage: rows },
         { width: TEX_WIDTH, height: rows, depthOrArrayLayers: 1 }
     );
 }
@@ -83,8 +80,8 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { _
         const metaCap = nextPow2Rows(slotsNeeded);
         gpu = {
             _device: device,
-            _curveTex: createAtlasTexture(device, curveRows, "text-slug-curves"),
-            _bandTex: createAtlasTexture(device, bandRows, "text-slug-bands"),
+            _curveTex: createAtlasTexture(device, curveRows, "text-slug-curves", "rgba32float"),
+            _bandTex: createAtlasTexture(device, bandRows, "text-slug-bands", "rg32uint"),
             _curveTexRows: curveRows,
             _bandTexRows: bandRows,
             _metaBuf: createMetaBuffer(device, metaCap),
@@ -97,14 +94,14 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { _
         if (curveRowsNeeded > gpu._curveTexRows) {
             gpu._curveTex.destroy();
             gpu._curveTexRows = nextPow2Rows(curveRowsNeeded);
-            gpu._curveTex = createAtlasTexture(device, gpu._curveTexRows, "text-slug-curves");
+            gpu._curveTex = createAtlasTexture(device, gpu._curveTexRows, "text-slug-curves", "rgba32float");
             gpu._uploadedVersion = -1;
             rebuilt = true;
         }
         if (bandRowsNeeded > gpu._bandTexRows) {
             gpu._bandTex.destroy();
             gpu._bandTexRows = nextPow2Rows(bandRowsNeeded);
-            gpu._bandTex = createAtlasTexture(device, gpu._bandTexRows, "text-slug-bands");
+            gpu._bandTex = createAtlasTexture(device, gpu._bandTexRows, "text-slug-bands", "rg32uint");
             gpu._uploadedVersion = -1;
             rebuilt = true;
         }
@@ -118,8 +115,8 @@ export function ensureSharedAtlasGpu(device: GPUDevice, atlas: SharedAtlas): { _
     }
 
     if (gpu._uploadedVersion !== atlas._version) {
-        uploadAll(device, gpu._curveTex, atlas._curveTexData, atlas._curveTexelsUsed);
-        uploadAll(device, gpu._bandTex, atlas._bandTexData, atlas._bandTexelsUsed);
+        uploadAll(device, gpu._curveTex, atlas._curveTexData, atlas._curveTexelsUsed, 4);
+        uploadAll(device, gpu._bandTex, atlas._bandTexData, atlas._bandTexelsUsed, 2);
         if (atlas._slotCount > 0) {
             const meta = atlas._metaData;
             device.queue.writeBuffer(gpu._metaBuf, 0, meta.buffer as ArrayBuffer, meta.byteOffset, atlas._slotCount * GLYPH_METADATA_BYTES);
