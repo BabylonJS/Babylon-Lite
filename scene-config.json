@@ -2791,5 +2791,55 @@
         "description": "The hosted coastalCliff.glb asset exercises real PBR materials, unique per-mesh tags, known foliage exclusions, screen depth, linear albedo shadow attenuation, asset-scaled radii, and Medium-quality mesh blending over most of the frame.",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "pbr", "gltf", "albedo"],
         "skipPerf": true
+    },
+    {
+        "id": 316,
+        "slug": "scene316-gltf-export-negative-world-matrix",
+        "name": "Scene 316 — glTF Export: Negative World Matrix",
+        "maxMad": 0.05,
+        "maxRawKB": 126.3,
+        "description": "Babylon.js visualization test “GLTF Serializer with Negative World Matrix (left handed, twice)” (playground #KX53VK#88): Triangles of both windings, two under negatively scaled parents, exported and reloaded twice.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 317,
+        "slug": "scene317-gltf-export-shared-buffers",
+        "name": "Scene 317 — glTF Export: Shared Buffer Conversions",
+        "maxMad": 0.05,
+        "maxRawKB": 118.4,
+        "description": "Babylon.js visualization test “GLTF Serializer Shared Buffer Conversions” (playground #KX53VK#85): Two triangles sharing one vertex-colored geometry, exported and reloaded.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 318,
+        "slug": "scene318-gltf-export-morph-target-animation",
+        "name": "Scene 318 — glTF Export: Morph Target Animation",
+        "maxMad": 0.05,
+        "maxRawKB": 126.5,
+        "description": "Babylon.js visualization test “GLTF Serializer Morph Target Animation” (playground #84M2SR#107): A textured sphere with two morph targets, exported and reloaded, its weights posed at the values the test's animations reach at frame 60.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 319,
+        "slug": "scene319-gltf-export-rotation-conversion",
+        "name": "Scene 319 — glTF Export: Rotation Conversion",
+        "maxMad": 0.15,
+        "maxRawKB": 119.2,
+        "description": "Babylon.js visualization test “GLTF Serializer Rotation conversion, left-handed” (playground #UK7FLI#1): Six rotated parent/child box pairs exported and reloaded.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
+    },
+    {
+        "id": 320,
+        "slug": "scene320-gltf-export-texture-transform",
+        "name": "Scene 320 — glTF Export: KHR_texture_transform",
+        "maxMad": 0.05,
+        "maxRawKB": 141.0,
+        "description": "Babylon.js visualization test “Export GLTF Extension KHR_texture_transform” (playground #20OAV9#15148): Standard materials with rotated, offset and scaled textures, exported and reloaded below the originals.",
+        "tags": ["gltf", "export"],
+        "skipPerf": true
     }
 ]

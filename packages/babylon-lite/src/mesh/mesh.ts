@@ -211,6 +211,8 @@ export interface Mesh extends SceneNode {
     _cpuPositions?: Float32Array;
     /** @internal */
     _cpuNormals?: Float32Array;
+    /** @internal Set by the glTF loader when the primitive had no NORMAL attribute: flat-shaded (glTF spec). */
+    _flatNormal?: boolean;
     /** @internal */
     _cpuUvs?: Float32Array;
     /** @internal */
