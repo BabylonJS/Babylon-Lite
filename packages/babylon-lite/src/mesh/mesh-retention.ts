@@ -1,14 +1,15 @@
 import type { Mesh } from "./mesh.js";
 import { disposeMeshGpu } from "./mesh-dispose.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { SceneContext } from "../scene/scene-core.js";
-import { _notifySceneChange, _runSceneChange } from "../scene/scene-core.js";
+import type { SceneContext, SceneEntity } from "../scene/scene-core.js";
+import { _installGroupBuildRunner, _installSceneAdmission, _notifySceneChange, _runSceneChange } from "../scene/scene-core.js";
 import { installMeshRetention, isMeshUnowned, meshSceneEngine, observeMeshMaterial, hasMeshScene } from "../scene/mesh-scene-registry.js";
-import { installSceneAdmission } from "../scene/scene-admission.js";
 import type { LightBase } from "../light/types.js";
-import { removeMeshFromScene } from "../scene/scene-remove.js";
+import { buildGroupSnapshot, removeMeshFromScene } from "../scene/scene-remove.js";
 import { _setShadowCasterFilter } from "../frame-graph/shadow-inputs.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import type { PendingTextureOwnership } from "../engine/device-lost-recovery.js";
+import { _installLeasedTextureOwnershipSettle } from "../texture/texture-ownership-settle.js";
 import { registerManagedResourceDisposer } from "../resource/managed-resource-hooks.js";
 import { acquireTexture, releaseTexture } from "../resource/texture-references.js";
 import { _textureOwners } from "../resource/texture-owner-state.js";
@@ -188,14 +189,9 @@ export function retainMeshResources(engine: EngineContext, mesh: Mesh): MeshReso
             });
         }
         engine._retainedMeshes.add(mesh);
-        installSceneAdmission(engine, (scene, entity) => {
-            if ("_gpu" in entity && "material" in entity) {
-                const candidate = entity as Mesh;
-                // Force disposal must remain an explicit add error, not a duplicate no-op.
-                return !!candidate._disposed || !hasMeshScene(scene, candidate);
-            }
-            return !("lightType" in entity) || !scene.lights.includes(entity as LightBase);
-        });
+        _installSceneAdmission(admitRetained);
+        _installGroupBuildRunner(buildGroupSnapshot);
+        _installLeasedTextureOwnershipSettle(retireReleasedTexture);
     }
     observeMeshMaterial(mesh);
     const lease: MeshResourceLease = Object.freeze({ mesh });
@@ -205,6 +201,19 @@ export function retainMeshResources(engine: EngineContext, mesh: Mesh): MeshReso
     return lease;
 }
 
+/** Admission policy installed by the first lease. Engines with no live leases keep legacy duplicate admission. */
+function admitRetained(scene: SceneContext, entity: SceneEntity): boolean {
+    if (!scene.surface.engine._retainedMeshes?.size) {
+        return true;
+    }
+    if ("_gpu" in entity && "material" in entity) {
+        const candidate = entity as unknown as Mesh;
+        // Force disposal must remain an explicit add error, not a duplicate no-op.
+        return !!candidate._disposed || !hasMeshScene(scene, candidate);
+    }
+    return !("lightType" in entity) || !scene.lights.includes(entity as LightBase);
+}
+
 function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     for (const lease of state.leases) {
         leases!.delete(lease);
@@ -212,9 +221,6 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     state.leases.clear();
     retentions!.delete(mesh);
     state.engine._retainedMeshes!.delete(mesh);
-    if (!state.engine._retainedMeshes!.size) {
-        installSceneAdmission(state.engine, undefined);
-    }
     const textures = [...state.textures.values()];
     state.textures.clear();
     const release = (): void => {
@@ -240,7 +246,7 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
  *  a claim acquired in this window is live and also raises the total, and a released claim lowers
  *  the total, dropping a live claim only when nothing is owed. Releasing the replacement while claims
  *  are still owed would destroy it before surviving owners regain them. */
-function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): [Texture2D, number, GPUTexture, boolean] | undefined {
+function pendingTextureOwnership(engine: EngineContext, texture: Texture2D): PendingTextureOwnership | undefined {
     return engine._deviceLostRecovery?._pendingOwnership?.find(([candidate, , outgoing]) => candidate.texture === texture.texture || outgoing === texture.texture);
 }
 
@@ -263,6 +269,16 @@ function releaseRetainedTexture(engine: EngineContext, texture: Texture2D): void
         }
     }
     releaseTexture(texture);
+}
+
+/** Every claim on a rebuilt texture was released while it rebuilt: retire the unowned replacement as the
+ *  last release would have, instead of leaving it allocated with nothing left to release it. A texture
+ *  nothing ever owned keeps its replacement, as it kept its allocation before the loss. */
+function retireReleasedTexture([texture, owners, outgoing, owned]: PendingTextureOwnership): void {
+    if (owned && !owners && !_textureOwners(texture) && texture.texture !== outgoing) {
+        acquireTexture(texture);
+        releaseTexture(texture);
+    }
 }
 
 /** Release one lease idempotently. Last unowned mesh disposal is GPU-fenced. */

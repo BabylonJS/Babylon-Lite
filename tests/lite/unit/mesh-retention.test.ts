@@ -218,24 +218,25 @@ describe("retained mesh scene membership", () => {
         disposeScene(scene);
         expect(dispose).toHaveBeenCalledTimes(1);
     });
-    it("installs admission only on each opted-in engine and removes it independently with its final lease", () => {
+    it("enforces duplicate admission only on engines with live leases and restores legacy admission after the final lease", () => {
         const first = fixture();
         const second = fixture();
         const firstLease = retainMeshResources(first.engine, first.mesh);
-        expect(first.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
-        expect(second.engine).not.toHaveProperty("_admitSceneEntity");
+        addToScene(first.scene, first.mesh);
+        addToScene(first.scene, first.mesh);
+        expect(first.scene.meshes).toHaveLength(1);
         addToScene(second.scene, second.mesh);
         addToScene(second.scene, second.mesh);
         expect(second.scene.meshes).toHaveLength(2);
         const secondLease = retainMeshResources(second.engine, second.mesh);
-        expect(second.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
         releaseMeshResources(firstLease);
-        expect(first.engine).not.toHaveProperty("_admitSceneEntity");
-        expect(second.engine).toHaveProperty("_admitSceneEntity", expect.any(Function));
+        addToScene(first.scene, first.mesh);
+        expect(first.scene.meshes).toHaveLength(2);
         addToScene(second.scene, second.mesh);
         expect(second.scene.meshes).toHaveLength(2);
         releaseMeshResources(secondLease);
-        expect(second.engine).not.toHaveProperty("_admitSceneEntity");
+        addToScene(second.scene, second.mesh);
+        expect(second.scene.meshes).toHaveLength(3);
     });
 
     it("keeps the same geometry through 1000 detached retirement fences and fresh admissions", async () => {
@@ -638,7 +639,7 @@ describe("retained mesh scene membership", () => {
         }
     });
 
-    it("confirms an unchanged boot group through the removal settler without rebuilding", async () => {
+    it("confirms an unchanged boot group through the removal snapshot runner without rebuilding", async () => {
         const { engine, scene, mesh: first } = fixture();
         const second = cloneTransformNode(first) as typeof first;
         const builder = vi.fn(async (_target: SceneContext, meshes: Mesh[]) => ({
@@ -649,14 +650,14 @@ describe("retained mesh scene membership", () => {
         const removed = freshMesh(engine, "removed");
         addToScene(scene, removed);
         removeFromScene(scene, removed);
-        const settle = vi.spyOn(scene, "_settleGroupBuild");
         addToScene(scene, first);
         addToScene(scene, second);
 
         await buildScene(scene);
         expect(builder).toHaveBeenCalledTimes(1);
-        expect(settle).toHaveBeenCalledTimes(1);
-        expect(await settle.mock.results[0]!.value).toBe(await builder.mock.results[0]!.value);
+        expect(builder.mock.calls[0]![1]).toEqual([first, second]);
+        expect(builder.mock.calls[0]![1]).not.toBe(scene._groups.get(builder));
+        expect(scene._groups.get(builder)!.o).toBe((await builder.mock.results[0]!.value).renderables);
         expect(scene._renderables.map((draw) => draw.mesh)).toEqual([first, second]);
 
         disposeScene(scene);

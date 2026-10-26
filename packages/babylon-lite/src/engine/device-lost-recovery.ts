@@ -57,7 +57,7 @@ export interface DeviceLostRecoveryState {
      *  because `_recovering` holds arming off until its run settles. Absent between recoveries. The
      *  flag records whether the texture was ever owned (at the loss or by a claim since), so a
      *  never-owned texture keeps its replacement while one released back to zero retires it. */
-    _pendingOwnership?: [Texture2D, number, GPUTexture, boolean][];
+    _pendingOwnership?: PendingTextureOwnership[];
     /** @internal Set while a recovery run on this engine is in flight, so `arm` defers. Recovery
      *  installs the replacement device on the engine long before its handlers finish, leaving
      *  `_armedDevice` naming the lost one, so a registration enabled in that window would otherwise
@@ -67,6 +67,10 @@ export interface DeviceLostRecoveryState {
      *  so a device lost during the window resolves for that later subscriber too. */
     _recovering?: boolean;
 }
+
+/** @internal One rebuilt texture's queued ownership: the wrapper, the claim total owed to its replacement,
+ *  the outgoing handle, and whether it was ever owned. */
+export type PendingTextureOwnership = [Texture2D, number, GPUTexture, boolean];
 
 function getState(engine: EngineContext): DeviceLostRecoveryState {
     return (engine._deviceLostRecovery ??= {

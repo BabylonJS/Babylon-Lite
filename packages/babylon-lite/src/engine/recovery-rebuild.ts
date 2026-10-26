@@ -104,20 +104,19 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
     }
 
     for (const [build, meshes] of scene._groups) {
-        // Emptied by removal or detach. Builders such as PBR read `meshes[0]`, and the group's pre-loss
-        // output and base target the lost device, so drop it: reinsertion builds a fresh group.
-        if (!meshes.length) {
+        // Emptied by removal, detach, or a runtime material move. Builders such as PBR read `meshes[0]`, so
+        // drop it unbuilt: reinsertion builds a fresh group.
+        if (!meshes[0]) {
             scene._groups.delete(build);
-            scene._runtimeBuilds?.dropBase(build);
-            continue;
         }
-        const result = await runRecoveryStep("rebuilding material groups", () => _buildMeshGroup(scene, build, meshes));
+        const result = meshes[0] && (await runRecoveryStep("rebuilding material groups", () => _buildMeshGroup(scene, build, meshes)));
         if (scene._z) {
             return;
         }
         if (!result) {
-            // Abandoned: removal's settler dropped an emptied group or handed the remaining members to the
-            // material-swap drain, which must not reuse the pre-loss rebuild closure or output.
+            // Dropped above, or abandoned by removal's settler (which dropped an emptied group or handed the
+            // remaining members to the material-swap drain). Either way the pre-loss rebuild closure and output
+            // target the lost device and must not be reused.
             scene._runtimeBuilds?.dropBase(build);
             meshes.r = meshes.o = undefined;
             continue;
@@ -207,14 +206,15 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
         }
         seen.add(mesh);
         if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices && !seen.has(mesh._gpu)) {
-            if (mesh._gpu._refCount && mesh._gpu._refCount > 1 && !mesh._gpu._recoverShared && !hasMeshLocalDrawRange(mesh._gpu)) {
+            // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
+            if ((mesh._gpu._refCount ?? 1) > 1 && !mesh._gpu._recoverShared && !mesh._gpu._drawRangeSource) {
                 const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
                 if (mesh._disposed) {
                     continue;
                 }
                 installSharedMeshRecovery(mesh._gpu);
             }
-            const recoverShared = hasMeshLocalDrawRange(mesh._gpu) ? undefined : mesh._gpu._recoverShared;
+            const recoverShared = !mesh._gpu._drawRangeSource && mesh._gpu._recoverShared;
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
             seen.add(mesh._gpu);
         }
@@ -246,11 +246,6 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             seen.add(old);
         }
     }
-}
-
-function hasMeshLocalDrawRange(gpu: MeshGPU): boolean {
-    // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
-    return "_drawRangeSource" in gpu && gpu._drawRangeSource !== undefined;
 }
 
 function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {

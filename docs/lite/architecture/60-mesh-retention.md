@@ -77,14 +77,17 @@ Detaching the last member of a material group before the scene is first register
 leaves that group's boot-time builder queued; the builder cancels an empty group
 instead of building it, so a later reinsertion creates a fresh group that the boot
 drain or the runtime build path materializes.
-Boot and device-lost recovery group builds receive a snapshot of the group's
-members, so a detach or removal while the builder awaits a lazy import cannot
-change the list it iterates. Scenes that never remove or detach a mesh only queue
-meshes that joined meanwhile for the material-swap drain. Once removal is used it
-installs a settler that confirms an unchanged group after the build by a single
-linear comparison of the snapshot with the live group, and otherwise reconciles
-the build against the group's current sequence using constant-time membership
-lookups:
+Scene core builds boot and device-lost recovery groups through an optional
+group-build runner seam. Scenes that never remove or detach a mesh leave it
+unassigned, so the bundler folds it away and the builder reads the live group, as
+before: no member can leave while it awaits. The first `removeFromScene` or
+retention lease installs `buildGroupSnapshot` (in `scene-remove`), which hands the
+builder a snapshot of the group's members, so a detach or removal while the
+builder awaits a lazy import cannot change the list it iterates. After the build
+it confirms an unchanged group by a single linear comparison of the snapshot with
+the live group. Only when membership changed does it load the lazy
+`scene-group-settle` chunk, which reconciles the build against the group's
+current sequence using constant-time membership lookups:
 
 - Output for a snapshot member that left meanwhile is evicted before it is
   committed (its renderables are dropped and its per-mesh teardown retires after
@@ -130,7 +133,8 @@ disposal generation at enqueue, which automatic device replacement does not bump
 
 1. Validate a live physical mesh and compatible owning engine.
 2. First retain captures textures, registers engine teardown, tracks the mesh,
-   installs [per-engine admission](62-scene-admission.md), and observes material.
+   installs [lease-gated admission](62-scene-admission.md), the snapshot group-build
+   runner, and the leased texture-ownership settle seam, and observes material.
 3. Every retain issues a frozen token and adds it to the mesh's lease set.
 4. Detach captures current textures, evicts only the requested scene membership,
    and leaves geometry alive across retirement fences and zero attached scenes.
@@ -140,8 +144,8 @@ disposal generation at enqueue, which automatic device replacement does not bump
    detached seeds mesh membership from `scene.meshes`, not hierarchy reachability,
    so the detached mesh's later reinsertion still publishes `added`.
 5. Release removes one token. Other leases or scene owners preserve resources.
-6. Final release removes the retention and engine mesh entry, clears the admission
-   hook when that engine has no remaining leased meshes, and schedules fenced
+6. Final release removes the retention and engine mesh entry (an engine with no
+   remaining leased meshes reverts to legacy admission), and schedules fenced
    teardown. The callback rechecks all current scene/retention ownership before
    disposing geometry, then releases the captured texture claims. Device recovery
    queues a texture's pending ownership top-up before its rebuild's first await,
@@ -159,8 +163,8 @@ disposal generation at enqueue, which automatic device replacement does not bump
    before its meshes first bind) is queued too, so claims taken during its rebuild
    are carried; the entry records whether the texture was ever owned, so a
    never-owned texture keeps its replacement while one released back to zero retires it.
-7. Engine teardown revokes tokens, marks the feature engine disposed, clears its
-   admission hook, and force-disposes retained resource claims. Scene teardown
+7. Engine teardown revokes tokens, marks the feature engine disposed, empties its
+   leased-mesh set (restoring legacy admission), and force-disposes retained resource claims. Scene teardown
    alone does not revoke leases. Explicit `disposeMeshGpu` remains force-disposal.
 
 Recovery rebuilds retained identities before registered scenes using one seen
@@ -197,8 +201,11 @@ implementation or asset is copied.
 ## Dependencies
 
 - `mesh-dispose`, `gpu-resource-retirement`: shared-claim release and fenced work.
-- `mesh-scene-registry`, `scene-remove`, `scene-admission`: ownership, observation,
-  membership eviction, and opt-in admission policy installation.
+- `mesh-scene-registry`, `scene-remove`, `scene-group-settle`: ownership,
+  observation, membership eviction, snapshot group builds, and their lazy settlement.
+- `scene-core`: zero-cost admission and group-build runner seams.
+- `texture-ownership-settle`: zero-cost seam through which retention retires a
+  replacement texture whose leased claims were all released during recovery.
 - `managed-resource-hooks`: engine-owned final cleanup.
 - `material-textures`, `material-view`, `texture-references`: texture enumeration
   and independent allocation claims.
@@ -256,10 +263,12 @@ is inferred from geometry reuse.
 - `packages/babylon-lite/src/mesh/mesh-retention.ts`
 - `packages/babylon-lite/src/scene/mesh-scene-registry.ts`
 - `packages/babylon-lite/src/scene/scene-remove.ts`
-- `packages/babylon-lite/src/scene/scene-admission.ts`
+- `packages/babylon-lite/src/scene/scene-group-settle.ts`
+- `packages/babylon-lite/src/scene/scene-core.ts`
 - `packages/babylon-lite/src/engine/engine.ts`
 - `packages/babylon-lite/src/engine/recovery-rebuild.ts`
 - `packages/babylon-lite/src/texture/texture-recovery.ts`
+- `packages/babylon-lite/src/texture/texture-ownership-settle.ts`
 - `packages/babylon-lite/src/frame-graph/shadow-inputs.ts`
 - `packages/babylon-lite/src/frame-graph/render-task-base.ts`
 - `packages/babylon-lite/src/picking/gpu-picker.ts`

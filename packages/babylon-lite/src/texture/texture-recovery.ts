@@ -3,9 +3,9 @@ import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
 import type { DeviceLostRecoveryState } from "../engine/device-lost-recovery.js";
+import { _settleLeasedTextureOwnership } from "./texture-ownership-settle.js";
 import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
-import { releaseTexture } from "../resource/texture-release.js";
 import { _isTextureReleased, _textureOwners } from "../resource/texture-owner-state.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
@@ -108,16 +108,10 @@ export function settleRebuiltTextureOwnership(state: DeviceLostRecoveryState): v
     if (!pending) {
         return;
     }
-    for (const [tex, owners, outgoing, owned] of pending) {
-        let held = _textureOwners(tex);
-        // Every owner released during the rebuild: retire the unowned replacement as the last
-        // release would have, instead of leaving it allocated with nothing left to release it. A
-        // texture nothing ever owned keeps its replacement, as it kept its allocation before the loss.
-        if (owned && !owners && !held && tex.texture !== outgoing) {
-            acquireTexture(tex);
-            releaseTexture(tex);
-        }
-        for (; held < owners; held++) {
+    for (const entry of pending) {
+        _settleLeasedTextureOwnership?.(entry);
+        const [tex, owners] = entry;
+        for (let held = _textureOwners(tex); held < owners; held++) {
             acquireTexture(tex);
         }
     }
