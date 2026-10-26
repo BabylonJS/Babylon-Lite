@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attach, createMesh, createScene, exportAndParse, readAccessor } from "./export-test-utils";
+import { attach, createMesh, createScene, expectClose, exportAndParse, loaderRoot, readAccessor } from "./export-test-utils";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import { createSceneNodeFromMatrix } from "../../../../packages/babylon-lite/src/scene/scene-node";
 import type { SceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
@@ -17,25 +17,12 @@ type AnimationGroups = SceneContext["animationGroups"];
 
 const SQRT1_2 = Math.SQRT1_2;
 
-function expectClose(actual: ArrayLike<number> | undefined, expected: number[]): void {
-    expect(actual).toBeDefined();
-    expect(actual!.length).toBe(expected.length);
-    for (let i = 0; i < expected.length; i++) {
-        expect(actual![i]).toBeCloseTo(expected[i]!, 5);
-    }
-}
-
 /** An exported node's local TRS as a matrix (glTF defaults for absent members). */
 function gltfLocalMatrix(node: { translation?: number[]; rotation?: number[]; scale?: number[] }): Mat4 {
     const [tx, ty, tz] = node.translation ?? [0, 0, 0];
     const [qx, qy, qz, qw] = node.rotation ?? [0, 0, 0, 1];
     const [sx, sy, sz] = node.scale ?? [1, 1, 1];
     return composeMat4(tx!, ty!, tz!, qx!, qy!, qz!, qw!, sx!, sy!, sz!);
-}
-
-/** The loader's conversion root. */
-function loaderRoot(): SceneNode {
-    return createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
 }
 
 function matrixNode(name: string, matrix: number[]): SceneNode {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFakeDevice, createMesh, createScene, createTexture, decodePng, exportAndParse, readBufferView } from "./export-test-utils";
+import { createFakeDevice, createMesh, createScene, createTexture, decodePng, expectClose, exportAndParse, readBufferView } from "./export-test-utils";
 import type { ParsedGlb } from "./export-test-utils";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material";
@@ -37,11 +37,6 @@ const STAMPED = { _hasTx: true, uScale: 2, uOffset: 0.25 };
 /** A non-identity transform without the `_hasTx` stamp. */
 const UNSTAMPED = { uScale: 2, uOffset: 0.25 };
 const STAMPED_RESULT = { offset: [0.25, 0], scale: [2, 1] };
-
-function expectClose(actual: number[], expected: number[]): void {
-    expect(actual).toHaveLength(expected.length);
-    expected.forEach((e, i) => expect(actual[i]).toBeCloseTo(e, 6));
-}
 
 function isUsed(r: Result, name: string): boolean {
     return (r.json.extensionsUsed ?? []).includes(name);
@@ -83,17 +78,17 @@ describe("KHR_materials_unlit", () => {
 
     it("multiplies a core baseColorFactor's RGB by _unlitColor", async () => {
         const r = await run({ _unlit: true, _unlitColor: [0.2, 0.4, 0.6], baseColorFactor: [0.5, 0.5, 0.5, 1] });
-        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.1, 0.2, 0.3, 1]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.1, 0.2, 0.3, 1], 6);
     });
 
     it("multiplies the RGB of a factor produced by alpha and keeps the alpha", async () => {
         const r = await run({ _unlit: true, _unlitColor: [0.2, 0.4, 0.6], alpha: 0.5 });
-        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.2, 0.4, 0.6, 0.5]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [0.2, 0.4, 0.6, 0.5], 6);
     });
 
     it("clamps the tinted factor to [0, 1]", async () => {
         const r = await run({ _unlit: true, _unlitColor: [2, 0.5, 1], baseColorFactor: [0.75, 0.5, 1, 1] });
-        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [1, 0.25, 1, 1]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [1, 0.25, 1, 1], 6);
     });
 
     it("removes baseColorFactor when the tinted result is all ones", async () => {

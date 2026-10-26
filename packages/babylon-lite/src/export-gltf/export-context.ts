@@ -150,7 +150,7 @@ export interface BlitResources {
 }
 
 /** @internal One glTF material extension writer; writers form a static ordered array in
- *  `export-materials.ts`. Runs during capture (synchronous). When the material carries the writer's
+ *  `export-material-pbr.ts`. Runs during capture (synchronous). When the material carries the writer's
  *  extension state, the writer attaches its payload with {@link attachExtension} (which records the
  *  name in `ctx.extensionsUsed`) and captures any texture slots through `capturePbrSlot`. Values
  *  that depend on resolved factors are written from a `ctx.afterResolve` callback. */

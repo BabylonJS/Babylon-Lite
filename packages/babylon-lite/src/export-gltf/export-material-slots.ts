@@ -6,6 +6,7 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import { getTextureCoordinateIndex, getTextureTransform } from "../texture/texture-metadata.js";
 import type { ExportContext, PendingSlot, SlotTransform, UvState } from "./export-context.js";
 import type { GltfJsonObject } from "./export-gltf-types.js";
+import { nearlyEqual, OMIT_EPSILON } from "./export-handedness.js";
 import { captureTextureSlot } from "./export-textures.js";
 
 /** @internal One PBR texture slot to capture. */
@@ -143,4 +144,26 @@ export function pbrCoreSlot(
     extra?: Readonly<Record<string, number>>
 ): PbrSlotRequest {
     return { key, texture, transform: !!material._hasUvTx, uv1: ((material._uv2Mask ?? 0) & uv2Bit) !== 0, extra };
+}
+
+/** @internal A textureInfo `strength` extra, omitted at 1. */
+export function strengthExtra(strength: number): Readonly<Record<string, number>> | undefined {
+    return strength !== 1 ? { strength } : undefined;
+}
+
+/** @internal Clamp material factors to glTF's [0, 1] range, warning when any was outside it. */
+export function clampFactors(ctx: ExportContext, values: readonly number[], name: string): number[] {
+    const out = values.map((v) => Math.min(Math.max(v, 0), 1));
+    if (out.some((v, i) => v !== values[i])) {
+        ctx.warn(`Material "${name}" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.`);
+    }
+    return out;
+}
+
+/** @internal Write `baseColorFactor` clamped to [0, 1], omitted at `[1, 1, 1, 1]`. */
+export function writeBaseColorFactor(ctx: ExportContext, pmr: GltfJsonObject, factor: readonly number[], name: string): void {
+    const clamped = clampFactors(ctx, factor, name);
+    if (!nearlyEqual(clamped, [1, 1, 1, 1], OMIT_EPSILON)) {
+        pmr.baseColorFactor = clamped;
+    }
 }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createFakeDevice, createMesh, createScene, createTexture, decodePng, exportAndParse, readBufferView } from "./export-test-utils";
+import { createFakeDevice, createMesh, createScene, createTexture, decodePng, expectClose, exportAndParse, readBufferView } from "./export-test-utils";
 import type { FakeTextureOptions, ParsedGlb } from "./export-test-utils";
 import { createStandardMaterial } from "../../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import type { StandardMaterialProps } from "../../../../packages/babylon-lite/src/material/standard/standard-material";
 import { stdUvTransformExt } from "../../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
-import { specularPowerToRoughness } from "../../../../packages/babylon-lite/src/export-gltf/export-materials";
+import { specularPowerToRoughness } from "../../../../packages/babylon-lite/src/export-gltf/export-material-standard";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
@@ -51,16 +51,11 @@ async function imageRows(glb: ParsedGlb, imageIndex: number): Promise<number[][]
 const STORAGE = [TOP, BOTTOM];
 const REVERSED = [BOTTOM, TOP];
 
-function close(actual: number[], expected: number[], digits = 6): void {
-    expect(actual).toHaveLength(expected.length);
-    expected.forEach((e, i) => expect(actual[i]).toBeCloseTo(e, digits));
-}
-
 describe("Standard to metallic-roughness: factors", () => {
     it("writes baseColorFactor = [diffuse^2.2 * 0.5, alpha] and metallicFactor 0", async () => {
         const r = await run(std({ diffuseColor: [0.5, 0.25, 1], alpha: 0.8 }));
         const pmr = r.mat.pbrMetallicRoughness;
-        close(pmr.baseColorFactor, [Math.pow(0.5, 2.2) * 0.5, Math.pow(0.25, 2.2) * 0.5, 0.5, 0.8]);
+        expectClose(pmr.baseColorFactor, [Math.pow(0.5, 2.2) * 0.5, Math.pow(0.25, 2.2) * 0.5, 0.5, 0.8], 6);
         expect(pmr.metallicFactor).toBe(0);
     });
 
@@ -196,7 +191,7 @@ describe("Standard UV mapping: shared path (_hasUvTx unset)", () => {
         for (const info of [base, emissive]) {
             const t = info.extensions.KHR_texture_transform;
             expect(t.scale).toEqual([2, 3]);
-            close(t.offset, [0.1, 1 - 3 - 0.2]);
+            expectClose(t.offset, [0.1, 1 - 3 - 0.2], 6);
             expect(t.rotation).toBeUndefined();
         }
         expect(r.json.extensionsUsed).toContain("KHR_texture_transform");
@@ -275,8 +270,8 @@ describe("Standard UV mapping: per-texture path (_hasUvTx)", () => {
         const base = r.mat.pbrMetallicRoughness.baseColorTexture;
         const t = base.extensions.KHR_texture_transform;
         expect(t.rotation).toBe(0.5);
-        close(t.scale, [2 * 1.5, 3 * 2]);
-        close(t.offset, expectedOffset);
+        expectClose(t.scale, [2 * 1.5, 3 * 2], 6);
+        expectClose(t.offset, expectedOffset, 6);
         expect(await imageRows(r, r.json.textures[base.index].source)).toEqual(REVERSED);
 
         // Identity wrapper: only the material's uvScale / uvOffset apply, and no flip.
@@ -304,7 +299,7 @@ describe("Standard UV mapping: per-texture path (_hasUvTx)", () => {
         // glTF-Sample-Renderer: uv' = T * R * S * uv with R's columns (cos, -sin) and (sin, cos), so u' = cos*u + sin*v.
         const c = Math.cos(rotation);
         const s = Math.sin(rotation);
-        close(Array.from(uniform!.subarray(0, 6)), [c * scale[0], s * scale[1], -s * scale[0], c * scale[1], offset[0], offset[1]]);
+        expectClose(Array.from(uniform!.subarray(0, 6)), [c * scale[0], s * scale[1], -s * scale[0], c * scale[1], offset[0], offset[1]], 6);
     });
 
     it("does not let the diffuse texture's invertY flip the other slots", async () => {
@@ -344,7 +339,7 @@ describe("Standard: emissive, alpha, culling, lighting", () => {
 
     it("writes a non-black emissiveColor as color^2.2, over an emissive texture too", async () => {
         const r = await run(std({ emissiveColor: [0.5, 0, 1], _emissiveTexture: column(TOP, BOTTOM) }));
-        close(r.mat.emissiveFactor, [Math.pow(0.5, 2.2), 0, 1]);
+        expectClose(r.mat.emissiveFactor, [Math.pow(0.5, 2.2), 0, 1], 6);
         const none = await run(std());
         expect(none.mat.emissiveFactor).toBeUndefined();
     });
@@ -388,14 +383,14 @@ describe("Standard: emissive, alpha, culling, lighting", () => {
         it("writes clamp(emissive * diffuse)^2.2 and the alpha, without the 0.5 factor, metallic or roughness", async () => {
             const r = await run(std({ disableLighting: true, emissiveColor: [1, 0.5, 0.25], diffuseColor: [0.5, 1, 1], alpha: 0.8 }));
             expect(Object.keys(r.mat.pbrMetallicRoughness)).toEqual(["baseColorFactor"]);
-            close(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(0.5, 2.2), Math.pow(0.5, 2.2), Math.pow(0.25, 2.2), 0.8]);
+            expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(0.5, 2.2), Math.pow(0.5, 2.2), Math.pow(0.25, 2.2), 0.8], 6);
             expect(r.mat.emissiveFactor).toBeUndefined();
             expect(r.mat.extensions).toEqual({ KHR_materials_unlit: {} });
         });
 
         it("clamps the product to [0, 1] before the gamma conversion", async () => {
             const r = await run(std({ disableLighting: true, emissiveColor: [4, 2, 1], diffuseColor: [1, 0.25, 1] }));
-            close(r.mat.pbrMetallicRoughness.baseColorFactor, [1, Math.pow(0.5, 2.2), 1, 1]);
+            expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [1, Math.pow(0.5, 2.2), 1, 1], 6);
             expect(r.warnings).toEqual([]);
         });
 
@@ -435,7 +430,7 @@ describe("Standard: emissive, alpha, culling, lighting", () => {
 
     it("clamps a Standard emissive factor above 1 with a warning", async () => {
         const r = await run(std({ name: "glow", emissiveColor: [2, 0.5, 0] }));
-        close(r.mat.emissiveFactor, [1, Math.pow(0.5, 2.2), 0]);
+        expectClose(r.mat.emissiveFactor, [1, Math.pow(0.5, 2.2), 0], 6);
         expect(r.warnings).toEqual(['Material "glow" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.']);
     });
 

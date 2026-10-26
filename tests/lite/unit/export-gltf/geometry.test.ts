@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attach, createMesh, createScene, exportAndParse, QUAD_INDICES, readAccessor } from "./export-test-utils";
+import { attach, createMesh, createScene, expectClose, exportAndParse, QUAD_INDICES, readAccessor } from "./export-test-utils";
 import type { ParsedGlb } from "./export-test-utils";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
@@ -11,14 +11,6 @@ const UNSIGNED_INT = 5125;
 const SQRT1_2 = Math.SQRT1_2;
 const FORWARD_INDICES = [0, 1, 2, 0, 2, 3];
 const REVERSED_INDICES = [0, 2, 1, 0, 3, 2];
-
-function expectClose(actual: ArrayLike<number> | undefined, expected: number[]): void {
-    expect(actual).toBeDefined();
-    expect(actual!.length).toBe(expected.length);
-    for (let i = 0; i < expected.length; i++) {
-        expect(actual![i]).toBeCloseTo(expected[i]!, 5);
-    }
-}
 
 /** Export one mesh at the scene root (a converting pass). */
 async function exportMesh(mesh: Mesh): Promise<ParsedGlb> {

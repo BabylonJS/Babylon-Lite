@@ -1,11 +1,13 @@
 /** Test harness for the glTF exporter: a fake WebGPU device that supports the exporter's readback
  *  paths, fabricated plain-data scenes, and a GLB parser. No real GPU is needed. */
 
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import { exportSceneAsGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-gltf";
 import { initMeshTransform } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { Mesh, MeshGPU } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import type { SceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
+import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
 
 /** A fake GPUTexture carrying its mip-0 bytes in storage order (RGBA8 for every format, float formats included). */
@@ -350,4 +352,34 @@ export async function decodePng(png: Uint8Array): Promise<{ width: number; heigh
         rgba.set(raw.subarray(y * (width * 4 + 1) + 1, (y + 1) * (width * 4 + 1)), y * width * 4);
     }
     return { width, height, rgba };
+}
+
+/** Assert `actual` has `expected`'s length and each value matches to `digits` decimal places. */
+export function expectClose(actual: ArrayLike<number> | undefined, expected: readonly number[], digits = 5): void {
+    expect(actual).toBeDefined();
+    expect(actual!.length).toBe(expected.length);
+    for (let i = 0; i < expected.length; i++) {
+        expect(actual![i]).toBeCloseTo(expected[i]!, digits);
+    }
+}
+
+/** Rotate vector `v` by the unit quaternion `q` (xyzw). */
+export function rotate(q: ArrayLike<number>, v: number[]): number[] {
+    const [x, y, z, w] = [q[0]!, q[1]!, q[2]!, q[3]!];
+    const [vx, vy, vz] = v as [number, number, number];
+    // t = 2 * cross(q.xyz, v); v' = v + w * t + cross(q.xyz, t)
+    const tx = 2 * (y * vz - z * vy);
+    const ty = 2 * (z * vx - x * vz);
+    const tz = 2 * (x * vy - y * vx);
+    return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)];
+}
+
+/** The glTF loader's conversion root: `__root__` with scaling (−1, 1, 1). */
+export function loaderRoot(): SceneNode {
+    return createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+}
+
+/** Set a parent link directly, for parents the typed API does not accept (cameras, lights, foreign objects). */
+export function setParent(object: object, parent: unknown): void {
+    (object as { parent: unknown }).parent = parent;
 }
