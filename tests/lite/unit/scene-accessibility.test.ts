@@ -20,6 +20,7 @@ import {
     setAccessibilityTag,
     updateSceneAccessibility,
 } from "../../../packages/babylon-lite/src/accessibility/scene-accessibility";
+import { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility";
 
 describe("scene accessibility", () => {
     it("rejects a headless projection after scene disposal without installing a binding", () => {
@@ -125,13 +126,13 @@ describe("scene accessibility", () => {
         expect(childNode.parent).toBe(getAccessibilityNode(accessibility, group));
         expect(childNode.tag?.aria?.["aria-pressed"]).toBe(false);
 
-        child.visible = false;
+        setSubtreeVisible(child, false);
         await Promise.resolve();
         expect(childNode.hidden).toBe(false);
         expect(childNode._selfHidden).toBe(true);
         expect(childNode.tag?.aria?.["aria-hidden"]).toBe(false);
 
-        child.visible = true;
+        setSubtreeVisible(child, true);
         child.name = "Renamed";
         setAccessibilityTag(child, { description: "Updated description", role: "img" });
         await Promise.resolve();

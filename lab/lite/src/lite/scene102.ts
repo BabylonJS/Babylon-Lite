@@ -32,6 +32,7 @@ import {
     setPhysicsShapeFilterMembershipMask,
     startEngine,
     stopEngine,
+    setMeshVisible,
 } from "babylon-lite";
 import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
 
@@ -119,7 +120,7 @@ async function main(): Promise<void> {
 
     // Yellow sphere placed at the raycast hit point (created once the raycast runs).
     const hitMarker = makeSphere(engine, scene, RAY_ORIGIN, [1, 1, 0]);
-    hitMarker.visible = false;
+    setMeshVisible(hitMarker, false);
 
     let steps = 0;
     let raycastDone = false;
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
             });
             if (result.hasHit) {
                 hitMarker.position.set(result.hitPoint.x, result.hitPoint.y, result.hitPoint.z);
-                hitMarker.visible = true;
+                setMeshVisible(hitMarker, true);
             }
             canvas.dataset.rayResult = JSON.stringify({
                 hasHit: result.hasHit,

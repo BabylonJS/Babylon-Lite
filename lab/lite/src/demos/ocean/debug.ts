@@ -15,6 +15,7 @@ import {
     type RenderTarget,
     type RenderTask,
     type SceneContext,
+    setMeshVisible,
 } from "babylon-lite";
 import type { OceanComputeResources } from "./resources.js";
 
@@ -100,7 +101,7 @@ export function createOceanTextureDebug(engine: EngineContext, scene: SceneConte
             mesh.material = material;
             mesh.renderOrder = 10000;
             mesh.pickable = false;
-            mesh.visible = true;
+            setMeshVisible(mesh, true);
             addToScene(scene, mesh);
             addMeshToTask(task, mesh);
             meshes.push(mesh);

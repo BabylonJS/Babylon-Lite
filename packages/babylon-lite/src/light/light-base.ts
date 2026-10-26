@@ -1,8 +1,7 @@
 /** Shared light base — world matrix state + dirty callback used by all light factories.
  *  Eliminates boilerplate repeated across hemispheric, directional, point, and spot lights. */
 
-import type { Mat4, Mat4Storage } from "../math/types.js";
-import type { LightBase } from "./types.js";
+import type { Mat4 } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { initSceneNodeTransform } from "../scene/scene-node.js";
 import type { ObservableVec3 } from "../math/observable-vec3.js";
@@ -57,19 +56,4 @@ export function applyLightBase<R>(node: SceneNode, target: object, lvs?: LightVe
         (node as { _bumpLightVersion?: () => void })._bumpLightVersion = lvs.b;
     }
     return node as R;
-}
-
-/** Copy the common SceneNode and light-filter state into a freshly created light clone. */
-export function copyLightBase(source: LightBase, clone: LightBase): void {
-    clone.name = source.name + "_clone";
-    clone.position.copyFrom(source.position);
-    clone.rotationQuaternion.copyFrom(source.rotationQuaternion);
-    clone.scaling.copyFrom(source.scaling);
-    clone.visible = source.visible;
-    clone.metadata = source.metadata;
-    clone.excludedMeshIds = source.excludedMeshIds;
-    clone.includedOnlyMeshIds = source.includedOnlyMeshIds;
-    if (source._localMatrix) {
-        clone._localMatrix = (source._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4;
-    }
 }

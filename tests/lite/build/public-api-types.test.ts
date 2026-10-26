@@ -35,6 +35,46 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes standalone device state and hides observer cleanup hooks", () => {
+        const probePath = resolve(BUILD_DIR, "device-input.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput,
+    createPointerInput, resetPointerInput, disposePointerInput, readGamepad,
+    type KeyboardInput, type PointerInput, type GamepadState, type GamepadButtonState,
+} from "./index.js";
+const keyboard: KeyboardInput = createKeyboardInput(window);
+const pointer: PointerInput = createPointerInput(document.createElement("canvas"));
+const held: boolean = isKeyboardKeyDown(keyboard, "KeyW");
+const codeSet: ReadonlySet<string> = keyboard.keys;
+const delta: number = pointer.deltaX;
+const pad: GamepadState | null = readGamepad(0);
+const button: GamepadButtonState | undefined = pad?.buttons[0];
+// @ts-expect-error The held-key set has no public mutation API.
+keyboard.keys.add("KeyW");
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+keyboard._dispose;
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+pointer._dispose;
+resetPointerInput(pointer);
+disposeKeyboardInput(keyboard);
+disposePointerInput(pointer);
+void [held, codeSet, delta, button];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks for a strict consumer that loads no ambient @types packages", () => {
         // A consumer with `compilerOptions.types: []` (or one that never lists `webxr`) gets no
         // automatic @types inclusion. The public WebXR API still references ambient XR globals, so the
@@ -132,6 +172,115 @@ const collision: SplatVoxelCollision = parseSplatVoxelCollision(metadata, buffer
 const position: [number, number, number] = moveSplatVoxelCamera(collision, [1, 2, 3], [4, 5, 6], 0.2);
 const loaded: Promise<SplatVoxelCollision> = loadSplatVoxelCollision("https://example.test/scene.voxel.json", new AbortController().signal);
 void [position, loaded];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes task removal for graphs and scenes through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "remove-task.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { removeTask, type FrameGraph, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const task: Task;
+const removedFromGraph: boolean = removeTask(graph, task);
+const removedFromScene: boolean = removeTask(scene, task);
+// @ts-expect-error A target must be a graph or scene.
+removeTask({}, task);
+// @ts-expect-error A task must satisfy the Task contract.
+removeTask(graph, { name: "incomplete" });
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes readonly live task discovery through the root API without internal storage", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).toContain("export declare function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];");
+        expect(dts.match(/declare function getFrameGraphTasks\(/g)).toHaveLength(1);
+        expect(dts).not.toMatch(/^\s*_tasks:/m);
+        const probePath = resolve(BUILD_DIR, "frame-graph-task-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getFrameGraph, getFrameGraphTasks, type FrameGraph, type FrameGraphContext, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const context: FrameGraphContext;
+declare const task: Task;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+const exactSignature: Equal<typeof getFrameGraphTasks, (frameGraph: FrameGraph) => readonly Task[]> = true;
+const sceneTasks: readonly Task[] = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks: readonly Task[] = getFrameGraphTasks(context.frameGraph);
+const tasks = getFrameGraphTasks(graph);
+// The array is readonly; task execution gates remain writable.
+tasks[0]!.executionEnabled = false;
+// @ts-expect-error The live list is not a mutable array.
+const mutable: Task[] = tasks;
+// @ts-expect-error Consumers must not append to the live list.
+tasks.push(task);
+// @ts-expect-error Consumers must not replace entries.
+tasks[0] = task;
+// @ts-expect-error Consumers must not clear the live list.
+tasks.length = 0;
+// @ts-expect-error There is no SceneContext overload.
+getFrameGraphTasks(scene);
+// @ts-expect-error Internal storage is not public.
+graph._tasks;
+// @ts-expect-error The argument must be a frame graph.
+getFrameGraphTasks({});
+void [exactSignature, sceneTasks, standaloneTasks];
 `
             );
             const result = spawnSync(
@@ -847,6 +996,58 @@ void options;
             );
             const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
             expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes custom RenderTarget post-processes without internal shader fields", () => {
+        const probePath = resolve(BUILD_DIR, "custom-post-process.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createCustomPostProcessTask, wgsl,
+    type CustomPostProcessTaskConfig, type PostProcessTask, type EngineContext,
+    type SceneContext, type RenderTarget,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const source: RenderTarget;
+declare const destination: RenderTarget;
+const config: CustomPostProcessTaskConfig = {
+    sourceTexture: source, targetTexture: destination,
+    fragmentWGSL: wgsl\`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}\`,
+    extraTextures: [source],
+    extraTextureWGSL: "@group(0) @binding(2) var second:texture_2d<f32>;",
+    uniformWGSL: "@group(0) @binding(3) var<uniform> gain:vec4f;",
+    uniformByteLength: 16,
+    writeUniforms: data => { data[0] = 0.5; },
+};
+const standalone: PostProcessTask = createCustomPostProcessTask(config, engine);
+const inScene: PostProcessTask = createCustomPostProcessTask(config, engine, scene);
+standalone.updateUniforms();
+const output: RenderTarget = inScene.outputTexture;
+void output;
+// @ts-expect-error Application shaders are required.
+createCustomPostProcessTask({ sourceTexture: source }, engine);
+// @ts-expect-error The internal shader configuration is not public.
+config._shader;
+// @ts-expect-error Bindings follow the public fixed convention.
+config.uniformBinding = 7;
+// @ts-expect-error Internal GPU rebuild hooks are not public.
+standalone._rebuildGpuState();
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", probePath],
+                {
+                    cwd: BUILD_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
         } finally {
             rmSync(probePath, { force: true });
         }

@@ -6,6 +6,9 @@
 
 import type { SceneNode } from "../scene/scene-node.js";
 
+/** @internal Copies shared light state onto a fresh clone; handed to `_cloneNode` by `cloneTransformNode`. */
+export type LightBaseCopier = (source: LightBase, clone: LightBase) => void;
+
 /** Shared base for all light types.
  *  Provides pipeline integration callbacks so render pipelines are light-agnostic. */
 export interface LightBase extends SceneNode {

@@ -18,17 +18,8 @@ import { _enableTaskMeshPopulation, addMeshToTask, createRenderTask, type Render
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import {
-    getNoColorView,
-    hasNoColorViewFactory,
-    preloadPcfShadowTaskState,
-    resolveShadowCasterMaterial,
-    shadowCasterMaterialChanged,
-    snapshotShadowCasterMaterial,
-} from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
-import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -267,7 +258,7 @@ export function ensureCsmShadowTaskState(
  *  from it: the caster switched material or got its first one, or it joins with an unseen material, whose chain may
  *  hold a view another caster's chain cached before the terminal was rebuilt.
  *
- *  A changed caster whose view cannot be built yet (`holdCsmCaster`) is held instead, without holding back any other
+ *  A changed caster whose view cannot be built yet (`holdShadowCaster`) is held instead, without holding back any other
  *  caster: it leaves every task once, its packets retired behind the frame fence, since they may reference per-mesh
  *  resources retired with its previous material, possibly in a frame this reconcile did not see (the generator was
  *  parked). A registered one keeps its cap entry, and its material is not snapshotted, so it still reads as changed and
@@ -305,7 +296,7 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
                 (held ??= new Set()).add(mesh);
             }
         } else if (shadowCasterMaterialChanged(material, materials, gens)) {
-            if (holdCsmCaster(scene, sg, material)) {
+            if (holdShadowCaster(scene, sg, material)) {
                 (held ??= new Set()).add(mesh);
             } else {
                 (stale ??= new Set()).add(material);
@@ -452,28 +443,6 @@ export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undef
         task._ob.length = 0;
         task._lastVersion = -1;
     }
-}
-
-/** Whether the no-colour view of a caster material cannot be built yet. When the view factory of the family the caster
- *  casts through is not imported, building the view would call an undefined factory: this re-supplies the generator's
- *  registered caster set through `setShadowTaskCasterMeshes`, which parks the generator while the factory imports, as any
- *  re-supplied set does. A caster casting through its own material also waits while that material's group is not built
- *  in this scene, or recording the view would throw inside the frame: the mesh's swap drain or runtime build builds it.
- *  A build that fails reports its own error, and the hold lasts until the caster's material is reassigned or the caster
- *  leaves the set. A `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's
- *  lifecycle builds it: recording it throws as before, naming the problem. */
-function holdCsmCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
-    const terminal = resolveShadowCasterMaterial(material);
-    if (!hasNoColorViewFactory(terminal)) {
-        // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
-        // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
-        const registered = _getShadowTaskCasterMeshes(sg);
-        if (registered && !sg._preloadPending) {
-            setShadowTaskCasterMeshes(sg, registered);
-        }
-        return true;
-    }
-    return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
 }
 
 /** Render every cascade layer for this frame, recomputing splits/matrices from the active camera. */
