@@ -116,7 +116,6 @@ describe("babylon-lite-gl build output", () => {
             "getEffectCompilationError",
             "waitForEffect",
             "createEffectWrapper",
-            "createEffectWrapperFromEffect",
             "applyEffectWrapper",
             "drawEffect",
             "setEffectTexture",

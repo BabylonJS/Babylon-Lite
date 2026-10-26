@@ -71,32 +71,6 @@ export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWr
     return { name, effect, _disposed: false };
 }
 
-/** Wrap an EXISTING effect (e.g. one from `createEffect`, or shared with a
- *  mesh pass) in a fullscreen {@link GLEffectWrapper} instead of compiling a
- *  new one — the counterpart of assigning Babylon's `EffectWrapper.effect`.
- *  Use this when you already own a `GLEffect`; otherwise
- *  {@link createEffectWrapper} compiles one from source.
- *
- *  The wrapper takes its own reference on the effect, so
- *  `disposeEffectWrapper(engine, wrapper)` and the caller's
- *  `disposeEffect(engine, effect)` are independent: the program is deleted
- *  only once both have run. The effect's vertex shader must consume the
- *  fullscreen-quad positions at attribute location 0 (as
- *  `createEffectWrapper`'s default vertex shader does).
- *
- *  @param engine - The engine the effect was created on.
- *  @param effect - The effect to wrap; must not be disposed.
- *  @param name - Wrapper name. Defaults to the effect's name.
- *  @returns A wrapper usable with {@link applyEffectWrapper}. */
-export function createEffectWrapperFromEffect(engine: GLEngineContext, effect: GLEffect, name?: string): GLEffectWrapper {
-    void engine;
-    if (effect._disposed) {
-        throw new Error(`lite-gl: cannot wrap disposed effect ${effect.name}`);
-    }
-    effect._refCount++;
-    return { name: name ?? effect.name, effect, _disposed: false };
-}
-
 /** Dispose the wrapper and the effect it owns (idempotent).
  *
  *  @param engine - The engine the wrapper was created on.
@@ -141,9 +115,11 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
     engine.gl.viewport(x, y, w, h);
 }
 
-/** Make `wrapper.effect` current and ensure the shared fullscreen quad VAO
- *  is bound — the counterpart of Babylon's `EffectRenderer.applyEffectWrapper`
- *  (lite-gl has no `setEffectWrapper`; this is the only "activate" call).
+/** Make `wrapper.effect` current — the counterpart of Babylon's
+ *  `EffectRenderer.applyEffectWrapper` (lite-gl has no `setEffectWrapper`;
+ *  this is the only wrapper "activate" call). The shared fullscreen quad is
+ *  bound by {@link drawEffect}, so an existing `GLEffect` needs no wrapper:
+ *  `if (isEffectReady(engine, e)) { useEffect(engine, e); …setters…; drawEffect(engine); }`.
  *
  *  The wrapper's effect must be ready: this polls {@link isEffectReady} itself
  *  (finalizing the effect on its first ready poll) and returns `false` without
@@ -167,13 +143,20 @@ export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWra
     if (!isEffectReady(engine, wrapper.effect) || wrapper._disposed) {
         return false;
     }
-    ensureQuad(engine);
     useEffect(engine, wrapper.effect);
     return true;
 }
 
-/** `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. No-op when the
- *  context is lost or there is no current program. */
+/** Draw the shared fullscreen quad with the current program (from
+ *  {@link applyEffectWrapper} or `useEffect`) — the counterpart of Babylon's
+ *  `EffectRenderer.draw`. Lazily creates the quad on first use (and after
+ *  context restore), binds its VAO (cached), flushes the deferred GL states and
+ *  issues `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. The program's
+ *  vertex shader must read the quad positions at attribute location 0 (as
+ *  `createEffectWrapper`'s default vertex shader does). No-op when the context
+ *  is lost/disposed or there is no current program.
+ *
+ *  @param engine - The engine. */
 export function drawEffect(engine: GLEngineContext): void {
     if (engine._isLost || engine._disposed) {
         return;
@@ -181,6 +164,7 @@ export function drawEffect(engine: GLEngineContext): void {
     if (engine._state.currentProgram === null) {
         return;
     }
+    ensureQuad(engine);
     applyGLStates(engine);
     engine.gl.drawElements(engine.gl.TRIANGLES, 6, engine.gl.UNSIGNED_SHORT, 0);
 }
@@ -188,7 +172,7 @@ export function drawEffect(engine: GLEngineContext): void {
 /** Lazy fullscreen quad. Built on first call; thereafter the VAO is cached on
  *  `_state.quadVao` and rebinding is a single cached call. Cleared by
  *  `webglcontextlost` and transparently rebuilt by the next
- *  `applyEffectWrapper` after restore.
+ *  `drawEffect` after restore.
  *
  *  Position attribute is enabled at location 0 — every effect's
  *  `createEffect` calls `gl.bindAttribLocation(program, 0, attributeNames[0])`

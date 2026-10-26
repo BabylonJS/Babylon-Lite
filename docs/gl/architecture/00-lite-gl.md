@@ -54,7 +54,7 @@ Non-goals:
 - **Pure state interfaces.** `GLEngineContext`, `GLEffect`, `GLTexture`, `GLEffectWrapper` are plain data. Behaviour is provided by standalone functions accepting the state as the first argument.
 - **No classes.** No `class` keyword anywhere in the package source.
 - **Tree-shakable.** Every setter, every loader, every helper is its own `export`. Unused symbols disappear from final bundles.
-- **Zero module-level side effects.** No top-level `new Map()`, `new WeakMap()`, `new Set()`. Caches live on `engine._state`; the single per-package lazy resource (fullscreen quad) is created on first `applyEffectWrapper` and stored on the context, never as a module-scoped allocation. `sideEffects: false` in `package.json`.
+- **Zero module-level side effects.** No top-level `new Map()`, `new WeakMap()`, `new Set()`. Caches live on `engine._state`; the single per-package lazy resource (fullscreen quad) is created on first `drawEffect` and stored on the context, never as a module-scoped allocation. `sideEffects: false` in `package.json`.
 - **One-way data ownership.** `GLEngineContext` owns `GLState`. `GLEffect`s and `GLTexture`s do not reference the context; functions take both explicitly. Effects do not know about wrappers; wrappers reference effects but only as plain data.
 - **Branchless hot path.** Each cached setter has the shape _(equality check → early return)_ before any GL call. No `if (option) doExtra()` style branches in per-frame code.
 - **No abstraction layers.** WebGL2 directly, no facade pattern, no enums, no constants table — we use `gl.TRIANGLES`, `gl.UNSIGNED_SHORT`, etc. directly.
@@ -733,11 +733,6 @@ export interface GLEffectWrapper {
  *  `createEffectWrapper(engine, options)`). `vertexSource` defaults to a
  *  built-in fullscreen-quad shader. */
 export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWrapperOptions): GLEffectWrapper;
-/** Wraps an EXISTING effect instead of compiling one (≙ assigning Babylon's
- *  `EffectWrapper.effect`). Takes its own reference on the effect, so the
- *  wrapper's and the caller's disposals are independent. Tree-shaken unless
- *  imported. */
-export function createEffectWrapperFromEffect(engine: GLEngineContext, effect: GLEffect, name?: string): GLEffectWrapper;
 /** Idempotent. Releases the wrapper's reference on its effect. */
 export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
 
@@ -751,15 +746,15 @@ export interface GLViewport {
 /** Defaults to the full canvas in pixel coordinates. */
 export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void;
 
-/** Polls `isEffectReady(engine, wrapper.effect)`; when ready, ensures the shared
- *  quad VAO exists (lazy-init via `ensureQuad`), binds it and calls
- *  `useEffect(engine, wrapper.effect)`, returning `true`. Returns `false` and
+/** Polls `isEffectReady(engine, wrapper.effect)`; when ready, calls
+ *  `useEffect(engine, wrapper.effect)` and returns `true`. Returns `false` and
  *  binds nothing while the effect is compiling, failed, disposed, or the
  *  context is lost — the caller skips that frame's setters and `drawEffect`.
  *
  *  An effect is always required: lite-gl has no `setEffectWrapper` (Babylon
  *  has none either); a wrapper always holds exactly one effect, compiled by
- *  `createEffectWrapper` or adopted by `createEffectWrapperFromEffect`.
+ *  `createEffectWrapper`. To draw an EXISTING effect fullscreen, skip the
+ *  wrapper: `isEffectReady` → `useEffect` → setters → `drawEffect`.
  *
  *  This MUST be called BEFORE any `setEffectFloat*` / `setEffectTexture` call
  *  for this effect in the current frame — WebGL `gl.uniform*` writes target the
@@ -771,8 +766,11 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
 export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean;
 
-/** `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)`. No-op when `engine._isLost`
- *  or when the bound effect is not ready. */
+/** ≙ Babylon `EffectRenderer.draw`. Lazily creates the shared quad
+ *  (`ensureQuad`), binds its VAO (cached), flushes deferred states and issues
+ *  `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)` with the CURRENT program,
+ *  whose vertex shader must read positions at location 0. No-op when the
+ *  context is lost/disposed or no program is bound. */
 export function drawEffect(engine: GLEngineContext): void;
 ```
 
@@ -969,7 +967,8 @@ export interface GLRenderTargetOptions {
     magFilter?: GLenum; // default gl.LINEAR
     wrapS?: GLenum; // default gl.CLAMP_TO_EDGE
     wrapT?: GLenum; // default gl.CLAMP_TO_EDGE
-    colorTexture?: GLTexture; // BYO color attachment (e.g. a createFloatTexture HDR target); else RGBA8
+    colorTexture?: GLTexture; // BYO color attachment (e.g. a createFloatTexture HDR target); else owned 8-bit
+    format?: GLenum; // owned color format: gl.RGBA (default, RGBA8) | gl.RG (RG8) | gl.RED (R8); else throws
     // No generateStencilBuffer/generateMipMaps here: stencil is the opt-in
     // generateRenderTargetStencil (depth-stencil module) helper; mipmaps are the
     // generateRenderTargetMipMaps function (both tree-shake out of the core).
@@ -993,7 +992,19 @@ export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRende
 //   generateRenderTargetStencil(engine, rt, { depth? }): void
 //     packs DEPTH24_STENCIL8 (depth default true) or stencil-only STENCIL_INDEX8 (depth:false),
 //     replacing the core depth-only buffer; installs a restore/resize hook so it survives FBO rebuilds.
-export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarget, x: number, y: number, w: number, h: number, into?: ArrayBufferView): ArrayBufferView; // GPU→CPU readback
+// GPU→CPU readback. `format` defaults to gl.RGBA (always readable); gl.RED / gl.RG
+// read 1 / 2 channels per texel tightly packed (sets PACK_ALIGNMENT 1) — valid when
+// it matches the target's IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
+export function readRenderTargetPixels(
+    engine: GLEngineContext,
+    rt: GLRenderTarget,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    into?: ArrayBufferView,
+    format?: GLenum
+): ArrayBufferView;
 ```
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
@@ -1020,7 +1031,7 @@ export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarg
     - re-uploaded by the standard texture restore protocol, §4.7), and the target
       reattaches the fresh handle — the same per-target hook pattern the sprite
       renderer uses (§3.6).
-- **Scope.** Color is RGBA8 by default, or any `GLTexture` passed via `colorTexture`
+- **Scope.** Color is RGBA8 by default, `R8` / `RG8` via `format`, or any `GLTexture` passed via `colorTexture`
   (e.g. a `createFloatTexture` half-float HDR target). Optional core depth16
   (`generateDepthBuffer`); a packed depth-stencil / stencil-only attachment via the
   opt-in `generateRenderTargetStencil`; `createFloatRenderTarget`,
@@ -1097,10 +1108,10 @@ interface GLState {
     _setStencilBack?: (state: GLState, ops: GLStencilOpState) => void;
     _flushColorMask?: (engine: GLEngineContext) => void;
 
-    /** Lazy fullscreen quad — built on first applyEffectWrapper, then reused
+    /** Lazy fullscreen quad — built on first drawEffect, then reused
      *  for the lifetime of the context. Lives here (not in a module-scoped
      *  WeakMap) to satisfy the zero-side-effects rule. Cleared (set to null)
-     *  on context-lost and rebuilt on next `applyEffectWrapper`. */
+     *  on context-lost and rebuilt on next `drawEffect`. */
     quadVbo: WebGLBuffer | null;
     quadIbo: WebGLBuffer | null;
     quadVao: WebGLVertexArrayObject | null;
@@ -1295,10 +1306,10 @@ canonical per-frame sequence is:
 
 ```
 setViewport(engine);                       // cached
-if (!applyEffectWrapper(engine, wrapper)) return; // ready poll + ensureQuad + useEffect
+if (!applyEffectWrapper(engine, wrapper)) return; // ready poll + useEffect
 setEffectFloat(engine, effect, ...);       // ← AFTER applyEffectWrapper
 setEffectTexture(engine, effect, ...);
-drawEffect(engine);
+drawEffect(engine);                        // ensureQuad + bind VAO + flush + draw
 ```
 
 This matches Babylon's `EffectRenderer` pattern (`applyEffectWrapper` then
@@ -1392,13 +1403,15 @@ function ensureQuad(engine: GLEngineContext): void {
 The geometry matches Babylon's `EffectRenderer` default (positions
 `[1,1,-1,1,-1,-1,1,-1]`, indices `[0,1,2,0,2,3]`).
 
-`applyEffectWrapper` polls readiness, then calls `ensureQuad(engine)` and `useEffect(engine, wrapper.effect)`.
+`applyEffectWrapper` polls readiness, then calls `useEffect(engine, wrapper.effect)`;
+`drawEffect` calls `ensureQuad(engine)` before drawing, so any current program
+(wrapper or plain `useEffect`) draws the quad.
 Once the quad VAO is built and bound, attribute state is baked into the VAO;
 subsequent frames touch zero buffer/attrib GL calls — only `useProgram` (cached),
 the user's `setEffect*` calls, and `drawElements`.
 
 On context lost, `s.quadVao` (and friends) are cleared to `null`, so the
-next `applyEffectWrapper` after restore transparently rebuilds the quad.
+next `drawEffect` after restore transparently rebuilds the quad.
 
 #### Why bind to location 0 explicitly
 
@@ -1746,7 +1759,7 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                      |
 | `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                           |
 | `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, mode, mips)`                                           |
-| `effectWrapper.effect = existingEffect`                          | `createEffectWrapperFromEffect(engine, existingEffect)`                                        |
+| `effectWrapper.effect = existingEffect`                          | `useEffect(engine, existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)       |
 | `texture.isReady()`                                              | `isTextureReady(engine, tex)`                                                                  |
 | `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(engine, tex, src, { invertY, premultiplyAlpha })`                        |
 | `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(engine, tex, { invertY })` (video: `!invertY`)                       |
@@ -1781,7 +1794,9 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
    `generateRenderTargetStencil` (packed `DEPTH24_STENCIL8` or
    stencil-only `STENCIL_INDEX8`) and opt-in mipmaps via
    `generateRenderTargetMipMaps`, and GPU→CPU readback
-   (`readRenderTargetPixels`). NOT supported: multiple render targets (MRT,
+   (`readRenderTargetPixels`, with an optional `RED` / `RG` read `format` for
+   `R8` / `RG8` targets created via the `format` option — Babylon core only
+   reads RGBA). NOT supported: multiple render targets (MRT,
    item 10).
 3. `SpriteRenderer` / `ThinSprite` are available from the barrel
    (`createSpriteRenderer` / `renderSprites` / `GLSprite`), matching Babylon's
@@ -1897,12 +1912,12 @@ this._effect = this._wrapper.effect;            // exposed for the per-uniform s
 …
 // inside render():
 setViewport(engine);                                      // cached
-applyEffectWrapper(engine, this._wrapper);        // useProgram (cached) + ensureQuad
+applyEffectWrapper(engine, this._wrapper);        // useProgram (cached)
 setEffectFloat(engine, this._effect, "u_Progress", this.progress);
 setEffectFloat2(engine, this._effect, "u_Resolution", rx, ry);
 setEffectTexture(engine, this._effect, "overlaySampler", this._overlayTex);
 setEffectTexture(engine, this._effect, "backgroundSampler", this._backgroundTex);
-drawEffect(engine);                                       // gl.drawElements
+drawEffect(engine);                                       // ensureQuad + gl.drawElements
 ```
 
 All ten effect files migrate the same way. No GL behaviour changes; uniform-cache behaviour either matches Babylon (per-uniform last-value check) or improves on it (sampler-uniform set once, not every frame).
@@ -1978,7 +1993,7 @@ with `skip*: true` (or no `maxRawKB`) unless there is a documented reason in the
 | `setEffectTexture switches unit when needed`               | Bind A unit 0, then B unit 0 → one `bindTexture`, no `activeTexture` reassignment.                        |
 | `setEffectTexture skips uniform1i after first frame`       | After finalization, repeated `setEffectTexture` produces zero `uniform1i` calls.                          |
 | `setViewport elides no-op`                                 | Same rect → zero `gl.viewport` calls.                                                                     |
-| `applyEffectWrapper builds quad once`                      | First call creates VAO; second call doesn't touch `createVertexArray`.                                    |
+| `drawEffect builds quad once`                              | First draw creates VAO; later draws don't touch `createVertexArray`.                                      |
 | `applyEffectWrapper before setters is required`            | Calling setters with a different effect bound writes to the wrong program (regression guard).             |
 | `executeWhenCompiled fires once on success`                | Mock parallel-shader-compile to flip ready on frame 3; callback fires exactly once.                       |
 | `setEffectFloat before isReady does NOT poison the cache`  | setEffectFloat("u",1) → not-ready, skipped; flip ready; setEffectFloat("u",1) → uploads exactly 1.        |
@@ -1988,7 +2003,7 @@ with `skip*: true` (or no `maxRawKB`) unless there is a documented reason in the
 | `disposeTexture invalidates _state.boundTextures`          | Bind A unit 0; disposeTexture(A); bind B unit 0 → `gl.bindTexture` IS called (not elided).                |
 | `disposeGLEngine makes later calls no-ops`                 | After dispose, `setEffectFloat` etc. return without throwing.                                             |
 | `context lost: setters become no-ops`                      | Simulate webglcontextlost → `setEffectFloat` skips upload AND skips cache write.                          |
-| `context restored: quad VAO rebuilt`                       | Simulate lost+restored → next `applyEffectWrapper` creates a fresh VAO.                                   |
+| `context restored: quad VAO rebuilt`                       | Simulate lost+restored → next `drawEffect` creates a fresh VAO.                                           |
 | `context restored: programs re-linked, samplers re-bound`  | Simulate restore → effects re-linked, sampler `uniform1i` re-issued exactly once per sampler.             |
 | `context restored: raw texture upload replayed`            | Simulate restore → `_upload(engine)` called, texture handle replaced, isReady=true.                       |
 | `context restored: loadTexture2D replays from ImageBitmap` | No re-fetch of the URL; the retained `ImageBitmap` is re-uploaded.                                        |

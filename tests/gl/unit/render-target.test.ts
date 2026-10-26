@@ -126,6 +126,35 @@ describe("lite-gl render-target: createRenderTarget", () => {
         expect(() => createRenderTarget(engine, { width: -4, height: 16 })).toThrow();
         expect(() => createRenderTarget(engine, { width: 1.5, height: 16 })).toThrow();
     });
+
+    it("format RED / RG allocates R8 / RG8 and keeps it across resize and restore", () => {
+        const { mock, canvas, engine, gl } = setup();
+        for (const [format, internalFormat] of [
+            [gl.RED, gl.R8],
+            [gl.RG, gl.RG8],
+        ] as const) {
+            mock.clear();
+            const rt = createRenderTarget(engine, { width: 4, height: 4, format });
+            const expectStorage = (): void => {
+                const ti = lastCall(mock, "texImage2D");
+                expect(ti?.args[2]).toBe(internalFormat);
+                expect(ti?.args[6]).toBe(format);
+                expect(ti?.args[7]).toBe(gl.UNSIGNED_BYTE);
+            };
+            expectStorage();
+            resizeRenderTarget(engine, rt, 8, 8);
+            expectStorage();
+            fireLost(canvas);
+            fireRestored(canvas);
+            expectStorage();
+            disposeRenderTarget(engine, rt);
+        }
+    });
+
+    it("rejects an unsupported format", () => {
+        const { engine, gl } = setup();
+        expect(() => createRenderTarget(engine, { width: 4, height: 4, format: gl.RGB })).toThrow(/unsupported render target format/);
+    });
 });
 
 describe("lite-gl render-target: depth attachment", () => {
@@ -349,6 +378,30 @@ describe("lite-gl render-target: readback", () => {
         const out = readRenderTargetPixels(engine, rt, 0, 0, 2, 2);
         expect(out).toBeInstanceOf(Uint16Array);
         expect(callsNamed(mock, "readPixels")[0]?.args[5]).toBe(gl.HALF_FLOAT);
+    });
+
+    it("reads a RED target tightly with format RED and PACK_ALIGNMENT 1", () => {
+        const { mock, engine, gl } = setup();
+        const rt = createRenderTarget(engine, { width: 3, height: 2, format: gl.RED });
+        mock.clear();
+        const out = readRenderTargetPixels(engine, rt, 0, 0, 3, 2, undefined, gl.RED);
+        expect(out).toBeInstanceOf(Uint8Array);
+        expect(out.byteLength).toBe(3 * 2);
+        const ps = callsNamed(mock, "pixelStorei");
+        expect(ps.map((c) => c.args)).toEqual([[gl.PACK_ALIGNMENT, 1]]);
+        const rp = callsNamed(mock, "readPixels")[0];
+        expect(rp?.args[4]).toBe(gl.RED);
+        expect(rp?.args[5]).toBe(gl.UNSIGNED_BYTE);
+    });
+
+    it("sizes an RG read at 2 channels and leaves PACK_ALIGNMENT alone for RGBA", () => {
+        const { mock, engine, gl } = setup();
+        const rt = createRenderTarget(engine, { width: 2, height: 2, format: gl.RG });
+        mock.clear();
+        expect(readRenderTargetPixels(engine, rt, 0, 0, 2, 2, undefined, gl.RG).byteLength).toBe(2 * 2 * 2);
+        mock.clear();
+        expect(readRenderTargetPixels(engine, rt, 0, 0, 2, 2).byteLength).toBe(2 * 2 * 4);
+        expect(mock.count("pixelStorei")).toBe(0);
     });
 
     it("reuses a provided buffer", () => {

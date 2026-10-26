@@ -4,7 +4,6 @@ import {
     bindTexture,
     createEffect,
     createEffectWrapper,
-    createEffectWrapperFromEffect,
     createRawTexture,
     createGLEngine,
     disposeEffect,
@@ -22,6 +21,7 @@ import {
     setEffectFloat2,
     setEffectTexture,
     setViewport,
+    useEffect,
     wipeGLStateCache,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -250,14 +250,18 @@ describe("lite-gl cache: program + viewport + quad", () => {
         expect(mock.count("viewport")).toBe(1);
     });
 
-    it("applyEffectWrapper builds the quad exactly once", () => {
+    it("drawEffect builds the quad exactly once", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
         mock.clear();
         applyEffectWrapper(engine, wrapper);
-        applyEffectWrapper(engine, wrapper);
-        applyEffectWrapper(engine, wrapper);
-        // Quad VAO created on the first call only.
+        // The quad is built lazily by the draw, not by applyEffectWrapper.
+        expect(mock.count("createVertexArray")).toBe(0);
+        for (let i = 0; i < 3; i++) {
+            applyEffectWrapper(engine, wrapper);
+            drawEffect(engine);
+        }
+        // Quad VAO created on the first draw only.
         expect(mock.count("createVertexArray")).toBe(1);
         // The wrapper's program is bound once, then cached.
         expect(mock.count("useProgram")).toBe(1);
@@ -408,11 +412,13 @@ describe("lite-gl cache: wipeGLStateCache", () => {
     it("wipeGLStateCache re-binds the program but PRESERVES the shared quad (no rebuild)", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
-        applyEffectWrapper(engine, wrapper); // builds the quad VAO + binds the program once
+        applyEffectWrapper(engine, wrapper); // binds the program once
+        drawEffect(engine); // builds the quad VAO
         expect(mock.count("createVertexArray")).toBe(1);
         mock.clear();
         wipeGLStateCache(engine);
         applyEffectWrapper(engine, wrapper);
+        drawEffect(engine);
         // Program binding cache was wiped → re-issued …
         expect(mock.count("useProgram")).toBe(1);
         // … but the owned quad GL objects survive → NOT recreated.
@@ -474,6 +480,7 @@ describe("lite-gl: context loss / restore", () => {
         });
         expect(isEffectReady(engine, wrapper.effect)).toBe(true);
         applyEffectWrapper(engine, wrapper);
+        drawEffect(engine);
         const vaosBefore = mock.count("createVertexArray");
         fireLost(canvas);
         fireRestored(canvas);
@@ -481,6 +488,7 @@ describe("lite-gl: context loss / restore", () => {
         // Restart the cycle
         expect(isEffectReady(engine, wrapper.effect)).toBe(true);
         applyEffectWrapper(engine, wrapper);
+        drawEffect(engine);
         const vaosAfter = vaosBefore + mock.count("createVertexArray");
         expect(vaosAfter).toBe(vaosBefore + 1); // exactly one new VAO
         // sampler1i should have been re-issued exactly once per declared sampler
@@ -581,25 +589,32 @@ describe("lite-gl: effect wrapper ownership", () => {
         }
     });
 
-    it("createEffectWrapperFromEffect wraps an existing effect with its own reference (#82)", () => {
+    it("drawEffect draws an existing effect fullscreen without a wrapper (#82)", () => {
         const { mock, engine, effect } = makeReadyEffect();
         mock.clear();
-        const wrapper = createEffectWrapperFromEffect(engine, effect);
-        expect(wrapper.effect).toBe(effect);
-        expect(wrapper.name).toBe("test");
-        expect(mock.count("createProgram")).toBe(0);
-        expect(applyEffectWrapper(engine, wrapper)).toBe(true);
-        disposeEffectWrapper(engine, wrapper);
-        expect(mock.count("deleteProgram")).toBe(0);
-        expect(effect._disposed).toBe(false);
-        disposeEffect(engine, effect);
-        expect(mock.count("deleteProgram")).toBe(1);
+        useEffect(engine, effect);
+        drawEffect(engine);
+        expect(mock.count("createVertexArray")).toBe(1);
+        expect(mock.count("drawElements")).toBe(1);
+        // Second draw reuses the cached quad and its binding.
+        mock.clear();
+        drawEffect(engine);
+        expect(mock.count("createVertexArray")).toBe(0);
+        expect(mock.count("bindVertexArray")).toBe(0);
+        expect(mock.count("drawElements")).toBe(1);
     });
 
-    it("createEffectWrapperFromEffect rejects a disposed effect (#82)", () => {
-        const { engine, effect } = makeReadyEffect();
-        disposeEffect(engine, effect);
-        expect(() => createEffectWrapperFromEffect(engine, effect, "late")).toThrow(/disposed/);
+    it("drawEffect rebinds the shared quad after another VAO was bound", () => {
+        const { mock, engine, effect } = makeReadyEffect();
+        useEffect(engine, effect);
+        drawEffect(engine);
+        const other = engine.gl.createVertexArray();
+        engine.gl.bindVertexArray(other);
+        engine._state.boundVao = other;
+        mock.clear();
+        drawEffect(engine);
+        expect(mock.count("bindVertexArray")).toBe(1);
+        expect(engine._state.boundVao).toBe(engine._state.quadVao);
     });
 
     it("createEffectWrapper defaults to the built-in fullscreen vertex shader", () => {

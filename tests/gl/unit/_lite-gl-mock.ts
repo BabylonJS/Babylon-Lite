@@ -176,6 +176,7 @@ export function createMockGL(): MockGL {
         FRONT_AND_BACK: 0x0408,
         // ──── pixel store + blend equations ──────────────────────────────
         UNPACK_ALIGNMENT: 0x0cf5,
+        PACK_ALIGNMENT: 0x0d05,
         UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
         MIN: 0x8007,
         MAX: 0x8008,

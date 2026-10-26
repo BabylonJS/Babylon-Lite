@@ -12,8 +12,9 @@
  * depth and/or stencil renderbuffer, all wrapped in a single
  * `WebGLFramebuffer`.
  *
- * The default {@link createRenderTarget} makes an **RGBA8** color target and
- * ships none of the HDR sized-format knowledge; {@link createFloatRenderTarget}
+ * The default {@link createRenderTarget} makes an 8-bit **RGBA8** (or, via
+ * `format`, `R8` / `RG8`) color target and ships none of the HDR sized-format
+ * knowledge; {@link createFloatRenderTarget}
  * is the separate opt-in for float / half-float color attachments (it alone
  * carries the `RGBA16F` / `RGBA32F` table, so RGBA8 consumers tree-shake it
  * away).
@@ -38,6 +39,14 @@ const FLOAT = 0x1406;
 const RGBA = 0x1908;
 /** GL `gl.RGBA8` — the default sized internalFormat. */
 const RGBA8 = 0x8058;
+/** GL `gl.RED`. */
+const RED = 0x1903;
+/** GL `gl.RG`. */
+const RG = 0x8227;
+/** GL `gl.R8`. */
+const R8 = 0x8229;
+/** GL `gl.RG8`. */
+const RG8 = 0x822b;
 /** GL `gl.LINEAR`. */
 const LINEAR = 0x2601;
 /** GL `gl.CLAMP_TO_EDGE`. */
@@ -58,6 +67,11 @@ export interface GLRenderTargetOptions {
      *  (`@babylonjs/lite-gl`), which keeps the stencil/packed
      *  renderbuffer code out of the render-target core bundle. */
     generateDepthBuffer?: boolean;
+    /** 8-bit color attachment format: `gl.RGBA` (default, `RGBA8`), `gl.RG`
+     *  (`RG8`) or `gl.RED` (`R8`) — ≙ Babylon's `RenderTargetCreationOptions.format`.
+     *  Ignored when {@link colorTexture} is supplied. Read single/two-channel
+     *  targets tightly via `readRenderTargetPixels(…, format)`. */
+    format?: GLenum;
     /** Color texture minification filter. Default `gl.LINEAR`. */
     minFilter?: GLenum;
     /** Color texture magnification filter. Default `gl.LINEAR`. */
@@ -75,8 +89,8 @@ export interface GLRenderTargetOptions {
 }
 
 /** Options for {@link createFloatRenderTarget} — {@link GLRenderTargetOptions}
- *  plus the float color `type`. */
-export interface GLFloatRenderTargetOptions extends GLRenderTargetOptions {
+ *  (always RGBA, so without `format`) plus the float color `type`. */
+export interface GLFloatRenderTargetOptions extends Omit<GLRenderTargetOptions, "format"> {
     /** Float color attachment type. Default `gl.HALF_FLOAT`. Pass `gl.FLOAT` for
      *  full 32-bit. Downgraded to the best renderable type the engine supports
      *  (`caps.textureFloatRender` / `caps.textureHalfFloatRender`), mirroring
@@ -146,7 +160,8 @@ export interface GLRenderTarget {
 }
 
 /**
- * Create an offscreen **RGBA8** render target.
+ * Create an offscreen 8-bit render target — **RGBA8** by default, or `R8` /
+ * `RG8` via {@link GLRenderTargetOptions.format}.
  *
  * The color attachment is an owned {@link GLTexture} (rebuilt by this target's
  * own restore hook), unless {@link GLRenderTargetOptions.colorTexture} supplies a
@@ -155,12 +170,18 @@ export interface GLRenderTarget {
  * @param engine - The engine to allocate GL resources on.
  * @param options - See {@link GLRenderTargetOptions} (`width`/`height` required).
  * @returns The new {@link GLRenderTarget}.
- * @throws If `width`/`height` are not positive integers, a GL handle could not
- *  be allocated, or the resulting framebuffer is not complete. On failure every
- *  partial GPU object (including an owned color texture) is released first.
+ * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
+ *  positive integers, a GL handle could not be allocated, or the resulting
+ *  framebuffer is not complete. On failure every partial GPU object (including
+ *  an owned color texture) is released first.
  */
 export function createRenderTarget(engine: GLEngineContext, options: GLRenderTargetOptions): GLRenderTarget {
-    return buildRT(engine, options, RGBA8, RGBA, UNSIGNED_BYTE);
+    const format = options.format ?? RGBA;
+    const internalFormat = format === RGBA ? RGBA8 : format === RG ? RG8 : format === RED ? R8 : 0;
+    if (internalFormat === 0) {
+        throw new Error(`lite-gl: unsupported render target format 0x${format.toString(16)}`);
+    }
+    return buildRT(engine, options, internalFormat, format, UNSIGNED_BYTE);
 }
 
 /**
@@ -292,19 +313,38 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
  * `Uint8Array` for `UNSIGNED_BYTE`, `Float32Array` for `FLOAT`, `Uint16Array`
  * for `HALF_FLOAT`. Origin is GL bottom-left.
  *
+ * Reads `RGBA` by default (like Babylon; always readable, a `RED` target reads
+ * back as `R,0,0,1`). Pass `format` `gl.RED` / `gl.RG` to read 1 / 2 channels
+ * per texel into a tightly packed buffer (`PACK_ALIGNMENT` is set to 1 and left
+ * there — lite-gl does not otherwise use it). WebGL only guarantees non-RGBA
+ * reads when they match the implementation-chosen
+ * `gl.IMPLEMENTATION_COLOR_READ_FORMAT` (`RED` for `R8`, `RG` for `RG8` in all
+ * major browsers).
+ *
  * @param engine - The engine.
  * @param rt - The render target to read from.
  * @param x - Lower-left X of the read rectangle, in texels.
  * @param y - Lower-left Y of the read rectangle, in texels.
  * @param width - Read rectangle width in texels.
  * @param height - Read rectangle height in texels.
- * @param into - Optional preallocated buffer (`width*height*4` elements of the
- *  matching type). Reused to avoid per-call allocation.
+ * @param into - Optional preallocated buffer (`width*height*channels` elements
+ *  of the matching type). Reused to avoid per-call allocation.
+ * @param format - Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or
+ *  `gl.RED` (1).
  * @returns The pixel buffer (the provided `into`, or a freshly allocated one).
  *  Empty buffer on a lost/disposed context.
  */
-export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarget, x: number, y: number, width: number, height: number, into?: ArrayBufferView): ArrayBufferView {
-    const elements = width * height * 4;
+export function readRenderTargetPixels(
+    engine: GLEngineContext,
+    rt: GLRenderTarget,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    into?: ArrayBufferView,
+    format: GLenum = RGBA
+): ArrayBufferView {
+    const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
     if (engine._isLost || engine._disposed || rt._disposed) {
         return into ?? new Uint8Array(0);
     }
@@ -319,7 +359,11 @@ export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarg
     if (buffer === undefined) {
         buffer = type === gl.FLOAT ? new Float32Array(elements) : type === gl.HALF_FLOAT ? new Uint16Array(elements) : new Uint8Array(elements);
     }
-    gl.readPixels(x, y, width, height, gl.RGBA, type, buffer);
+    if (format !== RGBA) {
+        // Not cached: a sync readback dwarfs it, and callers may change it directly.
+        gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    }
+    gl.readPixels(x, y, width, height, format, type, buffer);
     return buffer;
 }
 

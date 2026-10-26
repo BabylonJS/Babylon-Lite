@@ -126,11 +126,13 @@ use.
   `useEffect`, `disposeEffect`, and the cached uniform setters
   `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` / `…Int` /
   `…Color3` / `…Color4` / `…Texture`.
-- **Fullscreen renderer** — `createEffectWrapper`, `createEffectWrapperFromEffect`
-  (wrap an existing effect), `applyEffectWrapper`, `drawEffect`, `setViewport`,
-  `disposeEffectWrapper`. A wrapper always holds an effect (there is no
-  `setEffectWrapper`); `applyEffectWrapper` returns `false` and binds nothing
-  until that effect is ready, so skip the frame's setters and draw on `false`.
+- **Fullscreen renderer** — `createEffectWrapper`, `applyEffectWrapper`,
+  `drawEffect`, `setViewport`, `disposeEffectWrapper`. A wrapper always holds an
+  effect (there is no `setEffectWrapper`); `applyEffectWrapper` returns `false`
+  and binds nothing until that effect is ready, so skip the frame's setters and
+  draw on `false`. `drawEffect` lazily creates and binds the shared quad itself,
+  so an existing effect can be drawn fullscreen without a wrapper:
+  `isEffectReady` → `useEffect` → setters → `drawEffect`.
 - **Textures** — `createRawTexture` (typed-array upload, LDR byte formats),
   `createTextureFromSource` (single upload from already-decoded bitmaps/canvases/images),
   `createTexture3DFromPixels` + `setEffectTexture3D` (optional native RGBA8
@@ -148,10 +150,12 @@ use.
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
   `updateRawTexture` / `updateDynamicTexture` / `updateHtmlElementTexture` take
   optional `GLTextureUpdateOptions` (`invertY`, `premultiplyAlpha`).
-- **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
+- **Render targets** — `createRenderTarget` (RGBA8 FBO, or single/two-channel
+  `R8` / `RG8` via `format: gl.RED` / `gl.RG`, with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
   (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),
-  `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`,
+  `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`
+  (optional trailing `format` reads `RED` / `RG` targets tightly packed),
   `disposeRenderTarget`.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
   `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
