@@ -1,6 +1,14 @@
 // Babylon Lite — Public API
 // Tree-shakable: import only what you use.
 
+// ─── Standalone browser input ─────────────────────────────────────────
+export { createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput } from "./input/keyboard-input.js";
+export type { KeyboardInput } from "./input/keyboard-input.js";
+export { createPointerInput, resetPointerInput, disposePointerInput } from "./input/pointer-input.js";
+export type { PointerInput } from "./input/pointer-input.js";
+export { readGamepad } from "./input/gamepad-input.js";
+export type { GamepadState, GamepadButtonState } from "./input/gamepad-input.js";
+
 // ─── Core ────────────────────────────────────────────────────────────
 export {
     createEngine,
@@ -239,6 +247,10 @@ export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
+export { createRectAreaLight } from "./light/rect-area-light.js";
+export type { RectAreaLight } from "./light/rect-area-light.js";
+export { enableRectAreaLights } from "./light/enable-rect-area-lights.js";
+export { processAreaLightTexture } from "./light/process-area-light-texture.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export { setLightIntensity } from "./light/set-light-intensity.js";
@@ -864,6 +876,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { inverseLerp } from "./math/inverse-lerp.js";
 export { sampleHermiteSpline, sampleCatmullRomSpline } from "./math/curve-splines.js";
 export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {

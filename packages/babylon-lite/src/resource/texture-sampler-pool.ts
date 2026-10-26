@@ -48,3 +48,20 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
 export function clearSamplerCache(engine: EngineContext): void {
     samplerCaches?.delete(engine._device);
 }
+
+/** @internal Recover ordinary sampler settings from this pool's canonical descriptor key without retaining another cache. */
+export function getTextureSamplerDescriptor(engine: EngineContext, sampler: GPUSampler): TextureSamplerDescriptor | undefined {
+    const cache = samplerCaches?.get(engine._device);
+    if (cache) {
+        const fields = Object.keys(textureSamplerDefaults) as (keyof typeof textureSamplerDefaults)[];
+        for (const [key, value] of cache) {
+            if (value === sampler) {
+                const values = key.split(":").slice(-fields.length);
+                return Object.fromEntries(
+                    fields.map((field, i) => [field, typeof textureSamplerDefaults[field] === "number" ? Number(values[i]) : values[i]])
+                ) as TextureSamplerDescriptor;
+            }
+        }
+    }
+    return undefined;
+}

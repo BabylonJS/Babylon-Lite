@@ -122,6 +122,9 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
             continue;
         }
         meshes.r = scene._runtimeBuilds?.base(build, result.rebuildSingle) ?? result.rebuildSingle;
+        if (result._w !== undefined) {
+            meshes._w = result._w;
+        }
         meshes.o = result.renderables;
         scene._renderables.push(...result.renderables);
         if (result.updater) {

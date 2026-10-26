@@ -31,6 +31,7 @@ import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
 import type { Matrix } from "../math/matrix.js";
 import type { StorageBuffer } from "../buffers/storage-buffer.js";
+import type { AssetContainer } from "../loading/scene-loader.js";
 
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
@@ -72,6 +73,41 @@ export function ValidateFlowGraph(_flowGraph: unknown): IFlowGraphValidationResu
 
 export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlocks: unknown[]): IFlowGraphValidationResult {
     return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export interface FlowGraphPlayAnimationBlock {
+    getClassName(): string;
+}
+
+export interface FlowGraphContext {
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal -- Public Babylon.js FlowGraph context method.
+    _getGlobalContextVariable<T>(name: string, defaultValue: T): T;
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal -- Public Babylon.js FlowGraph context method.
+    _setGlobalContextVariable<T>(name: string, value: T): void;
+}
+
+export interface Observer<T> {
+    callback: (eventData: T, eventState: unknown) => void;
+    mask: number;
+    scope: any;
+    unregisterOnNextCall: boolean;
+    remove(defer?: boolean): void;
+}
+
+export interface IFlowGraphAnimationObserverSet {
+    block: FlowGraphPlayAnimationBlock;
+    groupEnd: Observer<AnimationGroup>;
+    animationEnd: Observer<any>;
+    animationLoop: Observer<any>;
+    groupLoop: Observer<AnimationGroup>;
+}
+
+export function RemoveFlowGraphAnimationGroupObservers(_context: FlowGraphContext, _animationGroup: AnimationGroup): FlowGraphPlayAnimationBlock | undefined {
+    return unsupported("RemoveFlowGraphAnimationGroupObservers", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export function defaultValueParseFunction(_key: string, _serializationObject: any, _assetsContainer: AssetContainer, _scene: Scene): any {
+    return unsupported("defaultValueParseFunction", FLOW_GRAPH_UNSUPPORTED);
 }
 
 // ─── Fluid rendering ─────────────────────────────────────────────────

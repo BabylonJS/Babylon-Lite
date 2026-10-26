@@ -92,6 +92,46 @@ lease.dispose();
         }
     });
 
+    it("exposes standalone device state and hides observer cleanup hooks", () => {
+        const probePath = resolve(BUILD_DIR, "device-input.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput,
+    createPointerInput, resetPointerInput, disposePointerInput, readGamepad,
+    type KeyboardInput, type PointerInput, type GamepadState, type GamepadButtonState,
+} from "./index.js";
+const keyboard: KeyboardInput = createKeyboardInput(window);
+const pointer: PointerInput = createPointerInput(document.createElement("canvas"));
+const held: boolean = isKeyboardKeyDown(keyboard, "KeyW");
+const codeSet: ReadonlySet<string> = keyboard.keys;
+const delta: number = pointer.deltaX;
+const pad: GamepadState | null = readGamepad(0);
+const button: GamepadButtonState | undefined = pad?.buttons[0];
+// @ts-expect-error The held-key set has no public mutation API.
+keyboard.keys.add("KeyW");
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+keyboard._dispose;
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+pointer._dispose;
+resetPointerInput(pointer);
+disposeKeyboardInput(keyboard);
+disposePointerInput(pointer);
+void [held, codeSet, delta, button];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks for a strict consumer that loads no ambient @types packages", () => {
         // A consumer with `compilerOptions.types: []` (or one that never lists `webxr`) gets no
         // automatic @types inclusion. The public WebXR API still references ambient XR globals, so the

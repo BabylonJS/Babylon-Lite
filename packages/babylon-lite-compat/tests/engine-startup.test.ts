@@ -73,6 +73,10 @@ describe("compat engine startup ordering", () => {
         const objectEngine = new Engine(canvas, { antialias: false, msaaSamples: 4 });
         await objectEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+
+        const optionsEngine = new Engine(canvas, undefined, { antialias: false, msaaSamples: 4 });
+        await optionsEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
     it("retains Lite's sample-count setting when antialiasing is not disabled", async () => {
@@ -85,6 +89,24 @@ describe("compat engine startup ordering", () => {
         const configuredEngine = new Engine(canvas, { antialias: true, msaaSamples: 1 });
         await configuredEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("accepts useReverseDepthBuffer in Babylon.js engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+        const engine = new Engine(canvas, true, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
+    });
+
+    it("accepts useReverseDepthBuffer in WebGPU engine constructor options", async () => {
+        const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
+        const engine = new WebGPUEngine(canvas, { useReverseDepthBuffer: true });
+
+        expect(engine.useReverseDepthBuffer).toBe(true);
+        await engine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, {});
     });
 
     it("forwards Lite device loss to the BJS context-loss observable", async () => {

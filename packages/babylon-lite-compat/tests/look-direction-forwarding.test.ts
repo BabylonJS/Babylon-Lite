@@ -44,9 +44,9 @@ describe("look-direction forwarding", () => {
         const rh = new Matrix();
 
         expect(Matrix.LookDirectionLHToRef(forward, up, lh)).toBe(lh);
-        expect(writeLookDirectionLHMock).toHaveBeenCalledWith(lh.m, forward, up);
+        expect(writeLookDirectionRHMock).toHaveBeenCalledWith(lh.m, forward, up);
         expect(Matrix.LookDirectionRHToRef(forward, up, rh)).toBe(rh);
-        expect(writeLookDirectionRHMock).toHaveBeenCalledWith(rh.m, forward, up);
+        expect(writeLookDirectionLHMock).toHaveBeenCalledWith(rh.m, forward, up);
     });
 
     it("forwards Quaternion LookDirection inputs through Lite and preserves ToRef identity", () => {
@@ -56,12 +56,12 @@ describe("look-direction forwarding", () => {
         const rh = new Quaternion();
 
         expect(Quaternion.FromLookDirectionLHToRef(forward, up, lh)).toBe(lh);
-        expect(writeLookDirectionLHMock).toHaveBeenCalledWith(expect.any(Float32Array), forward, up);
+        expect(writeLookDirectionRHMock).toHaveBeenCalledWith(expect.any(Float32Array), forward, up);
         expect(writeQuatMock).toHaveBeenCalledWith(expect.any(Float32Array), lh);
         expect(lh.asArray()).toEqual([0, 0, 0, 1]);
 
         expect(Quaternion.FromLookDirectionRHToRef(forward, up, rh)).toBe(rh);
-        expect(writeLookDirectionRHMock).toHaveBeenCalledWith(expect.any(Float32Array), forward, up);
+        expect(writeLookDirectionLHMock).toHaveBeenCalledWith(expect.any(Float32Array), forward, up);
         expect(writeQuatMock).toHaveBeenCalledWith(expect.any(Float32Array), rh);
         expect(rh.asArray()).toEqual([0, 0, 0, 1]);
     });
