@@ -554,7 +554,7 @@ export class ThinEngine extends AbstractEngine {}
  * Lite WebGPU context; this class exists to mirror Babylon.js's name + hierarchy.
  */
 export class Engine extends ThinEngine {
-    public constructor(canvas: RenderCanvas, antialiasOrOptions: boolean | EngineOptions = true, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
+    public constructor(canvas: RenderCanvas, antialiasOrOptions?: boolean | EngineOptions, options?: EngineOptions, adaptToDeviceRatio?: boolean) {
         if (typeof antialiasOrOptions === "object") {
             super(canvas, antialiasOrOptions);
             return;
@@ -565,7 +565,7 @@ export class Engine extends ThinEngine {
         }
         super(canvas, {
             ...options,
-            antialias: antialiasOrOptions,
+            antialias: antialiasOrOptions ?? options?.antialias,
             ...(adaptToDeviceRatio === undefined ? {} : { adaptToDeviceRatio }),
         });
     }

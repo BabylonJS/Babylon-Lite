@@ -73,6 +73,10 @@ describe("compat engine startup ordering", () => {
         const objectEngine = new Engine(canvas, { antialias: false, msaaSamples: 4 });
         await objectEngine.initAsync();
         expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+
+        const optionsEngine = new Engine(canvas, undefined, { antialias: false, msaaSamples: 4 });
+        await optionsEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
     it("retains Lite's sample-count setting when antialiasing is not disabled", async () => {
