@@ -92,12 +92,13 @@ export function exportLights(ctx: ExportContext, lights: readonly LightBase[]): 
             const convert = ctx.nodeConvert.get(parent) === true;
             const pos = light.position;
             const rq = light.rotationQuaternion;
-            const dir = light.lightType !== "point" ? light.direction : null;
+            const dir: readonly [number, number, number] | null =
+                light.lightType !== "point" ? [light.direction.x * light.scaling.x, light.direction.y * light.scaling.y, light.direction.z * light.scaling.z] : null;
             const collapse =
                 !holders.has(pNode) &&
                 nearlyEqual([pos.x, pos.y, pos.z], ORIGIN, OMIT_EPSILON) &&
                 isIdentityRotation([rq.x, rq.y, rq.z, rq.w]) &&
-                (!dir || nearlyEqual([dir.x, dir.y, dir.z], FORWARD, OMIT_EPSILON));
+                (!dir || nearlyEqual(dir, FORWARD, OMIT_EPSILON));
             if (collapse) {
                 attachExtension(ctx, ctx.doc.nodes[pNode]!, EXT, { light: lightIndex });
                 holders.add(pNode);
@@ -108,7 +109,7 @@ export function exportLights(ctx: ExportContext, lights: readonly LightBase[]): 
 
             let q: number[] = [rq.x, rq.y, rq.z, rq.w];
             if (dir) {
-                q = multiplyQuat(q, rotationToDirection(dir.x, dir.y, dir.z));
+                q = multiplyQuat(q, rotationToDirection(...dir));
             }
             let t: number[] = [pos.x, pos.y, pos.z];
             if (convert) {

@@ -19,8 +19,11 @@ export interface ExportedPrimitive {
 }
 
 /** @internal Emit the primitive for one Lite mesh (synchronous). Returns null, after logging when
- *  the cause is unexpected, when the mesh has no exportable CPU geometry. */
+ *  the cause is unexpected, when the mesh has no drawable CPU geometry. */
 export function exportPrimitive(ctx: ExportContext, m: Mesh, convert: boolean): ExportedPrimitive | null {
+    if (m.thinInstances?.count === 0) {
+        return null;
+    }
     const positions = m._cpuPositions;
     if (!positions) {
         ctx.warn(`Mesh "${m.name}" has no retained CPU geometry; exporting its node without a mesh.`);

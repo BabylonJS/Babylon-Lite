@@ -9,6 +9,7 @@ import { loadGltf } from "../../../../packages/babylon-lite/src/loader-gltf/load
 import { initMeshTransform } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { Mesh, MeshGPU } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, createSceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
@@ -281,7 +282,7 @@ export async function exportAndParse(scene: SceneContext): Promise<ParsedGlb> {
 }
 
 /** Reload an untextured export through the real loader with mocked GPU uploads. */
-export function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContainer> {
+export async function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContainer> {
     const device = {
         createBuffer({ size }: GPUBufferDescriptor) {
             const storage = new ArrayBuffer(size);
@@ -291,7 +292,10 @@ export function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContainer> {
         createTexture: () => ({ createView: () => ({}), destroy() {} }),
         queue: { writeTexture() {} },
     } as unknown as GPUDevice;
-    return loadGltf({ _device: device } as EngineContext, glb.bytes.slice().buffer);
+    const container = await loadGltf({ _device: device } as EngineContext, glb.bytes.slice().buffer);
+    const scene = createSceneContext(createScene({ device }).surface, { defaultRenderTask: false });
+    addToScene(scene, container);
+    return container;
 }
 
 /** Split a GLB into its JSON document and BIN payload, checking the framing. */

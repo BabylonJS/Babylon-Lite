@@ -7,7 +7,7 @@ import { FLOAT } from "../export-buffers.js";
 import type { ExportContext } from "../export-context.js";
 import { attachExtension } from "../export-context.js";
 import type { GltfAttributes, GltfNode } from "../export-gltf-types.js";
-import { convertRotation, EXPORT_EPSILON } from "../export-handedness.js";
+import { convertRotation, OMIT_EPSILON } from "../export-handedness.js";
 
 const EXT = "EXT_mesh_gpu_instancing";
 
@@ -33,15 +33,15 @@ export function writeInstancing(ctx: ExportContext, node: GltfNode, mesh: Mesh, 
         translations.set([convert ? -t.x : t.x, t.y, t.z], i * 3);
         rotations.set(q, i * 4);
         scales.set([s.x, s.y, s.z], i * 3);
-        moved ||= Math.abs(t.x) > EXPORT_EPSILON || Math.abs(t.y) > EXPORT_EPSILON || Math.abs(t.z) > EXPORT_EPSILON;
-        rotated ||= Math.abs(q[0]!) > EXPORT_EPSILON || Math.abs(q[1]!) > EXPORT_EPSILON || Math.abs(q[2]!) > EXPORT_EPSILON;
-        scaled ||= Math.abs(s.x - 1) > EXPORT_EPSILON || Math.abs(s.y - 1) > EXPORT_EPSILON || Math.abs(s.z - 1) > EXPORT_EPSILON;
+        moved ||= Math.abs(t.x) > OMIT_EPSILON || Math.abs(t.y) > OMIT_EPSILON || Math.abs(t.z) > OMIT_EPSILON;
+        rotated ||= Math.abs(q[0]!) > OMIT_EPSILON || Math.abs(q[1]!) > OMIT_EPSILON || Math.abs(q[2]!) > OMIT_EPSILON;
+        scaled ||= Math.abs(s.x - 1) > OMIT_EPSILON || Math.abs(s.y - 1) > OMIT_EPSILON || Math.abs(s.z - 1) > OMIT_EPSILON;
     }
 
     const colors = thin.colors && thin.colors.length >= count * 4 ? thin.colors : null;
     const attributes: GltfAttributes = {};
-    // The extension requires at least one attribute; all-identity instances keep TRANSLATION.
-    if (moved || !(rotated || scaled || colors)) {
+    // Lite's loader derives instance count from TRS attributes, not _COLOR_0.
+    if (moved || !(rotated || scaled)) {
         attributes.TRANSLATION = addFloatAccessor(ctx, translations, count, "VEC3");
     }
     if (rotated) {
