@@ -7,6 +7,7 @@ import type { ShaderPacket } from "../../../packages/babylon-lite/src/material/s
 import { buildShaderRenderablesWithInstancing } from "../../../packages/babylon-lite/src/material/shader/shader-thin-instance";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
+import { enableThinInstanceDirectDraws } from "../../../packages/babylon-lite/src/mesh/enable-thin-instance-direct-draws";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import type { MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
@@ -262,7 +263,7 @@ describe("ShaderMaterial thin instances", () => {
         expect(engine._device.queue.writeBuffer).not.toHaveBeenCalled();
     });
 
-    it("promotes a cached direct draw to indirect after the instance count changes", () => {
+    it.each([false, true])("synchronizes changing counts with direct mode %s", (direct) => {
         const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
         const engine = {
             _device: {
@@ -312,6 +313,9 @@ describe("ShaderMaterial thin instances", () => {
                 _pipelineLayout: {} as GPUPipelineLayout,
             })
         );
+        if (direct) {
+            enableThinInstanceDirectDraws(mesh);
+        }
         const binding = result.renderables[0]!.bind(engine, {} as RenderTargetSignature);
         binding.update!({ targetWidth: 1, targetHeight: 1 });
         const drawIndexedIndirect = vi.fn();
@@ -335,6 +339,17 @@ describe("ShaderMaterial thin instances", () => {
         mesh.thinInstances!._dirtyMax = 1;
         binding.update!({ targetWidth: 1, targetHeight: 1 });
         expect(binding.draw(pass, engine)).toBe(1);
-        expect(drawIndexedIndirect).toHaveBeenCalledTimes(1);
+        if (direct) {
+            expect(drawIndexed).toHaveBeenLastCalledWith(3, 1, 0, undefined);
+            for (const count of [0, 1]) {
+                mesh.thinInstances!.count = count;
+                binding.update!({ targetWidth: 1, targetHeight: 1 });
+                binding.draw(pass, engine);
+                expect(drawIndexed).toHaveBeenLastCalledWith(3, count, 0, undefined);
+            }
+            expect(drawIndexedIndirect).not.toHaveBeenCalled();
+        } else {
+            expect(drawIndexedIndirect).toHaveBeenCalledTimes(1);
+        }
     });
 });

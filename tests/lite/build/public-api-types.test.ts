@@ -35,6 +35,52 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes the thin-instance direct-draw enabler through the root without its private policy", () => {
+        const probePath = resolve(BUILD_DIR, "thin-instance-direct-draws.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { enableThinInstanceDirectDraws, type Mesh } from "./index.js";
+declare const mesh: Mesh;
+const result: void = enableThinInstanceDirectDraws(mesh);
+// @ts-expect-error Direct draws require a mesh.
+enableThinInstanceDirectDraws();
+// @ts-expect-error There is no runtime disable option.
+enableThinInstanceDirectDraws(mesh, false);
+if (mesh.thinInstances) {
+    // @ts-expect-error The installed draw policy is internal.
+    mesh.thinInstances._drawCountPolicy;
+}
+void result;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks for a strict consumer that loads no ambient @types packages", () => {
         // A consumer with `compilerOptions.types: []` (or one that never lists `webxr`) gets no
         // automatic @types inclusion. The public WebXR API still references ambient XR globals, so the

@@ -943,6 +943,7 @@ export {
     clearThinInstanceLodPartner,
 } from "./mesh/thin-instance.js";
 export { enableThinInstanceWorldBounds } from "./mesh/enable-thin-instance-world-bounds.js";
+export { enableThinInstanceDirectDraws } from "./mesh/enable-thin-instance-direct-draws.js";
 export {
     addHierarchyInstance,
     createHierarchyInstancePool,
