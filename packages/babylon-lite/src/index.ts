@@ -247,6 +247,10 @@ export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
+export { createRectAreaLight } from "./light/rect-area-light.js";
+export type { RectAreaLight } from "./light/rect-area-light.js";
+export { enableRectAreaLights } from "./light/enable-rect-area-lights.js";
+export { processAreaLightTexture } from "./light/process-area-light-texture.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export { setLightIntensity } from "./light/set-light-intensity.js";
