@@ -336,7 +336,28 @@ describe("Scene pointer observable", () => {
         expect(info.pickedMesh).toBe(box);
         expect(seen[0]!.pickInfo).toBe(info);
         expect(pick).toHaveBeenCalledOnce();
-        expect(pick).toHaveBeenCalledWith(400, 300);
+        expect(pick).toHaveBeenCalledWith(400, 300, undefined, false, null);
+        scene.dispose();
+    });
+
+    it("picks through cameraToUseForPointers when it differs from the active camera", () => {
+        const { canvas, scene, box } = pickableScene();
+        const facingBox = scene.activeCamera!;
+        const facingAway = new ArcRotateCamera("away", 0, Math.PI / 2, 10, new Vector3(0, 100, 0), scene);
+        const seen: PointerInfo[] = [];
+        scene.onPointerObservable.add((info) => seen.push(info));
+
+        // The active camera sees the box at the pointer; the pointer camera does not.
+        scene.cameraToUseForPointers = facingAway;
+        canvas.dispatchEvent(pointer("pointerdown", 410, 320));
+        expect(scene.activeCamera).toBe(facingBox);
+        expect(seen[0]!.pickInfo!.hit).toBe(false);
+
+        // And the other way around.
+        scene.activeCamera = facingAway;
+        scene.cameraToUseForPointers = facingBox;
+        canvas.dispatchEvent(pointer("pointerdown", 410, 320));
+        expect(seen[1]!.pickInfo!.pickedMesh).toBe(box);
         scene.dispose();
     });
 

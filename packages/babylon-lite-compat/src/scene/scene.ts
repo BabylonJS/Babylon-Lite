@@ -278,10 +278,12 @@ export class Scene extends AbstractScene {
                 this.pointerX = pointerEvent.clientX - rect.x;
                 this.pointerY = pointerEvent.clientY - rect.y;
             }
-            // As in Babylon.js, the pick at this event's position runs only if an observer reads `pickInfo`.
+            // As in Babylon.js, the pick at this event's position runs only if an observer reads `pickInfo`, through the
+            // pointer camera when one is set (`scene.pick` alone prefers the active camera).
             const x = this.pointerX;
             const y = this.pointerY;
-            this.onPointerObservable.notifyObservers(new PointerInfo(type, pointerEvent, null, () => this.pick(x, y)), type);
+            const camera = this.cameraToUseForPointers;
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, pointerEvent, null, () => this.pick(x, y, undefined, false, camera)), type);
         };
 
         for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
