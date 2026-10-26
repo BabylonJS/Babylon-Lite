@@ -48,6 +48,9 @@
             }
         }
     },
+    "dependencies": {
+        "text-shaper": "^0.1.28"
+    },
     "devDependencies": {
         "typescript": "^6.0.3"
     }
