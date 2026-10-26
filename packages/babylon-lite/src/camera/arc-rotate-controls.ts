@@ -352,44 +352,43 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (camera.wheelPrecision * 1000);
     }
 
-    function onContextMenu(e: Event): void {
-        e.preventDefault();
-    }
-
-    function onTouchStart(e: TouchEvent): void {
+    /** Record the changed touches; returns true while two or more fingers are down. */
+    function trackTouches(e: TouchEvent): boolean {
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i]!;
             activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
         }
-        if (activeTouches.size >= 2) {
+        return activeTouches.size >= 2;
+    }
+
+    /** Distance between the first two active touches. */
+    function pinchDistance(): number {
+        const iter = activeTouches.values();
+        const p0 = iter.next().value!;
+        const p1 = iter.next().value!;
+        return Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+
+    function onTouchStart(e: TouchEvent): void {
+        if (trackTouches(e)) {
             // A second finger landed: this is a pinch, not a rotate. Cancel any
             // in-progress pointer rotate/pan so the gesture only zooms, and stop
             // the browser from hijacking the two-finger gesture as a page zoom
             // (iOS Safari ignores touch-action:none for pinch-zoom).
             isDragging = false;
             isPanning = false;
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            pinchStartDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            pinchStartDist = pinchDistance();
             pinchStartRadius = camera.radius;
             e.preventDefault();
         }
     }
 
     function onTouchMove(e: TouchEvent): void {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i]!;
-            activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-        }
-        if (activeTouches.size >= 2) {
+        if (trackTouches(e)) {
             // Prevent the browser's native pinch-to-zoom (page zoom on iOS) so the
             // gesture drives the camera radius instead.
             e.preventDefault();
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            const dist = pinchDistance();
             if (pinchStartDist > 0 && dist > 0) {
                 // Direct write — the camera's radius setter self-clamps to any
                 // configured orbit limits, so no transient out-of-bounds value
@@ -416,10 +415,11 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
     }
 
-    // iOS Safari fires non-standard gesture* events for pinch and still zooms the
-    // page even with touch-action:none; preventing them keeps the gesture for the
-    // camera. (No-op on browsers that don't emit these events.)
-    function onGesture(e: Event): void {
+    // Suppresses the canvas context menu. iOS Safari also fires non-standard
+    // gesture* events for pinch and still zooms the page even with
+    // touch-action:none; preventing them keeps the gesture for the camera.
+    // (No-op on browsers that don't emit these events.)
+    function preventDefault(e: Event): void {
         e.preventDefault();
     }
 
@@ -491,18 +491,19 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         scene._beforeRender.push(applyInertia);
     }
 
+    const nonPassive: AddEventListenerOptions = { passive: false };
     const listeners: [string, EventListener, AddEventListenerOptions?][] = [
         ["pointerdown", onPointerDown as EventListener],
         ["pointermove", onPointerMove as EventListener],
         ["pointerup", onPointerUp as EventListener],
-        ["wheel", onWheel as EventListener, { passive: false }],
-        ["contextmenu", onContextMenu as EventListener],
-        ["touchstart", onTouchStart as EventListener, { passive: false }],
-        ["touchmove", onTouchMove as EventListener, { passive: false }],
+        ["wheel", onWheel as EventListener, nonPassive],
+        ["contextmenu", preventDefault],
+        ["touchstart", onTouchStart as EventListener, nonPassive],
+        ["touchmove", onTouchMove as EventListener, nonPassive],
         ["touchend", onTouchEnd as EventListener],
-        ["gesturestart", onGesture as EventListener, { passive: false }],
-        ["gesturechange", onGesture as EventListener, { passive: false }],
-        ["gestureend", onGesture as EventListener, { passive: false }],
+        ["gesturestart", preventDefault, nonPassive],
+        ["gesturechange", preventDefault, nonPassive],
+        ["gestureend", preventDefault, nonPassive],
     ];
     for (const [ev, h, opts] of listeners) {
         canvas.addEventListener(ev, h, opts);

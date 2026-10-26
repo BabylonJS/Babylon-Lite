@@ -51,8 +51,14 @@ describe("babylon-lite-gl build output", () => {
 
         // The emitted manifest is the scoped npm name exposing EXACTLY one public
         // export — the barrel. The former sub-entries must NOT be published anymore.
-        const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown> };
+        const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown>; dependencies?: Record<string, string> };
         expect(pkg.name).toBe("@babylonjs/lite-gl");
+
+        // The emitted text modules import `text-shaper` by bare specifier, so the published manifest must
+        // carry the source package's runtime dependencies.
+        const sourceDependencies = (JSON.parse(readFileSync(resolve(PACKAGE_DIR, "package.json"), "utf-8")) as { dependencies?: Record<string, string> }).dependencies;
+        expect(sourceDependencies?.["text-shaper"]).toBeDefined();
+        expect(pkg.dependencies).toEqual(sourceDependencies);
         expect(Object.keys(pkg.exports ?? {})).toEqual(["."]);
         for (const subpath of REMOVED_SUBPATHS) {
             expect(pkg.exports?.[subpath], `exports["${subpath}"] must no longer be published`).toBeUndefined();

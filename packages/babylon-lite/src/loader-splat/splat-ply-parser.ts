@@ -8,19 +8,25 @@
  *  per-vertex `f_rest_*`) are handled by a separate, dynamic-imported parser
  *  (`splat-ply-compressed.ts`) so plain `.ply` scenes (e.g. scene 120) don't
  *  bundle the additional decoder code. `isPlyCompressedOrSH` lets callers
- *  decide which path to take. */
+ *  decide which path to take.
+ *
+ *  `loadSplat` dynamic-imports this module only once `isPly` (in
+ *  `splat-ply-header.ts`) has recognised a PLY asset, so `.splat` scenes skip it. */
 
 import { F32, U8C, U8, DV } from "../engine/typed-arrays.js";
 import type { ParsedSplat } from "./splat-data.js";
+import { PLY_HEADER_END as HEADER_END } from "./splat-ply-header.js";
 
 const SH_C0 = 0.28209479177387814;
-const HEADER_END = /end_header\r?\n/;
 
-/** True when the buffer starts with a complete PLY ASCII header. */
-export function isPly(data: ArrayBuffer): boolean {
-    const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
-    const header = new TextDecoder().decode(ubuf);
-    return header.startsWith("ply") && HEADER_END.test(header);
+/** Parse a PLY splat asset, routing compressed or SH-carrying files to the
+ *  separately-imported compressed parser. */
+export async function parsePlySplat(data: ArrayBuffer): Promise<ParsedSplat> {
+    if (isPlyCompressedOrSH(data)) {
+        const { convertCompressedPlyToParsedSplat } = await import("./splat-ply-compressed.js");
+        return convertCompressedPlyToParsedSplat(data);
+    }
+    return convertPlyToSplat(data);
 }
 
 /** True when the PLY header declares either an `element chunk` block

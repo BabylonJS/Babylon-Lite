@@ -1,6 +1,14 @@
 // Babylon Lite — Public API
 // Tree-shakable: import only what you use.
 
+// ─── Standalone browser input ─────────────────────────────────────────
+export { createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput } from "./input/keyboard-input.js";
+export type { KeyboardInput } from "./input/keyboard-input.js";
+export { createPointerInput, resetPointerInput, disposePointerInput } from "./input/pointer-input.js";
+export type { PointerInput } from "./input/pointer-input.js";
+export { readGamepad } from "./input/gamepad-input.js";
+export type { GamepadState, GamepadButtonState } from "./input/gamepad-input.js";
+
 // ─── Core ────────────────────────────────────────────────────────────
 export {
     createEngine,
@@ -83,8 +91,8 @@ export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinit
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
+export { buildFrameGraphTask, getFrameGraphTasks } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
 export {
     createFrameGraphContext,
     registerFrameGraphContext,
@@ -104,6 +112,8 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createCustomPostProcessTask } from "./post-process/custom.js";
+export type { CustomPostProcessTaskConfig } from "./post-process/custom.js";
 export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
 export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
@@ -237,6 +247,10 @@ export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
+export { createRectAreaLight } from "./light/rect-area-light.js";
+export type { RectAreaLight } from "./light/rect-area-light.js";
+export { enableRectAreaLights } from "./light/enable-rect-area-lights.js";
+export { processAreaLightTexture } from "./light/process-area-light-texture.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export { setLightIntensity } from "./light/set-light-intensity.js";
@@ -862,6 +876,7 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export { inverseLerp } from "./math/inverse-lerp.js";
 export { sampleHermiteSpline, sampleCatmullRomSpline } from "./math/curve-splines.js";
 export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
 export {
@@ -895,6 +910,7 @@ export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat
 export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
 export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
 export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
+export { _getGaussianPointSplattingPackedShBytesPerSplat, _hasGaussianPointSplattingProjectedDepth } from "./math/gaussian-point-splatting-compat-helpers.js";
 export { decomposeMat4 } from "./math/decompose-mat4.js";
 export type { DecomposedTransform } from "./math/decompose-mat4.js";
 export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
@@ -1451,6 +1467,41 @@ export {
     tickFlowGraph,
 } from "./flow-graph/index.js";
 
+// ─── MeshLoD (opt-in, tree-shakable) ─────────────────────────────────
+// Clustered level-of-detail streaming for large static meshes. Importing the
+// facade has no side effects and pulls in no runtime/decoder/material chunks;
+// those load only when loadMeshLoD is first called, so non-MeshLoD scenes fetch
+// zero MeshLoD bytes.
+export {
+    loadMeshLoD,
+    createMeshLoDInstance,
+    addMeshLoDToScene,
+    removeMeshLoDFromScene,
+    setMeshLoDScreenSpaceError,
+    setMeshLoDCacheBudget,
+    setMeshLoDStreamingPaused,
+    setMeshLoDDebugView,
+    setMeshLoDSelectionMode,
+    getMeshLoDDiagnostics,
+    disposeMeshLoDAsset,
+    isMeshLoDError,
+} from "./mesh-lod/mesh-lod.js";
+export type {
+    MeshLoDSource,
+    MeshLoDAssetState,
+    MeshLoDSelectionMode,
+    MeshLoDDebugView,
+    MeshLoDRequestOptions,
+    MeshLoDLoadOptions,
+    MeshLoDMetadata,
+    MeshLoDDiagnostics,
+    MeshLoDAsset,
+    MeshLoDInstanceOptions,
+    MeshLoDInstance,
+    MeshLoDError,
+    MeshLoDErrorCode,
+} from "./mesh-lod/mesh-lod.js";
+
 // Accessibility (optional scene descriptions, roles, and ARIA attributes).
 export {
     createAccessibilityTree,
@@ -1476,3 +1527,5 @@ export {
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
 export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
 export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
+export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";

@@ -96,7 +96,7 @@ export function getTextPipelineCache(engine: EngineContext): TextPipelineDeviceC
         entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "uint" } },
             { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
             { binding: 4, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
         ],
@@ -206,8 +206,8 @@ function buildPipeline(
                     ...(alphaToCoverage
                         ? {}
                         : {
-                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs
-                              // `vColor * coverage`, so RGB is already coverage-weighted.
+                              // Premultiplied-alpha blend. The ordinary Slug fragment outputs RGB
+                              // premultiplied by `vColor.a * coverage`.
                               blend: {
                                   color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,
                                   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" } as GPUBlendComponent,

@@ -105,6 +105,8 @@ export function createMockGL(): MockGL {
         RG8: 0x822b,
         R8: 0x8229,
         RGBA32F: 0x8814,
+        RG32UI: 0x823c,
+        RG_INTEGER: 0x8228,
         RGB32F: 0x8815,
         RGBA16F: 0x881a,
         RGB16F: 0x881b,

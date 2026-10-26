@@ -214,3 +214,80 @@ describe("Mesh.clone", () => {
         expect(registered).toContain(clone.getChildMeshes()[0]);
     });
 });
+
+describe("Mesh.clone of a loaded mesh keeps its Lite material", () => {
+    /** A compat material stand-in for `scene.defaultMaterial`; the add path finalizes and binds it. */
+    function fakeMaterial(tag: string): { _lite: object; _ensureRenderable: ReturnType<typeof vi.fn> } {
+        return { _lite: { tag }, _ensureRenderable: vi.fn() };
+    }
+
+    /** `fakeScene()` plus a real `defaultMaterial` and an engine, with the adds queued until `start()`. */
+    function sceneWithDefault(): { scene: Scene; fallback: ReturnType<typeof fakeMaterial>; start(): void } {
+        const { scene } = fakeScene();
+        const fallback = fakeMaterial("default");
+        const queued: Array<() => void> = [];
+        Object.assign(scene, {
+            defaultMaterial: fallback,
+            getEngine: () => ({ _lite: {} }),
+            _deferAdd: (add: () => void) => queued.push(add),
+        });
+        return { scene, fallback, start: () => queued.splice(0).forEach((add) => add()) };
+    }
+
+    it("keeps the loaded material instead of the scene default material", () => {
+        const cube = liteMesh("Cube");
+        const { scene, fallback, start } = sceneWithDefault();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([cube])), new Map(), scene)[1] as Mesh;
+
+        const clone = source.clone("CubeCopy");
+        start();
+
+        expect(clone.material).toBeNull();
+        expect(clone._lite.material).toBe(cube.material);
+        expect(fallback._ensureRenderable).not.toHaveBeenCalled();
+    });
+
+    it("keeps the loaded materials of cloned descendants", () => {
+        const child = liteMesh("Child");
+        const parent = liteMesh("Parent");
+        parent.children.push(child);
+        const { scene, start } = sceneWithDefault();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([parent])), new Map(), scene)[1] as Mesh;
+
+        const clone = source.clone("ParentCopy");
+        start();
+
+        const clonedChild = clone.getChildMeshes()[0] as Mesh;
+        expect(clonedChild.name).toBe("ParentCopy.Child");
+        expect(clonedChild.material).toBeNull();
+        expect(clonedChild._lite.material).toBe(child.material);
+        expect(clone._lite.material).toBe(parent.material);
+    });
+
+    it("falls back to the scene default material when the Lite mesh has no material", () => {
+        const cube = liteMesh("Cube");
+        delete cube.material;
+        const { scene, fallback, start } = sceneWithDefault();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([cube])), new Map(), scene)[1] as Mesh;
+
+        const clone = source.clone("CubeCopy");
+        start();
+
+        expect(clone._lite.material).toBe(fallback._lite);
+        expect(fallback._ensureRenderable).toHaveBeenCalled();
+    });
+
+    it("lets an explicit material assignment replace the kept material", () => {
+        const cube = liteMesh("Cube");
+        const { scene, start } = sceneWithDefault();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([cube])), new Map(), scene)[1] as Mesh;
+        const replacement = fakeMaterial("replacement");
+
+        const clone = source.clone("CubeCopy");
+        clone.material = null;
+        Object.assign(scene, { defaultMaterial: replacement });
+        start();
+
+        expect(clone._lite.material).toBe(replacement._lite);
+    });
+});

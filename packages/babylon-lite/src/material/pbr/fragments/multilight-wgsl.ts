@@ -63,7 +63,7 @@ return r;
 /** The multi-light direct lighting loop WGSL block for the PBR template.
  *  Contains slot markers AD and BL for fragment injection.
  *  Generated at call time because MAX_LIGHTS is runtime-configurable via `setMaxLights`. */
-export function getMultiLightLoop(): string {
+export function getMultiLightLoop(extraLight = "", computeLight = "computePbrLight"): string {
     return wgsl`var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 // BJS direct-light specular: roughness is clamped by the geometric AA factor
@@ -81,7 +81,7 @@ let lightCount = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 // for those ancillary BRDFs are not yet supported (single-light parity only).
 let lightIndex0 = mli(0u);
 let entry0 = lights.lights[lightIndex0];
-let pl0 = computePbrLight(entry0, N, input.worldPos, material.lightFalloffMode);
+let pl0 = ${computeLight}(entry0, N, input.worldPos, material.lightFalloffMode);
 let L = pl0.L;
 let NdotL = pl0.NdotL;
 let lightColor = pl0.specColor;
@@ -92,7 +92,8 @@ let VdotH = saturate(dot(V, H));
 for (var li = 0u; li < lightCount; li++) {
 var pl: PbrLightResult;
 let lightIndex = mli(li);
-if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }
+${extraLight}
+if (li == 0u) { pl = pl0; } else { pl = ${computeLight}(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }
 let sf = shadowFactors[lightIndex];
 if (pl.isHemi) {
 directDiffuse += pl.color * surfaceAlbedo * material.directIntensity * sf;
