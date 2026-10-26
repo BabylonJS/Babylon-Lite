@@ -1,8 +1,7 @@
 /**
  * Input for the platformer demo: keyboard + on-screen touch buttons unified into a
- * single polled `InputState`. The engine provides no input subsystem (it is a pure
- * renderer), so this is hand-rolled with DOM listeners — explicitly allowed for the
- * demos, which exist to showcase the renderer.
+ * single polled `InputState`. The demo owns this action mapping; the engine's
+ * standalone device input helpers provide raw state rather than game actions.
  */
 
 export interface InputState {
