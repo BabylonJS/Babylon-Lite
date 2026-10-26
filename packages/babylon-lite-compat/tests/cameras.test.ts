@@ -185,6 +185,67 @@ describe("Camera projection mode", () => {
     });
 });
 
+describe("ArcRotateCamera.target stays live", () => {
+    function makeCamera(): ArcRotateCamera {
+        return new ArcRotateCamera("camera", 0.3, 1.1, 10, Vector3.Zero(), new Scene(new NullEngine()));
+    }
+
+    /** The camera's world-space eye position, read from its Lite world matrix. */
+    function eye(camera: ArcRotateCamera): number[] {
+        const m = camera._lite.worldMatrix as unknown as ArrayLike<number>;
+        return [m[12]!, m[13]!, m[14]!];
+    }
+
+    /** The eye position Babylon.js derives from the orbit parameters around `target`. */
+    function expectedEye(camera: ArcRotateCamera, target: { x: number; y: number; z: number }): number[] {
+        const { alpha, beta, radius } = camera;
+        return [target.x + radius * Math.cos(alpha) * Math.sin(beta), target.y + radius * Math.cos(beta), target.z + radius * Math.sin(alpha) * Math.sin(beta)];
+    }
+
+    function expectClose(actual: number[], expected: number[]): void {
+        actual.forEach((value, i) => expect(value).toBeCloseTo(expected[i]!, 5));
+    }
+
+    it("moves the view when the target is assigned", () => {
+        const camera = makeCamera();
+        eye(camera);
+        const liteTarget = camera._lite.target;
+
+        camera.target = new Vector3(1, 2, 3);
+
+        expect(camera._lite.target).toBe(liteTarget);
+        expectClose(eye(camera), expectedEye(camera, { x: 1, y: 2, z: 3 }));
+    });
+
+    it("writes component and in-place edits of the target through to Lite", () => {
+        const camera = makeCamera();
+        eye(camera);
+
+        camera.target.x = 4;
+        camera.target.addInPlace(new Vector3(0, 1, 0));
+
+        expect([camera._lite.target.x, camera._lite.target.y, camera._lite.target.z]).toEqual([4, 1, 0]);
+        expectClose(eye(camera), expectedEye(camera, { x: 4, y: 1, z: 0 }));
+    });
+
+    it("keeps Lite's own target edits (panning) visible after an assignment", () => {
+        const camera = makeCamera();
+        camera.target = new Vector3(1, 0, 0);
+        eye(camera);
+
+        // Lite's pointer pan moves the target component-wise, as `arc-rotate-controls` does.
+        camera._lite.target.y += 2;
+
+        expectClose(eye(camera), expectedEye(camera, { x: 1, y: 2, z: 0 }));
+        expect(camera.target.y).toBe(2);
+    });
+
+    it("returns the same target object on every read", () => {
+        const camera = makeCamera();
+        expect(camera.target).toBe(camera.target);
+    });
+});
+
 describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
     function fakeLiteArcRotate(): LiteArcRotateCamera {
         return {
