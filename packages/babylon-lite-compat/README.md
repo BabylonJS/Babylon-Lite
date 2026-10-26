@@ -255,8 +255,11 @@ move the whole import:
   example, a node scaled `(2, 1, 1)` above a primitive rotated 45 degrees around Z. Baking such a primitive drops the
   shear and changes the geometry.
 - **Tightly packed vertex data.** Baking replaces the vertex buffers through `resizeMeshGeometry()`, which throws for
-  interleaved geometry. A glTF primitive whose attributes come from a bufferView with `byteStride` loads as interleaved
-  geometry.
+  interleaved geometry. A glTF primitive loads as interleaved only when at least one of its vertex attributes comes
+  from a bufferView whose `byteStride` is larger than that attribute's element size, for example positions and normals
+  sharing one bufferView with `byteStride: 24`, and no loader extension such as Draco has already decoded it. A
+  `byteStride` equal to the element size, which many exporters write on tightly packed bufferViews, keeps the primitive
+  on the tightly packed path.
 - **Undeformed geometry.** The baker transforms the base positions, normals and tangents only. It does not transform
   morph target deltas, so after baking a delta contributes in the baked space: under an inherited uniform scale of
   `0.001`, a delta of 1 contributes `0.001` before baking and `1` after. Skinned meshes are not covered either, and
