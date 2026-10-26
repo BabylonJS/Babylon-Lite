@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attach, createMesh, createScene, expectClose, exportAndParse, QUAD_INDICES, readAccessor } from "./export-test-utils";
+import { attach, createMesh, createScene, expectClose, exportAndParse, QUAD_INDICES, readAccessor, reloadUntexturedGlb } from "./export-test-utils";
 import type { ParsedGlb } from "./export-test-utils";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
@@ -506,6 +506,36 @@ describe("thin instances", () => {
         expectClose(readAccessor(glb, attributes.TRANSLATION), [0, 0, 0, 0, 0, 0]);
     });
 
+    it("round-trips the count of colored identity instances", async () => {
+        const identityMatrices = matrices(translationMatrix(0, 0, 0), translationMatrix(0, 0, 0));
+        const colors = new Float32Array([1, 0, 0, 1, 0, 1, 0, 1]);
+        const glb = await exportMesh(instanced({ matrices: identityMatrices, count: 2, colors }));
+        const container = await reloadUntexturedGlb(glb);
+        const mesh = container.entities[0]!.children[0]!.children[0] as Mesh;
+        expect(mesh.thinInstances?.count).toBe(2);
+        expectClose(mesh.thinInstances?.matrices, Array.from(identityMatrices));
+        expectClose(readAccessor(glb, instancing(glb)._COLOR_0), [1, 0, 0, 0, 1, 0]);
+        expectClose(readAccessor(glb, instancing(glb).TRANSLATION), [0, 0, 0, 0, 0, 0]);
+    });
+
+    describe.each([false, true])("small instance transforms (pass-through: %s)", (passThrough) => {
+        it.each([
+            ["translation", 0.0005, 0, 2],
+            ["rotation", 0, 0.0005, 2],
+            ["scale", 1, 0, 1.0005],
+        ] as const)("preserves small %s components on reload", async (_name, tx, qy, sx) => {
+            const qw = Math.sqrt(1 - qy * qy);
+            const matrix = composeMat4(tx, 0, 0, 0, qy, 0, qw, sx, 1, 1);
+            const mesh = instanced({ matrices: new Float32Array(matrix), count: 1 });
+            const glb = await (passThrough ? exportPassThrough(mesh) : exportMesh(mesh));
+            const container = await reloadUntexturedGlb(glb);
+            const reloaded = container.entities[0]!.children[0]!.children[0] as Mesh;
+            const sign = passThrough ? 1 : -1;
+            const expected = composeMat4(sign * tx, 0, 0, 0, sign * qy, 0, qw, sx, 1, 1);
+            expectClose(reloaded.thinInstances?.matrices, Array.from(expected), 6);
+        });
+    });
+
     it("exports _COLOR_0 as VEC3 and warns when some instance alpha is below 1", async () => {
         const colors = new Float32Array([1, 0, 0, 1, 0, 1, 0, 0.5]);
         const glb = await exportMesh(instanced({ matrices: matrices(translationMatrix(1, 0, 0), translationMatrix(2, 0, 0)), count: 2, colors }));
@@ -529,10 +559,33 @@ describe("thin instances", () => {
         expectClose(readAccessor(glb, instancing(glb).TRANSLATION), [1, 2, 3]);
     });
 
-    it("skips the extension for a mesh with zero active instances", async () => {
-        const glb = await exportMesh(instanced({ matrices: matrices(translationMatrix(1, 0, 0)), count: 0 }));
+    it("round-trips an empty pool as a hierarchy node without a drawable mesh", async () => {
+        const mesh = instanced({ matrices: matrices(translationMatrix(1, 0, 0)), count: 0 });
+        attach(createTransformNode("marker", 1, 2, 3), mesh);
+        const glb = await exportMesh(mesh);
+        expect(glb.json.nodes[0].mesh).toBeUndefined();
+        expect(glb.json.meshes).toBeUndefined();
         expect(glb.json.nodes[0].extensions).toBeUndefined();
         expect(glb.json.extensionsUsed).toBeUndefined();
+        const container = await reloadUntexturedGlb(glb);
+        const reloaded = container.entities[0]!.children[0]!;
+        expect(reloaded.name).toBe("inst");
+        expect("material" in reloaded).toBe(false);
+        expect(reloaded.children.map((child) => child.name)).toEqual(["marker"]);
+    });
+
+    it("omits an empty pool's primitive when folding it beside an ordinary mesh", async () => {
+        const holder = createTransformNode("holder");
+        const empty = attach(instanced({ matrices: matrices(translationMatrix(0, 0, 0)), count: 0 }), holder);
+        const visible = attach(createMesh("visible"), holder);
+        const glb = await exportAndParse(createScene({ meshes: [empty, visible] }));
+        expect(glb.json.meshes).toHaveLength(1);
+        expect(glb.json.meshes[0].primitives).toHaveLength(1);
+        const container = await reloadUntexturedGlb(glb);
+        const reloaded = container.entities[0]!.children[0]!;
+        expect(reloaded.name).toBe("holder");
+        expect(reloaded.children).toHaveLength(1);
+        expect("material" in reloaded.children[0]!).toBe(true);
     });
 
     it("attaches the extension to the node that holds the folded mesh", async () => {

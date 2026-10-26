@@ -2,7 +2,10 @@
  *  paths, fabricated plain-data scenes, and a GLB parser. No real GPU is needed. */
 
 import { expect, vi } from "vitest";
+import type { AssetContainer } from "../../../../packages/babylon-lite/src/asset-container";
+import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import { exportSceneAsGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-gltf";
+import { loadGltf } from "../../../../packages/babylon-lite/src/loader-gltf/load-gltf";
 import { initMeshTransform } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { Mesh, MeshGPU } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
@@ -275,6 +278,20 @@ export async function exportAndParse(scene: SceneContext): Promise<ParsedGlb> {
     } finally {
         spy.mockRestore();
     }
+}
+
+/** Reload an untextured export through the real loader with mocked GPU uploads. */
+export function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContainer> {
+    const device = {
+        createBuffer({ size }: GPUBufferDescriptor) {
+            const storage = new ArrayBuffer(size);
+            return { getMappedRange: () => storage, unmap() {}, destroy() {} };
+        },
+        createSampler: () => ({}),
+        createTexture: () => ({ createView: () => ({}), destroy() {} }),
+        queue: { writeTexture() {} },
+    } as unknown as GPUDevice;
+    return loadGltf({ _device: device } as EngineContext, glb.bytes.slice().buffer);
 }
 
 /** Split a GLB into its JSON document and BIN payload, checking the framing. */

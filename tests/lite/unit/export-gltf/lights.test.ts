@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { attach, createMesh, createScene, expectClose, exportAndParse, loaderRoot, rotate, setParent } from "./export-test-utils";
+import { attach, createMesh, createScene, expectClose, exportAndParse, loaderRoot, reloadUntexturedGlb, rotate, setParent } from "./export-test-utils";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import { createFreeCamera } from "../../../../packages/babylon-lite/src/camera/free-camera";
 import { createPointLight } from "../../../../packages/babylon-lite/src/light/point-light";
 import { createDirectionalLight } from "../../../../packages/babylon-lite/src/light/directional-light";
+import type { DirectionalLight } from "../../../../packages/babylon-lite/src/light/directional-light";
 import { createSpotLight } from "../../../../packages/babylon-lite/src/light/spot-light";
+import type { SpotLight } from "../../../../packages/babylon-lite/src/light/spot-light";
 import { createHemisphericLight } from "../../../../packages/babylon-lite/src/light/hemispheric";
+import { writeWorldLightDirection } from "../../../../packages/babylon-lite/src/light/light-base";
 
 describe("lights", () => {
     it("omits block defaults", async () => {
@@ -156,6 +159,44 @@ describe("lights", () => {
         setParent(light, holder);
         const glb = await exportAndParse(createScene({ meshes: [mesh], lights: [light] }));
         expectClose(rotate(glb.json.nodes[1].rotation, [0, 0, -1]), [-1, 0, 0]);
+    });
+
+    describe.each([false, true])("scaled parented lights (pass-through: %s)", (passThrough) => {
+        it.each([
+            ["directional", "mirrored"],
+            ["spot", "mirrored"],
+            ["directional", "non-uniform"],
+            ["spot", "non-uniform"],
+        ] as const)("round-trips a %s light with %s local scale", async (type, scale) => {
+            const holder = createTransformNode("holder", 1, 2, 3, 0, 0, Math.sin(0.2), Math.cos(0.2), 2, 3, 1);
+            if (passThrough) {
+                attach(holder, loaderRoot());
+            }
+            const direction: [number, number, number] = scale === "mirrored" ? [0, 0, -1] : [1, 1, -1];
+            const light = type === "directional" ? createDirectionalLight(direction) : createSpotLight([0, 0, 0], direction, 1, 1);
+            if (scale === "mirrored") {
+                light.scaling.z = -1;
+            } else {
+                light.scaling.x = 2;
+                light.scaling.y = 3;
+                light.scaling.z = 4;
+                light.rotationQuaternion.y = Math.sin(0.3);
+                light.rotationQuaternion.w = Math.cos(0.3);
+            }
+            setParent(light, holder);
+            const before = new Float32Array(3);
+            writeWorldLightDirection(before, 0, light.worldMatrix, light.direction);
+            const glb = await exportAndParse(createScene({ lights: [light] }));
+            expect(glb.json.nodes).toHaveLength(2);
+            expect(glb.json.nodes[0].extensions).toBeUndefined();
+            const container = await reloadUntexturedGlb(glb);
+            const reloaded = container.entities.find(
+                (entity): entity is DirectionalLight | SpotLight => "lightType" in entity && (entity.lightType === "directional" || entity.lightType === "spot")
+            )!;
+            const after = new Float32Array(3);
+            writeWorldLightDirection(after, 0, reloaded.worldMatrix, reloaded.direction);
+            expectClose(after, Array.from(before), 6);
+        });
     });
 
     it("exports a parentless light as a world-placed root with the direction converted", async () => {
