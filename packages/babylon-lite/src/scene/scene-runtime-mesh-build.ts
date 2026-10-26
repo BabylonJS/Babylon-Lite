@@ -426,7 +426,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
         (pbrState._pbrMeshGeomContexts ??= new WeakMap()).set(mesh, builtPbrContext);
     }
     installRuntimeRebuild(scene, state, builder, mesh, result.rebuildSingle, hadBuiltGroup ? previousSceneBase : result.rebuildSingle);
-    (mesh.material as { _csmGen?: number })._csmGen = ((mesh.material as { _csmGen?: number })._csmGen ?? 0) + 1;
+    mesh._renderableGen = -~mesh._renderableGen!;
     const group = scene._groups.get(builder);
     if (group && !hadBuiltGroup) {
         group.r = result.rebuildSingle;

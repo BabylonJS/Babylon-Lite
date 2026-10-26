@@ -87,11 +87,11 @@ function build(scene: SceneContext, buildGroup: MeshGroupBuilder): void {
     scene._groups.set(buildGroup, { r: rebuild } as unknown as SceneMeshGroup);
 }
 
-/** What the runtime build does when it lands: the group gets its rebuild, the mesh's material its next generation, and the
+/** What the runtime build does when it lands: the group gets its rebuild, the mesh its next renderable generation, and the
  *  renderable version moves. */
 function buildLanded(scene: SceneContext, mesh: Mesh): void {
     build(scene, mesh.material!._buildGroup);
-    mesh.material!._csmGen = (mesh.material!._csmGen ?? 0) + 1;
+    mesh._renderableGen = (mesh._renderableGen ?? 0) + 1;
     scene._renderableVersion++;
     scene._materialEpoch++;
 }
@@ -168,6 +168,28 @@ async function setup() {
 async function loaded(sg: ShadowGenerator): Promise<void> {
     await vi.waitFor(() => expect(sg._preloadPending).toBeUndefined());
 }
+
+describe("a registered PCF caster whose own renderable is rebuilt", () => {
+    it("rebuilds the task, whose packet may reference the per-mesh resources the rebuild retired", async () => {
+        const { lite, shaders, caster, register, frame, state } = await setup();
+        const shared = material("shared", shaders);
+        const mesh = caster(shared);
+        await register([mesh]);
+        frame();
+        const first = state();
+        const tasks = created.tasks;
+
+        // Replaced GPU geometry, for example: no material changes, only the mesh's renderable is rebuilt.
+        lite.markMeshRenderableDirty(mesh);
+        frame();
+
+        expect(state()).not.toBe(first);
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, shared]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+});
 
 describe("a registered PCF caster whose material changes with the caster set unchanged", () => {
     it("rebuilds the task through the new material when its view can be built", async () => {

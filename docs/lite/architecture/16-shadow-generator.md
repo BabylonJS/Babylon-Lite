@@ -442,8 +442,9 @@ PCF depth rendering uses the regular material renderable path with a pass-specif
 - **Fragment stage retained when needed** with a void entry point so material `discard` / alpha-test logic updates the depth attachment without writing color
 - No multisample
 
-**Caster material changes.** The PCF state snapshots each caster's terminal material and its `_csmGen`. A new caster
-array, a switched or re-pointed caster material, or a rebuilt one makes the next ensure build a fresh task (the old one
+**Caster material changes.** The PCF state snapshots each caster's terminal material, its `_csmGen` and the caster's
+`_renderableGen`. A new caster array, a switched or re-pointed caster material, a rebuilt one, or a caster whose own
+renderable was rebuilt makes the next ensure build a fresh task (the old one
 retires behind the frame fence). A caster whose view cannot be built yet is left out of that task and kept in `_held`,
 using the same `holdShadowCaster` check as the CSM reconcile: the no-colour view factory of its family is not imported
 (the registered set is re-supplied, so the generator is parked once while it imports), or the material it casts through
