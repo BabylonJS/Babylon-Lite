@@ -235,22 +235,36 @@ for (const mesh of renderableMeshes) {
 }
 ```
 
-Bake the composed transform into the geometry: call `setParent()` first, so the full hierarchy-composed world
-transform becomes the mesh's new local transform, then bake:
+Baking the composed transform into the geometry works only for a narrow set of imported meshes. For those, call
+`setParent()` first, so the full hierarchy-composed world transform becomes the mesh's new local transform, then bake:
 
 ```ts
-for (const mesh of renderableMeshes) {
+// bakeableMeshes: the entries of renderableMeshes that meet every condition listed below.
+for (const mesh of bakeableMeshes) {
     mesh.setParent(applicationRoot);
     mesh.bakeCurrentTransformIntoVertices();
 }
 ```
 
-Bake only meshes whose composed transform is free of shear. `setParent()` keeps the exact affine local matrix, but
-`bakeCurrentTransformIntoVertices()` rebuilds the transform from position, rotation and scaling, and that cannot express
-shear. Shear appears when an ancestor has a non-uniform scale and a descendant below it is rotated: for example, a node
-scaled `(2, 1, 1)` above a primitive rotated 45 degrees around Z. Flattening such a primitive with `setParent()` keeps
-its appearance, but baking it afterwards drops the shear and changes the geometry. Leave those meshes flattened without
-baking.
+Bake a mesh only if all of the following hold. Otherwise flatten it with `setParent()` alone, or keep the hierarchy and
+move the whole import:
+
+- **Shear-free composed transform.** `setParent()` keeps the exact affine local matrix, but
+  `bakeCurrentTransformIntoVertices()` rebuilds the transform from position, rotation and scaling, and that cannot
+  express shear. Shear appears when an ancestor has a non-uniform scale and a descendant below it is rotated: for
+  example, a node scaled `(2, 1, 1)` above a primitive rotated 45 degrees around Z. Baking such a primitive drops the
+  shear and changes the geometry.
+- **Tightly packed vertex data.** Baking replaces the vertex buffers through `resizeMeshGeometry()`, which throws for
+  interleaved geometry. A glTF primitive whose attributes come from a bufferView with `byteStride` loads as interleaved
+  geometry.
+- **Undeformed geometry.** The baker transforms the base positions, normals and tangents only. It does not transform
+  morph target deltas, so after baking a delta contributes in the baked space: under an inherited uniform scale of
+  `0.001`, a delta of 1 contributes `0.001` before baking and `1` after. Skinned meshes are not covered either, and
+  flattening already detaches a primitive from any animated glTF node above it. Keep the hierarchy for assets whose
+  morph targets, skinning or node animation must keep working.
+- **Only positions, normals and the first UV set.** Baking can only re-upload the vertex attributes whose CPU arrays are
+  retained. The glTF loader uploads `COLOR_0` and `TEXCOORD_1` without keeping CPU copies, so baking drops vertex colors
+  and the second UV set, and it retains tangents only after `enableGltfCpuTangents()` from `@babylonjs/lite` is called before loading.
 
 `setParent()` also preserves mirrored transforms, including the synthetic handedness root of glTF imports (#456).
 
