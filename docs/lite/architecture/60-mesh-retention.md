@@ -87,7 +87,17 @@ builder awaits a lazy import cannot change the list it iterates. After the build
 it confirms an unchanged group by a single linear comparison of the snapshot with
 the live group. Only when membership changed does it load the lazy
 `scene-group-settle` chunk, which reconciles the build against the group's
-current sequence using constant-time membership lookups:
+current sequence using constant-time membership lookups.
+
+Removal or the first lease can also activate while a build that reads the live
+group is already awaiting, for example retaining and detaching the sole PBR mesh
+while registration runs. Core therefore notes the membership a live build started
+with, and checks for an installed runner once the build settles. If removal or
+retention activated meanwhile, that build goes to the runner. It is kept when
+membership is unchanged. Otherwise it is settled as obsolete, because it may have
+iterated an array that lost members: its output, including that of current
+members, is retired after a rebuild of the current members, and an emptied group
+is dropped instead of rejecting registration or recovery. The settle rules are:
 
 - Output for a snapshot member that left meanwhile is evicted before it is
   committed (its renderables are dropped and its per-mesh teardown retires after
@@ -223,6 +233,10 @@ implementation or asset is copied.
   caster lookups,
   material/texture swaps, reentrancy, independent engine hooks, and scene-change
   events for detach/reinsertion without echoing retained children.
+- `group-build-first-use.test.ts`: with a fresh module graph, the first retained
+  detach of a boot group's sole mesh drops the group instead of rejecting
+  registration, the first removal of one member rebuilds the survivor and retires
+  the obsolete output, and a lease without a membership change keeps the build.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `retained-shared-recovery-retirement.test.ts`: releasing one of two shared-texture
@@ -273,6 +287,7 @@ is inferred from geometry reuse.
 - `packages/babylon-lite/src/frame-graph/render-task-base.ts`
 - `packages/babylon-lite/src/picking/gpu-picker.ts`
 - `tests/lite/unit/mesh-retention.test.ts`
+- `tests/lite/unit/group-build-first-use.test.ts`
 - `tests/lite/unit/gpu-picker-membership.test.ts`
 - `tests/lite/unit/gpu-picker-retry.test.ts`
 - `tests/lite/unit/scene-retained-admission.test.ts`

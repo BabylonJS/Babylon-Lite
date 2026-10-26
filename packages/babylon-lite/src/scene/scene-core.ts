@@ -454,8 +454,16 @@ export interface DeferredSceneRenderables {
     dispose?: () => void;
 }
 
-/** @internal Builds a boot or recovery material group; resolves `undefined` when the build was abandoned. */
-export type SceneGroupBuildRunner = (scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup) => Promise<MeshGroupBuildResult | undefined>;
+/** @internal Builds a boot or recovery material group; resolves `undefined` when the build was abandoned.
+ *  `started` and `live` hand over a build that read the live group and was already awaiting when the runner
+ *  was installed: `started` is the membership it began with. */
+export type SceneGroupBuildRunner = (
+    scene: SceneContext,
+    build: MeshGroupBuilder,
+    group: SceneMeshGroup,
+    started?: Mesh[],
+    live?: Promise<MeshGroupBuildResult>
+) => Promise<MeshGroupBuildResult | undefined>;
 
 let _groupBuildRunner: SceneGroupBuildRunner | undefined;
 /** @internal Install the membership-revalidating group build. Mesh removal and retention install it on first use:
@@ -466,8 +474,24 @@ export function _installGroupBuildRunner(runner: SceneGroupBuildRunner): void {
 
 /** @internal Build a boot or recovery material group, through the installed runner when removal or retention
  *  is in use. Without it, no member can leave mid-build, so the builder reads the live group directly. */
-export function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
-    return _groupBuildRunner ? _groupBuildRunner(scene, build, group) : build(scene, group);
+export async function _buildMeshGroup(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
+    let started: Mesh[] | undefined;
+    let live: Promise<MeshGroupBuildResult> | undefined;
+    let result: MeshGroupBuildResult | undefined;
+    if (!_groupBuildRunner) {
+        started = group.slice();
+        live = build(scene, group);
+        try {
+            result = await live;
+        } catch (error) {
+            if (!_groupBuildRunner) {
+                throw error;
+            }
+        }
+    }
+    // Also reached when removal or retention first activated while the live build awaited: members may have
+    // left the array it was reading, so the runner revalidates that build.
+    return _groupBuildRunner ? _groupBuildRunner(scene, build, group, started, live) : result;
 }
 
 let _sceneAdmission: ((scene: SceneContext, entity: SceneEntity) => boolean) | undefined;
@@ -600,16 +624,29 @@ function joinMaterialGroup(ctx: SceneContext, mesh: Mesh): void {
                     ctx._groups.delete(build);
                     return;
                 }
+                // Inlined rather than awaiting `_buildMeshGroup`, so a plain build commits on the same tick as before.
+                let started: Mesh[] | undefined;
+                let live: Promise<MeshGroupBuildResult> | undefined;
+                let result: MeshGroupBuildResult | undefined;
+                if (!_groupBuildRunner) {
+                    started = group!.slice();
+                    live = build(ctx, group!);
+                    try {
+                        result = await live;
+                    } catch (error) {
+                        if (!_groupBuildRunner) {
+                            throw error;
+                        }
+                    }
+                }
                 if (_groupBuildRunner) {
                     // Undefined when the build was abandoned: the runner dropped an emptied group and queued any
                     // remaining members for the swap drain.
-                    const settled = await _groupBuildRunner(ctx, build, group!);
-                    if (settled) {
-                        commitGroupBuild(ctx, group!, settled);
-                    }
-                    return;
+                    result = await _groupBuildRunner(ctx, build, group!, started, live);
                 }
-                commitGroupBuild(ctx, group!, await build(ctx, group!));
+                if (result) {
+                    commitGroupBuild(ctx, group!, result);
+                }
             });
         }
     }

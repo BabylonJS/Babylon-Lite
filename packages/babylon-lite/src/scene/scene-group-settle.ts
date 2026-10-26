@@ -36,13 +36,17 @@ function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable
  *  so shared textures it re-acquires never reach a zero refcount). Scene-level resources an obsolete build
  *  registered stay owned by the scene until it is disposed. A group that empties is abandoned and dropped,
  *  as is one that keeps changing: its remaining members are queued for the material-swap drain, which builds
- *  a group without a completed build through the runtime path. */
+ *  a group without a completed build through the runtime path.
+ *
+ *  A `stale` build read the live group instead of a snapshot, so it may have skipped or included members as
+ *  they left or joined mid-iteration: it is always obsolete, and the output of current members is retired too. */
 export async function settleGroupBuild(
     scene: SceneContext,
     build: MeshGroupBuilder,
     group: SceneMeshGroup,
     members: Mesh[],
-    pending: Promise<MeshGroupBuildResult>
+    pending: Promise<MeshGroupBuildResult>,
+    stale: boolean
 ): Promise<MeshGroupBuildResult | undefined> {
     let result: MeshGroupBuildResult | undefined;
     let error: unknown;
@@ -60,7 +64,7 @@ export async function settleGroupBuild(
             let next = 0;
             const reordered = group.some((mesh) => captured.has(mesh) && mesh !== surviving[next++]);
             const left = surviving.length !== members.length;
-            if (!reordered && !(left && (!result || result.renderables.some((renderable) => !renderable.mesh)))) {
+            if (!stale && !reordered && !(left && (!result || result.renderables.some((renderable) => !renderable.mesh)))) {
                 if (!result) {
                     throw error;
                 }
@@ -76,13 +80,14 @@ export async function settleGroupBuild(
                 }
                 return result;
             }
-            for (const mesh of members) {
+            for (const mesh of stale ? members.concat(group) : members) {
                 const teardown = scene._meshDisposables.get(mesh);
                 if (teardown) {
                     scene._meshDisposables.delete(mesh);
                     superseded.push(...teardown);
                 }
             }
+            stale = false;
             if (scene._z || !group.length || attempt >= MAX_GROUP_BUILD_ATTEMPTS) {
                 if (!group.length && scene._groups.get(build) === group) {
                     scene._groups.delete(build);

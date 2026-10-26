@@ -171,17 +171,27 @@ export function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]
 /** Build a boot or recovery group from a membership snapshot, then settle it against the live group. Removal and
  *  retained detach splice the live group while a builder awaits its lazy imports, so the builder gets a stable
  *  list. An unchanged group is confirmed by one linear comparison; a changed one is revalidated by the lazily
- *  loaded `settleGroupBuild`. Installed in scene core on the first removal or retention lease. */
-export async function buildGroupSnapshot(scene: SceneContext, build: MeshGroupBuilder, group: SceneMeshGroup): Promise<MeshGroupBuildResult | undefined> {
-    const members = group.slice();
-    const pending = Promise.resolve(build(scene, members));
+ *  loaded `settleGroupBuild`. Installed in scene core on the first removal or retention lease.
+ *
+ *  `started` and `live` hand over a build that read the live group and was already awaiting when this runner
+ *  was installed. Its output is kept only when membership still equals `started`; otherwise it may have
+ *  iterated an array that lost members, so it is settled as obsolete and rebuilt from a snapshot. */
+export async function buildGroupSnapshot(
+    scene: SceneContext,
+    build: MeshGroupBuilder,
+    group: SceneMeshGroup,
+    started?: Mesh[],
+    live?: Promise<MeshGroupBuildResult>
+): Promise<MeshGroupBuildResult | undefined> {
+    const members = started ?? group.slice();
+    const pending = Promise.resolve(live ?? build(scene, members));
     // Wait without throwing: a failure caused by a membership change is the settler's to retry.
     await pending.catch(() => 0);
     if (group.length === members.length && group.every((mesh, i) => mesh === members[i])) {
         return pending;
     }
     const { settleGroupBuild } = await import("./scene-group-settle.js");
-    return settleGroupBuild(scene, build, group, members, pending);
+    return settleGroupBuild(scene, build, group, members, pending, !!started);
 }
 
 /** Run GPU teardown only after the next frame submission has drained.
