@@ -801,10 +801,21 @@ function applyRemoveRun(data: GLTextData, ref: GLGlyphRun | number): void {
     if (runIdx >= 0) {
         data._runs.splice(runIdx, 1);
     }
-    // If the group has no live instances left, drop it entirely and shrink the buffer tail.
-    if (group._liveCount === 0) {
+    // If the group has no live instances left and no remaining run (empty or whitespace-only runs
+    // own no slots but still point at their group), drop it and shrink the buffer tail.
+    if (group._liveCount === 0 && !isGroupReferenced(data, rec._groupIdx)) {
         dropEmptyGroup(data, group);
     }
+}
+
+/** True when any remaining run record points at the group at `groupIdx`. */
+function isGroupReferenced(data: GLTextData, groupIdx: number): boolean {
+    for (const r of data._runRecords.values()) {
+        if (r._groupIdx === groupIdx) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /** Remove a group with no live instances. Shifts later groups left over the vacated range.
