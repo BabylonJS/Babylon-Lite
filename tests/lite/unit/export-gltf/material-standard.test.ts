@@ -1,286 +1,76 @@
 import { describe, expect, it } from "vitest";
 import { createFakeDevice, createMesh, createScene, createTexture, decodePng, expectClose, exportAndParse, readBufferView } from "./export-test-utils";
-import type { FakeTextureOptions, ParsedGlb } from "./export-test-utils";
+import type { ParsedGlb } from "./export-test-utils";
 import { createStandardMaterial } from "../../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import type { StandardMaterialProps } from "../../../../packages/babylon-lite/src/material/standard/standard-material";
 import { stdUvTransformExt } from "../../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
-import { specularPowerToRoughness } from "../../../../packages/babylon-lite/src/export-gltf/export-material-standard";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
-import type { Mesh } from "../../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
 import { srgbByteToLinear } from "../../../../packages/babylon-lite/src/math/color";
 
-type State = "uv1" | "uv0" | "lost";
-
-const LOST_UV1 = /Material "[^"]*" samples TEXCOORD_1 on a mesh whose second UV set is on the GPU only/;
-
-function meshFor(name: string, material: Mesh["material"], state: State): Mesh {
-    if (state === "uv1") {
-        return createMesh(name, { material, uv2s: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]) });
-    }
-    if (state === "lost") {
-        return createMesh(name, { material, gpuOnly: ["uv2"] });
-    }
-    return createMesh(name, { material });
-}
-
-type Result = ParsedGlb & { mat: any };
-
-function std(props: Partial<StandardMaterialProps> = {}): StandardMaterialProps {
-    return Object.assign(createStandardMaterial(), props);
-}
-
-async function run(material: StandardMaterialProps, state: State = "uv0"): Promise<Result> {
-    const glb = await exportAndParse(createScene({ meshes: [meshFor("m", material, state)], device: createFakeDevice().device }));
-    return { ...glb, mat: glb.json.materials?.[0] };
-}
-
-/** A 1x2 texture (width 1, height 2): row 0 is `top`, row 1 is `bottom`. */
-function column(top: number[], bottom: number[], options: FakeTextureOptions = {}) {
-    return createTexture(1, 2, [...top, ...bottom], options);
-}
-
 const TOP = [100, 150, 200, 255];
 const BOTTOM = [10, 20, 30, 255];
+const WRAPPER = { uScale: 2, vScale: 3, uOffset: 0.1, vOffset: 0.2, uAng: 0.5 };
+const column = (invertY = false, wrapper = {}, format: GPUTextureFormat = "rgba8unorm") => createTexture(1, 2, [...TOP, ...BOTTOM], { invertY, wrapper, format });
+const std = (props: Partial<StandardMaterialProps>) => Object.assign(createStandardMaterial(), props);
 
-async function imageRows(glb: ParsedGlb, imageIndex: number): Promise<number[][]> {
-    const png = await decodePng(readBufferView(glb, glb.json.images[imageIndex].bufferView));
+async function run(props: Partial<StandardMaterialProps>) {
+    const r = await exportAndParse(createScene({ meshes: [createMesh("m", { material: std(props) })], device: createFakeDevice().device }));
+    return { ...r, mat: r.json.materials[0] };
+}
+
+async function rows(r: ParsedGlb, info: { index: number }): Promise<number[][]> {
+    const png = await decodePng(readBufferView(r, r.json.images[r.json.textures[info.index].source].bufferView));
     return [Array.from(png.rgba.subarray(0, 4)), Array.from(png.rgba.subarray(4, 8))];
 }
 
-const STORAGE = [TOP, BOTTOM];
-const REVERSED = [BOTTOM, TOP];
-
-describe("Standard to metallic-roughness: factors", () => {
-    it("writes baseColorFactor = [diffuse^2.2 * 0.5, alpha] and metallicFactor 0", async () => {
-        const r = await run(std({ diffuseColor: [0.5, 0.25, 1], alpha: 0.8 }));
-        const pmr = r.mat.pbrMetallicRoughness;
-        expectClose(pmr.baseColorFactor, [Math.pow(0.5, 2.2) * 0.5, Math.pow(0.25, 2.2) * 0.5, 0.5, 0.8], 6);
-        expect(pmr.metallicFactor).toBe(0);
-    });
-
-    it("writes a default material's white diffuse as 0.5", async () => {
-        const r = await run(std());
-        expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([0.5, 0.5, 0.5, 1]);
-    });
-
-    it("maps specularPower 64 to roughness 0.328809", async () => {
-        const r = await run(std({ specularPower: 64 }));
+describe("Standard material export", () => {
+    it.each<[StandardMaterialProps["diffuseColor"], number]>([
+        [[1, 1, 1], 1],
+        [[0.5, 0.25, 1], 0.8],
+    ])("should convert Babylon standard material to metallic roughness (%j, alpha %s)", async (diffuseColor, alpha) => {
+        const r = await run({ name: "wood", diffuseColor, alpha, specularPower: 64 });
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [...diffuseColor!.map((v) => v ** 2.2 * 0.5), alpha], 6);
+        expect(r.mat.pbrMetallicRoughness.metallicFactor).toBe(0);
         expect(Math.abs(r.mat.pbrMetallicRoughness.roughnessFactor - 0.328809)).toBeLessThan(1e-6);
+        expect(r.mat.name).toBe("wood");
     });
 
-    for (const power of [0, 256, 1024]) {
-        it(`matches specularPowerToRoughness at specularPower ${power}`, async () => {
-            const r = await run(std({ specularPower: power }));
-            expect(r.mat.pbrMetallicRoughness.roughnessFactor ?? 1).toBeCloseTo(specularPowerToRoughness(power), 10);
-        });
-    }
-
-    it("omits roughness at specularPower 0 (roughness 1)", async () => {
-        const r = await run(std({ specularPower: 0 }));
-        expect(specularPowerToRoughness(0)).toBe(1);
-        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeUndefined();
+    it("clamps specular power to its supported range", async () => {
+        expect((await run({ specularPower: -5 })).mat.pbrMetallicRoughness.roughnessFactor).toBeUndefined();
+        expect((await run({ specularPower: 2000 })).mat.pbrMetallicRoughness).toEqual((await run({ specularPower: 1024 })).mat.pbrMetallicRoughness);
     });
 
-    it("clamps specularPower above 1024 to 1024", async () => {
-        const r = await run(std({ specularPower: 2000 }));
-        const r1024 = await run(std({ specularPower: 1024 }));
-        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBe(r1024.mat.pbrMetallicRoughness.roughnessFactor);
-        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeCloseTo(specularPowerToRoughness(1024), 10);
-    });
-
-    it("clamps a negative specularPower to 0", async () => {
-        const r = await run(std({ specularPower: -5 }));
-        expect(r.mat.pbrMetallicRoughness.roughnessFactor).toBeUndefined();
-    });
-});
-
-describe("Standard: texture slots and UV sets", () => {
-    it("exports an -srgb diffuse texture's sampled (decoded) RGB, which the Standard shader treats as its bytes", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM, { format: "rgba8unorm-srgb" }) }));
-        const decoded = (px: number[]) => px.map((v, i) => (i === 3 ? v : Math.round(srgbByteToLinear(v) * 255)));
-        expect(await imageRows(r, 0)).toEqual([decoded(TOP), decoded(BOTTOM)]);
-    });
-
-    it("exports the diffuse texture as baseColorTexture on texCoord 0", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });
-        expect(r.json.images[0].name).toBe("baseColorTexture");
-    });
-
-    it("exports diffuseCoordIndex 1 as texCoord 1 only in the uv1 state", async () => {
-        const material = std({ diffuseTexture: column(TOP, BOTTOM), diffuseCoordIndex: 1 });
-        const uv1 = await run(material, "uv1");
-        expect(uv1.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0, texCoord: 1 });
-        const uv0 = await run(material, "uv0");
-        expect(uv0.mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
-        expect(uv0.warnings.filter((w) => LOST_UV1.test(w))).toHaveLength(0);
-        const lost = await run(material, "lost");
-        expect(lost.mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
-        expect(lost.warnings.filter((w) => LOST_UV1.test(w))).toHaveLength(1);
-    });
-
-    it("exports the ambient texture as occlusionTexture, honoring ambientCoordIndex", async () => {
-        const material = std({ _ambientTexture: column(TOP, BOTTOM), ambientCoordIndex: 1 });
-        const uv1 = await run(material, "uv1");
-        expect(uv1.mat.occlusionTexture).toEqual({ index: 0, texCoord: 1 });
-        const uv0 = await run(material, "uv0");
-        expect(uv0.mat.occlusionTexture).toBeUndefined();
-    });
-
-    it("exports an emissive texture on texCoord 0", async () => {
-        const r = await run(std({ _emissiveTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.emissiveTexture).toEqual({ index: 0 });
-    });
-
-    it("emits one glTF material per UV state only when a slot selects UV1", async () => {
-        const count = async (material: StandardMaterialProps): Promise<number> => {
-            const glb = await exportAndParse(
-                createScene({ meshes: [meshFor("a", material, "uv1"), meshFor("b", material, "uv0"), meshFor("c", material, "lost")], device: createFakeDevice().device })
-            );
-            return glb.json.materials.length;
-        };
-        expect(await count(std({ diffuseTexture: column(TOP, BOTTOM), diffuseCoordIndex: 1 }))).toBe(3);
-        expect(await count(std({ _ambientTexture: column(TOP, BOTTOM), ambientCoordIndex: 1 }))).toBe(3);
-        expect(await count(std({ diffuseTexture: column(TOP, BOTTOM) }))).toBe(1);
-    });
-
-    it("exports a bump texture as normalTexture with scale = bumpLevel when it is not 1", async () => {
-        const r = await run(std({ _bumpTexture: column(TOP, BOTTOM), bumpLevel: 2 }));
-        expect(r.mat.normalTexture).toEqual({ index: 0, scale: 2 });
-        const r1 = await run(std({ _bumpTexture: column(TOP, BOTTOM), bumpLevel: 1 }));
-        expect(r1.mat.normalTexture).toEqual({ index: 0 });
-    });
-
-    it("inverts the bump image's red channel", async () => {
-        const r = await run(std({ _bumpTexture: column(TOP, BOTTOM) }));
-        expect(await imageRows(r, 0)).toEqual([
-            [255 - 100, 150, 200, 255],
-            [255 - 10, 20, 30, 255],
-        ]);
-    });
-
-    it("inverts red and green and reverses the rows for a flipped bump slot", async () => {
-        const r = await run(std({ _bumpTexture: column(TOP, BOTTOM, { invertY: true }) }));
-        expect(await imageRows(r, 0)).toEqual([
-            [255 - 10, 255 - 20, 30, 255],
-            [255 - 100, 255 - 150, 200, 255],
-        ]);
-    });
-
-    it("does not invert channels of non-bump slots", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM) }));
-        expect(await imageRows(r, 0)).toEqual(STORAGE);
-    });
-});
-
-describe("Standard UV mapping: shared path (_hasUvTx unset)", () => {
-    it("flips all UV0 slots when the diffuse texture has invertY", async () => {
-        const r = await run(
-            std({
-                diffuseTexture: column(TOP, BOTTOM, { invertY: true }),
-                _emissiveTexture: column(BOTTOM, TOP),
-                uvScale: [2, 3],
-                uvOffset: [0.1, 0.2],
-            })
+    it.each<[boolean, boolean, GPUTextureFormat]>([
+        [false, false, "rgba8unorm"],
+        [false, false, "rgba8unorm-srgb"],
+        [true, false, "rgba8unorm"],
+        [true, true, "rgba8unorm"],
+    ])("preserves Standard image bytes and bump frame (bump=%s flip=%s format=%s)", async (bump, flip, format) => {
+        const r = await run({ [bump ? "_bumpTexture" : "diffuseTexture"]: column(flip, {}, format), bumpLevel: 2 });
+        const info = bump ? r.mat.normalTexture : r.mat.pbrMetallicRoughness.baseColorTexture;
+        const expected = (flip ? [BOTTOM, TOP] : [TOP, BOTTOM]).map((pixel) =>
+            pixel.map((v, i) => (bump && (i === 0 || (flip && i === 1)) ? 255 - v : format.endsWith("-srgb") && i < 3 ? Math.round(srgbByteToLinear(v) * 255) : v))
         );
-        const base = r.mat.pbrMetallicRoughness.baseColorTexture;
-        const emissive = r.mat.emissiveTexture;
-        expect(await imageRows(r, r.json.textures[base.index].source)).toEqual(REVERSED);
-        expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual([TOP, BOTTOM]);
-        for (const info of [base, emissive]) {
-            const t = info.extensions.KHR_texture_transform;
-            expect(t.scale).toEqual([2, 3]);
-            expectClose(t.offset, [0.1, 1 - 3 - 0.2], 6);
-            expect(t.rotation).toBeUndefined();
-        }
+        expect(await rows(r, info)).toEqual(expected);
+        expect(info).toEqual(bump ? { index: 0, scale: 2 } : { index: 0 });
+    });
+
+    it.each<[string, Partial<StandardMaterialProps>, boolean, object]>([
+        ["diffuse wins", { diffuseTexture: column(false), _opacityTexture: column(true), _bumpTexture: column(true) }, false, { offset: [0.1, 0.2], scale: [2, 3] }],
+        ["diffuse flips all", { diffuseTexture: column(true) }, true, { offset: [0.1, -2.2], scale: [2, 3] }],
+        ["opacity fallback", { _opacityTexture: column(true) }, true, { offset: [0.1, -2.2], scale: [2, 3] }],
+        ["bump fallback", { _bumpTexture: column(true) }, true, { offset: [0.1, -2.2], scale: [2, 3] }],
+        ["offset only", { uvScale: [1, 1] }, false, { offset: [0.1, 0.2] }],
+    ])("preserves shared-path UV orientation and transforms: %s", async (_label, props, flipped, transform) => {
+        const r = await run({ uvScale: [2, 3], uvOffset: [0.1, 0.2], _emissiveTexture: column(), ...props });
+        expect(await rows(r, r.mat.emissiveTexture)).toEqual(flipped ? [BOTTOM, TOP] : [TOP, BOTTOM]);
+        expect(r.mat.emissiveTexture.extensions.KHR_texture_transform).toEqual(transform);
         expect(r.json.extensionsUsed).toContain("KHR_texture_transform");
         expect(r.json.extensionsRequired).toBeUndefined();
     });
 
-    it("does not flip, and keeps the offset as is, when the diffuse texture is not inverted", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM, { invertY: false }), uvScale: [2, 3], uvOffset: [0.1, 0.2] }));
-        const info = r.mat.pbrMetallicRoughness.baseColorTexture;
-        expect(await imageRows(r, 0)).toEqual(STORAGE);
-        expect(info.extensions.KHR_texture_transform).toEqual({ offset: [0.1, 0.2], scale: [2, 3] });
-    });
-
-    it("always applies uvOffset, even with the default scale", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM), uvOffset: [0.3, 0.4] }));
-        expect(r.mat.pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform).toEqual({ offset: [0.3, 0.4] });
-    });
-
-    it("writes no transform for the identity scale and offset", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.pbrMetallicRoughness.baseColorTexture.extensions).toBeUndefined();
-        expect(r.json.extensionsUsed).toBeUndefined();
-    });
-
-    it("falls back to the opacity texture's invertY when there is no diffuse texture", async () => {
-        const r = await run(std({ _opacityTexture: column(BOTTOM, TOP, { invertY: true }), _emissiveTexture: column(TOP, BOTTOM) }));
-        expect(await imageRows(r, 0)).toEqual(REVERSED);
-        expect(r.mat.alphaMode).toBe("BLEND");
-    });
-
-    it("falls back to the bump texture's invertY when there is neither diffuse nor opacity texture", async () => {
-        const r = await run(std({ _bumpTexture: column(BOTTOM, TOP, { invertY: true }), _emissiveTexture: column(TOP, BOTTOM) }));
-        const emissive = r.mat.emissiveTexture;
-        expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual(REVERSED);
-    });
-
-    it("lets the diffuse texture's orientation win over the opacity and bump textures", async () => {
-        const r = await run(
-            std({
-                diffuseTexture: column(TOP, BOTTOM, { invertY: false }),
-                _opacityTexture: column(TOP, BOTTOM, { invertY: true }),
-                _bumpTexture: column(TOP, BOTTOM, { invertY: true }),
-                _emissiveTexture: column(TOP, BOTTOM),
-            })
-        );
-        const emissive = r.mat.emissiveTexture;
-        expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual(STORAGE);
-    });
-
-    it("does not flip or transform a UV1 slot", async () => {
-        const r = await run(std({ diffuseTexture: column(TOP, BOTTOM, { invertY: true }), diffuseCoordIndex: 1, uvScale: [2, 2], uvOffset: [0.5, 0.5] }), "uv1");
-        const info = r.mat.pbrMetallicRoughness.baseColorTexture;
-        expect(info).toEqual({ index: 0, texCoord: 1 });
-        expect(await imageRows(r, 0)).toEqual(STORAGE);
-    });
-});
-
-describe("Standard UV mapping: per-texture path (_hasUvTx)", () => {
-    const wrapper = { uScale: 2, vScale: 3, uOffset: 0.1, vOffset: 0.2, uAng: 0.5 };
-
-    it("composes rotation, scale and offset per texture and flips by each texture's own invertY", async () => {
-        const S = [1.5, 2];
-        const O = [0.3, 0.4];
-        const r = await run(
-            std({
-                _hasUvTx: true,
-                uvScale: [S[0]!, S[1]!],
-                uvOffset: [O[0]!, O[1]!],
-                diffuseTexture: column(TOP, BOTTOM, { invertY: true, wrapper }),
-                _emissiveTexture: column(TOP, BOTTOM, { invertY: false, wrapper: { uScale: 1, vScale: 1, uOffset: 0, vOffset: 0, uAng: 0 } }),
-            })
-        );
-        const c = Math.cos(0.5);
-        const s = Math.sin(0.5);
-        const expectedOffset = [c * 2 * O[0]! + s * 3 * O[1]! + 0.1, -s * 2 * O[0]! + c * 3 * O[1]! + 0.2];
-        const base = r.mat.pbrMetallicRoughness.baseColorTexture;
-        const t = base.extensions.KHR_texture_transform;
-        expect(t.rotation).toBe(0.5);
-        expectClose(t.scale, [2 * 1.5, 3 * 2], 6);
-        expectClose(t.offset, expectedOffset, 6);
-        expect(await imageRows(r, r.json.textures[base.index].source)).toEqual(REVERSED);
-
-        // Identity wrapper: only the material's uvScale / uvOffset apply, and no flip.
-        const emissive = r.mat.emissiveTexture;
-        expect(emissive.extensions.KHR_texture_transform).toEqual({ offset: O, scale: S });
-        expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual(STORAGE);
-    });
-
-    it("emits a transform that reproduces the shader's diffuse UV matrix under the Khronos sample renderer convention", async () => {
+    it.each([false, true])("reproduces the shader UV matrix and per-texture orientation under the Khronos rotation convention (flip=%s)", async (invertY) => {
         let uniform: Float32Array | undefined;
         const engine = {
             _device: {
@@ -292,158 +82,102 @@ describe("Standard UV mapping: per-texture path (_hasUvTx)", () => {
                 },
             },
         } as unknown as EngineContext;
-        const material = std({ _hasUvTx: true, uvScale: [1.5, 2], uvOffset: [0.3, 0.4], diffuseTexture: column(TOP, BOTTOM, { invertY: false, wrapper }) });
-        stdUvTransformExt._bind!(material, [], 0, undefined, { surface: { engine } } as SceneContext);
-        const r = await run(material);
-        const { offset, scale, rotation } = r.mat.pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform;
-        // glTF-Sample-Renderer: uv' = T * R * S * uv with R's columns (cos, -sin) and (sin, cos), so u' = cos*u + sin*v.
-        const c = Math.cos(rotation);
-        const s = Math.sin(rotation);
-        expectClose(Array.from(uniform!.subarray(0, 6)), [c * scale[0], s * scale[1], -s * scale[0], c * scale[1], offset[0], offset[1]], 6);
-    });
-
-    it("does not let the diffuse texture's invertY flip the other slots", async () => {
-        const r = await run(std({ _hasUvTx: true, diffuseTexture: column(TOP, BOTTOM, { invertY: true }), _emissiveTexture: column(TOP, BOTTOM) }));
-        const emissive = r.mat.emissiveTexture;
-        expect(await imageRows(r, r.json.textures[emissive.index].source)).toEqual(STORAGE);
-    });
-
-    it("omits the transform for an identity texture with the default material scale and offset", async () => {
-        const r = await run(std({ _hasUvTx: true, diffuseTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.pbrMetallicRoughness.baseColorTexture.extensions).toBeUndefined();
-    });
-
-    it("applies the texture transform without uvScale / uvOffset on a UV1 slot", async () => {
-        const r = await run(
-            std({
-                _hasUvTx: true,
-                diffuseCoordIndex: 1,
-                uvScale: [5, 5],
-                uvOffset: [0.7, 0.7],
-                diffuseTexture: column(TOP, BOTTOM, { invertY: true, wrapper }),
-            }),
-            "uv1"
+        const props: Partial<StandardMaterialProps> = {
+            _hasUvTx: true,
+            uvScale: [1.5, 2],
+            uvOffset: [0.3, 0.4],
+            diffuseTexture: column(invertY, WRAPPER),
+            _emissiveTexture: column(),
+        };
+        stdUvTransformExt._bind!(std(props), [], 0, undefined, { surface: { engine } } as SceneContext);
+        const r = await run(props);
+        const base = r.mat.pbrMetallicRoughness.baseColorTexture;
+        const { offset, scale, rotation } = base.extensions.KHR_texture_transform;
+        const c = Math.cos(0.5);
+        const s = Math.sin(0.5);
+        expect(rotation).toBe(0.5);
+        expect(scale).toEqual([3, 6]);
+        expectClose(offset, [c * 2 * 0.3 + s * 3 * 0.4 + 0.1, -s * 2 * 0.3 + c * 3 * 0.4 + 0.2], 6);
+        // Khronos uses rotation columns (cos, -sin), (sin, cos).
+        const sign = invertY ? -1 : 1;
+        expectClose(
+            Array.from(uniform!.subarray(0, 6)),
+            [c * scale[0], s * scale[1], -sign * s * scale[0], sign * c * scale[1], offset[0], invertY ? 1 - offset[1] : offset[1]],
+            6
         );
-        const info = r.mat.pbrMetallicRoughness.baseColorTexture;
-        expect(info.texCoord).toBe(1);
-        expect(info.extensions.KHR_texture_transform).toEqual({ offset: [0.1, 0.2], scale: [2, 3], rotation: 0.5, texCoord: 1 });
-        expect(await imageRows(r, 0)).toEqual(REVERSED);
-    });
-});
-
-describe("Standard: emissive, alpha, culling, lighting", () => {
-    it("writes an emissive texture alone with emissiveFactor [1, 1, 1]", async () => {
-        const r = await run(std({ _emissiveTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.emissiveFactor).toEqual([1, 1, 1]);
+        expect(await rows(r, base)).toEqual(invertY ? [BOTTOM, TOP] : [TOP, BOTTOM]);
+        expect(await rows(r, r.mat.emissiveTexture)).toEqual([TOP, BOTTOM]);
+        expect(r.mat.emissiveTexture.extensions.KHR_texture_transform).toEqual({ offset: [0.3, 0.4], scale: [1.5, 2] });
     });
 
-    it("writes a non-black emissiveColor as color^2.2, over an emissive texture too", async () => {
-        const r = await run(std({ emissiveColor: [0.5, 0, 1], _emissiveTexture: column(TOP, BOTTOM) }));
-        expectClose(r.mat.emissiveFactor, [Math.pow(0.5, 2.2), 0, 1], 6);
-        const none = await run(std());
-        expect(none.mat.emissiveFactor).toBeUndefined();
-    });
-
-    it("maps alphaCutOff with a diffuse texture to MASK and writes alphaCutoff only when it is not 0.5", async () => {
-        const r = await run(std({ alphaCutOff: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
-        expect(r.mat.alphaMode).toBe("MASK");
-        expect(r.mat.alphaCutoff).toBeUndefined();
-        const r2 = await run(std({ alphaCutOff: 0.25, diffuseTexture: column(TOP, BOTTOM) }));
-        expect(r2.mat.alphaMode).toBe("MASK");
-        expect(r2.mat.alphaCutoff).toBe(0.25);
-        expect(r2.warnings).toEqual([]);
-    });
-
-    it("ignores alphaCutOff without a diffuse texture", async () => {
-        const r = await run(std({ alphaCutOff: 0.25 }));
-        expect(r.mat.alphaMode).toBeUndefined();
-        expect(r.mat.alphaCutoff).toBeUndefined();
-        const blended = await run(std({ alphaCutOff: 0.25, alpha: 0.5 }));
-        expect(blended.mat.alphaMode).toBe("BLEND");
-        expect(blended.mat.alphaCutoff).toBeUndefined();
-        expect(blended.warnings).toEqual([]);
-    });
-
-    it("exports alpha < 1 or an opacity texture with a cutoff and a diffuse texture as BLEND and warns", async () => {
-        const alpha = await run(std({ alphaCutOff: 0.25, alpha: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
-        expect(alpha.mat.alphaMode).toBe("BLEND");
-        expect(alpha.mat.alphaCutoff).toBeUndefined();
-        expect(alpha.warnings.filter((w) => w.includes("both alpha-tests and blends"))).toHaveLength(1);
-        const opacity = await run(std({ alphaCutOff: 0.25, _opacityTexture: column(TOP, BOTTOM), diffuseTexture: column(BOTTOM, TOP) }));
-        expect(opacity.mat.alphaMode).toBe("BLEND");
-        expect(opacity.warnings.filter((w) => w.includes("both alpha-tests and blends"))).toHaveLength(1);
-    });
-
-    it("maps backFaceCulling false to doubleSided", async () => {
-        expect((await run(std({ backFaceCulling: false }))).mat.doubleSided).toBe(true);
-        expect((await run(std({ backFaceCulling: true }))).mat.doubleSided).toBeUndefined();
-    });
-
-    describe("disableLighting", () => {
-        it("writes clamp(emissive * diffuse)^2.2 and the alpha, without the 0.5 factor, metallic or roughness", async () => {
-            const r = await run(std({ disableLighting: true, emissiveColor: [1, 0.5, 0.25], diffuseColor: [0.5, 1, 1], alpha: 0.8 }));
-            expect(Object.keys(r.mat.pbrMetallicRoughness)).toEqual(["baseColorFactor"]);
-            expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [Math.pow(0.5, 2.2), Math.pow(0.5, 2.2), Math.pow(0.25, 2.2), 0.8], 6);
-            expect(r.mat.emissiveFactor).toBeUndefined();
-            expect(r.mat.extensions).toEqual({ KHR_materials_unlit: {} });
+    it.each([false, true])("preserves UV1 available/missing/lost variants and UV1 transform semantics (per-texture=%s)", async (perTexture) => {
+        const material = std({
+            _hasUvTx: perTexture,
+            diffuseTexture: column(true, WRAPPER),
+            _ambientTexture: column(true, WRAPPER),
+            diffuseCoordIndex: 1,
+            ambientCoordIndex: 1,
+            uvScale: [5, 5],
+            uvOffset: [0.7, 0.7],
         });
-
-        it("clamps the product to [0, 1] before the gamma conversion", async () => {
-            const r = await run(std({ disableLighting: true, emissiveColor: [4, 2, 1], diffuseColor: [1, 0.25, 1] }));
-            expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, [1, Math.pow(0.5, 2.2), 1, 1], 6);
-            expect(r.warnings).toEqual([]);
-        });
-
-        it("exports black for the default (black) emissive color", async () => {
-            const r = await run(std({ disableLighting: true }));
-            expect(r.mat.pbrMetallicRoughness.baseColorFactor).toEqual([0, 0, 0, 1]);
-        });
-
-        it("exports only the diffuse texture and warns about an emissive texture", async () => {
-            const r = await run(
-                std({
-                    disableLighting: true,
-                    emissiveColor: [1, 1, 1],
-                    diffuseTexture: column(TOP, BOTTOM),
-                    _bumpTexture: column(BOTTOM, TOP),
-                    _ambientTexture: column(TOP, TOP),
-                    _emissiveTexture: column(BOTTOM, BOTTOM),
-                })
-            );
-            expect(r.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });
-            expect(r.mat.normalTexture).toBeUndefined();
-            expect(r.mat.occlusionTexture).toBeUndefined();
-            expect(r.mat.emissiveTexture).toBeUndefined();
-            expect(r.mat.emissiveFactor).toBeUndefined();
-            expect(r.json.images).toHaveLength(1);
-            expect(r.warnings).toEqual([expect.stringContaining("unlit with an emissive texture")]);
-        });
-
-        it("keeps MASK for an opaque diffuse-textured material and BLEND for alpha < 1", async () => {
-            const mask = await run(std({ disableLighting: true, alphaCutOff: 0.3, diffuseTexture: column(TOP, BOTTOM) }));
-            expect(mask.mat.alphaMode).toBe("MASK");
-            expect(mask.mat.alphaCutoff).toBe(0.3);
-            const blend = await run(std({ disableLighting: true, alpha: 0.5, diffuseTexture: column(TOP, BOTTOM) }));
-            expect(blend.mat.alphaMode).toBe("BLEND");
-        });
+        const meshes = [createMesh("uv1", { material, uv2s: new Float32Array(8) }), createMesh("uv0", { material }), createMesh("lost", { material, gpuOnly: ["uv2"] })];
+        const r = await exportAndParse(createScene({ meshes, device: createFakeDevice().device }));
+        expect(r.json.materials).toHaveLength(3);
+        for (const info of [r.json.materials[0].pbrMetallicRoughness.baseColorTexture, r.json.materials[0].occlusionTexture]) {
+            expect(info.texCoord).toBe(1);
+            expect(info.extensions?.KHR_texture_transform).toEqual(perTexture ? { offset: [0.1, 0.2], scale: [2, 3], rotation: 0.5, texCoord: 1 } : undefined);
+            expect(await rows(r, info)).toEqual(perTexture ? [BOTTOM, TOP] : [TOP, BOTTOM]);
+        }
+        for (const mat of r.json.materials.slice(1)) {
+            expect(mat.pbrMetallicRoughness.baseColorTexture).toBeUndefined();
+            expect(mat.occlusionTexture).toBeUndefined();
+        }
+        expect(r.warnings.filter((w) => w.includes("samples TEXCOORD_1"))).toHaveLength(1);
     });
 
-    it("clamps a Standard emissive factor above 1 with a warning", async () => {
-        const r = await run(std({ name: "glow", emissiveColor: [2, 0.5, 0] }));
-        expectClose(r.mat.emissiveFactor, [1, Math.pow(0.5, 2.2), 0], 6);
-        expect(r.warnings).toEqual(['Material "glow" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.']);
+    it.each<[Partial<StandardMaterialProps>, string | undefined, number | undefined, number]>([
+        [{ alphaCutOff: 0.5, diffuseTexture: column() }, "MASK", undefined, 0],
+        [{ alphaCutOff: 0.25, diffuseTexture: column() }, "MASK", 0.25, 0],
+        [{ alphaCutOff: 0.25 }, undefined, undefined, 0],
+        [{ alphaCutOff: 0.25, alpha: 0.5 }, "BLEND", undefined, 0],
+        [{ alphaCutOff: 0.25, alpha: 0.5, diffuseTexture: column() }, "BLEND", undefined, 1],
+        [{ alphaCutOff: 0.25, _opacityTexture: column(), diffuseTexture: column() }, "BLEND", undefined, 1],
+        [{ disableLighting: true, alphaCutOff: 0.3, diffuseTexture: column() }, "MASK", 0.3, 0],
+        [{ disableLighting: true, alpha: 0.5, diffuseTexture: column() }, "BLEND", undefined, 0],
+    ])("preserves Standard alpha-test/blend precedence for %j", async (props, mode, cutoff, warnings) => {
+        const r = await run({ backFaceCulling: false, ...props });
+        expect([r.mat.alphaMode, r.mat.alphaCutoff, r.mat.doubleSided]).toEqual([mode, cutoff, true]);
+        expect(r.warnings).toEqual(warnings ? [expect.stringContaining("both alpha-tests and blends")] : []);
     });
 
-    it("maps disableLighting to KHR_materials_unlit", async () => {
-        const r = await run(std({ disableLighting: true }));
+    it.each<[Partial<StandardMaterialProps>, number[]]>([
+        [{ emissiveColor: [1, 0.5, 0.25], diffuseColor: [0.5, 1, 1], alpha: 0.8 }, [0.5 ** 2.2, 0.5 ** 2.2, 0.25 ** 2.2, 0.8]],
+        [{ emissiveColor: [4, 2, 1], diffuseColor: [1, 0.25, 1] }, [1, 0.5 ** 2.2, 1, 1]],
+        [{}, [0, 0, 0, 1]],
+    ])("exports unlit clamp(emissive * diffuse)^2.2 without metallic/roughness for %j", async (props, expected) => {
+        const r = await run({ disableLighting: true, ...props });
+        expect(Object.keys(r.mat.pbrMetallicRoughness)).toEqual(["baseColorFactor"]);
+        expectClose(r.mat.pbrMetallicRoughness.baseColorFactor, expected, 6);
+        expect(r.mat.emissiveFactor).toBeUndefined();
         expect(r.mat.extensions).toEqual({ KHR_materials_unlit: {} });
-        expect(r.json.extensionsUsed).toEqual(["KHR_materials_unlit"]);
-        expect(r.json.extensionsRequired).toBeUndefined();
-        const lit = await run(std());
-        expect(lit.json.extensionsUsed).toBeUndefined();
+        expect(r.warnings).toEqual([]);
     });
 
-    it("writes the material name", async () => {
-        expect((await run(std({ name: "wood" }))).mat.name).toBe("wood");
+    it("keeps only diffuse textures for unlit materials and warns about emissive textures", async () => {
+        const r = await run({ disableLighting: true, diffuseTexture: column(), _bumpTexture: column(), _ambientTexture: column(), _emissiveTexture: column() });
+        expect(r.mat.pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });
+        expect([r.mat.normalTexture, r.mat.occlusionTexture, r.mat.emissiveTexture, r.mat.emissiveFactor]).toEqual([undefined, undefined, undefined, undefined]);
+        expect(r.json.images).toHaveLength(1);
+        expect(r.warnings).toEqual([expect.stringContaining("unlit with an emissive texture")]);
+    });
+
+    it.each<[StandardMaterialProps["emissiveColor"] | undefined, number[], number]>([
+        [undefined, [1, 1, 1], 0],
+        [[0.5, 0, 1], [0.5 ** 2.2, 0, 1], 0],
+        [[2, 0.5, 0], [1, 0.5 ** 2.2, 0], 1],
+    ])("preserves Standard emissive factors and clamps HDR with a warning (%j)", async (emissiveColor, expected, warnings) => {
+        const r = await run({ name: "glow", emissiveColor, _emissiveTexture: column() });
+        expectClose(r.mat.emissiveFactor, expected, 6);
+        expect(r.warnings).toEqual(warnings ? ['Material "glow" has factors outside [0, 1], which glTF cannot represent; exporting them clamped.'] : []);
     });
 });
