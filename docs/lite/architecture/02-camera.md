@@ -584,10 +584,17 @@ if |offset| < RADIUS_EPSILON: offset = 0
 
 // Panning (uses camera.panningInertia, not camera.inertia), in the camera's view plane as in Babylon.js:
 // X along the camera right vector, Y along the camera up vector (world up made orthogonal to the view direction).
-// The camera looks at its target with world up, so both vectors flip when sin(beta) < 0 (sin(beta) = 0 counts as positive).
-s     = sin(beta) < 0 ? -1 : 1
-right = s * (-sin(alpha), 0, cos(alpha))
-up    = s * (-cos(alpha) * cos(beta), sin(beta), -sin(alpha) * cos(beta))
+// The camera looks at its target with world up, so both vectors flip when sin(beta) < 0. sin(beta) = 0 is placed at
+// 0.0001 like the camera's eye. When |sin(beta)| < 1e-10 the eye is straight above or below the target and the camera's
+// look-at falls back to the identity basis, so panning does too.
+sinB  = sin(beta) == 0 ? 0.0001 : sin(beta)
+if |sinB| < 1e-10:
+    right = (1, 0, 0)
+    up    = (0, 1, 0)
+else:
+    s     = sinB < 0 ? -1 : 1
+    right = s * (-sin(alpha), 0, cos(alpha))
+    up    = s * (-cos(alpha) * cos(beta), sinB, -sin(alpha) * cos(beta))
 panScale = radius * 0.001
 target += (right * inertialPanningX + up * inertialPanningY) * panScale
 inertialPanningX *= camera.panningInertia

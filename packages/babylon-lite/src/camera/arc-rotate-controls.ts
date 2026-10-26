@@ -452,26 +452,34 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
         // --- Panning inertia ---
         if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
-            const cosA = Math.cos(camera.alpha);
-            const sinA = Math.sin(camera.alpha);
-            const sinB = Math.sin(camera.beta);
+            // The camera places its eye at sinβ = 0.0001 when sinβ is exactly 0.
+            const sinB = Math.sin(camera.beta) || 0.0001;
             // The camera looks at its target with world up, so for sinβ < 0 (an unclamped β below 0 or above π) its right
-            // and up vectors both flip. Fold that sign into the scale; sinβ = 0 counts as positive, as in the camera.
-            const panScale = camera.radius / (sinB < 0 ? -1000 : 1000);
+            // and up vectors both flip. Fold that sign into the scale, except where the look-at degenerates (below).
+            const panScale = camera.radius / (sinB <= -1e-10 ? -1000 : 1000);
             const panX = camera.inertialPanningX * panScale;
             const panY = camera.inertialPanningY * panScale;
-            const panYAcross = Math.cos(camera.beta) * panY;
-
-            // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector ±(-sinα, 0, cosα), Y
-            // along its up vector ±(-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
-            // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
-            // target never moves towards or away from the eye.
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.
             const target = camera.target;
-            target.x -= sinA * panX + cosA * panYAcross;
-            target.y += sinB * panY;
-            target.z += cosA * panX - sinA * panYAcross;
+
+            if (Math.abs(sinB) < 1e-10) {
+                // The eye is straight above or below the target, so the camera's look-at falls back to the identity basis
+                // (its right axis has length |sinβ| there, below the helper's 1e-10 threshold): right +X, up +Y.
+                target.x += panX;
+                target.y += panY;
+            } else {
+                // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector ±(-sinα, 0, cosα), Y
+                // along its up vector ±(-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
+                // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
+                // target never moves towards or away from the eye.
+                const cosA = Math.cos(camera.alpha);
+                const sinA = Math.sin(camera.alpha);
+                const panYAcross = Math.cos(camera.beta) * panY;
+                target.x -= sinA * panX + cosA * panYAcross;
+                target.y += sinB * panY;
+                target.z += cosA * panX - sinA * panYAcross;
+            }
 
             camera.inertialPanningX = decayInertia(camera.inertialPanningX, camera.panningInertia, PANNING_EPSILON);
             camera.inertialPanningY = decayInertia(camera.inertialPanningY, camera.panningInertia, PANNING_EPSILON);

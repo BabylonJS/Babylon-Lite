@@ -343,6 +343,38 @@ describe("attachControl — panning direction", () => {
         expect(delta[1]).toBeCloseTo(scale, 9);
         expect(delta[2]).toBeCloseTo(0, 9);
     });
+
+    // With the eye straight below or above the target (sin(beta) rounds to about 1e-16 at beta = π or 2π) the camera's
+    // look-at falls back to the identity basis. An exact sin(beta) = 0 (beta = 0) places the eye at sin(beta) = 0.0001
+    // instead, which keeps a regular basis.
+    it.each([
+        [Math.PI / 2, Math.PI],
+        [0.3, Math.PI],
+        [-1.1, 2 * Math.PI],
+        [0.4, 0],
+    ])("follows the camera's look-at basis when the eye is straight below or above the target (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a camera at beta = π up along world Y, its look-at fallback up axis", () => {
+        const { delta, up, forward, scale } = pan(Math.PI / 2, Math.PI, 0, 1);
+
+        expect(up[1]).toBe(1);
+        expect(forward[2]).toBe(1);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
 });
 
 describe("attachControl — pointer mappings", () => {
