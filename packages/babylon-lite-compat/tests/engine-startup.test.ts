@@ -152,6 +152,32 @@ describe("compat engine startup ordering", () => {
         expect(observer).toHaveBeenCalledWith(engine);
     });
 
+    it("releases an engine context acquired after disposal and keeps cleanup idempotent", async () => {
+        let finishCreate!: (context: EngineContext) => void;
+        createEngineMock.mockImplementationOnce(
+            () =>
+                new Promise<EngineContext>((resolve) => {
+                    finishCreate = resolve;
+                })
+        );
+        const engine = new WebGPUEngine({} as ConstructorParameters<typeof WebGPUEngine>[0]);
+        const context = {} as EngineContext;
+
+        const initialization = engine.initAsync();
+        engine.dispose();
+        finishCreate(context);
+
+        await expect(initialization).rejects.toThrow("disposed during initialization");
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledWith(context);
+        expect(onEngineDeviceLostMock).not.toHaveBeenCalled();
+
+        engine.dispose();
+        await expect(engine.initAsync()).rejects.toThrow("has been disposed");
+        expect(createEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+    });
+
     it("rejects BJS canvas presentation options that require Lite's hot surface path", () => {
         const canvas = {} as ConstructorParameters<typeof Engine>[0];
 

@@ -203,8 +203,16 @@ export abstract class AbstractEngine {
         if (this._initialized) {
             return;
         }
-        this._lite = await createEngine(this._canvas, this._options);
-        this._unsubscribeDeviceLost = onEngineDeviceLost(this._lite, () => this.onContextLostObservable.notifyObservers(this));
+        if (this._disposed) {
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine has been disposed.");
+        }
+        const lite = await createEngine(this._canvas, this._options);
+        if (this._disposed) {
+            disposeEngine(lite);
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine was disposed during initialization.");
+        }
+        this._lite = lite;
+        this._unsubscribeDeviceLost = onEngineDeviceLost(lite, () => this.onContextLostObservable.notifyObservers(this));
         this._initialized = true;
     }
 
