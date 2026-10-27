@@ -30,6 +30,7 @@ import {
     registerScene,
     registerSceneWithShadowSupport,
     enableMirroredMeshes,
+    enableRectAreaLights,
     onBeforeRender,
     createNullEngine,
     stepScene,
@@ -501,6 +502,9 @@ export abstract class AbstractEngine {
             scene._buildClusteredContainers();
             await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
+            if (scene._lite.lights.some((light) => light.lightType === "rectArea")) {
+                await enableRectAreaLights(scene._lite);
+            }
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
             // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)

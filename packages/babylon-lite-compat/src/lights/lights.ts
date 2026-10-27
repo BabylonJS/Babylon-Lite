@@ -13,13 +13,15 @@
  * tuples, and every colour write bumps the light version so it reaches the lights UBO.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, removeFromScene } from "babylon-lite";
+import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createRectAreaLight, createSpotLight, removeFromScene } from "babylon-lite";
 import type {
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
     PointLight as LitePointLight,
+    RectAreaLight as LiteRectAreaLight,
     SpotLight as LiteSpotLight,
     LightBase,
+    SceneNode,
 } from "babylon-lite";
 
 import { liteBackedColor3 } from "../math/color.js";
@@ -28,6 +30,7 @@ import { liteBackedVector3 } from "../math/vector.js";
 import type { Vector3 } from "../math/vector.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+import type { BaseTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
 
@@ -51,9 +54,11 @@ export abstract class Light extends Node {
      */
     public _shadowGenerator: object | null = null;
 
-    protected constructor(name: string, scene?: Scene) {
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
         super(name, scene);
-        scene?._registerLight(this);
+        if (!dontAddToScene) {
+            scene?._registerLight(this);
+        }
     }
 
     public override getClassName(): string {
@@ -388,5 +393,105 @@ export class SpotLight extends Light {
     }
     public set specular(value: Color3) {
         this._writeColor(this._lite.specular, value);
+    }
+}
+
+/** Babylon.js `AreaLight` hierarchy node shared by rectangular area lights. */
+export abstract class AreaLight extends Light {
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+    }
+
+    public abstract get position(): Vector3;
+    public abstract set position(value: Vector3);
+}
+
+/** Babylon.js `RectAreaLight` over Lite's native LTC-backed rectangular emitter. */
+export class RectAreaLight extends AreaLight {
+    /** @internal Underlying Babylon Lite rectangular area light. */
+    public readonly _lite: LiteRectAreaLight;
+    /** @internal Caller-visible texture wrapper assigned through `emissionTexture`. */
+    private _emissionTexture: BaseTexture | null = null;
+
+    public constructor(name: string, position: Vector3, width: number, height: number, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+        this._lite = createRectAreaLight(position.asArray(), width, height);
+        this._lite.name = name;
+        if (scene && !dontAddToScene) {
+            addToScene(scene._lite, this._lite);
+        }
+    }
+
+    public override getClassName(): string {
+        return "RectAreaLight";
+    }
+
+    public getTypeID(): number {
+        return 4;
+    }
+
+    public override get position(): Vector3 {
+        return liteBackedVector3(this._lite.position);
+    }
+    public override set position(value: Vector3) {
+        this._lite.position.set(value.x, value.y, value.z);
+    }
+
+    public get width(): number {
+        return this._lite.width;
+    }
+    public set width(value: number) {
+        this._lite.width = value;
+    }
+
+    public get height(): number {
+        return this._lite.height;
+    }
+    public set height(value: number) {
+        this._lite.height = value;
+    }
+
+    public get diffuse(): Color3 {
+        return this._liveColor(this._lite.diffuse);
+    }
+    public set diffuse(value: Color3) {
+        this._writeColor(this._lite.diffuse, value);
+    }
+
+    public get specular(): Color3 {
+        return this._liveColor(this._lite.specular);
+    }
+    public set specular(value: Color3) {
+        this._writeColor(this._lite.specular, value);
+    }
+
+    public get emissionTexture(): BaseTexture | null {
+        return this._emissionTexture;
+    }
+    public set emissionTexture(value: BaseTexture | null) {
+        this._emissionTexture = value;
+        this._lite.emissionTexture = value?._lite ?? null;
+        value?._onReady(() => {
+            if (this._emissionTexture === value) {
+                this._lite.emissionTexture = value._lite ?? null;
+            }
+        });
+    }
+
+    /** @internal Preserve Babylon.js local-transform parenting on the Lite light node. */
+    protected override _applyParent(parent: Node | null): void {
+        const source = parent as unknown as { _node?: SceneNode; _lite?: SceneNode } | null;
+        const next = source?._node ?? source?._lite ?? null;
+        const previous = this._lite.parent as SceneNode | null;
+        if (previous && previous !== next) {
+            const index = previous.children.indexOf(this._lite);
+            if (index !== -1) {
+                previous.children.splice(index, 1);
+            }
+        }
+        this._lite.parent = next;
+        if (next && !next.children.includes(this._lite)) {
+            next.children.push(this._lite);
+        }
     }
 }
