@@ -38,6 +38,11 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     if (_isTextureReleased(tex)) {
         return;
     }
+    // Created on the replacement device while recovery awaited (the capture stamps the device it was made
+    // on). Rebuilding would overwrite its live allocation and orphan it with the claims it holds.
+    if (tex._device === engine._device) {
+        return;
+    }
     // Several wrappers can share one source. The tracked set and the per-kind reachability walks
     // both reach the same texture (a material texture also used by a sprite layer), and
     // `cloneTexture2D` deliberately hands out extra wrappers over a single upload. Rebuilding each
@@ -72,6 +77,7 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     const done = rebuildFromSource(engine, tex, source);
     _rebuiltOn.set(source, { device: engine._device, tex, done });
     await done;
+    tex._device = engine._device;
     // That ownership is carried onto the replacement, which starts unowned. Without it the
     // first consumer to bind and then unbind a rebuilt texture destroys it while the application
     // still holds the wrapper. Carrying it HERE would be wrong: recovery re-establishes part of the
@@ -134,6 +140,7 @@ function adoptRebuiltTexture(engine: EngineContext, tex: Texture2D, rebuilt: Tex
     tex.width = rebuilt.width;
     tex.height = rebuilt.height;
     tex.sampler = sampler;
+    tex._device = engine._device;
 }
 
 /**

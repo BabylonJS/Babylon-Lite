@@ -29,7 +29,9 @@ interface Retention {
     mesh: Mesh;
     engine: EngineContext;
     leases: Set<MeshResourceLease>;
-    textures: Map<GPUTexture, Texture2D>;
+    /** One entry per texture claim this retention acquired. Recovery may later converge two claimed wrappers
+     *  onto one replacement allocation; both claims stay owed, so entries are never re-keyed or merged. */
+    textures: Texture2D[];
 }
 
 let retentions: WeakMap<Mesh, Retention> | undefined;
@@ -105,8 +107,6 @@ function captureTextures(state: Retention, material: Material): void {
 }
 
 function collectTextures(state: Retention, material: Material): void {
-    // Recovery replaces texture handles in place; re-key before deduplicating acquisitions.
-    state.textures = new Map([...state.textures.values()].map((texture) => [texture.texture, texture]));
     const visited = new Set<Material>();
     const found = new Map<GPUTexture, Texture2D>();
     const visit = (current: Material): void => {
@@ -130,13 +130,20 @@ function collectTextures(state: Retention, material: Material): void {
         }
     };
     visit(material);
-    // Enumerate completely before acquiring: a plugin error must not leave partial ownership.
+    // Enumerate completely before acquiring: a plugin error must not leave partial ownership. Deduplicate
+    // against current handles, which recovery replaces in place.
     for (const [allocation, texture] of found) {
-        if (!state.textures.has(allocation)) {
+        if (!state.textures.some((claimed) => claimed.texture === allocation)) {
             acquireRetainedTexture(state.engine, texture);
-            state.textures.set(allocation, texture);
+            state.textures.push(texture);
         }
     }
+}
+
+/** @internal Every texture wrapper live retentions claimed, for device-lost recovery: this includes textures
+ *  enumerated only through a material plugin, which no walk of the material's own properties reaches. */
+export function _retainedTextures(engine: EngineContext): Texture2D[] {
+    return [...(engine._retainedMeshes ?? [])].flatMap((mesh) => retentions?.get(mesh)?.textures ?? []);
 }
 
 /** Keep a mesh alive until this independent lease is released.
@@ -173,7 +180,7 @@ export function retainMeshResources(engine: EngineContext, mesh: Mesh): MeshReso
                 }
             }
         );
-        state = { mesh, engine, leases: new Set(), textures: new Map() };
+        state = { mesh, engine, leases: new Set(), textures: [] };
         captureTextures(state, mesh.material);
         retentions.set(mesh, state);
         if (!engine._retainedMeshes) {
@@ -221,8 +228,7 @@ function revoke(mesh: Mesh, state: Retention, force: boolean): void {
     state.leases.clear();
     retentions!.delete(mesh);
     state.engine._retainedMeshes!.delete(mesh);
-    const textures = [...state.textures.values()];
-    state.textures.clear();
+    const textures = state.textures.splice(0);
     const release = (): void => {
         if (force || isMeshUnowned(mesh)) {
             disposeMeshGpu(mesh);

@@ -68,7 +68,7 @@ export function createMorphTargets(
     const weights = new F32(targetCount);
     weights.set(headerWeights);
 
-    return { deltasBuffer, count: targetCount, weightsBuffer, targets, weights };
+    return { deltasBuffer, count: targetCount, weightsBuffer, targets, weights, _device: engine._device };
 }
 
 /** Update morph target weights on CPU and GPU.

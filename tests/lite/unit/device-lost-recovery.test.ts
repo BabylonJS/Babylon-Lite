@@ -231,6 +231,7 @@ describe("device-lost recovery context dispatch", () => {
         const recovery = enableDeviceLostSceneRecovery(engine);
 
         engine._dlr!.b(texture, null, true, true, new Uint8Array([255, 255, 255, 255]));
+        engine._device = { ...engine._device };
         await rebuildTexture2D(engine, texture);
 
         expect(samplerDescriptors).toContainEqual({

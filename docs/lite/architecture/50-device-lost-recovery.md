@@ -363,6 +363,15 @@ destroyed texture hands a live one back to a wrapper the application has
 finished with, and for a texture that had owners, takes references nothing will
 ever release. Recovery therefore skips it.
 
+A texture already made on the replacement device is skipped too. Recovery
+installs that device before awaiting its handlers, so an application creating
+textures in the window gets live ones; rebuilding them would overwrite the live
+handle and orphan it with whatever claims it holds. The opt-in capture stamps
+each texture with the device it was created on, recovery restamps what it
+rebuilds or adopts, and derived wrappers inherit their base's stamp, so a clone
+of a still-outgoing texture is still adopted. Morph targets and skeletons carry
+the same stamp from their factories.
+
 That question is answered by the ref-count map, which distinguishes three
 states: no entry means nothing ever took ownership, a positive count means the
 texture is owned, and a zero entry means every owner released it and

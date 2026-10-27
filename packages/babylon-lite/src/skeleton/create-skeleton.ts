@@ -74,5 +74,6 @@ export function createSkeleton(
         joints1: joints1 ?? null,
         weights1: weights1 ?? null,
         _skinBuffers: skinBuffers,
+        _device: device,
     };
 }

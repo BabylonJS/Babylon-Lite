@@ -79,6 +79,7 @@ function attachRecoveryCapture(engine: EngineContext): void {
     const owner = new WeakRef(state);
     const stamp = (tex: Texture2D, source: Texture2DRecoverySource): void => {
         (_sourceOwners ??= new WeakMap()).set(source, owner);
+        tex._device = engine._device;
         stampTexture(state, tex, source);
     };
     // Engine-agnostic and inert unless a source has been captured, so it is installed on first

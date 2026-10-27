@@ -47,6 +47,9 @@ export interface Texture2D {
     _uvTransformDisabled?: true;
     /** @internal Retained source for opt-in device-lost recovery. */
     _recoverySource?: Texture2DRecoverySource;
+    /** @internal Device `texture` was created on. Stamped by the opt-in recovery capture and by recovery
+     *  itself, so recovery keeps a texture already made on the replacement device. */
+    _device?: GPUDevice;
     /** @internal Processed emitter identity; ordinary clones preserve this image provenance. */
     _areaLightImage?: AreaLightImage;
 }

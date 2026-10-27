@@ -163,6 +163,9 @@ export interface SkeletonData {
     /** @internal True once the last owning mesh has released the GPU resources. Animation
      *  controllers may outlive removed meshes, so they use this to skip stale uploads. */
     _disposed?: boolean;
+    /** @internal Device the GPU resources were created on, so device-lost recovery keeps an allocation already
+     *  made on the replacement device instead of rebuilding over its live handles. */
+    _device?: GPUDevice;
     /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
     readonly _skinBuffers: SkinBufferData;
     /** @internal Shared node-index → bone override map, stamped by `enableBoneControl`'s
@@ -233,4 +236,7 @@ export interface MorphTargetData {
     _refCount?: number;
     /** @internal True once the last owning mesh has released the GPU resources. */
     _disposed?: boolean;
+    /** @internal Device the GPU buffers were created on, so device-lost recovery keeps an allocation already
+     *  made on the replacement device instead of rebuilding over its live handles. */
+    _device?: GPUDevice;
 }

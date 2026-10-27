@@ -50,9 +50,11 @@ owners. Clone/shared-geometry counts and unique-update guards retain their meani
 
 Texture capture enumerates source-material textures, enabled plugin textures,
 and nested shadow-caster materials, visiting each material once. Enumeration is
-transactional before acquiring additional claims. Deduplication is by allocation
-identity; previously captured textures remain owned until final release. After
-recovery replaces facade handles, the map is re-keyed before acquisition.
+transactional before acquiring additional claims. Retention keeps one entry per
+acquired claim and deduplicates new acquisitions against the claimed wrappers'
+current allocations, which recovery replaces in place. Wrappers recovery later
+converges onto one replacement keep both claims; entries are never merged.
+Previously captured textures remain owned until final release.
 Reentrant enumeration, retention, or release during capture throws explicitly.
 
 ## Pipeline Configuration
@@ -189,9 +191,15 @@ owned source that never received a shared-recovery hook — keeps its claim on t
 live replacement instead of being uploaded again. An allocation the opt-in mesh
 capture stamped with the replacement device — a mesh created and retained while
 recovery awaited a texture fetch — is likewise kept rather than re-uploaded over
-its live claim. After every registered scene, recovery walks retained meshes'
-materials through the source-deduplicated texture rebuild, repeating while new
-wrappers appear, so a wrapper cloned from a still-outgoing texture onto a detached
+its live claim. The same device provenance covers every resource a retained mesh
+can gain in that window: textures stamped by the opt-in texture capture, and the
+morph-target and skeleton objects stamped by their factories, are kept rather than
+rebuilt over their live handles. Recovery restamps what it rebuilds or adopts, and
+derived wrappers inherit their base's stamp. After every registered scene, recovery
+reconciles the texture claims live retentions own — enumerated through the
+material and plugin contracts, so a texture held only in a plugin's closure is
+included — through the source-deduplicated texture rebuild, repeating while new
+claims appear, so a wrapper cloned from a still-outgoing texture onto a detached
 retained mesh adopts the replacement before ownership settles. Shared allocation replacement uses
 [shared mesh recovery](61-shared-mesh-recovery.md). Replacement-device allocation
 is expected and is not part of the detach/reinsert allocation-reuse measurement.
@@ -267,8 +275,14 @@ implementation or asset is copied.
   never-owned texture keeps its replacement. A wrapper cloned mid-fetch from the
   still-outgoing texture onto a loose retained clone adopts the replacement during
   registered-scene recovery, keeps it when reinserted, and final teardown destroys
-  the replacement once. A procedural mesh created and retained mid-fetch on the
-  replacement device keeps its original buffers, which final release destroys once.
+  the replacement once. A wrapper held only in a retained material plugin's closure
+  adopts the replacement the same way. A material reassigned onto a retained mesh
+  after the source is replaced but before reconciliation claims a still-outgoing
+  alias; after the alias converges onto the replacement, recapture, reinsertion,
+  and detach keep both claims, and final release destroys the replacement once. A
+  procedural mesh created and retained mid-fetch on the replacement device keeps
+  its original buffers, morph targets, skeleton, and solid texture, which final
+  release destroys once.
   A registered scene emptied by detach
   skips its PBR-style group builder, and deformation shared by a detached source
   and attached clone is uploaded once and torn down once.

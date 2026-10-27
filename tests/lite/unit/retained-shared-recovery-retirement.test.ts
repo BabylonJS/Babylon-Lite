@@ -26,7 +26,10 @@ import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/s
 import { _isTextureReleased, _textureOwners } from "../../../packages/babylon-lite/src/resource/texture-owner-state.js";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { createSolidTexture2D } from "../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { rebuildTexture2D, settleRebuiltTextureOwnership } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
+import { createMorphTargets } from "../../../packages/babylon-lite/src/morph/create-morph-targets.js";
+import { createSkeleton } from "../../../packages/babylon-lite/src/skeleton/create-skeleton.js";
 
 const environment = vi.hoisted(() => ({ rebuild: vi.fn<() => Promise<void>>() }));
 vi.mock("../../../packages/babylon-lite/src/loader-env/environment-recovery.js", () => ({
@@ -618,15 +621,101 @@ describe("shared replacement retirement during registered scene recovery", () =>
         expect(outgoing.destroy).not.toHaveBeenCalled();
     });
 
-    it("keeps geometry a retained mesh allocated on the replacement device while the fetch was in flight", async () => {
+    it("reconciles a wrapper only a retained material plugin's closure holds", async () => {
+        let outgoing!: GPUTexture;
+        let derived!: Texture2D;
+        let late!: Mesh;
+        let lateLease!: MeshResourceLease;
+        const material = createStandardMaterial();
+        // Held only in the plugin's closure: no walk of the material's enumerable properties reaches it.
+        material.plugins = [{ name: "closure", getActiveTextures: (out) => out.push(derived) }];
+        const { engine, shared, lease } = await fetchWindow(
+            async ({ engine, mesh, shared }) => {
+                outgoing = shared.texture;
+                derived = cloneTexture2D(shared, { uScale: 2 });
+                late = cloneTransformNode(mesh) as Mesh;
+                late.material = material;
+                lateLease = retainMeshResources(engine, late);
+            },
+            true,
+            async (engine) => {
+                expect(derived.texture).toBe(outgoing);
+                await rebuildRegisteredScenes(engine);
+            }
+        );
+        expect(derived.texture).toBe(shared.texture);
+        expect(derived.view).toBe(shared.view);
+        expect(_textureOwners(shared)).toBe(3);
+
+        const target = stubScene(engine);
+        addToScene(target, late);
+        const active: Texture2D[] = [];
+        material.plugins[0]!.getActiveTextures!(active);
+        expect(active[0]!.texture).toBe(shared.texture);
+        detachMeshFromScene(target, late);
+
+        releaseMeshResources(lease);
+        releaseMeshResources(lateLease);
+        await waitForGpuResourceRetirements(engine);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+        expect(outgoing.destroy).not.toHaveBeenCalled();
+    });
+
+    it("keeps both claims when recovery converges a retained mesh's wrappers onto one replacement", async () => {
+        let retained!: Mesh;
+        let alias!: Texture2D;
+        let source!: Texture2D;
+        const aliased = createStandardMaterial();
+        const { engine, shared, lease } = await fetchWindow(
+            async ({ mesh, shared }) => {
+                retained = mesh;
+                source = shared;
+                alias = cloneTexture2D(shared, { uScale: 2 });
+                aliased.diffuseTexture = alias;
+            },
+            true,
+            async (engine) => {
+                // The source is replaced, but the alias still holds the outgoing handle until reconciliation:
+                // this assignment claims it as a distinct allocation.
+                expect(alias.texture).not.toBe(source.texture);
+                retained.material = aliased;
+                await rebuildRegisteredScenes(engine);
+                expect(alias.texture).toBe(source.texture);
+            }
+        );
+        expect(_textureOwners(shared)).toBe(3);
+        // Recapturing now sees two claimed wrappers on one allocation; neither claim may be forgotten.
+        const original = createStandardMaterial();
+        original.diffuseTexture = shared;
+        retained.material = original;
+        const target = stubScene(engine);
+        addToScene(target, retained);
+        detachMeshFromScene(target, retained);
+
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        expect(_textureOwners(shared)).toBe(1);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("keeps geometry, deformation and textures a retained mesh allocated on the replacement device while the fetch was in flight", async () => {
         let fresh!: Mesh;
         let freshLease!: MeshResourceLease;
         let allocated!: MeshGPU;
+        let solid!: Texture2D;
+        let solidTexture!: GPUTexture;
+        let deformation!: GPUBuffer[];
+        let boneTexture!: GPUTexture;
         let disable!: () => void;
         const { engine, lease, shared } = await fetchWindow(
             async ({ engine }) => {
-                // Recovery installed the replacement device before awaiting the fetch; this mesh is made on it.
+                // Recovery installed the replacement device before awaiting the fetch; these are made on it.
                 Object.assign(engine._device, { features: new Set<GPUFeatureName>() });
+                Object.assign(engine._device.queue, { writeTexture: vi.fn() });
                 Object.assign(engine._deviceLostRecovery!, {
                     _recovering: true,
                     _requiredFeatures: [],
@@ -640,6 +729,16 @@ describe("shared replacement retirement during registered scene recovery", () =>
                 disable = enableDeviceLostSceneRecovery(engine).disable;
                 fresh = createPlane(engine);
                 allocated = fresh._gpu;
+                const vertexCount = fresh._cpuPositions!.length / 3;
+                fresh.morphTargets = createMorphTargets(engine, [{ positions: new Float32Array(vertexCount * 3), normals: null }], vertexCount, [0]);
+                fresh.skeleton = createSkeleton(engine, new Uint16Array(vertexCount * 4), new Float32Array(vertexCount * 4), 1, new Float32Array(16));
+                deformation = [fresh.morphTargets.deltasBuffer, fresh.morphTargets.weightsBuffer, fresh.skeleton.jointsBuffer, fresh.skeleton.weightsBuffer];
+                boneTexture = fresh.skeleton.boneTexture;
+                solid = createSolidTexture2D(engine, 1, 0, 0);
+                solidTexture = solid.texture;
+                const material = createStandardMaterial();
+                material.diffuseTexture = solid;
+                fresh.material = material;
                 freshLease = retainMeshResources(engine, fresh);
             },
             true,
@@ -647,13 +746,19 @@ describe("shared replacement retirement during registered scene recovery", () =>
         );
         try {
             expect(fresh._gpu).toBe(allocated);
-            for (const buffer of buffers(allocated)) {
-                expect(buffer.destroy).not.toHaveBeenCalled();
+            expect(solid.texture).toBe(solidTexture);
+            const live = [fresh.morphTargets!.deltasBuffer, fresh.morphTargets!.weightsBuffer, fresh.skeleton!.jointsBuffer, fresh.skeleton!.weightsBuffer];
+            live.forEach((buffer, i) => expect(buffer).toBe(deformation[i]));
+            expect(fresh.skeleton!.boneTexture).toBe(boneTexture);
+            for (const resource of [...buffers(allocated), ...deformation, boneTexture, solidTexture]) {
+                expect(resource.destroy).not.toHaveBeenCalled();
             }
             releaseMeshResources(freshLease);
             await waitForGpuResourceRetirements(engine);
-            for (const buffer of buffers(allocated)) {
-                expect(buffer.destroy).toHaveBeenCalledOnce();
+            expect(solidTexture.destroy).not.toHaveBeenCalled();
+            expect(releaseTexture(solid)).toBe(true);
+            for (const resource of [...buffers(allocated), ...deformation, boneTexture, solidTexture]) {
+                expect(resource.destroy).toHaveBeenCalledOnce();
             }
         } finally {
             releaseMeshResources(lease);
