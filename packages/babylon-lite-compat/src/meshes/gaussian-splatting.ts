@@ -76,7 +76,14 @@ function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext
 
 /** Translate Babylon.js's resolution multiplier into Lite's integer downsampling factor. */
 function litePointSplattingRenderScale(value: number | "auto"): number | "auto" {
-    return value === "auto" ? value : Math.max(1, Math.min(8, Math.round(1 / Math.max(value, 1e-3))));
+    if (value === "auto") {
+        return value;
+    }
+    const divisor = 1 / value;
+    if (!Number.isFinite(divisor) || !Number.isInteger(divisor) || divisor < 1 || divisor > 8) {
+        throw new RangeError("GaussianSplattingMesh.pointSplattingRenderScale must be 'auto' or the reciprocal of an integer from 1 through 8.");
+    }
+    return divisor;
 }
 
 /** `.splat` row stride: position(3f) + scale(3f) + rgba(4×u8) + rot(4×u8) = 32 bytes. */
@@ -142,9 +149,10 @@ export class GaussianSplattingMesh extends TransformNode {
     }
 
     public set pointSplattingRenderScale(value: number | "auto") {
+        const liteValue = litePointSplattingRenderScale(value);
         this._pointSplattingRenderScale = value;
         if (this._pointSplatting) {
-            this._pointSplatting.renderScale = litePointSplattingRenderScale(value);
+            this._pointSplatting.renderScale = liteValue;
         }
     }
 
@@ -279,6 +287,7 @@ export class GaussianSplattingMesh extends TransformNode {
     public _adopt(lite: LiteGsMesh): void {
         const placeholder = this._node;
         const previousAccessibilitySource = this._accessibilitySource();
+        this._disablePointSplatting();
         lite.parent = placeholder;
         placeholder.children.push(lite);
         lite.name = this.name;
@@ -303,10 +312,7 @@ export class GaussianSplattingMesh extends TransformNode {
             return;
         }
         if (!this._pointSplattingRenderMode && !this._pointSplattingDepthRenderMode) {
-            if (this._pointSplatting) {
-                disableGaussianPointSplatting(this._scene._lite, this._pointSplatting);
-                this._pointSplatting = null;
-            }
+            this._disablePointSplatting();
             return;
         }
         this._pointSplatting = enableGaussianPointSplatting(this._scene._lite, this._gs, {
@@ -316,6 +322,14 @@ export class GaussianSplattingMesh extends TransformNode {
             renderScale: litePointSplattingRenderScale(this._pointSplattingRenderScale),
             occlusionCulling: this._pointSplattingOcclusionCulling,
         });
+    }
+
+    /** @internal Release the point renderer owned by the currently adopted splat. */
+    private _disablePointSplatting(): void {
+        if (this._pointSplatting && this._scene) {
+            disableGaussianPointSplatting(this._scene._lite, this._pointSplatting);
+            this._pointSplatting = null;
+        }
     }
 
     /** Babylon.js `gs.splatsData` — the raw 32-byte/splat row buffer (for inspection / `updateData`). */
@@ -376,10 +390,7 @@ export class GaussianSplattingMesh extends TransformNode {
 
     /** @internal Release the opt-in point renderer before removing the splat node. */
     protected override _disposeSelf(doNotRecurse: boolean): void {
-        if (this._pointSplatting && this._scene) {
-            disableGaussianPointSplatting(this._scene._lite, this._pointSplatting);
-            this._pointSplatting = null;
-        }
+        this._disablePointSplatting();
         super._disposeSelf(doNotRecurse);
     }
 }
