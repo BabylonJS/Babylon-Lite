@@ -469,6 +469,9 @@ export class RectAreaLight extends AreaLight {
         this._lite.name = name;
         if (scene && !dontAddToScene) {
             addToScene(scene._lite, this._lite);
+            if (scene._hasStarted) {
+                requestRectAreaLightReconcile(scene);
+            }
         }
     }
 
@@ -536,6 +539,15 @@ export class RectAreaLight extends AreaLight {
             value._onReady(apply);
         } else {
             apply();
+        }
+    }
+
+    /** @internal Rebuild receiver pipelines after removing an area-light slot from a running scene. */
+    protected override _disposeSelf(doNotRecurse: boolean): void {
+        const scene = this._scene;
+        super._disposeSelf(doNotRecurse);
+        if (scene?._hasStarted) {
+            requestRectAreaLightReconcile(scene);
         }
     }
 

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const liteMocks = vi.hoisted(() => ({
+    addToScene: vi.fn(),
     enableRectAreaLights: vi.fn(),
     rebuildSceneRenderables: vi.fn(),
+    removeFromScene: vi.fn(),
 }));
 
 vi.mock("babylon-lite", async (importActual) => {
@@ -14,6 +16,7 @@ import type { RectAreaLight as LiteRectAreaLight, SceneContext, Texture2D } from
 
 import type { WebGPUEngine } from "../src/engine/engine";
 import { RectAreaLight } from "../src/lights/lights";
+import { Vector3 } from "../src/math/vector";
 import type { Scene } from "../src/scene/scene";
 import { BaseTexture } from "../src/textures/textures";
 
@@ -30,8 +33,70 @@ class ReadyTexture extends BaseTexture {
 
 describe("RectAreaLight emission texture", () => {
     beforeEach(() => {
+        liteMocks.addToScene.mockReset();
         liteMocks.enableRectAreaLights.mockReset();
         liteMocks.rebuildSceneRenderables.mockReset();
+        liteMocks.removeFromScene.mockReset();
+    });
+
+    it("reconciles receiver pipelines when a solid area light is added after startup", async () => {
+        const lateWork: Array<() => Promise<void>> = [];
+        const engine = { _registerLateWork: (work: () => Promise<void>) => lateWork.push(work) } as unknown as WebGPUEngine;
+        const liteScene = {} as SceneContext;
+        const scene = {
+            _lite: liteScene,
+            _hasStarted: true,
+            _registerLight: vi.fn(),
+            getEngine: () => engine,
+        } as unknown as Scene;
+
+        const light = new RectAreaLight("panel", new Vector3(0, 1, 0), 2, 3, scene);
+
+        expect(liteMocks.addToScene).toHaveBeenCalledWith(liteScene, light._lite);
+        expect(lateWork).toHaveLength(1);
+        await lateWork[0]!();
+        expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
+        expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
+    });
+
+    it("reconciles emission slots when an area light is disposed after startup", async () => {
+        const lateWork: Array<() => Promise<void>> = [];
+        const engine = { _registerLateWork: (work: () => Promise<void>) => lateWork.push(work) } as unknown as WebGPUEngine;
+        const liteScene = {} as SceneContext;
+        const scene = {
+            _lite: liteScene,
+            _hasStarted: true,
+            _registerLight: vi.fn(),
+            _unregisterNode: vi.fn(),
+            getEngine: () => engine,
+        } as unknown as Scene;
+        const light = new RectAreaLight("panel", new Vector3(0, 1, 0), 2, 3, scene);
+        await lateWork.shift()!();
+        liteMocks.enableRectAreaLights.mockClear();
+        liteMocks.rebuildSceneRenderables.mockClear();
+
+        light.dispose();
+
+        expect(liteMocks.removeFromScene).toHaveBeenCalledWith(liteScene, light._lite);
+        expect(lateWork).toHaveLength(1);
+        await lateWork[0]!();
+        expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
+        expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
+    });
+
+    it("leaves area-light topology reconciliation to the startup build before the scene starts", () => {
+        const registerLateWork = vi.fn();
+        const liteScene = {} as SceneContext;
+        const scene = {
+            _lite: liteScene,
+            _hasStarted: false,
+            _registerLight: vi.fn(),
+            getEngine: () => ({ _registerLateWork: registerLateWork }) as unknown as WebGPUEngine,
+        } as unknown as Scene;
+
+        new RectAreaLight("panel", new Vector3(0, 1, 0), 2, 3, scene);
+
+        expect(registerLateWork).not.toHaveBeenCalled();
     });
 
     it("reconciles emission resources and rebuilds scene materials after startup", async () => {
