@@ -46,7 +46,7 @@ describe("GaussianSplattingMesh point mode", () => {
         const scene = { _lite: liteScene, _registerMesh: () => undefined } as unknown as Scene;
         const mesh = GaussianSplattingMesh._fromLite(lite, scene);
 
-        mesh.pointSplattingRenderScale = 2;
+        mesh.pointSplattingRenderScale = 0.5;
         mesh.pointSplattingOcclusionCulling = true;
         mesh.pointSplattingScale = 1.5;
         mesh.pointSplattingRenderMode = true;
@@ -63,10 +63,11 @@ describe("GaussianSplattingMesh point mode", () => {
         expect(pointMocks.enable).toHaveBeenLastCalledWith(liteScene, lite, expect.objectContaining({ colorRenderMode: true, depthRenderMode: true }));
 
         mesh.pointSplattingScale = 2;
-        mesh.pointSplattingRenderScale = 3;
+        mesh.pointSplattingRenderScale = 0.25;
         mesh.pointSplattingOcclusionCulling = false;
         expect(handle.pointScale).toBe(2);
-        expect(handle.renderScale).toBe(3);
+        expect(handle.renderScale).toBe(4);
+        expect(mesh.pointSplattingRenderScale).toBe(0.25);
         expect(handle.occlusionCulling).toBe(false);
     });
 

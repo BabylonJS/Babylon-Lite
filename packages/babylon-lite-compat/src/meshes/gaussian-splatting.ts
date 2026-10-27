@@ -74,6 +74,11 @@ function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext
     return loadSplat;
 }
 
+/** Translate Babylon.js's resolution multiplier into Lite's integer downsampling factor. */
+function litePointSplattingRenderScale(value: number | "auto"): number | "auto" {
+    return value === "auto" ? value : Math.max(1, Math.min(8, Math.round(1 / Math.max(value, 1e-3))));
+}
+
 /** `.splat` row stride: position(3f) + scale(3f) + rgba(4×u8) + rot(4×u8) = 32 bytes. */
 const SPLAT_ROW_BYTES = 32;
 const SPLAT_ROW_FLOATS = SPLAT_ROW_BYTES / 4;
@@ -139,7 +144,7 @@ export class GaussianSplattingMesh extends TransformNode {
     public set pointSplattingRenderScale(value: number | "auto") {
         this._pointSplattingRenderScale = value;
         if (this._pointSplatting) {
-            this._pointSplatting.renderScale = value;
+            this._pointSplatting.renderScale = litePointSplattingRenderScale(value);
         }
     }
 
@@ -308,7 +313,7 @@ export class GaussianSplattingMesh extends TransformNode {
             colorRenderMode: this._pointSplattingRenderMode,
             depthRenderMode: this._pointSplattingDepthRenderMode,
             pointScale: this._pointSplattingScale,
-            renderScale: this._pointSplattingRenderScale,
+            renderScale: litePointSplattingRenderScale(this._pointSplattingRenderScale),
             occlusionCulling: this._pointSplattingOcclusionCulling,
         });
     }

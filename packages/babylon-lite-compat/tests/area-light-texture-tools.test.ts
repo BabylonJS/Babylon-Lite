@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const processAreaLightTexture = vi.hoisted(() => vi.fn());
+const liteMocks = vi.hoisted(() => ({
+    processAreaLightTexture: vi.fn(),
+    releaseTexture: vi.fn(),
+}));
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
-    return { ...actual, processAreaLightTexture };
+    return { ...actual, ...liteMocks };
 });
 
 import type { Texture2D } from "babylon-lite";
@@ -27,14 +30,15 @@ class ReadyTexture extends BaseTexture {
 
 describe("AreaLightTextureTools", () => {
     beforeEach(() => {
-        processAreaLightTexture.mockReset();
+        liteMocks.processAreaLightTexture.mockReset();
+        liteMocks.releaseTexture.mockReset();
     });
 
     it("forwards processing to Lite and wraps the resulting texture", async () => {
         const engine = { _lite: { label: "engine" } } as unknown as AbstractEngine;
         const sourceHandle = { width: 4, height: 4 } as Texture2D;
         const processedHandle = { width: 1024, height: 1024 } as Texture2D;
-        processAreaLightTexture.mockResolvedValue(processedHandle);
+        liteMocks.processAreaLightTexture.mockResolvedValue(processedHandle);
         const tools = new AreaLightTextureTools(engine);
 
         expect(tools.shaderLanguage).toBe(ShaderLanguage.GLSL);
@@ -43,18 +47,23 @@ describe("AreaLightTextureTools", () => {
 
         expect(tools.shaderLanguage).toBe(ShaderLanguage.WGSL);
         expect(tools.isReady()).toBe(true);
-        expect(processAreaLightTexture).toHaveBeenCalledWith(engine._lite, sourceHandle);
+        expect(liteMocks.processAreaLightTexture).toHaveBeenCalledWith(engine._lite, sourceHandle);
         expect(processed?._lite).toBe(processedHandle);
         if (!processed) {
             throw new Error("Expected a processed area-light texture.");
         }
         await expect(processed.whenReadyAsync()).resolves.toBeUndefined();
+        processed.dispose();
+        processed.dispose();
+        expect(liteMocks.releaseTexture).toHaveBeenCalledTimes(1);
+        expect(liteMocks.releaseTexture).toHaveBeenCalledWith(processedHandle);
+        expect(processed._lite).toBeUndefined();
     });
 
     it("returns null when the source has no Lite texture handle", async () => {
         const tools = new AreaLightTextureTools({ _lite: {} } as unknown as AbstractEngine);
 
         await expect(tools.processAsync(new ReadyTexture())).resolves.toBeNull();
-        expect(processAreaLightTexture).not.toHaveBeenCalled();
+        expect(liteMocks.processAreaLightTexture).not.toHaveBeenCalled();
     });
 });

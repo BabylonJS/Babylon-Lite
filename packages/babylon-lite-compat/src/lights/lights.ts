@@ -13,7 +13,17 @@
  * tuples, and every colour write bumps the light version so it reaches the lights UBO.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createRectAreaLight, createSpotLight, removeFromScene } from "babylon-lite";
+import {
+    addToScene,
+    createHemisphericLight,
+    createDirectionalLight,
+    createPointLight,
+    createRectAreaLight,
+    createSpotLight,
+    enableRectAreaLights,
+    rebuildSceneRenderables,
+    removeFromScene,
+} from "babylon-lite";
 import type {
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
@@ -470,12 +480,26 @@ export class RectAreaLight extends AreaLight {
     }
     public set emissionTexture(value: BaseTexture | null) {
         this._emissionTexture = value;
-        this._lite.emissionTexture = value?._lite ?? null;
-        value?._onReady(() => {
+        const apply = (): void => {
             if (this._emissionTexture === value) {
-                this._lite.emissionTexture = value._lite ?? null;
+                const texture = value?._lite ?? null;
+                if (this._lite.emissionTexture !== texture) {
+                    this._lite.emissionTexture = texture;
+                    const scene = this._scene;
+                    if (scene?._hasStarted) {
+                        scene.getEngine()._registerLateWork(async () => {
+                            await enableRectAreaLights(scene._lite);
+                            await rebuildSceneRenderables(scene._lite);
+                        });
+                    }
+                }
             }
-        });
+        };
+        if (value) {
+            value._onReady(apply);
+        } else {
+            apply();
+        }
     }
 
     /** @internal Preserve Babylon.js local-transform parenting on the Lite light node. */

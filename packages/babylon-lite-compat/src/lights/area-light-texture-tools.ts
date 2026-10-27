@@ -1,4 +1,4 @@
-import { processAreaLightTexture } from "babylon-lite";
+import { processAreaLightTexture, releaseTexture } from "babylon-lite";
 
 import type { AbstractEngine } from "../engine/engine.js";
 import { ShaderLanguage } from "../misc/engine-constants.js";
@@ -12,6 +12,13 @@ class ProcessedAreaLightTexture extends BaseTexture {
 
     public whenReadyAsync(): Promise<void> {
         return Promise.resolve();
+    }
+
+    public dispose(): void {
+        if (this._lite) {
+            releaseTexture(this._lite);
+            this._lite = undefined;
+        }
     }
 }
 
@@ -48,6 +55,6 @@ export class AreaLightTextureTools {
     }
 
     public dispose(): void {
-        // Lite owns processed texture lifetimes through its resource pool.
+        // Processing tools hold no resources; each returned texture owns its Lite allocation.
     }
 }
