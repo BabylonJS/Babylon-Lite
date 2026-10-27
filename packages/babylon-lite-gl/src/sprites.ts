@@ -496,13 +496,11 @@ export function renderSprites(
  *  after an async load). The cell size is unchanged — adjust `cellWidth` /
  *  `cellHeight` on the renderer directly if the new sheet differs. No-op when
  *  the renderer is disposed.
+ *  No GL call is made — the texture is bound at draw time.
  *
- *   consistency; no GL call is made — the texture is bound at draw time).
  *  @param renderer - The renderer to update.
  *  @param texture - The new sprite-sheet texture. */
 export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void {
-    const engine = renderer._effect._engine;
-    void engine;
     if (renderer._disposed) {
         return;
     }

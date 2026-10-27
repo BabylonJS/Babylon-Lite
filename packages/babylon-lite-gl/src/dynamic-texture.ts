@@ -131,12 +131,10 @@ export function updateDynamicTexture(tex: GLTexture, source: TexImageSource, opt
  *  dropped so it can be garbage-collected — and a subsequent
  *  `webglcontextrestored` will re-blank the texture instead of replaying. Use
  *  after the final {@link updateDynamicTexture} once the source (e.g. a large
- *  atlas canvas) is no longer needed. No-op on a non-dynamic texture.
+ *  atlas canvas) is no longer needed. No-op on a non-dynamic texture. No GL
+ *  call is made.
  *
- *   with every other texture function; no GL call is made).
  *  @param tex - A texture created by {@link createDynamicTexture}. */
 export function clearDynamicTextureSource(tex: GLTexture): void {
-    const engine = tex._engine;
-    void engine;
     tex._dynSource = null;
 }
