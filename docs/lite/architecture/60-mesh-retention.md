@@ -111,6 +111,10 @@ is dropped instead of rejecting registration or recovery. The settle rules are:
   reinserted while it awaited; that mesh is built by its current family's group.
   A failure that persists without a membership change is rethrown.
 - Per-mesh resources of an obsolete build retire only after the replacement build.
+  That cleanup is scoped to meshes the build still owns: a mesh still in this
+  group, or in no group of the scene. A mesh first-use retention moved into
+  another group that built first keeps that group's current disposers; the
+  runtime material-swap path already retires its previous ones.
   A group that empties is cancelled like an emptied boot group. A group whose
   membership keeps changing for three attempts is abandoned and its members are
   queued for the material-swap drain, which builds a group without a completed
@@ -182,7 +186,13 @@ set, preserving detached buffers on the replacement device and avoiding duplicat
 identity rebuilds. The set also records each allocation recovery rebuilt, so a mesh
 cloned from an already recovered mesh while recovery awaits — including a uniquely
 owned source that never received a shared-recovery hook — keeps its claim on that
-live replacement instead of being uploaded again. Shared allocation replacement uses
+live replacement instead of being uploaded again. An allocation the opt-in mesh
+capture stamped with the replacement device — a mesh created and retained while
+recovery awaited a texture fetch — is likewise kept rather than re-uploaded over
+its live claim. After every registered scene, recovery walks retained meshes'
+materials through the source-deduplicated texture rebuild, repeating while new
+wrappers appear, so a wrapper cloned from a still-outgoing texture onto a detached
+retained mesh adopts the replacement before ownership settles. Shared allocation replacement uses
 [shared mesh recovery](61-shared-mesh-recovery.md). Replacement-device allocation
 is expected and is not part of the detach/reinsert allocation-reuse measurement.
 Recovery rechecks disposal after loading shared recovery support, before installing
@@ -237,6 +247,9 @@ implementation or asset is copied.
   detach of a boot group's sole mesh drops the group instead of rejecting
   registration, the first removal of one member rebuilds the survivor and retires
   the obsolete output, and a lease without a membership change keeps the build.
+  When first-use retention moves a mesh from a delayed PBR boot group into a
+  Standard group that builds first, the stale PBR build's cleanup leaves the
+  mesh's current Standard disposers untouched.
 - `retained-shared-recovery-import.test.ts`: controlled import pause, last-lease
   retirement during recovery, and exactly-once destruction of surviving replacement buffers.
 - `retained-shared-recovery-retirement.test.ts`: releasing one of two shared-texture
@@ -251,7 +264,12 @@ implementation or asset is copied.
   teardown destroys the replacement exactly once. With a controlled mipmap import
   paused in a zero-owner bitmap rebuild, two leases taken mid-rebuild are both
   restored, the survivor stays live, and final teardown destroys it once; a
-  never-owned texture keeps its replacement. A registered scene emptied by detach
+  never-owned texture keeps its replacement. A wrapper cloned mid-fetch from the
+  still-outgoing texture onto a loose retained clone adopts the replacement during
+  registered-scene recovery, keeps it when reinserted, and final teardown destroys
+  the replacement once. A procedural mesh created and retained mid-fetch on the
+  replacement device keeps its original buffers, which final release destroys once.
+  A registered scene emptied by detach
   skips its PBR-style group builder, and deformation shared by a detached source
   and attached clone is uploaded once and torn down once.
 - `gpu-picker-membership.test.ts`: controlled preparation pause, retirement,

@@ -169,6 +169,8 @@ function attachRecoveryCapture(engine: EngineContext): void {
             mesh._cpuColors = colors ?? null;
             mesh._cpuGpuIndices = gpuIndices;
             mesh._cpuIndexFormat = indexFormat;
+            // `??=`: a glTF instance shares its source's allocation, which keeps the device it was made on.
+            mesh._gpu._device ??= engine._device;
         },
         e(scene: SceneContext, url: string, brdfUrl: string): void {
             if (state._meshCaptureRefs) {

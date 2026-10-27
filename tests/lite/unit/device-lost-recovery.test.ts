@@ -172,7 +172,7 @@ describe("device-lost recovery context dispatch", () => {
                 lost: new Promise<GPUDeviceLostInfo>(() => undefined),
             },
         } as unknown as EngineContext;
-        const mesh = {} as Mesh;
+        const mesh = { _gpu: {} } as Mesh;
         const indices = new Uint16Array([0, 1, 2]);
         const sprite = enableDeviceLostSpriteRecovery(engine);
 
@@ -182,6 +182,7 @@ describe("device-lost recovery context dispatch", () => {
         const scene = enableDeviceLostSceneRecovery(engine);
         engine._dlr!.m(mesh, null, null, null, indices, "uint16");
         expect(mesh._cpuGpuIndices).toBe(indices);
+        expect(mesh._gpu._device).toBe(engine._device);
 
         scene.disable();
         const replacement = new Uint16Array([2, 1, 0]);

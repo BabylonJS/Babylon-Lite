@@ -101,6 +101,10 @@ export interface MeshGPU {
     /** @internal Rebuild one shared geometry per replacement device. Installed only
      *  by the glTF sharing path, so ordinary meshes pay no recovery-state cost. */
     _recoverShared?: (engine: EngineContext, mesh: Mesh, upload: (engine: EngineContext, mesh: Mesh) => MeshGPU) => MeshGPU;
+    /** @internal Device these buffers were allocated on. Stamped only by the opt-in recovery
+     *  capture and by recovery itself, so recovery can keep an allocation already made on the
+     *  replacement device instead of uploading it a second time. */
+    _device?: GPUDevice;
 }
 
 // ─── Mesh ────────────────────────────────────────────────────────────

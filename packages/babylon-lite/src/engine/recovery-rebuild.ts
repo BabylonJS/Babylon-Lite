@@ -68,6 +68,14 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
             await rebuildSceneGpu(engine, scene, seen);
         }
     }
+    // Last, so every source has finished rebuilding: a wrapper cloned from a still-outgoing texture while
+    // recovery awaited a fetch was tracked after the up-front snapshot, and a detached retained mesh is in
+    // no scene walk. Adopting through the source-deduplicated rebuild hands it the replacement texture.
+    // Repeats while those awaits let the app derive further wrappers onto retained materials.
+    const reconciled = new Set<Texture2D>();
+    while (engine._retainedMeshes?.size && (await rebuildMaterialTextures(engine, engine._retainedMeshes, reconciled))) {
+        // Each pass rebuilds only wrappers the previous passes had not reached.
+    }
 }
 
 async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen: WeakSet<object>): Promise<void> {
@@ -78,7 +86,7 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext, seen:
         await runRecoveryStep("rebuilding environment textures", () => rebuildSceneEnvironment(engine, scene));
     }
 
-    await runRecoveryStep("rebuilding material textures", () => rebuildSceneTextures(engine, scene));
+    await runRecoveryStep("rebuilding material textures", () => rebuildMaterialTextures(engine, scene.meshes, new Set()));
     await runRecoveryStep("rebuilding meshes", () => rebuildMeshResources(engine, scene.meshes, seen));
     if (scene._z) {
         return;
@@ -198,7 +206,8 @@ export async function _rebuildMeshes(engine: EngineContext, scene: SceneContext)
 /** `seen` holds both visited meshes and the allocations this recovery rebuilt on the replacement
  *  device. A mesh cloned from an already recovered mesh while recovery awaits already holds a claim
  *  on that live replacement, so uploading it again would orphan that claim and duplicate the
- *  geometry; it keeps the replacement instead. */
+ *  geometry; it keeps the replacement instead. An allocation stamped with the replacement device —
+ *  a mesh created while recovery awaited a texture fetch — is kept for the same reason. */
 async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh>, seen: WeakSet<object>): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
@@ -208,7 +217,7 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             continue;
         }
         seen.add(mesh);
-        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices && !seen.has(mesh._gpu)) {
+        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices && !seen.has(mesh._gpu) && mesh._gpu._device !== engine._device) {
             // Opt-in active CPU windows belong to individual meshes, not a shared recovery allocation.
             if ((mesh._gpu._refCount ?? 1) > 1 && !mesh._gpu._recoverShared && !mesh._gpu._drawRangeSource) {
                 const { installSharedMeshRecovery } = await import("../mesh/shared-mesh-recovery.js");
@@ -219,6 +228,7 @@ async function rebuildMeshResources(engine: EngineContext, meshes: Iterable<Mesh
             }
             const recoverShared = !mesh._gpu._drawRangeSource && mesh._gpu._recoverShared;
             mesh._gpu = recoverShared ? recoverShared(engine, mesh, uploadRetainedMesh) : uploadRetainedMesh(engine, mesh);
+            mesh._gpu._device = engine._device;
             seen.add(mesh._gpu);
         }
         // A detached source and its attached clone share these objects: rebuild each once per recovery, or the
@@ -294,8 +304,9 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     };
 }
 
-async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext): Promise<void> {
-    const seen = new Set<Texture2D>();
+/** Rebuilds the textures `meshes`' materials reference that `seen` does not already hold, adding
+ *  them to it. Resolves whether any were found. */
+async function rebuildMaterialTextures(engine: EngineContext, meshes: Iterable<Mesh>, seen: Set<Texture2D>): Promise<boolean> {
     const visited = new WeakSet<object>();
     const textures: Texture2D[] = [];
     const visit = (value: unknown): void => {
@@ -319,14 +330,15 @@ async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext):
             visit(child);
         }
     };
-    for (const mesh of scene.meshes) {
+    for (const mesh of meshes) {
         visit(mesh.material);
     }
     if (textures.length === 0) {
-        return;
+        return false;
     }
     // The per-kind texture rebuild logic lives in its own module, reached only
     // when the scene actually owns material textures.
     const { rebuildTexture2D } = await import("../texture/texture-recovery.js");
     await Promise.all(textures.map((texture) => rebuildTexture2D(engine, texture)));
+    return true;
 }
