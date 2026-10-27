@@ -92,6 +92,58 @@ lease.dispose();
         }
     });
 
+    it("exposes read-mostly skeleton, morph, and particle discovery without internal registries", () => {
+        const probePath = resolve(BUILD_DIR, "p9-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getMeshSkeleton, createMorphTargets, getParticleSystems, isParticleSystemStarted,
+    type Bone, type Skeleton, type Mesh, type MorphTargetData, type ParticleSystem,
+    type SceneContext, type EngineContext,
+} from "./index.js";
+declare const mesh: Mesh;
+declare const scene: SceneContext;
+declare const engine: EngineContext;
+declare const bone: Bone;
+declare const morph: MorphTargetData;
+declare const system: ParticleSystem;
+const skeleton: Skeleton | undefined = getMeshSkeleton(mesh);
+const parent: Bone | null = bone.parent;
+const names: readonly string[] | undefined = morph.names;
+const name: string | undefined = system.name;
+const systems: readonly ParticleSystem[] = getParticleSystems(scene);
+const started: boolean = isParticleSystemStarted(system);
+createMorphTargets(engine, [{ positions: new Float32Array(3), normals: null }], 1, [0], ["Smile"]);
+createMorphTargets(engine, [{ positions: new Float32Array(3), normals: null }], 1, null);
+// @ts-expect-error Parent references are readonly.
+bone.parent = null;
+// @ts-expect-error A bone's index is its array position, not a public field.
+bone.index;
+// @ts-expect-error glTF node indices are internal.
+bone._nodeIndex;
+// @ts-expect-error Public-handle associations are internal.
+mesh.skeleton?._skeleton;
+// @ts-expect-error Particle storage is not a public scene collection.
+scene._particleSystems;
+// @ts-expect-error The enumeration result is readonly.
+systems.push(system);
+// @ts-expect-error Names are readonly.
+morph.names?.push("extra");
+void [skeleton, parent, names, name, started];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes standalone device state and hides observer cleanup hooks", () => {
         const probePath = resolve(BUILD_DIR, "device-input.probe.ts");
         try {

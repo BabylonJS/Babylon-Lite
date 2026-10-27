@@ -337,6 +337,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                         continue;
                     }
                     rebuiltMaterials.add(mesh.material);
+                    // Its per-mesh resources are retired below: the shadow tasks requeue it also when it casts through
+                    // an override, whose terminal generation does not move.
+                    mesh._renderableGen = -~mesh._renderableGen!;
                     ctx._runtimeBuilds?.reset(mesh);
                 }
                 for (const material of rebuiltMaterials) {

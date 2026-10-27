@@ -40,7 +40,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [18-picking.md](18-picking.md)                                     | Picking                  | GPU ID pass, CPU ray/triangle intersection                                                                |
 | [19-loader-hdr.md](19-loader-hdr.md)                               | HDR Loader               | RGBE parsing, SH extraction, GPU compute IBL                                                              |
 | [20-loader-babylon.md](20-loader-babylon.md)                       | .babylon Loader          | .babylon format parsing                                                                                   |
-| [loader-usd.md](loader-usd.md)                                     | OpenUSD Loader           | Shared protocol-v5 WASM extraction, Lite-native command-buffer materialization                           |
+| [loader-usd.md](loader-usd.md)                                     | OpenUSD Loader           | Shared protocol-v5 WASM extraction, Lite-native command-buffer materialization                            |
 | [21-core-math.md](21-core-math.md)                                 | Core Math                | Vec3, Mat4, Quat, ObservableVec3/Quat                                                                     |
 | [22-engine.md](22-engine.md)                                       | Engine                   | GPU init, MSAA, render loop, swap chain                                                                   |
 | [23-shader-composition.md](23-shader-composition.md)               | Shader Composition       | ShaderFragment system, composer, slot injection                                                           |
@@ -310,6 +310,8 @@ createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
 setEnvironmentRotation(scene: SceneContext, rotation: number): void
+setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void
+setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void
 
 // Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera

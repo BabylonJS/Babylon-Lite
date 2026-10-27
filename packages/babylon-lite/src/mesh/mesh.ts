@@ -212,6 +212,10 @@ export interface Mesh extends SceneNode {
     _dashedLineOptions?: readonly [dashSize: number, gapSize: number];
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
+    /** @internal Generation of this mesh's own renderable, advanced when a one-mesh path rebuilds it (the material-swap
+     *  drain, a runtime build). The shadow tasks then requeue this caster alone: its packets may reference the per-mesh
+     *  resources that rebuild retired, while the other casters of its material keep theirs. */
+    _renderableGen?: number;
     /** @internal */
     _cpuPositions?: Float32Array;
     /** @internal */

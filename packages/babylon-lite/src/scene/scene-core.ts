@@ -31,6 +31,7 @@ import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
 import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
+import type { ParticleSystem } from "../particle/particle-system.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -216,6 +217,8 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
+    _particleSystems?: ParticleSystem[];
     /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
     _sceneChanges?: SceneChangeState;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */

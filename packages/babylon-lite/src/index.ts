@@ -64,7 +64,7 @@ export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
-export { setEnvironmentRotation } from "./scene/set-environment-rotation.js";
+export { setEnvironmentRotation, setEnvironmentLightingRotation, setEnvironmentSkyboxRotation } from "./scene/set-environment-rotation.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
@@ -828,6 +828,7 @@ export {
     setBoneWorldPoseDeferred,
     bakeSkeleton,
     clearBoneOverride,
+    getMeshSkeleton,
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
@@ -1220,9 +1221,9 @@ export { buildNodeParticleSetWithEmitterProvider, withNodeParticleEmitterProvide
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem, isParticleSystemStarted } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
-export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { registerNodeParticleSet, getParticleSystems } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
 export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";

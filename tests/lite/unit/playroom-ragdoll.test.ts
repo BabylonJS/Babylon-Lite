@@ -133,7 +133,7 @@ describe("The Playroom ragdoll bind conversion", () => {
     });
 
     it("submits every configured joint as one absolute world-pose batch", () => {
-        const bones = rig.joints.map((joint, index) => ({ name: joint.name, _nodeIndex: index }) satisfies Bone);
+        const bones = rig.joints.map((joint, index) => ({ name: joint.name, parent: null, _nodeIndex: index }) satisfies Bone);
         const bake = vi.fn();
         const skeleton = {
             bones,

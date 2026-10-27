@@ -16,10 +16,16 @@ export class PointerInfo {
     public constructor(
         public type: number,
         public event: PointerEvent | WheelEvent,
-        private readonly _pickInfo: PickingInfo | null
+        private _pickInfo: PickingInfo | null,
+        private _pick: (() => PickingInfo) | null = null
     ) {}
 
+    /** Like Babylon.js lazy picking: without a precomputed pick, `_pick` runs on the first read only. */
     public get pickInfo(): PickingInfo | null {
+        if (!this._pickInfo && this._pick) {
+            this._pickInfo = this._pick();
+            this._pick = null;
+        }
         return this._pickInfo;
     }
 }
