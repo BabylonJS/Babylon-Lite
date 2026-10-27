@@ -7,12 +7,23 @@ import type { MeshGroupBuilder, MeshGroupBuildResult, Renderable } from "../rend
 /** Builds of one boot or recovery group before membership that keeps changing is handed to the swap drain. */
 const MAX_GROUP_BUILD_ATTEMPTS = 3;
 
+/** Take the scene disposers of `mesh` when they are `group`'s to retire. A mesh that moved into another group
+ *  meanwhile is that group's: its entry may hold that group's live resources, and whatever an earlier build left
+ *  there is retired by the runtime material-swap path when it rebuilds the mesh. */
+function takeOwnedTeardown(scene: SceneContext, group: SceneMeshGroup, mesh: Mesh): (() => void)[] | undefined {
+    const teardown = scene._meshDisposables.get(mesh);
+    if (teardown && (group.includes(mesh) || ![...scene._groups.values()].some((other) => other.includes(mesh)))) {
+        scene._meshDisposables.delete(mesh);
+        return teardown;
+    }
+    return undefined;
+}
+
 /** Drop what an in-flight group build produced for a mesh that was removed or detached while the build
  *  awaited: removal found nothing to tear down then, and the builder installed it afterwards. */
-function evictBuiltMesh(scene: SceneContext, mesh: Mesh, renderables: Renderable[]): void {
-    const teardown = scene._meshDisposables.get(mesh);
+function evictBuiltMesh(scene: SceneContext, group: SceneMeshGroup, mesh: Mesh, renderables: Renderable[]): void {
+    const teardown = takeOwnedTeardown(scene, group, mesh);
     if (teardown) {
-        scene._meshDisposables.delete(mesh);
         retireMeshTeardown(scene, teardown);
     }
     removeEvery(renderables, (renderable) => renderable.mesh === mesh);
@@ -70,7 +81,7 @@ export async function settleGroupBuild(
                 }
                 for (const mesh of members) {
                     if (!live.has(mesh)) {
-                        evictBuiltMesh(scene, mesh, result.renderables);
+                        evictBuiltMesh(scene, group, mesh, result.renderables);
                     }
                 }
                 for (const mesh of group) {
@@ -81,9 +92,8 @@ export async function settleGroupBuild(
                 return result;
             }
             for (const mesh of stale ? members.concat(group) : members) {
-                const teardown = scene._meshDisposables.get(mesh);
+                const teardown = takeOwnedTeardown(scene, group, mesh);
                 if (teardown) {
-                    scene._meshDisposables.delete(mesh);
                     superseded.push(...teardown);
                 }
             }

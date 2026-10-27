@@ -63,7 +63,6 @@ function fixture() {
         _renderableVersion: 0,
         _frameGraph: stub<SceneContext["_frameGraph"]>({ _tasks: [] }),
     });
-    const material = lite.standard.createStandardMaterial();
     const teardowns = new Map<Mesh, ReturnType<typeof vi.fn>[]>();
     const rebuildSingle = (target: SceneContext, member: Mesh) => {
         const dispose = vi.fn();
@@ -71,21 +70,27 @@ function fixture() {
         target._meshDisposables.set(member, [dispose]);
         return { order: 1, mesh: member } as never;
     };
-    // Mirrors real group builders: yield to a lazy import, then read the members (PBR dereferences the first).
-    const builder: MeshGroupBuilder = vi.fn(async (target: SceneContext, meshes: Mesh[]) => {
-        await Promise.resolve();
-        void meshes[0]!.material;
-        return { renderables: meshes.map((member) => rebuildSingle(target, member)), rebuildSingle };
-    });
-    builder._materialFamily = "pbr";
-    Object.defineProperty(material, "_buildGroup", { value: builder });
-    const createMesh = (name: string): Mesh => {
+    // Mirrors real group builders: yield to a lazy import (or an explicit gate), then read the members (PBR
+    // dereferences the first) and install each member's scene disposers.
+    const createFamily = (family: "pbr" | "standard", gate?: Promise<void>) => {
+        const material = lite.standard.createStandardMaterial();
+        const builder: MeshGroupBuilder = vi.fn(async (target: SceneContext, meshes: Mesh[]) => {
+            await (gate ?? Promise.resolve());
+            void meshes[0]!.material;
+            return { renderables: meshes.map((member) => rebuildSingle(target, member)), rebuildSingle };
+        });
+        builder._materialFamily = family;
+        Object.defineProperty(material, "_buildGroup", { value: builder });
+        return { material, builder };
+    };
+    const { material, builder } = createFamily("pbr");
+    const createMesh = (name: string, meshMaterial = material): Mesh => {
         const positions = new Float32Array([-1, -1, 0, 1, -1, 0, 0, 1, 0]);
         const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
         const indices = new Uint32Array([0, 1, 2]);
         return lite.mesh.initMeshTransform({
             name,
-            material,
+            material: meshMaterial,
             receiveShadows: false,
             boundMin: [-1, -1, 0],
             boundMax: [1, 1, 0],
@@ -95,7 +100,13 @@ function fixture() {
             _gpu: lite.mesh.uploadMeshToGPU(engine, positions, normals, indices),
         });
     };
-    return { engine, scene, builder, teardowns, createMesh };
+    return { engine, scene, builder, teardowns, createMesh, createFamily };
+}
+
+function gate(): { promise: Promise<void>; open: () => void } {
+    let open!: () => void;
+    const promise = new Promise<void>((resolve) => (open = resolve));
+    return { promise, open };
 }
 
 describe("boot group builds when removal or retention first activates mid-build", () => {
@@ -145,6 +156,48 @@ describe("boot group builds when removal or retention first activates mid-build"
         expect(current).not.toHaveBeenCalled();
 
         lite.core.disposeScene(scene);
+        await lite.retirement.waitForGpuResourceRetirements(engine);
+    });
+
+    it("keeps a mesh's current disposers when it moved into another group that built first", async () => {
+        const { engine, scene, teardowns, createMesh, createFamily } = fixture();
+        const pbrGate = gate();
+        const standardGate = gate();
+        const pbr = createFamily("pbr", pbrGate.promise);
+        const standard = createFamily("standard", standardGate.promise);
+        const moved = createMesh("moved", pbr.material);
+        const pbrPeer = createMesh("pbr-peer", pbr.material);
+        const standardPeer = createMesh("standard-peer", standard.material);
+        lite.core.addToScene(scene, moved);
+        lite.core.addToScene(scene, pbrPeer);
+        lite.core.addToScene(scene, standardPeer);
+
+        // Both boot builds read their live groups before retention exists. The first lease then moves `moved`
+        // from the delayed PBR group into the already-building Standard group, which settles first.
+        const registration = lite.core.buildScene(scene);
+        const lease = lite.retention.retainMeshResources(engine, moved);
+        lite.retention.detachMeshFromScene(scene, moved);
+        moved.material = standard.material;
+        lite.core.addToScene(scene, moved);
+        standardGate.open();
+        await vi.waitFor(() => expect(scene._groups.get(standard.builder)!.o).toBeDefined());
+        pbrGate.open();
+        await registration;
+        await lite.retirement.waitForGpuResourceRetirements(engine);
+
+        for (const mesh of [moved, pbrPeer, standardPeer]) {
+            const all = teardowns.get(mesh)!;
+            const current = all.at(-1)!;
+            expect(scene._meshDisposables.get(mesh)).toEqual([current]);
+            expect(current).not.toHaveBeenCalled();
+            for (const obsolete of all.slice(0, -1)) {
+                expect(obsolete).toHaveBeenCalledOnce();
+            }
+        }
+        expect(scene._renderables.map((draw) => draw.mesh).sort((a, b) => a!.name.localeCompare(b!.name))).toEqual([moved, pbrPeer, standardPeer]);
+
+        lite.core.disposeScene(scene);
+        lite.retention.releaseMeshResources(lease);
         await lite.retirement.waitForGpuResourceRetirements(engine);
     });
 
