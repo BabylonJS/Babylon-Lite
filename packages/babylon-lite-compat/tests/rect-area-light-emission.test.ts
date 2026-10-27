@@ -56,9 +56,10 @@ describe("RectAreaLight emission texture", () => {
 
         const light = new RectAreaLight("panel", new Vector3(0, 1, 0), 2, 3, scene);
 
-        expect(liteMocks.addToScene).toHaveBeenCalledWith(liteScene, light._lite);
+        expect(liteMocks.addToScene).not.toHaveBeenCalled();
         expect(lateWork).toHaveLength(1);
         await lateWork[0]!();
+        expect(liteMocks.addToScene).toHaveBeenCalledWith(liteScene, light._lite);
         expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
     });
@@ -85,9 +86,10 @@ describe("RectAreaLight emission texture", () => {
 
         light.dispose();
 
-        expect(liteMocks.removeFromScene).toHaveBeenCalledWith(liteScene, light._lite);
+        expect(liteMocks.removeFromScene).not.toHaveBeenCalled();
         expect(lateWork).toHaveLength(1);
         await lateWork[0]!();
+        expect(liteMocks.removeFromScene).toHaveBeenCalledWith(liteScene, light._lite);
         expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
     });
@@ -116,9 +118,50 @@ describe("RectAreaLight emission texture", () => {
 
         point.dispose();
 
-        expect(liteMocks.removeFromScene).toHaveBeenCalledWith(liteScene, point._lite);
+        expect(liteMocks.removeFromScene).not.toHaveBeenCalled();
         expect(lateWork).toHaveLength(1);
         await lateWork[0]!();
+        expect(liteMocks.removeFromScene).toHaveBeenCalledWith(liteScene, point._lite);
+        expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
+        expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
+    });
+
+    it("defers callback-driven light removal until the active frame has finished", async () => {
+        const lateWork: Array<() => Promise<void>> = [];
+        const calls: string[] = [];
+        const engine = {
+            _lite: { _currentEncoder: {} },
+            _registerLateWork: (work: () => Promise<void>) => lateWork.push(work),
+            _pauseForSceneMutation: vi.fn(() => calls.push("pause")),
+            _resumeAfterSceneMutation: vi.fn(() => {
+                calls.push("resume");
+                return Promise.resolve();
+            }),
+        } as unknown as WebGPUEngine;
+        const liteScene = { lights: [] } as unknown as SceneContext;
+        const scene = {
+            _lite: liteScene,
+            _hasStarted: false,
+            _registerLight: vi.fn(),
+            _unregisterNode: vi.fn(),
+            getEngine: () => engine,
+        } as unknown as Scene;
+        const point = new PointLight("point", new Vector3(0, 1, 0), scene);
+        const area = new RectAreaLight("panel", new Vector3(0, 1, 0), 2, 3, scene);
+        area.emissionTexture = new ReadyTexture({ width: 1024, height: 1024 } as Texture2D);
+        liteScene.lights.push(point._lite, area._lite);
+        (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
+        liteMocks.removeFromScene.mockImplementation(() => calls.push("remove"));
+
+        point.dispose();
+
+        expect(liteMocks.removeFromScene).not.toHaveBeenCalled();
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        expect(calls).toEqual([]);
+        expect(lateWork).toHaveLength(1);
+        await lateWork[0]!();
+        expect(calls).toEqual(["pause", "remove", "resume"]);
         expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
     });
@@ -155,9 +198,10 @@ describe("RectAreaLight emission texture", () => {
 
         light.emissionTexture = texture;
 
-        expect(liteLight.emissionTexture).toBe(textureHandle);
+        expect(liteLight.emissionTexture).toBeNull();
         expect(lateWork).toHaveLength(1);
         await lateWork[0]!();
+        expect(liteLight.emissionTexture).toBe(textureHandle);
         expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.enableRectAreaLights.mock.invocationCallOrder[0]).toBeLessThan(liteMocks.rebuildSceneRenderables.mock.invocationCallOrder[0]!);

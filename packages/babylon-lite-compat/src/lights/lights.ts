@@ -47,16 +47,20 @@ type Tuple3 = [number, number, number];
 interface RectAreaLightReconcileState {
     revision: number;
     scheduled: boolean;
+    mutations: Array<() => void>;
 }
 
 let rectAreaLightReconcileStates: WeakMap<Scene, RectAreaLightReconcileState> | null = null;
 
-function requestRectAreaLightReconcile(scene: Scene): void {
+function requestRectAreaLightReconcile(scene: Scene, mutation?: () => void): void {
     const states = (rectAreaLightReconcileStates ??= new WeakMap());
     let state = states.get(scene);
     if (!state) {
-        state = { revision: 0, scheduled: false };
+        state = { revision: 0, scheduled: false, mutations: [] };
         states.set(scene, state);
+    }
+    if (mutation) {
+        state.mutations.push(mutation);
     }
     state.revision++;
     if (state.scheduled) {
@@ -64,27 +68,38 @@ function requestRectAreaLightReconcile(scene: Scene): void {
     }
     state.scheduled = true;
     const engine = scene.getEngine();
-    engine._registerLateWork(async () => {
-        engine._pauseForSceneMutation();
-        try {
-            let reconciledRevision = 0;
-            while (reconciledRevision !== state.revision) {
-                const requestedRevision = state.revision;
-                try {
-                    await enableRectAreaLights(scene._lite);
-                    await rebuildSceneRenderables(scene._lite);
-                    reconciledRevision = requestedRevision;
-                } catch (error) {
-                    if (requestedRevision === state.revision) {
-                        throw error;
+    const schedule = (): void => {
+        engine._registerLateWork(async () => {
+            engine._pauseForSceneMutation();
+            try {
+                let reconciledRevision = 0;
+                while (reconciledRevision !== state.revision) {
+                    const requestedRevision = state.revision;
+                    const mutations = state.mutations.splice(0);
+                    for (const apply of mutations) {
+                        apply();
+                    }
+                    try {
+                        await enableRectAreaLights(scene._lite);
+                        await rebuildSceneRenderables(scene._lite);
+                        reconciledRevision = requestedRevision;
+                    } catch (error) {
+                        if (requestedRevision === state.revision) {
+                            throw error;
+                        }
                     }
                 }
+            } finally {
+                state.scheduled = false;
+                await engine._resumeAfterSceneMutation();
             }
-        } finally {
-            state.scheduled = false;
-            await engine._resumeAfterSceneMutation();
-        }
-    });
+        });
+    };
+    if (engine._lite?._currentEncoder) {
+        queueMicrotask(schedule);
+    } else {
+        schedule();
+    }
 }
 
 /** Babylon.js `Light` — base class for all lights (derives from `Node`). */
@@ -209,13 +224,14 @@ export abstract class Light extends Node {
     protected override _disposeSelf(_doNotRecurse: boolean): void {
         const scene = this._scene;
         if (scene) {
-            removeFromScene(scene._lite, this._lite);
-            if (
+            const needsRectAreaReconcile =
                 scene._hasStarted &&
-                this._lite.lightType !== "rectArea" &&
-                scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null)
-            ) {
-                requestRectAreaLightReconcile(scene);
+                (this._lite.lightType === "rectArea" ||
+                    scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null));
+            if (needsRectAreaReconcile) {
+                requestRectAreaLightReconcile(scene, () => removeFromScene(scene._lite, this._lite));
+            } else {
+                removeFromScene(scene._lite, this._lite);
             }
         } else {
             this._lite.shadowGenerator = undefined;
@@ -479,9 +495,10 @@ export class RectAreaLight extends AreaLight {
         this._lite = createRectAreaLight(position.asArray(), width, height);
         this._lite.name = name;
         if (scene && !dontAddToScene) {
-            addToScene(scene._lite, this._lite);
             if (scene._hasStarted) {
-                requestRectAreaLightReconcile(scene);
+                requestRectAreaLightReconcile(scene, () => addToScene(scene._lite, this._lite));
+            } else {
+                addToScene(scene._lite, this._lite);
             }
         }
     }
@@ -538,10 +555,15 @@ export class RectAreaLight extends AreaLight {
             if (this._emissionTexture === value) {
                 const texture = value?._lite ?? null;
                 if (this._lite.emissionTexture !== texture) {
-                    this._lite.emissionTexture = texture;
                     const scene = this._scene;
                     if (scene?._hasStarted) {
-                        requestRectAreaLightReconcile(scene);
+                        requestRectAreaLightReconcile(scene, () => {
+                            if (this._emissionTexture === value) {
+                                this._lite.emissionTexture = texture;
+                            }
+                        });
+                    } else {
+                        this._lite.emissionTexture = texture;
                     }
                 }
             }
@@ -550,15 +572,6 @@ export class RectAreaLight extends AreaLight {
             value._onReady(apply);
         } else {
             apply();
-        }
-    }
-
-    /** @internal Rebuild receiver pipelines after removing an area-light slot from a running scene. */
-    protected override _disposeSelf(doNotRecurse: boolean): void {
-        const scene = this._scene;
-        super._disposeSelf(doNotRecurse);
-        if (scene?._hasStarted) {
-            requestRectAreaLightReconcile(scene);
         }
     }
 
