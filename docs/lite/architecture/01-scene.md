@@ -247,6 +247,10 @@ covers two distinct cases:
   drain or one `rebuildMaterial` call share a single rebuild; requests that arrive while a rebuild runs
   fold into one follow-up, dispatched after it settles.
 
+`rebuildMaterial()` may also drain the queue synchronously for the PBR meshes of one material, when their group
+already composed their variants: it queues only those meshes, drains, and puts the meshes queued for other
+reasons back for the next frame's drain (27-render-pipeline, PBR Material Rebuild Lifecycle).
+
 > **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
 > shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`
 > returns — `addToScene` itself returns `void` and offers no readiness signal. Adding at least one mesh of

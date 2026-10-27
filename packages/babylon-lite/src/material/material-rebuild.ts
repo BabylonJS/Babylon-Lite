@@ -5,6 +5,7 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
 import { resolveMeshRebuild } from "./resolve-mesh-rebuild.js";
 import { processMaterialSwaps } from "../scene/scene-material-swap.js";
+import type * as PbrBuiltVariant from "./pbr/pbr-built-variant.js";
 
 export interface RebuildMaterialOptions {
     /** Rebuild views created from the same source material. Defaults to true. */
@@ -21,7 +22,7 @@ interface DetachablePacket {
 
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
-type RebuildsComposed = typeof import("./pbr/pbr-built-variant.js")._pbrRebuildsComposed;
+type RebuildsComposed = typeof PbrBuiltVariant._pbrRebuildsComposed;
 /** The PBR check: the first PBR material rebuild starts importing it and rebuilds the group; later ones call it. */
 let _rebuildsComposed: RebuildsComposed | undefined;
 

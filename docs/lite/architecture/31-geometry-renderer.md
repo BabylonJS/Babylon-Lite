@@ -236,8 +236,9 @@ request), is constant for the task, or is read live each frame (world, light sel
 material UBO version, vertex/index buffers, thin-instance counts). A resize or frame-graph
 rebuild therefore rebuilds nothing, and a Standard material swap, material rebuild or new mesh
 rebuilds only its meshes. PBR follows its forward pass: a per-mesh forward rebuild (a material
-swap through the group's rebuild closure, `markMeshRenderableDirty`) rebuilds only that entry,
-but a full PBR group rebuild (`rebuildMaterial` on a PBR material, a PBR mesh whose group must
+swap through the group's rebuild closure, `markMeshRenderableDirty`, a `rebuildMaterial` that takes
+the per-mesh path) rebuilds only that entry, but a full PBR group rebuild (`rebuildMaterial` on a PBR
+material that does not qualify for the per-mesh path, a PBR mesh whose group must
 widen or be built at runtime, `rebuildScenePbrPipelines`) replaces every PBR forward renderable
 and publishes a new PBR context, so every PBR geometry entry is rebuilt and every PBR view
 composes a variant set for the new context; Standard entries are still carried. The PBR
