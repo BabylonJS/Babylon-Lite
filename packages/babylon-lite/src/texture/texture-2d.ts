@@ -267,7 +267,7 @@ async function loadTexture2DImpl(engine: EngineContext, url: string, opts: Textu
     });
 
     const tex2d: Texture2D = { texture, view: texture.createView(), sampler, width, height };
-    engine._dlr?.u(tex2d, url, opts);
+    engine._dlr?.u(tex2d, url, opts, device);
     acquireTexture(tex2d);
     return tex2d;
 }

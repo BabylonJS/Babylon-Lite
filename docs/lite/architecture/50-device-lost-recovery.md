@@ -369,8 +369,11 @@ textures in the window gets live ones; rebuilding them would overwrite the live
 handle and orphan it with whatever claims it holds. The opt-in capture stamps
 each texture with the device it was created on, recovery restamps what it
 rebuilds or adopts, and derived wrappers inherit their base's stamp, so a clone
-of a still-outgoing texture is still adopted. Morph targets and skeletons carry
-the same stamp from their factories.
+of a still-outgoing texture is still adopted. Asynchronous URL and external-image
+loads pass the device they allocated on to the capture rather than reading the
+engine's device when they finish, so a load started before the loss that
+completes after the replacement is installed keeps its outgoing stamp and is
+rebuilt. Morph targets and skeletons carry the same stamp from their factories.
 
 That question is answered by the ref-count map, which distinguishes three
 states: no entry means nothing ever took ownership, a positive count means the

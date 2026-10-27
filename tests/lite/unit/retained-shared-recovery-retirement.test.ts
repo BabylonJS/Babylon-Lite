@@ -621,6 +621,43 @@ describe("shared replacement retirement during registered scene recovery", () =>
         expect(outgoing.destroy).not.toHaveBeenCalled();
     });
 
+    it("reconciles a wrapper reassigned onto an already-retained mesh before the source is replaced", async () => {
+        let outgoing!: GPUTexture;
+        let derived!: Texture2D;
+        let retained!: Mesh;
+        const material = createStandardMaterial();
+        const { engine, shared, lease } = await fetchWindow(
+            async ({ mesh, shared }) => {
+                outgoing = shared.texture;
+                retained = mesh;
+                // Shares the claimed source's outgoing allocation, so claim deduplication acquires nothing for it.
+                derived = cloneTexture2D(shared, { uScale: 2 });
+                material.diffuseTexture = derived;
+                mesh.material = material;
+            },
+            true,
+            async (engine) => {
+                expect(derived.texture).toBe(outgoing);
+                await rebuildRegisteredScenes(engine);
+            }
+        );
+        expect(derived.texture).toBe(shared.texture);
+        expect(derived.view).toBe(shared.view);
+        expect(_textureOwners(shared)).toBe(2);
+
+        const target = stubScene(engine);
+        addToScene(target, retained);
+        expect(material.diffuseTexture?.texture).toBe(shared.texture);
+        detachMeshFromScene(target, retained);
+
+        releaseMeshResources(lease);
+        await waitForGpuResourceRetirements(engine);
+        expect(shared.texture.destroy).not.toHaveBeenCalled();
+        expect(releaseTexture(shared)).toBe(true);
+        expect(shared.texture.destroy).toHaveBeenCalledOnce();
+        expect(outgoing.destroy).not.toHaveBeenCalled();
+    });
+
     it("reconciles a wrapper only a retained material plugin's closure holds", async () => {
         let outgoing!: GPUTexture;
         let derived!: Texture2D;

@@ -95,20 +95,25 @@ function filterShadowCasters(scene: SceneContext, casters: readonly Mesh[]): rea
 }
 
 function captureTextures(state: Retention, material: Material): void {
-    if (capturing?.has(state.mesh)) {
-        throw new Error(`Mesh "${state.mesh.name}" resource retention cannot reenter material texture enumeration.`);
-    }
-    (capturing ??= new WeakSet()).add(state.mesh);
-    try {
-        collectTextures(state, material);
-    } finally {
-        capturing.delete(state.mesh);
+    // Enumerate completely before acquiring: a plugin error must not leave partial ownership. Claims deduplicate
+    // by current allocation, which recovery replaces in place.
+    for (const texture of enumerateTextures(state.mesh, material)) {
+        if (!state.textures.some((claimed) => claimed.texture === texture.texture)) {
+            acquireRetainedTexture(state.engine, texture);
+            state.textures.push(texture);
+        }
     }
 }
 
-function collectTextures(state: Retention, material: Material): void {
+/** Every distinct wrapper `material` (its plugins and nested shadow-caster materials included) uses. Two
+ *  wrappers sharing one allocation are both listed: during a recovery fetch they can diverge again. */
+function enumerateTextures(mesh: Mesh, material: Material): Set<Texture2D> {
+    if (capturing?.has(mesh)) {
+        throw new Error(`Mesh "${mesh.name}" resource retention cannot reenter material texture enumeration.`);
+    }
+    (capturing ??= new WeakSet()).add(mesh);
     const visited = new Set<Material>();
-    const found = new Map<GPUTexture, Texture2D>();
+    const found = new Set<Texture2D>();
     const visit = (current: Material): void => {
         if (current && !visited.has(current)) {
             visited.add(current);
@@ -122,28 +127,36 @@ function collectTextures(state: Retention, material: Material): void {
                 }
             }
             for (const texture of textures) {
-                found.set(texture.texture, texture);
+                found.add(texture);
             }
             if (current._shadowCasterMaterial) {
                 visit(current._shadowCasterMaterial);
             }
         }
     };
-    visit(material);
-    // Enumerate completely before acquiring: a plugin error must not leave partial ownership. Deduplicate
-    // against current handles, which recovery replaces in place.
-    for (const [allocation, texture] of found) {
-        if (!state.textures.some((claimed) => claimed.texture === allocation)) {
-            acquireRetainedTexture(state.engine, texture);
-            state.textures.push(texture);
-        }
+    try {
+        visit(material);
+    } finally {
+        capturing.delete(mesh);
     }
+    return found;
 }
 
-/** @internal Every texture wrapper live retentions claimed, for device-lost recovery: this includes textures
- *  enumerated only through a material plugin, which no walk of the material's own properties reaches. */
-export function _retainedTextures(engine: EngineContext): Texture2D[] {
-    return [...(engine._retainedMeshes ?? [])].flatMap((mesh) => retentions?.get(mesh)?.textures ?? []);
+/** @internal Texture wrappers device-lost recovery must reconcile for live retentions: every claimed wrapper
+ *  (a claim outlives material reassignment) plus every wrapper each retained mesh's material and plugins use
+ *  now. Discovery is independent of claims, which deduplicate by allocation and so omit a wrapper cloned
+ *  from an already-claimed texture while its source still held the outgoing handle. */
+export function _retainedTextures(engine: EngineContext): Set<Texture2D> {
+    const textures = new Set<Texture2D>();
+    for (const mesh of engine._retainedMeshes ?? []) {
+        const state = retentions?.get(mesh);
+        if (state) {
+            for (const texture of [...state.textures, ...enumerateTextures(mesh, mesh.material)]) {
+                textures.add(texture);
+            }
+        }
+    }
+    return textures;
 }
 
 /** Keep a mesh alive until this independent lease is released.

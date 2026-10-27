@@ -70,14 +70,14 @@ export async function rebuildRegisteredScenes(engine: EngineContext): Promise<vo
     }
     // Last, so every source has finished rebuilding: a wrapper cloned from a still-outgoing texture while
     // recovery awaited a fetch was tracked after the up-front snapshot, and a detached retained mesh is in
-    // no scene walk. Reconciling the textures retention actually owns (enumerated through the material and
-    // plugin contracts, so closure-held plugin textures included) adopts the replacement through the
-    // source-deduplicated rebuild. Repeats while those awaits let the app give retained meshes more wrappers.
+    // no scene walk. Reconciling the wrappers retention claims plus those each retained mesh's material and plugins
+    // use now (discovered independently of claims, which deduplicate by allocation) adopts the replacement through
+    // the source-deduplicated rebuild. Repeats while those awaits let the app give retained meshes more wrappers.
     if (engine._retainedMeshes?.size) {
         const { _retainedTextures } = await import("../mesh/mesh-retention.js");
         const reconciled = new Set<Texture2D>();
         for (;;) {
-            const pending = _retainedTextures(engine).filter((texture) => !reconciled.has(texture));
+            const pending = [..._retainedTextures(engine)].filter((texture) => !reconciled.has(texture));
             if (!pending.length) {
                 break;
             }

@@ -77,9 +77,11 @@ function releaseCapturedTexture(tex: Texture2D): void {
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
     const owner = new WeakRef(state);
-    const stamp = (tex: Texture2D, source: Texture2DRecoverySource): void => {
+    // Async loads pass the device they allocated on: one started before a loss can finish after recovery has
+    // installed the replacement, and must still be rebuilt.
+    const stamp = (tex: Texture2D, source: Texture2DRecoverySource, device = engine._device): void => {
         (_sourceOwners ??= new WeakMap()).set(source, owner);
-        tex._device = engine._device;
+        tex._device = device;
         stampTexture(state, tex, source);
     };
     // Engine-agnostic and inert unless a source has been captured, so it is installed on first
@@ -89,24 +91,28 @@ function attachRecoveryCapture(engine: EngineContext): void {
     _setTextureReleaseHook(releaseCapturedTexture);
     engine._dlr = {
         t: stamp,
-        async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload): Promise<Texture2D> {
+        async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload, device): Promise<Texture2D> {
             const bitmap = await createImageBitmap(source, {
                 premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",
                 colorSpaceConversion: "none",
             });
             try {
                 const tex = await upload(bitmap);
-                stamp(tex, {
-                    kind: "external",
-                    bitmap,
-                    width,
-                    height,
-                    format,
-                    levels,
-                    samplerDesc,
-                    flipY,
-                    premultipliedAlpha,
-                });
+                stamp(
+                    tex,
+                    {
+                        kind: "external",
+                        bitmap,
+                        width,
+                        height,
+                        format,
+                        levels,
+                        samplerDesc,
+                        flipY,
+                        premultipliedAlpha,
+                    },
+                    device
+                );
                 return tex;
             } catch (error) {
                 bitmap.close();
@@ -114,8 +120,8 @@ function attachRecoveryCapture(engine: EngineContext): void {
             }
         },
         d: trackDerivedTexture,
-        u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
-            stamp(tex, { kind: "url", url, opts: { ...opts } });
+        u(tex: Texture2D, url: string, opts: Texture2DOptions, device: GPUDevice): void {
+            stamp(tex, { kind: "url", url, opts: { ...opts } }, device);
         },
         s(tex: Texture2D, r: number, g: number, b: number, a: number): void {
             stamp(tex, { kind: "solid", rgba: [r, g, b, a] });

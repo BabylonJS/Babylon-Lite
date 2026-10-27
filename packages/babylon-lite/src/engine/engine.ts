@@ -275,10 +275,12 @@ interface DeviceLostRecoveryCapture {
         samplerDesc: GPUSamplerDescriptor,
         flipY: boolean,
         premultipliedAlpha: boolean,
-        upload: (source: GPUCopyExternalImageSource) => Promise<Texture2D>
+        upload: (source: GPUCopyExternalImageSource) => Promise<Texture2D>,
+        device: GPUDevice
     ): Promise<Texture2D>;
     d(base: Texture2D, derived: Texture2D): void;
-    u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
+    /** `device` is the one the texture was allocated on, captured before the load awaited. */
+    u(tex: Texture2D, url: string, opts: Texture2DOptions, device: GPUDevice): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
     b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
     p(tex: Texture2D, data: Uint8Array, options: PixelsTexture2DOptions): void;

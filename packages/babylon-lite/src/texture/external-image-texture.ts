@@ -162,7 +162,7 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
 
             return { texture, view: texture.createView(), sampler, width, height };
         };
-        const result = (await engine._dlr?.x(uploadSource, width, height, format, levels, samplerDesc, flipY, premultiplyAlpha, upload)) ?? (await upload(uploadSource));
+        const result = (await engine._dlr?.x(uploadSource, width, height, format, levels, samplerDesc, flipY, premultiplyAlpha, upload, device)) ?? (await upload(uploadSource));
         acquireTexture(result);
         return result;
     } catch (error) {

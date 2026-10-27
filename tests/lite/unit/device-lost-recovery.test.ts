@@ -14,7 +14,7 @@ import type { GltfMaterialData } from "../../../packages/babylon-lite/src/loader
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { acquireTexture, releaseTexture, _isTextureReleased } from "../../../packages/babylon-lite/src/resource/gpu-pool.js";
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
-import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { cloneTexture2D, loadTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
 import { createTexture2DFromPixels } from "../../../packages/babylon-lite/src/texture/pixels-texture.js";
 import { updateTextureRegion } from "../../../packages/babylon-lite/src/texture/texture-region.js";
@@ -202,11 +202,58 @@ describe("device-lost recovery context dispatch", () => {
         const texture = {} as Texture2D;
         const recovery = enableDeviceLostSceneRecovery(engine);
 
-        engine._dlr!.u(texture, "texture.png", options);
+        engine._dlr!.u(texture, "texture.png", options, engine._device);
         options.mipMaps = true;
 
         expect(texture._recoverySource).toEqual({ kind: "url", url: "texture.png", opts: { mipMaps: false } });
         recovery.disable();
+    });
+
+    it("stamps a load started before the loss with the lost device even when it completes on the replacement", async () => {
+        const device = (): GPUDevice =>
+            ({
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
+                createSampler: vi.fn(() => ({})),
+                queue: { copyExternalImageToTexture: vi.fn(), writeTexture: vi.fn() },
+            }) as unknown as GPUDevice;
+        const lost = device();
+        const engine = { _device: lost } as unknown as EngineContext;
+        const recovery = enableDeviceLostSceneRecovery(engine);
+        let fetched!: () => void;
+        const gate = new Promise<void>((resolve) => (fetched = resolve));
+        let entered!: () => void;
+        const inFetch = new Promise<void>((resolve) => (entered = resolve));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => {
+                entered();
+                await gate;
+                return { blob: async () => ({}) };
+            })
+        );
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+        );
+        try {
+            const load = loadTexture2D(engine, "stale.png", { mipMaps: false });
+            await inFetch;
+            // Recovery installs the replacement before its handlers await; the stale load then completes.
+            engine._device = device();
+            fetched();
+            const texture = await load;
+            expect(lost.createTexture).toHaveBeenCalledOnce();
+            expect(texture._device).toBe(lost);
+            const stale = texture.texture;
+            await rebuildTexture2D(engine, texture);
+            expect(texture.texture).not.toBe(stale);
+            expect(texture._device).toBe(engine._device);
+        } finally {
+            vi.unstubAllGlobals();
+            recovery.disable();
+        }
     });
 
     it("restores the glTF sampler settings used before device loss", async () => {
@@ -767,7 +814,7 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
     // reach that state: `releaseTexture` is public API, and its first call destroys a texture whose
     // creator took no reference of its own, which is how `solid` and glTF-uploaded textures start.
     const recoverableKinds: ReadonlyArray<readonly [string, boolean, (engine: EngineContext, tex: Texture2D) => void]> = [
-        ["url", true, (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false })],
+        ["url", true, (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false }, engine._device)],
         ["raw-pixel", true, (engine, tex) => engine._dlr!.p(tex, new Uint8Array([1, 2, 3, 4]), {})],
         ["render-target", true, (engine, tex) => engine._dlr!.r(tex, 1, 1, "rgba8unorm", {})],
         [
@@ -1090,7 +1137,7 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
     // ref-count 0, so recovery has to take it again — otherwise the first consumer to bind and then
     // unbind the rebuilt texture drops it to zero and destroys it out from under the application.
     const creatorOwned: ReadonlyArray<readonly [string, (engine: EngineContext, tex: Texture2D) => void]> = [
-        ["url", (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false })],
+        ["url", (engine, tex) => engine._dlr!.u(tex, "atlas.png", { mipMaps: false }, engine._device)],
         ["raw-pixel", (engine, tex) => engine._dlr!.p(tex, new Uint8Array([1, 2, 3, 4]), {})],
         ["render-target", (engine, tex) => engine._dlr!.r(tex, 1, 1, "rgba8unorm", {})],
     ];

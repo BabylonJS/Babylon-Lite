@@ -196,11 +196,14 @@ can gain in that window: textures stamped by the opt-in texture capture, and the
 morph-target and skeleton objects stamped by their factories, are kept rather than
 rebuilt over their live handles. Recovery restamps what it rebuilds or adopts, and
 derived wrappers inherit their base's stamp. After every registered scene, recovery
-reconciles the texture claims live retentions own — enumerated through the
+reconciles every texture wrapper live retentions reach — their claimed wrappers
+plus each wrapper the retained mesh's current material exposes through the
 material and plugin contracts, so a texture held only in a plugin's closure is
 included — through the source-deduplicated texture rebuild, repeating while new
-claims appear, so a wrapper cloned from a still-outgoing texture onto a detached
-retained mesh adopts the replacement before ownership settles. Shared allocation replacement uses
+wrappers appear. Discovery is by wrapper identity, independent of claims, which
+deduplicate by allocation: a wrapper cloned from a still-outgoing texture onto a
+detached retained mesh adopts the replacement before ownership settles even when
+its allocation is already claimed and the clone acquired no claim of its own. Shared allocation replacement uses
 [shared mesh recovery](61-shared-mesh-recovery.md). Replacement-device allocation
 is expected and is not part of the detach/reinsert allocation-reuse measurement.
 Recovery rechecks disposal after loading shared recovery support, before installing
@@ -276,7 +279,9 @@ implementation or asset is copied.
   still-outgoing texture onto a loose retained clone adopts the replacement during
   registered-scene recovery, keeps it when reinserted, and final teardown destroys
   the replacement once. A wrapper held only in a retained material plugin's closure
-  adopts the replacement the same way. A material reassigned onto a retained mesh
+  adopts the replacement the same way, as does a wrapper cloned from the claimed
+  source and reassigned onto an already-retained mesh before the source is
+  replaced, which acquires no claim of its own. A material reassigned onto a retained mesh
   after the source is replaced but before reconciliation claims a still-outgoing
   alias; after the alias converges onto the replacement, recapture, reinsertion,
   and detach keep both claims, and final release destroys the replacement once. A
