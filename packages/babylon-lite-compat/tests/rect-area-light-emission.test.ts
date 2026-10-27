@@ -17,6 +17,7 @@ import type { RectAreaLight as LiteRectAreaLight, SceneContext, Texture2D } from
 import type { WebGPUEngine } from "../src/engine/engine";
 import { PointLight, RectAreaLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
+import { TransformNode } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 import { BaseTexture } from "../src/textures/textures";
 
@@ -162,6 +163,52 @@ describe("RectAreaLight emission texture", () => {
         expect(lateWork).toHaveLength(1);
         await lateWork[0]!();
         expect(calls).toEqual(["pause", "remove", "resume"]);
+        expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
+        expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
+    });
+
+    it("keeps parent disposal from recursively removing a light before reconciliation", async () => {
+        const lateWork: Array<() => Promise<void>> = [];
+        const engine = {
+            _lite: { _currentEncoder: {} },
+            _registerLateWork: (work: () => Promise<void>) => lateWork.push(work),
+            _pauseForSceneMutation: vi.fn(),
+            _resumeAfterSceneMutation: vi.fn(),
+        } as unknown as WebGPUEngine;
+        const liteScene = { lights: [] } as unknown as SceneContext;
+        const scene = {
+            _lite: liteScene,
+            _hasStarted: false,
+            _registerLight: vi.fn(),
+            _registerMesh: vi.fn(),
+            _unregisterNode: vi.fn(),
+            getEngine: () => engine,
+        } as unknown as Scene;
+        const parent = new TransformNode("parent", scene);
+        const removed: unknown[] = [];
+        liteMocks.removeFromScene.mockImplementation((_scene, entity) => {
+            removed.push(entity);
+            for (const child of [...((entity as { children?: unknown[] }).children ?? [])]) {
+                liteMocks.removeFromScene(_scene, child as never);
+            }
+        });
+        const removedLight = new RectAreaLight("removed", new Vector3(0, 1, 0), 2, 3, scene);
+        const remainingLight = new RectAreaLight("remaining", new Vector3(0, 1, 0), 2, 3, scene);
+        remainingLight.emissionTexture = new ReadyTexture({ width: 1024, height: 1024 } as Texture2D);
+        removedLight.parent = parent;
+        liteScene.lights.push(removedLight._lite, remainingLight._lite);
+        (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
+
+        parent.dispose();
+
+        expect(removed).toEqual([parent._node]);
+        expect(removedLight._lite.parent).toBe(parent._node);
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        expect(lateWork).toHaveLength(1);
+
+        await lateWork[0]!();
+
+        expect(removed).toEqual([parent._node, removedLight._lite]);
         expect(liteMocks.enableRectAreaLights).toHaveBeenCalledWith(liteScene);
         expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledWith(liteScene);
     });

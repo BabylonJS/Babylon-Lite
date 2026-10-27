@@ -108,6 +108,7 @@ export abstract class AbstractEngine {
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
+    private _disposed = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
 
@@ -358,6 +359,9 @@ export abstract class AbstractEngine {
 
     /** @internal Pause rendering across an asynchronous scene topology/resource mutation. */
     public _pauseForSceneMutation(): void {
+        if (this._disposed) {
+            return;
+        }
         if (this._sceneMutationPauseCount++ > 0) {
             return;
         }
@@ -373,7 +377,7 @@ export abstract class AbstractEngine {
         if (this._sceneMutationPauseCount === 0 || --this._sceneMutationPauseCount > 0) {
             return;
         }
-        const shouldResume = this._shouldResumeAfterSceneMutation && this._sceneMutationPauseRevision === this._renderLoopStopRevision;
+        const shouldResume = !this._disposed && this._shouldResumeAfterSceneMutation && this._sceneMutationPauseRevision === this._renderLoopStopRevision;
         this._shouldResumeAfterSceneMutation = false;
         if (shouldResume) {
             await startEngine(this._lite);
@@ -439,6 +443,12 @@ export abstract class AbstractEngine {
     }
 
     public dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+        this._disposed = true;
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;

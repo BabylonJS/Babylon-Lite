@@ -229,6 +229,14 @@ export abstract class Light extends Node {
                 (this._lite.lightType === "rectArea" ||
                     scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null));
             if (needsRectAreaReconcile) {
+                // Keep ancestor removal from recursively bypassing the queued light-slot reconciliation.
+                const parent = this._lite.parent as SceneNode | null;
+                if (parent) {
+                    const index = parent.children.indexOf(this._lite);
+                    if (index !== -1) {
+                        parent.children.splice(index, 1);
+                    }
+                }
                 requestRectAreaLightReconcile(scene, () => removeFromScene(scene._lite, this._lite));
             } else {
                 removeFromScene(scene._lite, this._lite);

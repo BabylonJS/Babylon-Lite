@@ -1,20 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock, stopEngineMock } = vi.hoisted(() => ({
-    createEngineMock: vi.fn(),
-    enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
-    enableRectAreaLightsMock: vi.fn<() => Promise<void>>(),
-    onEngineDeviceLostMock: vi.fn(),
-    registerSceneMock: vi.fn<() => Promise<void>>(),
-    startEngineMock: vi.fn<() => Promise<void>>(),
-    stopEngineMock: vi.fn(),
-}));
+const { createEngineMock, disposeEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock, stopEngineMock } =
+    vi.hoisted(() => ({
+        createEngineMock: vi.fn(),
+        disposeEngineMock: vi.fn(),
+        enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+        enableRectAreaLightsMock: vi.fn<() => Promise<void>>(),
+        onEngineDeviceLostMock: vi.fn(),
+        registerSceneMock: vi.fn<() => Promise<void>>(),
+        startEngineMock: vi.fn<() => Promise<void>>(),
+        stopEngineMock: vi.fn(),
+    }));
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
         createEngine: createEngineMock,
+        disposeEngine: disposeEngineMock,
         enableMirroredMeshes: enableMirroredMeshesMock,
         enableRectAreaLights: enableRectAreaLightsMock,
         onEngineDeviceLost: onEngineDeviceLostMock,
@@ -35,6 +38,7 @@ interface TestEngine {
     _scenes: object[];
     _lite: EngineContext;
     _initialized: boolean;
+    _disposed: boolean;
     _headless: boolean;
     _rafId: number | null;
     _sceneMutationPauseCount: number;
@@ -46,6 +50,7 @@ interface TestEngine {
     _pauseForSceneMutation(): void;
     _resumeAfterSceneMutation(): Promise<void>;
     stopRenderLoop(): void;
+    dispose(): void;
 }
 
 interface StartupScene {
@@ -62,6 +67,7 @@ function makeEngine(): TestEngine {
     engine._scenes = [];
     engine._lite = {} as EngineContext;
     engine._initialized = false;
+    engine._disposed = false;
     engine._headless = false;
     engine._rafId = null;
     engine._sceneMutationPauseCount = 0;
@@ -75,6 +81,7 @@ describe("compat engine startup ordering", () => {
     beforeEach(() => {
         createEngineMock.mockReset();
         createEngineMock.mockResolvedValue({});
+        disposeEngineMock.mockReset();
         enableMirroredMeshesMock.mockReset();
         enableMirroredMeshesMock.mockResolvedValue();
         enableRectAreaLightsMock.mockReset();
@@ -333,6 +340,25 @@ describe("compat engine startup ordering", () => {
         await engine._resumeAfterSceneMutation();
 
         expect(stopEngineMock).toHaveBeenCalledTimes(2);
+        expect(startEngineMock).not.toHaveBeenCalled();
+    });
+
+    it("does not resume a pending scene mutation after engine disposal, including rejected work", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+        let rejectPreparation!: (error: Error) => void;
+        const preparation = new Promise<void>((_resolve, reject) => {
+            rejectPreparation = reject;
+        }).finally(() => engine._resumeAfterSceneMutation());
+
+        engine._pauseForSceneMutation();
+        engine.dispose();
+        rejectPreparation(new Error("area-light preparation failed"));
+
+        await expect(preparation).rejects.toThrow("area-light preparation failed");
+        expect(disposeEngineMock).toHaveBeenCalledOnce();
+        expect(disposeEngineMock).toHaveBeenCalledWith(engine._lite);
         expect(startEngineMock).not.toHaveBeenCalled();
     });
 });
