@@ -207,6 +207,12 @@ await loadEnvironment(scene, envUrl, {
 });
 ```
 
+The asset container keeps the glTF node hierarchy: each glTF node is a transform node and each primitive is a mesh under it,
+where Babylon.js returns one `Mesh` for a single-primitive node. Through `@babylonjs/lite-compat`, `ImportMeshAsync(...).meshes`
+is a flattened view of that hierarchy, so reparent loaded meshes with `setParent()` rather than assigning `.parent` to every
+entry, or transforms inherited from glTF nodes are lost. See
+[glTF import hierarchy and reparenting](https://github.com/BabylonJS/Babylon-Lite/blob/master/packages/babylon-lite-compat/README.md#gltf-import-hierarchy-and-reparenting).
+
 ### 6. Shadows Attach to Lights
 
 BJS creates a `ShadowGenerator` separately. Lite assigns it directly to the light.
