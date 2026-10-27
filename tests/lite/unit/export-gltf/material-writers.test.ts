@@ -156,13 +156,16 @@ describe("material extension writers", () => {
         expect(r.json.images).toHaveLength(2);
     });
 
-    it("keeps the bytes of -srgb iridescence intensity and thickness textures, which the loader uploads as sRGB", async () => {
-        const texture = createTexture(2, 1, PIXELS, { format: "rgba8unorm-srgb" });
+    it.each<[GPUTextureFormat, number[]]>([
+        ["rgba8unorm-srgb", PIXELS],
+        ["rgba8unorm", PIXELS.map((v, i) => (i % 4 === 3 ? v : linearToSrgbByte(v / 255)))],
+    ])("encodes iridescence intensity and thickness textures for the loader's sRGB upload (%s)", async (format, expected) => {
+        const texture = createTexture(2, 1, PIXELS, { format });
         const r = await run({ _iridescence: { isEnabled: true, texture, thicknessTexture: texture } });
         const ir = extension(r, "iridescence");
         expect(ir.iridescenceTexture).toEqual(ir.iridescenceThicknessTexture);
         expect(r.json.images).toHaveLength(1);
-        expect(await pixels(r, ir.iridescenceTexture)).toEqual(PIXELS);
+        expect(await pixels(r, ir.iridescenceTexture)).toEqual(expected);
     });
 
     it("preserves iridescence-only UV1 available/missing/lost material variants", async () => {

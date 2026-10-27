@@ -17,8 +17,8 @@ export const iridescenceWriter: MaterialExtensionWriter = (ctx, material, out, u
         texture: ir.texture,
         transform: hasTx(ir.texture),
         uv1: samplesUv1(ir.texture),
-        // The loader uploads both iridescence textures as sRGB; keeping the bytes inverts that.
-        color: true,
+        // The loader uploads both iridescence textures as sRGB, so they export like color slots.
+        colorDecode: "linear",
     });
     setUnlessDefault(payload, "iridescenceIor", ir.indexOfRefraction ?? 1.3, 1.3);
     setUnlessDefault(payload, "iridescenceThicknessMinimum", ir.minimumThickness ?? 100, 100);
@@ -28,7 +28,7 @@ export const iridescenceWriter: MaterialExtensionWriter = (ctx, material, out, u
         texture: ir.thicknessTexture,
         transform: hasTx(ir.thicknessTexture),
         uv1: samplesUv1(ir.thicknessTexture),
-        color: true,
+        colorDecode: "linear",
     });
     attachExtension(ctx, out, "KHR_materials_iridescence", payload);
 };

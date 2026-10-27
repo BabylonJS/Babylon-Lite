@@ -7,7 +7,7 @@ import { computeMinMax, FLOAT } from "./export-buffers.js";
 import type { ExportContext } from "./export-context.js";
 import { cachedAccessor } from "./export-context.js";
 import { mirrorX, repairUnitLength } from "./export-geometry.js";
-import { isExportableNode } from "./export-nodes.js";
+import { isExportableNode, isMesh } from "./export-nodes.js";
 import type { GltfAccessorType, GltfAnimation, GltfAnimationChannel, GltfAnimationSampler } from "./export-gltf-types.js";
 
 type AnimPathName = "translation" | "rotation" | "scale" | "weights";
@@ -92,6 +92,21 @@ function morphTargetCount(ctx: ExportContext, node: number): number {
     return meshIdx === undefined ? 0 : (ctx.doc.meshes[meshIdx]?.primitives[0]?.targets?.length ?? 0);
 }
 
+/** The exported nodes with morph targets that a weights channel on `target` drives: the target's
+ *  own node and, when the target holds mesh children, the nodes of those that did not fold into it. */
+function morphOwners(ctx: ExportContext, target: object, node: number): number[] {
+    const owners = new Set([node]);
+    if (isExportableNode(target) && !isMesh(target)) {
+        for (const child of target.children) {
+            const index = ctx.nodeIndex.get(child);
+            if (index !== undefined && isMesh(child)) {
+                owners.add(index);
+            }
+        }
+    }
+    return [...owners].filter((owner) => morphTargetCount(ctx, owner) > 0);
+}
+
 function interpolationOf(sampler: AnimationSampler): GltfAnimationSampler["interpolation"] {
     return sampler.interpolation === INTERP_STEP ? "STEP" : sampler.interpolation === INTERP_CUBICSPLINE ? "CUBICSPLINE" : undefined;
 }
@@ -126,41 +141,44 @@ export function exportAnimations(ctx: ExportContext, groups: readonly AnimationG
             if (pathName === undefined || clipSampler === undefined) {
                 continue;
             }
-            const targetCount = pathName === "weights" ? morphTargetCount(ctx, node) : 1;
-            if (targetCount === 0) {
+            const owners = pathName === "weights" ? morphOwners(ctx, target, node) : [node];
+            if (owners.length === 0) {
                 ctx.warn(`Animation "${group.name}" animates morph weights on a node without morph targets; skipping channel.`);
                 continue;
             }
-            // glTF needs at least one key and exactly (keys × values per key × 3 for splines) outputs.
             const cubic = clipSampler.interpolation === INTERP_CUBICSPLINE;
             const keys = clipSampler.input.length;
-            if (keys === 0 || clipSampler.output.length !== keys * componentsOf(pathName) * targetCount * (cubic ? 3 : 1)) {
-                ctx.warn(`Animation "${group.name}" has a sampler whose key and value counts do not match; skipping channel.`);
-                continue;
-            }
-            const useKey = `${node}:${pathName}`;
-            if (used.has(useKey)) {
-                ctx.warn(`Animation "${group.name}" targets node ${node} ${pathName} more than once; keeping the first channel.`);
-                continue;
-            }
-            used.add(useKey);
-
             const convert = ctx.nodeConvert.get(target) === true;
-            const samplerKey = `${channel.samplerIdx}:${pathName}:${convert ? "c" : "p"}`;
-            let sampler = samplerIndex.get(samplerKey);
-            if (sampler === undefined) {
-                const out: GltfAnimationSampler = {
-                    input: inputAccessor(ctx, clipSampler.input),
-                    output: outputAccessor(ctx, clipSampler.output, pathName, convert, cubic),
-                };
-                const interpolation = interpolationOf(clipSampler);
-                if (interpolation) {
-                    out.interpolation = interpolation;
+            for (const owner of owners) {
+                const targetCount = pathName === "weights" ? morphTargetCount(ctx, owner) : 1;
+                // glTF needs at least one key and exactly (keys × values per key × 3 for splines) outputs.
+                if (keys === 0 || clipSampler.output.length !== keys * componentsOf(pathName) * targetCount * (cubic ? 3 : 1)) {
+                    ctx.warn(`Animation "${group.name}" has a sampler whose key and value counts do not match; skipping channel.`);
+                    continue;
                 }
-                sampler = samplers.push(out) - 1;
-                samplerIndex.set(samplerKey, sampler);
+                const useKey = `${owner}:${pathName}`;
+                if (used.has(useKey)) {
+                    ctx.warn(`Animation "${group.name}" targets node ${owner} ${pathName} more than once; keeping the first channel.`);
+                    continue;
+                }
+                used.add(useKey);
+
+                const samplerKey = `${channel.samplerIdx}:${pathName}:${convert ? "c" : "p"}`;
+                let sampler = samplerIndex.get(samplerKey);
+                if (sampler === undefined) {
+                    const out: GltfAnimationSampler = {
+                        input: inputAccessor(ctx, clipSampler.input),
+                        output: outputAccessor(ctx, clipSampler.output, pathName, convert, cubic),
+                    };
+                    const interpolation = interpolationOf(clipSampler);
+                    if (interpolation) {
+                        out.interpolation = interpolation;
+                    }
+                    sampler = samplers.push(out) - 1;
+                    samplerIndex.set(samplerKey, sampler);
+                }
+                channels.push({ sampler, target: { node: owner, path: pathName } });
             }
-            channels.push({ sampler, target: { node, path: pathName } });
         }
 
         if (channels.length === 0) {

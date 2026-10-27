@@ -22,10 +22,9 @@ export interface PbrSlotRequest {
     readonly extra?: Readonly<Record<string, number>>;
     /** How a linear-format color texture is decoded before glTF sRGB encoding. */
     readonly colorDecode?: "linear" | "gamma";
-    /** Keeps `-srgb` bytes without `colorDecode`: a color slot, a slot the loader uploads as sRGB
-     *  (iridescence), or a slot that reads only alpha (which decoding leaves unchanged, so it can share
-     *  the undecoded image). Slots with neither are data: an `-srgb` source exports the linear bytes the
-     *  GPU samples. */
+    /** Keeps `-srgb` bytes without `colorDecode`: a color slot, or a slot that reads only alpha
+     *  (which decoding leaves unchanged, so it can share the undecoded image). Slots with neither are
+     *  data: an `-srgb` source exports the linear bytes the GPU samples. */
     readonly color?: boolean;
 }
 

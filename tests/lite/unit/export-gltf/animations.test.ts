@@ -126,6 +126,19 @@ describe("animations", () => {
         expect(readAccessor(glb, sampler.output)).toEqual([0.25, 0.5, 0.75, 1]);
     });
 
+    it("drives a node's morphed primitives that export outside its mesh", async () => {
+        const holder = createTransformNode("holder");
+        const folded = attach(morphMesh(), holder);
+        const moved = attach(morphMesh(), holder);
+        moved.position.x = 1;
+        const animationGroups = [group("weights", [{ target: holder, path: "weights" }], [{ input: [0], output: [0.25, 0.5] }])];
+        const glb = await exportAndParse(createScene({ meshes: [folded, moved], animationGroups }));
+        expect(glb.json.animations[0].channels).toEqual([
+            { sampler: 0, target: { node: 0, path: "weights" } },
+            { sampler: 0, target: { node: 1, path: "weights" } },
+        ]);
+    });
+
     it("skips unsupported, duplicate and unbound channels while sharing surviving samplers", async () => {
         const a = createTransformNode("a");
         const b = createTransformNode("b");

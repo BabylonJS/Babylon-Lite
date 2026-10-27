@@ -63,6 +63,8 @@ export function exportPrimitive(ctx: ExportContext, m: Mesh, convert: boolean): 
     const uv2s = m._cpuUv2s;
     if (uv2s && uv2s.length > 0) {
         if (checkLength(ctx, m, uv2s, 2, count, "second UV set")) {
+            // glTF forbids TEXCOORD_1 without TEXCOORD_0; Lite samples zeros for a missing UV0.
+            attributes.TEXCOORD_0 ??= zeroUvAccessor(ctx, count);
             attributes.TEXCOORD_1 = vectorAccessor(ctx, uv2s, 2, count, "v", null, false);
             uvState = "uv1";
         } else {
@@ -124,7 +126,8 @@ export function morphTargetsFit(mesh: Mesh): boolean {
 }
 
 /** @internal A zero-filled TEXCOORD_0 accessor for `count` vertices: what Lite samples for a mesh
- *  without UVs (`uploadMeshToGPU` binds a zero-filled UV buffer), emitted when its material needs UV0. */
+ *  without UVs (`uploadMeshToGPU` binds a zero-filled UV buffer), emitted when its material needs UV0
+ *  or the mesh exports TEXCOORD_1. */
 export function zeroUvAccessor(ctx: ExportContext, count: number): number {
     let index = ctx.zeroUvAccessors.get(count);
     if (index === undefined) {

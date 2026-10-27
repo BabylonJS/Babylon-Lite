@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attach, createMesh, createScene, expectClose, exportAndParse, loaderRoot, readAccessor, reloadUntexturedGlb } from "./export-test-utils";
+import { attach, createMesh, createScene, expectClose, exportAndParse, loaderRoot, QUAD_UVS, readAccessor, reloadUntexturedGlb } from "./export-test-utils";
 import type { FakeMeshOptions, ParsedGlb } from "./export-test-utils";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
@@ -50,6 +50,13 @@ describe("geometry", () => {
         }
         expect(firstPrimitive(glb).attributes.POSITION).toBeDefined();
         expect(glb.warnings).toHaveLength(warnings);
+    });
+
+    it("adds the zero TEXCOORD_0 Lite samples beneath a lone TEXCOORD_1", async () => {
+        const uv2s = QUAD_UVS.slice();
+        const glb = await exportMesh(createMesh("m", { uvs: null, uv2s }));
+        expect(readAccessor(glb, firstPrimitive(glb).attributes.TEXCOORD_0)).toEqual(new Array(8).fill(0));
+        expect(readAccessor(glb, firstPrimitive(glb).attributes.TEXCOORD_1)).toEqual(Array.from(uv2s));
     });
 
     it.each([
