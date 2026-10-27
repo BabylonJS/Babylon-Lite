@@ -541,6 +541,25 @@ describe("lite-gl: effect wrapper ownership", () => {
         expect(mock.count("useProgram")).toBe(0);
     });
 
+    it("applying a disposed wrapper never finalizes an effect it shared with a live wrapper", () => {
+        const { mock, engine, effect: current } = makeReadyEffect();
+        useEffect(current);
+        mock.setParallelComplete(false);
+        const live = createEffectWrapper(engine, { name: "shared", fragmentSource: FS });
+        const disposed = createEffectWrapper(engine, { name: "shared", fragmentSource: FS });
+        expect(disposed.effect).toBe(live.effect);
+        let compiled = 0;
+        executeWhenCompiled(live.effect, () => compiled++);
+        disposeEffectWrapper(disposed);
+        mock.setParallelComplete(true);
+        mock.clear();
+        expect(applyEffectWrapper(disposed)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        expect(engine._state.currentProgram).toBe(current.program);
+        expect(compiled).toBe(0);
+        expect(live.effect.isReady).toBe(false);
+    });
+
     it("applyEffectWrapper returns false and binds nothing while the effect is still linking (#82)", () => {
         const mock = createMockGL();
         mock.setParallelComplete(false);

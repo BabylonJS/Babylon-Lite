@@ -137,8 +137,10 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  @returns `true` when the effect is ready and now current; `false` when
  *   nothing was bound. */
 export function applyEffectWrapper(wrapper: GLEffectWrapper): boolean {
-    // Poll first: ready callbacks fired by the poll may dispose the wrapper.
-    if (!isEffectReady(wrapper.effect) || wrapper._disposed) {
+    // Bail before polling so a disposed wrapper sharing a live effect can't
+    // finalize it (useProgram + callbacks); re-check after the poll because
+    // ready callbacks it fires may dispose the wrapper.
+    if (wrapper._disposed || !isEffectReady(wrapper.effect) || wrapper._disposed) {
         return false;
     }
     useEffect(wrapper.effect);
