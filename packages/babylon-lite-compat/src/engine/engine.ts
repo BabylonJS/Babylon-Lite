@@ -154,6 +154,14 @@ export abstract class AbstractEngine {
      * not block engine startup.
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
+    /** @internal Number of scene mutations currently holding the Lite render loop paused. */
+    private _sceneMutationPauseCount = 0;
+    /** @internal Whether the render loop was active when the outermost scene mutation paused it. */
+    private _shouldResumeAfterSceneMutation = false;
+    /** @internal Changes whenever a caller explicitly stops the render loop. */
+    private _renderLoopStopRevision = 0;
+    /** @internal Stop revision captured by the outermost scene mutation pause. */
+    private _sceneMutationPauseRevision = 0;
 
     public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
         this._canvas = canvas;
@@ -348,6 +356,30 @@ export abstract class AbstractEngine {
         this._lateWork.push(work);
     }
 
+    /** @internal Pause rendering across an asynchronous scene topology/resource mutation. */
+    public _pauseForSceneMutation(): void {
+        if (this._sceneMutationPauseCount++ > 0) {
+            return;
+        }
+        this._sceneMutationPauseRevision = this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = this._initialized && !this._headless && this._lite._animFrameId !== 0;
+        if (this._shouldResumeAfterSceneMutation) {
+            stopEngine(this._lite);
+        }
+    }
+
+    /** @internal Release a scene-mutation pause, resuming only if the caller did not stop rendering. */
+    public async _resumeAfterSceneMutation(): Promise<void> {
+        if (this._sceneMutationPauseCount === 0 || --this._sceneMutationPauseCount > 0) {
+            return;
+        }
+        const shouldResume = this._shouldResumeAfterSceneMutation && this._sceneMutationPauseRevision === this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = false;
+        if (shouldResume) {
+            await startEngine(this._lite);
+        }
+    }
+
     /** @internal Scenes register themselves on construction. */
     public _registerScene(scene: Scene): void {
         this._scenes.push(scene);
@@ -383,6 +415,8 @@ export abstract class AbstractEngine {
     }
 
     public stopRenderLoop(): void {
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;

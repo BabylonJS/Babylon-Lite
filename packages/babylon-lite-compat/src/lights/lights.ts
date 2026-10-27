@@ -63,7 +63,9 @@ function requestRectAreaLightReconcile(scene: Scene): void {
         return;
     }
     state.scheduled = true;
-    scene.getEngine()._registerLateWork(async () => {
+    const engine = scene.getEngine();
+    engine._registerLateWork(async () => {
+        engine._pauseForSceneMutation();
         try {
             let reconciledRevision = 0;
             while (reconciledRevision !== state.revision) {
@@ -80,6 +82,7 @@ function requestRectAreaLightReconcile(scene: Scene): void {
             }
         } finally {
             state.scheduled = false;
+            await engine._resumeAfterSceneMutation();
         }
     });
 }

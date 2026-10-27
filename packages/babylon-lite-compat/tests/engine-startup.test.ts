@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock, stopEngineMock } = vi.hoisted(() => ({
     createEngineMock: vi.fn(),
     enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
     enableRectAreaLightsMock: vi.fn<() => Promise<void>>(),
     onEngineDeviceLostMock: vi.fn(),
     registerSceneMock: vi.fn<() => Promise<void>>(),
     startEngineMock: vi.fn<() => Promise<void>>(),
+    stopEngineMock: vi.fn(),
 }));
 
 vi.mock("babylon-lite", async (importActual) => {
@@ -19,6 +20,7 @@ vi.mock("babylon-lite", async (importActual) => {
         onEngineDeviceLost: onEngineDeviceLostMock,
         registerScene: registerSceneMock,
         startEngine: startEngineMock,
+        stopEngine: stopEngineMock,
     };
 });
 
@@ -32,8 +34,18 @@ interface TestEngine {
     _lateWork: Array<() => Promise<void>>;
     _scenes: object[];
     _lite: EngineContext;
+    _initialized: boolean;
+    _headless: boolean;
+    _rafId: number | null;
+    _sceneMutationPauseCount: number;
+    _shouldResumeAfterSceneMutation: boolean;
+    _renderLoopStopRevision: number;
+    _sceneMutationPauseRevision: number;
     _start(): Promise<void>;
     _registerLateWork(work: () => Promise<void>): void;
+    _pauseForSceneMutation(): void;
+    _resumeAfterSceneMutation(): Promise<void>;
+    stopRenderLoop(): void;
 }
 
 interface StartupScene {
@@ -49,6 +61,13 @@ function makeEngine(): TestEngine {
     engine._lateWork = [];
     engine._scenes = [];
     engine._lite = {} as EngineContext;
+    engine._initialized = false;
+    engine._headless = false;
+    engine._rafId = null;
+    engine._sceneMutationPauseCount = 0;
+    engine._shouldResumeAfterSceneMutation = false;
+    engine._renderLoopStopRevision = 0;
+    engine._sceneMutationPauseRevision = 0;
     return engine;
 }
 
@@ -65,6 +84,7 @@ describe("compat engine startup ordering", () => {
         registerSceneMock.mockReset();
         registerSceneMock.mockResolvedValue();
         startEngineMock.mockReset();
+        stopEngineMock.mockReset();
     });
 
     it("translates disabled antialiasing into a single-sample Lite surface", async () => {
@@ -282,5 +302,37 @@ describe("compat engine startup ordering", () => {
 
         expect(error).toHaveBeenCalledWith(expect.stringContaining("post-startup sync blew up"));
         error.mockRestore();
+    });
+
+    it("holds nested scene mutations under one render-loop pause", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+        startEngineMock.mockResolvedValue();
+
+        engine._pauseForSceneMutation();
+        engine._pauseForSceneMutation();
+        await engine._resumeAfterSceneMutation();
+
+        expect(stopEngineMock).toHaveBeenCalledOnce();
+        expect(startEngineMock).not.toHaveBeenCalled();
+
+        await engine._resumeAfterSceneMutation();
+
+        expect(startEngineMock).toHaveBeenCalledOnce();
+        expect(startEngineMock).toHaveBeenCalledWith(engine._lite);
+    });
+
+    it("does not resume a scene mutation pause after an explicit stopRenderLoop", async () => {
+        const engine = makeEngine();
+        engine._initialized = true;
+        engine._lite = { _animFrameId: 1 } as EngineContext;
+
+        engine._pauseForSceneMutation();
+        engine.stopRenderLoop();
+        await engine._resumeAfterSceneMutation();
+
+        expect(stopEngineMock).toHaveBeenCalledTimes(2);
+        expect(startEngineMock).not.toHaveBeenCalled();
     });
 });
