@@ -72,4 +72,43 @@ describe("RectAreaLight emission texture", () => {
         expect(liteLight.emissionTexture).toBe(textureHandle);
         expect(registerLateWork).not.toHaveBeenCalled();
     });
+
+    it("coalesces overlapping updates and retries the latest assignment after stale preparation fails", async () => {
+        const lateWork: Array<() => Promise<void>> = [];
+        const engine = { _registerLateWork: (work: () => Promise<void>) => lateWork.push(work) } as unknown as WebGPUEngine;
+        const liteScene = {} as SceneContext;
+        const scene = { _lite: liteScene, _hasStarted: true, getEngine: () => engine } as unknown as Scene;
+        const firstLiteLight = { emissionTexture: null } as LiteRectAreaLight;
+        const firstLight = Object.create(RectAreaLight.prototype) as RectAreaLight;
+        Object.assign(firstLight, { _lite: firstLiteLight, _scene: scene });
+        const latestLiteLight = { emissionTexture: null } as LiteRectAreaLight;
+        const latestLight = Object.create(RectAreaLight.prototype) as RectAreaLight;
+        Object.assign(latestLight, { _lite: latestLiteLight, _scene: scene });
+        const firstHandle = { width: 1024, height: 1024, id: "first" } as unknown as Texture2D;
+        const latestHandle = { width: 1024, height: 1024, id: "latest" } as unknown as Texture2D;
+        let rejectFirst!: (error: Error) => void;
+        liteMocks.enableRectAreaLights
+            .mockImplementationOnce(
+                () =>
+                    new Promise<void>((_resolve, reject) => {
+                        rejectFirst = reject;
+                    })
+            )
+            .mockResolvedValueOnce(undefined);
+        liteMocks.rebuildSceneRenderables.mockResolvedValue(undefined);
+
+        firstLight.emissionTexture = new ReadyTexture(firstHandle);
+        const reconciliation = lateWork[0]!();
+        await vi.waitFor(() => expect(liteMocks.enableRectAreaLights).toHaveBeenCalledTimes(1));
+
+        latestLight.emissionTexture = new ReadyTexture(latestHandle);
+        expect(lateWork).toHaveLength(1);
+        rejectFirst(new Error("stale area-light preparation"));
+
+        await reconciliation;
+        expect(firstLiteLight.emissionTexture).toBe(firstHandle);
+        expect(latestLiteLight.emissionTexture).toBe(latestHandle);
+        expect(liteMocks.enableRectAreaLights).toHaveBeenCalledTimes(2);
+        expect(liteMocks.rebuildSceneRenderables).toHaveBeenCalledTimes(1);
+    });
 });

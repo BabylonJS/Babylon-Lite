@@ -44,6 +44,46 @@ import type { BaseTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
 
+interface RectAreaLightReconcileState {
+    revision: number;
+    scheduled: boolean;
+}
+
+let rectAreaLightReconcileStates: WeakMap<Scene, RectAreaLightReconcileState> | null = null;
+
+function requestRectAreaLightReconcile(scene: Scene): void {
+    const states = (rectAreaLightReconcileStates ??= new WeakMap());
+    let state = states.get(scene);
+    if (!state) {
+        state = { revision: 0, scheduled: false };
+        states.set(scene, state);
+    }
+    state.revision++;
+    if (state.scheduled) {
+        return;
+    }
+    state.scheduled = true;
+    scene.getEngine()._registerLateWork(async () => {
+        try {
+            let reconciledRevision = 0;
+            while (reconciledRevision !== state.revision) {
+                const requestedRevision = state.revision;
+                try {
+                    await enableRectAreaLights(scene._lite);
+                    await rebuildSceneRenderables(scene._lite);
+                    reconciledRevision = requestedRevision;
+                } catch (error) {
+                    if (requestedRevision === state.revision) {
+                        throw error;
+                    }
+                }
+            }
+        } finally {
+            state.scheduled = false;
+        }
+    });
+}
+
 /** Babylon.js `Light` — base class for all lights (derives from `Node`). */
 export abstract class Light extends Node {
     /** @internal Underlying Babylon Lite light. */
@@ -487,10 +527,7 @@ export class RectAreaLight extends AreaLight {
                     this._lite.emissionTexture = texture;
                     const scene = this._scene;
                     if (scene?._hasStarted) {
-                        scene.getEngine()._registerLateWork(async () => {
-                            await enableRectAreaLights(scene._lite);
-                            await rebuildSceneRenderables(scene._lite);
-                        });
+                        requestRectAreaLightReconcile(scene);
                     }
                 }
             }
