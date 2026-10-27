@@ -248,6 +248,135 @@ describe("attachControl — pinch / touch handling", () => {
     });
 });
 
+describe("attachControl — panning direction", () => {
+    type V3 = [number, number, number];
+    const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+    /** One frame of inertial panning on a radius-10 camera; returns the target delta and the camera's own axes before the
+     *  pan, read from its world matrix (columns right, up, forward). */
+    function pan(alpha: number, beta: number, panningX: number, panningY: number): { delta: V3; right: V3; up: V3; forward: V3; scale: number } {
+        const camera = createArcRotateCamera(alpha, beta, 10, { x: 1, y: 2, z: 3 });
+        const scene = makeScene();
+        attachControl(camera, makeCanvas() as unknown as HTMLCanvasElement, scene);
+        const m = camera.worldMatrix;
+        const right: V3 = [m[0]!, m[1]!, m[2]!];
+        const up: V3 = [m[4]!, m[5]!, m[6]!];
+        const forward: V3 = [m[8]!, m[9]!, m[10]!];
+        // No decay: the frame applies the whole offset, and nothing is left for later frames.
+        camera.panningInertia = 0;
+        camera.inertialPanningX = panningX;
+        camera.inertialPanningY = panningY;
+        beforeRender(scene);
+        return { delta: [camera.target.x - 1, camera.target.y - 2, camera.target.z - 3], right, up, forward, scale: camera.radius * 0.001 };
+    }
+
+    it.each([
+        [0.3, 1],
+        [2.1, 0.4],
+        [-1.2, 2.6],
+    ])("moves the target along the camera's up vector on a vertical pan (alpha %s, beta %s)", (alpha, beta) => {
+        const { delta, up, forward, scale } = pan(alpha, beta, 0, 1);
+
+        for (let i = 0; i < 3; i++) {
+            expect(delta[i]).toBeCloseTo(up[i]! * scale, 9);
+        }
+        // In the view plane: the target neither approaches nor leaves the eye.
+        expect(dot(delta, forward)).toBeCloseTo(0, 9);
+    });
+
+    it("moves the target across the ground, away from the eye, on a vertical pan of a camera looking down", () => {
+        const alpha = 0.7;
+        const { delta } = pan(alpha, 0.2, 0, 1);
+        // The eye sits on the +(cos α, sin α) side of the target, so screen-up on the ground points the other way.
+        const away = -(Math.cos(alpha) * delta[0] + Math.sin(alpha) * delta[2]);
+
+        expect(away).toBeGreaterThan(0.9 * 0.01);
+        expect(Math.abs(delta[1])).toBeLessThan(0.25 * 0.01);
+    });
+
+    it("keeps panning along the camera's right vector, and along world Y for a horizontal camera", () => {
+        const horizontal = pan(0.3, 1, 1, 0);
+        for (let i = 0; i < 3; i++) {
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+
+        const level = pan(0.3, Math.PI / 2, 0, 1);
+        expect(level.delta[0]).toBeCloseTo(0, 9);
+        expect(level.delta[1]).toBeCloseTo(level.scale, 9);
+        expect(level.delta[2]).toBeCloseTo(0, 9);
+    });
+
+    it("keeps a diagonal pan in the view plane", () => {
+        const { delta, right, up, forward, scale } = pan(-0.4, 0.5, 0.6, -0.8);
+
+        expect(dot(delta, forward)).toBeCloseTo(0, 9);
+        expect(dot(delta, right)).toBeCloseTo(0.6 * scale, 9);
+        expect(dot(delta, up)).toBeCloseTo(-0.8 * scale, 9);
+    });
+
+    // Beta is not clamped by the factory, the beta setter or panning. For sin(beta) < 0 the camera, which looks at its target
+    // with world up, has its right and up vectors flipped; panning must follow the camera rather than the beta formula.
+    it.each([
+        [0, -Math.PI / 2],
+        [0.8, -0.6],
+        [2.1, 4],
+        [-0.5, 3.6],
+    ])("follows the camera's right and up vectors when sin(beta) < 0 (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a level camera with a negative beta up along world Y", () => {
+        const { delta, up, scale } = pan(0, -Math.PI / 2, 0, 1);
+
+        expect(up[1]).toBeCloseTo(1, 9);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
+
+    // With the eye straight below or above the target (sin(beta) rounds to about 1e-16 at beta = π or 2π) the camera's
+    // look-at falls back to the identity basis. An exact sin(beta) = 0 (beta = 0) places the eye at sin(beta) = 0.0001
+    // instead, which keeps a regular basis.
+    it.each([
+        [Math.PI / 2, Math.PI],
+        [0.3, Math.PI],
+        [-1.1, 2 * Math.PI],
+        [0.4, 0],
+    ])("follows the camera's look-at basis when the eye is straight below or above the target (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a camera at beta = π up along world Y, its look-at fallback up axis", () => {
+        const { delta, up, forward, scale } = pan(Math.PI / 2, Math.PI, 0, 1);
+
+        expect(up[1]).toBe(1);
+        expect(forward[2]).toBe(1);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
+});
+
 describe("attachControl — pointer mappings", () => {
     it("preserves primary rotate and secondary pan as the defaults", () => {
         const canvas = makeCanvas();
