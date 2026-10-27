@@ -79,6 +79,7 @@ export {
     generateTextureMipMaps,
     loadTexture2D,
     bindTexture,
+    unbindTexture,
     disposeTexture,
     updateRawTexture,
     updateTextureSamplingMode,
@@ -95,6 +96,7 @@ export type { GLTextureSourceOptions } from "./texture-source.js";
 export {
     createTexture3DFromPixels,
     bindTexture3D,
+    unbindTexture3D,
     setEffectTexture3D,
     generateTexture3DMipMaps,
     updateTexture3DSamplingMode,
@@ -111,6 +113,7 @@ export {
     createRenderTarget,
     createFloatRenderTarget,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     generateRenderTargetMipMaps,
     resizeRenderTarget,
     readRenderTargetPixels,

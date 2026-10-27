@@ -1,6 +1,6 @@
 import type { GLEngineContext } from "./context.js";
 import { compileShader, getLinkError, isLinkComplete, linkProgram } from "./shader.js";
-import { bindTexture, type GLTexture } from "./texture.js";
+import { bindTextureRaw, type GLTexture } from "./texture.js";
 
 /** Inputs to `createEffect`: shader sources plus the uniform, sampler and
  *  attribute names whose locations are resolved during readiness finalization. */
@@ -77,6 +77,9 @@ export interface GLEffect {
     /** True once the program has linked and finalization has run; the
      *  `setEffect*` setters are no-ops until then. Poll `isEffectReady` to advance it. */
     isReady: boolean;
+    /** The engine that created (and owns) this effect. Effect operations derive
+     *  their engine from it, so they take the effect alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _compileError: string | null;
     /** @internal */
@@ -152,6 +155,7 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
         _lastVec: {},
         _lastI1: {},
         isReady: false,
+        _engine: engine,
         _compileError: null,
         _disposed: false,
         _refCount: 1,
@@ -213,7 +217,8 @@ function compileEffectProgram(gl: WebGL2RenderingContext, options: GLEffectOptio
 /** Poll the link state and, on first success, run finalization (uniform-
  *  location resolution + one-shot sampler-unit `uniform1i` assignment +
  *  `_onCompiled` callbacks). Returns `true` once the effect is usable. */
-export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolean {
+export function isEffectReady(effect: GLEffect): boolean {
+    const engine = effect._engine;
     if (
         !effect.isReady &&
         !effect._disposed &&
@@ -238,8 +243,8 @@ export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolea
  *  Returns null while pending or when no failure has been recorded; this is
  *  not a readiness guarantee. Does not schedule polling. A successful restore
  *  allocation clears the previous diagnostic before the new link is checked. */
-export function getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null {
-    isEffectReady(engine, effect);
+export function getEffectCompilationError(effect: GLEffect): string | null {
+    isEffectReady(effect);
     return effect._compileError;
 }
 
@@ -263,7 +268,7 @@ function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
     }
     // Switch to this program via the cached helper so _state.currentProgram
     // stays consistent — no raw gl.useProgram outside useEffect.
-    useEffect(engine, effect);
+    useEffect(effect);
     let unit = 0;
     for (const name of effect.options.samplerNames) {
         const loc = gl.getUniformLocation(program, name);
@@ -290,8 +295,8 @@ function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
 /** Fires `cb` synchronously if the effect is already ready; otherwise queues
  *  it for the next finalization. Does not start polling: call `isEffectReady`
  *  from the render loop or opt into `waitForEffect`. */
-export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, cb: (e: GLEffect) => void): void {
-    if (isEffectReady(engine, effect)) {
+export function executeWhenCompiled(effect: GLEffect, cb: (e: GLEffect) => void): void {
+    if (isEffectReady(effect)) {
         cb(effect);
         return;
     }
@@ -304,7 +309,8 @@ export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, c
  *  referenced by another `createEffect` caller) is kept alive. Call exactly ONCE
  *  per `createEffect` (each call decrements the ref count); safe (no-op) once the
  *  effect is fully torn down. */
-export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void {
+export function disposeEffect(effect: GLEffect): void {
+    const engine = effect._engine;
     if (effect._disposed) {
         return;
     }
@@ -334,7 +340,8 @@ export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void {
  *  a failed one fails the next draw). `applyEffectWrapper` does that poll for
  *  wrappers. No-op when the effect is already current, disposed, or the
  *  context is lost/disposed. */
-export function useEffect(engine: GLEngineContext, effect: GLEffect): void {
+export function useEffect(effect: GLEffect): void {
+    const engine = effect._engine;
     if (engine._isLost || engine._disposed || effect._disposed) {
         return;
     }
@@ -360,7 +367,8 @@ export function useEffect(engine: GLEngineContext, effect: GLEffect): void {
 
 /** Cached `gl.uniform1f`. No-op when context-lost, the effect isn't ready, the
  *  uniform is absent, or the value is unchanged since last upload. */
-export function setEffectFloat(engine: GLEngineContext, effect: GLEffect, name: string, x: number): void {
+export function setEffectFloat(effect: GLEffect, name: string, x: number): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -377,7 +385,8 @@ export function setEffectFloat(engine: GLEngineContext, effect: GLEffect, name: 
 
 /** Cached `gl.uniform2f`. No-op when context-lost, the effect isn't ready, the
  *  uniform is absent, or the value is unchanged since last upload. */
-export function setEffectFloat2(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number): void {
+export function setEffectFloat2(effect: GLEffect, name: string, x: number, y: number): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -401,7 +410,8 @@ export function setEffectFloat2(engine: GLEngineContext, effect: GLEffect, name:
 
 /** Cached `gl.uniform3f`. No-op when context-lost, the effect isn't ready, the
  *  uniform is absent, or the value is unchanged since last upload. */
-export function setEffectFloat3(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number, z: number): void {
+export function setEffectFloat3(effect: GLEffect, name: string, x: number, y: number, z: number): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -426,7 +436,8 @@ export function setEffectFloat3(engine: GLEngineContext, effect: GLEffect, name:
 
 /** Cached `gl.uniform4f`. No-op when context-lost, the effect isn't ready, the
  *  uniform is absent, or the value is unchanged since last upload. */
-export function setEffectFloat4(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number, z: number, w: number): void {
+export function setEffectFloat4(effect: GLEffect, name: string, x: number, y: number, z: number, w: number): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -451,19 +462,19 @@ export function setEffectFloat4(engine: GLEngineContext, effect: GLEffect, name:
 }
 
 /** Cached `gl.uniform3f` from an r/g/b color object. Delegates to `setEffectFloat3`. */
-export function setEffectColor3(engine: GLEngineContext, effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void {
-    setEffectFloat3(engine, effect, name, c.r, c.g, c.b);
+export function setEffectColor3(effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void {
+    setEffectFloat3(effect, name, c.r, c.g, c.b);
 }
 
 /** Cached `gl.uniform4f` from an r/g/b/a color object. Delegates to `setEffectFloat4`. */
-export function setEffectColor4(engine: GLEngineContext, effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void {
-    setEffectFloat4(engine, effect, name, c.r, c.g, c.b, c.a);
+export function setEffectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void {
+    setEffectFloat4(effect, name, c.r, c.g, c.b, c.a);
 }
 
 /** Cached `gl.uniform2f` from an `{x,y}` vector object — the lite-gl equivalent
  *  of Babylon's `Effect.setVector2`. Delegates to `setEffectFloat2`. */
-export function setEffectVector2(engine: GLEngineContext, effect: GLEffect, name: string, v: { x: number; y: number }): void {
-    setEffectFloat2(engine, effect, name, v.x, v.y);
+export function setEffectVector2(effect: GLEffect, name: string, v: { x: number; y: number }): void {
+    setEffectFloat2(effect, name, v.x, v.y);
 }
 
 /** Cached `gl.uniform4f` from an r/g/b/a color WITHOUT premultiplication — the
@@ -471,13 +482,14 @@ export function setEffectVector2(engine: GLEngineContext, effect: GLEffect, name
  *  `setEffectFloat4` (lite-gl never premultiplies in the uniform setters, so
  *  this matches `setEffectColor4`; the distinct name eases the ShapeBuilder
  *  port). */
-export function setEffectDirectColor4(engine: GLEngineContext, effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void {
-    setEffectFloat4(engine, effect, name, c.r, c.g, c.b, c.a);
+export function setEffectDirectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void {
+    setEffectFloat4(effect, name, c.r, c.g, c.b, c.a);
 }
 
 /** Cached `gl.uniform1i`. No-op when context-lost, the effect isn't ready, the
  *  uniform is absent, or the value is unchanged since last upload. */
-export function setEffectInt(engine: GLEngineContext, effect: GLEffect, name: string, x: number): void {
+export function setEffectInt(effect: GLEffect, name: string, x: number): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -502,7 +514,8 @@ export function setEffectInt(engine: GLEngineContext, effect: GLEffect, name: st
 
 /** `gl.uniformMatrix4fv` from a column-major 4×4 matrix — the lite-gl
  *  equivalent of Babylon's `Effect.setMatrix`. Not value-cached. */
-export function setEffectMatrix(engine: GLEngineContext, effect: GLEffect, name: string, matrix: Float32Array | number[]): void {
+export function setEffectMatrix(effect: GLEffect, name: string, matrix: Float32Array | number[]): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -515,7 +528,8 @@ export function setEffectMatrix(engine: GLEngineContext, effect: GLEffect, name:
 
 /** `gl.uniformMatrix3fv` from a column-major 3×3 matrix — the lite-gl
  *  equivalent of Babylon's `Effect.setMatrix3x3`. Not value-cached. */
-export function setEffectMatrix3x3(engine: GLEngineContext, effect: GLEffect, name: string, matrix: Float32Array | number[]): void {
+export function setEffectMatrix3x3(effect: GLEffect, name: string, matrix: Float32Array | number[]): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -528,7 +542,8 @@ export function setEffectMatrix3x3(engine: GLEngineContext, effect: GLEffect, na
 
 /** `gl.uniform1fv` — a flat float array (`Effect.setFloatArray` / `setArray`).
  *  Not value-cached. */
-export function setEffectFloatArray(engine: GLEngineContext, effect: GLEffect, name: string, array: Float32Array | number[]): void {
+export function setEffectFloatArray(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -541,7 +556,8 @@ export function setEffectFloatArray(engine: GLEngineContext, effect: GLEffect, n
 
 /** `gl.uniform4fv` — an array of `vec4`s (`Effect.setFloatArray4` / `setArray4`).
  *  Not value-cached. */
-export function setEffectFloatArray4(engine: GLEngineContext, effect: GLEffect, name: string, array: Float32Array | number[]): void {
+export function setEffectFloatArray4(effect: GLEffect, name: string, array: Float32Array | number[]): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -553,7 +569,8 @@ export function setEffectFloatArray4(engine: GLEngineContext, effect: GLEffect, 
 }
 
 /** `gl.uniform1iv` — a flat int array (`Effect.setIntArray`). Not value-cached. */
-export function setEffectIntArray(engine: GLEngineContext, effect: GLEffect, name: string, array: Int32Array | number[]): void {
+export function setEffectIntArray(effect: GLEffect, name: string, array: Int32Array | number[]): void {
+    const engine = effect._engine;
     if (engine._isLost || !effect.isReady) {
         return;
     }
@@ -568,15 +585,16 @@ export function setEffectIntArray(engine: GLEngineContext, effect: GLEffect, nam
  *  that unit (§4.4). NO `gl.uniform1i` is issued — that was done exactly once per program lifetime during
  *  finalization. This is the key win over Babylon's `Effect.setTexture` which
  *  re-issues the sampler binding on every call. */
-export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture | null): void {
-    if (engine._isLost || !effect.isReady) {
+export function setEffectTexture(effect: GLEffect, samplerName: string, tex: GLTexture | null): void {
+    const engine = effect._engine;
+    if (engine._isLost || engine._disposed || !effect.isReady) {
         return;
     }
     const unit = effect.samplerUnits[samplerName];
-    if (unit === undefined) {
+    if (unit === undefined || tex?._disposed) {
         return;
     }
-    bindTexture(engine, unit, tex);
+    bindTextureRaw(engine, unit, tex === null ? null : tex.handle);
 }
 
 /** Resolve (and cache) a vertex-attribute location by name — the lite-gl
@@ -585,7 +603,8 @@ export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samp
  *  the mesh / instancing path, where attribute names are not declared up-front.
  *  Returns `-1` when the attribute is absent (matching `gl.getAttribLocation`).
  *  @internal */
-export function getEffectAttributeLocation(engine: GLEngineContext, effect: GLEffect, name: string): number {
+export function getEffectAttributeLocation(effect: GLEffect, name: string): number {
+    const engine = effect._engine;
     const cached = effect.attributeLocations[name];
     if (cached !== undefined) {
         return cached;

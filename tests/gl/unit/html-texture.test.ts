@@ -108,7 +108,7 @@ describe("lite-gl: html-texture sampling presets (getSamplingModeFilters)", () =
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR_MIPMAP_LINEAR);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_LINEAR);
         expect(mock.count("generateMipmap")).toBe(0);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
@@ -141,7 +141,7 @@ describe("lite-gl: updateHtmlElementTexture", () => {
         element.width = 8;
         element.height = 6;
         mock.clear();
-        updateHtmlElementTexture(engine, tex);
+        updateHtmlElementTexture(tex);
         expectSourceUpload(mock, engine.gl, element);
         expect(tex.width).toBe(8);
         expect(tex.height).toBe(6);
@@ -152,11 +152,11 @@ describe("lite-gl: updateHtmlElementTexture", () => {
         const { mock, engine } = makeCtx();
         const tex = createHtmlElementTexture(engine, sourceElement());
         mock.clear();
-        updateHtmlElementTexture(engine, tex);
+        updateHtmlElementTexture(tex);
         expect(mock.count("generateMipmap")).toBe(0);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         mock.clear();
-        updateHtmlElementTexture(engine, tex);
+        updateHtmlElementTexture(tex);
         expect(mock.count("generateMipmap")).toBe(1);
         // The chain is rebuilt AFTER the level-0 upload.
         expect(mock.log.findIndex((c) => c.name === "generateMipmap")).toBeGreaterThan(mock.log.findIndex((c) => c.name === "texImage2D"));
@@ -178,7 +178,7 @@ describe("lite-gl: updateHtmlElementTexture", () => {
         const tex = createHtmlElementTexture(engine, sourceElement());
         const expectNoUpload = (): void => {
             mock.clear();
-            updateHtmlElementTexture(engine, tex);
+            updateHtmlElementTexture(tex);
             expect(mock.count("texImage2D")).toBe(0);
         };
 
@@ -199,10 +199,10 @@ describe("lite-gl: updateHtmlElementTexture", () => {
         // texture (uploads on unit 0), then bind an unrelated texture on unit 1.
         const other = createHtmlElementTexture(engine, sourceElement());
         const tex = createHtmlElementTexture(engine, sourceElement());
-        bindTexture(engine, 1, other); // leaves unit 1 active; boundTextures[0] is still `tex`
+        bindTexture(other, 1); // leaves unit 1 active; boundTextures[0] is still `tex`
 
         mock.clear();
-        updateHtmlElementTexture(engine, tex);
+        updateHtmlElementTexture(tex);
 
         // texImage2D writes into the texture on the ACTIVE unit, so the upload MUST
         // have re-selected unit 0 first. Without the fix, the unit-0 bind is elided,

@@ -36,7 +36,7 @@ export function createTextTexture(engine: GLEngineContext, pixels: Float32Array 
 /** @internal Preserve the texture object and its context-restore upload source. */
 export function uploadTextTexture(engine: GLEngineContext, texture: GLTexture, pixels: Float32Array | Uint32Array, width: number, height: number): void {
     checkSize(engine, width, height);
-    updateRawTexture(engine, texture, pixels, { width, height });
+    updateRawTexture(texture, pixels, { width, height });
 }
 
 /** @internal Atlas resources are shared by every block using the same curve set. */
@@ -74,7 +74,7 @@ export function ensureSharedAtlasGpu(engine: GLEngineContext, atlas: SharedAtlas
             atlas._gpu = gpu;
         } catch (error) {
             for (const texture of textures) {
-                disposeTexture(engine, texture);
+                disposeTexture(texture);
             }
             throw error;
         }

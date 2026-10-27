@@ -83,23 +83,36 @@ packages are imported together (as NeonBrush does).
    lite-core, and the engine handle is always the **first** parameter, named
    `engine`. Lifecycle verbs track lite one-for-one:
 
-    | lite-core (`@babylonjs/lite`)          | lite-gl (`@babylonjs/lite-gl`)          |
-    | -------------------------------------- | --------------------------------------- |
-    | `EngineContext`                        | `GLEngineContext`                       |
-    | `EngineOptions`                        | `GLEngineOptions`                       |
-    | `createEngine(canvas, options)`        | `createGLEngine(canvas, options)`       |
-    | `disposeEngine(engine)`                | `disposeGLEngine(engine)`               |
-    | `resizeEngine(engine)`                 | `resizeGLEngine(engine)`                |
-    | `EffectWrapper`                        | `GLEffectWrapper`                       |
-    | `createEffectWrapper(engine, options)` | `createEffectWrapper(engine, options)`  |
-    | `disposeEffectWrapper(wrapper)`        | `disposeEffectWrapper(engine, wrapper)` |
+    | lite-core (`@babylonjs/lite`)          | lite-gl (`@babylonjs/lite-gl`)         |
+    | -------------------------------------- | -------------------------------------- |
+    | `EngineContext`                        | `GLEngineContext`                      |
+    | `EngineOptions`                        | `GLEngineOptions`                      |
+    | `createEngine(canvas, options)`        | `createGLEngine(canvas, options)`      |
+    | `disposeEngine(engine)`                | `disposeGLEngine(engine)`              |
+    | `resizeEngine(engine)`                 | `resizeGLEngine(engine)`               |
+    | `EffectWrapper`                        | `GLEffectWrapper`                      |
+    | `createEffectWrapper(engine, options)` | `createEffectWrapper(engine, options)` |
+    | `disposeEffectWrapper(wrapper)`        | `disposeEffectWrapper(wrapper)`        |
 
     Wrappers take **shader source** and compile + own their effect (like lite).
-    Every lite-gl function that touches GL takes the **engine first** —
-    including `applyEffectWrapper` / `disposeEffectWrapper` and the sprite
-    functions — so call sites read uniformly and no object hides a back-pointer
-    to its engine. This is a deliberate divergence from lite's wrapper-only
-    `disposeEffectWrapper(wrapper)`.
+    **Receiver rule:** a function takes `engine` only when it cannot derive it
+    from a resource argument. Creators (`create*`, `loadTexture2D`),
+    engine-scoped state/frame/loop functions (`setDepthState`, `setViewport`,
+    `drawEffect`, `clearEngine`, …) and the resource-less unbinds
+    (`unbindTexture(engine, unit)`, `unbindTexture3D(engine, unit)`,
+    `restoreDefaultFramebuffer(engine)`) take the engine first. Resource
+    arguments are never nullable on engine-deriving functions — binding a
+    resource and clearing a slot are separate functions
+    (`bindTexture(tex, unit)` / `unbindTexture(engine, unit)`,
+    `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`). Every
+    operation on an existing resource takes the
+    **resource first** and reads its owner from an `@internal _engine`
+    back-pointer set by its creator — `applyEffectWrapper(wrapper)`,
+    `setEffectFloat(effect, …)`, `disposeTexture(tex)`, `drawMesh(vao)`,
+    `renderSprites(renderer, …)` — matching lite's `disposeEffectWrapper(wrapper)`
+    and Babylon's receiver methods, and making a mismatched-engine call
+    unrepresentable. The back-pointer adds no lifetime edge: the engine already
+    strongly references every live resource for context-restore replay.
 
 3. **Documented divergences (backend-driven, not inconsistencies).**
     - `createGLEngine` is **synchronous** — WebGL2 context acquisition is sync,
@@ -109,7 +122,7 @@ packages are imported together (as NeonBrush does).
       WebGL2 has no equivalent ergonomic UBO path for these tiny effects.
     - **No `RenderingContext` / frame-graph / registration layer.** lite's
       `EffectRenderer` is a registerable rendering context; lite-gl instead
-      exposes the lower-level `applyEffectWrapper(engine, wrapper)` + `drawEffect(engine)`
+      exposes the lower-level `applyEffectWrapper(wrapper)` + `drawEffect(engine)`
       primitives, and the fullscreen quad is a context-owned lazy resource.
 
 4. **The barrel re-exports explicitly — never `export *`.** `src/index.ts`
@@ -145,8 +158,8 @@ packages are imported together (as NeonBrush does).
    `GLTextureOptions` shape, so an option accepted by one creator is accepted
    (and honored) by all of them.
 
-Any **new** export MUST follow rules 1–2 and 4 (GL-prefixed type, engine-first
-`engine` parameter, lite-matching verb, explicit named re-export from the barrel)
+Any **new** export MUST follow rules 1–2 and 4 (GL-prefixed type, receiver rule —
+`engine` first only when not derivable from a resource —, lite-matching verb, explicit named re-export from the barrel)
 unless a backend difference forces a documented divergence under rule 3; rule 5
 governs whether a new feature should be an export at all.
 
@@ -349,32 +362,32 @@ export interface GLEffect {
 }
 
 export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect;
-export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolean;
+export function isEffectReady(effect: GLEffect): boolean;
 /** Polls readiness once and returns a recorded compile/link/restore error,
  *  or null when none has been recorded. Does not schedule background work. */
-export function getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null;
-export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, cb: (e: GLEffect) => void): void;
+export function getEffectCompilationError(effect: GLEffect): string | null;
+export function executeWhenCompiled(effect: GLEffect, cb: (e: GLEffect) => void): void;
 /** Optional readiness scheduler; all scheduling code lives in effect-ready.ts. */
 export interface GLEffectWaitOptions {
     /** Cancels this wait without disposing or cancelling the shared effect. */
     signal?: AbortSignal;
 }
-export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>;
-export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void;
+export function waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>;
+export function disposeEffect(effect: GLEffect): void;
 
 /** Sets engine._state.currentProgram and calls gl.useProgram(...) iff changed.
  *  No-op when the effect is not ready. */
-export function useEffect(engine: GLEngineContext, effect: GLEffect): void;
+export function useEffect(effect: GLEffect): void;
 
 // Cached uniform setters — see §4 for the exact cache contract.
-export function setEffectFloat(engine: GLEngineContext, effect: GLEffect, name: string, x: number): void;
-export function setEffectFloat2(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number): void;
-export function setEffectFloat3(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number, z: number): void;
-export function setEffectFloat4(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number, z: number, w: number): void;
-export function setEffectColor3(engine: GLEngineContext, effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void;
-export function setEffectColor4(engine: GLEngineContext, effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void;
-export function setEffectInt(engine: GLEngineContext, effect: GLEffect, name: string, x: number): void;
-export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture): void;
+export function setEffectFloat(effect: GLEffect, name: string, x: number): void;
+export function setEffectFloat2(effect: GLEffect, name: string, x: number, y: number): void;
+export function setEffectFloat3(effect: GLEffect, name: string, x: number, y: number, z: number): void;
+export function setEffectFloat4(effect: GLEffect, name: string, x: number, y: number, z: number, w: number): void;
+export function setEffectColor3(effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void;
+export function setEffectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void;
+export function setEffectInt(effect: GLEffect, name: string, x: number): void;
+export function setEffectTexture(effect: GLEffect, samplerName: string, tex: GLTexture): void;
 ```
 
 ### 3.4 Textures
@@ -451,35 +464,38 @@ export function createRawTexture(
 export function loadTexture2D(engine: GLEngineContext, url: string, options?: GLTextureOptions, onLoad?: (tex: GLTexture) => void, onError?: (err: Error) => void): GLTexture;
 
 /** Cached: skips `gl.activeTexture` and/or `gl.bindTexture` when nothing changes.
- *  No-op when `tex._disposed` or `engine._isLost`. */
-export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTexture | null): void;
+ *  No-op when `tex._disposed` or the context is lost. */
+export function bindTexture(tex: GLTexture, unit: number): void;
+
+/** Cached unbind of `TEXTURE_2D` on `unit`. */
+export function unbindTexture(engine: GLEngineContext, unit: number): void;
 
 /** Sets `tex._disposed=true`, calls `gl.deleteTexture(tex.handle)`, walks
  *  the matching target's binding cache and clears every unit that still references the
  *  handle (so a later `bindTexture(..., otherTex)` to the same unit is NOT
  *  incorrectly elided). Deregisters via `engine._textures.delete(tex)` in
  *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
-export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
+export function disposeTexture(tex: GLTexture): void;
 
 /** Build a full mip chain for `tex` now and retain the intent (≙ Babylon
  *  `useMipMaps`, `generateTexture3DMipMaps`): sets `_hasMipMaps` and wraps
  *  `_upload` once, so every later level-0 upload (`updateRawTexture`,
  *  dynamic/HTML updates, the `loadTexture2D` arrival, context-restore replay)
  *  rebuilds the chain. No-op when `tex._disposed` or `engine._isLost`. */
-export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
+export function generateTextureMipMaps(tex: GLTexture): void;
 
 /** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
  *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
  *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained)
  *  unless the texture already has one (it is rebuilt on every upload; call
  *  `generateTextureMipMaps` to force a regeneration). */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+export function updateTextureSamplingMode(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /** Raw GL min/mag filters overload. */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
 
 /** ≙ Babylon `texture.isReady()`: `tex.isReady` and not disposed and the
  *  context is not lost (the function form, mirroring `isEffectReady`). */
-export function isTextureReady(engine: GLEngineContext, tex: GLTexture): boolean;
+export function isTextureReady(tex: GLTexture): boolean;
 
 /** Per-update flags of `updateRawTexture` / `updateDynamicTexture` /
  *  `updateHtmlElementTexture` (≙ lite's `DynamicTextureUpdateOptions`). Omitted flags fall back to the
@@ -508,9 +524,9 @@ generated; a mipmapped preset (`useMipMaps: true`) requires a
 `GLTextureOptions` (no per-creator aliases). Dynamic textures
 (`createDynamicTexture`) track the uploaded source's size in `tex.width` /
 `tex.height`. Every 2D update takes the same trailing options shape —
-`updateRawTexture(engine, tex, data, { width, height, unpackAlignment,
-invertY, premultiplyAlpha })`, `updateDynamicTexture(engine, tex, source, {
-invertY, premultiplyAlpha })` and `updateHtmlElementTexture(engine, tex, {
+`updateRawTexture(tex, data, { width, height, unpackAlignment,
+invertY, premultiplyAlpha })`, `updateDynamicTexture(tex, source, {
+invertY, premultiplyAlpha })` and `updateHtmlElementTexture(tex, {
 invertY, premultiplyAlpha })` — and each update falls back to the
 creation-time `invertY` / `premultiplyAlpha` when a call omits them. The
 latest flags are reused by context-restore replay.
@@ -630,12 +646,13 @@ export interface GLTexture3D extends Omit<GLTexture, "target"> {
     depth: number;
 }
 export function createTexture3DFromPixels(engine: GLEngineContext, data: Uint8Array, width: number, height: number, depth: number, options?: GLPixelsTexture3DOptions): GLTexture3D;
-export function bindTexture3D(engine: GLEngineContext, unit: number, tex: GLTexture3D | null): void;
-export function setEffectTexture3D(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void;
-export function generateTexture3DMipMaps(engine: GLEngineContext, tex: GLTexture3D): void;
-export function updateTexture3DSamplingMode(engine: GLEngineContext, tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void;
-export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void;
-export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): void;
+export function bindTexture3D(tex: GLTexture3D, unit: number): void;
+export function unbindTexture3D(engine: GLEngineContext, unit: number): void;
+export function setEffectTexture3D(effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void;
+export function generateTexture3DMipMaps(tex: GLTexture3D): void;
+export function updateTexture3DSamplingMode(tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTexture3DWrapMode(tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void;
+export function disposeTexture3D(tex: GLTexture3D): void;
 ```
 
 `createTexture3DFromPixels(engine, data, width, height, depth, options?)` is the
@@ -668,7 +685,7 @@ intent, so restore regenerates the mip levels from the retained level-0 pixels
 before applying the saved minification filter. The optional module owns an independent 3D per-unit binding cache,
 invalidated to an unknown sentinel on context loss and on `wipeGLStateCache`
 so the first subsequent bind explicitly selects its texture unit and reaches GL
-(including a null unbind); null unbinds only the
+(including an unbind); `unbindTexture` / `unbindTexture3D` clear only the
 target used by the matching 2D or 3D binder. The module's sampling/wrap
 updates persist across restoration and elide unchanged `texParameteri` calls
 without rebinding. Update setters reject invalid WebGL filter or wrap enums
@@ -701,7 +718,7 @@ export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLC
  *  `invertY` is the raw `UNPACK_FLIP_Y_WEBGL` for every element type, whereas
  *  Babylon flips video with `!invertY` — port video calls as `{ invertY: !invertY }`.
  *  No-op when the context is lost/disposed or the texture is disposed. */
-export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture, options?: GLTextureUpdateOptions): void;
+export function updateHtmlElementTexture(tex: GLTexture, options?: GLTextureUpdateOptions): void;
 ```
 
 ### 3.5 Effect renderer (fullscreen quad)
@@ -719,8 +736,8 @@ export interface GLEffectWrapperOptions {
     defines?: string;
 }
 
-// The wrapper compiles and OWNS its effect. Like every lite-gl function,
-// `disposeEffectWrapper` / `applyEffectWrapper` take the engine first.
+// The wrapper compiles and OWNS its effect. Like every resource operation,
+// `disposeEffectWrapper` / `applyEffectWrapper` take the wrapper alone (receiver rule).
 export interface GLEffectWrapper {
     readonly name: string;
     /** The compiled effect the wrapper owns — exposed so the per-uniform
@@ -734,7 +751,7 @@ export interface GLEffectWrapper {
  *  built-in fullscreen-quad shader. */
 export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWrapperOptions): GLEffectWrapper;
 /** Idempotent. Releases the wrapper's reference on its effect. */
-export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void;
+export function disposeEffectWrapper(wrapper: GLEffectWrapper): void;
 
 export interface GLViewport {
     x: number;
@@ -746,8 +763,8 @@ export interface GLViewport {
 /** Defaults to the full canvas in pixel coordinates. */
 export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void;
 
-/** Polls `isEffectReady(engine, wrapper.effect)`; when ready, calls
- *  `useEffect(engine, wrapper.effect)` and returns `true`. Returns `false` and
+/** Polls `isEffectReady(wrapper.effect)`; when ready, calls
+ *  `useEffect(wrapper.effect)` and returns `true`. Returns `false` and
  *  binds nothing while the effect is compiling, failed, disposed, or the
  *  context is lost — the caller skips that frame's setters and `drawEffect`.
  *
@@ -764,7 +781,7 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  No depth/stencil state changes: NeonBrush effects never enable them, and
  *  `createGLEngine` requested `depth: false, stencil: false`. If a future
  *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
-export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean;
+export function applyEffectWrapper(wrapper: GLEffectWrapper): boolean;
 
 /** ≙ Babylon `EffectRenderer.draw`. Lazily creates the shared quad
  *  (`ensureQuad`), binds its VAO (cached), flushes deferred states and issues
@@ -893,7 +910,6 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  *  Babylon parity but unused (no animation state). Resets blend to `DISABLE`
  *  afterwards (≙ Babylon `autoResetAlpha`). */
 export function renderSprites(
-    engine: GLEngineContext,
     renderer: GLSpriteRenderer,
     sprites: readonly GLSprite[],
     deltaTime: number,
@@ -903,11 +919,11 @@ export function renderSprites(
 
 /** Swap the sprite-sheet texture (≙ Babylon assigning `SpriteRenderer.texture`
  *  after async load). No-op after disposal. */
-export function setSpriteRendererTexture(engine: GLEngineContext, renderer: GLSpriteRenderer, texture: GLTexture): void;
+export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void;
 
 /** Releases the VAO/VBO/IBO + owned effect and unregisters the restore hook.
  *  Idempotent. Does NOT dispose the texture (the consumer owns it). */
-export function disposeSpriteRenderer(engine: GLEngineContext, renderer: GLSpriteRenderer): void;
+export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void;
 ```
 
 Geometry / parity notes:
@@ -945,7 +961,7 @@ export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.j
 // tree-shakes them from bundles that don't use them.
 export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeSpriteRenderer } from "./sprites.js";
 export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
-export { createRenderTarget, bindRenderTarget, resizeRenderTarget, disposeRenderTarget } from "./render-target.js";
+export { createRenderTarget, bindRenderTarget, restoreDefaultFramebuffer, resizeRenderTarget, disposeRenderTarget } from "./render-target.js";
 ```
 
 ---
@@ -980,31 +996,23 @@ export interface GLRenderTarget {
     height: number; /* + @internal FBO/depth/restore */
 }
 
-// Engine-first params everywhere; GL-prefixed, Options-suffixed type names (lite-gl convention).
+// Receiver rule: engine first only on creators / resource-less calls; GL-prefixed, Options-suffixed type names (lite-gl convention).
 export function createRenderTarget(engine: GLEngineContext, options: GLRenderTargetOptions): GLRenderTarget;
-export function bindRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null): void;
-export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, width: number, height: number): void;
-export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null | undefined): void;
+export function bindRenderTarget(rt: GLRenderTarget): void;
+export function restoreDefaultFramebuffer(engine: GLEngineContext): void; // canvas framebuffer + full-canvas viewport
+export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void;
+export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void;
 export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloatRenderTargetOptions): GLRenderTarget; // float / half-float HDR color
-export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRenderTarget): void;
+export function generateRenderTargetMipMaps(rt: GLRenderTarget): void;
 // Stencil is opt-in from the depth-stencil module (NOT a createRenderTarget option),
 // so the packed-renderbuffer code tree-shakes out of the render-target core:
-//   generateRenderTargetStencil(engine, rt, { depth? }): void
+//   generateRenderTargetStencil(rt, { depth? }): void
 //     packs DEPTH24_STENCIL8 (depth default true) or stencil-only STENCIL_INDEX8 (depth:false),
 //     replacing the core depth-only buffer; installs a restore/resize hook so it survives FBO rebuilds.
 // GPU→CPU readback. `format` defaults to gl.RGBA (always readable); gl.RED / gl.RG
 // read 1 / 2 channels per texel tightly packed (sets PACK_ALIGNMENT 1) — valid when
 // it matches the target's IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
-export function readRenderTargetPixels(
-    engine: GLEngineContext,
-    rt: GLRenderTarget,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    into?: ArrayBufferView,
-    format?: GLenum
-): ArrayBufferView;
+export function readRenderTargetPixels(rt: GLRenderTarget, x: number, y: number, w: number, h: number, into?: ArrayBufferView, format?: GLenum): ArrayBufferView;
 ```
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
@@ -1164,7 +1172,7 @@ kept in sync with actual GL state. Two protocols enforce that:
 | `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
 | `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
 | `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
-| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget`; null = canvas)                    |
+| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget` / `restoreDefaultFramebuffer`)     |
 | `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
 | blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
 
@@ -1262,7 +1270,7 @@ location) MUST NOT update the cache — otherwise a later "real" set with the
 same value would incorrectly elide and the GPU would keep stale data.
 
 ```ts
-export function setEffectFloat(engine: GLEngineContext, effect: GLEffect, name: string, x: number): void {
+export function setEffectFloat(effect: GLEffect, name: string, x: number): void {
     if (engine._isLost || !effect.isReady) return; // skip; do not touch cache
     const loc = effect.uniformLocations[name];
     if (loc === null) return; // unknown uniform; do not touch cache
@@ -1271,7 +1279,7 @@ export function setEffectFloat(engine: GLEngineContext, effect: GLEffect, name: 
     engine.gl.uniform1f(loc, x);
 }
 
-export function setEffectFloat2(engine: GLEngineContext, effect: GLEffect, name: string, x: number, y: number): void {
+export function setEffectFloat2(effect: GLEffect, name: string, x: number, y: number): void {
     if (engine._isLost || !effect.isReady) return;
     const loc = effect.uniformLocations[name];
     if (loc === null) return;
@@ -1306,9 +1314,9 @@ canonical per-frame sequence is:
 
 ```
 setViewport(engine);                       // cached
-if (!applyEffectWrapper(engine, wrapper)) return; // ready poll + useEffect
-setEffectFloat(engine, effect, ...);       // ← AFTER applyEffectWrapper
-setEffectTexture(engine, effect, ...);
+if (!applyEffectWrapper(wrapper)) return; // ready poll + useEffect
+setEffectFloat(effect, ...);       // ← AFTER applyEffectWrapper
+setEffectTexture(effect, ...);
 drawEffect(engine);                        // ensureQuad + bind VAO + flush + draw
 ```
 
@@ -1332,8 +1340,8 @@ function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
     // 1. Check link status; on failure record _compileError and stop.
     // 2. Resolve uniform locations from options.uniformNames.
     // 3. Resolve attribute locations from options.attributeNames.
-    // 4. useEffect(engine, effect)  — updates _state.currentProgram (cached).
-    useEffect(engine, effect);
+    // 4. useEffect(effect)  — updates _state.currentProgram (cached).
+    useEffect(effect);
     // 5. Assign each declared sampler a fixed texture unit and tell the shader once.
     let unit = 0;
     for (const name of effect.options.samplerNames) {
@@ -1350,11 +1358,11 @@ function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
 }
 ```
 
-Then `setEffectTexture(engine, effect, name, tex)` is:
+Then `setEffectTexture(effect, name, tex)` is:
 
 ```ts
 const unit = effect.samplerUnits[samplerName]; // O(1) lookup
-bindTexture(engine, unit, tex); // cached: maybe-activeTexture + maybe-bindTexture
+bindTexture(tex, unit); // cached: maybe-activeTexture + maybe-bindTexture
 // NO gl.uniform1i — it's already set for the lifetime of the program.
 ```
 
@@ -1403,7 +1411,7 @@ function ensureQuad(engine: GLEngineContext): void {
 The geometry matches Babylon's `EffectRenderer` default (positions
 `[1,1,-1,1,-1,-1,1,-1]`, indices `[0,1,2,0,2,3]`).
 
-`applyEffectWrapper` polls readiness, then calls `useEffect(engine, wrapper.effect)`;
+`applyEffectWrapper` polls readiness, then calls `useEffect(wrapper.effect)`;
 `drawEffect` calls `ensureQuad(engine)` before drawing, so any current program
 (wrapper or plain `useEffect`) draws the quad.
 Once the quad VAO is built and bound, attribute state is baked into the VAO;
@@ -1442,7 +1450,7 @@ which returns the shader/program handles or an allocation diagnostic and
 releases any partial allocation. Creation throws that diagnostic with the
 effect name; restoration records it with a `context-restore` prefix.
 
-`isEffectReady(engine, effect)` is the polling gate:
+`isEffectReady(effect)` is the polling gate:
 
 ```
 if (effect.isReady) return true;
@@ -1465,10 +1473,10 @@ finalizeEffect(engine, effect);                // §4.4
 return true;                                 // effect.isReady is now true
 ```
 
-`executeWhenCompiled(engine, effect, cb)`:
+`executeWhenCompiled(effect, cb)`:
 
 ```
-if (isEffectReady(engine, effect)) { cb(effect); return; }
+if (isEffectReady(effect)) { cb(effect); return; }
 effect._onCompiled.push(cb);
 ```
 
@@ -1479,7 +1487,7 @@ the render loop. That same poll drives finalization — there is no separate
 `_onCompiled[]` is fired and cleared during finalization. Listeners added
 _after_ readiness fire synchronously from `executeWhenCompiled` itself.
 
-`getEffectCompilationError(engine, effect)` runs one `isEffectReady` poll and
+`getEffectCompilationError(effect)` runs one `isEffectReady` poll and
 returns `_compileError`. `null` means no failure has been recorded, not that
 the effect is ready. Recorded errors survive disposal and context loss for
 diagnostics; a successful context-restoration allocation clears the error,
@@ -1487,7 +1495,7 @@ then readiness checks diagnose the replacement program normally. Restore
 allocation errors identify the stage and clean up any partially allocated
 shaders. Neither the accessor nor `executeWhenCompiled` starts a scheduler.
 
-`waitForEffect(engine, effect, { signal? })` is an opt-in helper in the separate,
+`waitForEffect(effect, { signal? })` is an opt-in helper in the separate,
 side-effect-free `effect-ready.ts` module, re-exported from the root barrel.
 It polls immediately, resolves with the effect when finalization succeeds,
 and otherwise polls once per animation frame independently of the render
@@ -1743,30 +1751,30 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, fmt, type, { invertY, ...getSamplingModeFilters(s) })`   |
 | `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                          |
 | `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })` |
-| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(engine, effect, cb)`                                                      |
-| `effect.isReady()`                                               | `isEffectReady(engine, effect)`                                                                |
-| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(engine, effect, name, c)`   |
-| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(engine, effect, name, glTexture)`                                            |
+| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(effect, cb)`                                                              |
+| `effect.isReady()`                                               | `isEffectReady(effect)`                                                                        |
+| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(effect, name, c)`           |
+| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(effect, name, glTexture)`                                                    |
 | `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                        |
 | `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                          |
-| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(engine, wrapper)`                                                          |
+| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(wrapper)`                                                                  |
 | `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                           |
 | `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                              |
 | `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                   |
 | `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                               |
 | `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                |
-| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(engine, renderer, sprites, deltaTime, view, proj)`                              |
-| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(engine, renderer)`                                                      |
+| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                      |
+| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                              |
 | `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                           |
-| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(engine, tex, mode, mips)`                                           |
-| `effectWrapper.effect = existingEffect`                          | `useEffect(engine, existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)       |
-| `texture.isReady()`                                              | `isTextureReady(engine, tex)`                                                                  |
-| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(engine, tex, src, { invertY, premultiplyAlpha })`                        |
-| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(engine, tex, { invertY })` (video: `!invertY`)                       |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(tex, mode, mips)`                                                   |
+| `effectWrapper.effect = existingEffect`                          | `useEffect(existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)               |
+| `texture.isReady()`                                              | `isTextureReady(tex)`                                                                          |
+| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(tex, src, { invertY, premultiplyAlpha })`                                |
+| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(tex, { invertY })` (video: `!invertY`)                               |
 | `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
 | `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
-| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                              |
-| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                     |
+| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`                                   |
+| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(rt, w, h)` / `disposeRenderTarget(rt)`                                     |
 
 Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
@@ -1815,7 +1823,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 8. No texture compression, no KTX, no DDS, no Basis.
 9. No anisotropic filtering knobs (NeonBrush doesn't use them).
 10. No MRT — `gl_FragData[N]` is a converter error (§6.3).
-11. Matrix uniform setters ARE shipped: `setEffectMatrix(engine, effect, name, m)`
+11. Matrix uniform setters ARE shipped: `setEffectMatrix(effect, name, m)`
     (4×4) and `setEffectMatrix3x3` for fullscreen effects, alongside the sprite
     renderer's internal `gl.uniformMatrix4fv` view/projection upload.
 
@@ -1912,11 +1920,11 @@ this._effect = this._wrapper.effect;            // exposed for the per-uniform s
 …
 // inside render():
 setViewport(engine);                                      // cached
-applyEffectWrapper(engine, this._wrapper);        // useProgram (cached)
-setEffectFloat(engine, this._effect, "u_Progress", this.progress);
-setEffectFloat2(engine, this._effect, "u_Resolution", rx, ry);
-setEffectTexture(engine, this._effect, "overlaySampler", this._overlayTex);
-setEffectTexture(engine, this._effect, "backgroundSampler", this._backgroundTex);
+applyEffectWrapper(this._wrapper);        // useProgram (cached)
+setEffectFloat(this._effect, "u_Progress", this.progress);
+setEffectFloat2(this._effect, "u_Resolution", rx, ry);
+setEffectTexture(this._effect, "overlaySampler", this._overlayTex);
+setEffectTexture(this._effect, "backgroundSampler", this._backgroundTex);
 drawEffect(engine);                                       // ensureQuad + gl.drawElements
 ```
 

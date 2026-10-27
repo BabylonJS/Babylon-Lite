@@ -12,6 +12,7 @@ import {
     setEffectTexture,
     stopRenderLoop,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     createRenderTarget,
 } from "babylon-lite-gl";
 
@@ -20,9 +21,9 @@ import {
  *
  * Exercises render targets end-to-end:
  *   - PASS 1 renders a procedural pattern INTO an offscreen 512×512 render
- *     target (`createRenderTarget` → `bindRenderTarget(engine, rt)` binds the
+ *     target (`createRenderTarget` → `bindRenderTarget(rt)` binds the
  *     FBO and sets the viewport to the RT size automatically).
- *   - PASS 2 binds the default framebuffer (`bindRenderTarget(engine, null)` —
+ *   - PASS 2 binds the default framebuffer (`restoreDefaultFramebuffer(engine)` —
  *     restores the canvas viewport) and samples the RT's color texture
  *     fullscreen with a radial vignette (`setEffectTexture(…, rt.texture)`).
  *
@@ -100,7 +101,7 @@ const compositeWrapper = createEffectWrapper(engine, {
     samplerNames: ["uRt"],
 });
 
-executeWhenCompiled(engine, compositeWrapper.effect, () => {
+executeWhenCompiled(compositeWrapper.effect, () => {
     console.log("scene8: render-to-texture round-trip effects compiled");
 });
 
@@ -110,23 +111,23 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, patternWrapper.effect) || !isEffectReady(engine, compositeWrapper.effect)) {
+    if (!isEffectReady(patternWrapper.effect) || !isEffectReady(compositeWrapper.effect)) {
         return;
     }
     resizeGLEngine(engine);
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
 
     // ── PASS 1: render the radial pattern into the render target ──
-    bindRenderTarget(engine, rt); // binds the FBO + sets viewport to RT_SIZE
-    applyEffectWrapper(engine, patternWrapper);
-    setEffectFloat(engine, patternWrapper.effect, "uTime", uTime);
+    bindRenderTarget(rt); // binds the FBO + sets viewport to RT_SIZE
+    applyEffectWrapper(patternWrapper);
+    setEffectFloat(patternWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
     // ── PASS 2: composite the RT to the screen ──
-    bindRenderTarget(engine, null); // default framebuffer + canvas viewport
-    applyEffectWrapper(engine, compositeWrapper);
-    setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
+    restoreDefaultFramebuffer(engine); // default framebuffer + canvas viewport
+    applyEffectWrapper(compositeWrapper);
+    setEffectFloat2(compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

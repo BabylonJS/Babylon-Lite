@@ -33,7 +33,7 @@ function makeReadyEffect(engine: ReturnType<typeof makeEngine>["engine"]) {
         samplerNames: [],
         attributeNames: ["a"],
     });
-    isEffectReady(engine, eff);
+    isEffectReady(eff);
     return eff;
 }
 
@@ -84,7 +84,7 @@ describe("lite-gl mesh: buffer creation", () => {
         const { mock, engine } = makeEngine();
         const vb = createVertexBuffer(engine, new Float32Array([0, 0]), true);
         const next = new Float32Array([5, 6]);
-        updateVertexBuffer(engine, vb, next);
+        updateVertexBuffer(vb, next);
         const sub = callsNamed(mock, "bufferSubData");
         expect(sub).toHaveLength(1);
         expect(sub[0]?.args[1]).toBe(0);
@@ -97,8 +97,8 @@ describe("lite-gl mesh: bindIndexBuffer cache", () => {
         const { mock, engine } = makeEngine();
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         mock.clear();
-        bindIndexBuffer(engine, ib);
-        bindIndexBuffer(engine, ib);
+        bindIndexBuffer(ib);
+        bindIndexBuffer(ib);
         // Already bound at creation → both elided.
         expect(callsNamed(mock, "bindBuffer").filter((c) => c.args[0] === engine.gl.ELEMENT_ARRAY_BUFFER)).toHaveLength(0);
     });
@@ -111,7 +111,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0, 0]));
         mock.clear();
         const descriptors: GLAttributeDescriptor[] = [{ index: 3, size: 4, offset: 0 }];
-        bindAttributes(engine, vb, descriptors, eff);
+        bindAttributes(vb, descriptors, eff);
         const div = callsNamed(mock, "vertexAttribDivisor");
         expect(div).toHaveLength(1);
         expect(div[0]?.args).toEqual([3, 1]);
@@ -122,7 +122,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         const eff = makeReadyEffect(engine);
         const vb = createVertexBuffer(engine, new Float32Array([0, 0]));
         mock.clear();
-        bindAttributes(engine, vb, [{ index: 0, size: 2, offset: 0, divisor: 0 }], eff);
+        bindAttributes(vb, [{ index: 0, size: 2, offset: 0, divisor: 0 }], eff);
         expect(callsNamed(mock, "vertexAttribDivisor")[0]?.args).toEqual([0, 0]);
     });
 
@@ -136,7 +136,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
             { index: 2, size: 4, offset: 16 },
             { index: 3, size: 4, offset: 32 },
         ];
-        bindAttributes(engine, vb, descriptors, eff);
+        bindAttributes(vb, descriptors, eff);
         const ptr = callsNamed(mock, "vertexAttribPointer");
         expect(ptr).toHaveLength(3);
         // (index, size, type, normalized, STRIDE, offset)
@@ -154,7 +154,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
             { index: 1, size: 3, offset: 0 },
             { index: 2, size: 3, offset: 12 },
         ];
-        bindAttributes(engine, vb, descriptors, eff, true);
+        bindAttributes(vb, descriptors, eff, true);
         const ptr = callsNamed(mock, "vertexAttribPointer");
         expect(ptr[0]?.args[4]).toBe(24); // (3+3)*4
         expect(ptr[1]?.args[4]).toBe(24);
@@ -165,7 +165,6 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         const eff = makeReadyEffect(engine);
         const vb = createVertexBuffer(engine, new Float32Array(16));
         bindAttributes(
-            engine,
             vb,
             [
                 { index: 5, size: 4, offset: 0 },
@@ -189,7 +188,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         const eff = makeReadyEffect(engine);
         const vb = createVertexBuffer(engine, new Float32Array(8));
         for (let frame = 0; frame < 3; frame++) {
-            bindAttributes(engine, vb, [{ index: 0, size: 2, offset: 0, divisor: 0 }], eff);
+            bindAttributes(vb, [{ index: 0, size: 2, offset: 0, divisor: 0 }], eff);
         }
         expect(engine._state.instanceLocations).toEqual([]);
         mock.clear();
@@ -206,8 +205,8 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
             { index: 6, size: 4, offset: 16, divisor: 2 },
             { index: 7, size: 2, offset: 0, divisor: 0 },
         ];
-        bindAttributes(engine, vb, descriptors, eff);
-        bindAttributes(engine, vb, descriptors, eff);
+        bindAttributes(vb, descriptors, eff);
+        bindAttributes(vb, descriptors, eff);
         expect(engine._state.instanceLocations).toEqual([5, 6]);
         mock.clear();
         unbindInstanceAttributes(engine);
@@ -222,7 +221,7 @@ describe("lite-gl mesh: bindAttributes (Babylon bindInstancesBuffer parity)", ()
         const eff = makeReadyEffect(engine);
         const vb = createVertexBuffer(engine, new Float32Array(8));
         mock.clear();
-        bindAttributes(engine, vb, [{ index: -1, size: 2, offset: 0 }], eff);
+        bindAttributes(vb, [{ index: -1, size: 2, offset: 0 }], eff);
         expect(callsNamed(mock, "vertexAttribPointer")).toHaveLength(0);
     });
 });
@@ -233,7 +232,7 @@ describe("lite-gl mesh: drawIndexed", () => {
         makeReadyEffect(engine);
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 3, 4, 5]));
         mock.clear();
-        drawIndexed(engine, ib, 6, 0);
+        drawIndexed(ib, 6, 0);
         const de = callsNamed(mock, "drawElements");
         expect(de).toHaveLength(1);
         expect(de[0]?.args).toEqual([engine.gl.TRIANGLES, 6, engine.gl.UNSIGNED_SHORT, 0]);
@@ -245,7 +244,7 @@ describe("lite-gl mesh: drawIndexed", () => {
         makeReadyEffect(engine);
         const ib = createIndexBuffer(engine, new Uint16Array(12));
         mock.clear();
-        drawIndexed(engine, ib, 6, 3);
+        drawIndexed(ib, 6, 3);
         expect(callsNamed(mock, "drawElements")[0]?.args[3]).toBe(6);
     });
 
@@ -254,7 +253,7 @@ describe("lite-gl mesh: drawIndexed", () => {
         makeReadyEffect(engine);
         const ib = createIndexBuffer(engine, new Uint32Array(12));
         mock.clear();
-        drawIndexed(engine, ib, 6, 2);
+        drawIndexed(ib, 6, 2);
         const de = callsNamed(mock, "drawElements")[0];
         expect(de?.args[2]).toBe(engine.gl.UNSIGNED_INT);
         expect(de?.args[3]).toBe(8);
@@ -265,7 +264,7 @@ describe("lite-gl mesh: drawIndexed", () => {
         makeReadyEffect(engine);
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2, 3, 4, 5]));
         mock.clear();
-        drawIndexed(engine, ib, 6, 0, 32);
+        drawIndexed(ib, 6, 0, 32);
         const di = callsNamed(mock, "drawElementsInstanced");
         expect(di).toHaveLength(1);
         expect(di[0]?.args).toEqual([engine.gl.TRIANGLES, 6, engine.gl.UNSIGNED_SHORT, 0, 32]);
@@ -277,7 +276,7 @@ describe("lite-gl mesh: drawIndexed", () => {
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         engine._state.currentProgram = null;
         mock.clear();
-        drawIndexed(engine, ib, 3);
+        drawIndexed(ib, 3);
         expect(callsNamed(mock, "drawElements")).toHaveLength(0);
     });
 });
@@ -287,7 +286,7 @@ describe("lite-gl mesh: lifecycle", () => {
         const { mock, engine } = makeEngine();
         const vb = createVertexBuffer(engine, new Float32Array([1, 2]));
         expect(engine._state.boundArrayBuffer).toBe(vb.handle);
-        disposeBuffer(engine, vb);
+        disposeBuffer(vb);
         expect(callsNamed(mock, "deleteBuffer")).toHaveLength(1);
         expect(engine._buffers).toHaveLength(0);
         expect(engine._state.boundArrayBuffer).toBeNull();
@@ -296,9 +295,9 @@ describe("lite-gl mesh: lifecycle", () => {
     it("disposeBuffer is idempotent", () => {
         const { mock, engine } = makeEngine();
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
-        disposeBuffer(engine, ib);
+        disposeBuffer(ib);
         mock.clear();
-        disposeBuffer(engine, ib);
+        disposeBuffer(ib);
         expect(callsNamed(mock, "deleteBuffer")).toHaveLength(0);
     });
 
@@ -337,7 +336,7 @@ describe("lite-gl mesh: static mesh VAO (createMeshVao / drawMesh)", () => {
             samplerNames: [],
             attributeNames: ["a_pos", "a_color"],
         });
-        isEffectReady(engine, eff);
+        isEffectReady(eff);
         return eff;
     }
 
@@ -377,10 +376,10 @@ describe("lite-gl mesh: static mesh VAO (createMeshVao / drawMesh)", () => {
         const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
-        useEffect(engine, effect); // drawMesh needs a current program
+        useEffect(effect); // drawMesh needs a current program
         mock.clear();
-        drawMesh(engine, vao);
-        drawMesh(engine, vao);
+        drawMesh(vao);
+        drawMesh(vao);
         // No vertexAttribPointer/Divisor on the per-frame draw — the VAO replays them.
         expect(mock.count("vertexAttribPointer")).toBe(0);
         expect(mock.count("vertexAttribDivisor")).toBe(0);
@@ -395,9 +394,9 @@ describe("lite-gl mesh: static mesh VAO (createMeshVao / drawMesh)", () => {
         const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
-        useEffect(engine, effect);
+        useEffect(effect);
         mock.clear();
-        drawMesh(engine, vao, 5);
+        drawMesh(vao, 5);
         const di = callsNamed(mock, "drawElementsInstanced");
         expect(di).toHaveLength(1);
         expect(di[0]?.args[4]).toBe(5); // instanceCount
@@ -424,7 +423,7 @@ describe("lite-gl mesh: static mesh VAO (createMeshVao / drawMesh)", () => {
         const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
         const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
         const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
-        disposeMeshVao(engine, vao);
+        disposeMeshVao(vao);
         expect(mock.count("deleteVertexArray")).toBe(1);
         // A later restore must NOT re-record the disposed VAO.
         fireLost(canvas);

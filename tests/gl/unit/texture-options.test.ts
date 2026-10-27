@@ -81,7 +81,7 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const tex = raw(engine);
         mock.clear();
         const { minFilter, magFilter } = getSamplingModeFilters(GLSamplingMode.NEAREST);
-        updateTextureSamplingMode(engine, tex, minFilter, magFilter);
+        updateTextureSamplingMode(tex, minFilter, magFilter);
         expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
@@ -90,7 +90,7 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR);
+        updateTextureSamplingMode(tex, GLSamplingMode.TRILINEAR);
         expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
@@ -99,10 +99,10 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
+        updateTextureSamplingMode(tex, GLSamplingMode.TRILINEAR, true);
         expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(1);
-        updateRawTexture(engine, tex, new Uint8Array(4));
+        updateRawTexture(tex, new Uint8Array(4));
         expect(mock.count("generateMipmap")).toBe(2);
     });
 
@@ -110,7 +110,7 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.BILINEAR, true);
+        updateTextureSamplingMode(tex, GLSamplingMode.BILINEAR, true);
         expect(filters(mock, gl)).toEqual([gl.LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(0);
         expect(tex._hasMipMaps).not.toBe(true);
@@ -119,9 +119,9 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
     it("updateTextureSamplingMode preset does not regenerate an existing chain", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR, true);
+        updateTextureSamplingMode(tex, GLSamplingMode.TRILINEAR, true);
         expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
         expect(mock.count("generateMipmap")).toBe(0);
         expect(tex._hasMipMaps).toBe(true);
@@ -134,27 +134,27 @@ describe("lite-gl getSamplingModeFilters (#81)", () => {
             return [last(gl.UNPACK_FLIP_Y_WEBGL), last(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)];
         };
         const tex = raw(engine, { invertY: false, premultiplyAlpha: false });
-        updateRawTexture(engine, tex, new Uint8Array(4), { invertY: true, premultiplyAlpha: true });
+        updateRawTexture(tex, new Uint8Array(4), { invertY: true, premultiplyAlpha: true });
         expect(flags()).toEqual([1, 1]);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
         expect(flags()).toEqual([1, 1]);
         // Omitted flags fall back to the creation options.
-        updateRawTexture(engine, tex, new Uint8Array(4), { premultiplyAlpha: true });
+        updateRawTexture(tex, new Uint8Array(4), { premultiplyAlpha: true });
         expect(flags()).toEqual([0, 1]);
-        updateRawTexture(engine, tex, new Uint8Array(4));
+        updateRawTexture(tex, new Uint8Array(4));
         expect(flags()).toEqual([0, 0]);
     });
 
     it("updateTextureSamplingMode preset uses mip filters once the texture has mipmaps", () => {
         const { mock, engine, gl } = setup();
         const tex = raw(engine);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.TRILINEAR);
+        updateTextureSamplingMode(tex, GLSamplingMode.TRILINEAR);
         expect(filters(mock, gl)).toEqual([gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR]);
-        updateTextureSamplingMode(engine, tex, GLSamplingMode.NEAREST);
+        updateTextureSamplingMode(tex, GLSamplingMode.NEAREST);
         expect(filters(mock, gl)).toEqual([gl.NEAREST, gl.NEAREST]);
         expect(mock.count("generateMipmap")).toBe(0);
     });
@@ -173,18 +173,18 @@ describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
     it("generates now, and not before it is called", () => {
         const { mock, engine } = setup();
         const tex = raw(engine);
-        updateRawTexture(engine, tex, new Uint8Array(4));
+        updateRawTexture(tex, new Uint8Array(4));
         expect(mock.count("generateMipmap")).toBe(0);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
     it("rebuilds the chain after updateRawTexture and on context restore", () => {
         const { mock, canvas, engine } = setup();
         const tex = raw(engine);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         mock.clear();
-        updateRawTexture(engine, tex, new Uint8Array(4));
+        updateRawTexture(tex, new Uint8Array(4));
         expect(mock.count("texImage2D")).toBe(1);
         expect(mock.count("generateMipmap")).toBe(1);
         fireLost(canvas);
@@ -197,8 +197,8 @@ describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
     it("wraps the upload only once when called repeatedly", () => {
         const { mock, canvas, engine } = setup();
         const tex = raw(engine);
-        generateTextureMipMaps(engine, tex);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(2);
         fireLost(canvas);
         mock.clear();
@@ -209,11 +209,11 @@ describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
     it("rebuilds the chain after each dynamic update and for the blank re-allocation on restore", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 4, 4);
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(4, 4));
+        updateDynamicTexture(tex, fakeSource(4, 4));
         expect(mock.count("generateMipmap")).toBe(1);
-        clearDynamicTextureSource(engine, tex);
+        clearDynamicTextureSource(tex);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -228,7 +228,7 @@ describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
         const loaded = new Promise<void>((resolve) => {
             tex = loadTexture2D(engine, "x.png", undefined, () => resolve());
         });
-        generateTextureMipMaps(engine, tex!);
+        generateTextureMipMaps(tex!);
         mock.clear();
         await loaded;
         expect(mock.count("texImage2D")).toBe(1);
@@ -240,7 +240,7 @@ describe("lite-gl generateTextureMipMaps retains the mip intent (#81)", () => {
         const tex = raw(engine);
         fireLost(canvas);
         mock.clear();
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 });
@@ -249,7 +249,7 @@ describe("lite-gl texture upload options (#81)", () => {
     it("dynamic size tracking prefers the source's intrinsic size", () => {
         const { engine } = setup();
         const tex = createDynamicTexture(engine, 4, 4);
-        updateDynamicTexture(engine, tex, { videoWidth: 32, videoHeight: 16, width: 1, height: 1 } as unknown as TexImageSource);
+        updateDynamicTexture(tex, { videoWidth: 32, videoHeight: 16, width: 1, height: 1 } as unknown as TexImageSource);
         expect([tex.width, tex.height]).toEqual([32, 16]);
     });
 
@@ -277,9 +277,9 @@ describe("lite-gl dynamic texture consistency (#81)", () => {
     it("tracks the uploaded source size and restores the blank size after clearing", () => {
         const { canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 4, 4);
-        updateDynamicTexture(engine, tex, fakeSource(16, 8));
+        updateDynamicTexture(tex, fakeSource(16, 8));
         expect([tex.width, tex.height]).toEqual([16, 8]);
-        clearDynamicTextureSource(engine, tex);
+        clearDynamicTextureSource(tex);
         fireLost(canvas);
         fireRestored(canvas);
         expect([tex.width, tex.height]).toEqual([4, 4]);
@@ -288,11 +288,11 @@ describe("lite-gl dynamic texture consistency (#81)", () => {
     it("omitted update flags fall back to the creation options", () => {
         const { mock, engine, gl } = setup();
         const tex = createDynamicTexture(engine, 4, 4, { invertY: true, premultiplyAlpha: true });
-        updateDynamicTexture(engine, tex, fakeSource(4, 4), { invertY: false, premultiplyAlpha: false });
-        updateDynamicTexture(engine, tex, fakeSource(4, 4));
+        updateDynamicTexture(tex, fakeSource(4, 4), { invertY: false, premultiplyAlpha: false });
+        updateDynamicTexture(tex, fakeSource(4, 4));
         expect(pixelStore(mock, gl.UNPACK_FLIP_Y_WEBGL)).toBe(1);
         expect(pixelStore(mock, gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)).toBe(1);
-        updateDynamicTexture(engine, tex, fakeSource(4, 4), { invertY: false });
+        updateDynamicTexture(tex, fakeSource(4, 4), { invertY: false });
         expect(pixelStore(mock, gl.UNPACK_FLIP_Y_WEBGL)).toBe(0);
         expect(pixelStore(mock, gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)).toBe(1);
     });
@@ -303,7 +303,7 @@ describe("lite-gl html element texture update options (#81)", () => {
         const { mock, canvas, engine, gl } = setup();
         const tex = createHtmlElementTexture(engine, fakeSource(2, 2) as HTMLCanvasElement, { invertY: true });
         expect(pixelStore(mock, gl.UNPACK_FLIP_Y_WEBGL)).toBe(1);
-        updateHtmlElementTexture(engine, tex, { invertY: false, premultiplyAlpha: true });
+        updateHtmlElementTexture(tex, { invertY: false, premultiplyAlpha: true });
         expect(pixelStore(mock, gl.UNPACK_FLIP_Y_WEBGL)).toBe(0);
         expect(pixelStore(mock, gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL)).toBe(1);
         fireLost(canvas);
@@ -317,8 +317,8 @@ describe("lite-gl html element texture update options (#81)", () => {
     it("omitted update flags fall back to the creation options", () => {
         const { mock, engine, gl } = setup();
         const tex = createHtmlElementTexture(engine, fakeSource(2, 2) as HTMLCanvasElement, { invertY: true });
-        updateHtmlElementTexture(engine, tex, { invertY: false });
-        updateHtmlElementTexture(engine, tex);
+        updateHtmlElementTexture(tex, { invertY: false });
+        updateHtmlElementTexture(tex);
         expect(pixelStore(mock, gl.UNPACK_FLIP_Y_WEBGL)).toBe(1);
     });
 });
@@ -332,14 +332,14 @@ describe("lite-gl isTextureReady (#81)", () => {
         const loaded = new Promise<void>((resolve) => {
             tex = loadTexture2D(engine, "x.png", undefined, () => resolve());
         });
-        expect(isTextureReady(engine, tex!)).toBe(false);
+        expect(isTextureReady(tex!)).toBe(false);
         await loaded;
-        expect(isTextureReady(engine, tex!)).toBe(true);
+        expect(isTextureReady(tex!)).toBe(true);
         fireLost(canvas);
-        expect(isTextureReady(engine, tex!)).toBe(false);
+        expect(isTextureReady(tex!)).toBe(false);
         fireRestored(canvas);
-        expect(isTextureReady(engine, tex!)).toBe(true);
-        disposeTexture(engine, tex!);
-        expect(isTextureReady(engine, tex!)).toBe(false);
+        expect(isTextureReady(tex!)).toBe(true);
+        disposeTexture(tex!);
+        expect(isTextureReady(tex!)).toBe(false);
     });
 });

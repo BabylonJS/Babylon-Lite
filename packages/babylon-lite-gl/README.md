@@ -51,8 +51,8 @@ runRenderLoop(engine, () => {
     resizeGLEngine(engine);
     setViewport(engine);
     // false (and nothing bound) until the shaders finish compiling asynchronously
-    if (!applyEffectWrapper(engine, wrapper)) return;
-    setEffectFloat(engine, wrapper.effect, "uTime", (performance.now() - start) / 1000);
+    if (!applyEffectWrapper(wrapper)) return;
+    setEffectFloat(wrapper.effect, "uTime", (performance.now() - start) / 1000);
     drawEffect(engine);
 });
 ```
@@ -65,8 +65,8 @@ poll completion before inspecting link status. Shader status and info logs are
 queried only after link failure, avoiding premature compilation stalls.
 Without the extension, checking link status can block.
 
-Manual polling stays available: call `isEffectReady(engine, effect)` in your
-render loop and inspect `getEffectCompilationError(engine, effect)` when it
+Manual polling stays available: call `isEffectReady(effect)` in your
+render loop and inspect `getEffectCompilationError(effect)` when it
 returns false. The error accessor also polls once; `null` means no failure has
 been recorded, not necessarily that the effect is ready. Errors include the
 program log and failing shader stages' logs and are logged once. Neither this
@@ -79,7 +79,7 @@ import { waitForEffect } from "@babylonjs/lite-gl";
 
 const controller = new AbortController();
 try {
-    await waitForEffect(engine, wrapper.effect, { signal: controller.signal });
+    await waitForEffect(wrapper.effect, { signal: controller.signal });
     // The effect is finalized; rendering can now start.
 } catch (error) {
     console.error("Effect could not become ready:", error);
@@ -204,7 +204,7 @@ import { createTextureFromSource, disposeTexture } from "@babylonjs/lite-gl";
 const texture = createTextureFromSource(engine, bitmap);
 // One texImage2D upload, linear filtering and clamp-to-edge by default.
 // Later, release the GPU resource:
-disposeTexture(engine, texture);
+disposeTexture(texture);
 ```
 
 The factory accepts `TexImageSource` (including `ImageBitmap`, `ImageData`,

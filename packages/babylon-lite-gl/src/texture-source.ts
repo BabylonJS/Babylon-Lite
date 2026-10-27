@@ -117,6 +117,7 @@ export function createTextureFromSource(engine: GLEngineContext, source: TexImag
         width,
         height,
         isReady: true,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: restore,
@@ -127,7 +128,7 @@ export function createTextureFromSource(engine: GLEngineContext, source: TexImag
         uploadSource(engine, source, width, height);
         initializeParameters(engine);
     } catch (error) {
-        disposeTexture(engine, tex);
+        disposeTexture(tex);
         throw error;
     }
     if (options.retainSource === false) {

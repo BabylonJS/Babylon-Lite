@@ -72,16 +72,16 @@ export function runFullscreenEffect(opts: FullscreenEffectOptions): void {
     let firstFrameDrawn = false;
 
     runRenderLoop(engine, () => {
-        if (!isEffectReady(engine, effect)) {
+        if (!isEffectReady(effect)) {
             return;
         }
         resizeGLEngine(engine);
         setViewport(engine);
-        applyEffectWrapper(engine, wrapper);
+        applyEffectWrapper(wrapper);
         // Frozen capture pins uTime to seekTime; otherwise advance on wall clock.
         const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
-        setEffectFloat(engine, effect, "uTime", uTime);
-        setEffectFloat2(engine, effect, "uResolution", canvas.width, canvas.height);
+        setEffectFloat(effect, "uTime", uTime);
+        setEffectFloat2(effect, "uResolution", canvas.width, canvas.height);
         drawEffect(engine);
         if (!firstFrameDrawn) {
             firstFrameDrawn = true;

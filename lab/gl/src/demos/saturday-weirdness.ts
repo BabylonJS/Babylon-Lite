@@ -31,6 +31,7 @@ import {
     setEffectFloat3,
     setEffectTexture,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
 } from "babylon-lite-gl";
 import { createPingPong } from "../ping-pong";
 
@@ -332,7 +333,7 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, bufferEffect) || !isEffectReady(engine, imageEffect)) {
+    if (!isEffectReady(bufferEffect) || !isEffectReady(imageEffect)) {
         return;
     }
     resizeGLEngine(engine);
@@ -347,18 +348,18 @@ runRenderLoop(engine, () => {
     const time = (performance.now() - startMs) / 1000;
 
     // Pass 1 — Buffer A: render into `write`, sampling the previous frame (`read`).
-    bindRenderTarget(engine, pingpong.write);
-    applyEffectWrapper(engine, bufferWrapper);
-    setEffectFloat(engine, bufferEffect, "iTime", time);
-    setEffectFloat3(engine, bufferEffect, "iResolution", w, h, 1);
-    setEffectTexture(engine, bufferEffect, "iChannel0", pingpong.read.texture);
+    bindRenderTarget(pingpong.write);
+    applyEffectWrapper(bufferWrapper);
+    setEffectFloat(bufferEffect, "iTime", time);
+    setEffectFloat3(bufferEffect, "iResolution", w, h, 1);
+    setEffectTexture(bufferEffect, "iChannel0", pingpong.read.texture);
     drawEffect(engine);
 
     // Pass 2 — Image: FXAA-resolve the Buffer A we just produced to the screen.
-    bindRenderTarget(engine, null);
-    applyEffectWrapper(engine, imageWrapper);
-    setEffectFloat3(engine, imageEffect, "iResolution", w, h, 1);
-    setEffectTexture(engine, imageEffect, "iChannel0", pingpong.write.texture);
+    restoreDefaultFramebuffer(engine);
+    applyEffectWrapper(imageWrapper);
+    setEffectFloat3(imageEffect, "iResolution", w, h, 1);
+    setEffectTexture(imageEffect, "iChannel0", pingpong.write.texture);
     drawEffect(engine);
 
     // Swap so next frame reads the buffer we just wrote (the feedback chain).

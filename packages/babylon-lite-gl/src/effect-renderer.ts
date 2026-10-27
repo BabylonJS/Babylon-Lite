@@ -39,9 +39,9 @@ export interface GLEffectWrapperOptions {
 }
 
 /** A reusable fullscreen effect that compiles and OWNS its `GLEffect` — the
- *  WebGL counterpart of lite's `EffectWrapper`. Like every lite-gl function,
- *  the wrapper functions take the owning engine first:
- *  `applyEffectWrapper(engine, wrapper)` / `disposeEffectWrapper(engine, wrapper)`. */
+ *  WebGL counterpart of lite's `EffectWrapper`. Like lite, the wrapper functions
+ *  take the wrapper alone (the engine is derived from its effect):
+ *  `applyEffectWrapper(wrapper)` / `disposeEffectWrapper(wrapper)`. */
 export interface GLEffectWrapper {
     /** Name alias for the wrapper (and its effect). */
     readonly name: string;
@@ -73,14 +73,13 @@ export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWr
 
 /** Dispose the wrapper and the effect it owns (idempotent).
  *
- *  @param engine - The engine the wrapper was created on.
  *  @param wrapper - The wrapper to dispose. */
-export function disposeEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): void {
+export function disposeEffectWrapper(wrapper: GLEffectWrapper): void {
     if (wrapper._disposed) {
         return;
     }
     wrapper._disposed = true;
-    disposeEffect(engine, wrapper.effect);
+    disposeEffect(wrapper.effect);
 }
 
 /** Pixel-space viewport rectangle passed to `setViewport`. */
@@ -119,7 +118,7 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  `EffectRenderer.applyEffectWrapper` (lite-gl has no `setEffectWrapper`;
  *  this is the only wrapper "activate" call). The shared fullscreen quad is
  *  bound by {@link drawEffect}, so an existing `GLEffect` needs no wrapper:
- *  `if (isEffectReady(engine, e)) { useEffect(engine, e); …setters…; drawEffect(engine); }`.
+ *  `if (isEffectReady(e)) { useEffect(e); …setters…; drawEffect(engine); }`.
  *
  *  The wrapper's effect must be ready: this polls {@link isEffectReady} itself
  *  (finalizing the effect on its first ready poll) and returns `false` without
@@ -131,19 +130,18 @@ export function setViewport(engine: GLEngineContext, viewport?: GLViewport): voi
  *  This MUST be called BEFORE any `setEffect*` call for the same effect in the
  *  current frame (uniform setters write to the currently bound program).
  *  Typical frame:
- *  `if (!applyEffectWrapper(engine, w)) return;` →
- *  `setEffectFloat(engine, w.effect, …)` → `drawEffect(engine)`.
+ *  `if (!applyEffectWrapper(w)) return;` →
+ *  `setEffectFloat(w.effect, …)` → `drawEffect(engine)`.
  *
- *  @param engine - The engine the wrapper was created on.
  *  @param wrapper - The wrapper whose effect to make current.
  *  @returns `true` when the effect is ready and now current; `false` when
  *   nothing was bound. */
-export function applyEffectWrapper(engine: GLEngineContext, wrapper: GLEffectWrapper): boolean {
+export function applyEffectWrapper(wrapper: GLEffectWrapper): boolean {
     // Poll first: ready callbacks fired by the poll may dispose the wrapper.
-    if (!isEffectReady(engine, wrapper.effect) || wrapper._disposed) {
+    if (!isEffectReady(wrapper.effect) || wrapper._disposed) {
         return false;
     }
-    useEffect(engine, wrapper.effect);
+    useEffect(wrapper.effect);
     return true;
 }
 

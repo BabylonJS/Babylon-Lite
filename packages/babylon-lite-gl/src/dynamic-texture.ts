@@ -90,6 +90,7 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
         width: w,
         height: h,
         isReady: true,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: upload,
@@ -109,13 +110,13 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
  *  the storage). No-op when the context is lost/disposed or the texture is
  *  disposed.
  *
- *  @param engine - The engine that owns the texture.
  *  @param tex - A texture created by {@link createDynamicTexture}.
  *  @param source - The 2D pixel source to upload.
  *  @param options - Per-update `invertY` / `premultiplyAlpha`; each defaults to
  *   the texture's creation value (like Babylon's `texture.invertY` fallback),
  *   itself `false` by default. */
-export function updateDynamicTexture(engine: GLEngineContext, tex: GLTexture, source: TexImageSource, options?: GLTextureUpdateOptions): void {
+export function updateDynamicTexture(tex: GLTexture, source: TexImageSource, options?: GLTextureUpdateOptions): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
@@ -132,10 +133,10 @@ export function updateDynamicTexture(engine: GLEngineContext, tex: GLTexture, so
  *  after the final {@link updateDynamicTexture} once the source (e.g. a large
  *  atlas canvas) is no longer needed. No-op on a non-dynamic texture.
  *
- *  @param engine - The engine that owns the texture (taken for API consistency
  *   with every other texture function; no GL call is made).
  *  @param tex - A texture created by {@link createDynamicTexture}. */
-export function clearDynamicTextureSource(engine: GLEngineContext, tex: GLTexture): void {
+export function clearDynamicTextureSource(tex: GLTexture): void {
+    const engine = tex._engine;
     void engine;
     tex._dynSource = null;
 }

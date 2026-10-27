@@ -172,14 +172,14 @@ runRenderLoop(engine, (dt) => {
     // Gate on BOTH the background effect and the sprite renderer's effect (plus
     // the sheet) so the frozen capture always includes the sprites — matching
     // the BJS reference, whose sprite shaders also load before its first frame.
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, renderer._effect) || !sheet.isReady) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(renderer._effect) || !sheet.isReady) {
         return;
     }
     resizeGLEngine(engine);
     setViewport(engine);
 
     // Opaque background (blend is left DISABLED by renderSprites' auto-reset).
-    applyEffectWrapper(engine, background);
+    applyEffectWrapper(background);
     drawEffect(engine);
 
     // Frozen capture pins the animation clock to seekTime; else the wall clock.
@@ -207,7 +207,7 @@ runRenderLoop(engine, (dt) => {
         const hue = (i / SPRITE_COUNT + t * 0.05) % 1;
         hsvToColor(hue, 0.7, 1.0, col);
     }
-    renderSprites(engine, renderer, sprites, dt, IDENTITY, IDENTITY);
+    renderSprites(renderer, sprites, dt, IDENTITY, IDENTITY);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

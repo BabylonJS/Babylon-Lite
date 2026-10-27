@@ -331,7 +331,6 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  * {@link GLBlendMode.DISABLE} afterwards (matching Babylon's
  * `autoResetAlpha = true`), so a subsequent `drawEffect` is unaffected.
  *
- * @param engine - The engine the renderer was created on.
  * @param renderer - The renderer to draw with.
  * @param sprites - The sprites to draw (only `isVisible !== false` are drawn;
  *  excess beyond `capacity` is ignored, matching Babylon).
@@ -341,13 +340,13 @@ export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteR
  * @param projectionMatrix - Column-major 4x4 projection matrix.
  */
 export function renderSprites(
-    engine: GLEngineContext,
     renderer: GLSpriteRenderer,
     sprites: readonly GLSprite[],
     deltaTime: number,
     viewMatrix: Float32Array | number[],
     projectionMatrix: Float32Array | number[]
 ): void {
+    const engine = renderer._effect._engine;
     if (engine._isLost || engine._disposed || renderer._disposed) {
         return;
     }
@@ -361,7 +360,7 @@ export function renderSprites(
         return;
     }
     const effect = renderer._effect;
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     if (renderer._vao === null || renderer._vbo === null) {
@@ -470,7 +469,7 @@ export function renderSprites(
     const floatCount = visible * VERTS_PER_SPRITE * FLOATS_PER_VERTEX;
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, vd, 0, floatCount);
 
-    useEffect(engine, effect);
+    useEffect(effect);
     const viewLoc = effect.uniformLocations["view"];
     if (viewLoc !== null && viewLoc !== undefined) {
         gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
@@ -479,7 +478,7 @@ export function renderSprites(
     if (projLoc !== null && projLoc !== undefined) {
         gl.uniformMatrix4fv(projLoc, false, projectionMatrix);
     }
-    setEffectTexture(engine, effect, "diffuseSampler", tex);
+    setEffectTexture(effect, "diffuseSampler", tex);
 
     setBlendMode(engine, renderer.blendMode);
     applyGLStates(engine);
@@ -498,11 +497,11 @@ export function renderSprites(
  *  `cellHeight` on the renderer directly if the new sheet differs. No-op when
  *  the renderer is disposed.
  *
- *  @param engine - The engine the renderer was created on (taken for API
  *   consistency; no GL call is made — the texture is bound at draw time).
  *  @param renderer - The renderer to update.
  *  @param texture - The new sprite-sheet texture. */
-export function setSpriteRendererTexture(engine: GLEngineContext, renderer: GLSpriteRenderer, texture: GLTexture): void {
+export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void {
+    const engine = renderer._effect._engine;
     void engine;
     if (renderer._disposed) {
         return;
@@ -514,15 +513,15 @@ export function setSpriteRendererTexture(engine: GLEngineContext, renderer: GLSp
  *  its context-restore handler. Idempotent. Does NOT dispose the texture — the
  *  consumer that supplied it owns its lifetime.
  *
- *  @param engine - The engine the renderer was created on.
  *  @param renderer - The renderer to dispose. */
-export function disposeSpriteRenderer(engine: GLEngineContext, renderer: GLSpriteRenderer): void {
+export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void {
+    const engine = renderer._effect._engine;
     if (renderer._disposed) {
         return;
     }
     renderer._disposed = true;
     offContextRestored(engine, renderer._restore);
-    disposeEffect(engine, renderer._effect);
+    disposeEffect(renderer._effect);
     if (!engine._isLost && !engine._disposed) {
         const gl = engine.gl;
         const s = engine._state;

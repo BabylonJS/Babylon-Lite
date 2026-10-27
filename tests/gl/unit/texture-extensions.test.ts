@@ -54,7 +54,7 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const tex = createRawTexture(engine, new Uint8Array([0, 0, 0, 0]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
         const next = new Uint8Array(2 * 2 * 4);
-        updateRawTexture(engine, tex, next, { width: 2, height: 2 });
+        updateRawTexture(tex, next, { width: 2, height: 2 });
         const ti = callsNamed(mock, "texImage2D")[0];
         expect(ti?.args[3]).toBe(2); // width
         expect(ti?.args[4]).toBe(2); // height
@@ -68,12 +68,12 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const tex = createRawTexture(engine, new Uint8Array(3), 1, 1, engine.gl.RGB, engine.gl.UNSIGNED_BYTE);
         mock.clear();
         // Align-1 upload: a single cached pixelStorei(ALIGNMENT, 1) — no per-call reset.
-        updateRawTexture(engine, tex, new Uint8Array(3), { unpackAlignment: 1 });
+        updateRawTexture(tex, new Uint8Array(3), { unpackAlignment: 1 });
         let align = callsNamed(mock, "pixelStorei").filter((c) => c.args[0] === engine.gl.UNPACK_ALIGNMENT);
         expect(align.map((c) => c.args[1])).toEqual([1]);
         mock.clear();
         // A subsequent default-alignment upload restores it to 4 via the cache (1 → 4).
-        updateRawTexture(engine, tex, new Uint8Array(3));
+        updateRawTexture(tex, new Uint8Array(3));
         align = callsNamed(mock, "pixelStorei").filter((c) => c.args[0] === engine.gl.UNPACK_ALIGNMENT);
         expect(align.map((c) => c.args[1])).toEqual([4]);
     });
@@ -82,7 +82,7 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const { mock, canvas, engine } = makeEngine();
         const tex = createRawTexture(engine, new Uint8Array([1, 1, 1, 1]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         const latest = new Uint8Array([9, 9, 9, 9]);
-        updateRawTexture(engine, tex, latest);
+        updateRawTexture(tex, latest);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -102,7 +102,7 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const { mock, engine } = makeEngine();
         const tex = createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
-        updateTextureSamplingMode(engine, tex, engine.gl.NEAREST, engine.gl.NEAREST);
+        updateTextureSamplingMode(tex, engine.gl.NEAREST, engine.gl.NEAREST);
         const tp = callsNamed(mock, "texParameteri");
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_MIN_FILTER && c.args[2] === engine.gl.NEAREST)).toBe(true);
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_MAG_FILTER && c.args[2] === engine.gl.NEAREST)).toBe(true);
@@ -112,7 +112,7 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const { mock, engine } = makeEngine();
         const tex = createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
-        updateTextureWrapMode(engine, tex, engine.gl.MIRRORED_REPEAT, engine.gl.REPEAT);
+        updateTextureWrapMode(tex, engine.gl.MIRRORED_REPEAT, engine.gl.REPEAT);
         const tp = callsNamed(mock, "texParameteri");
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_S && c.args[2] === engine.gl.MIRRORED_REPEAT)).toBe(true);
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_T && c.args[2] === engine.gl.REPEAT)).toBe(true);
@@ -212,11 +212,11 @@ describe("lite-gl texture: float / half-float (HDR opt-in)", () => {
         const { mock, canvas, engine } = makeEngine();
         const tex = createRawTexture(engine, null, 4, 4, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(1);
         fireLost(canvas);
         mock.clear();
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 });

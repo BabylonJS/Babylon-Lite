@@ -52,9 +52,9 @@ describe("lite-gl updateDynamicTexture()", () => {
         const tex = createDynamicTexture(engine, 64, 64);
         // Prime the cache to the opposite (flip + premultiply ON) so the default
         // update's explicit reset-to-0 is observable — the state cache elides no-ops.
-        updateDynamicTexture(engine, tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
+        updateDynamicTexture(tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        updateDynamicTexture(tex, fakeSource(64, 64));
         const flips = callsNamed(mock, "pixelStorei");
         // both UNPACK flags reset to 0
         expect(flips.some((c) => c.args[0] === engine.gl.UNPACK_FLIP_Y_WEBGL && c.args[1] === 0)).toBe(true);
@@ -69,7 +69,7 @@ describe("lite-gl updateDynamicTexture()", () => {
         const { mock, engine } = setup();
         const tex = createDynamicTexture(engine, 64, 64);
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
+        updateDynamicTexture(tex, fakeSource(64, 64), { invertY: true, premultiplyAlpha: true });
         const flips = callsNamed(mock, "pixelStorei");
         expect(flips.some((c) => c.args[0] === engine.gl.UNPACK_FLIP_Y_WEBGL && c.args[1] === 1)).toBe(true);
         expect(flips.some((c) => c.args[0] === (engine.gl as { UNPACK_PREMULTIPLY_ALPHA_WEBGL: number }).UNPACK_PREMULTIPLY_ALPHA_WEBGL && c.args[1] === 1)).toBe(true);
@@ -78,7 +78,7 @@ describe("lite-gl updateDynamicTexture()", () => {
     it("replays the last source on webglcontextrestored", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 64, 64);
-        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        updateDynamicTexture(tex, fakeSource(64, 64));
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -107,7 +107,7 @@ describe("lite-gl updateDynamicTexture()", () => {
         const tex = createDynamicTexture(engine, 64, 64);
         fireLost(canvas);
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        updateDynamicTexture(tex, fakeSource(64, 64));
         expect(mock.count("texImage2D")).toBe(0);
     });
 });
@@ -116,8 +116,8 @@ describe("lite-gl clearDynamicTextureSource()", () => {
     it("drops the retained source so a later restore re-blanks instead of replaying", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 32, 16);
-        updateDynamicTexture(engine, tex, fakeSource(32, 16));
-        clearDynamicTextureSource(engine, tex);
+        updateDynamicTexture(tex, fakeSource(32, 16));
+        clearDynamicTextureSource(tex);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);
@@ -134,8 +134,8 @@ describe("lite-gl dynamic texture: texParameteri caching", () => {
         const { mock, engine } = setup();
         const tex = createDynamicTexture(engine, 64, 64); // 4 texParameteri at create
         mock.clear();
-        updateDynamicTexture(engine, tex, fakeSource(64, 64));
-        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        updateDynamicTexture(tex, fakeSource(64, 64));
+        updateDynamicTexture(tex, fakeSource(64, 64));
         // Same handle across updates → GL retains the filter/wrap → zero redundant
         // texParameteri (the scene13 redundancy fix)...
         expect(mock.count("texParameteri")).toBe(0);
@@ -146,7 +146,7 @@ describe("lite-gl dynamic texture: texParameteri caching", () => {
     it("re-applies texParameteri on webglcontextrestored (the fresh handle starts at GL defaults)", () => {
         const { mock, canvas, engine } = setup();
         const tex = createDynamicTexture(engine, 64, 64);
-        updateDynamicTexture(engine, tex, fakeSource(64, 64)); // same handle → no re-apply
+        updateDynamicTexture(tex, fakeSource(64, 64)); // same handle → no re-apply
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);

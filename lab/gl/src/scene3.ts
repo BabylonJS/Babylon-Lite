@@ -149,7 +149,7 @@ const wrapper = createEffectWrapper(engine, {
 });
 const effect = wrapper.effect;
 
-executeWhenCompiled(engine, effect, () => {
+executeWhenCompiled(effect, () => {
     console.log("scene3: textured-quad effect compiled — two samplers ready");
 });
 
@@ -159,18 +159,18 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(engine, wrapper);
+    applyEffectWrapper(wrapper);
     // Frozen capture pins uTime to seekTime; otherwise advance on the wall clock.
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
-    setEffectFloat(engine, effect, "uTime", uTime);
-    setEffectFloat2(engine, effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, effect, "uTexA", texA);
-    setEffectTexture(engine, effect, "uTexB", texB);
+    setEffectFloat(effect, "uTime", uTime);
+    setEffectFloat2(effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(effect, "uTexA", texA);
+    setEffectTexture(effect, "uTexB", texB);
     drawEffect(engine);
     // Hold readiness until the async PNG (texB) has decoded so the captured
     // frame includes it — the deterministic freeze must match the BJS reference,

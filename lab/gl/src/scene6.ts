@@ -147,19 +147,19 @@ const effect = wrapper.effect;
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     // Frozen capture pins the surface-animation clock to seekTime; otherwise
     // advance on the wall clock.
     const t = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
     drawSurface(t);
-    updateHtmlElementTexture(engine, tex);
+    updateHtmlElementTexture(tex);
 
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(engine, wrapper);
-    setEffectTexture(engine, effect, "uTex", tex);
+    applyEffectWrapper(wrapper);
+    setEffectTexture(effect, "uTex", tex);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

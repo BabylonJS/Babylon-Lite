@@ -77,7 +77,7 @@ export interface GLTextureUpdateOptions {
  * same `GLTexture` reference; only the internal `WebGLTexture` is swapped.
  *
  * `loadTexture2D` also uses the same handle for the 1×1 placeholder upload AND
- * the final image upload — so a `bindTexture(engine, unit, tex)` made before the
+ * the final image upload — so a `bindTexture(tex, unit)` made before the
  * image has decoded remains valid once the image arrives.
  */
 export interface GLTexture {
@@ -93,6 +93,9 @@ export interface GLTexture {
     /** True when the texture is safe to sample with final content (placeholders
      *  read as not-ready until their image/upload completes). */
     isReady: boolean;
+    /** The engine that created (and owns) this texture. Texture operations
+     *  derive their engine from it, so they take the texture alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal */
@@ -213,7 +216,7 @@ export interface GLSamplingFilters {
  * @example
  * ```ts
  * const tex = createRawTexture(engine, data, w, h, gl.RGBA, gl.UNSIGNED_BYTE, { ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) });
- * generateTextureMipMaps(engine, tex); // required by the mipmapped min filter
+ * generateTextureMipMaps(tex); // required by the mipmapped min filter
  * ```
  *
  * @param samplingMode - The {@link GLSamplingMode} preset.
@@ -305,6 +308,7 @@ export function createRawTexture(
         width,
         height,
         isReady: true,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: upload,
@@ -377,8 +381,11 @@ export function createFloatTexture(engine: GLEngineContext, data: ArrayBufferVie
  * the matching linear-filtering cap). Render targets use
  * `generateRenderTargetMipMaps` instead. No-op on a lost/disposed context or a
  * disposed texture.
+ *
+ * @param tex - The texture whose mip chain to generate.
  */
-export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void {
+export function generateTextureMipMaps(tex: GLTexture): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed || tex.handle === null) {
         return;
     }
@@ -404,7 +411,6 @@ export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture):
  * loss, and rebuilds the mip chain after {@link generateTextureMipMaps}. No-op
  * on a lost/disposed/non-raw texture.
  *
- * @param engine - The engine.
  * @param tex - The raw texture to update.
  * @param data - New pixel data (must match the original `format`/`type`).
  * @param options - Optional new `width`/`height` (default: unchanged),
@@ -413,11 +419,11 @@ export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture):
  *  are reused by context-restore replay.
  */
 export function updateRawTexture(
-    engine: GLEngineContext,
     tex: GLTexture,
     data: ArrayBufferView | null,
     options?: GLTextureUpdateOptions & { width?: number; height?: number; unpackAlignment?: number }
 ): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed || tex._updateRaw === undefined) {
         return;
     }
@@ -447,12 +453,11 @@ export function updateRawTexture(
  * change is not replayed on `webglcontextrestored` (creation options are).
  * No-op on a lost/disposed context or a disposed texture.
  *
- * @param engine - The engine.
  * @param tex - The texture to update.
  * @param samplingMode - The {@link GLSamplingMode} preset.
  * @param generateMipMaps - Generate the mip chain now (`TRILINEAR` only). Default false.
  */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+export function updateTextureSamplingMode(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 /**
  * Update a texture's raw GL min/mag sampling filters (e.g. `gl.NEAREST`,
  * `gl.LINEAR_MIPMAP_LINEAR`). A mipmapped min filter needs
@@ -460,13 +465,13 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
  * `webglcontextrestored`. No-op on a lost/disposed context or a disposed
  * texture.
  *
- * @param engine - The engine.
  * @param tex - The texture to update.
  * @param minFilter - `TEXTURE_MIN_FILTER` value.
  * @param magFilter - `TEXTURE_MAG_FILTER` value.
  */
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
-export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTexture, modeOrMinFilter: number, magFilterOrGenerateMipMaps?: number | boolean): void {
+export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTextureSamplingMode(tex: GLTexture, modeOrMinFilter: number, magFilterOrGenerateMipMaps?: number | boolean): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
@@ -490,29 +495,30 @@ export function updateTextureSamplingMode(engine: GLEngineContext, tex: GLTextur
     // An existing chain is already rebuilt on every upload; call
     // `generateTextureMipMaps` directly to force a regeneration.
     if (generateMipMaps && !tex._hasMipMaps) {
-        generateTextureMipMaps(engine, tex);
+        generateTextureMipMaps(tex);
     }
 }
 
 /**
  * Whether a texture holds its final content and can be sampled — the function
- * form of {@link GLTexture.isReady}, mirroring `isEffectReady(engine, effect)`
+ * form of {@link GLTexture.isReady}, mirroring `isEffectReady(effect)`
  * (≙ Babylon's `texture.isReady()`). False while `loadTexture2D` is still
  * decoding (the 1×1 placeholder is bound meanwhile), after disposal, and while
  * the context is lost/disposed.
  *
- * @param engine - The engine that owns the texture.
  * @param tex - The texture to query.
  * @returns `true` when the texture is ready to sample.
  */
-export function isTextureReady(engine: GLEngineContext, tex: GLTexture): boolean {
+export function isTextureReady(tex: GLTexture): boolean {
+    const engine = tex._engine;
     return tex.isReady && !tex._disposed && !engine._isLost && !engine._disposed;
 }
 
 /** Update a texture's S/T wrap modes (`gl.CLAMP_TO_EDGE` / `gl.REPEAT` /
  *  `gl.MIRRORED_REPEAT`) — the lite-gl equivalent of Babylon's
  *  `updateTextureWrappingMode`. No-op on a lost/disposed context. */
-export function updateTextureWrapMode(engine: GLEngineContext, tex: GLTexture, wrapS: GLenum, wrapT: GLenum): void {
+export function updateTextureWrapMode(tex: GLTexture, wrapS: GLenum, wrapT: GLenum): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
@@ -548,6 +554,7 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
         width,
         height,
         isReady: true,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         // External handle — restore replay is the external owner's job.
@@ -613,6 +620,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         width: 1,
         height: 1,
         isReady: false,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: upload,
@@ -665,16 +673,24 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
     return tex;
 }
 
-/** Cached bind. Skips `gl.activeTexture` and/or `gl.bindTexture` when nothing
- *  changes. No-op when `tex._disposed` or `engine._isLost`. */
-export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTexture | null): void {
+/** Cached bind of `tex` on sampler `unit`. Skips `gl.activeTexture` and/or
+ *  `gl.bindTexture` when nothing changes. No-op when `tex._disposed` or the
+ *  context is lost/disposed. Use {@link unbindTexture} to clear a unit. */
+export function bindTexture(tex: GLTexture, unit: number): void {
+    const engine = tex._engine;
+    if (engine._isLost || engine._disposed || tex._disposed) {
+        return;
+    }
+    bindTextureRaw(engine, unit, tex.handle);
+}
+
+/** Unbind `TEXTURE_2D` on sampler `unit` (cached, like {@link bindTexture}).
+ *  No-op on a lost/disposed context. */
+export function unbindTexture(engine: GLEngineContext, unit: number): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
-    if (tex !== null && tex._disposed) {
-        return;
-    }
-    bindTextureRaw(engine, unit, tex === null ? null : tex.handle);
+    bindTextureRaw(engine, unit, null);
 }
 
 /** @internal — for callers that already hold a raw `WebGLTexture`. Not part of
@@ -721,10 +737,11 @@ export function bindTextureForUpload(engine: GLEngineContext, handle: WebGLTextu
  *  Shared references keep the texture registered until its final release;
  *  repeated disposal is a no-op. Unregistered wrappers keep their existing
  *  handle-deletion semantics without affecting the live registry. */
-export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void {
+export function disposeTexture(tex: GLTexture): void {
     if (tex._disposed) {
         return;
     }
+    const engine = tex._engine;
     if (tex._refCount > 1) {
         tex._refCount--;
         return;

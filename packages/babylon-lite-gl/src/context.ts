@@ -166,7 +166,7 @@ export interface GLEngineContext {
     /**
      * The render target currently bound for drawing (`bindRenderTarget`), or
      * `null` for the default canvas framebuffer. Tracked so that leaving a
-     * mipmapped target (`bindRenderTarget(engine, null)` or switching to
+     * mipmapped target (`restoreDefaultFramebuffer(engine)` or switching to
      * another target) can regenerate its mip chain — mirroring Babylon's
      * auto-mipmap on `unBindFramebuffer`. Reset to `null` on context-lost.
      * @internal

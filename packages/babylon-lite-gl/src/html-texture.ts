@@ -60,6 +60,7 @@ export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLC
         width: 1,
         height: 1,
         isReady: true,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         _upload: upload,
@@ -81,11 +82,11 @@ export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLC
  *  video elements with `!invertY`, so port `videoTexture.update(invertY)` as
  *  `{ invertY: !invertY }` (canvas / image calls map directly).
  *
- *  @param engine - The engine that owns the texture.
  *  @param tex - A texture created by {@link createHtmlElementTexture}.
  *  @param options - Per-update `invertY` / `premultiplyAlpha`; each defaults to
  *   the texture's creation value. Retained for `webglcontextrestored` replay. */
-export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture, options?: GLTextureUpdateOptions): void {
+export function updateHtmlElementTexture(tex: GLTexture, options?: GLTextureUpdateOptions): void {
+    const engine = tex._engine;
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }

@@ -1,4 +1,19 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, createRawTexture, drawEffect, GLBlendMode, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, createSpriteRenderer, renderSprites, type GLSprite } from "babylon-lite-gl";
+import {
+    applyEffectWrapper,
+    createEffectWrapper,
+    createGLEngine,
+    createRawTexture,
+    drawEffect,
+    GLBlendMode,
+    isEffectReady,
+    resizeGLEngine,
+    runRenderLoop,
+    setViewport,
+    stopRenderLoop,
+    createSpriteRenderer,
+    renderSprites,
+    type GLSprite,
+} from "babylon-lite-gl";
 
 /**
  * Scene 15 — Multiple Sprite Renderers (shared program).
@@ -195,14 +210,14 @@ let firstFrameDrawn = false;
 runRenderLoop(engine, (dt) => {
     // Gate on both layers' effects + sheets so the frozen capture always includes
     // every sprite (matching the BJS reference's async sprite-shader load).
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, discRenderer._effect) || !isEffectReady(engine, ringRenderer._effect) || !discSheet.isReady || !ringSheet.isReady) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(discRenderer._effect) || !isEffectReady(ringRenderer._effect) || !discSheet.isReady || !ringSheet.isReady) {
         return;
     }
     resizeGLEngine(engine);
     setViewport(engine);
 
     // Opaque background (blend left DISABLED by the previous frame's auto-reset).
-    applyEffectWrapper(engine, background);
+    applyEffectWrapper(background);
     drawEffect(engine);
 
     const t = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
@@ -214,8 +229,8 @@ runRenderLoop(engine, (dt) => {
     // Draw both layers in order (bg -> discs -> rings). Two sprite renderers, but
     // one shared program: useProgram is issued once for the discs, then elided
     // for the rings by the current-program cache.
-    renderSprites(engine, discRenderer, discSprites, dt, IDENTITY, IDENTITY);
-    renderSprites(engine, ringRenderer, ringSprites, dt, IDENTITY, IDENTITY);
+    renderSprites(discRenderer, discSprites, dt, IDENTITY, IDENTITY);
+    renderSprites(ringRenderer, ringSprites, dt, IDENTITY, IDENTITY);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

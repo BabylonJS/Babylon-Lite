@@ -147,6 +147,9 @@ export interface GLRenderTarget {
     _rebuildDepthStencil?: (engine: GLEngineContext) => void;
     /** @internal Resolved attachment config, for context-restore rebuild. */
     _config: ResolvedRTConfig;
+    /** The engine that created (and owns) this render target. Operations on it derive
+     *  their engine from here, so they take the render target alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal Delete every GPU object the target owns (FBO, renderbuffer, and
@@ -207,45 +210,54 @@ export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloa
 
 /**
  * Bind the render target's framebuffer as the draw target and set the viewport
- * to cover it. `rt = null` binds the default (canvas) framebuffer and resets the
- * viewport to the full canvas — the counterpart of Babylon's
- * `restoreDefaultFramebuffer`. Subsequent `drawEffect` / `drawIndexed` /
- * `clearEngine` calls write into the bound target.
+ * to cover it. Use {@link restoreDefaultFramebuffer} to return to the canvas.
+ * Subsequent `drawEffect` / `drawIndexed` / `clearEngine` calls write into the
+ * bound target.
  *
  * Cached. No-op on a lost/disposed context or a disposed `rt`. Mipmaps are NOT
  * regenerated here — refresh a target's mip chain explicitly via
  * {@link generateRenderTargetMipMaps} after rendering into it.
  *
- * @param engine - The engine.
- * @param rt - The render target to draw into, or `null` for the canvas.
+ * @param rt - The render target to draw into.
  */
-export function bindRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null): void {
+export function bindRenderTarget(rt: GLRenderTarget): void {
+    const engine = rt._engine;
+    if (engine._isLost || engine._disposed || rt._disposed) {
+        return;
+    }
+    bindFramebufferAndViewport(engine, rt, rt._framebuffer, rt.width, rt.height);
+}
+
+/**
+ * Bind the default (canvas) framebuffer and reset the viewport to the full
+ * canvas — the counterpart of Babylon's `restoreDefaultFramebuffer`. Cached;
+ * no-op on a lost/disposed context.
+ *
+ * @param engine - The engine.
+ */
+export function restoreDefaultFramebuffer(engine: GLEngineContext): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
-    if (rt !== null && rt._disposed) {
-        return;
-    }
-    const gl = engine.gl;
+    bindFramebufferAndViewport(engine, null, null, engine.canvas.width, engine.canvas.height);
+}
+
+function bindFramebufferAndViewport(engine: GLEngineContext, rt: GLRenderTarget | null, fb: WebGLFramebuffer | null, width: number, height: number): void {
     const s = engine._state;
-    const fb = rt === null ? null : rt._framebuffer;
     if (s.boundFramebuffer !== fb) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        engine.gl.bindFramebuffer(engine.gl.FRAMEBUFFER, fb);
         s.boundFramebuffer = fb;
     }
     engine._currentRenderTarget = rt;
-    if (rt === null) {
-        setViewportCached(engine, 0, 0, engine.canvas.width, engine.canvas.height);
-    } else {
-        setViewportCached(engine, 0, 0, rt.width, rt.height);
-    }
+    setViewportCached(engine, 0, 0, width, height);
 }
 
 /** Regenerate a render target's color-attachment mip chain from its (freshly
  *  rendered) level-0 — mipmaps for render targets are a pure manual opt-in
  *  (call this after rendering into the target). No-op for a disposed target, a
  *  handle-less color attachment, or a lost/disposed context. */
-export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRenderTarget): void {
+export function generateRenderTargetMipMaps(rt: GLRenderTarget): void {
+    const engine = rt._engine;
     if (engine._isLost || engine._disposed || rt._disposed || rt.texture.handle === null) {
         return;
     }
@@ -264,12 +276,12 @@ export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRende
  * lost the new size is recorded but the GL reallocation is deferred to the
  * restore hook.
  *
- * @param engine - The engine.
  * @param rt - The render target to resize.
  * @param width - New width in texels (≥ 1).
  * @param height - New height in texels (≥ 1).
  */
-export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, width: number, height: number): void {
+export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void {
+    const engine = rt._engine;
     if (rt._disposed) {
         return;
     }
@@ -299,7 +311,7 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
     rt._deleteGpu(engine.gl);
     allocateRenderTargetGpu(engine, rt);
     if (wasBound) {
-        bindRenderTarget(engine, rt);
+        bindRenderTarget(rt);
     }
 }
 
@@ -321,7 +333,6 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
  * `gl.IMPLEMENTATION_COLOR_READ_FORMAT` (`RED` for `R8`, `RG` for `RG8` in all
  * major browsers).
  *
- * @param engine - The engine.
  * @param rt - The render target to read from.
  * @param x - Lower-left X of the read rectangle, in texels.
  * @param y - Lower-left Y of the read rectangle, in texels.
@@ -334,16 +345,8 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
  * @returns The pixel buffer (the provided `into`, or a freshly allocated one).
  *  Empty buffer on a lost/disposed context.
  */
-export function readRenderTargetPixels(
-    engine: GLEngineContext,
-    rt: GLRenderTarget,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    into?: ArrayBufferView,
-    format: GLenum = RGBA
-): ArrayBufferView {
+export function readRenderTargetPixels(rt: GLRenderTarget, x: number, y: number, width: number, height: number, into?: ArrayBufferView, format: GLenum = RGBA): ArrayBufferView {
+    const engine = rt._engine;
     const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
     if (engine._isLost || engine._disposed || rt._disposed) {
         return into ?? new Uint8Array(0);
@@ -377,13 +380,13 @@ export function readRenderTargetPixels(
  * A BYO {@link GLRenderTargetOptions.colorTexture} is NOT disposed here — it is
  * engine-managed and the caller owns its lifetime.
  *
- * @param engine - The engine.
  * @param rt - The render target to dispose, or `null`/`undefined` for a no-op.
  */
-export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null | undefined): void {
+export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void {
     if (rt === null || rt === undefined || rt._disposed) {
         return;
     }
+    const engine = rt._engine;
     rt._disposed = true;
     // Only the owned color texture is marked disposed here; a BYO texture stays
     // live for its caller-owner.
@@ -445,6 +448,7 @@ function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, intern
         width,
         height,
         isReady: false,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         // Owned-by-RT: its storage is (re)allocated by allocateRenderTargetGpu,
@@ -462,6 +466,7 @@ function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, intern
         _depthStencil: null,
         _rebuildDepthStencil: undefined,
         _config: config,
+        _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
         _restore: () => {},
