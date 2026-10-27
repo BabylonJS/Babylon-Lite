@@ -84,7 +84,6 @@ import {
     GaussianPointSplattingDepthBlitMaterial,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
-import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import {
     GLTF1,
     GLTF2,

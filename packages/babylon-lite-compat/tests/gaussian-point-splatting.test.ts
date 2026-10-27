@@ -60,11 +60,7 @@ describe("GaussianSplattingMesh point mode", () => {
         });
 
         mesh.pointSplattingDepthRenderMode = true;
-        expect(pointMocks.enable).toHaveBeenLastCalledWith(
-            liteScene,
-            lite,
-            expect.objectContaining({ colorRenderMode: true, depthRenderMode: true })
-        );
+        expect(pointMocks.enable).toHaveBeenLastCalledWith(liteScene, lite, expect.objectContaining({ colorRenderMode: true, depthRenderMode: true }));
 
         mesh.pointSplattingScale = 2;
         mesh.pointSplattingRenderScale = 3;

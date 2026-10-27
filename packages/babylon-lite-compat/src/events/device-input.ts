@@ -85,10 +85,7 @@ export interface IMouseEvent extends IUIEvent {
 }
 
 export interface IPointerEvent extends IMouseEvent {
-    inputIndex: Exclude<
-        PointerInput,
-        PointerInput.Horizontal | PointerInput.Vertical | PointerInput.MouseWheelX | PointerInput.MouseWheelY | PointerInput.MouseWheelZ
-    >;
+    inputIndex: Exclude<PointerInput, PointerInput.Horizontal | PointerInput.Vertical | PointerInput.MouseWheelX | PointerInput.MouseWheelY | PointerInput.MouseWheelZ>;
     pointerId: number;
     pointerType: string;
 }

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, enableMirroredMeshesMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, enableMirroredMeshesMock, enableRectAreaLightsMock, onEngineDeviceLostMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
     createEngineMock: vi.fn(),
     enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+    enableRectAreaLightsMock: vi.fn<() => Promise<void>>(),
     onEngineDeviceLostMock: vi.fn(),
     registerSceneMock: vi.fn<() => Promise<void>>(),
     startEngineMock: vi.fn<() => Promise<void>>(),
@@ -14,6 +15,7 @@ vi.mock("babylon-lite", async (importActual) => {
         ...actual,
         createEngine: createEngineMock,
         enableMirroredMeshes: enableMirroredMeshesMock,
+        enableRectAreaLights: enableRectAreaLightsMock,
         onEngineDeviceLost: onEngineDeviceLostMock,
         registerScene: registerSceneMock,
         startEngine: startEngineMock,
@@ -56,6 +58,8 @@ describe("compat engine startup ordering", () => {
         createEngineMock.mockResolvedValue({});
         enableMirroredMeshesMock.mockReset();
         enableMirroredMeshesMock.mockResolvedValue();
+        enableRectAreaLightsMock.mockReset();
+        enableRectAreaLightsMock.mockResolvedValue();
         onEngineDeviceLostMock.mockReset();
         onEngineDeviceLostMock.mockReturnValue(() => undefined);
         registerSceneMock.mockReset();
@@ -160,7 +164,7 @@ describe("compat engine startup ordering", () => {
             _enableMaterialPlugins: () => Promise.resolve(),
             _loadPendingEnvironment: () => Promise.resolve(),
             _hasShadows: () => false,
-            _lite: {},
+            _lite: { lights: [] },
             _reconcilePendingMaterialPlugins: () => {
                 order.push("plugins");
                 return Promise.resolve();
@@ -190,7 +194,7 @@ describe("compat engine startup ordering", () => {
             _enableMaterialPlugins: () => Promise.resolve(),
             _loadPendingEnvironment: () => Promise.resolve(),
             _hasShadows: () => false,
-            _lite: {},
+            _lite: { lights: [] },
         };
         let sceneADrains = 0;
         const sceneA: StartupScene & typeof startupSceneDefaults = {
