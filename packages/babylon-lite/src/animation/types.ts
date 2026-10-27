@@ -3,6 +3,7 @@
 
 import type { Mat4 } from "../math/types.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
+import type { Skeleton } from "../skeleton/bone-control.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
 export const INTERP_LINEAR = 0;
@@ -171,6 +172,8 @@ export interface SkeletonData {
      *  blended clip honours overrides without any always-loaded plumbing. Undefined on the
      *  default path. Typed `unknown` value to keep the internal `BoneOverride` shape private. */
     _overrides?: ReadonlyMap<number, unknown>;
+    /** @internal Public handle stamped only by the opt-in glTF bone-control builder. */
+    _skeleton?: Skeleton;
 }
 
 /** @internal Ref-counted skin vertex buffers shared by live skeletons and VAT data. */
@@ -221,6 +224,8 @@ export interface VatData {
  *  Created by createMorphTargets() in morph/create-morph-targets.ts.
  *  Attached to mesh.morphTargets. */
 export interface MorphTargetData {
+    /** Per-target names, index-aligned with targets and weights, when supplied by the source. */
+    readonly names?: readonly string[];
     /** Read-only storage buffer: 6 f32 per (target, vertex) — position xyz then normal xyz. */
     readonly deltasBuffer: GPUBuffer;
     readonly count: number;

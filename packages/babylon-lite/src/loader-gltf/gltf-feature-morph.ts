@@ -25,8 +25,10 @@ const feature: GltfFeature = {
         }
         const parentMesh = json.meshes[json.nodes[meshData._nodeIndex].mesh];
         const morphWeights = parentMesh.weights ?? new Array(targets.length).fill(0);
+        const targetNames: unknown = parentMesh.extras?.targetNames;
+        const names = Array.isArray(targetNames) && targetNames.length === targets.length && targetNames.every((name) => typeof name === "string") ? targetNames : undefined;
         const { createMorphTargets } = await import("../morph/create-morph-targets.js");
-        mesh.morphTargets = createMorphTargets(ctx._engine, morphTargets, meshData._vertexCount, morphWeights);
+        mesh.morphTargets = createMorphTargets(ctx._engine, morphTargets, meshData._vertexCount, morphWeights, names);
     },
 };
 export default feature;
