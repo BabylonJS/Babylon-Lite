@@ -49,6 +49,10 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _casterMatGens: number[];
     /** @internal Renderable generation (`Mesh._renderableGen`) of each caster mesh when the task was built. */
     _casterMeshGens: (number | undefined)[];
+    /** @internal Render features (`_renderFeatures`) of each terminal caster material when the task was built: a view
+     *  copies the features it was built from, and a rebuild through a mesh that is not a caster recomputes them without
+     *  moving any generation the task reads. */
+    _casterMatFeatures: unknown[];
     /** @internal Casters the build left out of the task because their view could not be built yet (`holdShadowCaster`). */
     _held?: Set<Mesh>;
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
@@ -128,7 +132,14 @@ export function ensurePcfShadowTaskState(
             const mesh = casterMeshes[i]!;
             const material = mesh.material;
             const terminal = material ? resolveShadowCasterMaterial(material) : null;
-            if (existing._casterMaterials[i] !== terminal || existing._casterMatGens[i] !== (terminal?._csmGen ?? 0) || existing._casterMeshGens[i] !== mesh._renderableGen) {
+            // Dropped features that are not recomputed yet do not count, as for the CSM: a view built now would read none of them.
+            const features = terminal?._renderFeatures;
+            if (
+                existing._casterMaterials[i] !== terminal ||
+                existing._casterMatGens[i] !== (terminal?._csmGen ?? 0) ||
+                existing._casterMeshGens[i] !== mesh._renderableGen ||
+                (!!features && existing._casterMatFeatures[i] !== features)
+            ) {
                 // A caster the last build held stays out of the task while its view still cannot be built, so an
                 // unresolved hold costs a check per frame and no task.
                 changed = !(material && existing._held?.has(mesh) && holdShadowCaster(scene, sg, material));
@@ -147,6 +158,7 @@ export function ensurePcfShadowTaskState(
     const casterMaterials: (Material | null)[] = [];
     const casterMatGens: number[] = [];
     const casterMeshGens: (number | undefined)[] = [];
+    const casterMatFeatures: unknown[] = [];
     const camera = createShadowCamera(sg);
     const rt = createShadowRenderTarget(sg);
     const state: PcfTaskState = {
@@ -173,6 +185,7 @@ export function ensurePcfShadowTaskState(
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
         _casterMeshGens: casterMeshGens,
+        _casterMatFeatures: casterMatFeatures,
         _scene: scene,
     };
 
@@ -185,11 +198,13 @@ export function ensurePcfShadowTaskState(
             (state._held ??= new Set()).add(mesh);
             casterMaterials.push(null);
             casterMatGens.push(0);
+            casterMatFeatures.push(undefined);
             continue;
         }
         const terminal = material ? resolveShadowCasterMaterial(material) : null;
         casterMaterials.push(terminal);
         casterMatGens.push(terminal?._csmGen ?? 0);
+        casterMatFeatures.push(terminal?._renderFeatures);
         if (material) {
             addMeshToTask(state._task, mesh, { material: getNoColorView(material, materialViews) });
         }

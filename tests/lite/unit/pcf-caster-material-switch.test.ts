@@ -191,6 +191,57 @@ describe("a registered PCF caster whose own renderable is rebuilt", () => {
     });
 });
 
+describe("a registered PCF caster that casts through a PBR override", () => {
+    /** A caster whose override is also the material of a mesh outside the caster set, with the task built. */
+    async function overrideShared() {
+        const ctx = await setup();
+        const pbr = group("pbr");
+        build(ctx.scene, pbr);
+        const receive = material("receive", ctx.shaders);
+        const override = material("override", pbr);
+        override._renderFeatures = { features: 1 };
+        ctx.lite.setShadowCasterMaterial(receive, override);
+        const mesh = ctx.caster(receive);
+        const other = ctx.caster(override);
+        await ctx.register([mesh]);
+        ctx.frame();
+        return { ...ctx, override, mesh, other, first: ctx.state(), tasks: created.tasks };
+    }
+
+    it("rebuilds the task when a mesh that casts no shadow rebuilds the override with new render features", async () => {
+        const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
+
+        // An alpha-test or culling change of the override: its features are recomputed and only the meshes that draw it are
+        // rebuilt, here the non-caster. Neither the override's generation nor the caster's renderable generation moves.
+        override._renderFeatures = { features: 2 };
+        lite.markMeshRenderableDirty(other);
+        frame();
+
+        expect(state()).not.toBe(first);
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, override]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+
+    it("keeps the task while the override's features are dropped, and rebuilds it once they are recomputed", async () => {
+        const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
+
+        // A pending rebuild dropped the features: a view built now would read none of them.
+        override._renderFeatures = undefined;
+        frame();
+        expect(state()).toBe(first);
+
+        override._renderFeatures = { features: 2 };
+        lite.markMeshRenderableDirty(other);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, override]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+});
+
 describe("a registered PCF caster whose material changes with the caster set unchanged", () => {
     it("rebuilds the task through the new material when its view can be built", async () => {
         const { shaders, caster, register, frame, state } = await setup();

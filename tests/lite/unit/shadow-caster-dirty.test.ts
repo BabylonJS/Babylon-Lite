@@ -98,6 +98,7 @@ describe("shadow caster dirty tracking", () => {
             _casterMaterials: [mesh.material],
             _casterMatGens: [0],
             _casterMeshGens: [undefined],
+            _casterMatFeatures: [undefined],
             _scene: { camera: null } as unknown as SceneContext,
         } satisfies PcfTaskState;
         const light = { lightType: "directional", worldMatrixVersion: 1, _lightVersion: 1 };
