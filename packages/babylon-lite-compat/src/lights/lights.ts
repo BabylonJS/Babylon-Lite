@@ -204,8 +204,16 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
+        const scene = this._scene;
+        if (scene) {
+            removeFromScene(scene._lite, this._lite);
+            if (
+                scene._hasStarted &&
+                this._lite.lightType !== "rectArea" &&
+                scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null)
+            ) {
+                requestRectAreaLightReconcile(scene);
+            }
         } else {
             this._lite.shadowGenerator = undefined;
         }
