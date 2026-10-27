@@ -268,6 +268,18 @@ move the whole import:
 - **Only positions, normals and the first UV set.** Baking can only re-upload the vertex attributes whose CPU arrays are
   retained. The glTF loader uploads `COLOR_0` and `TEXCOORD_1` without keeping CPU copies, so baking drops vertex colors
   and the second UV set, and it retains tangents only after `enableGltfCpuTangents()` from `@babylonjs/lite` is called before loading.
+- **No thin instances.** This includes every primitive on a glTF node with `EXT_mesh_gpu_instancing`, which the loader
+  draws as thin instances: their matrices stay in the node's local frame, and the shader composes
+  `mesh.world * instanceWorld`. Baking transforms only the prototype geometry and resets the mesh transform, but not the
+  instance matrices, so the instance offsets end up in the baked space: under an inherited uniform scale of `0.001`, an
+  instance translation of `(0, 1, 0)` contributes `0.001` before baking and `1` after, and the copies scatter. Flatten
+  such meshes with `setParent()` alone, or keep the hierarchy.
+- **Triangle lists only.** The glTF loader keeps the topology of line, line-strip and triangle-strip primitives, but the
+  baker treats every index buffer as a triangle list. When the baked transform mirrors the geometry, it swaps the second
+  and third index of each group of three to keep the winding. Flattening a glTF import under an identity
+  `applicationRoot` includes the mirroring of its synthetic handedness root, so a line list `[0, 1, 2, 3, 4, 5]` becomes
+  `[0, 2, 1, 3, 5, 4]` and connects other vertices; strips lose their connectivity the same way. Flatten line and strip
+  primitives with `setParent()` alone.
 
 `setParent()` also preserves mirrored transforms, including the synthetic handedness root of glTF imports (#456).
 
