@@ -1,6 +1,6 @@
 import type { Mesh } from "../mesh/mesh.js";
 import { createCylinder, createDisc, createMeshFromData, updateMeshPositions } from "../mesh/mesh-factories.js";
-import { addToScene, type SceneContext } from "../scene/scene-core.js";
+import { _hasSceneChangeHook, _runSceneChange, addToScene, type SceneContext } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import type { Vec3 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
@@ -134,6 +134,15 @@ export function showPhysicsConstraint(viewer: PhysicsViewer, constraint: Physics
     if (viewer._constraintKeys.includes(constraint)) {
         return [];
     }
+    let meshes: Mesh[] = [];
+    // Defer scene-change listeners until the key and full mesh group are registered.
+    batchSceneChanges(viewer.scene, () => {
+        meshes = addConstraintMeshes(viewer, constraint);
+    });
+    return meshes;
+}
+
+function addConstraintMeshes(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): Mesh[] {
     const meshStart = viewer._constraintMeshes.length;
     const axisLen = 0.4;
     const diskRadius = 0.6;
@@ -191,8 +200,10 @@ export function hidePhysicsConstraint(viewer: PhysicsViewer, constraint: Physics
         return false;
     }
     const group = viewer._constraintGroups[index]!;
+    // Commit all bookkeeping before removing meshes so reentrant listeners see a consistent viewer.
+    viewer._constraintKeys.splice(index, 1);
+    viewer._constraintGroups.splice(index, 1);
     for (const mesh of group) {
-        removeFromScene(viewer.scene, mesh);
         viewer._constraintMeshes.splice(viewer._constraintMeshes.indexOf(mesh), 1);
     }
     for (const entries of [viewer._constraintLines, viewer._constraintDisks, viewer._constraintArrowheads]) {
@@ -202,10 +213,21 @@ export function hidePhysicsConstraint(viewer: PhysicsViewer, constraint: Physics
             }
         }
     }
-    viewer._constraintKeys.splice(index, 1);
-    viewer._constraintGroups.splice(index, 1);
     unregisterViewerUpdateIfEmpty(viewer);
+    batchSceneChanges(viewer.scene, () => {
+        for (const mesh of group) {
+            removeFromScene(viewer.scene, mesh);
+        }
+    });
     return true;
+}
+
+function batchSceneChanges(scene: SceneContext, mutation: () => void): void {
+    if (_hasSceneChangeHook()) {
+        _runSceneChange(scene, mutation);
+    } else {
+        mutation();
+    }
 }
 
 /** Shows a Havok Physics V2 body as a wireframe debug mesh. */

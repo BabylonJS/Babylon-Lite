@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { PhysicsBody, PhysicsConstraint } from "../../../packages/babylon-lite/src/physics/havok";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
+import { onSceneChange } from "../../../packages/babylon-lite/src/scene/scene-change";
 import { createHavokWorld, disposePhysics, releasePhysicsConstraint, PhysicsConstraintType } from "../../../packages/babylon-lite/src/physics/havok";
 import {
     createPhysicsViewer,
@@ -34,6 +35,8 @@ function setup() {
             },
         },
         meshes: [],
+        lights: [],
+        shadowGenerators: [],
         _beforeRender: [],
         _disposables: [],
         _renderables: [],
@@ -119,6 +122,53 @@ describe("physics constraint viewer", () => {
         for (const spy of Object.values(hknp)) {
             expect(spy).not.toHaveBeenCalled();
         }
+    });
+
+    it("defers scene-change listeners until a shown constraint is fully registered", () => {
+        const { viewer, scene, constraint } = setup();
+        const a = getPhysicsConstraintDebug(constraint());
+        const b = getPhysicsConstraintDebug(constraint());
+        let reentered = false;
+        const off = onSceneChange(scene, () => {
+            if (reentered) {
+                return;
+            }
+            reentered = true;
+            expect(showPhysicsConstraint(viewer, a)).toEqual([]);
+            showPhysicsConstraint(viewer, b);
+        });
+        const groupA = showPhysicsConstraint(viewer, a);
+        off();
+        expect(viewer._constraintKeys).toEqual([a, b]);
+        const groupB = viewer._constraintGroups[1]!;
+        expect(viewer._constraintGroups[0]!.some((mesh) => groupB.includes(mesh))).toBe(false);
+        expect(groupA.every((mesh) => viewer._constraintGroups[0]!.includes(mesh))).toBe(true);
+        expect(hidePhysicsConstraint(viewer, a)).toBe(true);
+        expect(scene.meshes).toEqual(groupB);
+        expect(viewer._constraintMeshes).toEqual(groupB);
+    });
+
+    it("keeps bookkeeping consistent when a listener re-enters hide", () => {
+        const { viewer, scene, constraint } = setup();
+        const a = getPhysicsConstraintDebug(constraint());
+        const b = getPhysicsConstraintDebug(constraint());
+        showPhysicsConstraint(viewer, a);
+        showPhysicsConstraint(viewer, b);
+        const groupB = [...viewer._constraintGroups[1]!];
+        const reentrantResults: boolean[] = [];
+        const off = onSceneChange(scene, (event) => {
+            if (event.type === "removed") {
+                reentrantResults.push(hidePhysicsConstraint(viewer, a));
+            }
+        });
+        expect(hidePhysicsConstraint(viewer, a)).toBe(true);
+        off();
+        expect(reentrantResults.length).toBeGreaterThan(0);
+        expect(reentrantResults.every((result) => !result)).toBe(true);
+        expect(viewer._constraintKeys).toEqual([b]);
+        expect(viewer._constraintGroups).toEqual([groupB]);
+        expect(viewer._constraintMeshes).toEqual(groupB);
+        expect(scene.meshes).toEqual(groupB);
     });
 
     it("clears every group and update entry on viewer disposal", () => {
