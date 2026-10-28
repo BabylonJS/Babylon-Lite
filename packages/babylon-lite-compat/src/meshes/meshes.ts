@@ -60,7 +60,7 @@ import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
 import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
-import type { MorphTargetManager } from "../morph/morph.js";
+import { MorphTargetManager } from "../morph/morph.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial | LinesMaterial;
 
@@ -789,6 +789,12 @@ export class Mesh extends AbstractMesh {
         return mesh;
     }
 
+    /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
+    public override _bindLoadedScene(scene: Scene): void {
+        super._bindLoadedScene(scene);
+        this._morphTargetManager?._adoptEngine(scene._getLiteEngine());
+    }
+
     /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
     public static _fromLiteHierarchy(
         lite: LiteMesh,
@@ -823,6 +829,9 @@ export class Mesh extends AbstractMesh {
      * CPU geometry exists) and assigns it onto the Lite mesh before registration.
      */
     public get morphTargetManager(): MorphTargetManager | null {
+        if (!this._morphTargetManager && this._lite.morphTargets) {
+            this._morphTargetManager = MorphTargetManager._fromLite(this._lite.morphTargets, this._scene?._getLiteEngine());
+        }
         return this._morphTargetManager;
     }
     public set morphTargetManager(value: MorphTargetManager | null) {

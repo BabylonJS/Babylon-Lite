@@ -2,12 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { Skeleton as LiteSkeleton } from "babylon-lite";
 
 import { Quaternion, Skeleton, Vector3 } from "../src/index";
+import { NullEngine } from "../src/engine/engine";
+import { Mesh } from "../src/meshes/meshes";
+import { Scene } from "../src/scene/scene";
 
 function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>; overrides: Map<number, unknown> } {
     const bake = vi.fn();
     const overrides = new Map<number, unknown>();
     const root = { name: "root", _nodeIndex: 0 };
-    const hand = { name: "hand", _nodeIndex: 1 };
+    const hand = { name: "hand", _nodeIndex: 1, parent: root };
     const lite = {
         bones: [root, hand],
         _byName: new Map([
@@ -32,6 +35,7 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         expect(hand).toBe(skeleton.bones[1]);
         expect(hand?.getName()).toBe("hand");
         expect(hand?.getSkeleton()).toBe(skeleton);
+        expect(hand?.parent).toBe(skeleton.bones[0]);
 
         hand?.setPosition(new Vector3(1, 2, 3));
         hand?.setRotationQuaternion(new Quaternion(0, 0, 0, 1));
@@ -53,5 +57,30 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         hand.returnToRest();
         expect(overrides.has(1)).toBe(false);
         expect(bake).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns the whole skeleton to rest and prepares through Lite", () => {
+        const { skeleton, bake, overrides } = createSkeleton();
+        skeleton.bones[0]!.setPosition(new Vector3(1, 0, 0));
+        skeleton.bones[1]!.setScale(new Vector3(0, 0, 0));
+
+        skeleton.returnToRest();
+        expect(overrides.size).toBe(0);
+        expect(bake).toHaveBeenCalledTimes(4);
+
+        skeleton.prepare();
+        expect(bake).toHaveBeenCalledTimes(5);
+    });
+
+    it("surfaces stable scene skeleton wrappers from loaded meshes", () => {
+        const { skeleton } = createSkeleton();
+        const scene = new Scene(new NullEngine());
+        const liteMesh = { name: "skinned", children: [], _gpu: {}, skeleton: { _skeleton: skeleton._lite } } as never;
+        Mesh._fromLite(liteMesh, undefined, scene);
+        scene._lite.meshes.push(liteMesh);
+
+        expect(scene.skeletons).toHaveLength(1);
+        expect(scene.skeletons[0]!._lite).toBe(skeleton._lite);
+        expect(scene.skeletons[0]).toBe(scene.skeletons[0]);
     });
 });

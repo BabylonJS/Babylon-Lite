@@ -36,6 +36,8 @@ import {
     invertMat4,
     multiplyMat4,
     onPhysicsAfterStep,
+    getMeshSkeleton,
+    getParticleSystems,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -48,6 +50,8 @@ import type {
     Mat4,
     Material as LiteMaterial,
     EngineContext,
+    Skeleton as LiteSkeleton,
+    ParticleSystem as LiteParticleSystem,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -73,6 +77,8 @@ import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
+import { Skeleton } from "../bones/skeleton.js";
+import { ParticleSystem } from "../particles/particle-system.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -172,6 +178,27 @@ export class Scene extends AbstractScene {
         return this._runningAnimatables;
     }
 
+    /** Babylon.js `scene.skeletons` — loader-produced skeletons currently used by scene meshes. */
+    public get skeletons(): Skeleton[] {
+        for (const mesh of this._lite.meshes) {
+            const lite = getMeshSkeleton(mesh);
+            if (lite) {
+                this._wrapSkeleton(lite);
+            }
+        }
+        return this._skeletons;
+    }
+
+    /** Babylon.js `scene.particleSystems` — registered Lite node-particle systems in scene order. */
+    public get particleSystems(): ParticleSystem[] {
+        for (const system of getParticleSystems(this._lite)) {
+            if (!this._retiredParticleSystems.has(system)) {
+                this._wrapParticleSystem(system);
+            }
+        }
+        return this._particleSystems;
+    }
+
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
     public cameraToUseForPointers: Camera | null = null;
@@ -208,6 +235,11 @@ export class Scene extends AbstractScene {
     /** @internal Lite manager that owns supported compat property animations. */
     private _propertyAnimationManager: AnimationManager | null = null;
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
+    private readonly _skeletonCache = new Map<LiteSkeleton, Skeleton>();
+    private readonly _skeletons: Skeleton[] = [];
+    private readonly _particleSystemCache = new Map<LiteParticleSystem, ParticleSystem>();
+    private readonly _particleSystems: ParticleSystem[] = [];
+    private readonly _retiredParticleSystems = new Set<LiteParticleSystem>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
     /** @internal Lite manager that weight/additive-blends loaded glTF groups (lazily created). */
@@ -460,6 +492,58 @@ export class Scene extends AbstractScene {
      */
     public _registerMorphTargetManager(mesh: { _lite: unknown }, manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void }): void {
         this._pendingMorphBuilds.push({ mesh, manager });
+    }
+
+    /** @internal Return the Lite engine used to update loader-produced resources. */
+    public _getLiteEngine(): EngineContext {
+        return this._engine._lite;
+    }
+
+    /** @internal Return the canonical compat wrapper for a loader-produced skeleton. */
+    public _wrapSkeleton(lite: LiteSkeleton, preferred?: Skeleton): Skeleton {
+        let wrapper = this._skeletonCache.get(lite);
+        if (!wrapper) {
+            wrapper = preferred ?? Skeleton._fromLite(lite, this._skeletonCache.size);
+            this._skeletonCache.set(lite, wrapper);
+            this._skeletons.push(wrapper);
+        }
+        return wrapper;
+    }
+
+    /** @internal Remove a disposed asset-container skeleton from the scene collection. */
+    public _unregisterSkeleton(lite: LiteSkeleton): void {
+        const wrapper = this._skeletonCache.get(lite);
+        if (wrapper) {
+            this._skeletonCache.delete(lite);
+            const index = this._skeletons.indexOf(wrapper);
+            if (index !== -1) {
+                this._skeletons.splice(index, 1);
+            }
+        }
+    }
+
+    /** @internal Return the canonical compat wrapper for a registered Lite particle system. */
+    public _wrapParticleSystem(lite: LiteParticleSystem): ParticleSystem {
+        let wrapper = this._particleSystemCache.get(lite);
+        if (!wrapper) {
+            wrapper = ParticleSystem._fromLite(lite, this);
+            this._particleSystemCache.set(lite, wrapper);
+            this._particleSystems.push(wrapper);
+        }
+        return wrapper;
+    }
+
+    /** @internal Remove a disposed particle system from the Babylon.js scene collection. */
+    public _unregisterParticleSystem(lite: LiteParticleSystem): void {
+        this._retiredParticleSystems.add(lite);
+        const wrapper = this._particleSystemCache.get(lite);
+        if (wrapper) {
+            this._particleSystemCache.delete(lite);
+            const index = this._particleSystems.indexOf(wrapper);
+            if (index !== -1) {
+                this._particleSystems.splice(index, 1);
+            }
+        }
     }
 
     /** @internal Build all registered morph-target managers. Called by the engine before registration. */

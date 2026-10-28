@@ -247,6 +247,35 @@ export class PointsCloudSystem {
     }
 }
 
+// ─── glTF loader extensions ─────────────────────────────────────────
+export class KHR_materials_scatter {
+    public readonly name = "KHR_materials_scatter";
+    public enabled: boolean;
+    public order = 172;
+
+    public constructor(loader?: { isExtensionUsed?(name: string): boolean }) {
+        this.enabled = loader?.isExtensionUsed?.(this.name) ?? false;
+    }
+
+    public dispose(): void {}
+
+    public loadMaterialPropertiesAsync(
+        _context: string,
+        material: { extensions?: Record<string, unknown> },
+        _babylonMaterial: unknown
+    ): Promise<void> | null {
+        if (!material.extensions?.[this.name]) {
+            return null;
+        }
+        return unsupported(
+            "KHR_materials_scatter.loadMaterialPropertiesAsync",
+            "KHR_materials_scatter requires OpenPBR scattering texture processing plus a screen-space subsurface-scattering prepass. Babylon Lite reserves scattering material state but does not implement that render subsystem."
+        );
+    }
+}
+
+export function RegisterKHR_materials_scatter(): void {}
+
 export class CannonJSPlugin {
     public constructor() {
         unsupported("CannonJSPlugin", "Babylon Lite physics is Havok-V2 only.");

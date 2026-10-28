@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { MorphTargetData } from "babylon-lite";
 
 import { MorphTarget, MorphTargetManager } from "../src/morph/morph";
 
@@ -37,5 +38,46 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
             t.influence = 0.5;
         }).not.toThrow();
         expect(t.influence).toBe(0.5);
+    });
+
+    it("wraps loader-produced names and forwards influence updates", () => {
+        const writeBuffer = vi.fn();
+        const lite = {
+            count: 2,
+            names: ["Smile", "Blink"],
+            weights: new Float32Array([0.25, 0.75]),
+            weightsBuffer: {},
+            deltasBuffer: {},
+            targets: [
+                { positions: new Float32Array(), normals: null },
+                { positions: new Float32Array(), normals: null },
+            ],
+        } as unknown as MorphTargetData;
+        const manager = MorphTargetManager._fromLite(lite, { _device: { queue: { writeBuffer } } } as never);
+
+        expect(manager.numTargets).toBe(2);
+        expect(manager.getTarget(0).name).toBe("Smile");
+        expect(manager.getTarget(1).influence).toBe(0.75);
+
+        manager.getTarget(0).influence = 0.5;
+        expect(Array.from(lite.weights)).toEqual([0.5, 0.75]);
+        expect(writeBuffer).toHaveBeenCalled();
+    });
+
+    it("retains loader-produced influence edits made before scene adoption", () => {
+        const lite = {
+            count: 1,
+            names: ["Smile"],
+            weights: new Float32Array([0.25]),
+            weightsBuffer: {},
+            deltasBuffer: {},
+            targets: [{ positions: new Float32Array(), normals: null }],
+        } as unknown as MorphTargetData;
+        const manager = MorphTargetManager._fromLite(lite);
+
+        manager.getTarget(0).influence = 0.5;
+
+        expect(manager.getTarget(0).influence).toBe(0.5);
+        expect(lite.weights[0]).toBe(0.5);
     });
 });

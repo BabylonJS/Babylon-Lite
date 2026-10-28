@@ -7,6 +7,7 @@ vi.mock("babylon-lite", async (importActual) => {
         parseNodeParticleSetFromSnippet: vi.fn(),
         registerNodeParticleSet: vi.fn(),
         stopParticleSystem: vi.fn(),
+        isParticleSystemStarted: vi.fn(),
         startParticleSystem: vi.fn(),
         animateParticleSystem: vi.fn(),
         createParticleBillboard: vi.fn(() => ({ billboard: true })),
@@ -19,6 +20,7 @@ import {
     parseNodeParticleSetFromSnippet,
     registerNodeParticleSet,
     stopParticleSystem,
+    isParticleSystemStarted,
     startParticleSystem,
     animateParticleSystem,
     createParticleBillboard,
@@ -35,6 +37,7 @@ import type { Scene } from "../src/scene/scene";
 const parseMock = vi.mocked(parseNodeParticleSetFromSnippet);
 const registerMock = vi.mocked(registerNodeParticleSet);
 const stopMock = vi.mocked(stopParticleSystem);
+const isStartedMock = vi.mocked(isParticleSystemStarted);
 const startMock = vi.mocked(startParticleSystem);
 const animateMock = vi.mocked(animateParticleSystem);
 const createBillboardMock = vi.mocked(createParticleBillboard);
@@ -52,6 +55,8 @@ function makeScene(): { scene: Scene; liteScene: object; liteEngine: object; def
         _deferAdd: (add: () => void) => {
             deferred.push(add);
         },
+        _wrapParticleSystem: (lite: never) => ParticleSystem._fromLite(lite, scene),
+        _unregisterParticleSystem: () => undefined,
     } as unknown as Scene;
     return { scene, liteScene, liteEngine, deferred };
 }
@@ -176,6 +181,7 @@ describe("ParticleSystemSet", () => {
     it("dispose() stops every built system via stopParticleSystem", async () => {
         parseMock.mockReset();
         stopMock.mockReset();
+        isStartedMock.mockReset();
         const s0 = { id: 0 };
         const s1 = { id: 1 };
         const liteSet = { systems: [s0, s1] } as unknown as LiteNodeParticleSet;
@@ -185,6 +191,7 @@ describe("ParticleSystemSet", () => {
         const set = await NodeParticleSystemSet.Parse({}).buildAsync(scene);
         set.dispose();
         expect(stopMock.mock.calls).toEqual([[s0], [s1]]);
+        expect(set.systems).toEqual([]);
     });
 
     it("a directly-constructed empty set is inert (no systems, no forwarding)", () => {
@@ -269,6 +276,15 @@ describe("ParticleSystem (per-system NPE handle)", () => {
         expect(deferred).toHaveLength(1);
     });
 
+    it("keeps isStarted() true after stop(), matching Babylon.js lifecycle semantics", async () => {
+        const lite = { updateSpeed: 0.1, texture: null };
+        const { system } = await buildOneSystem(lite);
+        expect(system.isStarted()).toBe(false);
+        system.start();
+        system.stop();
+        expect(system.isStarted()).toBe(true);
+    });
+
     it("animate() uses preWarmStepOffset while prewarming and ratio 1 otherwise", async () => {
         const lite = { updateSpeed: 0.1, texture: null };
         const { system } = await buildOneSystem(lite);
@@ -290,6 +306,16 @@ describe("ParticleSystem (per-system NPE handle)", () => {
         system.stop();
         system.dispose();
         expect(stopMock.mock.calls).toEqual([[lite], [lite]]);
+    });
+
+    it("preserves the Lite system name and forwards isStarted()", async () => {
+        const lite = { name: "sparks", updateSpeed: 0.1, texture: null };
+        isStartedMock.mockReturnValueOnce(true);
+        const { system } = await buildOneSystem(lite);
+
+        expect(system.name).toBe("sparks");
+        expect(system.isStarted()).toBe(true);
+        expect(isStartedMock).toHaveBeenCalledWith(lite);
     });
 
     it("start() defers a billboard build that binds the loaded texture and renders once", async () => {

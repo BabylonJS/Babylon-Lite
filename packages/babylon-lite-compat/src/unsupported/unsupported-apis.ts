@@ -1144,6 +1144,11 @@ export function IsHtmlInCanvasSupportedNatively(): never {
     return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
 }
 
+/** Babylon.js internal polyfill-state query. Compat never installs the unsupported polyfill. */
+export function _IsHtmlInCanvasPolyfillInstalled(): boolean {
+    return false;
+}
+
 /** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
 export function InstallHtmlInCanvasPolyfill(): never {
     return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");

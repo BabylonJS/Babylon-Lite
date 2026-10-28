@@ -89,7 +89,7 @@ export class AssetContainer {
     }
 
     public get skeletons(): Skeleton[] {
-        return (this._skeletons ??= (this._lite.skeletons ?? []).map((skeleton, index) => Skeleton._fromLite(skeleton, index)));
+        return (this._skeletons ??= (this._lite.skeletons ?? []).map((skeleton, index) => this._scene?._wrapSkeleton(skeleton) ?? Skeleton._fromLite(skeleton, index)));
     }
 
     /** Add every entity, animation group, camera, and clear colour to the scene. */
@@ -105,6 +105,9 @@ export class AssetContainer {
             this._sceneDisposeObserver = undefined;
         }
         this._scene = scene;
+        for (const skeleton of this.skeletons) {
+            scene._wrapSkeleton(skeleton._lite, skeleton);
+        }
         if (this._dispose && !this._sceneDisposeObserver) {
             this._sceneDisposeObserver = scene.onDisposeObservable.addOnce(() => {
                 this._scene = undefined;
@@ -139,6 +142,9 @@ export class AssetContainer {
 
     private _detachFromScene(scene: Scene): void {
         try {
+            for (const skeleton of this._skeletons ?? []) {
+                scene._unregisterSkeleton(skeleton._lite);
+            }
             if (this._ownedMeshes) {
                 for (const mesh of this._ownedMeshes) {
                     setLiteParent(mesh, null);

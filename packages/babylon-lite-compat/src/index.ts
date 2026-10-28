@@ -105,6 +105,24 @@ export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { _GetPackedShBytesPerSplat, _HasGaussianPointSplattingProjectedDepth, GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
 export type { IGaussianPointSplattingProgress, ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
 export {
+    _ClampGpuSortKeyBits,
+    _GetGpuSortPassCount,
+    _GetGpuSortPaddedCount,
+    _PackGpuSortIntervals,
+    _ComputeGpuSortDepthCoefficients,
+    _ComputeGpuSortDepthRange,
+    _ComputeGpuSortKeyScale,
+    _DecodeGpuSortSogMean,
+    GetGaussianSplattingGpuSorterMaxSplatCount,
+    GaussianSplattingGpuSortOutput,
+    GaussianSplattingGpuSorter,
+} from "./meshes/gaussian-splatting-gpu-sorter.js";
+export type {
+    GaussianSplattingGpuSortMatrix,
+    IGaussianSplattingGpuSortSource,
+    IGaussianSplattingGpuSortOptions,
+} from "./meshes/gaussian-splatting-gpu-sorter.js";
+export {
     MeshBlendingRadiusClass,
     PackMeshBlendingTag,
     UnpackMeshBlendingTag,
@@ -144,6 +162,16 @@ export {
 // ─── Textures ────────────────────────────────────────────────────────
 export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, HtmlTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
 export { ExternalTexture } from "./textures/external-texture.js";
+export {
+    DivideTexturesAsync,
+    TransmissionFractionAsync,
+    TransmissionScatterToSingleScatterAlbedoAsync,
+    MultiScatterToSingleScatterAlbedoAsync,
+    SingleScatterToMultiScatterAlbedoAsync,
+    ThinWalledScatterWeightsAsync,
+} from "./textures/texture-processing.js";
+export { TextureColorSpace, ChannelMask, TextureChannel } from "./textures/texture-processing.js";
+export type { ITextureProcessOperand, ITextureProcessorOutputOptions } from "./textures/texture-processing.js";
 export type { IHtmlTextureOptions } from "./textures/textures.js";
 export {
     RawTexture2DArray,
@@ -358,6 +386,7 @@ export {
     ComputeOverlayCssTransform,
     GetElementPixelFromUv,
     IsHtmlInCanvasSupportedNatively,
+    _IsHtmlInCanvasPolyfillInstalled,
     InstallHtmlInCanvasPolyfill,
     UninstallHtmlInCanvasPolyfill,
     Sound,
@@ -471,6 +500,8 @@ export {
     ThinFSR1SharpenPostProcess,
     ParticleHelper,
     PointsCloudSystem,
+    KHR_materials_scatter,
+    RegisterKHR_materials_scatter,
     CannonJSPlugin,
     AmmoJSPlugin,
     RecastJSPlugin,
