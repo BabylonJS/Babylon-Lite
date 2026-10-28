@@ -211,7 +211,7 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         expect(loaded._disposed).toBe(true);
     });
 
-    it("releases discovered manager ownership during scene teardown", () => {
+    it("releases detached discovered manager ownership during scene teardown", () => {
         const loaded = morphData("loaded");
         const lite = liteMesh("morphed", loaded);
         const scene = new Scene(new NullEngine());
@@ -220,6 +220,8 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
 
         expect(mesh.morphTargetManager).not.toBeNull();
         expect(loaded._refCount).toBe(2);
+        mesh.morphTargetManager = null;
+        expect(loaded._disposed).not.toBe(true);
 
         scene.dispose();
 
@@ -228,7 +230,7 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         expect(loaded.weightsBuffer.destroy).toHaveBeenCalledOnce();
     });
 
-    it("releases discovered manager ownership during asset-container teardown", () => {
+    it("releases replaced discovered manager ownership during asset-container teardown", () => {
         const loaded = morphData("loaded");
         const lite = liteMesh("morphed", loaded);
         const root = { name: "__root__", children: [lite] };
@@ -237,6 +239,8 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
 
         expect(mesh.morphTargetManager).not.toBeNull();
         expect(loaded._refCount).toBe(2);
+        mesh.morphTargetManager = new MorphTargetManager();
+        expect(loaded._disposed).not.toBe(true);
 
         container.dispose();
 

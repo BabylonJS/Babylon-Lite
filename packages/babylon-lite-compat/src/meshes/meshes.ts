@@ -826,6 +826,7 @@ export class Mesh extends AbstractMesh {
     }
 
     private _morphTargetManager: MorphTargetManager | null = null;
+    private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
 
     /**
      * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
@@ -836,6 +837,7 @@ export class Mesh extends AbstractMesh {
     public get morphTargetManager(): MorphTargetManager | null {
         if (!this._morphTargetManager && this._lite.morphTargets) {
             this._morphTargetManager = MorphTargetManager._fromLite(this._lite.morphTargets, this._scene?._getLiteEngine());
+            this._ownedMorphTargetManagers.add(this._morphTargetManager);
         }
         return this._morphTargetManager;
     }
@@ -858,9 +860,12 @@ export class Mesh extends AbstractMesh {
         }
     }
 
-    /** @internal Release the compat manager's ownership claim during scene/container teardown. */
+    /** @internal Release discovered manager ownership claims during scene/container teardown. */
     public _releaseMorphTargetManagerOwnership(): void {
-        this._morphTargetManager?.dispose();
+        for (const manager of this._ownedMorphTargetManagers) {
+            manager.dispose();
+        }
+        this._ownedMorphTargetManagers.clear();
     }
 
     // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
