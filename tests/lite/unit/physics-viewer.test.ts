@@ -83,6 +83,16 @@ describe("physics constraint viewer", () => {
         expect(Object.values(hknp).reduce((n, fn) => n + fn.mock.calls.length, 0)).toBe(calls);
     });
 
+    it("ignores mirroring scale on ordinary bodies, matching the position/rotation Havok simulates", () => {
+        const { viewer, world, constraint } = setup();
+        const mirrored = { node: createTransformNode("mirrored", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1), _world: world } as unknown as PhysicsBody;
+        showPhysicsConstraint(viewer, getPhysicsConstraintDebug(constraint(mirrored, { pivotA: { x: 0, y: 1, z: 0 } })));
+        const [x, y, z] = anchorA(viewer);
+        expect(x).toBeCloseTo(0);
+        expect(y).toBeCloseTo(1);
+        expect(z).toBeCloseTo(0);
+    });
+
     it("places thin-body anchors at instance 0's rigid pose", () => {
         const { viewer, world, constraint } = setup();
         // Instance 0: 90° about Z, uniform scale 3, translated (0, 2, 0); carrier translated (10, 0, 0).

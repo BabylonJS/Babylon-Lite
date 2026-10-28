@@ -4,6 +4,7 @@ import { _hasSceneChangeHook, _runSceneChange, addToScene, type SceneContext } f
 import { removeFromScene } from "../scene/scene-remove.js";
 import type { Mat4Storage, Vec3 } from "../math/types.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { PhysicsBody, PhysicsWorld, PhysicsConstraint } from "./havok.js";
 import { getPhysicsBodyDebugGeometry } from "./havok.js";
@@ -418,17 +419,20 @@ function updateConstraintLine(viewer: PhysicsViewer, line: ConstraintLine): void
 
 let rigidScratch: Float64Array | null = null;
 
-/** World pose of the simulated rigid frame that Havok constraint pivots/axes are expressed in:
- *  scale is stripped, and thin bodies use instance 0 (carrier × instance matrix). JS-only, no native calls. */
+/** World pose of the simulated rigid frame that Havok constraint pivots/axes are expressed in.
+ *  Ordinary bodies use the node position/quaternion with unit scale (as written to Havok);
+ *  thin bodies use instance 0 (carrier × instance matrix) with scale stripped. JS-only, no native calls. */
 function rigidMatrix(body: PhysicsBody): Float64Array {
     const m = (rigidScratch ??= new Float64Array(16));
     const node = body.node as Mesh;
     const thin = body._world._thin?.count(body) !== undefined ? node.thinInstances : null;
-    if (thin && thin.count > 0) {
-        multiplyMat4IntoBuffer(m, 0, node.worldMatrix as unknown as Mat4Storage, 0, thin.matrices, 0);
-    } else {
-        m.set(node.worldMatrix as unknown as Mat4Storage);
+    if (!thin || thin.count === 0) {
+        const p = node.position;
+        const q = node.rotationQuaternion;
+        composeMat4IntoBuffer(m, 0, p.x, p.y, p.z, q.x, q.y, q.z, q.w, 1, 1, 1);
+        return m;
     }
+    multiplyMat4IntoBuffer(m, 0, node.worldMatrix as unknown as Mat4Storage, 0, thin.matrices, 0);
     for (let c = 0; c < 12; c += 4) {
         const len = Math.hypot(m[c]!, m[c + 1]!, m[c + 2]!);
         if (len > 0) {
