@@ -2,7 +2,8 @@ import type { Mesh } from "../mesh/mesh.js";
 import { createCylinder, createDisc, createMeshFromData, updateMeshPositions } from "../mesh/mesh-factories.js";
 import { _hasSceneChangeHook, _runSceneChange, addToScene, type SceneContext } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
-import type { Vec3 } from "../math/types.js";
+import type { Mat4Storage, Vec3 } from "../math/types.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { PhysicsBody, PhysicsWorld, PhysicsConstraint } from "./havok.js";
 import { getPhysicsBodyDebugGeometry } from "./havok.js";
@@ -415,9 +416,41 @@ function updateConstraintLine(viewer: PhysicsViewer, line: ConstraintLine): void
     updateMeshPositions(viewer.scene.surface.engine, line.mesh, line.positions);
 }
 
+let rigidScratch: Float64Array | null = null;
+
+/** World pose of the simulated rigid frame that Havok constraint pivots/axes are expressed in:
+ *  scale is stripped, and thin bodies use instance 0 (carrier × instance matrix). JS-only, no native calls. */
+function rigidMatrix(body: PhysicsBody): Float64Array {
+    const m = (rigidScratch ??= new Float64Array(16));
+    const node = body.node as Mesh;
+    const thin = body._world._thin?.count(body) !== undefined ? node.thinInstances : null;
+    if (thin && thin.count > 0) {
+        multiplyMat4IntoBuffer(m, 0, node.worldMatrix as unknown as Mat4Storage, 0, thin.matrices, 0);
+    } else {
+        m.set(node.worldMatrix as unknown as Mat4Storage);
+    }
+    for (let c = 0; c < 12; c += 4) {
+        const len = Math.hypot(m[c]!, m[c + 1]!, m[c + 2]!);
+        if (len > 0) {
+            m[c]! /= len;
+            m[c + 1]! /= len;
+            m[c + 2]! /= len;
+        }
+    }
+    const det = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) - m[4]! * (m[1]! * m[10]! - m[2]! * m[9]!) + m[8]! * (m[1]! * m[6]! - m[2]! * m[5]!);
+    if (det < 0) {
+        // Mirrored carriers are represented by a negated Y scale, matching thinInstanceTransform.
+        m[4] = -m[4]!;
+        m[5] = -m[5]!;
+        m[6] = -m[6]!;
+    }
+    return m;
+}
+
 function updateConstraintDisk(disk: ConstraintDisk): void {
-    const p = localToWorld(disk.endpoint.body.node.worldMatrix, disk.endpoint.pivot);
-    const axis = normalize(transformDirection(disk.endpoint.body.node.worldMatrix, disk.axis));
+    const m = rigidMatrix(disk.endpoint.body);
+    const p = localToWorld(m, disk.endpoint.pivot);
+    const axis = normalize(transformDirection(m, disk.axis));
     disk.mesh.position.set(p.x, p.y, p.z);
     const q = quatFromZTo(axis);
     disk.mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
@@ -425,7 +458,7 @@ function updateConstraintDisk(disk: ConstraintDisk): void {
 
 function updateConstraintArrowhead(arrowhead: ConstraintArrowhead): void {
     const tip = endpointWorld(arrowhead.endpoint);
-    const axis = arrowhead.endpoint.axis ? normalize(transformDirection(arrowhead.endpoint.body.node.worldMatrix, arrowhead.endpoint.axis)) : { x: 0, y: 1, z: 0 };
+    const axis = arrowhead.endpoint.axis ? normalize(transformDirection(rigidMatrix(arrowhead.endpoint.body), arrowhead.endpoint.axis)) : { x: 0, y: 1, z: 0 };
     arrowhead.mesh.position.set(tip.x, tip.y, tip.z);
     const q = quatFromYTo(axis);
     arrowhead.mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
@@ -446,7 +479,7 @@ function endpointWorld(endpoint: ConstraintEndpoint): Vec3 {
               z: endpoint.pivot.z + endpoint.axis.z * (endpoint.axisLength ?? 1),
           }
         : endpoint.pivot;
-    return localToWorld(endpoint.body.node.worldMatrix, pivot);
+    return localToWorld(rigidMatrix(endpoint.body), pivot);
 }
 
 function localToWorld(m: ArrayLike<number>, p: Vec3): Vec3 {

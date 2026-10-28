@@ -49,15 +49,15 @@ function setup() {
     } as unknown as SceneContext;
     const world = createHavokWorld(scene, hknp);
     const viewer = createPhysicsViewer(scene, world);
-    const body = { node: createTransformNode("body") } as PhysicsBody;
-    function constraint(): PhysicsConstraint {
+    const body = { node: createTransformNode("body"), _world: world } as unknown as PhysicsBody;
+    function constraint(bodyA: PhysicsBody = body, options: PhysicsConstraint["options"] = {}): PhysicsConstraint {
         const c: PhysicsConstraint = {
             _hkConstraint: {},
             _isDisposed: false,
-            bodyA: body,
+            bodyA,
             bodyB: body,
             type: PhysicsConstraintType.BALL_AND_SOCKET,
-            options: {},
+            options,
         };
         (world._constraints ??= []).push(c);
         return c;
@@ -66,6 +66,38 @@ function setup() {
 }
 
 describe("physics constraint viewer", () => {
+    function anchorA(viewer: ReturnType<typeof setup>["viewer"]): number[] {
+        // First line is constraintAxisAX; its first endpoint is the pivotA anchor.
+        return Array.from(viewer._constraintLines[0]!.positions.subarray(0, 3));
+    }
+
+    it("places anchors in the unscaled rigid frame of a scaled body without native calls", () => {
+        const { viewer, world, hknp, constraint } = setup();
+        const scaled = { node: createTransformNode("scaled", 5, 0, 0, 0, 0, 0, 1, 2, 0.03, 1), _world: world } as unknown as PhysicsBody;
+        const calls = Object.values(hknp).reduce((n, fn) => n + fn.mock.calls.length, 0);
+        showPhysicsConstraint(viewer, getPhysicsConstraintDebug(constraint(scaled, { pivotA: { x: 1, y: 0, z: 0 } })));
+        const [x, y, z] = anchorA(viewer);
+        expect(x).toBeCloseTo(6);
+        expect(y).toBeCloseTo(0);
+        expect(z).toBeCloseTo(0);
+        expect(Object.values(hknp).reduce((n, fn) => n + fn.mock.calls.length, 0)).toBe(calls);
+    });
+
+    it("places thin-body anchors at instance 0's rigid pose", () => {
+        const { viewer, world, constraint } = setup();
+        // Instance 0: 90° about Z, uniform scale 3, translated (0, 2, 0); carrier translated (10, 0, 0).
+        const matrices = new Float32Array(32);
+        matrices.set([0, 3, 0, 0, -3, 0, 0, 0, 0, 0, 3, 0, 0, 2, 0, 1]);
+        const carrier = Float32Array.from([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 0, 0, 1]);
+        const thinWorld = { ...world, _thin: { count: () => 2 } };
+        const thin = { node: { worldMatrix: carrier, thinInstances: { matrices, count: 2 } }, _world: thinWorld } as unknown as PhysicsBody;
+        showPhysicsConstraint(viewer, getPhysicsConstraintDebug(constraint(thin, { pivotA: { x: 1, y: 0, z: 0 } })));
+        const [x, y, z] = anchorA(viewer);
+        expect(x).toBeCloseTo(10);
+        expect(y).toBeCloseTo(3);
+        expect(z).toBeCloseTo(0);
+    });
+
     it("hides exactly one group including arrowheads, preserves other groups, and rejects duplicate shows", () => {
         const { viewer, scene, constraint } = setup();
         const a = getPhysicsConstraintDebug(constraint());
