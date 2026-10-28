@@ -141,6 +141,8 @@ export interface EngineContext extends SurfaceContext {
     _attachGpuEvents?: (engine: EngineContext) => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
+    /** @internal Installed only by recovery opt-in; keeps already-captured dynamic sources current across disable/re-enable. */
+    _updateCapturedDynamicTexture?: (tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean) => void;
     /** @internal */
     _deviceLostRecovery?: DeviceLostRecoveryState;
     /** @internal */
@@ -265,7 +267,6 @@ export function getRenderingContextKind(context: RenderingContext): string {
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;
     dt(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, levels: number, samplerDesc: GPUSamplerDescriptor): void;
-    du(tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean): void;
     c<Args extends unknown[]>(renderable: Renderable, builder: (...args: Args) => Renderable | Promise<Renderable>, ...args: Args): void;
     x(
         source: GPUCopyExternalImageSource,

@@ -260,13 +260,17 @@ textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
 
 Dynamic texture creation and uploads use `engine._dlr?.dt(...)` and
-`engine._dlr?.du(...)` respectively. The creation seam receives the texture,
+`engine._updateCapturedDynamicTexture?.(...)` respectively. The creation seam receives the texture,
 dimensions, format, mip count, and existing sampler descriptor; capture alone
 constructs the `dynamic` recovery source. The update seam receives the external
 image and already-computed flip/premultiplication flags after a successful GPU
 copy; capture alone checks and updates the retained source. Without recovery,
 neither API reads `_recoverySource`, encodes a source kind, or retains the image.
-Disabling capture also stops recording subsequent uploads to existing textures.
+The update seam is installed only by recovery opt-in and remains installed after
+capture is disabled. It updates only existing `dynamic` records, preserving the
+latest successful upload and flags if recovery is later re-enabled; it never
+creates records for textures created while capture is disabled. Engines that
+never opt in retain only the optional call and never inspect recovery metadata.
 
 ### Captured textures
 

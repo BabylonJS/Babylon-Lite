@@ -150,7 +150,7 @@ export function updateDynamicTexture(engine: EngineContext, tex: DynamicTexture2
 
     engine._device.queue.copyExternalImageToTexture({ source, flipY: invertY }, { texture: tex.texture, premultipliedAlpha }, [tex.width, tex.height]);
 
-    engine._dlr?.du(tex, source, invertY, premultipliedAlpha);
+    engine._updateCapturedDynamicTexture?.(tex, source, invertY, premultipliedAlpha);
 
     if (tex.texture.mipLevelCount > 1) {
         generateMipmaps(engine, tex.texture);

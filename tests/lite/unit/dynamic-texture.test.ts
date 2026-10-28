@@ -140,6 +140,34 @@ describe("updateDynamicTexture", () => {
 });
 
 describe("createDynamicTexture device-lost recovery", () => {
+    it("restores the latest source and flags after capture is disabled and re-enabled", async () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const tex = createDynamicTexture(engine, 16, 16);
+        const first = fakeSource(16, 16);
+        const latest = fakeSource(16, 16);
+        updateDynamicTexture(engine, tex, first);
+        recovery.disable();
+        expect(engine._dlr).toBeUndefined();
+        updateDynamicTexture(engine, tex, latest, { invertY: false, premultiplyAlpha: true });
+        const uncaptured = createDynamicTexture(engine, 16, 16);
+        updateDynamicTexture(engine, uncaptured, latest);
+        expect(uncaptured._recoverySource).toBeUndefined();
+
+        const resumed = enableDeviceLostSpriteRecovery(engine);
+        try {
+            cap.copyCalls.length = 0;
+            await rebuildDynamicTexture2D(engine, tex);
+            expect(cap.copyCalls).toHaveLength(1);
+            expect(cap.copyCalls[0]!.src.source).toBe(latest);
+            expect(cap.copyCalls[0]!.src.flipY).toBe(false);
+            expect(cap.copyCalls[0]!.dst.premultipliedAlpha).toBe(true);
+        } finally {
+            resumed.disable();
+        }
+    });
+
     function withRecovery(engine: EngineContext): void {
         enableDeviceLostSpriteRecovery(engine);
     }

@@ -74,6 +74,15 @@ function releaseCapturedTexture(tex: Texture2D): void {
     }
 }
 
+function updateCapturedDynamicTexture(tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean): void {
+    const rec = tex._recoverySource;
+    if (rec?.kind === "dynamic") {
+        rec.source = source;
+        rec.flipY = flipY;
+        rec.premultipliedAlpha = premultipliedAlpha;
+    }
+}
+
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
     const owner = new WeakRef(state);
@@ -86,6 +95,8 @@ function attachRecoveryCapture(engine: EngineContext): void {
     // for any other engine still capturing.
     _setDerivedTexture2DHook(trackDerivedTexture);
     _setTextureReleaseHook(releaseCapturedTexture);
+    // Disabling capture stops new records, not updates to sources a later enable may reuse.
+    engine._updateCapturedDynamicTexture = updateCapturedDynamicTexture;
     engine._dlr = {
         t: stamp,
         dt(tex, width, height, format, levels, samplerDesc): void {
@@ -100,14 +111,6 @@ function attachRecoveryCapture(engine: EngineContext): void {
                 flipY: true,
                 premultipliedAlpha: false,
             });
-        },
-        du(tex, source, flipY, premultipliedAlpha): void {
-            const rec = tex._recoverySource;
-            if (rec?.kind === "dynamic") {
-                rec.source = source;
-                rec.flipY = flipY;
-                rec.premultipliedAlpha = premultipliedAlpha;
-            }
         },
         c(renderable, builder, ...args): void {
             if (state._meshCaptureRefs) {
