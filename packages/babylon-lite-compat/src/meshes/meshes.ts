@@ -858,6 +858,11 @@ export class Mesh extends AbstractMesh {
         }
     }
 
+    /** @internal Release the compat manager's ownership claim during scene/container teardown. */
+    public _releaseMorphTargetManagerOwnership(): void {
+        this._morphTargetManager?.dispose();
+    }
+
     // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
 
     /** Legacy `Mesh.CreateSphere(name, segments, diameter, scene)`. */

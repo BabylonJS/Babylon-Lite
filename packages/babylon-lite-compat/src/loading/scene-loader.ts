@@ -171,6 +171,7 @@ export class AssetContainer {
         let firstError: unknown;
         for (const wrapper of this._meshRegistry.values()) {
             try {
+                wrapper._releaseMorphTargetManagerOwnership();
                 wrapper._disposeWrapperOnly();
             } catch (error) {
                 if (!hasError) {

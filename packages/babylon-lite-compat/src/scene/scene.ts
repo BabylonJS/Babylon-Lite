@@ -1384,6 +1384,11 @@ export class Scene extends AbstractScene {
         runCleanup(() => this._particleSystemCache.clear());
         runCleanup(() => this._retiredParticleSystems.clear());
         runCleanup(() => this._pendingMorphBuilds.splice(0));
+        for (const wrapper of new Set(this._meshWrappers.values())) {
+            if (wrapper instanceof Mesh) {
+                runCleanup(() => wrapper._releaseMorphTargetManagerOwnership());
+            }
+        }
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

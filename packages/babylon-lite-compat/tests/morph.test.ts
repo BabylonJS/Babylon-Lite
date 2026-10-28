@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { disposeMeshGpu } from "babylon-lite";
 import type { Mesh as LiteMesh, MorphTargetData } from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
+import { AssetContainer } from "../src/loading/scene-loader";
 import { MorphTarget, MorphTargetManager } from "../src/morph/morph";
 import { Mesh } from "../src/meshes/meshes";
-import type { Scene } from "../src/scene/scene";
+import { Scene } from "../src/scene/scene";
 
 describe("MorphTarget / MorphTargetManager (compat over native createMorphTargets)", () => {
     function morphData(name: string): MorphTargetData {
@@ -207,6 +209,40 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         mesh.morphTargetManager = null;
         manager.dispose();
         expect(loaded._disposed).toBe(true);
+    });
+
+    it("releases discovered manager ownership during scene teardown", () => {
+        const loaded = morphData("loaded");
+        const lite = liteMesh("morphed", loaded);
+        const scene = new Scene(new NullEngine());
+        scene._lite.meshes.push(lite);
+        const mesh = Mesh._fromLite(lite, undefined, scene);
+
+        expect(mesh.morphTargetManager).not.toBeNull();
+        expect(loaded._refCount).toBe(2);
+
+        scene.dispose();
+
+        expect(loaded._disposed).toBe(true);
+        expect(loaded.deltasBuffer.destroy).toHaveBeenCalledOnce();
+        expect(loaded.weightsBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("releases discovered manager ownership during asset-container teardown", () => {
+        const loaded = morphData("loaded");
+        const lite = liteMesh("morphed", loaded);
+        const root = { name: "__root__", children: [lite] };
+        const container = new AssetContainer({ entities: [root] } as never, () => disposeMeshGpu(lite));
+        const mesh = container.meshes[1]!;
+
+        expect(mesh.morphTargetManager).not.toBeNull();
+        expect(loaded._refCount).toBe(2);
+
+        container.dispose();
+
+        expect(loaded._disposed).toBe(true);
+        expect(loaded.deltasBuffer.destroy).toHaveBeenCalledOnce();
+        expect(loaded.weightsBuffer.destroy).toHaveBeenCalledOnce();
     });
 
     it("cancels a stale authored build when a discovered manager is restored before startup", () => {
