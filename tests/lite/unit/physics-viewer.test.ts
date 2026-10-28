@@ -183,6 +183,28 @@ describe("physics constraint viewer", () => {
         expect(viewer._constraintLines).toEqual([]);
         expect(viewer._constraintDisks).toEqual([]);
         expect(viewer._constraintArrowheads).toEqual([]);
+    });
+
+    it("removes every mesh when a listener re-enters hide during viewer disposal", () => {
+        const { viewer, scene, constraint } = setup();
+        const a = getPhysicsConstraintDebug(constraint());
+        const b = getPhysicsConstraintDebug(constraint());
+        showPhysicsConstraint(viewer, a);
+        showPhysicsConstraint(viewer, b);
+        const reentrantResults: boolean[] = [];
+        const off = onSceneChange(scene, (event) => {
+            if (event.type === "removed") {
+                reentrantResults.push(hidePhysicsConstraint(viewer, a), hidePhysicsConstraint(viewer, b));
+            }
+        });
+        disposePhysicsViewer(viewer);
+        off();
+        expect(reentrantResults.length).toBeGreaterThan(0);
+        expect(reentrantResults.every((result) => !result)).toBe(true);
+        expect(scene.meshes).toEqual([]);
+        expect(viewer._constraintMeshes).toEqual([]);
+        expect(viewer._constraintKeys).toEqual([]);
+        expect(viewer._constraintGroups).toEqual([]);
         expect(scene._beforeRender).not.toContain(viewer._update);
     });
 });

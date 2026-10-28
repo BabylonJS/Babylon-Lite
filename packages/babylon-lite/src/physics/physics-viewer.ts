@@ -274,18 +274,20 @@ export function hidePhysicsBody(viewer: PhysicsViewer, body: PhysicsBody): boole
 
 /** Disposes all physics debug meshes and unregisters the viewer update hook. */
 export function disposePhysicsViewer(viewer: PhysicsViewer): void {
-    while (viewer._bodies.length > 0) {
-        hidePhysicsBody(viewer, viewer._bodies[0]!);
-    }
-    while (viewer._constraintMeshes.length > 0) {
-        removeFromScene(viewer.scene, viewer._constraintMeshes.pop()!);
-    }
+    // Commit all bookkeeping before removing meshes so reentrant listeners see an empty viewer.
+    const meshes = viewer._meshes.splice(0).concat(viewer._constraintMeshes.splice(0));
+    viewer._bodies.length = 0;
     viewer._constraintLines.length = 0;
     viewer._constraintDisks.length = 0;
     viewer._constraintArrowheads.length = 0;
     viewer._constraintKeys.length = 0;
     viewer._constraintGroups.length = 0;
     unregisterViewerUpdate(viewer);
+    batchSceneChanges(viewer.scene, () => {
+        for (const mesh of meshes) {
+            removeFromScene(viewer.scene, mesh);
+        }
+    });
 }
 
 function registerViewerUpdate(viewer: PhysicsViewer): void {
