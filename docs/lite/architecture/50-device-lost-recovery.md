@@ -140,7 +140,7 @@ the descriptor type, the switch, and its four `await import()` calls: each
 builder is already its own module, so replay needs no dispatch. It is also more
 correct — the tuple silently dropped `enableNoise` for the ground and DDS
 skybox, which a closure captures for free — and it composes across repeated
-losses, because each rebuilt renderable stamps a fresh thunk.
+losses, because enabled capture stamps a fresh thunk on each rebuilt background.
 
 `_rebuild` is only for renderables that no retained structure owns. Mesh-backed
 renderables keep recovering through `scene._groups`, and must not also carry a
@@ -155,33 +155,38 @@ on one renderable would rebuild it twice and leave a duplicate in
 orphans — not mesh-backed, pushed straight into `scene._renderables` by a loader
 that then discards the locals they were built from.
 
-Two capture-based designs were measured first and rejected. Describing
+Historical measurements (before the Scene-only capture contract above): two
+capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
 re-deriving the rules during recovery — cost ~65 B for _every_ environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
-Discovery removes the loader seam entirely. Against the pre-feature baseline the
-feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
+Discovery removed the loader seam entirely. Against the pre-feature baseline the
+then-current feature measured +1,707 B across 73 scenes, of which scene164 — the recovery
 parity scene, and the only one that enables recovery — carries +1,554 B; 56
-scenes are _smaller_ than before because the loader capture seam is gone. The 11
-background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
-unconditionally rather than gated on capture being enabled; one closure per
-background is cheaper than the branch that would guard it. Choosing thunks over
+scenes were _smaller_ than before because the loader capture seam was gone. The 11
+background-building scenes paid 16–56 B each for an unconditional thunk. That
+revision favored the thunk's byte cost over a capture guard, but still allocated
+and retained recovery-only closures without opt-in. The current design supersedes
+that tradeoff: only Scene-enabled capture constructs background thunks; builders
+retain only the optional seam call. These historical figures are not measurements
+of the current design. Choosing thunks over
 descriptors also lowered scene164's ceiling requirement by ~1.6 KB, since the
 recovery chunk no longer carries the switch or its dynamic imports.
 
 Property names beginning with `_` are mangled in release builds, so `_rebuild`
 costs no more than an abbreviated name would; internal fields are spelled out.
 
-Capture arguments must stay primitive. Rollup tracks the property values of
+Capture must not receive branch-gating objects. Rollup tracks the property values of
 object literals and uses them to prove branches dead. Passing an object whose
 properties gate tree-shakeable code — such as `bgOptions`, whose `skipSkybox` /
 `skipGround` guard the loader's `await import()` of the background modules —
 forces Rollup to deoptimize it, because the unknown callee could mutate it. It
 then loses the known property values and retains `background-ground.js`
 (+4,968 B) and `background-solid-skybox.js` (+1,882 B) in scenes that had
-tree-shaken them. This is why the remaining seams (`_dlr.e` / `_dlr.h`) pass
-already-computed scalars.
+tree-shaken them. This is why the loader seams (`_dlr.e` / `_dlr.h`) pass
+already-computed scalars. Background capture passes existing builders and their
+arguments, never the loader's branch-gating options object.
 
 Shadow generators are recovered in place before material groups are rebuilt.
 Recovery deduplicates generators referenced by `scene.lights` and
