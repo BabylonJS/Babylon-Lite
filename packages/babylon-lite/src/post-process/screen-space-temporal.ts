@@ -1,8 +1,8 @@
 /**
- * Shared temporal owner for the screen-space contact-shadow and global-illumination
+ * Shared temporal owner for the screen-space contact-shadow, ambient-occlusion, and global-illumination
  * effects (see `docs/lite/architecture/52-screen-space-effects.md`).
  *
- * Owns the two internal passes that run after either producer:
+ * Owns the two internal passes that run after each producer:
  *   1. Resolve: reconstruct the current world position, reproject through the previous
  *      view-projection, reject off-screen/depth-mismatched history, clamp accepted
  *      history to the current 3x3 neighborhood, and blend the current estimate.
@@ -11,7 +11,7 @@
  *
  * The module exports pure functions for the reset matrix, the accumulation ramp, and the
  * rotating phase index so they can be unit tested without a GPU device. All GPU state
- * lives behind `createScreenSpaceTemporalOwner`, which is only invoked by the two public
+ * lives behind `createScreenSpaceTemporalOwner`, which is only invoked by the public
  * task factories — importing this module in isolation allocates nothing at module scope.
  */
 
