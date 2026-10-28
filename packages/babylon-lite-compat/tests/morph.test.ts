@@ -290,6 +290,37 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         expect(buffers[1]!.destroy).toHaveBeenCalledOnce();
     });
 
+    it("releases a shared manager after its meshes are disposed before scene teardown", () => {
+        const loaded = morphData("shared");
+        const firstLite = liteMesh("first", loaded);
+        const secondLite = liteMesh("second", null);
+        const engine = new NullEngine();
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            queue: { writeBuffer: vi.fn() },
+        } as unknown as GPUDevice;
+        const scene = new Scene(engine);
+        scene._lite.meshes.push(firstLite, secondLite);
+        const firstMesh = Mesh._fromLite(firstLite, undefined, scene);
+        const secondMesh = Mesh._fromLite(secondLite, undefined, scene);
+        const manager = firstMesh.morphTargetManager!;
+
+        secondMesh.morphTargetManager = manager;
+        expect(loaded._refCount).toBe(3);
+
+        firstMesh.dispose();
+        secondMesh.dispose();
+
+        expect(manager._lite).toBe(loaded);
+        expect(loaded._disposed).not.toBe(true);
+
+        scene.dispose();
+
+        expect(manager._lite).toBeUndefined();
+        expect(loaded._disposed).toBe(true);
+        expect(loaded.deltasBuffer.destroy).toHaveBeenCalledOnce();
+        expect(loaded.weightsBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
     it("cancels a stale authored build when a discovered manager is restored before startup", () => {
         const loaded = morphData("loaded");
         const lite = liteMesh("morphed", loaded);

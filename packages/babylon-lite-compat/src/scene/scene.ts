@@ -79,6 +79,7 @@ import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 import { Skeleton } from "../bones/skeleton.js";
 import { ParticleSystem } from "../particles/particle-system.js";
+import type { MorphTargetManager } from "../morph/morph.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -238,6 +239,7 @@ export class Scene extends AbstractScene {
         mesh: { _lite: unknown; morphTargetManager: unknown };
         manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void };
     }> = [];
+    private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
     private _materialPluginsRequested = false;
     private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
@@ -508,6 +510,11 @@ export class Scene extends AbstractScene {
         if (manager) {
             this._pendingMorphBuilds.push({ mesh, manager });
         }
+    }
+
+    /** @internal Retain manager-wrapper ownership until scene teardown, independently of mesh lifetime. */
+    public _retainMorphTargetManagerOwnership(manager: MorphTargetManager): void {
+        this._ownedMorphTargetManagers.add(manager);
     }
 
     /** @internal Return the Lite engine used to update loader-produced resources. */
@@ -1384,11 +1391,10 @@ export class Scene extends AbstractScene {
         runCleanup(() => this._particleSystemCache.clear());
         runCleanup(() => this._retiredParticleSystems.clear());
         runCleanup(() => this._pendingMorphBuilds.splice(0));
-        for (const wrapper of new Set(this._meshWrappers.values())) {
-            if (wrapper instanceof Mesh) {
-                runCleanup(() => wrapper._releaseMorphTargetManagerOwnership());
-            }
+        for (const manager of this._ownedMorphTargetManagers) {
+            runCleanup(() => manager.dispose());
         }
+        this._ownedMorphTargetManagers.clear();
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

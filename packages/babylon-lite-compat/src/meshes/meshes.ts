@@ -793,6 +793,9 @@ export class Mesh extends AbstractMesh {
     /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
     public override _bindLoadedScene(scene: Scene): void {
         super._bindLoadedScene(scene);
+        for (const manager of this._ownedMorphTargetManagers) {
+            scene._retainMorphTargetManagerOwnership(manager);
+        }
         if (this._morphTargetManager?._lite) {
             this._morphTargetManager._adoptEngine(scene._getLiteEngine());
         } else if (this._morphTargetManager) {
@@ -828,6 +831,11 @@ export class Mesh extends AbstractMesh {
     private _morphTargetManager: MorphTargetManager | null = null;
     private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
 
+    private _retainMorphTargetManagerOwnership(manager: MorphTargetManager): void {
+        this._ownedMorphTargetManagers.add(manager);
+        this._scene?._retainMorphTargetManagerOwnership?.(manager);
+    }
+
     /**
      * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
      * `createMorphTargets` and stores it on the Lite mesh; the compat manager is
@@ -837,7 +845,7 @@ export class Mesh extends AbstractMesh {
     public get morphTargetManager(): MorphTargetManager | null {
         if (!this._morphTargetManager && this._lite.morphTargets) {
             this._morphTargetManager = MorphTargetManager._fromLite(this._lite.morphTargets, this._scene?._getLiteEngine());
-            this._ownedMorphTargetManagers.add(this._morphTargetManager);
+            this._retainMorphTargetManagerOwnership(this._morphTargetManager);
         }
         return this._morphTargetManager;
     }
@@ -848,7 +856,7 @@ export class Mesh extends AbstractMesh {
         }
         this._morphTargetManager = value;
         if (value) {
-            this._ownedMorphTargetManagers.add(value);
+            this._retainMorphTargetManagerOwnership(value);
         }
         this._scene?._registerMorphTargetManager(this, value?._lite ? null : value);
         if (!value) {
