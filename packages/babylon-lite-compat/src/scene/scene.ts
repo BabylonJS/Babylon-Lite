@@ -500,10 +500,7 @@ export class Scene extends AbstractScene {
      * start. Building is deferred so the mesh's base CPU geometry (set by primitive
      * builders / `VertexData.applyToMesh`) exists when per-target deltas are computed.
      */
-    public _registerMorphTargetManager(
-        mesh: { _lite: unknown; morphTargetManager: unknown },
-        manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } | null
-    ): void {
+    public _registerMorphTargetManager(mesh: { _lite: unknown; morphTargetManager: unknown }, manager: { _build(mesh: never, engine: EngineContext): void } | null): void {
         const index = this._pendingMorphBuilds.findIndex((pending) => pending.mesh === mesh);
         if (index !== -1) {
             this._pendingMorphBuilds.splice(index, 1);
@@ -543,6 +540,9 @@ export class Scene extends AbstractScene {
 
     /** @internal Return the canonical compat wrapper for a registered Lite particle system. */
     public _wrapParticleSystem(lite: LiteParticleSystem): ParticleSystem {
+        if (this._disposed) {
+            return ParticleSystem._fromLite(lite, this);
+        }
         let wrapper = this._particleSystemCache.get(lite);
         if (!wrapper) {
             wrapper = ParticleSystem._fromLite(lite, this);

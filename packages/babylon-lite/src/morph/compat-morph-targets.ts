@@ -10,10 +10,22 @@ function destroyMorphTargets(morphTargets: MorphTargetData): void {
     morphTargets.weightsBuffer.destroy();
 }
 
+/** Retain a morph-target resource for a non-mesh owner such as a compatibility manager. */
+export function retainMorphTargets(morphTargets: MorphTargetData): void {
+    retain(morphTargets);
+}
+
+/** Release a non-mesh morph-target ownership claim and destroy the resource when it was the last claim. */
+export function releaseMorphTargets(morphTargets: MorphTargetData): void {
+    if (release(morphTargets)) {
+        destroyMorphTargets(morphTargets);
+    }
+}
+
 function releaseMeshMorphTargets(mesh: Mesh): void {
     const current = mesh.morphTargets;
-    if (current && release(current)) {
-        destroyMorphTargets(current);
+    if (current) {
+        releaseMorphTargets(current);
     }
 }
 

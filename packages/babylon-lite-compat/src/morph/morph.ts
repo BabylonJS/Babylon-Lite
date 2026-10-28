@@ -11,7 +11,7 @@
  * (`target.influence = …`) re-upload via `setMorphTargetWeights`.
  */
 
-import { adoptMeshMorphTargets, createMorphTargets, setMorphTargetWeight, setMorphTargetWeights } from "babylon-lite";
+import { adoptMeshMorphTargets, createMorphTargets, releaseMorphTargets, retainMorphTargets, setMorphTargetWeight, setMorphTargetWeights } from "babylon-lite";
 import type { EngineContext, MorphTargetData } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
@@ -92,6 +92,7 @@ export class MorphTargetManager {
     public static _fromLite(lite: MorphTargetData, engine?: EngineContext): MorphTargetManager {
         const manager = new MorphTargetManager();
         manager._lite = lite;
+        retainMorphTargets(lite);
         manager._engine = engine;
         for (let index = 0; index < lite.count; index++) {
             manager._targets.push(MorphTarget._fromLite(lite.names?.[index] ?? `morphTarget${index}`, lite.weights[index] ?? 0, manager, index));
@@ -170,7 +171,11 @@ export class MorphTargetManager {
             return { positions, normals };
         });
         const weights = this._targets.slice(0, 4).map((t) => t.influence);
+        if (this._lite) {
+            releaseMorphTargets(this._lite);
+        }
         this._lite = createMorphTargets(engine, targets, vertexCount, weights);
+        retainMorphTargets(this._lite);
         adoptMeshMorphTargets(mesh._lite, this._lite);
     }
 
@@ -181,5 +186,14 @@ export class MorphTargetManager {
         }
         const weights = this._targets.slice(0, 4).map((t) => t.influence);
         setMorphTargetWeights(this._engine, this._lite, weights);
+    }
+
+    /** Babylon.js `MorphTargetManager.dispose()` — release this manager's morph-resource claim. */
+    public dispose(): void {
+        if (this._lite) {
+            releaseMorphTargets(this._lite);
+            this._lite = undefined;
+        }
+        this._engine = undefined;
     }
 }

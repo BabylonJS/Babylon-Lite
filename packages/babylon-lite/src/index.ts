@@ -859,7 +859,7 @@ export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimat
 export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
-export { adoptMeshMorphTargets, shareMeshMorphTargets, setMorphTargetWeight } from "./morph/compat-morph-targets.js";
+export { adoptMeshMorphTargets, releaseMorphTargets, retainMorphTargets, shareMeshMorphTargets, setMorphTargetWeight } from "./morph/compat-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 export { enableUnsupportedGltfMaterialExtension } from "./loader-gltf/gltf-feature-unsupported-extension.js";
 export { bakeVat, bakeVatMany, prepareVat, prepareVatMany, createVatBakeResult, createVatBakeResults, attachVat } from "./vat/vat-baker.js";

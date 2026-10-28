@@ -6,12 +6,21 @@ import { NullEngine } from "../src/engine/engine";
 import { Mesh } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
-function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>; overrides: Map<number, unknown>; worldOverrides: Map<number, unknown> } {
-    const bake = vi.fn();
+function createSkeleton(nodeIndices = [0, 1]): {
+    skeleton: Skeleton;
+    boneMatrices: Float32Array;
+    bake: ReturnType<typeof vi.fn>;
+    overrides: Map<number, unknown>;
+    worldOverrides: Map<number, unknown>;
+} {
     const overrides = new Map<number, unknown>();
     const worldOverrides = new Map<number, unknown>();
-    const root = { name: "root", _nodeIndex: 0 };
-    const hand = { name: "hand", _nodeIndex: 1, parent: root };
+    const boneMatrices = new Float32Array([1, 0, 0, 1]);
+    const bake = vi.fn(() => {
+        boneMatrices.set([1, 0, 0, 1]);
+    });
+    const root = { name: "root", _nodeIndex: nodeIndices[0]! };
+    const hand = { name: "hand", _nodeIndex: nodeIndices[1]!, parent: root };
     const lite = {
         bones: [root, hand],
         _byName: new Map([
@@ -22,7 +31,7 @@ function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>;
         _worldOverrides: worldOverrides,
         _bake: bake,
     } as unknown as LiteSkeleton;
-    return { skeleton: Skeleton._fromLite(lite, 0), bake, overrides, worldOverrides };
+    return { skeleton: Skeleton._fromLite(lite, 0), boneMatrices, bake, overrides, worldOverrides };
 }
 
 describe("loader-produced Skeleton and Bone wrappers", () => {
@@ -60,17 +69,55 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         expect(bake).toHaveBeenCalledTimes(2);
     });
 
-    it("returns the whole skeleton to rest with one unconditional bake and preserves the current pose during prepare", () => {
-        const { skeleton, bake, overrides, worldOverrides } = createSkeleton();
-        worldOverrides.set(0, {});
+    it("preserves an evaluated non-rest pose during prepare", () => {
+        const { skeleton, boneMatrices, bake } = createSkeleton();
+        boneMatrices.set([1, 2, 3, 1]);
+        const evaluatedPose = Array.from(boneMatrices);
+
+        skeleton.prepare();
+
+        expect(Array.from(boneMatrices)).toEqual(evaluatedPose);
+        expect(bake).not.toHaveBeenCalled();
+    });
+
+    it("returns a stopped non-rest pose to rest even when both override maps are empty", () => {
+        const { skeleton, boneMatrices, bake, overrides, worldOverrides } = createSkeleton();
+        boneMatrices.set([4, 3, 2, 1]);
+        expect(overrides.size).toBe(0);
+        expect(worldOverrides.size).toBe(0);
 
         skeleton.returnToRest();
+
+        expect(Array.from(boneMatrices)).toEqual([1, 0, 0, 1]);
         expect(overrides.size).toBe(0);
         expect(worldOverrides.size).toBe(0);
         expect(bake).toHaveBeenCalledTimes(1);
+    });
 
-        skeleton.prepare();
-        expect(bake).toHaveBeenCalledTimes(1);
+    it("returns only the owning skeleton to rest when an asset shares override maps", () => {
+        const sharedOverrides = new Map<number, unknown>([
+            [1, { position: true }],
+            [3, { position: true }],
+        ]);
+        const sharedWorldOverrides = new Map<number, unknown>([
+            [0, { world: true }],
+            [2, { world: true }],
+        ]);
+        const first = createSkeleton([0, 1]);
+        const second = createSkeleton([2, 3]);
+        Object.defineProperties(first.skeleton._lite, {
+            _overrides: { value: sharedOverrides },
+            _worldOverrides: { value: sharedWorldOverrides },
+        });
+        Object.defineProperties(second.skeleton._lite, {
+            _overrides: { value: sharedOverrides },
+            _worldOverrides: { value: sharedWorldOverrides },
+        });
+
+        first.skeleton.returnToRest();
+
+        expect([...sharedOverrides.keys()]).toEqual([3]);
+        expect([...sharedWorldOverrides.keys()]).toEqual([2]);
     });
 
     it("surfaces stable scene skeleton wrappers from loaded meshes", () => {

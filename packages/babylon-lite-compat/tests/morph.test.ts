@@ -152,29 +152,68 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         const secondManager = secondSourceMesh.morphTargetManager!;
 
         targetMesh.morphTargetManager = firstManager;
-        expect(first._refCount).toBe(2);
+        expect(first._refCount).toBe(3);
 
         targetMesh.morphTargetManager = firstManager;
-        expect(first._refCount).toBe(2);
+        expect(first._refCount).toBe(3);
 
         targetMesh.morphTargetManager = secondManager;
-        expect(first._refCount).toBe(1);
-        expect(second._refCount).toBe(2);
+        expect(first._refCount).toBe(2);
+        expect(second._refCount).toBe(3);
 
         targetMesh.morphTargetManager = null;
-        expect(second._refCount).toBe(1);
+        expect(second._refCount).toBe(2);
         expect(target.morphTargets).toBeNull();
 
         targetMesh.morphTargetManager = firstManager;
         disposeMeshGpu(source);
         expect(first._disposed).not.toBe(true);
         disposeMeshGpu(target);
+        expect(first._disposed).not.toBe(true);
+        firstManager.dispose();
         expect(first._disposed).toBe(true);
+        disposeMeshGpu(secondSource);
+        secondManager.dispose();
+        expect(second._disposed).toBe(true);
+    });
+
+    it("clears loader morph data before the manager getter is read", () => {
+        const loaded = morphData("loaded");
+        const lite = liteMesh("morphed", loaded);
+        const mesh = Mesh._fromLite(lite);
+
+        mesh.morphTargetManager = null;
+
+        expect(lite.morphTargets).toBeNull();
+        expect(loaded._disposed).toBe(true);
+        expect(mesh.morphTargetManager).toBeNull();
+    });
+
+    it("keeps a saved discovered manager alive while detached and restores it safely", () => {
+        const loaded = morphData("loaded");
+        const lite = liteMesh("morphed", loaded);
+        const mesh = Mesh._fromLite(lite);
+        const manager = mesh.morphTargetManager!;
+
+        mesh.morphTargetManager = null;
+        expect(loaded._disposed).not.toBe(true);
+
+        mesh.morphTargetManager = manager;
+        expect(lite.morphTargets).toBe(loaded);
+        expect(() => {
+            manager.getTarget(0).influence = 0.5;
+        }).not.toThrow();
+
+        mesh.morphTargetManager = null;
+        manager.dispose();
+        expect(loaded._disposed).toBe(true);
     });
 
     it("cancels a stale authored build when a discovered manager is restored before startup", () => {
         const loaded = morphData("loaded");
         const lite = liteMesh("morphed", loaded);
+        lite._cpuPositions = new Float32Array([0, 0, 0]);
+        lite._cpuNormals = new Float32Array([0, 0, 1]);
         const scene = new (class {
             public readonly pending: Array<{ mesh: { morphTargetManager: unknown }; manager: MorphTargetManager }> = [];
             public _getLiteEngine(): never {
@@ -195,13 +234,18 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         const mesh = Mesh._fromLite(lite, undefined, scene as unknown as Scene);
         const discovered = mesh.morphTargetManager!;
         const authored = new MorphTargetManager();
-        const build = vi.spyOn(authored, "_build");
+        const authoredBuild = vi.spyOn(authored, "_build");
+        const discoveredBuild = vi.spyOn(discovered, "_build");
 
         mesh.morphTargetManager = authored;
+        expect(scene.pending).toEqual([{ mesh, manager: authored }]);
         mesh.morphTargetManager = discovered;
+        expect(scene.pending).toEqual([]);
         scene.flush();
 
-        expect(build).not.toHaveBeenCalled();
+        expect(authoredBuild).not.toHaveBeenCalled();
+        expect(discoveredBuild).not.toHaveBeenCalled();
         expect(lite.morphTargets).toBe(loaded);
+        expect((lite.morphTargets as MorphTargetData).targets[0]!.positions).toEqual(new Float32Array());
     });
 });

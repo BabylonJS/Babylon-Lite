@@ -32,7 +32,8 @@ import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 import { LiteCompatError } from "../src/error";
 import { NodeParticleSystemSet, ParticleSystemSet } from "../src/particles/node-particle-system-set";
 import { ParticleSystem } from "../src/particles/particle-system";
-import type { Scene } from "../src/scene/scene";
+import { NullEngine } from "../src/engine/engine";
+import { Scene } from "../src/scene/scene";
 
 const parseMock = vi.mocked(parseNodeParticleSetFromSnippet);
 const registerMock = vi.mocked(registerNodeParticleSet);
@@ -106,6 +107,25 @@ describe("NodeParticleSystemSet", () => {
         expect(() => set.serialize()).toThrow(LiteCompatError);
         expect(() => set.editAsync()).toThrow(LiteCompatError);
         expect(() => NodeParticleSystemSet.CreateDefault("d")).toThrow(LiteCompatError);
+    });
+
+    it("does not repopulate a disposed scene when a delayed build completes", async () => {
+        parseMock.mockReset();
+        let resolveSet!: (set: LiteNodeParticleSet) => void;
+        parseMock.mockReturnValueOnce(
+            new Promise<LiteNodeParticleSet>((resolve) => {
+                resolveSet = resolve;
+            })
+        );
+        const scene = new Scene(new NullEngine());
+        const build = NodeParticleSystemSet.Parse({}).buildAsync(scene);
+
+        scene.dispose();
+        resolveSet({ systems: [{ updateSpeed: 0.1, texture: null }] } as unknown as LiteNodeParticleSet);
+        const set = await build;
+
+        expect(set.systems).toHaveLength(1);
+        expect(scene.particleSystems).toEqual([]);
     });
 });
 
