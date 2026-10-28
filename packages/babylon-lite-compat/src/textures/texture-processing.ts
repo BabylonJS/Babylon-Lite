@@ -118,10 +118,7 @@ export async function TransmissionScatterToSingleScatterAlbedoAsync(
     _outputOptions?: ITextureProcessorOutputOptions
 ): Promise<ITextureProcessOperand> {
     requireConstants("TransmissionScatterToSingleScatterAlbedoAsync", [transmissionColor, transmissionScatter]);
-    return constantResult(
-        color(transmissionScatterToSingleScatterAlbedoConstants(tuple(factor(transmissionColor)), tuple(factor(transmissionScatter)))),
-        outputChannelMask
-    );
+    return constantResult(color(transmissionScatterToSingleScatterAlbedoConstants(tuple(factor(transmissionColor)), tuple(factor(transmissionScatter)))), outputChannelMask);
 }
 
 export async function MultiScatterToSingleScatterAlbedoAsync(

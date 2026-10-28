@@ -36,7 +36,7 @@ export class MorphTarget {
     }
 
     public get influence(): number {
-        return this._liteIndex === undefined ? this._influence : this._manager?._getWeight(this._liteIndex) ?? this._influence;
+        return this._liteIndex === undefined ? this._influence : (this._manager?._getWeight(this._liteIndex) ?? this._influence);
     }
     public set influence(value: number) {
         this._influence = value;

@@ -83,7 +83,7 @@ export class Bone {
         const bone = Object.create(Bone.prototype) as Bone;
         Object.defineProperties(bone, {
             name: { value: lite.name, enumerable: true },
-            parent: { get: () => (lite.parent ? wrappers?.get(lite.parent) ?? null : null), enumerable: true },
+            parent: { get: () => (lite.parent ? (wrappers?.get(lite.parent) ?? null) : null), enumerable: true },
             _lite: { value: lite },
             _skeleton: { value: skeleton },
             _enabled: { value: true, writable: true },

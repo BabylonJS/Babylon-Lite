@@ -178,6 +178,25 @@ describe("ParticleSystemSet", () => {
         expect(registerMock).toHaveBeenCalledTimes(1);
     });
 
+    it("start() synchronizes per-system isStarted() without changing post-stop semantics", async () => {
+        parseMock.mockReset();
+        isStartedMock.mockReset();
+        const s0 = { updateSpeed: 0.1, texture: null };
+        const liteSet = { systems: [s0] } as unknown as LiteNodeParticleSet;
+        parseMock.mockResolvedValueOnce(liteSet);
+        const { scene } = makeScene();
+
+        const set = await NodeParticleSystemSet.Parse({}).buildAsync(scene);
+        const system = set.systems[0]!;
+        expect(system.isStarted()).toBe(false);
+
+        set.start();
+        expect(system.isStarted()).toBe(true);
+
+        system.stop();
+        expect(system.isStarted()).toBe(true);
+    });
+
     it("dispose() stops every built system via stopParticleSystem", async () => {
         parseMock.mockReset();
         stopMock.mockReset();

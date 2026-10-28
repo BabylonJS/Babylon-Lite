@@ -259,11 +259,7 @@ export class KHR_materials_scatter {
 
     public dispose(): void {}
 
-    public loadMaterialPropertiesAsync(
-        _context: string,
-        material: { extensions?: Record<string, unknown> },
-        _babylonMaterial: unknown
-    ): Promise<void> | null {
+    public loadMaterialPropertiesAsync(_context: string, material: { extensions?: Record<string, unknown> }, _babylonMaterial: unknown): Promise<void> | null {
         if (!material.extensions?.[this.name]) {
             return null;
         }

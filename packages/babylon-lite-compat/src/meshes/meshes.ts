@@ -836,7 +836,16 @@ export class Mesh extends AbstractMesh {
     }
     public set morphTargetManager(value: MorphTargetManager | null) {
         this._morphTargetManager = value;
-        if (value && this._scene) {
+        if (!value) {
+            this._lite.morphTargets = null;
+            return;
+        }
+        if (value._lite) {
+            this._lite.morphTargets = value._lite;
+            if (this._scene) {
+                value._adoptEngine(this._scene._getLiteEngine());
+            }
+        } else if (this._scene) {
             this._scene._registerMorphTargetManager(this, value);
         }
     }

@@ -93,7 +93,7 @@ export class ParticleSystem {
         system._texture = null;
         system._billboardScheduled = false;
         system._billboardOwnedBySet = false;
-        system._started = isParticleSystemStarted(lite);
+        system._started = isParticleSystemStarted(lite) === true;
         return system;
     }
 
@@ -195,6 +195,11 @@ export class ParticleSystem {
      */
     public _releaseBillboardToSet(): void {
         this._billboardOwnedBySet = true;
+    }
+
+    /** @internal Synchronize Babylon.js lifecycle state when the owning set starts this system. */
+    public _markStartedBySet(): void {
+        this._started = true;
     }
 
     /**

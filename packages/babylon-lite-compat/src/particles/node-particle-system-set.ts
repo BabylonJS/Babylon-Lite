@@ -26,7 +26,7 @@ import { parseNodeParticleSetFromSnippet, registerNodeParticleSet } from "babylo
 import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
-import { ParticleSystem } from "./particle-system.js";
+import type { ParticleSystem } from "./particle-system.js";
 import { unsupported } from "../error.js";
 
 /**
@@ -98,6 +98,7 @@ export class ParticleSystemSet {
         // build (from `systems[i].start()`) is skipped when the deferred adds flush.
         for (const system of this._systems ?? []) {
             system._releaseBillboardToSet();
+            system._markStartedBySet();
         }
         scene._deferAdd(() => {
             for (const system of this._systems ?? []) {

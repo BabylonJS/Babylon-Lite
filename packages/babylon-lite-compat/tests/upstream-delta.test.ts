@@ -49,9 +49,9 @@ describe("Babylon.js upstream delta surfaces", () => {
             ChannelMask.RGB
         );
         expect(rgb.factor).toEqual(new Color4(1, 1, 1, 1));
-        await expect(
-            DivideTexturesAsync("divide", { texture: {} as never }, { texture: null, factor: new Color4(1, 1, 1, 1) }, {} as never)
-        ).rejects.toThrow(/procedural texture processor/);
+        await expect(DivideTexturesAsync("divide", { texture: {} as never }, { texture: null, factor: new Color4(1, 1, 1, 1) }, {} as never)).rejects.toThrow(
+            /procedural texture processor/
+        );
     });
 
     it("reports that compat never installed the unsupported HTML-in-canvas polyfill", () => {

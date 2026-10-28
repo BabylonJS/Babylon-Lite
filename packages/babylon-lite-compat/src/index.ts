@@ -117,11 +117,7 @@ export {
     GaussianSplattingGpuSortOutput,
     GaussianSplattingGpuSorter,
 } from "./meshes/gaussian-splatting-gpu-sorter.js";
-export type {
-    GaussianSplattingGpuSortMatrix,
-    IGaussianSplattingGpuSortSource,
-    IGaussianSplattingGpuSortOptions,
-} from "./meshes/gaussian-splatting-gpu-sorter.js";
+export type { GaussianSplattingGpuSortMatrix, IGaussianSplattingGpuSortSource, IGaussianSplattingGpuSortOptions } from "./meshes/gaussian-splatting-gpu-sorter.js";
 export {
     MeshBlendingRadiusClass,
     PackMeshBlendingTag,
