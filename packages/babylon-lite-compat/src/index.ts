@@ -496,8 +496,6 @@ export {
     ThinFSR1SharpenPostProcess,
     ParticleHelper,
     PointsCloudSystem,
-    KHR_materials_scatter,
-    RegisterKHR_materials_scatter,
     CannonJSPlugin,
     AmmoJSPlugin,
     RecastJSPlugin,
@@ -515,6 +513,7 @@ export {
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
+export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "./loading/khr-materials-scatter.js";
 export type {
     EffectWrapperCustomShaderCodeProcessing,
     EffectWrapperCreationOptions,

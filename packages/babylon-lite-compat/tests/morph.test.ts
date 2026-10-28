@@ -1,11 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MorphTargetData } from "babylon-lite";
+import { disposeMeshGpu } from "babylon-lite";
+import type { Mesh as LiteMesh, MorphTargetData } from "babylon-lite";
 
 import { MorphTarget, MorphTargetManager } from "../src/morph/morph";
 import { Mesh } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 
 describe("MorphTarget / MorphTargetManager (compat over native createMorphTargets)", () => {
+    function morphData(name: string): MorphTargetData {
+        return {
+            count: 1,
+            names: [name],
+            weights: new Float32Array([0]),
+            weightsBuffer: { destroy: vi.fn() },
+            deltasBuffer: { destroy: vi.fn() },
+            targets: [{ positions: new Float32Array(), normals: null }],
+        } as unknown as MorphTargetData;
+    }
+
+    function liteMesh(name: string, morphTargets: MorphTargetData | null): LiteMesh {
+        const buffer = (): object => ({ destroy: vi.fn() });
+        return {
+            name,
+            children: [],
+            morphTargets,
+            _gpu: {
+                positionBuffer: buffer(),
+                normalBuffer: buffer(),
+                uvBuffer: buffer(),
+                indexBuffer: buffer(),
+            },
+        } as unknown as LiteMesh;
+    }
+
     it("stores absolute positions/normals and influence", () => {
         const t = new MorphTarget("a", 0.25);
         expect(t.name).toBe("a");
@@ -110,5 +137,71 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         expect(liteMesh.morphTargets).toBe(liteMorphs);
         expect(liteMesh.morphTargets.targets).toBe(targets);
         expect(pendingMorphBuilds).toEqual([]);
+    });
+
+    it("retains shared morph resources and releases replacement, clearing, and disposal claims", () => {
+        const first = morphData("first");
+        const second = morphData("second");
+        const source = liteMesh("source", first);
+        const secondSource = liteMesh("second-source", second);
+        const target = liteMesh("target", null);
+        const sourceMesh = Mesh._fromLite(source);
+        const secondSourceMesh = Mesh._fromLite(secondSource);
+        const targetMesh = Mesh._fromLite(target);
+        const firstManager = sourceMesh.morphTargetManager!;
+        const secondManager = secondSourceMesh.morphTargetManager!;
+
+        targetMesh.morphTargetManager = firstManager;
+        expect(first._refCount).toBe(2);
+
+        targetMesh.morphTargetManager = firstManager;
+        expect(first._refCount).toBe(2);
+
+        targetMesh.morphTargetManager = secondManager;
+        expect(first._refCount).toBe(1);
+        expect(second._refCount).toBe(2);
+
+        targetMesh.morphTargetManager = null;
+        expect(second._refCount).toBe(1);
+        expect(target.morphTargets).toBeNull();
+
+        targetMesh.morphTargetManager = firstManager;
+        disposeMeshGpu(source);
+        expect(first._disposed).not.toBe(true);
+        disposeMeshGpu(target);
+        expect(first._disposed).toBe(true);
+    });
+
+    it("cancels a stale authored build when a discovered manager is restored before startup", () => {
+        const loaded = morphData("loaded");
+        const lite = liteMesh("morphed", loaded);
+        const scene = new (class {
+            public readonly pending: Array<{ mesh: { morphTargetManager: unknown }; manager: MorphTargetManager }> = [];
+            public _getLiteEngine(): never {
+                return { _device: { queue: { writeBuffer: vi.fn() } } } as never;
+            }
+            public _registerMesh(): void {}
+            public _registerMorphTargetManager(mesh: { morphTargetManager: unknown }, manager: MorphTargetManager | null): void {
+                this.pending.splice(0, this.pending.length, ...(manager ? [{ mesh, manager }] : []));
+            }
+            public flush(): void {
+                for (const { mesh, manager } of this.pending) {
+                    if (mesh.morphTargetManager === manager) {
+                        manager._build(mesh as never, this._getLiteEngine());
+                    }
+                }
+            }
+        })();
+        const mesh = Mesh._fromLite(lite, undefined, scene as unknown as Scene);
+        const discovered = mesh.morphTargetManager!;
+        const authored = new MorphTargetManager();
+        const build = vi.spyOn(authored, "_build");
+
+        mesh.morphTargetManager = authored;
+        mesh.morphTargetManager = discovered;
+        scene.flush();
+
+        expect(build).not.toHaveBeenCalled();
+        expect(lite.morphTargets).toBe(loaded);
     });
 });

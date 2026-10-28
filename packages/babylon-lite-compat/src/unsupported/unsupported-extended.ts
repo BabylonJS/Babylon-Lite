@@ -17,6 +17,8 @@ import type { Vector3 } from "../math/vector.js";
 import type { ShaderLanguage } from "../misc/engine-constants.js";
 import type { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+
+export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "../loading/khr-materials-scatter.js";
 import type { BaseTexture } from "../textures/textures.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
@@ -246,31 +248,6 @@ export class PointsCloudSystem {
         unsupported("PointsCloudSystem", "Point-cloud systems are not implemented in Babylon Lite. For Gaussian splats use the native splat loaders.");
     }
 }
-
-// ─── glTF loader extensions ─────────────────────────────────────────
-export class KHR_materials_scatter {
-    public readonly name = "KHR_materials_scatter";
-    public enabled: boolean;
-    public order = 172;
-
-    public constructor(loader?: { isExtensionUsed?(name: string): boolean }) {
-        this.enabled = loader?.isExtensionUsed?.(this.name) ?? false;
-    }
-
-    public dispose(): void {}
-
-    public loadMaterialPropertiesAsync(_context: string, material: { extensions?: Record<string, unknown> }, _babylonMaterial: unknown): Promise<void> | null {
-        if (!material.extensions?.[this.name]) {
-            return null;
-        }
-        return unsupported(
-            "KHR_materials_scatter.loadMaterialPropertiesAsync",
-            "KHR_materials_scatter requires OpenPBR scattering texture processing plus a screen-space subsurface-scattering prepass. Babylon Lite reserves scattering material state but does not implement that render subsystem."
-        );
-    }
-}
-
-export function RegisterKHR_materials_scatter(): void {}
 
 export class CannonJSPlugin {
     public constructor() {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
@@ -67,6 +67,26 @@ describe("Babylon.js upstream delta surfaces", () => {
         expect(scene.particleSystems[0]!.name).toBe("smoke");
         expect(scene.particleSystems[0]).toBe(scene.particleSystems[0]);
         scene.particleSystems[0]!.dispose();
+        expect(scene.particleSystems).toEqual([]);
+    });
+
+    it("clears discovered collections on disposal and does not rediscover native objects", () => {
+        const scene = new Scene(new NullEngine());
+        const skeleton = { bones: [], _byName: new Map(), _overrides: new Map(), _worldOverrides: new Map(), _bake: vi.fn() };
+        const liteMesh = { name: "skinned", children: [], _gpu: {}, skeleton: { _skeleton: skeleton } };
+        const liteSystem = { name: "smoke", updateSpeed: 1, texture: null };
+        const skeletons = scene.skeletons;
+        const particleSystems = scene.particleSystems;
+        scene._wrapSkeleton(skeleton as never);
+        scene._wrapParticleSystem(liteSystem as never);
+
+        scene.dispose();
+        scene._lite.meshes.push(liteMesh as never);
+        (scene._lite as unknown as { _particleSystems: object[] })._particleSystems = [liteSystem];
+
+        expect(scene.skeletons).toBe(skeletons);
+        expect(scene.particleSystems).toBe(particleSystems);
+        expect(scene.skeletons).toEqual([]);
         expect(scene.particleSystems).toEqual([]);
     });
 });

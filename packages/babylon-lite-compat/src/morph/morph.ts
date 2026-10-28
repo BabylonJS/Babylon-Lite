@@ -11,7 +11,7 @@
  * (`target.influence = …`) re-upload via `setMorphTargetWeights`.
  */
 
-import { createMorphTargets, setMorphTargetWeights } from "babylon-lite";
+import { adoptMeshMorphTargets, createMorphTargets, setMorphTargetWeight, setMorphTargetWeights } from "babylon-lite";
 import type { EngineContext, MorphTargetData } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
@@ -117,13 +117,11 @@ export class MorphTargetManager {
         if (!this._lite) {
             return;
         }
-        const weights = Array.from(this._lite.weights);
-        weights[index] = value;
         if (!this._engine) {
-            this._lite.weights.set(weights);
+            this._lite.weights[index] = value;
             return;
         }
-        setMorphTargetWeights(this._engine, this._lite, weights);
+        setMorphTargetWeight(this._engine, this._lite, index, value);
     }
 
     public get numTargets(): number {
@@ -173,7 +171,7 @@ export class MorphTargetManager {
         });
         const weights = this._targets.slice(0, 4).map((t) => t.influence);
         this._lite = createMorphTargets(engine, targets, vertexCount, weights);
-        lite.morphTargets = this._lite;
+        adoptMeshMorphTargets(mesh._lite, this._lite);
     }
 
     /** @internal Re-upload current target influences to the GPU weights buffer. */

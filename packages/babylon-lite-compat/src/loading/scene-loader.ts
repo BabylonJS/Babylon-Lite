@@ -20,6 +20,7 @@ import { Skeleton } from "../bones/skeleton.js";
 import type { USDFileLoaderOptions } from "./usd-file-loader.js";
 import { SPLATFileLoader, type SPLATLoadingOptions } from "./splat-file-loader.js";
 import { resolveUsdOptions, toLiteUsdOptions } from "./usd-options.js";
+import { RegisterKHR_materials_scatter } from "./khr-materials-scatter.js";
 
 /**
  * Babylon.js registers built-in loader factories through a global plugin
@@ -267,7 +268,11 @@ async function load(rootUrl: string, fileName: string, scene: Scene, usdOptions?
     if (isUsdUrl(url)) {
         return loadUsdContainer(engine, url, usdOptions);
     }
-    const lite = isBabylonUrl(url) ? await loadBabylon(engine, url) : await loadGltf(engine, url);
+    if (isBabylonUrl(url)) {
+        return new AssetContainer(await loadBabylon(engine, url));
+    }
+    RegisterKHR_materials_scatter();
+    const lite = await loadGltf(engine, url);
     return new AssetContainer(lite);
 }
 
@@ -382,7 +387,11 @@ async function loadFromSource(
     if (isUsdUrl(source)) {
         return loadUsdContainer(engine, source, usdOptions, onProgress);
     }
-    const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
+    if (isBabylonUrl(source)) {
+        return new AssetContainer(await loadBabylon(engine, source));
+    }
+    RegisterKHR_materials_scatter();
+    const lite = await loadGltf(engine, source);
     return new AssetContainer(lite);
 }
 

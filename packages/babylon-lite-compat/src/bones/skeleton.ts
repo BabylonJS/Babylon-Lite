@@ -1,4 +1,4 @@
-import { bakeSkeleton, clearBoneOverride, getBoneByName as getLiteBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling } from "babylon-lite";
+import { clearBoneOverride, getBoneByName as getLiteBoneByName, resetSkeletonToRest, setBonePosition, setBoneRotationQuaternion, setBoneScaling } from "babylon-lite";
 import type { Bone as LiteBone, Skeleton as LiteSkeleton } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -49,15 +49,11 @@ export class Skeleton {
 
     /** Babylon.js `Skeleton.returnToRest()` — clear every compat bone override. */
     public returnToRest(): void {
-        for (const bone of this._lite.bones) {
-            clearBoneOverride(this._lite, bone);
-        }
+        resetSkeletonToRest(this._lite);
     }
 
-    /** Babylon.js `Skeleton.prepare()` — rebuild the current bone matrices. */
-    public prepare(_dontCheckFrameId = false): void {
-        bakeSkeleton(this._lite);
-    }
+    /** Babylon.js `Skeleton.prepare()` — Lite keeps loaded/evaluated bone matrices ready, so no additional bake is needed. */
+    public prepare(_dontCheckFrameId = false): void {}
 }
 
 export class Bone {

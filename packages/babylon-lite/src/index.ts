@@ -832,6 +832,7 @@ export {
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
+export { resetSkeletonToRest } from "./skeleton/compat-skeleton.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { runFrameInterpolation } from "./animation/frame-interpolation.js";
 export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
@@ -858,7 +859,9 @@ export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimat
 export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
+export { adoptMeshMorphTargets, shareMeshMorphTargets, setMorphTargetWeight } from "./morph/compat-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
+export { enableUnsupportedGltfMaterialExtension } from "./loader-gltf/gltf-feature-unsupported-extension.js";
 export { bakeVat, bakeVatMany, prepareVat, prepareVatMany, createVatBakeResult, createVatBakeResults, attachVat } from "./vat/vat-baker.js";
 export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
 export type { VatBakeResult, PreparedVatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";

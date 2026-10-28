@@ -42,6 +42,7 @@ import {
     updateLineSystem,
     createLineMaterial,
     setLineMaterialColor,
+    shareMeshMorphTargets,
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
@@ -792,7 +793,11 @@ export class Mesh extends AbstractMesh {
     /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
     public override _bindLoadedScene(scene: Scene): void {
         super._bindLoadedScene(scene);
-        this._morphTargetManager?._adoptEngine(scene._getLiteEngine());
+        if (this._morphTargetManager?._lite) {
+            this._morphTargetManager._adoptEngine(scene._getLiteEngine());
+        } else if (this._morphTargetManager) {
+            scene._registerMorphTargetManager(this, this._morphTargetManager);
+        }
     }
 
     /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
@@ -835,18 +840,20 @@ export class Mesh extends AbstractMesh {
         return this._morphTargetManager;
     }
     public set morphTargetManager(value: MorphTargetManager | null) {
+        if (this._morphTargetManager === value) {
+            return;
+        }
         this._morphTargetManager = value;
+        this._scene?._registerMorphTargetManager(this, value);
         if (!value) {
-            this._lite.morphTargets = null;
+            shareMeshMorphTargets(this._lite, null);
             return;
         }
         if (value._lite) {
-            this._lite.morphTargets = value._lite;
+            shareMeshMorphTargets(this._lite, value._lite);
             if (this._scene) {
                 value._adoptEngine(this._scene._getLiteEngine());
             }
-        } else if (this._scene) {
-            this._scene._registerMorphTargetManager(this, value);
         }
     }
 

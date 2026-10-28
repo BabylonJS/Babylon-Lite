@@ -180,6 +180,9 @@ export class Scene extends AbstractScene {
 
     /** Babylon.js `scene.skeletons` — loader-produced skeletons currently used by scene meshes. */
     public get skeletons(): Skeleton[] {
+        if (this._disposed) {
+            return this._skeletons;
+        }
         for (const mesh of this._lite.meshes) {
             const lite = getMeshSkeleton(mesh);
             if (lite) {
@@ -191,6 +194,9 @@ export class Scene extends AbstractScene {
 
     /** Babylon.js `scene.particleSystems` — registered Lite node-particle systems in scene order. */
     public get particleSystems(): ParticleSystem[] {
+        if (this._disposed) {
+            return this._particleSystems;
+        }
         for (const system of getParticleSystems(this._lite)) {
             if (!this._retiredParticleSystems.has(system)) {
                 this._wrapParticleSystem(system);
@@ -228,7 +234,10 @@ export class Scene extends AbstractScene {
     private readonly _shadowGenerators: CompatShadowGenerator[] = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
-    private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
+    private readonly _pendingMorphBuilds: Array<{
+        mesh: { _lite: unknown; morphTargetManager: unknown };
+        manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void };
+    }> = [];
     private _materialPluginsRequested = false;
     private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
@@ -240,6 +249,7 @@ export class Scene extends AbstractScene {
     private readonly _particleSystemCache = new Map<LiteParticleSystem, ParticleSystem>();
     private readonly _particleSystems: ParticleSystem[] = [];
     private readonly _retiredParticleSystems = new Set<LiteParticleSystem>();
+    private _disposed = false;
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
     /** @internal Lite manager that weight/additive-blends loaded glTF groups (lazily created). */
@@ -490,8 +500,17 @@ export class Scene extends AbstractScene {
      * start. Building is deferred so the mesh's base CPU geometry (set by primitive
      * builders / `VertexData.applyToMesh`) exists when per-target deltas are computed.
      */
-    public _registerMorphTargetManager(mesh: { _lite: unknown }, manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void }): void {
-        this._pendingMorphBuilds.push({ mesh, manager });
+    public _registerMorphTargetManager(
+        mesh: { _lite: unknown; morphTargetManager: unknown },
+        manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } | null
+    ): void {
+        const index = this._pendingMorphBuilds.findIndex((pending) => pending.mesh === mesh);
+        if (index !== -1) {
+            this._pendingMorphBuilds.splice(index, 1);
+        }
+        if (manager) {
+            this._pendingMorphBuilds.push({ mesh, manager });
+        }
     }
 
     /** @internal Return the Lite engine used to update loader-produced resources. */
@@ -550,7 +569,9 @@ export class Scene extends AbstractScene {
     public _buildMorphTargets(): void {
         const engine = this._engine._lite;
         for (const { mesh, manager } of this._pendingMorphBuilds) {
-            manager._build(mesh as never, engine);
+            if (mesh.morphTargetManager === manager) {
+                manager._build(mesh as never, engine);
+            }
         }
         this._pendingMorphBuilds.length = 0;
     }
@@ -1324,6 +1345,10 @@ export class Scene extends AbstractScene {
     }
 
     public dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+        this._disposed = true;
         let hasError = false;
         let firstError: unknown;
         const runCleanup = (cleanup: () => void): void => {
@@ -1353,6 +1378,12 @@ export class Scene extends AbstractScene {
             runCleanup(() => clearAnimationManager(this._blendManager!));
         }
         this._runningAnimatables.length = 0;
+        runCleanup(() => this._skeletons.splice(0));
+        runCleanup(() => this._skeletonCache.clear());
+        runCleanup(() => this._particleSystems.splice(0));
+        runCleanup(() => this._particleSystemCache.clear());
+        runCleanup(() => this._retiredParticleSystems.clear());
+        runCleanup(() => this._pendingMorphBuilds.splice(0));
         runCleanup(() => disposeScene(this._lite));
         if (hasError) {
             throw firstError;

@@ -6,9 +6,10 @@ import { NullEngine } from "../src/engine/engine";
 import { Mesh } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
-function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>; overrides: Map<number, unknown> } {
+function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>; overrides: Map<number, unknown>; worldOverrides: Map<number, unknown> } {
     const bake = vi.fn();
     const overrides = new Map<number, unknown>();
+    const worldOverrides = new Map<number, unknown>();
     const root = { name: "root", _nodeIndex: 0 };
     const hand = { name: "hand", _nodeIndex: 1, parent: root };
     const lite = {
@@ -18,10 +19,10 @@ function createSkeleton(): { skeleton: Skeleton; bake: ReturnType<typeof vi.fn>;
             ["hand", hand],
         ]),
         _overrides: overrides,
-        _worldOverrides: new Map(),
+        _worldOverrides: worldOverrides,
         _bake: bake,
     } as unknown as LiteSkeleton;
-    return { skeleton: Skeleton._fromLite(lite, 0), bake, overrides };
+    return { skeleton: Skeleton._fromLite(lite, 0), bake, overrides, worldOverrides };
 }
 
 describe("loader-produced Skeleton and Bone wrappers", () => {
@@ -59,17 +60,17 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         expect(bake).toHaveBeenCalledTimes(2);
     });
 
-    it("returns the whole skeleton to rest and prepares through Lite", () => {
-        const { skeleton, bake, overrides } = createSkeleton();
-        skeleton.bones[0]!.setPosition(new Vector3(1, 0, 0));
-        skeleton.bones[1]!.setScale(new Vector3(0, 0, 0));
+    it("returns the whole skeleton to rest with one unconditional bake and preserves the current pose during prepare", () => {
+        const { skeleton, bake, overrides, worldOverrides } = createSkeleton();
+        worldOverrides.set(0, {});
 
         skeleton.returnToRest();
         expect(overrides.size).toBe(0);
-        expect(bake).toHaveBeenCalledTimes(4);
+        expect(worldOverrides.size).toBe(0);
+        expect(bake).toHaveBeenCalledTimes(1);
 
         skeleton.prepare();
-        expect(bake).toHaveBeenCalledTimes(5);
+        expect(bake).toHaveBeenCalledTimes(1);
     });
 
     it("surfaces stable scene skeleton wrappers from loaded meshes", () => {
