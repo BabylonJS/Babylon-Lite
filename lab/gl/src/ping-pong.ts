@@ -35,7 +35,7 @@ export function createPingPong(engine: GLEngineContext, options: GLRenderTargetO
     try {
         b = createRenderTarget(engine, options);
     } catch (e) {
-        disposeRenderTarget(engine, a);
+        disposeRenderTarget(a);
         throw e;
     }
 
@@ -56,16 +56,16 @@ export function createPingPong(engine: GLEngineContext, options: GLRenderTargetO
             if (disposed) {
                 return;
             }
-            resizeRenderTarget(engine, a, width, height);
-            resizeRenderTarget(engine, b, width, height);
+            resizeRenderTarget(a, width, height);
+            resizeRenderTarget(b, width, height);
         },
         dispose(): void {
             if (disposed) {
                 return;
             }
             disposed = true;
-            disposeRenderTarget(engine, a);
-            disposeRenderTarget(engine, b);
+            disposeRenderTarget(a);
+            disposeRenderTarget(b);
         },
     };
 }

@@ -38,6 +38,9 @@ export interface MockGL {
     /** Toggle availability of a `getExtension(name)` result (e.g. the
      *  color-buffer-float extensions that drive render-target caps). */
     setExtensionAvailable(name: string, ok: boolean): void;
+    /** Configure `EXT_disjoint_timer_query_webgl2` query results (the
+     *  extension itself is toggled with `setExtensionAvailable`). */
+    setTimerQuery(opts: { available?: boolean; result?: number; disjoint?: boolean }): void;
 }
 
 interface Internal {
@@ -48,6 +51,7 @@ interface Internal {
     programAllocationSuccess: boolean;
     sampleCount: number;
     extensions: Record<string, boolean>;
+    timerQuery: { available: boolean; result: number; disjoint: boolean };
 }
 
 export function createMockGL(): MockGL {
@@ -67,9 +71,11 @@ export function createMockGL(): MockGL {
             EXT_color_buffer_half_float: true,
             OES_texture_float_linear: true,
         },
+        timerQuery: { available: true, result: 0, disjoint: false },
     };
 
     const PARALLEL_EXT = { COMPLETION_STATUS_KHR: 0x91b1 };
+    const TIMER_EXT = { TIME_ELAPSED_EXT: 0x88bf, GPU_DISJOINT_EXT: 0x8fbb };
 
     const rec = (name: string, ...args: unknown[]): void => {
         log.push({ name, args });
@@ -115,6 +121,8 @@ export function createMockGL(): MockGL {
         TEXTURE_WRAP_R: 0x8072,
         LINEAR: 0x2601,
         LINEAR_MIPMAP_LINEAR: 0x2703,
+        LINEAR_MIPMAP_NEAREST: 0x2701,
+        NEAREST_MIPMAP_LINEAR: 0x2702,
         NEAREST: 0x2600,
         CLAMP_TO_EDGE: 0x812f,
         UNPACK_FLIP_Y_WEBGL: 0x9240,
@@ -170,6 +178,7 @@ export function createMockGL(): MockGL {
         FRONT_AND_BACK: 0x0408,
         // ──── pixel store + blend equations ──────────────────────────────
         UNPACK_ALIGNMENT: 0x0cf5,
+        PACK_ALIGNMENT: 0x0d05,
         UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0x9241,
         MIN: 0x8007,
         MAX: 0x8008,
@@ -177,6 +186,8 @@ export function createMockGL(): MockGL {
         DST_COLOR: 0x0306,
         MIRRORED_REPEAT: 0x8370,
         REPEAT: 0x2901,
+        QUERY_RESULT: 0x8866,
+        QUERY_RESULT_AVAILABLE: 0x8867,
     };
 
     const gl = {
@@ -195,11 +206,17 @@ export function createMockGL(): MockGL {
             if (p === ENUMS.SAMPLES) {
                 return state.sampleCount;
             }
+            if (p === TIMER_EXT.GPU_DISJOINT_EXT) {
+                return state.timerQuery.disjoint ? 1 : 0;
+            }
             return 0;
         },
         getExtension: (name: string): unknown => {
             if (name === "KHR_parallel_shader_compile" && state.parallelAvailable) {
                 return { ...PARALLEL_EXT };
+            }
+            if (name === "EXT_disjoint_timer_query_webgl2" && state.extensions[name] === true) {
+                return { ...TIMER_EXT };
             }
             if (state.extensions[name] === true) {
                 return { __ext: name };
@@ -472,6 +489,27 @@ export function createMockGL(): MockGL {
         clear: (mask: number): void => {
             rec("clear", mask);
         },
+        // ──── queries ───────────────────────────────────────────────────
+        createQuery: (): object => {
+            rec("createQuery");
+            return handle("query");
+        },
+        deleteQuery: (q: object): void => {
+            rec("deleteQuery", q);
+        },
+        beginQuery: (target: number, q: object): void => {
+            rec("beginQuery", target, q);
+        },
+        endQuery: (target: number): void => {
+            rec("endQuery", target);
+        },
+        getQueryParameter: (q: object, p: number): unknown => {
+            rec("getQueryParameter", q, p);
+            if (p === ENUMS.QUERY_RESULT_AVAILABLE) {
+                return state.timerQuery.available;
+            }
+            return p === ENUMS.QUERY_RESULT ? state.timerQuery.result : null;
+        },
     } as unknown as WebGL2RenderingContext;
 
     return {
@@ -502,6 +540,9 @@ export function createMockGL(): MockGL {
         },
         setExtensionAvailable: (name, ok) => {
             state.extensions[name] = ok;
+        },
+        setTimerQuery: (opts) => {
+            Object.assign(state.timerQuery, opts);
         },
     };
 }

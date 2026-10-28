@@ -12,6 +12,7 @@ import {
     setEffectTexture,
     stopRenderLoop,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     createFloatRenderTarget,
 } from "babylon-lite-gl";
 
@@ -26,7 +27,7 @@ import {
  *     carries the float sized-format table that `createRenderTarget` omits, and
  *     defaults to `gl.HALF_FLOAT`; the engine downgrades it to the best
  *     renderable type its caps support (`textureHalfFloatRender`).
- *   - PASS 2 binds the default framebuffer (`bindRenderTarget(engine, null)`),
+ *   - PASS 2 binds the default framebuffer (`restoreDefaultFramebuffer(engine)`),
  *     samples the float RT fullscreen, applies a FIXED exposure tone-map
  *     (`1 - exp(-c·exposure)`, which maps the >1.0 HDR values back into [0,1)),
  *     then the scene8 aspect-corrected radial vignette → LDR screen.
@@ -114,7 +115,7 @@ const compositeWrapper = createEffectWrapper(engine, {
     samplerNames: ["uRt"],
 });
 
-executeWhenCompiled(engine, compositeWrapper.effect, () => {
+executeWhenCompiled(compositeWrapper.effect, () => {
     console.log("scene14: float (HDR) render-target tone-map effects compiled");
 });
 
@@ -124,23 +125,23 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, patternWrapper.effect) || !isEffectReady(engine, compositeWrapper.effect)) {
+    if (!isEffectReady(patternWrapper.effect) || !isEffectReady(compositeWrapper.effect)) {
         return;
     }
     resizeGLEngine(engine);
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
 
     // ── PASS 1: render the HDR pattern into the half-float render target ──
-    bindRenderTarget(engine, rt); // binds the FBO + sets viewport to RT_SIZE
+    bindRenderTarget(rt); // binds the FBO + sets viewport to RT_SIZE
     applyEffectWrapper(patternWrapper);
-    setEffectFloat(engine, patternWrapper.effect, "uTime", uTime);
+    setEffectFloat(patternWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
     // ── PASS 2: tone-map the float RT to the LDR screen ──
-    bindRenderTarget(engine, null); // default framebuffer + canvas viewport
+    restoreDefaultFramebuffer(engine); // default framebuffer + canvas viewport
     applyEffectWrapper(compositeWrapper);
-    setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
+    setEffectFloat2(compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

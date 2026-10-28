@@ -21,6 +21,7 @@ import {
     setEffectFloat2,
     setEffectTexture,
     setViewport,
+    useEffect,
     wipeGLStateCache,
 } from "../../../packages/babylon-lite-gl/src/index";
 import { createMockCanvas, createMockGL, fireLost, fireRestored } from "./_lite-gl-mock";
@@ -41,7 +42,7 @@ function makeReadyEffect() {
         samplerNames: ["s0", "s1"],
     });
     // Drive finalization
-    expect(isEffectReady(engine, effect)).toBe(true);
+    expect(isEffectReady(effect)).toBe(true);
     return { mock, canvas, engine, effect };
 }
 
@@ -124,44 +125,44 @@ describe("lite-gl context: lost/restored callbacks", () => {
 
 describe("lite-gl cache: uniform setters", () => {
     it("setEffectFloat elides repeat calls with identical value", () => {
-        const { mock, engine, effect } = makeReadyEffect();
+        const { mock, effect } = makeReadyEffect();
         mock.clear();
-        setEffectFloat(engine, effect, "u_a", 0.5);
-        setEffectFloat(engine, effect, "u_a", 0.5);
-        setEffectFloat(engine, effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.5);
         expect(mock.count("uniform1f")).toBe(1);
     });
 
     it("setEffectFloat re-uploads when value changes", () => {
-        const { mock, engine, effect } = makeReadyEffect();
+        const { mock, effect } = makeReadyEffect();
         mock.clear();
-        setEffectFloat(engine, effect, "u_a", 0.5);
-        setEffectFloat(engine, effect, "u_a", 0.6);
-        setEffectFloat(engine, effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.6);
+        setEffectFloat(effect, "u_a", 0.5);
         expect(mock.count("uniform1f")).toBe(3);
     });
 
     it("setEffectFloat with NaN re-uploads every call (NaN !== NaN)", () => {
-        const { mock, engine, effect } = makeReadyEffect();
+        const { mock, effect } = makeReadyEffect();
         mock.clear();
-        setEffectFloat(engine, effect, "u_a", Number.NaN);
-        setEffectFloat(engine, effect, "u_a", Number.NaN);
+        setEffectFloat(effect, "u_a", Number.NaN);
+        setEffectFloat(effect, "u_a", Number.NaN);
         expect(mock.count("uniform1f")).toBe(2);
     });
 
     it("setEffectFloat2 with 0.1 compares equal across frames (number[] not Float32Array)", () => {
-        const { mock, engine, effect } = makeReadyEffect();
+        const { mock, effect } = makeReadyEffect();
         mock.clear();
-        setEffectFloat2(engine, effect, "u_a", 0.1, 0.2);
-        setEffectFloat2(engine, effect, "u_a", 0.1, 0.2);
-        setEffectFloat2(engine, effect, "u_a", 0.1, 0.2);
+        setEffectFloat2(effect, "u_a", 0.1, 0.2);
+        setEffectFloat2(effect, "u_a", 0.1, 0.2);
+        setEffectFloat2(effect, "u_a", 0.1, 0.2);
         expect(mock.count("uniform2f")).toBe(1);
     });
 
     it("setEffectFloat to an unknown uniform is a silent no-op", () => {
-        const { mock, engine, effect } = makeReadyEffect();
+        const { mock, effect } = makeReadyEffect();
         mock.clear();
-        setEffectFloat(engine, effect, "__missing_x", 1.0);
+        setEffectFloat(effect, "__missing_x", 1.0);
         expect(mock.count("uniform1f")).toBe(0);
     });
 
@@ -178,14 +179,14 @@ describe("lite-gl cache: uniform setters", () => {
             samplerNames: [],
         });
         // not ready yet
-        setEffectFloat(engine, effect, "u_a", 1.0);
+        setEffectFloat(effect, "u_a", 1.0);
         expect(mock.count("uniform1f")).toBe(0);
         // becomes ready
         mock.setParallelComplete(true);
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         mock.clear();
         // The first real call after readiness MUST upload even with the same value
-        setEffectFloat(engine, effect, "u_a", 1.0);
+        setEffectFloat(effect, "u_a", 1.0);
         expect(mock.count("uniform1f")).toBe(1);
     });
 });
@@ -199,7 +200,7 @@ describe("lite-gl cache: textures + samplers", () => {
         const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         // Repeated setEffectTexture calls must NEVER re-issue uniform1i
         for (let i = 0; i < 50; i++) {
-            setEffectTexture(engine, effect, "s0", tex);
+            setEffectTexture(effect, "s0", tex);
         }
         expect(mock.count("uniform1i")).toBe(0);
     });
@@ -208,9 +209,9 @@ describe("lite-gl cache: textures + samplers", () => {
         const { mock, engine } = makeReadyEffect();
         const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
-        bindTexture(engine, 0, tex);
-        bindTexture(engine, 0, tex);
-        bindTexture(engine, 0, tex);
+        bindTexture(tex, 0);
+        bindTexture(tex, 0);
+        bindTexture(tex, 0);
         expect(mock.count("bindTexture")).toBe(0);
         expect(mock.count("activeTexture")).toBe(0);
     });
@@ -220,9 +221,9 @@ describe("lite-gl cache: textures + samplers", () => {
         const a = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         const b = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         // Park unit 0 on `a`
-        bindTexture(engine, 0, a);
+        bindTexture(a, 0);
         mock.clear();
-        bindTexture(engine, 0, b);
+        bindTexture(b, 0);
         expect(mock.count("bindTexture")).toBe(1);
         expect(mock.count("activeTexture")).toBe(0); // unit already 0
     });
@@ -231,10 +232,10 @@ describe("lite-gl cache: textures + samplers", () => {
         const { mock, engine } = makeReadyEffect();
         const a = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         const b = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        bindTexture(engine, 0, a);
-        disposeTexture(engine, a);
+        bindTexture(a, 0);
+        disposeTexture(a);
         mock.clear();
-        bindTexture(engine, 0, b);
+        bindTexture(b, 0);
         expect(mock.count("bindTexture")).toBe(1);
     });
 });
@@ -249,14 +250,18 @@ describe("lite-gl cache: program + viewport + quad", () => {
         expect(mock.count("viewport")).toBe(1);
     });
 
-    it("applyEffectWrapper builds the quad exactly once", () => {
+    it("drawEffect builds the quad exactly once", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
         mock.clear();
         applyEffectWrapper(wrapper);
-        applyEffectWrapper(wrapper);
-        applyEffectWrapper(wrapper);
-        // Quad VAO created on the first call only.
+        // The quad is built lazily by the draw, not by applyEffectWrapper.
+        expect(mock.count("createVertexArray")).toBe(0);
+        for (let i = 0; i < 3; i++) {
+            applyEffectWrapper(wrapper);
+            drawEffect(engine);
+        }
+        // Quad VAO created on the first draw only.
         expect(mock.count("createVertexArray")).toBe(1);
         // The wrapper's program is bound once, then cached.
         expect(mock.count("useProgram")).toBe(1);
@@ -305,11 +310,11 @@ describe("lite-gl effect cache: identical descriptors share one program (ref-cou
         expect(b).toBe(a);
         mock.clear();
         // First dispose: still shared (refCount 2 → 1) — the program survives.
-        disposeEffect(engine, a);
+        disposeEffect(a);
         expect(a._disposed).toBe(false);
         expect(mock.count("deleteProgram")).toBe(0);
         // Second dispose: refCount 1 → 0 — real teardown.
-        disposeEffect(engine, b);
+        disposeEffect(b);
         expect(b._disposed).toBe(true);
         expect(mock.count("deleteProgram")).toBe(1);
     });
@@ -340,7 +345,7 @@ describe("lite-gl effect cache: identical descriptors share one program (ref-cou
     it("after the shared effect is fully disposed, a new identical createEffect compiles a fresh program", () => {
         const { mock, engine } = makeEngine();
         const a = createEffect(engine, { name: "a", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
-        disposeEffect(engine, a);
+        disposeEffect(a);
         expect(a._disposed).toBe(true);
         mock.clear();
         const b = createEffect(engine, { name: "b", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
@@ -351,9 +356,9 @@ describe("lite-gl effect cache: identical descriptors share one program (ref-cou
 
 describe("lite-gl: executeWhenCompiled", () => {
     it("fires synchronously when already ready", () => {
-        const { engine, effect } = makeReadyEffect();
+        const { effect } = makeReadyEffect();
         let fired = 0;
-        executeWhenCompiled(engine, effect, () => {
+        executeWhenCompiled(effect, () => {
             fired++;
         });
         expect(fired).toBe(1);
@@ -372,20 +377,20 @@ describe("lite-gl: executeWhenCompiled", () => {
             samplerNames: [],
         });
         let fired = 0;
-        executeWhenCompiled(engine, effect, () => {
+        executeWhenCompiled(effect, () => {
             fired++;
         });
         // Not ready yet — callback queued, not fired
         expect(fired).toBe(0);
         // Still not ready after polling
-        expect(isEffectReady(engine, effect)).toBe(false);
+        expect(isEffectReady(effect)).toBe(false);
         expect(fired).toBe(0);
         // Flip ready
         mock.setParallelComplete(true);
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         expect(fired).toBe(1);
         // Subsequent polls don't re-fire
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         expect(fired).toBe(1);
     });
 });
@@ -407,11 +412,13 @@ describe("lite-gl cache: wipeGLStateCache", () => {
     it("wipeGLStateCache re-binds the program but PRESERVES the shared quad (no rebuild)", () => {
         const { mock, engine } = makeReadyEffect();
         const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
-        applyEffectWrapper(wrapper); // builds the quad VAO + binds the program once
+        applyEffectWrapper(wrapper); // binds the program once
+        drawEffect(engine); // builds the quad VAO
         expect(mock.count("createVertexArray")).toBe(1);
         mock.clear();
         wipeGLStateCache(engine);
         applyEffectWrapper(wrapper);
+        drawEffect(engine);
         // Program binding cache was wiped → re-issued …
         expect(mock.count("useProgram")).toBe(1);
         // … but the owned quad GL objects survive → NOT recreated.
@@ -430,7 +437,7 @@ describe("lite-gl: disposal", () => {
         const { mock, engine, effect } = makeReadyEffect();
         disposeGLEngine(engine);
         mock.clear();
-        expect(() => setEffectFloat(engine, effect, "u_a", 1.0)).not.toThrow();
+        expect(() => setEffectFloat(effect, "u_a", 1.0)).not.toThrow();
         expect(() => drawEffect(engine)).not.toThrow();
         expect(mock.count("uniform1f")).toBe(0);
         expect(mock.count("drawElements")).toBe(0);
@@ -450,11 +457,11 @@ describe("lite-gl: context loss / restore", () => {
     it("context lost → setters become no-ops and do not poison the cache", () => {
         const { mock, canvas, engine, effect } = makeReadyEffect();
         // First, prove the value cache is poppulated.
-        setEffectFloat(engine, effect, "u_a", 0.5);
+        setEffectFloat(effect, "u_a", 0.5);
         mock.clear();
         fireLost(canvas);
         expect(engine._isLost).toBe(true);
-        setEffectFloat(engine, effect, "u_a", 0.7);
+        setEffectFloat(effect, "u_a", 0.7);
         expect(mock.count("uniform1f")).toBe(0);
         // Effect should have been marked not-ready
         expect(effect.isReady).toBe(false);
@@ -471,15 +478,17 @@ describe("lite-gl: context loss / restore", () => {
             uniformNames: ["u_a", "u_b"],
             samplerNames: ["s0", "s1"],
         });
-        expect(isEffectReady(engine, wrapper.effect)).toBe(true);
+        expect(isEffectReady(wrapper.effect)).toBe(true);
         applyEffectWrapper(wrapper);
+        drawEffect(engine);
         const vaosBefore = mock.count("createVertexArray");
         fireLost(canvas);
         fireRestored(canvas);
         mock.clear();
         // Restart the cycle
-        expect(isEffectReady(engine, wrapper.effect)).toBe(true);
+        expect(isEffectReady(wrapper.effect)).toBe(true);
         applyEffectWrapper(wrapper);
+        drawEffect(engine);
         const vaosAfter = vaosBefore + mock.count("createVertexArray");
         expect(vaosAfter).toBe(vaosBefore + 1); // exactly one new VAO
         // sampler1i should have been re-issued exactly once per declared sampler
@@ -530,6 +539,101 @@ describe("lite-gl: effect wrapper ownership", () => {
         applyEffectWrapper(wrapper);
         expect(mock.count("createVertexArray")).toBe(0);
         expect(mock.count("useProgram")).toBe(0);
+    });
+
+    it("applying a disposed wrapper never finalizes an effect it shared with a live wrapper", () => {
+        const { mock, engine, effect: current } = makeReadyEffect();
+        useEffect(current);
+        mock.setParallelComplete(false);
+        const live = createEffectWrapper(engine, { name: "shared", fragmentSource: FS });
+        const disposed = createEffectWrapper(engine, { name: "shared", fragmentSource: FS });
+        expect(disposed.effect).toBe(live.effect);
+        let compiled = 0;
+        executeWhenCompiled(live.effect, () => compiled++);
+        disposeEffectWrapper(disposed);
+        mock.setParallelComplete(true);
+        mock.clear();
+        expect(applyEffectWrapper(disposed)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        expect(engine._state.currentProgram).toBe(current.program);
+        expect(compiled).toBe(0);
+        expect(live.effect.isReady).toBe(false);
+    });
+
+    it("applyEffectWrapper returns false and binds nothing while the effect is still linking (#82)", () => {
+        const mock = createMockGL();
+        mock.setParallelComplete(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        expect(mock.count("createVertexArray")).toBe(0);
+        mock.setParallelComplete(true);
+        expect(applyEffectWrapper(wrapper)).toBe(true);
+        expect(wrapper.effect.isReady).toBe(true);
+        expect(engine._state.currentProgram).toBe(wrapper.effect.program);
+    });
+
+    it("applyEffectWrapper returns false for an effect that failed to link (#82)", () => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const mock = createMockGL();
+        mock.setLinkSuccess(false);
+        const engine = createGLEngine(createMockCanvas(mock));
+        const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+        mock.clear();
+        expect(applyEffectWrapper(wrapper)).toBe(false);
+        expect(mock.count("useProgram")).toBe(0);
+        vi.restoreAllMocks();
+    });
+
+    it("applyEffectWrapper binds nothing when a ready callback disposes the wrapper or engine (#82)", () => {
+        for (const disposeEngine of [false, true]) {
+            const mock = createMockGL();
+            mock.setParallelComplete(false);
+            const engine = createGLEngine(createMockCanvas(mock));
+            const wrapper = createEffectWrapper(engine, { name: "w", fragmentSource: FS });
+            executeWhenCompiled(wrapper.effect, () => {
+                if (disposeEngine) {
+                    disposeGLEngine(engine);
+                } else {
+                    disposeEffectWrapper(wrapper);
+                }
+            });
+            mock.setParallelComplete(true);
+            mock.clear();
+            expect(applyEffectWrapper(wrapper)).toBe(false);
+            expect(mock.count("createVertexArray")).toBe(0);
+            expect(mock.count("bindVertexArray")).toBe(0);
+        }
+    });
+
+    it("drawEffect draws an existing effect fullscreen without a wrapper (#82)", () => {
+        const { mock, engine, effect } = makeReadyEffect();
+        mock.clear();
+        useEffect(effect);
+        drawEffect(engine);
+        expect(mock.count("createVertexArray")).toBe(1);
+        expect(mock.count("drawElements")).toBe(1);
+        // Second draw reuses the cached quad and its binding.
+        mock.clear();
+        drawEffect(engine);
+        expect(mock.count("createVertexArray")).toBe(0);
+        expect(mock.count("bindVertexArray")).toBe(0);
+        expect(mock.count("drawElements")).toBe(1);
+    });
+
+    it("drawEffect rebinds the shared quad after another VAO was bound", () => {
+        const { mock, engine, effect } = makeReadyEffect();
+        useEffect(effect);
+        drawEffect(engine);
+        const other = engine.gl.createVertexArray();
+        engine.gl.bindVertexArray(other);
+        engine._state.boundVao = other;
+        mock.clear();
+        drawEffect(engine);
+        expect(mock.count("bindVertexArray")).toBe(1);
+        expect(engine._state.boundVao).toBe(engine._state.quadVao);
     });
 
     it("createEffectWrapper defaults to the built-in fullscreen vertex shader", () => {

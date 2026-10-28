@@ -34,7 +34,11 @@ export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.j
 export { getAlphaToCoverage, getCurrentSampleCount, setAlphaToCoverage } from "./alpha-to-coverage.js";
 
 // ─── Render loop ─────────────────────────────────────────────────────
-export { runRenderLoop, stopRenderLoop } from "./render-loop.js";
+export { runRenderLoop, stopRenderLoop, beginFrame, endFrame } from "./render-loop.js";
+
+// ─── GPU frame timing (optional) ────────────────────────────────────
+export { captureGPUFrameTime, getGPUFrameTimeCounter } from "./gpu-frame-time.js";
+export type { GLPerfCounter } from "./gpu-frame-time.js";
 
 // ─── Effects ─────────────────────────────────────────────────────────
 export {
@@ -75,18 +79,24 @@ export {
     generateTextureMipMaps,
     loadTexture2D,
     bindTexture,
+    unbindTexture,
     disposeTexture,
     updateRawTexture,
     updateTextureSamplingMode,
     updateTextureWrapMode,
     createTextureFromHandle,
+    getSamplingModeFilters,
+    isTextureReady,
+    // GLSamplingMode is a const + same-name type; one value re-export carries both.
+    GLSamplingMode,
 } from "./texture.js";
-export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export type { GLTextureOptions, GLTextureUpdateOptions, GLFloatTextureOptions, GLTexture, GLSamplingFilters } from "./texture.js";
 export { createTextureFromSource } from "./texture-source.js";
 export type { GLTextureSourceOptions } from "./texture-source.js";
 export {
     createTexture3DFromPixels,
     bindTexture3D,
+    unbindTexture3D,
     setEffectTexture3D,
     generateTexture3DMipMaps,
     updateTexture3DSamplingMode,
@@ -103,6 +113,7 @@ export {
     createRenderTarget,
     createFloatRenderTarget,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     generateRenderTargetMipMaps,
     resizeRenderTarget,
     readRenderTargetPixels,
@@ -145,9 +156,7 @@ export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeS
 export type { GLSprite, GLSpriteColor, GLSpriteRendererOptions, GLSpriteRenderer } from "./sprites.js";
 
 // ─── HTML-element textures ───────────────────────────────────────────
-// GLSamplingMode is a const + same-name type; one value re-export carries both.
-export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
-export type { GLHtmlElementTextureOptions } from "./html-texture.js";
+export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
 
 // ─── Text (analytic Slug coverage) ───────────────────────────────────
 export type { GLFont } from "./text/font.js";

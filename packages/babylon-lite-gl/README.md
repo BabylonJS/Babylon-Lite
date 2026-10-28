@@ -25,7 +25,7 @@ npm install @babylonjs/lite-gl
 ## Quick start — an animated fullscreen effect
 
 ```ts
-import { createGLEngine, createEffectWrapper, isEffectReady, applyEffectWrapper, drawEffect, setViewport, setEffectFloat, runRenderLoop, resizeGLEngine } from "@babylonjs/lite-gl";
+import { createGLEngine, createEffectWrapper, applyEffectWrapper, drawEffect, setViewport, setEffectFloat, runRenderLoop, resizeGLEngine } from "@babylonjs/lite-gl";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
@@ -48,11 +48,11 @@ const wrapper = createEffectWrapper(engine, {
 
 const start = performance.now();
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, wrapper.effect)) return; // shaders compile async
     resizeGLEngine(engine);
     setViewport(engine);
-    applyEffectWrapper(wrapper);
-    setEffectFloat(engine, wrapper.effect, "uTime", (performance.now() - start) / 1000);
+    // false (and nothing bound) until the shaders finish compiling asynchronously
+    if (!applyEffectWrapper(wrapper)) return;
+    setEffectFloat(wrapper.effect, "uTime", (performance.now() - start) / 1000);
     drawEffect(engine);
 });
 ```
@@ -65,8 +65,8 @@ poll completion before inspecting link status. Shader status and info logs are
 queried only after link failure, avoiding premature compilation stalls.
 Without the extension, checking link status can block.
 
-Manual polling stays available: call `isEffectReady(engine, effect)` in your
-render loop and inspect `getEffectCompilationError(engine, effect)` when it
+Manual polling stays available: call `isEffectReady(effect)` in your
+render loop and inspect `getEffectCompilationError(effect)` when it
 returns false. The error accessor also polls once; `null` means no failure has
 been recorded, not necessarily that the effect is ready. Errors include the
 program log and failing shader stages' logs and are logged once. Neither this
@@ -79,7 +79,7 @@ import { waitForEffect } from "@babylonjs/lite-gl";
 
 const controller = new AbortController();
 try {
-    await waitForEffect(engine, wrapper.effect, { signal: controller.signal });
+    await waitForEffect(wrapper.effect, { signal: controller.signal });
     // The effect is finalized; rendering can now start.
 } catch (error) {
     console.error("Effect could not become ready:", error);
@@ -116,28 +116,46 @@ use.
   `getRenderWidth`, `getRenderHeight`, `get/setHardwareScalingLevel`,
   `getRenderingCanvas`, and `on/offContextLost` + `on/offContextRestored`
   (context-loss is handled: effects and textures are rebuilt on restore).
-- **Render loop** — `runRenderLoop`, `stopRenderLoop`.
+- **Render loop** — `runRenderLoop`, `stopRenderLoop`, plus `beginFrame` /
+  `endFrame` for hosts that drive their own frame.
+- **GPU frame timing (optional)** — `captureGPUFrameTime`,
+  `getGPUFrameTimeCounter` (`EXT_disjoint_timer_query_webgl2`; ≙ Babylon's
+  `ThinEngine` APIs, tree-shaken unless imported).
 - **Effects** — `createEffect`, `isEffectReady`, `getEffectCompilationError`,
   `executeWhenCompiled`, `waitForEffect` (optional cancellable readiness promise),
   `useEffect`, `disposeEffect`, and the cached uniform setters
   `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` / `…Int` /
   `…Color3` / `…Color4` / `…Texture`.
 - **Fullscreen renderer** — `createEffectWrapper`, `applyEffectWrapper`,
-  `drawEffect`, `setViewport`, `disposeEffectWrapper`.
+  `drawEffect`, `setViewport`, `disposeEffectWrapper`. A wrapper always holds an
+  effect (there is no `setEffectWrapper`); `applyEffectWrapper` returns `false`
+  and binds nothing until that effect is ready, so skip the frame's setters and
+  draw on `false`. `drawEffect` lazily creates and binds the shared quad itself,
+  so an existing effect can be drawn fullscreen without a wrapper:
+  `isEffectReady` → `useEffect` → setters → `drawEffect`.
 - **Textures** — `createRawTexture` (typed-array upload, LDR byte formats),
   `createTextureFromSource` (single upload from already-decoded bitmaps/canvases/images),
   `createTexture3DFromPixels` + `setEffectTexture3D` (optional native RGBA8
   LUT volumes with trilinear sampling and zero 2D-only bundle cost),
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
-  `disposeTexture`, plus `updateRawTexture`, `updateTextureSamplingMode`,
-  `updateTextureWrapMode`, `createTextureFromHandle`.
+  `disposeTexture`, `isTextureReady`, plus `updateRawTexture`,
+  `updateTextureSamplingMode` (Babylon preset + `generateMipMaps`, or raw
+  filters), `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
+  takes the same `GLTextureOptions` (`invertY`, `premultiplyAlpha`, filters /
+  wraps). Babylon-style `GLSamplingMode` presets resolve to filters via the
+  opt-in `getSamplingModeFilters`; `generateTextureMipMaps` builds the chain
+  and keeps it current on every later upload and context restore.
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
-- **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
+  `updateRawTexture` / `updateDynamicTexture` / `updateHtmlElementTexture` take
+  optional `GLTextureUpdateOptions` (`invertY`, `premultiplyAlpha`).
+- **Render targets** — `createRenderTarget` (RGBA8 FBO, or single/two-channel
+  `R8` / `RG8` via `format: gl.RED` / `gl.RG`, with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
   (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),
-  `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`,
+  `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`
+  (optional trailing `format` reads `RED` / `RG` targets tightly packed),
   `disposeRenderTarget`.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
   `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
@@ -186,7 +204,7 @@ import { createTextureFromSource, disposeTexture } from "@babylonjs/lite-gl";
 const texture = createTextureFromSource(engine, bitmap);
 // One texImage2D upload, linear filtering and clamp-to-edge by default.
 // Later, release the GPU resource:
-disposeTexture(engine, texture);
+disposeTexture(texture);
 ```
 
 The factory accepts `TexImageSource` (including `ImageBitmap`, `ImageData`,
@@ -210,9 +228,9 @@ produces a ready, transparent-black texture at the original size. Recreate
 the texture after restore (for example from `onContextRestored`) to recover its
 content. Mutable retained sources replay their current pixels and intrinsic
 size. If a retained source was closed anyway, restore logs an error and falls
-back to transparent black for that texture only. Mipmaps generated with
-`generateTextureMipMaps` are not replayed; regenerate them after restore. No
-source is closed by lite-gl.
+back to transparent black for that texture only. Mipmaps requested with
+`generateTextureMipMaps` are rebuilt after the restored upload. No source is
+closed by lite-gl.
 
 ## Demos
 

@@ -11,6 +11,7 @@ import {
     setEffectTexture,
     stopRenderLoop,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     createRenderTarget,
     clearEngine,
     generateRenderTargetStencil,
@@ -23,7 +24,7 @@ import {
  *
  * Exercises the converged stencil API end-to-end:
  *   - `createRenderTarget` makes an offscreen 512×512 RGBA8 + depth target, then
- *     `generateRenderTargetStencil(engine, rt)` replaces the depth-only
+ *     `generateRenderTargetStencil(rt)` replaces the depth-only
  *     renderbuffer with
  *     a packed DEPTH24_STENCIL8 attachment so the FBO carries a stencil plane.
  *   - PASS 1 (mask write): with stencil `func = ALWAYS`, `ref = 1`, op
@@ -32,7 +33,7 @@ import {
  *   - PASS 2 (masked draw): with stencil `func = EQUAL`, `ref = 1`, op
  *     `KEEP/KEEP/KEEP` (no stencil writes) and colour writes back on, a fullscreen
  *     animated radial gradient is drawn only inside the stencil disc.
- *   - COMPOSITE binds the default framebuffer (`bindRenderTarget(engine, null)`),
+ *   - COMPOSITE binds the default framebuffer (`restoreDefaultFramebuffer(engine)`),
  *     disables the stencil test and samples the RT fullscreen with an
  *     aspect-corrected radial vignette.
  *
@@ -124,7 +125,7 @@ const gl = engine.gl;
 // renderbuffer to a packed DEPTH24_STENCIL8 attachment so the FBO carries a
 // stencil plane for the masking passes.
 const rt = createRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE, generateDepthBuffer: true });
-generateRenderTargetStencil(engine, rt);
+generateRenderTargetStencil(rt);
 
 const discWrapper = createEffectWrapper(engine, {
     fragmentSource: DISC_FRAGMENT,
@@ -145,14 +146,14 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, discWrapper.effect) || !isEffectReady(engine, gradientWrapper.effect) || !isEffectReady(engine, compositeWrapper.effect)) {
+    if (!isEffectReady(discWrapper.effect) || !isEffectReady(gradientWrapper.effect) || !isEffectReady(compositeWrapper.effect)) {
         return;
     }
     resizeGLEngine(engine);
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
 
     // ── Bind the render target and clear colour + stencil to a known state ──
-    bindRenderTarget(engine, rt); // binds the FBO + sets viewport to RT_SIZE
+    bindRenderTarget(rt); // binds the FBO + sets viewport to RT_SIZE
     setColorMask(engine, true, true, true, true);
     setStencilState(engine, { test: true, mask: 0xff });
     clearEngine(engine, { color: { r: CLEAR_R, g: CLEAR_G, b: CLEAR_B }, stencil: true });
@@ -185,16 +186,16 @@ runRenderLoop(engine, () => {
         opZPass: gl.KEEP,
     });
     applyEffectWrapper(gradientWrapper);
-    setEffectFloat(engine, gradientWrapper.effect, "uTime", uTime);
+    setEffectFloat(gradientWrapper.effect, "uTime", uTime);
     drawEffect(engine);
 
     // ── COMPOSITE: sample the masked RT to the screen (stencil disabled) ──
-    bindRenderTarget(engine, null); // default framebuffer + canvas viewport
+    restoreDefaultFramebuffer(engine); // default framebuffer + canvas viewport
     setStencilState(engine, { test: false });
     setColorMask(engine, true, true, true, true);
     applyEffectWrapper(compositeWrapper);
-    setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, compositeWrapper.effect, "uRt", rt.texture);
+    setEffectFloat2(compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(compositeWrapper.effect, "uRt", rt.texture);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

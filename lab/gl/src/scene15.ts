@@ -1,4 +1,19 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, createRawTexture, drawEffect, GLBlendMode, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, createSpriteRenderer, renderSprites, type GLSprite } from "babylon-lite-gl";
+import {
+    applyEffectWrapper,
+    createEffectWrapper,
+    createGLEngine,
+    createRawTexture,
+    drawEffect,
+    GLBlendMode,
+    isEffectReady,
+    resizeGLEngine,
+    runRenderLoop,
+    setViewport,
+    stopRenderLoop,
+    createSpriteRenderer,
+    renderSprites,
+    type GLSprite,
+} from "babylon-lite-gl";
 
 /**
  * Scene 15 — Multiple Sprite Renderers (shared program).
@@ -195,7 +210,7 @@ let firstFrameDrawn = false;
 runRenderLoop(engine, (dt) => {
     // Gate on both layers' effects + sheets so the frozen capture always includes
     // every sprite (matching the BJS reference's async sprite-shader load).
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, discRenderer._effect) || !isEffectReady(engine, ringRenderer._effect) || !discSheet.isReady || !ringSheet.isReady) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(discRenderer._effect) || !isEffectReady(ringRenderer._effect) || !discSheet.isReady || !ringSheet.isReady) {
         return;
     }
     resizeGLEngine(engine);

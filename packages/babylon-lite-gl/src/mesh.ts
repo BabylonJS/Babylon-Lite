@@ -47,6 +47,9 @@ export interface GLVertexBuffer {
     handle: WebGLBuffer;
     /** Size of the GL buffer in bytes. */
     byteLength: number;
+    /** The engine that created (and owns) this buffer. Operations on it derive
+     *  their engine from here, so they take the buffer alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal Delete the underlying GL buffer. */
@@ -69,6 +72,9 @@ export interface GLIndexBuffer {
     count: number;
     /** `true` for 32-bit (`Uint32Array`) indices, `false` for 16-bit. */
     is32Bits: boolean;
+    /** The engine that created (and owns) this buffer. Operations on it derive
+     *  their engine from here, so they take the buffer alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal Delete the underlying GL buffer. */
@@ -129,6 +135,7 @@ export function createVertexBuffer(engine: GLEngineContext, data: Float32Array, 
         byteLength: data.byteLength,
         _data: data,
         _dynamic: dynamic,
+        _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
         _restore: () => {},
@@ -157,12 +164,12 @@ export function createVertexBuffer(engine: GLEngineContext, data: Float32Array, 
  * full-buffer update from offset 0 also refreshes the retained CPU data used
  * for context-restore.
  *
- * @param engine - The engine.
  * @param vb - The vertex buffer to update.
  * @param data - The new float data.
  * @param dstByteOffset - Destination byte offset within the buffer. Default 0.
  */
-export function updateVertexBuffer(engine: GLEngineContext, vb: GLVertexBuffer, data: Float32Array, dstByteOffset = 0): void {
+export function updateVertexBuffer(vb: GLVertexBuffer, data: Float32Array, dstByteOffset = 0): void {
+    const engine = vb._engine;
     if (engine._isLost || engine._disposed || vb._disposed) {
         return;
     }
@@ -195,6 +202,7 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
         count: data.length,
         is32Bits: is32,
         _data: data,
+        _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
         _restore: () => {},
@@ -224,7 +232,8 @@ export function createIndexBuffer(engine: GLEngineContext, data: Uint16Array | U
 
 /** Dispose a vertex or index buffer (delete the GL buffer + unregister). Clears
  *  the array/element-buffer cache slot if it pointed at this buffer. Idempotent. */
-export function disposeBuffer(engine: GLEngineContext, buffer: GLVertexBuffer | GLIndexBuffer): void {
+export function disposeBuffer(buffer: GLVertexBuffer | GLIndexBuffer): void {
+    const engine = buffer._engine;
     if (buffer._disposed) {
         return;
     }
@@ -251,10 +260,10 @@ export function disposeBuffer(engine: GLEngineContext, buffer: GLVertexBuffer | 
  * Bind an index buffer as the current element-array buffer (on the default
  * VAO). Cached. The lite-gl equivalent of Babylon's `_bindIndexBufferWithCache`.
  *
- * @param engine - The engine.
  * @param ib - The index buffer to bind.
  */
-export function bindIndexBuffer(engine: GLEngineContext, ib: GLIndexBuffer): void {
+export function bindIndexBuffer(ib: GLIndexBuffer): void {
+    const engine = ib._engine;
     if (engine._isLost || engine._disposed || ib._disposed) {
         return;
     }
@@ -285,13 +294,13 @@ export function bindIndexBuffer(engine: GLEngineContext, ib: GLIndexBuffer): voi
  * Runs on the default (null) VAO — never corrupts the quad / sprite VAOs.
  * No-op on a lost/disposed context or before the effect is ready.
  *
- * @param engine - The engine.
  * @param vb - The buffer supplying the attribute data.
  * @param descriptors - The attribute layout.
  * @param effect - The effect whose attribute locations resolve unnamed indices.
  * @param computeStride - See above. Default `false`.
  */
-export function bindAttributes(engine: GLEngineContext, vb: GLVertexBuffer, descriptors: readonly GLAttributeDescriptor[], effect: GLEffect, computeStride = false): void {
+export function bindAttributes(vb: GLVertexBuffer, descriptors: readonly GLAttributeDescriptor[], effect: GLEffect, computeStride = false): void {
+    const engine = vb._engine;
     if (engine._isLost || engine._disposed || vb._disposed || !effect.isReady) {
         return;
     }
@@ -309,7 +318,7 @@ export function bindAttributes(engine: GLEngineContext, vb: GLVertexBuffer, desc
 
     for (let i = 0; i < descriptors.length; i++) {
         const d = descriptors[i] as GLAttributeDescriptor;
-        const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(engine, effect, d.name) : -1;
+        const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(effect, d.name) : -1;
         if (loc < 0) {
             continue;
         }
@@ -352,21 +361,21 @@ export function unbindInstanceAttributes(engine: GLEngineContext): void {
  * `drawElementsInstanced`, otherwise `drawElements`. No-op on a lost/disposed
  * context or when no program is current.
  *
- * @param engine - The engine.
  * @param ib - The index buffer (also bound as a side-effect, cached).
  * @param indexCount - Number of indices to draw.
  * @param indexStart - First index offset (in indices, not bytes). Default 0.
  * @param instanceCount - Instance count for instanced draws. Default 0
  *  (non-instanced).
  */
-export function drawIndexed(engine: GLEngineContext, ib: GLIndexBuffer, indexCount: number, indexStart = 0, instanceCount = 0): void {
+export function drawIndexed(ib: GLIndexBuffer, indexCount: number, indexStart = 0, instanceCount = 0): void {
+    const engine = ib._engine;
     if (engine._isLost || engine._disposed || ib._disposed) {
         return;
     }
     if (engine._state.currentProgram === null) {
         return;
     }
-    bindIndexBuffer(engine, ib);
+    bindIndexBuffer(ib);
     const gl = engine.gl;
     const type = ib.is32Bits ? UNSIGNED_INT : UNSIGNED_SHORT;
     const byteOffset = indexStart * (ib.is32Bits ? 4 : 2);
@@ -407,6 +416,9 @@ export interface GLMeshVertexBuffer {
 export interface GLMeshVao {
     /** The live `WebGLVertexArrayObject`. Swapped on `webglcontextrestored`. */
     handle: WebGLVertexArrayObject;
+    /** The engine that created (and owns) this VAO. Operations on it derive
+     *  their engine from here, so they take the VAO alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal The index buffer recorded into the VAO. */
@@ -472,7 +484,7 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
         const attrs: _ResolvedAttr[] = [];
         for (let i = 0; i < vbb.attributes.length; i++) {
             const d = vbb.attributes[i] as GLAttributeDescriptor;
-            const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(engine, effect, d.name) : -1;
+            const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(effect, d.name) : -1;
             if (loc < 0) {
                 continue;
             }
@@ -488,7 +500,7 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
         }
         bindings.push({ buffer: vbb.buffer, attrs });
     }
-    const vao: GLMeshVao = { handle, _disposed: false, _indexBuffer: indexBuffer, _bindings: bindings, _restore: () => {} };
+    const vao: GLMeshVao = { handle, _engine: engine, _disposed: false, _indexBuffer: indexBuffer, _bindings: bindings, _restore: () => {} };
     vao._restore = (): void => {
         if (engine._isLost || engine._disposed || vao._disposed) {
             return;
@@ -510,10 +522,10 @@ export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly G
  * {@link drawMesh} binds it for you. Binding restores the VAO's recorded element
  * binding, so the element-buffer cache is updated in lock-step.
  *
- * @param engine - The engine.
  * @param vao - The mesh VAO to bind.
  */
-export function bindMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
+export function bindMeshVao(vao: GLMeshVao): void {
+    const engine = vao._engine;
     if (engine._isLost || engine._disposed || vao._disposed) {
         return;
     }
@@ -533,18 +545,18 @@ export function bindMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
  * buffer. No per-draw attribute (re)binding. No-op on a lost/disposed context, a
  * disposed VAO, or when no program is current.
  *
- * @param engine - The engine.
  * @param vao - The mesh VAO to draw.
  * @param instanceCount - Instance count for instanced draws. Default 0 (non-instanced).
  */
-export function drawMesh(engine: GLEngineContext, vao: GLMeshVao, instanceCount = 0): void {
+export function drawMesh(vao: GLMeshVao, instanceCount = 0): void {
+    const engine = vao._engine;
     if (engine._isLost || engine._disposed || vao._disposed) {
         return;
     }
     if (engine._state.currentProgram === null) {
         return;
     }
-    bindMeshVao(engine, vao);
+    bindMeshVao(vao);
     applyGLStates(engine);
     const ib = vao._indexBuffer;
     const gl = engine.gl;
@@ -558,7 +570,8 @@ export function drawMesh(engine: GLEngineContext, vao: GLMeshVao, instanceCount 
 
 /** Dispose a {@link GLMeshVao}: delete the VAO and unregister its restore hook.
  *  Does NOT dispose the vertex/index buffers (the caller owns those). Idempotent. */
-export function disposeMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
+export function disposeMeshVao(vao: GLMeshVao): void {
+    const engine = vao._engine;
     if (vao._disposed) {
         return;
     }

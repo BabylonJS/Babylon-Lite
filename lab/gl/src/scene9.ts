@@ -12,6 +12,7 @@ import {
     setEffectTexture,
     stopRenderLoop,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
 } from "babylon-lite-gl";
 import { createPingPong } from "./ping-pong";
 
@@ -27,10 +28,10 @@ import { createPingPong } from "./ping-pong";
  *     the previous frame from `read.texture` (`setEffectTexture`), blends it 50/50
  *     with a k-shifted radial palette, then `swap()`s — the classic
  *     sample-previous / render-next / exchange ping-pong loop (the same pattern
- *     `bindRenderTarget(engine, pp.write)` → draw → `pp.swap()` the
+ *     `bindRenderTarget(pp.write)` → draw → `pp.swap()` the
  *     saturday-weirdness demo uses, here pinned to a deterministic iteration
  *     count).
- *   - COMPOSITE: bind the default framebuffer (`bindRenderTarget(engine, null)`)
+ *   - COMPOSITE: bind the default framebuffer (`restoreDefaultFramebuffer(engine)`)
  *     and sample the final feedback result fullscreen with a radial vignette.
  *
  * Like scene8, EVERY shader term depends ONLY on `r = length(vUv - 0.5)` and each
@@ -136,7 +137,7 @@ const compositeWrapper = createEffectWrapper(engine, {
     samplerNames: ["uTex"],
 });
 
-executeWhenCompiled(engine, compositeWrapper.effect, () => {
+executeWhenCompiled(compositeWrapper.effect, () => {
     console.log("scene9: ping-pong feedback effects compiled");
 });
 
@@ -146,36 +147,36 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, seedWrapper.effect) || !isEffectReady(engine, feedbackWrapper.effect) || !isEffectReady(engine, compositeWrapper.effect)) {
+    if (!isEffectReady(seedWrapper.effect) || !isEffectReady(feedbackWrapper.effect) || !isEffectReady(compositeWrapper.effect)) {
         return;
     }
     resizeGLEngine(engine);
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
 
     // ── SEED: write P0 into `write`, then swap so it becomes `read`. ──
-    bindRenderTarget(engine, pingpong.write);
+    bindRenderTarget(pingpong.write);
     applyEffectWrapper(seedWrapper);
-    setEffectFloat(engine, seedWrapper.effect, "uTime", uTime);
+    setEffectFloat(seedWrapper.effect, "uTime", uTime);
     drawEffect(engine);
     pingpong.swap();
 
     // ── FEEDBACK: N fixed iterations, each sampling `read` (last pass) while
     //    rendering into `write`, then swapping — the ping-pong feedback loop. ──
     for (let k = 1; k <= FEEDBACK_ITERATIONS; k++) {
-        bindRenderTarget(engine, pingpong.write);
+        bindRenderTarget(pingpong.write);
         applyEffectWrapper(feedbackWrapper);
-        setEffectFloat(engine, feedbackWrapper.effect, "uTime", uTime);
-        setEffectFloat(engine, feedbackWrapper.effect, "uK", k);
-        setEffectTexture(engine, feedbackWrapper.effect, "uPrev", pingpong.read.texture);
+        setEffectFloat(feedbackWrapper.effect, "uTime", uTime);
+        setEffectFloat(feedbackWrapper.effect, "uK", k);
+        setEffectTexture(feedbackWrapper.effect, "uPrev", pingpong.read.texture);
         drawEffect(engine);
         pingpong.swap();
     }
 
     // ── COMPOSITE: sample the final feedback result to the screen + vignette. ──
-    bindRenderTarget(engine, null); // default framebuffer + canvas viewport
+    restoreDefaultFramebuffer(engine); // default framebuffer + canvas viewport
     applyEffectWrapper(compositeWrapper);
-    setEffectFloat2(engine, compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, compositeWrapper.effect, "uTex", pingpong.read.texture);
+    setEffectFloat2(compositeWrapper.effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(compositeWrapper.effect, "uTex", pingpong.read.texture);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

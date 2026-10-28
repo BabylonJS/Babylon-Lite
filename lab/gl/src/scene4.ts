@@ -172,7 +172,7 @@ runRenderLoop(engine, (dt) => {
     // Gate on BOTH the background effect and the sprite renderer's effect (plus
     // the sheet) so the frozen capture always includes the sprites — matching
     // the BJS reference, whose sprite shaders also load before its first frame.
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, renderer._effect) || !sheet.isReady) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(renderer._effect) || !sheet.isReady) {
         return;
     }
     resizeGLEngine(engine);

@@ -101,10 +101,8 @@ describe("babylon-lite-gl build output", () => {
         expect(readFileSync(resolve(DIST, "texture-source.d.ts"), "utf-8")).toContain(
             "createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture"
         );
-        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null");
-        expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain(
-            "waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>"
-        );
+        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(effect: GLEffect): string | null");
+        expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain("waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>");
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -117,6 +115,10 @@ describe("babylon-lite-gl build output", () => {
             "wipeGLStateCache",
             "runRenderLoop",
             "stopRenderLoop",
+            "beginFrame",
+            "endFrame",
+            "captureGPUFrameTime",
+            "getGPUFrameTimeCounter",
             // effects
             "createEffect",
             "getEffectCompilationError",
@@ -130,8 +132,11 @@ describe("babylon-lite-gl build output", () => {
             // textures (LDR core + HDR opt-in + extensions)
             "createRawTexture",
             "createTextureFromSource",
+            "bindTexture",
+            "unbindTexture",
             "createTexture3DFromPixels",
             "bindTexture3D",
+            "unbindTexture3D",
             "setEffectTexture3D",
             "generateTexture3DMipMaps",
             "updateTexture3DSamplingMode",
@@ -144,6 +149,8 @@ describe("babylon-lite-gl build output", () => {
             "updateTextureSamplingMode",
             "updateTextureWrapMode",
             "createTextureFromHandle",
+            "getSamplingModeFilters",
+            "isTextureReady",
             // dynamic textures
             "createDynamicTexture",
             "updateDynamicTexture",
@@ -152,6 +159,7 @@ describe("babylon-lite-gl build output", () => {
             "createRenderTarget",
             "createFloatRenderTarget",
             "bindRenderTarget",
+            "restoreDefaultFramebuffer",
             "generateRenderTargetMipMaps",
             "resizeRenderTarget",
             "readRenderTargetPixels",
@@ -199,7 +207,7 @@ describe("babylon-lite-gl build output", () => {
         expect(typeof mod.GLSamplingMode, "export GLSamplingMode").toBe("object");
         expect(mod.setBoundTextureParams, "internal texture parameter helper must not be public").toBeUndefined();
 
-        // The legacy `unbindRenderTarget` was folded into `bindRenderTarget(engine, null)`
+        // The legacy `unbindRenderTarget` was folded into `restoreDefaultFramebuffer(engine)`
         // and MUST NOT ship — its presence would mean the converge regressed.
         expect(mod.unbindRenderTarget, "unbindRenderTarget must not be exported").toBeUndefined();
 

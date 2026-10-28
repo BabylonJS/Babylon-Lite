@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
     bindTexture,
+    unbindTexture,
     bindTexture3D,
+    unbindTexture3D,
     createEffect,
     createGLEngine,
     createRawTexture,
@@ -84,26 +86,26 @@ describe("lite-gl native 3D pixel textures", () => {
         const volume = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         const flat = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
         mock.clear();
-        bindTexture3D(engine, 1, volume);
-        bindTexture3D(engine, 1, volume);
-        bindTexture(engine, 1, flat);
-        bindTexture(engine, 1, flat);
+        bindTexture3D(volume, 1);
+        bindTexture3D(volume, 1);
+        bindTexture(flat, 1);
+        bindTexture(flat, 1);
         expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args[0])).toEqual([engine.gl.TEXTURE_3D, engine.gl.TEXTURE_2D]);
         expect(mock.log.filter((c) => c.name === "activeTexture")).toHaveLength(1);
         mock.clear();
-        bindTexture(engine, 1, null);
+        unbindTexture(engine, 1);
         expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args)).toEqual([[engine.gl.TEXTURE_2D, null]]);
         expect(engine._state._boundTextures3D?.[1]).toBe(volume.handle);
-        bindTexture3D(engine, 1, null);
+        unbindTexture3D(engine, 1);
         expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args[0])).toEqual([engine.gl.TEXTURE_2D, engine.gl.TEXTURE_3D]);
-        bindTexture3D(engine, 1, null);
+        unbindTexture3D(engine, 1);
         expect(mock.count("bindTexture")).toBe(2);
     });
 
     it("forces texture unit zero active before a 3D upload even when its binding is cached", () => {
         const { mock, engine } = makeEngine();
         const first = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        bindTexture3D(engine, 1, first);
+        bindTexture3D(first, 1);
         mock.clear();
         const second = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         expect(mock.log.filter((c) => c.name === "activeTexture").map((c) => c.args)).toEqual([[engine.gl.TEXTURE0]]);
@@ -156,13 +158,13 @@ describe("lite-gl native 3D pixel textures", () => {
         const { mock, engine } = makeEngine();
         const volume = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         const flat = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        bindTexture3D(engine, 2, volume);
-        bindTexture(engine, 2, flat);
-        disposeTexture3D(engine, volume);
+        bindTexture3D(volume, 2);
+        bindTexture(flat, 2);
+        disposeTexture3D(volume);
         expect(engine._state._boundTextures3D?.[2]).toBeNull();
         expect(engine._state.boundTextures[2]).toBe(flat.handle);
         mock.clear();
-        bindTexture(engine, 2, flat);
+        bindTexture(flat, 2);
         expect(mock.count("bindTexture")).toBe(0);
     });
 
@@ -175,14 +177,14 @@ describe("lite-gl native 3D pixel textures", () => {
             uniformNames: [],
             samplerNames: ["lut"],
         });
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         mock.clear();
-        setEffectTexture3D(engine, effect, "lut", tex);
-        setEffectTexture3D(engine, effect, "lut", tex);
-        generateTexture3DMipMaps(engine, tex);
-        updateTexture3DSamplingMode(engine, tex, engine.gl.NEAREST, engine.gl.NEAREST);
-        updateTexture3DWrapMode(engine, tex, engine.gl.REPEAT, engine.gl.MIRRORED_REPEAT, engine.gl.CLAMP_TO_EDGE);
+        setEffectTexture3D(effect, "lut", tex);
+        setEffectTexture3D(effect, "lut", tex);
+        generateTexture3DMipMaps(tex);
+        updateTexture3DSamplingMode(tex, engine.gl.NEAREST, engine.gl.NEAREST);
+        updateTexture3DWrapMode(tex, engine.gl.REPEAT, engine.gl.MIRRORED_REPEAT, engine.gl.CLAMP_TO_EDGE);
         expect(mock.count("uniform1i")).toBe(0);
         expect(mock.log.find((c) => c.name === "generateMipmap")?.args).toEqual([engine.gl.TEXTURE_3D]);
         expect(mock.log.filter((c) => c.name === "texParameteri").map((c) => c.args[1])).toEqual([
@@ -197,22 +199,22 @@ describe("lite-gl native 3D pixel textures", () => {
         const { mock, engine } = makeEngine();
         const gl = engine.gl;
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         mock.clear();
-        updateTexture3DSamplingMode(engine, tex, gl.LINEAR, gl.LINEAR);
-        updateTexture3DWrapMode(engine, tex, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
+        updateTexture3DSamplingMode(tex, gl.LINEAR, gl.LINEAR);
+        updateTexture3DWrapMode(tex, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE);
         expect(mock.log).toEqual([]);
 
-        updateTexture3DSamplingMode(engine, tex, gl.NEAREST, gl.LINEAR);
-        updateTexture3DWrapMode(engine, tex, gl.CLAMP_TO_EDGE, gl.REPEAT, gl.CLAMP_TO_EDGE);
+        updateTexture3DSamplingMode(tex, gl.NEAREST, gl.LINEAR);
+        updateTexture3DWrapMode(tex, gl.CLAMP_TO_EDGE, gl.REPEAT, gl.CLAMP_TO_EDGE);
         expect(mock.log.filter((c) => c.name === "texParameteri").map((c) => c.args)).toEqual([
             [gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST],
             [gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.REPEAT],
         ]);
-        bindTexture3D(engine, 2, tex);
+        bindTexture3D(tex, 2);
         mock.clear();
-        updateTexture3DSamplingMode(engine, tex, gl.NEAREST, gl.LINEAR);
-        updateTexture3DWrapMode(engine, tex, gl.CLAMP_TO_EDGE, gl.REPEAT, gl.CLAMP_TO_EDGE);
+        updateTexture3DSamplingMode(tex, gl.NEAREST, gl.LINEAR);
+        updateTexture3DWrapMode(tex, gl.CLAMP_TO_EDGE, gl.REPEAT, gl.CLAMP_TO_EDGE);
         expect(mock.log).toEqual([]);
         expect(engine._state.activeTextureUnit).toBe(2);
     });
@@ -222,12 +224,12 @@ describe("lite-gl native 3D pixel textures", () => {
         const gl = engine.gl;
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         mock.clear();
-        expect(() => updateTexture3DSamplingMode(engine, tex, gl.TEXTURE_2D, gl.NEAREST)).toThrow(/minification filter/);
-        expect(() => updateTexture3DSamplingMode(engine, tex, gl.NEAREST, gl.LINEAR_MIPMAP_LINEAR)).toThrow(/magnification filter/);
-        expect(() => updateTexture3DWrapMode(engine, tex, gl.REPEAT, gl.REPEAT, gl.TEXTURE_2D)).toThrow(/wrap mode/);
+        expect(() => updateTexture3DSamplingMode(tex, gl.TEXTURE_2D, gl.NEAREST)).toThrow(/minification filter/);
+        expect(() => updateTexture3DSamplingMode(tex, gl.NEAREST, gl.LINEAR_MIPMAP_LINEAR)).toThrow(/magnification filter/);
+        expect(() => updateTexture3DWrapMode(tex, gl.REPEAT, gl.REPEAT, gl.TEXTURE_2D)).toThrow(/wrap mode/);
         expect(mock.log).toEqual([]);
-        updateTexture3DSamplingMode(engine, tex, gl.NEAREST, gl.LINEAR);
-        updateTexture3DWrapMode(engine, tex, gl.REPEAT, gl.REPEAT, gl.REPEAT);
+        updateTexture3DSamplingMode(tex, gl.NEAREST, gl.LINEAR);
+        updateTexture3DWrapMode(tex, gl.REPEAT, gl.REPEAT, gl.REPEAT);
         expect(mock.count("texParameteri")).toBe(4);
     });
 
@@ -236,11 +238,11 @@ describe("lite-gl native 3D pixel textures", () => {
         const gl = engine.gl;
         const data = new Uint8Array(2 * 2 * 2 * 4);
         const tex = createTexture3DFromPixels(engine, data, 2, 2, 2);
-        generateTexture3DMipMaps(engine, tex);
-        updateTexture3DSamplingMode(engine, tex, gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
+        generateTexture3DMipMaps(tex);
+        updateTexture3DSamplingMode(tex, gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
         fireLost(canvas);
         mock.clear();
-        generateTexture3DMipMaps(engine, tex);
+        generateTexture3DMipMaps(tex);
         expect(mock.log).toEqual([]);
 
         fireRestored(canvas);
@@ -259,7 +261,7 @@ describe("lite-gl native 3D pixel textures", () => {
         fireRestored(canvas);
         expect(mock.count("generateMipmap")).toBe(1);
         mock.clear();
-        updateTexture3DSamplingMode(engine, tex, gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
+        updateTexture3DSamplingMode(tex, gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
         expect(mock.log).toEqual([]);
     });
 
@@ -267,12 +269,12 @@ describe("lite-gl native 3D pixel textures", () => {
         const { mock, canvas, engine } = makeEngine();
         const data = new Uint8Array([10, 20, 30, 255]);
         const tex = createTexture3DFromPixels(engine, data, 1, 1, 1);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         const oldHandle = tex.handle;
         fireLost(canvas);
         expect(tex.isReady).toBe(false);
         mock.clear();
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         expect(mock.count("bindTexture")).toBe(0);
         fireRestored(canvas);
         expect(tex.isReady).toBe(true);
@@ -281,25 +283,25 @@ describe("lite-gl native 3D pixel textures", () => {
         expect(mock.log.filter((c) => c.name === "texParameteri")).toHaveLength(5);
         expect(mock.count("generateMipmap")).toBe(0);
         mock.clear();
-        bindTexture3D(engine, 1, tex);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
+        bindTexture3D(tex, 1);
         expect(mock.count("bindTexture")).toBe(1);
-        disposeTexture3D(engine, tex);
+        disposeTexture3D(tex);
         expect(engine._state._boundTextures3D?.[1]).toBeNull();
         expect(engine._textures).not.toContain(tex);
         expect(mock.count("deleteTexture")).toBe(1);
         mock.clear();
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         expect(mock.count("bindTexture")).toBe(0);
     });
 
     it("invalidates the optional 3D cache when external GL state is wiped", () => {
         const { mock, engine } = makeEngine();
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         mock.clear();
         wipeGLStateCache(engine);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         expect(mock.log.find((c) => c.name === "bindTexture")?.args).toEqual([engine.gl.TEXTURE_3D, tex.handle]);
     });
 
@@ -316,33 +318,33 @@ describe("lite-gl native 3D pixel textures", () => {
         gl.activeTexture(gl.TEXTURE0 + 3);
         wipeGLStateCache(engine);
         mock.clear();
-        bindTexture3D(engine, 0, tex);
+        bindTexture3D(tex, 0);
         expect(mock.log.filter((c) => c.name === "activeTexture").map((c) => c.args)).toEqual([[gl.TEXTURE0]]);
         expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args)).toEqual([[gl.TEXTURE_3D, tex.handle]]);
         mock.clear();
-        bindTexture3D(engine, 0, tex);
+        bindTexture3D(tex, 0);
         expect(mock.log).toEqual([]);
     });
 
     it("unbinds a 3D texture after a cache wipe even when the previous binding is unknown", () => {
         const { mock, engine } = makeEngine();
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        bindTexture3D(engine, 1, tex);
+        bindTexture3D(tex, 1);
         mock.clear();
         wipeGLStateCache(engine);
-        bindTexture3D(engine, 1, null);
+        unbindTexture3D(engine, 1);
         expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args)).toEqual([[engine.gl.TEXTURE_3D, null]]);
         expect(engine._state._boundTextures3D?.[1]).toBeNull();
         mock.clear();
-        bindTexture3D(engine, 1, null);
+        unbindTexture3D(engine, 1);
         expect(mock.count("bindTexture")).toBe(0);
     });
 
     it("replays updated 3D sampling and wrap parameters on restore", () => {
         const { mock, canvas, engine } = makeEngine();
         const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        updateTexture3DSamplingMode(engine, tex, engine.gl.NEAREST, engine.gl.LINEAR);
-        updateTexture3DWrapMode(engine, tex, engine.gl.REPEAT, engine.gl.MIRRORED_REPEAT, engine.gl.CLAMP_TO_EDGE);
+        updateTexture3DSamplingMode(tex, engine.gl.NEAREST, engine.gl.LINEAR);
+        updateTexture3DWrapMode(tex, engine.gl.REPEAT, engine.gl.MIRRORED_REPEAT, engine.gl.CLAMP_TO_EDGE);
         fireLost(canvas);
         mock.clear();
         fireRestored(canvas);

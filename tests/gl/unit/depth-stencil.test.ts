@@ -398,7 +398,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
         const depthOnly = rt._depthStencil;
         mock.clear();
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         // The packed buffer replaced (deleted) the core depth-only renderbuffer.
         expect(callsNamed(mock, "deleteRenderbuffer").map((c) => c.args[0])).toContain(depthOnly);
         const store = callsNamed(mock, "renderbufferStorage");
@@ -416,7 +416,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const gl = engine.gl;
         const rt = createRenderTarget(engine, { width: 64, height: 64 });
         mock.clear();
-        generateRenderTargetStencil(engine, rt, { depth: false });
+        generateRenderTargetStencil(rt, { depth: false });
         const store = callsNamed(mock, "renderbufferStorage");
         expect(store).toHaveLength(1);
         expect(store[0]?.args[1]).toBe(gl.STENCIL_INDEX8);
@@ -430,7 +430,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const { mock, canvas, engine } = makeRTEngine();
         const gl = engine.gl;
         const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         expect(rt._rebuildDepthStencil).toBeDefined();
         fireLost(canvas);
         mock.clear();
@@ -446,9 +446,9 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
         const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         mock.clear();
-        resizeRenderTarget(engine, rt, 128, 128);
+        resizeRenderTarget(rt, 128, 128);
         const packed = callsNamed(mock, "renderbufferStorage").filter((c) => c.args[1] === gl.DEPTH24_STENCIL8);
         expect(packed.length).toBeGreaterThanOrEqual(1);
         expect(packed[packed.length - 1]?.args[2]).toBe(128);
@@ -459,9 +459,9 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("is a no-op on a disposed target", () => {
         const { mock, engine } = makeRTEngine();
         const rt = createRenderTarget(engine, { width: 64, height: 64 });
-        disposeRenderTarget(engine, rt);
+        disposeRenderTarget(rt);
         mock.clear();
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         expect(mock.count("createRenderbuffer")).toBe(0);
     });
 
@@ -470,7 +470,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const rt = createRenderTarget(engine, { width: 64, height: 64 });
         fireLost(canvas);
         mock.clear();
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         expect(mock.count("createRenderbuffer")).toBe(0);
     });
 
@@ -479,11 +479,11 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const other = createRenderTarget(engine, { width: 32, height: 32 });
         const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
         // Make another RT the active draw target, then add stencil to `rt`.
-        bindRenderTarget(engine, other);
+        bindRenderTarget(other);
         const prevFb = engine._state.boundFramebuffer;
         expect(prevFb).toBe(other._framebuffer);
         mock.clear();
-        generateRenderTargetStencil(engine, rt);
+        generateRenderTargetStencil(rt);
         // The helper must NOT leave rt's FBO bound — the caller's target is restored.
         expect(engine._state.boundFramebuffer).toBe(prevFb);
         const binds = callsNamed(mock, "bindFramebuffer");
@@ -501,7 +501,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const origCheck = gl.checkFramebufferStatus;
         gl.checkFramebufferStatus = () => 0x8cd6; // FRAMEBUFFER_INCOMPLETE_ATTACHMENT
         try {
-            expect(() => generateRenderTargetStencil(engine, rt)).toThrow(/incomplete/);
+            expect(() => generateRenderTargetStencil(rt)).toThrow(/incomplete/);
         } finally {
             gl.checkFramebufferStatus = origCheck;
         }
@@ -524,7 +524,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
         const origCheck = gl.checkFramebufferStatus;
         gl.checkFramebufferStatus = () => 0x8cd6; // FRAMEBUFFER_INCOMPLETE_ATTACHMENT
         try {
-            expect(() => generateRenderTargetStencil(engine, rt)).toThrow(/incomplete/);
+            expect(() => generateRenderTargetStencil(rt)).toThrow(/incomplete/);
         } finally {
             gl.checkFramebufferStatus = origCheck;
         }

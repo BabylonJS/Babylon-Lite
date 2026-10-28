@@ -48,7 +48,7 @@ describe("lite-gl createTextureFromSource", () => {
         expect(Array.from(engine._textures)).toEqual([tex]);
         expect(source.close).not.toHaveBeenCalled();
         mock.clear();
-        bindTexture(engine, 0, tex);
+        bindTexture(tex, 0);
         expect(mock.log).toEqual([]);
     });
 
@@ -103,7 +103,7 @@ describe("lite-gl createTextureFromSource", () => {
             premultiplyAlpha: true,
             unpackAlignment: 1,
         });
-        bindTexture(engine, 3, previous);
+        bindTexture(previous, 3);
         mock.clear();
         const source = bitmap();
         const tex = createTextureFromSource(engine, source);
@@ -236,11 +236,11 @@ describe("lite-gl createTextureFromSource", () => {
         const { mock, canvas, engine, gl } = setup();
         const source = bitmap();
         const tex = createTextureFromSource(engine, source);
-        bindTexture(engine, 2, tex);
+        bindTexture(tex, 2);
         mock.clear();
-        disposeTexture(engine, tex);
-        disposeTexture(engine, tex);
-        bindTexture(engine, 0, tex);
+        disposeTexture(tex);
+        disposeTexture(tex);
+        bindTexture(tex, 0);
         expect(mock.log).toEqual([{ name: "deleteTexture", args: [tex.handle] }]);
         expect(engine._textures.size).toBe(0);
         expect(engine._state.boundTextures[0]).toBeNull();

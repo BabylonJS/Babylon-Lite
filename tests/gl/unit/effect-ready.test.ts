@@ -65,8 +65,8 @@ function advanceFrame(): void {
 describe("lite-gl: opt-in effect waiting", () => {
     it("does not schedule work for manual polling or executeWhenCompiled", () => {
         const { engine, effect } = setup();
-        isEffectReady(engine, effect);
-        executeWhenCompiled(engine, effect, () => undefined);
+        isEffectReady(effect);
+        executeWhenCompiled(effect, () => undefined);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
     });
@@ -76,8 +76,8 @@ describe("lite-gl: opt-in effect waiting", () => {
         const controller = new AbortController();
         const removeListener = vi.spyOn(controller.signal, "removeEventListener");
         const compiled = vi.fn();
-        executeWhenCompiled(engine, effect, compiled);
-        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        executeWhenCompiled(effect, compiled);
+        const promise = waitForEffect(effect, { signal: controller.signal });
         expect(frames.size).toBe(1);
         expect(engine._loops).toHaveLength(0);
         advanceFrame();
@@ -98,8 +98,8 @@ describe("lite-gl: opt-in effect waiting", () => {
     it("resolves immediately for a completed link without scheduling a frame", async () => {
         const { mock, engine, effect } = setup();
         mock.setParallelComplete(true);
-        await expect(waitForEffect(engine, effect)).resolves.toBe(effect);
-        await expect(waitForEffect(engine, effect)).resolves.toBe(effect);
+        await expect(waitForEffect(effect)).resolves.toBe(effect);
+        await expect(waitForEffect(effect)).resolves.toBe(effect);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
     });
@@ -109,13 +109,13 @@ describe("lite-gl: opt-in effect waiting", () => {
         mock.setParallelAvailable(false);
         const engine = createGLEngine(createMockCanvas(mock));
         const effect = createEffect(engine, OPTIONS);
-        await expect(waitForEffect(engine, effect)).resolves.toBe(effect);
+        await expect(waitForEffect(effect)).resolves.toBe(effect);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
     });
 
     it.each([true, false])("rejects deferred compilation/link errors and cleans up (compile=%s)", async (compile) => {
         const { mock, engine, effect } = setup();
-        const promise = waitForEffect(engine, effect);
+        const promise = waitForEffect(effect);
         const rejected = expect(promise).rejects.toThrow(compile ? "wait-test link failed: mock link error\nvertex compile failed" : "wait-test link failed: mock link error");
         if (compile) {
             mock.setCompileSuccess(false);
@@ -127,7 +127,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         await rejected;
         expect(frames.size).toBe(0);
         expect(engine._onLost).toHaveLength(0);
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("mock link error");
+        await expect(waitForEffect(effect)).rejects.toThrow("mock link error");
         expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
     });
 
@@ -135,7 +135,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { canvas, engine, effect } = setup();
         const otherListener = vi.fn();
         onContextLost(engine, otherListener);
-        const promise = waitForEffect(engine, effect);
+        const promise = waitForEffect(effect);
         const rejected = expect(promise).rejects.toThrow("wait-test context lost");
         fireLost(canvas);
         await rejected;
@@ -147,11 +147,11 @@ describe("lite-gl: opt-in effect waiting", () => {
 
     it("can wait again after context restoration", async () => {
         const { mock, canvas, engine, effect } = setup();
-        const rejected = expect(waitForEffect(engine, effect)).rejects.toThrow("context lost");
+        const rejected = expect(waitForEffect(effect)).rejects.toThrow("context lost");
         fireLost(canvas);
         await rejected;
         fireRestored(canvas);
-        const promise = waitForEffect(engine, effect);
+        const promise = waitForEffect(effect);
         mock.setParallelComplete(true);
         advanceFrame();
         await expect(promise).resolves.toBe(effect);
@@ -163,17 +163,17 @@ describe("lite-gl: opt-in effect waiting", () => {
         fireLost(canvas);
         mock.setProgramAllocationSuccess(false);
         fireRestored(canvas);
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("wait-test context-restore: program allocation failed");
+        await expect(waitForEffect(effect)).rejects.toThrow("wait-test context-restore: program allocation failed");
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
     });
 
     it.each(["effect", "engine"] as const)("rejects %s disposal on the next poll", async (target) => {
         const { engine, effect } = setup();
-        const promise = waitForEffect(engine, effect);
+        const promise = waitForEffect(effect);
         const rejected = expect(promise).rejects.toThrow("wait-test disposed");
         if (target === "effect") {
-            disposeEffect(engine, effect);
+            disposeEffect(effect);
         } else {
             disposeGLEngine(engine);
         }
@@ -187,9 +187,9 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { mock, canvas, engine, effect } = setup();
         const queries = mock.count("getProgramParameter");
         fireLost(canvas);
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("context lost");
-        disposeEffect(engine, effect);
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("disposed");
+        await expect(waitForEffect(effect)).rejects.toThrow("context lost");
+        disposeEffect(effect);
+        await expect(waitForEffect(effect)).rejects.toThrow("disposed");
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
         expect(mock.count("getProgramParameter")).toBe(queries);
@@ -199,7 +199,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { mock, engine, effect } = setup();
         const queries = mock.count("getProgramParameter");
         disposeGLEngine(engine);
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("wait-test disposed");
+        await expect(waitForEffect(effect)).rejects.toThrow("wait-test disposed");
         expect(mock.count("getProgramParameter")).toBe(queries);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
@@ -210,7 +210,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         const controller = new AbortController();
         const reason = new Error("cancelled before waiting");
         controller.abort(reason);
-        await expect(waitForEffect(engine, effect, { signal: controller.signal })).rejects.toBe(reason);
+        await expect(waitForEffect(effect, { signal: controller.signal })).rejects.toBe(reason);
         expect(requestAnimationFrame).not.toHaveBeenCalled();
         expect(engine._onLost).toHaveLength(0);
     });
@@ -219,7 +219,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { engine, effect } = setup();
         const controller = new AbortController();
         controller.abort("user cancelled");
-        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        const promise = waitForEffect(effect, { signal: controller.signal });
         await expect(promise).rejects.toBeInstanceOf(DOMException);
         await expect(promise).rejects.toMatchObject({ name: "AbortError", code: DOMException.ABORT_ERR, cause: "user cancelled" });
         expect(engine._onLost).toHaveLength(0);
@@ -229,7 +229,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { engine, effect } = setup();
         const controller = new AbortController();
         const reason = new Error("cancelled while waiting");
-        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        const promise = waitForEffect(effect, { signal: controller.signal });
         const rejected = expect(promise).rejects.toBe(reason);
         controller.abort(reason);
         expect(frames.size).toBe(0);
@@ -242,8 +242,8 @@ describe("lite-gl: opt-in effect waiting", () => {
         const { mock, engine, effect } = setup();
         const controller = new AbortController();
         const removeListener = vi.spyOn(controller.signal, "removeEventListener");
-        const cancelled = waitForEffect(engine, effect, { signal: controller.signal });
-        const continuing = waitForEffect(engine, effect);
+        const cancelled = waitForEffect(effect, { signal: controller.signal });
+        const continuing = waitForEffect(effect);
         const rejected = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
         controller.abort();
         await rejected;
@@ -261,9 +261,9 @@ describe("lite-gl: opt-in effect waiting", () => {
     it.each(["dispose", "dispose-engine", "lose", "abort"] as const)("rejects when a ready callback triggers %s instead of resolving", async (action) => {
         const { mock, canvas, engine, effect } = setup();
         const controller = new AbortController();
-        executeWhenCompiled(engine, effect, () => {
+        executeWhenCompiled(effect, () => {
             if (action === "dispose") {
-                disposeEffect(engine, effect);
+                disposeEffect(effect);
             } else if (action === "dispose-engine") {
                 disposeGLEngine(engine);
             } else if (action === "lose") {
@@ -272,7 +272,7 @@ describe("lite-gl: opt-in effect waiting", () => {
                 controller.abort();
             }
         });
-        const promise = waitForEffect(engine, effect, { signal: controller.signal });
+        const promise = waitForEffect(effect, { signal: controller.signal });
         const rejected =
             action === "abort"
                 ? expect(promise).rejects.toMatchObject({ name: "AbortError" })
@@ -295,7 +295,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         vi.spyOn(engine.gl, "getProgramParameter").mockImplementation(() => {
             throw new Error("poll failed");
         });
-        await expect(waitForEffect(engine, effect, { signal: controller.signal })).rejects.toThrow("poll failed");
+        await expect(waitForEffect(effect, { signal: controller.signal })).rejects.toThrow("poll failed");
         expect(frames.size).toBe(0);
         expect(engine._onLost).toHaveLength(0);
         expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
@@ -306,7 +306,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         vi.spyOn(engine.gl, "getProgramParameter").mockImplementation(() => {
             throw "driver failure";
         });
-        await expect(waitForEffect(engine, effect)).rejects.toMatchObject({ message: "lite-gl: wait-test compilation wait failed", cause: "driver failure" });
+        await expect(waitForEffect(effect)).rejects.toMatchObject({ message: "lite-gl: wait-test compilation wait failed", cause: "driver failure" });
         expect(engine._onLost).toHaveLength(0);
     });
 
@@ -315,7 +315,7 @@ describe("lite-gl: opt-in effect waiting", () => {
         vi.stubGlobal("requestAnimationFrame", () => {
             throw new Error("scheduler unavailable");
         });
-        await expect(waitForEffect(engine, effect)).rejects.toThrow("scheduler unavailable");
+        await expect(waitForEffect(effect)).rejects.toThrow("scheduler unavailable");
         expect(engine._onLost).toHaveLength(0);
     });
 });

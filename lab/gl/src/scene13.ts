@@ -1,4 +1,17 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, createDynamicTexture, drawEffect, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop, updateDynamicTexture } from "babylon-lite-gl";
+import {
+    applyEffectWrapper,
+    createEffectWrapper,
+    createGLEngine,
+    createDynamicTexture,
+    drawEffect,
+    isEffectReady,
+    resizeGLEngine,
+    runRenderLoop,
+    setEffectTexture,
+    setViewport,
+    stopRenderLoop,
+    updateDynamicTexture,
+} from "babylon-lite-gl";
 
 /**
  * Scene 13 — Dynamic Texture.
@@ -10,7 +23,7 @@ import { applyEffectWrapper, createEffectWrapper, createGLEngine, createDynamicT
  *     across OSes and would inflate MAD.
  *   - `createDynamicTexture(engine, w, h)` allocates a blank RGBA8 texture
  *     (LINEAR/LINEAR, CLAMP/CLAMP, no mipmaps by default — i.e. BILINEAR).
- *   - `updateDynamicTexture(engine, tex, canvas)` re-uploads the canvas each
+ *   - `updateDynamicTexture(tex, canvas)` re-uploads the canvas each
  *     frame; the result is sampled by a fullscreen effect via `setEffectTexture`.
  *
  * Orientation: lite-gl uploads the canvas WITHOUT a vertical flip (`invertY`
@@ -127,7 +140,7 @@ const effect = wrapper.effect;
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     // Frozen capture pins the surface-animation clock to seekTime; otherwise
@@ -136,12 +149,12 @@ runRenderLoop(engine, () => {
     drawSurface(t);
     // invertY defaults to false (canvas top row -> texture t=0); the fragment
     // flips V to present it upright.
-    updateDynamicTexture(engine, tex, surface);
+    updateDynamicTexture(tex, surface);
 
     resizeGLEngine(engine);
     setViewport(engine);
     applyEffectWrapper(wrapper);
-    setEffectTexture(engine, effect, "uTex", tex);
+    setEffectTexture(effect, "uTex", tex);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

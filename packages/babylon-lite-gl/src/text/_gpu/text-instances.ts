@@ -24,13 +24,13 @@ export function ensureTextDataGpu(engine: GLEngineContext, data: GLTextData): Te
             };
             data._gpu = gpu;
         } catch (error) {
-            disposeBuffer(engine, buffer);
+            disposeBuffer(buffer);
             throw error;
         }
     } else if (gpu._instanceBuf._data !== data._instances) {
         // Retain the live CPU pool, including partial edits, for context restoration.
         const buffer = createVertexBuffer(engine, data._instances, true);
-        disposeBuffer(engine, gpu._instanceBuf);
+        disposeBuffer(gpu._instanceBuf);
         gpu._instanceBuf = buffer;
         gpu._uploadedVersion = data._version;
     } else if (gpu._uploadedVersion !== data._version) {
@@ -38,9 +38,9 @@ export function ensureTextDataGpu(engine: GLEngineContext, data: GLTextData): Te
             const start = data._dirtyStart * TEXT_INSTANCE_FLOATS;
             const end = data._dirtyEnd * TEXT_INSTANCE_FLOATS;
             const source = start === 0 && end === data._instances.length ? data._instances : data._instances.subarray(start, end);
-            updateVertexBuffer(engine, gpu._instanceBuf, source, data._dirtyStart * TEXT_INSTANCE_BYTES);
+            updateVertexBuffer(gpu._instanceBuf, source, data._dirtyStart * TEXT_INSTANCE_BYTES);
         } else {
-            updateVertexBuffer(engine, gpu._instanceBuf, data._instances);
+            updateVertexBuffer(gpu._instanceBuf, data._instances);
         }
         gpu._uploadedVersion = data._version;
     }
