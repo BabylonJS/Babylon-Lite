@@ -18,10 +18,7 @@ export function getGaussianSplattingGpuSortPaddedCount(activeCount: number): num
     return Math.max((activeCount + 15) & ~15, 16);
 }
 
-export function packGaussianSplattingGpuSortIntervals(
-    intervals: ArrayLike<number>,
-    vertexCount: number
-): { data: Uint32Array; count: number; total: number } {
+export function packGaussianSplattingGpuSortIntervals(intervals: ArrayLike<number>, vertexCount: number): { data: Uint32Array; count: number; total: number } {
     const data = new Uint32Array(Math.max(intervals.length & ~1, 2));
     let count = 0;
     let total = 0;
@@ -54,9 +51,7 @@ export function computeGaussianSplattingGpuSortDepthCoefficients(
     out[offset + 1] = (fx * (world[worldOffset + 4] ?? 0) + fy * (world[worldOffset + 5] ?? 0) + fz * (world[worldOffset + 6] ?? 0)) * depthSign;
     out[offset + 2] = (fx * (world[worldOffset + 8] ?? 0) + fy * (world[worldOffset + 9] ?? 0) + fz * (world[worldOffset + 10] ?? 0)) * depthSign;
     const translation = fx * (world[worldOffset + 12] ?? 0) + fy * (world[worldOffset + 13] ?? 0) + fz * (world[worldOffset + 14] ?? 0);
-    const distance = cameraPosition
-        ? translation - (fx * (cameraPosition[0] ?? 0) + fy * (cameraPosition[1] ?? 0) + fz * (cameraPosition[2] ?? 0))
-        : translation + (view[14] ?? 0);
+    const distance = cameraPosition ? translation - (fx * (cameraPosition[0] ?? 0) + fy * (cameraPosition[1] ?? 0) + fz * (cameraPosition[2] ?? 0)) : translation + (view[14] ?? 0);
     out[offset + 3] = distance * depthSign;
 }
 
