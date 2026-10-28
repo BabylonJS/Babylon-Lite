@@ -12,6 +12,7 @@ import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { Renderable } from "../render/renderable.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -263,6 +264,9 @@ export function getRenderingContextKind(context: RenderingContext): string {
 /** @internal */
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;
+    dt(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, levels: number, samplerDesc: GPUSamplerDescriptor): void;
+    du(tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean): void;
+    c<Args extends unknown[]>(renderable: Renderable, builder: (...args: Args) => Renderable | Promise<Renderable>, ...args: Args): void;
     x(
         source: GPUCopyExternalImageSource,
         width: number,

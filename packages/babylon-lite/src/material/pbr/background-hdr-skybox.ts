@@ -34,7 +34,9 @@ export async function buildHdrSkyboxRenderable(
 
     const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);
 
-    return createCubemapSkyboxRenderable(mat, bindGroup, positionBuffer, indexBuffer, () => buildHdrSkyboxRenderable(scene, envTextures, skyHalfSize, rootPosition, primaryColor));
+    const renderable = createCubemapSkyboxRenderable(mat, bindGroup, positionBuffer, indexBuffer);
+    engine._dlr?.c(renderable, buildHdrSkyboxRenderable, scene, envTextures, skyHalfSize, rootPosition, primaryColor);
+    return renderable;
 }
 
 // ─── HDR Skybox UBO ─────────────────────────────────────────────────────────────

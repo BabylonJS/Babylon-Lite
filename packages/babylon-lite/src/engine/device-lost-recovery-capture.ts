@@ -88,6 +88,32 @@ function attachRecoveryCapture(engine: EngineContext): void {
     _setTextureReleaseHook(releaseCapturedTexture);
     engine._dlr = {
         t: stamp,
+        dt(tex, width, height, format, levels, samplerDesc): void {
+            stamp(tex, {
+                kind: "dynamic",
+                width,
+                height,
+                format,
+                levels,
+                samplerDesc,
+                source: null,
+                flipY: true,
+                premultipliedAlpha: false,
+            });
+        },
+        du(tex, source, flipY, premultipliedAlpha): void {
+            const rec = tex._recoverySource;
+            if (rec?.kind === "dynamic") {
+                rec.source = source;
+                rec.flipY = flipY;
+                rec.premultipliedAlpha = premultipliedAlpha;
+            }
+        },
+        c(renderable, builder, ...args): void {
+            if (state._meshCaptureRefs) {
+                renderable._rebuild = () => builder(...args);
+            }
+        },
         async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload): Promise<Texture2D> {
             const bitmap = await createImageBitmap(source, {
                 premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",

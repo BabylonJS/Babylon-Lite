@@ -89,9 +89,8 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
     }
 
     // Snapshot the rebuild thunks before the renderable list is truncated below. Discovering them
-    // here — rather than recording descriptors through a capture seam — keeps the loader paths that
-    // build renderables free of any recovery cost, and this whole module is only ever fetched on
-    // the recovery path.
+    // here keeps dispatch independent of each renderable's builder. Background capture creates
+    // these thunks only when enabled; this module is fetched only on the recovery path.
     const rebuilds = scene._renderables.filter((r) => !!r._rebuild).map((r) => r._rebuild!);
 
     scene._renderables.length = scene._uniformUpdaters.length = 0;

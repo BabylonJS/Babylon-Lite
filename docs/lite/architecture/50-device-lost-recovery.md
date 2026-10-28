@@ -114,15 +114,21 @@ rebuild — lives in `device-lost-recovery-capture.ts` and
 `enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
 none of those chunks.
 
-Backgrounds are discovered, not captured. Each background builder stamps a plain
-rebuild thunk onto the `Renderable` it returns — `Renderable._rebuild`, a
-`() => Renderable | Promise<Renderable>` closing over the arguments the builder
-already received. Recovery snapshots those thunks while traversing
-`scene._renderables` and replays them in order, the same way material textures
-already recover through `Texture2D._recoverySource`. The always-bundled
-`loadEnvironment` / `loadHdr` path therefore carries no per-background recovery
-code at all, and the residual cost lands only in `background-*.js`, which a scene
-already pays for whenever it builds that background.
+Background builders notify `engine._dlr?.c(renderable, builder, ...args)` with
+their existing builder function and scalar/reference arguments. Only the enabled
+capture implementation allocates the rebuild closure and stamps
+`Renderable._rebuild`, and only while Scene recovery is enabled. The ground
+builder passes `undefined` instead of its consumed image promise so recovery
+refetches the texture URL. No builder constructs a closure, descriptor, or
+argument array for recovery when capture is absent; the cubemap renderable shell
+has no recovery parameter or assignment.
+
+Recovery snapshots the captured thunks while traversing `scene._renderables` and
+replays them in order, the same way material textures already recover through
+`Texture2D._recoverySource`. The `loadEnvironment` / `loadHdr` paths carry no
+per-background recovery code, and background modules retain only the optional
+capture call. Replayed builders pass through that same seam so subsequent losses
+remain recoverable.
 
 The thunk is deliberately opaque. An earlier revision stamped a descriptor tuple
 — `[kind, size, rootPosition, url?]` — that recovery interpreted through a
@@ -247,6 +253,15 @@ are unchanged, and disabled recovery adds no byte-view allocation or retention.
 Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
+
+Dynamic texture creation and uploads use `engine._dlr?.dt(...)` and
+`engine._dlr?.du(...)` respectively. The creation seam receives the texture,
+dimensions, format, mip count, and existing sampler descriptor; capture alone
+constructs the `dynamic` recovery source. The update seam receives the external
+image and already-computed flip/premultiplication flags after a successful GPU
+copy; capture alone checks and updates the retained source. Without recovery,
+neither API reads `_recoverySource`, encodes a source kind, or retains the image.
+Disabling capture also stops recording subsequent uploads to existing textures.
 
 ### Captured textures
 
@@ -460,6 +475,12 @@ module-level side effects; mutable caches remain null until an explicit call.
   mutation. Replacement-device uploads must reproduce the complete updated
   image; rejected uploads must not alter the snapshot, and disabled recovery
   must not capture a source.
+- Background unit tests cover all four builders with no recovery, Sprite-only
+  recovery, enabled Scene recovery, repeated rebuilds, and disabled capture.
+  Dynamic texture updates must not even read recovery metadata without capture.
+- Build tests verify that non-opted-in dynamic texture and background consumers
+  retain neither source encoding nor rebuild closure construction, while an
+  explicitly imported recovery enabler retains the capture implementation.
 - Text unit tests replace a fake device and assert new layer buffers and Slug
   atlas textures, invalidated/rebuilt bindings and bundles, preserved
   `TextData`/layer state, and exact-kind enumeration.
