@@ -32,6 +32,7 @@ import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
 import type { ParticleSystem } from "../particle/particle-system.js";
+import type { PhysicsWorld } from "../physics/havok.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -219,6 +220,8 @@ export interface SceneContext extends RenderingContext {
     _beforeRender: ((deltaMs: number) => void)[];
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
+    /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
+    _physicsWorlds?: PhysicsWorld[];
     /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
     _sceneChanges?: SceneChangeState;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */

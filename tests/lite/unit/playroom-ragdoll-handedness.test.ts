@@ -39,7 +39,7 @@ function vector(value: Vec3): number[] {
 }
 
 function fixture() {
-    const scene = { _beforeRender: [], fixedDeltaMs: 1000 / 60 } as unknown as SceneContext;
+    const scene = { _beforeRender: [], _disposables: [], fixedDeltaMs: 1000 / 60 } as unknown as SceneContext;
     const physics = createHavokWorld(scene, hknp);
     const bones = rig.joints.map((joint, index) => ({ name: joint.name, parent: null, _nodeIndex: index }));
     const skeleton: Skeleton = {

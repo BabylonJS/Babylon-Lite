@@ -35,6 +35,95 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes physics discovery and allocation-free inspection without internal state", () => {
+        const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getPhysicsWorlds, getPhysicsBodies, getPhysicsConstraints, getPhysicsBodyWorld,
+    getPhysicsBodyPrestepType, getPhysicsBodyShape, getPhysicsBodyMassPropertiesToRef,
+    getPhysicsBodyLinearDamping, setPhysicsBodyLinearDamping,
+    getPhysicsBodyAngularDamping, setPhysicsBodyAngularDamping,
+    getPhysicsBodyGravityFactor, setPhysicsBodyGravityFactor,
+    getPhysicsBodyLinearVelocityToRef, getPhysicsBodyAngularVelocityToRef,
+    getPhysicsShapeType, getPhysicsShapeParameters, getPhysicsShapeMaterialToRef,
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask,
+    getPhysicsShapeDensity, getPhysicsShapeChildCount,
+    isPhysicsConstraintEnabled, setPhysicsConstraintEnabled,
+    getPhysicsConstraintDebug, hidePhysicsConstraint,
+    type SceneContext, type PhysicsWorld, type PhysicsBody, type PhysicsConstraint,
+    type PhysicsShape, type PhysicsShapeMaterial, type PhysicsMassProperties,
+    type PhysicsShapeParameters, type PhysicsShapeType, type PhysicsPrestepType,
+    type PhysicsConstraintDebug, type PhysicsViewer, type Vec3,
+} from "./index.js";
+declare const scene: SceneContext;
+declare const world: PhysicsWorld;
+declare const body: PhysicsBody;
+declare const shape: PhysicsShape;
+declare const constraint: PhysicsConstraint;
+declare const viewer: PhysicsViewer;
+declare const vector: Vec3;
+declare const massOut: Required<PhysicsMassProperties>;
+declare const materialOut: PhysicsShapeMaterial;
+const worlds: readonly PhysicsWorld[] = getPhysicsWorlds(scene);
+const bodies: readonly PhysicsBody[] = getPhysicsBodies(world);
+const constraints: readonly PhysicsConstraint[] = getPhysicsConstraints(world);
+const owner: PhysicsWorld = getPhysicsBodyWorld(body);
+const prestep: PhysicsPrestepType = getPhysicsBodyPrestepType(body);
+const baseShape: PhysicsShape | null = getPhysicsBodyShape(body);
+const mass: Required<PhysicsMassProperties> = getPhysicsBodyMassPropertiesToRef(world, body, massOut);
+getPhysicsBodyMassPropertiesToRef(world, body, massOut, 1);
+const linear: Vec3 = getPhysicsBodyLinearVelocityToRef(world, body, vector);
+getPhysicsBodyLinearVelocityToRef(world, body, vector, 1);
+const angular: Vec3 = getPhysicsBodyAngularVelocityToRef(world, body, vector);
+getPhysicsBodyAngularVelocityToRef(world, body, vector, 1);
+const dampingGetters: ((world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number) => number)[] =
+    [getPhysicsBodyLinearDamping, getPhysicsBodyAngularDamping, getPhysicsBodyGravityFactor];
+const dampingSetters: ((world: PhysicsWorld, body: PhysicsBody, value: number) => void)[] =
+    [setPhysicsBodyLinearDamping, setPhysicsBodyAngularDamping, setPhysicsBodyGravityFactor];
+const type: PhysicsShapeType = getPhysicsShapeType(shape);
+const parameters: Readonly<PhysicsShapeParameters> | null = getPhysicsShapeParameters(shape);
+const material: PhysicsShapeMaterial = getPhysicsShapeMaterialToRef(world, shape, materialOut);
+const scalarGetters: ((world: PhysicsWorld, shape: PhysicsShape) => number)[] = [
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask, getPhysicsShapeDensity, getPhysicsShapeChildCount,
+];
+const enabled: boolean = isPhysicsConstraintEnabled(world, constraint);
+setPhysicsConstraintEnabled(world, constraint, false);
+const debug: PhysicsConstraintDebug = getPhysicsConstraintDebug(constraint);
+const hidden: boolean = hidePhysicsConstraint(viewer, debug);
+// @ts-expect-error World discovery registry is internal.
+scene._physicsWorlds;
+// @ts-expect-error Constraint registry is internal.
+world._constraints;
+// @ts-expect-error Cached shape parameters are internal.
+shape._parameters;
+// @ts-expect-error Cached viewer mapping is internal.
+constraint._debug;
+// @ts-expect-error Owning world field is internal.
+body._world;
+// @ts-expect-error Discovery arrays are readonly.
+worlds.push(world);
+// @ts-expect-error Discovery arrays are readonly.
+bodies.push(body);
+// @ts-expect-error Discovery arrays are readonly.
+constraints.push(constraint);
+// @ts-expect-error Cached parameters are readonly.
+if (parameters) { parameters.radius = 1; }
+void [owner, prestep, baseShape, mass, linear, angular, dampingGetters, dampingSetters, type, material, scalarGetters, enabled, hidden];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes read-mostly skeleton, morph, and particle discovery without internal registries", () => {
         const probePath = resolve(BUILD_DIR, "p9-discovery.probe.ts");
         try {

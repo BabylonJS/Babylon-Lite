@@ -4,7 +4,7 @@ import { addToScene, type SceneContext } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import type { Vec3 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
-import type { PhysicsBody, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsWorld, PhysicsConstraint } from "./havok.js";
 import { getPhysicsBodyDebugGeometry } from "./havok.js";
 import { createPhysicsDebugLineMaterial } from "./physics-debug-line-material.js";
 
@@ -24,6 +24,10 @@ export interface PhysicsViewer {
     readonly _meshes: Mesh[];
     /** @internal */
     readonly _constraintMeshes: Mesh[];
+    /** @internal */
+    readonly _constraintKeys: PhysicsConstraintDebug[];
+    /** @internal */
+    readonly _constraintGroups: Mesh[][];
     /** @internal */
     readonly _constraintLines: ConstraintLine[];
     /** @internal */
@@ -92,6 +96,8 @@ export function createPhysicsViewer(scene: SceneContext, world: PhysicsWorld, op
         _bodies: [],
         _meshes: [],
         _constraintMeshes: [],
+        _constraintKeys: [],
+        _constraintGroups: [],
         _constraintLines: [],
         _constraintDisks: [],
         _constraintArrowheads: [],
@@ -104,8 +110,31 @@ export function createPhysicsViewer(scene: SceneContext, world: PhysicsWorld, op
     return viewer;
 }
 
+/**
+ * Cached viewer data for a constraint. Repeated calls return the identical object.
+ * Creation options are immutable; omitted pivots default to body-local zero.
+ * No native calls are made, including after constraint release.
+ */
+export function getPhysicsConstraintDebug(constraint: PhysicsConstraint): PhysicsConstraintDebug {
+    return (constraint._debug ??= {
+        bodyA: constraint.bodyA,
+        bodyB: constraint.bodyB,
+        type: constraint.type,
+        pivotA: constraint.options.pivotA ?? { x: 0, y: 0, z: 0 },
+        pivotB: constraint.options.pivotB ?? { x: 0, y: 0, z: 0 },
+        axisA: constraint.options.axisA,
+        axisB: constraint.options.axisB,
+        perpAxisA: constraint.options.perpAxisA,
+        perpAxisB: constraint.options.perpAxisB,
+    });
+}
+
 /** Shows a simplified Physics V2 constraint overlay: local axes (with arrowheads) plus angular-limit disks. */
 export function showPhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): Mesh[] {
+    if (viewer._constraintKeys.includes(constraint)) {
+        return [];
+    }
+    const meshStart = viewer._constraintMeshes.length;
     const axisLen = 0.4;
     const diskRadius = 0.6;
     const axisA = constraint.axisA ?? { x: 1, y: 0, z: 0 };
@@ -146,8 +175,37 @@ export function showPhysicsConstraint(viewer: PhysicsViewer, constraint: Physics
         viewer._constraintMeshes.push(mesh);
         addToScene(viewer.scene, mesh);
     }
+    viewer._constraintKeys.push(constraint);
+    viewer._constraintGroups.push(viewer._constraintMeshes.slice(meshStart));
     registerViewerUpdate(viewer);
     return meshes;
+}
+
+/**
+ * Hide a previously shown constraint by its stable debug object, returning whether it was shown.
+ * Makes no native calls; safe after constraint release, body removal, or world disposal.
+ */
+export function hidePhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): boolean {
+    const index = viewer._constraintKeys.indexOf(constraint);
+    if (index < 0) {
+        return false;
+    }
+    const group = viewer._constraintGroups[index]!;
+    for (const mesh of group) {
+        removeFromScene(viewer.scene, mesh);
+        viewer._constraintMeshes.splice(viewer._constraintMeshes.indexOf(mesh), 1);
+    }
+    for (const entries of [viewer._constraintLines, viewer._constraintDisks, viewer._constraintArrowheads]) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+            if (group.includes(entries[i]!.mesh)) {
+                entries.splice(i, 1);
+            }
+        }
+    }
+    viewer._constraintKeys.splice(index, 1);
+    viewer._constraintGroups.splice(index, 1);
+    unregisterViewerUpdateIfEmpty(viewer);
+    return true;
 }
 
 /** Shows a Havok Physics V2 body as a wireframe debug mesh. */
@@ -203,6 +261,8 @@ export function disposePhysicsViewer(viewer: PhysicsViewer): void {
     viewer._constraintLines.length = 0;
     viewer._constraintDisks.length = 0;
     viewer._constraintArrowheads.length = 0;
+    viewer._constraintKeys.length = 0;
+    viewer._constraintGroups.length = 0;
     unregisterViewerUpdate(viewer);
 }
 

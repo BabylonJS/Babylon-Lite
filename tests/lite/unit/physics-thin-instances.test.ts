@@ -16,6 +16,8 @@ import {
     disposePhysics,
     enableHavokThinInstancePhysics,
     getPhysicsBodyInstanceCount,
+    getPhysicsBodyWorld,
+    getPhysicsBodies,
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsShapeType,
@@ -91,7 +93,7 @@ function makeMockHknp() {
 }
 
 function makeScene(): SceneContext {
-    return { _beforeRender: [] } as unknown as SceneContext;
+    return { _beforeRender: [], _disposables: [] } as unknown as SceneContext;
 }
 
 function makeThinMesh(): Mesh {
@@ -164,6 +166,8 @@ describe("thin-instance physics bodies", () => {
         expect(world._hknp).not.toBe(hknp);
         expect(Object.getPrototypeOf(world._hknp)).toBe(hknp);
         expect(getPhysicsBodyInstanceCount(body)).toBe(2);
+        expect(getPhysicsBodyWorld(body)).toBe(world);
+        expect(getPhysicsBodies(world)).toEqual([body]);
         expect(hknp.HP_Body_Create).toHaveBeenCalledTimes(2);
         expect(hknp.HP_World_AddBody).toHaveBeenCalledTimes(2);
         expect(Array.from(hknp.transforms.values())).toEqual([
