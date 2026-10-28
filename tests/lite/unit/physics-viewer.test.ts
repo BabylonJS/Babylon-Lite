@@ -66,9 +66,10 @@ function setup() {
 }
 
 describe("physics constraint viewer", () => {
-    function anchorA(viewer: ReturnType<typeof setup>["viewer"]): number[] {
+    function anchorA(viewer: ReturnType<typeof setup>["viewer"]): [number, number, number] {
         // First line is constraintAxisAX; its first endpoint is the pivotA anchor.
-        return Array.from(viewer._constraintLines[0]!.positions.subarray(0, 3));
+        const p = viewer._constraintLines[0]!.positions;
+        return [p[0]!, p[1]!, p[2]!];
     }
 
     it("places anchors in the unscaled rigid frame of a scaled body without native calls", () => {
@@ -106,6 +107,23 @@ describe("physics constraint viewer", () => {
         expect(x).toBeCloseTo(10);
         expect(y).toBeCloseTo(3);
         expect(z).toBeCloseTo(0);
+    });
+
+    it("recovers the normalized Havok quaternion for a nonuniform carrier and rotated thin instance", () => {
+        const { viewer, world, constraint } = setup();
+        // Instance 0 rotated 45° about Z; carrier scaled (2, 1, 1) — product basis is sheared.
+        const c = Math.SQRT1_2;
+        const matrices = Float32Array.from([c, c, 0, 0, -c, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const carrier = Float32Array.from([2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const thinWorld = { ...world, _thin: { count: () => 1 } };
+        const thin = { node: { worldMatrix: carrier, thinInstances: { matrices, count: 1 } }, _world: thinWorld } as unknown as PhysicsBody;
+        showPhysicsConstraint(viewer, getPhysicsConstraintDebug(constraint(thin, { pivotA: { x: 1, y: 0, z: 0 } })));
+        // Normalized columns (0.894,0.447)/(-0.894,0.447) → Shepperd quaternion ≈ (0,0,0.3727,0.9280), ≈43.8° about Z.
+        const [x, y, z] = anchorA(viewer);
+        expect(x).toBeCloseTo(0.7224, 4);
+        expect(y).toBeCloseTo(0.6915, 4);
+        expect(z).toBeCloseTo(0);
+        expect(Math.hypot(x, y, z)).toBeCloseTo(1, 6);
     });
 
     it("hides exactly one group including arrowheads, preserves other groups, and rejects duplicate shows", () => {

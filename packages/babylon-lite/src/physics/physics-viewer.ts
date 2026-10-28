@@ -2,7 +2,8 @@ import type { Mesh } from "../mesh/mesh.js";
 import { createCylinder, createDisc, createMeshFromData, updateMeshPositions } from "../mesh/mesh-factories.js";
 import { _hasSceneChangeHook, _runSceneChange, addToScene, type SceneContext } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
-import type { Mat4Storage, Vec3 } from "../math/types.js";
+import type { Mat4Storage, Quat, Vec3 } from "../math/types.js";
+import { _quatFromRotationBasis } from "../math/create-quat-from-rotation-mat4.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
@@ -418,6 +419,7 @@ function updateConstraintLine(viewer: PhysicsViewer, line: ConstraintLine): void
 }
 
 let rigidScratch: Float64Array | null = null;
+let rigidQuat: Quat | null = null;
 
 /** World pose of the simulated rigid frame that Havok constraint pivots/axes are expressed in.
  *  Ordinary bodies use the node position/quaternion with unit scale (as written to Havok);
@@ -448,6 +450,11 @@ function rigidMatrix(body: PhysicsBody): Float64Array {
         m[5] = -m[5]!;
         m[6] = -m[6]!;
     }
+    // A nonuniform carrier × rotated instance leaves a sheared basis; recover the same normalized
+    // quaternion thinInstanceTransform hands to Havok and recompose with unit scale.
+    const q = _quatFromRotationBasis(m[0]!, m[4]!, m[8]!, m[1]!, m[5]!, m[9]!, m[2]!, m[6]!, m[10]!, (rigidQuat ??= { x: 0, y: 0, z: 0, w: 1 }));
+    const inv = 1 / Math.hypot(q.x, q.y, q.z, q.w);
+    composeMat4IntoBuffer(m, 0, m[12]!, m[13]!, m[14]!, q.x * inv, q.y * inv, q.z * inv, q.w * inv, 1, 1, 1);
     return m;
 }
 
