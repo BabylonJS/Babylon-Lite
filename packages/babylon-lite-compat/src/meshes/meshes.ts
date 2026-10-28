@@ -847,6 +847,9 @@ export class Mesh extends AbstractMesh {
             return;
         }
         this._morphTargetManager = value;
+        if (value) {
+            this._ownedMorphTargetManagers.add(value);
+        }
         this._scene?._registerMorphTargetManager(this, value?._lite ? null : value);
         if (!value) {
             shareMeshMorphTargets(this._lite, null);
@@ -860,7 +863,7 @@ export class Mesh extends AbstractMesh {
         }
     }
 
-    /** @internal Release discovered manager ownership claims during scene/container teardown. */
+    /** @internal Release manager ownership claims during scene/container teardown. */
     public _releaseMorphTargetManagerOwnership(): void {
         for (const manager of this._ownedMorphTargetManagers) {
             manager.dispose();

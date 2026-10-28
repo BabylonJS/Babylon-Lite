@@ -249,6 +249,47 @@ describe("MorphTarget / MorphTargetManager (compat over native createMorphTarget
         expect(loaded.weightsBuffer.destroy).toHaveBeenCalledOnce();
     });
 
+    it("releases a built authored manager during scene teardown", () => {
+        const buffers: Array<{ destroy: ReturnType<typeof vi.fn> }> = [];
+        const engine = new NullEngine();
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                const buffer = {
+                    destroy: vi.fn(),
+                    getMappedRange: () => mapped,
+                    unmap: () => undefined,
+                };
+                buffers.push(buffer);
+                return buffer as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const scene = new Scene(engine);
+        const lite = liteMesh("authored", null);
+        lite._cpuPositions = new Float32Array([0, 0, 0]);
+        lite._cpuNormals = new Float32Array([0, 0, 1]);
+        scene._lite.meshes.push(lite);
+        const mesh = Mesh._fromLite(lite, undefined, scene);
+        const manager = new MorphTargetManager();
+        const target = new MorphTarget("raised", 0.5);
+        target.setPositions([0, 1, 0]);
+        target.setNormals([0, 1, 0]);
+        manager.addTarget(target);
+
+        mesh.morphTargetManager = manager;
+        scene._buildMorphTargets();
+
+        expect(manager._lite).toBe(lite.morphTargets);
+        expect(manager._lite?._refCount).toBe(2);
+
+        scene.dispose();
+
+        expect(manager._lite).toBeUndefined();
+        expect(buffers).toHaveLength(2);
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+        expect(buffers[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
     it("cancels a stale authored build when a discovered manager is restored before startup", () => {
         const loaded = morphData("loaded");
         const lite = liteMesh("morphed", loaded);
