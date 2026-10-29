@@ -20,7 +20,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { MotionController, XrMotionControllerProfileOptions } from "./xr-motion-controller.js";
 import type { XrHandedness } from "./xr-support.js";
 import type { XrInputManager } from "./xr-input.js";
@@ -131,7 +131,7 @@ function defaultMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     mesh.receiveShadows = false;
     // Handle: ~4 cm cross-section, ~12 cm along the barrel.
     mesh.scaling.set(0.04, 0.04, 0.12);
-    mesh.visible = false;
+    (mesh as _WritableVisibility).visible = false;
     return mesh;
 }
 
@@ -156,7 +156,7 @@ function loadingMeshFactory(engine: EngineContext, _scene: SceneContext, handedn
     mesh.receiveShadows = false;
     // Slightly smaller than the solid handle so it reads as an insubstantial ghost.
     mesh.scaling.set(0.035, 0.035, 0.11);
-    mesh.visible = false;
+    (mesh as _WritableVisibility).visible = false;
     return mesh;
 }
 

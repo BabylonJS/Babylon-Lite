@@ -70,7 +70,8 @@ export async function apply(context: UsdContext): Promise<void> {
                 context.engine,
                 runtimeTargets,
                 draw.geometry.positions.length / 3,
-                targets.map((target) => target.influence)
+                targets.map((target) => target.influence),
+                targets.map((target) => target.name)
             );
             draw.mesh.morphTargets = data;
             targets.forEach((target, targetIndex) => {

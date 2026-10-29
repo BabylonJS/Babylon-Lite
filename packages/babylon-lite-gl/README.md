@@ -146,6 +146,37 @@ use.
   `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.
 - **Blend** — `setBlendMode` + `GLBlendMode` (`DISABLE` / `ADD` / `ALPHA` /
   `PREMULTIPLIED`), matching Babylon's `setAlphaMode` parameters.
+- **Text (Slug)** — analytic, resolution-independent glyph rendering, the WebGL2
+  counterpart of Lite's `TextRenderer`: `loadFont` / `createFontFromBuffer`,
+  `createDefaultTextData` / `updateDefaultTextData` / `disposeDefaultTextData`
+  (shape + extract + pack in one call), or `createGlyphStorage` + `createTextData`
+  / `updateTextData` / `disposeTextData` to drive your own layout;
+  `createTextLayer` / `setTextLayerPosition`, `createTextRenderer`,
+  `registerTextRenderer` / `unregisterTextRenderer` / `renderText` /
+  `isTextRendererReady`, and the optional synthetic-weight setter
+  `setFontWeightOffset` (its shader is only bundled when you import it). Text uses `text-shaper` for shaping; it is a dependency, not bundled by
+  consumers that never import the text API. See [Text](#text-slug) below.
+
+### Text (Slug)
+
+```ts
+import { createGLEngine, loadFont, createDefaultTextData, createTextLayer, createTextRenderer, registerTextRenderer } from "@babylonjs/lite-gl";
+
+const engine = createGLEngine(canvas);
+const font = await loadFont("/fonts/Inter-Regular.ttf");
+const data = createDefaultTextData(font, 48, "Hello, WebGL2", [1, 1, 1, 1]);
+const layer = createTextLayer(data, { positionPx: { x: 24, y: 80 } });
+const renderer = createTextRenderer(engine, { layers: [layer], clearValue: { r: 0.1, g: 0.1, b: 0.12 } });
+registerTextRenderer(renderer); // draws every frame; unregisterTextRenderer to stop
+```
+
+Glyph outlines are stored as quadratic curves in a float texture with a spatial
+band index in an `rg32uint` texture; the fragment shader resolves analytic
+coverage per pixel, so text stays sharp at any scale or rotation. The text data
+(and its glyph storage) is borrowed by layers and renderers — dispose it
+yourself with `disposeDefaultTextData` / `disposeTextData`. One glyph storage
+can be drawn by a single engine only. Text is blended as premultiplied
+source-over, with no depth test.
 
 ### Already-decoded textures
 

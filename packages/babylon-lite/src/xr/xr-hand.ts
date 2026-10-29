@@ -31,6 +31,7 @@ import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
+import type { _WritableVisibility } from "../scene/scene-node.js";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -135,7 +136,7 @@ function makeDefaultFactory(color: readonly [number, number, number]): XrHandJoi
         mesh.material = mat as unknown as Mesh["material"];
         mesh.pickable = false;
         mesh.receiveShadows = false;
-        mesh.visible = false;
+        (mesh as _WritableVisibility).visible = false;
         return mesh;
     };
 }

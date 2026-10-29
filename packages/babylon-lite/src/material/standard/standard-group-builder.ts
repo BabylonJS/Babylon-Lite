@@ -6,6 +6,17 @@ import type { StdExt } from "./standard-flags.js";
 import type { StandardSceneShaderContext } from "./standard-material.js";
 import type * as StdShadow from "./fragments/std-shadow-fragment.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
+import type { SceneContext } from "../../scene/scene.js";
+
+interface StandardSceneHooks {
+    prepare(scene: SceneContext): Promise<void>;
+    context(scene: SceneContext, fog: ShaderFragment | null): StandardSceneShaderContext | undefined;
+}
+let sceneHooks: StandardSceneHooks | null = null;
+/** @internal Explicitly installed scene contributions disappear from consumers without the enabler. */
+export function _installStandardSceneHooks(hooks: StandardSceneHooks): void {
+    sceneHooks = hooks;
+}
 
 // ─── Durable opt-in mesh-feature preload seam ───────────────────────
 //
@@ -44,6 +55,9 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         return _standardGroupBuilder;
     }
     const builder: MeshGroupBuilder = async (scene, meshes) => {
+        if (sceneHooks) {
+            await sceneHooks.prepare(scene);
+        }
         const hasTI = meshes.some((m) => !!m.thinInstances);
         const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
         const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
@@ -111,7 +125,8 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         }
 
         const renderableMod = await import("./standard-renderable.js");
-        const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;
+        const sceneShader: StandardSceneShaderContext | null =
+            sceneHooks?.context(scene, fogFragment) ?? (scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null);
         const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadow, morphFragment, cull, sceneShader });
         // Wire the per-mesh rebuild closure used by material swap + per-pass override.
         builder._rebuildSingle = result.rebuildSingle;

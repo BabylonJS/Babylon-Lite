@@ -53,6 +53,11 @@ export const liteGlAlias: Record<string, string> = {
     "babylon-lite-gl": resolve(pkgSrc, "index.ts"),
 };
 
+// Vendor shaping runtime excluded from the lite-gl bundle-size metric, mirroring the WebGPU
+// bundler's `isLiteBundleExternal`: `text-shaper` is pulled in only by the default text-layout
+// path, so the measured size reflects first-party lite-gl engine code only.
+export const liteGlBundleExternals: string[] = ["text-shaper", "text-shaper/*"];
+
 /** rawKB / gzipKB rounding identical to the lite bundler's bytesToRoundedKB. */
 export function bytesToRoundedKB(bytes: number): number {
     return Math.round((bytes / 1024) * 10) / 10;
@@ -61,8 +66,8 @@ export function bytesToRoundedKB(bytes: number): number {
 /**
  * esbuild a single entry into a standalone, tree-shaken, minified ESM bundle and
  * return its raw + gzip size. `alias` is supplied for lite-gl scenes (to resolve
- * the package to source); the Babylon reference passes none so `@babylonjs/core`
- * resolves normally from node_modules.
+ * the package to source) and also externalizes the vendor shaping runtime; the Babylon
+ * reference passes none so `@babylonjs/core` resolves normally from node_modules.
  */
 export async function measureBundle(entry: string, alias?: Record<string, string>): Promise<BundleSize> {
     const result = await build({
@@ -74,7 +79,7 @@ export async function measureBundle(entry: string, alias?: Record<string, string
         target: "esnext",
         platform: "browser",
         legalComments: "none",
-        ...(alias ? { alias } : {}),
+        ...(alias ? { alias, external: liteGlBundleExternals } : {}),
         write: false,
         logLevel: "warning",
     });

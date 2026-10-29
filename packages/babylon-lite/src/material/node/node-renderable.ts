@@ -99,6 +99,7 @@ function buildNodeMeshRenderablesImpl(
     const renderables: Renderable[] = [];
 
     for (const [material, matMeshes] of byMaterial) {
+        scene._lighting?._validateNode?.(material._state.usesLightsUbo);
         const featureFlags = material._renderFeatures?.features ?? 0;
         const noColorOutput = (featureFlags & NODE_NO_COLOR_OUTPUT) !== 0;
         const esmShadowOutput = (featureFlags & NODE_ESM_SHADOW_OUTPUT) !== 0;

@@ -64,6 +64,14 @@ export interface Quat {
 }
 ```
 
+### Scalar Functions
+
+```typescript
+export function inverseLerp(a: number, b: number, value: number): number;
+```
+
+The [bounded inverse interpolation contract](inverse-lerp.md) defines endpoint order, saturation, degenerate intervals, and compatibility forwarding.
+
 ### Vec3 Functions (`vec3.ts`)
 
 ```typescript

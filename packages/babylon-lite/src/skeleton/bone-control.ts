@@ -50,6 +50,8 @@ export interface BoneOverride {
 export interface Bone {
     /** Bone (joint node) name from the glTF, or `bone_<index>` when unnamed. */
     readonly name: string;
+    /** Nearest ancestor joint in the same skin, or null for a root joint. */
+    readonly parent: Bone | null;
     /** @internal glTF node index of this joint — the key into the override map. */
     readonly _nodeIndex: number;
 }
@@ -76,6 +78,11 @@ export interface Skeleton {
  *  When several joints share a name, the first in joint order is returned. */
 export function getBoneByName(skeleton: Skeleton, name: string): Bone | undefined {
     return skeleton._byName.get(name);
+}
+
+/** Public skeleton driving this mesh, if glTF bone control was enabled before loading. */
+export function getMeshSkeleton(mesh: Mesh): Skeleton | undefined {
+    return mesh.skeleton?._skeleton;
 }
 
 function ensureOverride(skeleton: Skeleton, bone: Bone): BoneOverride {
@@ -382,14 +389,6 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     // (each with its own GPU bone texture in Lite), so we must refresh them all —
     // matching Babylon.js, where the shared skeleton updates every mesh at once.
     const allBindings: SkeletonBinding[] = groups.flatMap((g) => g.bindings);
-    // Bridge the asset-wide override map onto each shared runtime skeleton (mesh.skeleton),
-    // which the optional weighted-blend mixer also holds — so a manager-blended clip can
-    // honour bone overrides. Stamped in this opt-in chunk to keep the always-loaded animation
-    // path byte-identical for scenes that never use bone control. Every binding here has a
-    // runtime skeleton (bindings are only created for meshes that have one).
-    for (const b of allBindings) {
-        b.runtimeSkeleton!._overrides = overrides;
-    }
     const bake = (): void => {
         resetTRS(nodes, numNodes, currentTRS);
         if (overrides.size > 0) {
@@ -401,16 +400,31 @@ async function buildSkeletons(ctx: GltfLoadCtx, meshes: Mesh[], overrides: Map<n
     };
 
     const skeletons: Skeleton[] = groups.map((g) => {
-        const bones: Bone[] = [];
+        type BoneBuilder = Omit<Bone, "parent"> & { parent: Bone | null };
+        const bones: BoneBuilder[] = [];
         const byName = new Map<string, Bone>();
+        const byNode = new Map<number, Bone>();
         for (const ni of g.jointNodes) {
-            const bone: Bone = { name: json.nodes?.[ni]?.name ?? `bone_${ni}`, _nodeIndex: ni };
+            const bone = { name: json.nodes?.[ni]?.name ?? `bone_${ni}`, parent: null, _nodeIndex: ni };
             bones.push(bone);
+            byNode.set(ni, bone);
             if (!byName.has(bone.name)) {
                 byName.set(bone.name, bone);
             }
         }
-        return { bones, _byName: byName, _overrides: overrides, _worldOverrides: worldOverrides, _bake: bake };
+        for (const bone of bones) {
+            let parent = parentMap.get(bone._nodeIndex);
+            while (parent !== undefined && !byNode.has(parent)) {
+                parent = parentMap.get(parent);
+            }
+            bone.parent = parent === undefined ? null : byNode.get(parent)!;
+        }
+        const skeleton: Skeleton = { bones, _byName: byName, _overrides: overrides, _worldOverrides: worldOverrides, _bake: bake };
+        for (const binding of g.bindings) {
+            binding.runtimeSkeleton!._overrides = overrides;
+            binding.runtimeSkeleton!._skeleton = skeleton;
+        }
+        return skeleton;
     });
 
     return { skeletons };

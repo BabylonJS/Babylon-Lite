@@ -42,6 +42,7 @@ import {
     setThinInstances,
     startEngine,
     stopEngine,
+    setMeshVisible,
 } from "babylon-lite";
 import type { Mat4, Vec3 } from "babylon-lite";
 
@@ -202,7 +203,7 @@ async function main(): Promise<void> {
     indicatorMat.alpha = 0.7;
     indicator.material = indicatorMat;
     indicator.pickable = false;
-    indicator.visible = false;
+    setMeshVisible(indicator, false);
     addToScene(scene, indicator);
 
     const camOrigin = arcCameraPosition();
@@ -232,7 +233,7 @@ async function main(): Promise<void> {
                 const last = hits[hits.length - 1]!;
                 if (last.hasHit) {
                     indicator.position.set(last.point.x, last.point.y, last.point.z);
-                    indicator.visible = true;
+                    setMeshVisible(indicator, true);
                 }
                 canvas.dataset.rayHits = JSON.stringify(hits);
                 // eslint-disable-next-line no-console
@@ -264,7 +265,7 @@ async function main(): Promise<void> {
             const result = physicsRaycast(world, camPos, dest);
             if (result.hasHit) {
                 indicator.position.set(result.hitPoint.x, result.hitPoint.y, result.hitPoint.z);
-                indicator.visible = true;
+                setMeshVisible(indicator, true);
             }
         });
     }

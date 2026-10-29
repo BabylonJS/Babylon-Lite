@@ -49,6 +49,16 @@ describe("Mesh transform bake (issue #475)", () => {
         expect(Array.from(positions)).toEqual([2, 3, 4]);
     });
 
+    it("leaves the caller's matrix unchanged when baking normals", () => {
+        const mesh = makeMesh({ normals: new Float32Array([1, 1, 0]) });
+        const matrix = Matrix.Scaling(2, 1, 1);
+        const before = Array.from(matrix.m);
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(matrix);
+
+        expect(Array.from(matrix.m)).toEqual(before);
+    });
+
     it("transforms normals by the inverse-transpose (correct under non-uniform scale)", () => {
         // Under scale (2,1,1) a raw 3×3 multiply would tilt the normal toward X;
         // the inverse-transpose (0.5,1,1) tilts it toward Y — the correct result.

@@ -11,6 +11,34 @@ import { unsupported } from "../error.js";
 import type { Material } from "../materials/materials.js";
 import type { Node } from "../node/node.js";
 
+interface IFlowGraphBlockConfiguration {
+    [key: string]: unknown;
+}
+
+interface FlowGraphDataConnection<T> {
+    dataTransformer: ((value: T) => T) | null;
+    readonly optional: boolean;
+    isDisabled: boolean;
+    setValue(value: T, context: unknown): void;
+    resetToDefaultValue(context: unknown): void;
+    getValue(context: unknown): T;
+    connectTo(point: FlowGraphDataConnection<T>): void;
+    getClassName(): string;
+    serialize(serializationObject?: any): void;
+}
+
+interface FlowGraphInteger {
+    readonly value: number;
+    clone(): FlowGraphInteger;
+    add(other: FlowGraphInteger): FlowGraphInteger;
+    subtract(other: FlowGraphInteger): FlowGraphInteger;
+    multiply(other: FlowGraphInteger): FlowGraphInteger;
+    divide(other: FlowGraphInteger): FlowGraphInteger;
+    getClassName(): string;
+    equals(other: FlowGraphInteger): boolean;
+    toString(): string;
+}
+
 const KHR_INTERACTIVITY_UNSUPPORTED =
     "KHR_interactivity depends on Babylon.js FlowGraph block, connection, context, serialization, and glTF-reference models. Lite's flow-graph runtime uses a different graph model, so a stable cross-model adapter requires a broader loader/runtime design.";
 const KHR_INTERACTIVITY_EXPORT_UNSUPPORTED =
@@ -276,6 +304,25 @@ export const gltfTypeToBabylonType: Readonly<Record<string, IKHRInteractivityTyp
 export interface IFlowGraphEventReferenceBlockConfiguration {
     eventKey?: string;
     [key: string]: unknown;
+}
+
+export interface IFlowGraphDelayReferenceBlockConfiguration extends IFlowGraphBlockConfiguration {
+    decode?: boolean;
+}
+
+export class FlowGraphDelayReferenceBlock {
+    public readonly config: IFlowGraphDelayReferenceBlockConfiguration;
+    public readonly input!: FlowGraphDataConnection<unknown>;
+    public readonly value!: FlowGraphDataConnection<string | FlowGraphInteger>;
+
+    public constructor(config: IFlowGraphDelayReferenceBlockConfiguration) {
+        this.config = config;
+        unsupported("GLTF2.FlowGraphDelayReferenceBlock", KHR_INTERACTIVITY_UNSUPPORTED);
+    }
+
+    public getClassName(): string {
+        return "FlowGraphDelayReferenceBlock";
+    }
 }
 
 export class FlowGraphEventReferenceBlock {

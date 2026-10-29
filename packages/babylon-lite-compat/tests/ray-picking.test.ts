@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMeshesWithRay } from "babylon-lite";
+import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMeshesWithRay, setMeshVisible } from "babylon-lite";
 
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../babylon-lite/src/math/_matrix-allocator";
 import { allocateF64Mat4 } from "../../babylon-lite/src/math/_mat4-storage-f64";
@@ -267,7 +267,7 @@ describe("Scene.pickWithRay", () => {
     it("preserves native Lite visibility and pickable eligibility", () => {
         const { engine } = createPickScene();
         const native = createLiteBox(engine._lite, 2);
-        native.visible = false;
+        setMeshVisible(native, false);
         const ray = {
             origin: [0, 0, -5] as [number, number, number],
             direction: [0, 0, 1] as [number, number, number],

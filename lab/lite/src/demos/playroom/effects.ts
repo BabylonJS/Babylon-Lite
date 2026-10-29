@@ -12,6 +12,7 @@ import {
     resizeMeshGeometry,
     updateMeshPositions,
     updateMeshUvs,
+    setMeshVisible,
 } from "babylon-lite";
 import type { ArcRotateCamera, BillboardSpriteInit, EngineContext, FacingBillboardSpriteSystem, Mesh, NodeInputHandle, SceneContext, Texture2D, Vec3 } from "babylon-lite";
 import { GAME_SCALE } from "./constants.js";
@@ -199,7 +200,7 @@ export function createPlayroomEffects(engine: EngineContext, scene: SceneContext
     const aiming = createRibbon(engine, { pathArray: paths });
     makeAimingRibbonDoubleSided(engine, aiming);
     aiming.material = assets.aimingMaterial;
-    aiming.visible = false;
+    setMeshVisible(aiming, false);
     aiming.pickable = false;
     addToScene(scene, aiming);
     const aimingPositions = new Float32Array((AIMING_SEGMENTS + 1) * 2 * 3);
@@ -230,7 +231,7 @@ export function createPlayroomEffects(engine: EngineContext, scene: SceneContext
 }
 
 export function updateAimingEffect(effects: PlayroomEffects, origin: Vec3, camera: ArcRotateCamera, visible: boolean): void {
-    effects.aiming.visible = visible;
+    setMeshVisible(effects.aiming, visible);
     if (!visible) {
         return;
     }

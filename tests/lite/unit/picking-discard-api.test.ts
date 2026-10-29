@@ -16,6 +16,7 @@ import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -697,7 +698,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
 
         const pending = pickAsync(createGpuPicker(scene), 4, 4);
         await Promise.resolve();
-        mesh.visible = false;
+        setSubtreeVisible(mesh, false);
         scene.meshes.reverse();
         const info = await pending;
 
@@ -852,7 +853,7 @@ fn shouldDiscardPick(input: PickDiscardInput) -> bool { return data[0].x > 1.0 &
     it("keeps invisible pickable collider meshes in the GPU pick pass", async () => {
         const { engine } = makePickerEngine();
         const { scene, mesh } = makePickScene(engine);
-        mesh.visible = false;
+        setSubtreeVisible(mesh, false);
 
         const info = await pickAsync(createGpuPicker(scene), 4, 4);
 

@@ -295,6 +295,14 @@ export class StandardMaterial extends PushMaterial {
         this._markDirty();
     }
 
+    public get roughness(): number {
+        return this._lite.roughness ?? 0;
+    }
+    public set roughness(value: number) {
+        this._lite.roughness = value;
+        this._markDirty();
+    }
+
     public get emissiveColor(): Color3 {
         return readColor3(this._lite.emissiveColor);
     }

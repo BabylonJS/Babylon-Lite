@@ -181,6 +181,65 @@ describe("ShaderMaterial thin instances", () => {
         expect(plainRebuild).toHaveBeenLastCalledWith(scene, mesh, override, plainResources);
     });
 
+    it("keys the async warm-up recipe by mesh for its own material and by renderable for an override", () => {
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(),
+                queue: { writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+        const material = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const caster = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const mesh = {
+            material,
+            thinInstances: makeThinInstances(),
+            _gpu: { positionBuffer: {} as GPUBuffer, indexBuffer: {} as GPUBuffer, indexCount: 3, indexFormat: "uint16" },
+            worldMatrix: new Float32Array(16),
+        } as unknown as Mesh;
+        const scene = { surface: { engine } } as unknown as SceneContext;
+        const systemSpec = { _totalBytes: 16, _offsets: new Map(), _structBody: "" };
+        const packet = {
+            mesh,
+            systemUBO: {} as GPUBuffer,
+            systemData: new Float32Array(4),
+            _systemDependencies: 0,
+            _bindGroup: {} as GPUBindGroup,
+            _lastResourceVersion: 0,
+            _boundTextures: [],
+        } as ShaderPacket;
+        const registerPipeline = vi.fn();
+        const result = buildShaderRenderablesWithInstancing(
+            scene,
+            [mesh],
+            vi.fn(() => ({ renderables: [], rebuildSingle: vi.fn() })),
+            vi.fn((): ShaderPacket => packet),
+            vi.fn(),
+            vi.fn(),
+            () => mesh._gpu.positionBuffer,
+            () => ({}) as GPURenderPipeline,
+            () => ({
+                group1BGL: {} as GPUBindGroupLayout,
+                systemSpec,
+                customSpec: null,
+                vertexBuffers: [],
+                pipelines: new Map(),
+                _pipelineLayout: {} as GPUPipelineLayout,
+            }),
+            undefined,
+            undefined,
+            undefined,
+            registerPipeline
+        );
+
+        result.rebuildSingle(scene, mesh, undefined, { _lifetimeDisposers: [] });
+        expect(registerPipeline).toHaveBeenLastCalledWith(mesh, material, expect.any(Boolean), undefined);
+
+        // A shadow-caster or depth-prepass override must not replace the mesh's own recipe: it is keyed by its renderable.
+        const overrideRenderable = result.rebuildSingle(scene, mesh, caster, { _lifetimeDisposers: [] });
+        expect(registerPipeline).toHaveBeenLastCalledWith(overrideRenderable, caster, expect.any(Boolean), undefined);
+        expect(registerPipeline.mock.calls.filter(([key]) => key === mesh).every(([, m]) => m === material)).toBe(true);
+    });
+
     it("lets a color-independent material override share matrices without binding the mesh color stream", () => {
         const engine = {
             _device: {

@@ -2,9 +2,9 @@
  *  Plain data, no scene knowledge (pillar 4b).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase } from "./types.js";
+import type { LightBase, LightBaseCopier } from "./types.js";
 import type { ObservableVec3 } from "./light-base.js";
-import { createLightBase, applyLightBase, copyLightBase } from "./light-base.js";
+import { createLightBase, applyLightBase } from "./light-base.js";
 
 export interface PointLight extends LightBase {
     readonly lightType: "point";
@@ -31,12 +31,12 @@ export function createPointLight(position: [number, number, number], intensity =
             specular: [1, 1, 1] as [number, number, number],
             intensity,
             range: Number.MAX_VALUE,
-            _cloneNode: () => {
+            _cloneNode: (copyBase: LightBaseCopier) => {
                 const clone = createPointLight([light.position.x, light.position.y, light.position.z], light.intensity);
                 clone.diffuse = [...light.diffuse];
                 clone.specular = [...light.specular];
                 clone.range = light.range;
-                copyLightBase(light, clone);
+                copyBase(light, clone);
                 return clone;
             },
 

@@ -1,4 +1,6 @@
 import { createPbrComposer } from "../../../../packages/babylon-lite/src/material/pbr/pbr-compose.js";
+import * as cotangentNormalWgsl from "../../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-cotangent-wgsl.js";
+import * as tangentNormalWgsl from "../../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-tangent-wgsl.js";
 import { composeMeshLoDWgsl } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-compose.js";
 import { COMPUTE_PBR_LIGHT, getMultiLightLoop, MULTI_LIGHT_STRUCTS } from "../../../../packages/babylon-lite/src/material/pbr/fragments/multilight-wgsl.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_SPECULAR_AA } from "../../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
@@ -112,6 +114,8 @@ export async function createMeshLoDPbrProbe(
         _fogBlock: "",
         _createPbrTemplateExt: null,
         _flatNormalWgsl: "",
+        _tangentNormal: tangentNormalWgsl,
+        _cotangentNormal: cotangentNormalWgsl,
         _createPbrShadowFragment: null,
         _shadowLights: [],
         _createThinInstanceFragment: null,

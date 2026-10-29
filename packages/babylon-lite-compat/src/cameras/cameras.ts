@@ -252,12 +252,17 @@ export class ArcRotateCamera extends Camera {
         this._lite.radius = value;
     }
 
+    /** Live, as in Babylon.js: `camera.target.x = …` and in-place vector math move the target. */
     public get target(): Vector3 {
-        const t = this._lite.target;
-        return new Vector3(t.x, t.y, t.z);
+        return liteBackedVector3(this._lite.target);
     }
     public set target(value: Vector3) {
-        this._lite.target = { x: value.x, y: value.y, z: value.z };
+        // Write into Lite's observable target. Replacing the object would drop its change notification, so neither
+        // this assignment nor Lite's later pans would move the view until alpha, beta or radius changed.
+        const target = this._lite.target;
+        target.x = value.x;
+        target.y = value.y;
+        target.z = value.z;
     }
 
     /** Babylon.js `setTarget` — point the arc-rotate camera at a world-space target. */

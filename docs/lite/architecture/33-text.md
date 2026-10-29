@@ -3,7 +3,8 @@
 > Package path: `packages/babylon-lite/src/text/`
 >
 > Slug-style GPU font rendering for Lite. Glyphs are stored as quadratic Bézier
-> outlines with a spatial-band index packed into two `rgba32float` textures, and
+> outlines in an `rgba32float` curve texture with a spatial-band index in an
+> `rg32uint` texture, and
 > drawn as instanced unit quads where the fragment shader resolves analytic
 > coverage from the curves intersecting each pixel's bands. The module is layered
 > so the lowest level (`GlyphStorage`) holds only outlines and atlases, the
@@ -278,7 +279,7 @@ Each `GlyphStorage` curve-set owns a `SharedAtlas`:
 type SharedAtlas = {
     curveTexData: Float32Array; // rgba32float, width 4096, grows by row doubling
     curveTexelsUsed: number;
-    bandTexData: Float32Array; // rgba32float, width 4096, grows by row doubling
+    bandTexData: Uint32Array; // rg32uint (two components per texel), width 4096, grows by row doubling
     bandTexelsUsed: number;
     glyphSlots: Map<number, AtlasSlot>; // glyphId → curve start + band header location + band counts
     version: number; // monotonic, bumped per packAppendGlyph
@@ -289,7 +290,7 @@ type SharedAtlas = {
 The two textures are fixed-width `4096` and grow in row-doubling steps. Curve
 texels store quadratic control points (`p0`, `p1`, `p2` packed as two
 `vec4`s per curve); band texels store per-band headers (count + offset) followed
-by curve-index lists. Per-glyph metadata lives in `AtlasSlot` (curve start
+by curve-index lists, as integers (no float rounding in the shader). Per-glyph metadata lives in `AtlasSlot` (curve start
 texel, band header location, `(vBandCount, hBandCount)` for the fragment
 shader's transform).
 
@@ -432,7 +433,7 @@ alpha: src.a + (1 - src.a) * dst.a
 Topology is `triangle-list` (two triangles per glyph from a shared 6-vertex
 unit-quad buffer). The bind group has three entries: the `TextU` UBO (mvp +
 viewport + color) on binding 0, and the curve / band textures on bindings 1
-and 2 (both `texture_2d<f32>` as `unfilterable-float`).
+and 2 (`texture_2d<f32>` as `unfilterable-float` for curves, `texture_2d<u32>` as `uint` for bands).
 
 ### WGSL outline
 
@@ -468,7 +469,9 @@ The fragment stage (the fragment half of `shaders/slug-shader.ts`):
    to count signed crossings using the standard Loop-Blinn 3-bit root-code
    table (`0x2E74`). Early-exit when sorted-curve x/y is past the pixel.
 4. Accumulate signed coverage from h-bands and v-bands and average; clamp
-   to `[0, 1]`; multiply by `vColor`. Output the result.
+   to `[0, 1]`; multiply by `vColor`. Blended output is premultiplied by the
+   effective alpha (`color.a * coverage`); the alpha-to-coverage variant keeps
+   straight RGB and carries coverage in alpha only.
 
 The shader is independent of the layout / curve-extraction path — it consumes
 only the packed atlas + instance buffer.

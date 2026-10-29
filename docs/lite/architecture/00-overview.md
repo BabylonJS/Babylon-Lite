@@ -311,6 +311,8 @@ createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
 setEnvironmentRotation(scene: SceneContext, rotation: number): void
+setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void
+setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void
 
 // Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera

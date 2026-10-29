@@ -16,7 +16,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Vec3 } from "../math/types.js";
 import { addToScene, onBeforeRender } from "../scene/scene-core.js";
@@ -425,7 +425,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     // per handle without parent-world-matrix recomputation).
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = material;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     root.pickable = false;
     addToScene(utilityScene, root);
 

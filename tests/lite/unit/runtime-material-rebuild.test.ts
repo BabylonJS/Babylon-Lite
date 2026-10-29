@@ -670,7 +670,7 @@ describe("runtime material rebuild ownership", () => {
         }
     });
 
-    it.each(["resolve", "reject"] as const)("updates a PBR gamma widening hook only when a rebuild will %s", async (outcome) => {
+    it.each(["resolve", "reject"] as const)("installs a PBR build's widening hook only when its rebuild will %s", async (outcome) => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         scene._built = true;
         const failure = new Error("PBR rebuild failed");
@@ -678,7 +678,7 @@ describe("runtime material rebuild ownership", () => {
             if (outcome === "reject") {
                 throw failure;
             }
-            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: true };
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _w: null };
         }) as MeshGroupBuilder;
         builder._materialFamily = "pbr";
         const material = { _buildGroup: builder, gammaAlbedo: true } as Material & { gammaAlbedo: boolean };
@@ -709,7 +709,7 @@ describe("runtime material rebuild ownership", () => {
         const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
             const capturedGamma = meshes.some((mesh) => (mesh.material as { gammaAlbedo?: boolean } | null)?.gammaAlbedo);
             await gate;
-            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _G: capturedGamma };
+            return { renderables: meshes.map(renderable), rebuildSingle: (_scene: SceneContext, mesh: Mesh) => renderable(mesh), _w: capturedGamma ? null : widen };
         }) as MeshGroupBuilder;
         builder._materialFamily = "pbr";
         const material = { _buildGroup: builder, gammaAlbedo: false } as Material & { gammaAlbedo: boolean };

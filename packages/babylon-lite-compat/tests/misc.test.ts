@@ -66,6 +66,82 @@ describe("Observable", () => {
         expect(cb).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        ["normal", "normal"],
+        ["normal", "safe"],
+        ["safe", "normal"],
+        ["safe", "safe"],
+    ] as const)("delivers addOnce once across %s outer and %s nested notifications", (outer, inner) => {
+        const obs = new Observable<number>();
+        const notify = (kind: "normal" | "safe", value: number): void => {
+            if (kind === "safe") {
+                obs._notifyObserversSafely(value);
+            } else {
+                obs.notifyObservers(value);
+            }
+        };
+        obs.add((value) => {
+            if (value === 1) {
+                notify(inner, 2);
+            }
+        });
+        const cb = vi.fn();
+        obs.addOnce(cb);
+
+        notify(outer, 1);
+        notify(outer, 3);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+    });
+
+    it("consumes a throwing one-shot callback before a nested safe notification returns", () => {
+        const obs = new Observable<number>();
+        const failure = new Error("one-shot failed");
+        let nestedResult: { hasError: boolean; error: unknown } | undefined;
+        obs.add((value) => {
+            if (value === 1) {
+                nestedResult = obs._notifyObserversSafely(2);
+            }
+        });
+        const cb = vi.fn(() => {
+            throw failure;
+        });
+        obs.addOnce(cb);
+
+        const outerResult = obs._notifyObserversSafely(1);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(nestedResult).toEqual({ hasError: true, error: failure });
+        expect(outerResult).toEqual({ hasError: false, error: undefined });
+    });
+
+    it("does not replay a one-shot already delivered by the observer-added hook", () => {
+        const obs = new Observable<number>(() => obs.notifyObservers(2), true);
+        const cb = vi.fn();
+        obs.notifyObservers(1);
+
+        obs.addOnce(cb);
+        obs.notifyObservers(3);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(obs.hasObservers()).toBe(false);
+    });
+
+    it("preserves one-shot subscriptions until a matching mask is notified", () => {
+        const obs = new Observable<number>();
+        const cb = vi.fn();
+        const observer = obs.addOnce(cb, 2);
+        obs.notifyObservers(1, 1);
+        expect(cb).not.toHaveBeenCalled();
+
+        obs.notifyObservers(2, 2);
+        obs.notifyObservers(3, 2);
+
+        expect(cb).toHaveBeenCalledExactlyOnceWith(2);
+        expect(obs.remove(observer)).toBe(false);
+        expect(obs.hasObservers()).toBe(false);
+    });
+
     it("allows mutation during notification", () => {
         const obs = new Observable<void>();
         const cb = vi.fn();
@@ -145,9 +221,41 @@ describe("Observable", () => {
 
 describe("Tools", () => {
     afterEach(() => {
+        vi.unstubAllGlobals();
         vi.restoreAllMocks();
         vi.doUnmock("../src/misc/guid");
         vi.resetModules();
+    });
+
+    it("reads a fresh numeric high-resolution timestamp on each Now property access", () => {
+        const now = vi.fn().mockReturnValueOnce(11.25).mockReturnValueOnce(19.5);
+        vi.stubGlobal("performance", { now });
+
+        const start: number = Tools.Now;
+        const end: number = Tools.Now;
+
+        expect(start).toBe(11.25);
+        expect(end - start).toBe(8.25);
+        expect(now).toHaveBeenCalledTimes(2);
+    });
+
+    it("falls back to the current Date timestamp when performance is unavailable", () => {
+        vi.stubGlobal("performance", undefined);
+        vi.spyOn(Date, "now").mockReturnValueOnce(1000).mockReturnValueOnce(1025);
+
+        expect(Tools.Now).toBe(1000);
+        expect(Tools.Now).toBe(1025);
+    });
+
+    it("does not read a clock while importing Tools", async () => {
+        vi.resetModules();
+        const now = vi.fn().mockReturnValue(42.5);
+        vi.stubGlobal("performance", { now });
+
+        const { Tools: importedTools } = await import("../src/misc/tools");
+        expect(now).not.toHaveBeenCalled();
+        expect(importedTools.Now).toBe(42.5);
+        expect(now).toHaveBeenCalledOnce();
     });
 
     it("converts degrees and radians", () => {
