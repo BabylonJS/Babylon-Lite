@@ -347,8 +347,11 @@ light keeps its filter rather than becoming unrestricted. The sets are shared by
 **Consistency with shader selection.** The selection is baked when a renderable is built: into the
 shader's light-mode permutation, into the mesh UBO's packed indices, and into any material feature bits
 that mirror the selection (`SceneLightingExtension._pbrFeatures(mesh)`, used by rectangular area lights).
-`buildPbrRenderables` therefore rescans the selection after its dynamic imports and loads anything still
-missing, so the light WGSL it composes against is always a superset of what the final selection needs.
+`buildPbrRenderables` therefore alternates scanning the selection and loading what is missing until a scan
+finds nothing missing, so the light WGSL it composes against is always a superset of what the final
+selection needs. The loop ends on a scan rather than on an await, which is what makes the guarantee hold
+against an edit landing inside the loading itself, and it terminates because loading only ever adds over a
+finite set of paths.
 
 **Lifecycle.** The per-frame updater only revisits the selection when the light count or the mesh's world
 matrix changes, so an edit under a stable light count needs a renderable rebuild. Compat drives that:

@@ -216,6 +216,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
         }
     };
+    /** Whether a light path the current selection needs has not been loaded yet. */
+    const lightPathsMissing = (): boolean =>
+        (needsSingleLightPath && singleLightTypes.some((type) => !singleLightBlocks[type])) ||
+        (needsMultiLightPath && !multiLightLoaded) ||
+        (hasAnyAffectedLight && hasSomeShadows && !_createPbrShadowFragment);
     await loadLightPaths();
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
@@ -304,7 +309,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const _cotangentNormal = loadCaps & PBR_LAZY_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined;
     const _specGloss = loadCaps & PBR_LAZY_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined;
     scanLightPaths();
-    await loadLightPaths();
+    while (lightPathsMissing()) {
+        await loadLightPaths();
+        scanLightPaths();
+    }
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,

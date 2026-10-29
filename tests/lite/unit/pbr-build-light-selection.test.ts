@@ -5,6 +5,9 @@ import type { Material } from "../../../packages/babylon-lite/src/material/mater
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene.js";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node.js";
 import { createPointLight } from "../../../packages/babylon-lite/src/light/point-light.js";
+import { createSpotLight } from "../../../packages/babylon-lite/src/light/spot-light.js";
+import { COMPUTE_PBR_LIGHT, MULTI_LIGHT_STRUCTS, getMultiLightLoop } from "../../../packages/babylon-lite/src/material/pbr/fragments/multilight-wgsl.js";
+import type { SceneLightingExtension } from "../../../packages/babylon-lite/src/light/lighting-extension.js";
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable.js";
 import { _registerPbrSceneHook } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
@@ -100,6 +103,41 @@ describe("PBR build light selection", () => {
             editDuringBuild = null;
         }
         expect(composedFragment(res)).toContain("fn computePbrLight(");
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it("loads a light block selected by an edit that lands inside the dependency loading itself", async () => {
+        const { scene } = fixture();
+        const near = createPointLight([0, 2, 0]);
+        const side = createSpotLight([2, 0, 0], [-1, 0, 0], Math.PI / 4, 2);
+        scene.lights.push(near, side);
+        const material = createPbrMaterial();
+        const receiver = mesh(material, "receiver");
+        scene._groups.set(material._buildGroup, [receiver]);
+        side.excludedMeshes = new Set([receiver]);
+        // The multi-light contribution is requested from inside the loader, so editing a list here lands
+        // in the window the scan before the loader cannot see. It moves the mesh onto the spot light
+        // alone, a single-light type this build has had no reason to fetch.
+        const lighting: SceneLightingExtension = {
+            _prepare: async () => {},
+            _multi: () => {
+                near.excludedMeshes = new Set([receiver]);
+                side.excludedMeshes = undefined;
+                return { _helpers: MULTI_LIGHT_STRUCTS() + COMPUTE_PBR_LIGHT, _loop: getMultiLightLoop() };
+            },
+        };
+        scene._lighting = lighting;
+        // Both lights affected by the time of the last scan, so that scan is what first asks for multi.
+        editDuringBuild = () => {
+            side.excludedMeshes = undefined;
+        };
+        let res: MeshGroupBuildResult;
+        try {
+            res = await buildPbrRenderables(scene, [receiver], undefined);
+        } finally {
+            editDuringBuild = null;
+        }
+        expect(composedFragment(res)).toContain("let spotC = dot(");
         scene._disposables.forEach((dispose) => dispose());
     });
 });
