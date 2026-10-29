@@ -24,6 +24,7 @@ import {
     createRectAreaLight,
     createSpotLight,
     enableRectAreaLights,
+    onSceneDispose,
     rebuildSceneRenderables,
     removeFromScene,
 } from "babylon-lite";
@@ -221,6 +222,7 @@ export abstract class Light extends Node {
     private _excludedMeshes: AbstractMesh[] = this._subscribeMeshList([]);
     private _includedOnlyMeshes: AbstractMesh[] = this._subscribeMeshList([]);
     private _meshListSyncScheduled = false;
+    private _meshListSceneRelease: (() => void) | null = null;
 
     /**
      * Meshes this light does not light. Babylon.js hands out the light's own array, and
@@ -293,6 +295,20 @@ export abstract class Light extends Node {
         meshListSubscribers?.get(array)?.delete(this);
     }
 
+    /** @internal Release this light from its lists when its scene is torn down. */
+    private _watchSceneForMeshListRelease(scene: Scene): void {
+        this._meshListSceneRelease ??= onSceneDispose(scene._lite, () => {
+            this._meshListSceneRelease = null;
+            this._releaseMeshLists();
+        });
+    }
+
+    /** @internal Drop this light from both of its lists' subscriber sets. */
+    private _releaseMeshLists(): void {
+        meshListSubscribers?.get(this._excludedMeshes)?.delete(this);
+        meshListSubscribers?.get(this._includedOnlyMeshes)?.delete(this);
+    }
+
     /**
      * @internal Coalesce the sync to the end of the tick: a list built up one `push` at a time,
      * as a loader callback or a room-by-room walk does, would otherwise rebuild the scene's
@@ -320,11 +336,15 @@ export abstract class Light extends Node {
         this._lite.excludedMeshes = liteMeshSet(this._excludedMeshes);
         this._lite.includedOnlyMeshes = liteMeshSet(this._includedOnlyMeshes);
 
+        const scene = this._scene;
+        if (!scene) {
+            return;
+        }
+        this._watchSceneForMeshListRelease(scene);
         // A light held by a clustered container is out of the per-mesh light path entirely
         // (the container calls `removeFromScene`), so nothing would read the sets back.
         // Babylon.js skips its resync for the same reason.
-        const scene = this._scene;
-        if (!scene?._hasStarted || this._clusteredContainer) {
+        if (!scene._hasStarted || this._clusteredContainer) {
             return;
         }
         // The selection is baked into each renderable at build time (the shader's light-count
@@ -342,8 +362,9 @@ export abstract class Light extends Node {
 
     /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
     protected override _disposeSelf(_doNotRecurse: boolean): void {
-        meshListSubscribers?.get(this._excludedMeshes)?.delete(this);
-        meshListSubscribers?.get(this._includedOnlyMeshes)?.delete(this);
+        this._meshListSceneRelease?.();
+        this._meshListSceneRelease = null;
+        this._releaseMeshLists();
         const scene = this._scene;
         if (scene) {
             const needsRectAreaReconcile =

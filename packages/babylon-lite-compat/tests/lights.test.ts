@@ -273,6 +273,12 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         (scene._lite as unknown as { _built: boolean })._built = true;
     }
 
+    /** Tear the scene down the way `disposeScene` does, without touching its lights. */
+    function disposeSceneStub(scene: SceneStub): void {
+        const disposables = (scene._lite as unknown as { _disposables: (() => void)[] })._disposables;
+        disposables.splice(0).forEach((dispose) => dispose());
+    }
+
     /**
      * `splice` the way JS callers reach it.
      */
@@ -657,6 +663,49 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
 
         // Releasing one light must not take the array's other live consumers with it.
         expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+    });
+
+    it("releases a retained list when the scene is disposed without disposing its lights", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const moduleMeshes = [mesh("floor")];
+
+        rim.excludedMeshes = moduleMeshes;
+        await flush();
+
+        // `scene.dispose()` never reaches `_disposeSelf`, so the light is still live here.
+        disposeSceneStub(scene);
+        rebuildMock.mockClear();
+
+        const wall = mesh("wall");
+        moduleMeshes.push(wall);
+        await flush();
+
+        // Nothing reads a dead scene's selection, and the array must not retain the light that held it.
+        expect(rebuildMock).not.toHaveBeenCalled();
+        expect(excluded(rim)).toEqual([moduleMeshes[0]!._lite]);
+    });
+
+    it("keeps a live scene's light publishing when a disposed scene shared its list", async () => {
+        const retired = sceneStub(true);
+        const current = sceneStub(true);
+        const old = new DirectionalLight("old", new Vector3(0, -1, 0), retired);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, current);
+        const shared = [mesh("floor")];
+
+        old.excludedMeshes = shared;
+        led.excludedMeshes = shared;
+        await flush();
+
+        disposeSceneStub(retired);
+
+        const wall = mesh("wall");
+        shared.push(wall);
+        await flush();
+
+        // Only the retired scene's light comes off the array; the live scene keeps observing it.
+        expect(excluded(led)).toEqual(shared.map((m) => m._lite));
+        expect(excluded(old)).toEqual([shared[0]!._lite]);
     });
 
     it("survives repeated create, dispose and reuse against one retained list", async () => {
