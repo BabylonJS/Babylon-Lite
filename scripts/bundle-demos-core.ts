@@ -207,6 +207,9 @@ function copyRequiredDir(source: string, target: string, label: string): void {
 }
 
 function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
+    if (demos.some((demo) => demo.slug === "navcat")) {
+        copyRequiredDir(resolve(labDir, "public", "navcat"), resolve(demosDir, "navcat"), "Navcat");
+    }
     if (demos.some((demo) => demo.slug === "ocean")) {
         cpSync(resolve(labDir, "lite", "demo-ocean-reference.html"), resolve(demosDir, "demo-ocean-reference.html"));
     }
@@ -329,7 +332,7 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
 }
 
 function demoRequiresReady(slug: string): boolean {
-    return slug === "racer" || slug === "ocean" || slug === "playroom";
+    return slug === "racer" || slug === "ocean" || slug === "playroom" || slug === "navcat";
 }
 
 export async function buildDemo(slug: string, options: { debug?: boolean } = {}): Promise<void> {

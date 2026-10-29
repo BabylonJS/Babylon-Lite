@@ -1,5 +1,12 @@
 [
     {
+        "slug": "navcat",
+        "name": "Navcat Navigation",
+        "description": "Query an offline-baked pure-JavaScript navmesh, compare filtered routes, inspect debug geometry, and dispose/reload the backend. No generator, crowd, Recast or Wasm is loaded by this demo.",
+        "tags": ["navigation", "showcase"],
+        "mobile": true
+    },
+    {
         "slug": "ocean",
         "name": "Ocean",
         "description": "A GPU spectral ocean driven by Babylon Lite compute tasks: JONSWAP spectrum generation, time-dependent amplitudes, multi-stage 2D inverse FFT, and a displaced water surface. Port of Playground YX6IB8#758.",
