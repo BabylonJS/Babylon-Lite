@@ -337,6 +337,7 @@ exports[`right-handed drift guard > material/standard/standard-pipeline.ts: righ
 exports[`right-handed drift guard > material/standard/std-mirrored-support.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "_windingFrontFace ?:": "«» → «(» meshFeatures & … ? " «cw» → «ccw» " : … : " «ccw» → «cw» " ) … ccw " «» → «)»",
+  "installMirroredMeshSupport use": "«» → «if ( _rightHanded ) { if ( bits ! = = undefined | | mirrored ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = ( ( bits ? ? 0 ) & ~ ( 1 < < 11 ) ) | ( mirrored ? 1 < < 11 : 0 ) ; } } else if ( bits ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = bits & ~ ( 1 < < 11 ) ; }»",
 }
 `;
 

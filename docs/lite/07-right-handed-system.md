@@ -129,7 +129,7 @@ It matches Babylon.js with `scene.useRightHandedSystem = true`:
 
 - **Cameras** look down their local **−Z** axis; for the same position and target, the image is the mirror of the left-handed one.
 - **glTF** assets keep glTF's native right-handed space: no mirroring root node, like Babylon.js.
-- **Triangle winding**: front faces follow Babylon.js's right-handed rule, so back-face culling keeps working on glTF and procedural meshes alike, with PBR, Standard, Node and shader materials.
+- **Triangle winding**: front faces follow Babylon.js's right-handed rule, so back-face culling keeps working on glTF and procedural meshes alike, with PBR, Standard, Node and shader materials, including a glTF mesh switched from PBR to a Node or shader material with `enableMirroredMeshes()` on.
 - **Environment lighting** (IBL) is oriented as in Babylon.js's right-handed scenes (except the glTF `EXT_lights_image_based` yaw, see [Limits](#limits)).
 
 Port a right-handed Babylon.js scene by keeping its positions, rotations and camera angles as they are: the same numbers give the same image.

@@ -92,7 +92,14 @@ export function installMirroredMeshSupport(scene: SceneContext): void {
             // than masking it on the shared path — keeps that cost in this opt-in module. The
             // loader's topology bits are untouched.
             const bits = (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures;
-            if (bits) {
+            if (_rightHanded) {
+                // Right-handed, the bit is also the per-mesh winding mark that Node and ShaderMaterial
+                // read ("wind ccw"), and `mirrored` is exactly that answer kept live: rewrite it rather
+                // than clear it, or a glTF mesh switched from PBR to one of those draws inside out.
+                if (bits !== undefined || mirrored) {
+                    (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = ((bits ?? 0) & ~(1 << 11)) | (mirrored ? 1 << 11 : 0);
+                }
+            } else if (bits) {
                 (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = bits & ~(1 << 11);
             }
             return mirrored ? 1 << 11 : 0;

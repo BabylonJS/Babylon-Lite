@@ -482,6 +482,56 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
         ]);
     });
 
+    it("the mirrored-mesh opt-in keeps the winding mark live for the Node and ShaderMaterial meshes that read it", async () => {
+        const [lh, rh] = await bothBuilds(async (rightHanded) => {
+            const { installMirroredMeshSupport } = await import(`${SRC}material/standard/std-mirrored-support`);
+            const { _computeMeshFeatures } = await import(`${SRC}material/mesh-features`);
+            const { createShaderMaterial } = await import(`${SRC}material/shader/shader-material`);
+            const { buildShaderMaterialRenderables } = await import(`${SRC}material/shader/shader-renderable`);
+            const { initMeshTransform } = await import(`${SRC}mesh/mesh`);
+            const { wgsl } = await import(`${SRC}shader/wgsl`);
+            const gpu = fakeDevice();
+            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 } };
+            const material = createShaderMaterial({
+                vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+                fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+                attributes: ["position"],
+            });
+            const geometry = { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32" };
+            const procedural = initMeshTransform({ name: "procedural", children: [], material, receiveShadows: false, _gpu: geometry } as never);
+            // An ordinary glTF mesh as the loader leaves it: left-handed under the X-mirroring root, unmarked;
+            // right-handed with no root and the loader's winding mark.
+            const gltf = initMeshTransform({
+                name: "gltf",
+                children: [],
+                material,
+                receiveShadows: false,
+                _gpu: geometry,
+                _authoredSign: -1,
+                _primitiveFeatures: rightHanded ? GLTF_WINDING : undefined,
+            } as never);
+            if (!rightHanded) {
+                gltf.worldMatrix.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+            }
+            const scene = { surface: { engine }, camera: null, meshes: [procedural, gltf], _beforeRender: [], _meshDisposables: new Map() };
+            installMirroredMeshSupport(scene as never);
+            // Drawn first with PBR or Standard, which runs the opt-in's feature encoder; then switched to a ShaderMaterial.
+            for (const mesh of scene.meshes) {
+                _computeMeshFeatures(mesh as never);
+            }
+            const { renderables } = buildShaderMaterialRenderables(scene as never, scene.meshes as never);
+            for (const renderable of renderables) {
+                renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
+            }
+            return [scene.meshes.map((mesh) => (mesh as { _primitiveFeatures?: number })._primitiveFeatures), gpu.pipelines.map((pipeline) => pipeline.primitive!.frontFace)];
+        });
+        expect(lh).toEqual([[undefined, undefined], [undefined]]);
+        expect(rh).toEqual([
+            [undefined, GLTF_WINDING],
+            ["cw", "ccw"],
+        ]);
+    });
+
     it("Node material pipelines wind glTF geometry apart from procedural geometry", async () => {
         const [lh, rh] = await bothBuilds(async () => {
             const { emitGraph, loadGraphEmitters } = await import(`${SRC}material/node/node-emitter`);

@@ -83,7 +83,11 @@ With `Sz = diag(1, 1, -1)`:
   unmarked meshes, even when they share one geometry), and shader materials by splitting glTF and
   procedural meshes into separately wound pipelines (`|ccw` variant key). The mark lives on the mesh,
   not on its shared GPU geometry: a negative-scale node instancing the same glTF mesh is not marked and
-  stays `"cw"`, and a device-loss rebuild of the geometry keeps it. Depth and shadow passes use the same
+  stays `"cw"`, and a device-loss rebuild of the geometry keeps it. Whenever a PBR or Standard
+  renderable is built, the `enableMirroredMeshes()` opt-in clears that bit in a left-handed build;
+  right-handed, it rewrites it from the live determinant instead, so a glTF mesh moved from PBR or
+  Standard to a Node or shader material keeps its `"ccw"`. Otherwise Node and shader materials read the
+  load-time mark, as in a left-handed build. Depth and shadow passes use the same
   winding as the colour pass, since light views mirror like the camera's.
 - **glTF** — the loader keeps glTF's native right-handed space: the `__root__` node has no X mirror,
   `computeNodeWorldMatrix` drops the root conversion, the skeleton and animation-mixer root transforms

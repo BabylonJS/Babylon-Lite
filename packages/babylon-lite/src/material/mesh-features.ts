@@ -75,7 +75,7 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     if (_rightHanded) {
         // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
         // meshes: carry the loader's winding bit so the Standard pipelines key and wind it apart.
-        // Read after the opt-in encoder above, which takes ownership of (and clears) that bit.
+        // Read after the opt-in encoder above, which rewrites that bit from the live determinant.
         features |= ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11);
     }
     return features;
