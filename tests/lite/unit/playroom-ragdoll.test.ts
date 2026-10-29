@@ -44,7 +44,7 @@ function rotateByQuaternion(rotation: Quat, vector: { x: number; y: number; z: n
 function makeLifecycleFixture(): { physics: PhysicsWorld; ragdoll: RagdollState; hknp: ReturnType<typeof makeHavok>; events: string[] } {
     const events: string[] = [];
     const hknp = makeHavok(events);
-    const physics = createHavokWorld({ _beforeRender: [], fixedDeltaMs: 1000 / 60 } as unknown as SceneContext, hknp);
+    const physics = createHavokWorld({ _beforeRender: [], _disposables: [], fixedDeltaMs: 1000 / 60 } as unknown as SceneContext, hknp);
     const launch = { x: 0, y: 0.9, z: 0 };
     const records = rig.joints.map((joint, index) => {
         const position = ragdollBodyPosition(joint, launch);

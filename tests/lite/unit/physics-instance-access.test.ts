@@ -13,7 +13,7 @@ import {
 import { applyPhysicsBodyInstanceImpulse, getPhysicsBodyInstanceLinearVelocityToRef } from "../../../lab/lite/src/demos/playroom/physics-instances";
 
 function makeScene(): SceneContext {
-    return { _beforeRender: [] } as unknown as SceneContext;
+    return { _beforeRender: [], _disposables: [] } as unknown as SceneContext;
 }
 
 function makeMesh(count = 2): Mesh {
