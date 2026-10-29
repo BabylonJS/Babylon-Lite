@@ -3,7 +3,7 @@ import { _cameraChangeKey } from "../camera/camera.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { XrEye } from "./xr-support.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { copyXrProjectionToLeftHanded, copyXrRigidMatrixToLeftHanded } from "./xr-coordinates.js";
+import { copyXrProjectionToLeftHanded, copyXrRigidMatrixToWorld } from "./xr-coordinates.js";
 
 /**
  * XrCamera — a {@link Camera} whose view and projection matrices come from an
@@ -31,6 +31,9 @@ import { copyXrProjectionToLeftHanded, copyXrRigidMatrixToLeftHanded } from "./x
  * The eye pose is converted with `H·T·H` and the projection with `P·H`, where
  * `H = diag(1,1,-1,1)`. Input and hand poses use the same boundary conversion, so
  * every material pipeline sees an ordinary left-handed scene with normal winding.
+ * A right-handed build (docs/lite/architecture/61-right-handed-system.md) keeps
+ * WebXR's world: poses are copied verbatim and only the projection is converted,
+ * because the camera's view matrix (`Sz·T⁻¹`) is still left-handed.
  *  - **Reverse-Z:** the WebGPU binding's `XRView.projectionMatrix` targets `z ∈ [0,1]`
  *    (near→0, far→1). Babylon Lite's pipeline expects reverse-Z (near→1, far→0), so we
  *    remap `row2 ← row3 − row2`. This is handedness-independent and specific to this engine.
@@ -86,10 +89,10 @@ export function createXrCamera(eye: XrEye): XrCamera {
  *   returns the XR projection verbatim instead of recomputing a symmetric one.
  */
 export function updateXrCameraForView(cam: XrCamera, view: XRView, rtWidth: number, rtHeight: number, viewport: NormalizedViewport): void {
-    // Convert the right-handed eye pose into Lite's left-handed world.
+    // Bring the right-handed eye pose into Lite's world (mirrored unless the build is right-handed).
     const m = view.transform.matrix;
     const w = cam._world;
-    copyXrRigidMatrixToLeftHanded(w, m);
+    copyXrRigidMatrixToWorld(w, m);
     // Monotonic bump (never truncated to int32: `worldMatrixVersion` must never
     // decrease per the camera.ts contract; a plain +1 stays exact up to 2^53).
     cam._wmv = cam._wmv + 1;

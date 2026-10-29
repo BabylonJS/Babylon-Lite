@@ -11,6 +11,7 @@
  *  share this state too.
  *
  *  The common triangle-list positive-winding case never loads this module. */
+import { _rightHanded } from "#coordinate-system";
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import { buildPrimitiveState } from "../material/pbr/pbr-primitive-topology.js";
 import type { GltfFeature } from "./gltf-feature.js";
@@ -46,6 +47,11 @@ const feature: GltfFeature = {
             const prim: GPUPrimitiveState = topo ? buildPrimitiveState(topo, mesh._gpu.indexFormat === "uint32") : {};
             if (mirrored) {
                 prim.frontFace = "cw";
+                if (_rightHanded !== null) {
+                    // Node-material pipelines are keyed by material, not by mesh: they read the
+                    // winding from the geometry (`_pipelineForMesh`).
+                    (mesh._gpu as typeof mesh._gpu & { _ccw?: 1 })._ccw = 1;
+                }
             }
             (mesh as typeof mesh & { _primitive?: GPUPrimitiveState })._primitive = prim;
         }

@@ -21,7 +21,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { XrInputManager } from "./xr-input.js";
-import { setXrPoseToLeftHanded } from "./xr-coordinates.js";
+import { setXrPoseToWorld } from "./xr-coordinates.js";
 import type { XrFeatureSpec } from "./xr-feature.js";
 import type { XrHandedness } from "./xr-support.js";
 import type { HandMeshOptions, LoadedHandMesh } from "./xr-hand-mesh.js";
@@ -297,7 +297,7 @@ export function updateXrHandTracking(handTracking: XrHandTracking, input: XrInpu
                 continue;
             }
             const d = (pose.radius ?? FALLBACK_RADIUS) * 2 * handTracking._jointScale;
-            setXrPoseToLeftHanded(mesh, pose.transform);
+            setXrPoseToWorld(mesh, pose.transform);
             mesh.scaling.set(d, d, d);
             setSubtreeVisible(mesh, true);
         }

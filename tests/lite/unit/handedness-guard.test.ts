@@ -23,11 +23,7 @@ const LAB = join(ROOT, "lab/lite");
 /** Files with handedness-sensitive code that deliberately do not import `#coordinate-system`. */
 const HANDEDNESS_EXEMPT: Record<string, string> = {
     "camera/orthographic.ts": "projection only: Babylon.js's right-handed ortho projection is the left-handed one times Sz, which camera.ts folds into the view matrix",
-    "camera/geospatial-camera.ts": "not ported yet: listed under 'Not covered yet' in doc 61",
-    "loader-usd/usd-material-plugin.ts": "USD loader: not ported to the right-handed build, listed under 'Not covered yet' in doc 61",
-    "loader-gltf/gltf-feature-primitive.ts": "winding from the world determinant; the PBR pipelines apply the right-handed flip on top of it",
     "material/node/blocks/perturb-normal.ts": "node-material normal frame: Babylon.js's PerturbNormalBlock flips only on its invertX/invertY options, never with the handedness",
-    "material/node/blocks/pbr-mr-helper-full.ts": "node-material anisotropy frame: like PerturbNormalBlock, Babylon.js does not flip it with the handedness",
     "shader/wgsl-helpers.ts": "Standard bump frame: Babylon.js flips it only with invertNormalMapX/Y, which only its glTF loader ties to the handedness",
     "text/_gpu/text-pipeline.ts": "cullMode none: winding cannot change what is drawn",
 };
@@ -110,6 +106,14 @@ const TWIN_HINT =
     "A right-handed twin must stay a pure re-run of its left-handed source: lab/lite/src/lite/sceneN.ts imports only the " +
     'source scene, and lab/lite/src/bjs/sceneN.ts imports only "./right-handed-twin" then the source reference.';
 
+/**
+ * Twins whose source Babylon.js renders wrongly when right-handed: their reference stays the
+ * left-handed source's, since a right-handed twin must look exactly like its source.
+ */
+const BJS_RH_BROKEN: Record<number, string> = {
+    342: "Babylon.js 9.28 lights EXT_lights_image_based wrongly in a right-handed scene (white dielectrics turn black)",
+};
+
 function importsOf(path: string): string[] {
     return [...stripComments(readFileSync(path, "utf8")).matchAll(/^\s*import\s+"([^"]+)";\s*$/gm)].map((m) => m[1]!);
 }
@@ -137,10 +141,100 @@ describe("handedness guard: right-handed twin scenes", () => {
 
         const bjsPath = join(LAB, `src/bjs/scene${twin.id}.ts`);
         if (existsSync(join(LAB, `src/bjs/scene${sourceId}.ts`))) {
-            expect(importsOf(bjsPath), TWIN_HINT).toEqual(["./right-handed-twin", `./scene${sourceId}`]);
+            const shim = twin.id in BJS_RH_BROKEN ? [] : ["./right-handed-twin"];
+            expect(importsOf(bjsPath), TWIN_HINT).toEqual([...shim, `./scene${sourceId}`]);
             expect(nonImportCode(bjsPath), TWIN_HINT).toBe("");
         }
 
         expect(existsSync(join(ROOT, `tests/lite/parity/scenes/${twin.slug}.spec.ts`)), `scene ${twin.id} needs its parity spec`).toBe(true);
+    });
+});
+
+/**
+ * Seam files whose right-handed branch no right-handed unit test imports, with the twin scenes whose
+ * golden comparison renders that branch. Unit-tested files (any `right-handed-*.test.ts` importing the
+ * module) need no entry.
+ */
+const RH_TWIN_COVERAGE: Record<string, number[]> = {
+    "gizmo/camera-gizmo.ts": [339],
+    "loader-gltf/gltf-feature-camera.ts": [328],
+    "loader-gltf/gltf-feature-primitive.ts": [346],
+    "loader-gltf/gltf-feature-registry.ts": [322, 324, 326, 343, 347],
+    "loader-gltf/gltf-parser.ts": [322, 324, 326, 343, 347],
+    "loader-gltf/load-gltf.ts": [322, 324, 326, 343, 347],
+    "material/node/blocks/input-block.ts": [334, 335],
+    "material/node/node-geometry-renderable.ts": [346],
+    "material/node/node-pipeline.ts": [334, 335],
+    "material/pbr/background-ground.ts": [323, 324],
+    "material/pbr/fragments/clearcoat-fragment.ts": [324],
+    "material/pbr/pbr-geometry-renderable.ts": [322, 323, 324],
+    "material/pbr/pbr-pipeline.ts": [322, 323, 324],
+    "material/shader/shader-pipeline.ts": [336],
+    "material/standard/standard-geometry-renderable.ts": [321, 325],
+    "material/standard/standard-pipeline.ts": [321, 325],
+    "material/standard/std-mirrored-support.ts": [331],
+    "mesh/csg2.ts": [341],
+    "render/scene-helpers.ts": [321],
+    "skeleton/skeleton-updater.ts": [322, 326],
+};
+
+/**
+ * Seam files covered by neither a unit test nor a twin scene: only the drift snapshot
+ * (right-handed-drift.test.ts) stops their left-handed branch from changing alone. Each entry is
+ * a known gap, kept short on purpose — add a pair test or a twin and remove it.
+ */
+const RH_DRIFT_ONLY: Record<string, string> = {
+    "animation/weighted-gltf-mixer.ts": "animation-blending root: the same ROOT_TRANSFORM as skeleton-pose.ts, which is pair-tested",
+    "loader-usd/usd-materialize.ts": "USD root axis conversion: no USD scene has a right-handed twin yet",
+    "material/pbr/pbr-mesh-lod-renderable.ts": "pipeline frontFace only; the mesh-LoD WGSL it compiles is pair-tested",
+    "physics/havok.ts": "mesh-shape triangle order: needs the Havok wasm runtime",
+    "xr/xr-controller-models.ts": "needs a WebXR session",
+    "xr/xr-hand-mesh.ts": "needs a WebXR session",
+    "xr/xr-pointer.ts": "needs a WebXR session",
+    "xr/xr-teleport.ts": "needs a WebXR session",
+};
+
+const RH_TESTS = readdirSync(join(ROOT, "tests/lite/unit"))
+    .filter((name) => /^right-handed-.*\.test\.ts$/.test(name))
+    .map((name) => readFileSync(join(ROOT, "tests/lite/unit", name), "utf8"))
+    .join("\n");
+
+/** True when a right-handed unit test imports the module (`${SRC}path` or a relative `/src/path`). */
+function unitTested(rel: string): boolean {
+    const module = rel.replace(/\.ts$/, "");
+    return RH_TESTS.includes(`}${module}\``) || RH_TESTS.includes(`/src/${module}"`) || RH_TESTS.includes(`/src/${module}.js"`);
+}
+
+const seamFiles = sources.filter((s) => SEAM_IMPORT.test(s.code) && !s.rel.startsWith("engine/coordinate-system")).map((s) => s.rel);
+const COVERAGE_HINT =
+    "Every file importing #coordinate-system needs its right-handed branch exercised: a pair test in " +
+    "right-handed-pairs.test.ts (preferred: same input through both builds, assert the documented relation), a seam " +
+    "test, or a right-handed twin scene listed in RH_TWIN_COVERAGE. RH_DRIFT_ONLY is for known gaps only.";
+
+describe("handedness guard: right-handed coverage", () => {
+    it("every seam file is unit-tested, rendered by a twin, or a declared gap", () => {
+        const uncovered = seamFiles.filter((rel) => !unitTested(rel) && !(rel in RH_TWIN_COVERAGE) && !(rel in RH_DRIFT_ONLY));
+        expect(uncovered, COVERAGE_HINT).toEqual([]);
+    });
+
+    it("coverage entries are not stale", () => {
+        const stale = [...Object.keys(RH_TWIN_COVERAGE), ...Object.keys(RH_DRIFT_ONLY)].flatMap((rel) => {
+            if (!seamFiles.includes(rel)) {
+                return [`${rel}: no longer imports #coordinate-system`];
+            }
+            if (rel in RH_DRIFT_ONLY && (unitTested(rel) || rel in RH_TWIN_COVERAGE)) {
+                return [`${rel}: now covered, drop it from RH_DRIFT_ONLY`];
+            }
+            return [];
+        });
+        expect(stale).toEqual([]);
+    });
+
+    it("twin coverage names right-handed twins", () => {
+        const twinIds = new Set(twins.map((t) => t.id));
+        const unknown = Object.entries(RH_TWIN_COVERAGE).flatMap(([rel, ids]) =>
+            ids.length ? ids.filter((id) => !twinIds.has(id)).map((id) => `${rel}: ${id}`) : [`${rel}: no scene`]
+        );
+        expect(unknown).toEqual([]);
     });
 });

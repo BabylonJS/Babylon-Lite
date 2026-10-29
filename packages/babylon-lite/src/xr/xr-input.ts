@@ -1,5 +1,5 @@
 import type { XrHandedness, XrTargetRayMode } from "./xr-support.js";
-import { copyXrRigidMatrixToLeftHanded } from "./xr-coordinates.js";
+import { copyXrRigidMatrixToWorld } from "./xr-coordinates.js";
 
 /**
  * XR input sources — controller / hand target-ray + grip poses and
@@ -175,7 +175,7 @@ export function updateXrInputPoses(mgr: XrInputManager, frame: XRFrame, referenc
     for (const w of mgr._list) {
         const rayPose = frame.getPose(w.source.targetRaySpace, referenceSpace);
         if (rayPose) {
-            copyXrRigidMatrixToLeftHanded(w.targetRayMatrix, rayPose.transform.matrix);
+            copyXrRigidMatrixToWorld(w.targetRayMatrix, rayPose.transform.matrix);
             w.targetRayTracked = true;
         } else {
             w.targetRayTracked = false;
@@ -184,7 +184,7 @@ export function updateXrInputPoses(mgr: XrInputManager, frame: XRFrame, referenc
         if (grip) {
             const gripPose = frame.getPose(grip, referenceSpace);
             if (gripPose) {
-                copyXrRigidMatrixToLeftHanded(w.gripMatrix, gripPose.transform.matrix);
+                copyXrRigidMatrixToWorld(w.gripMatrix, gripPose.transform.matrix);
                 w.gripTracked = true;
             } else {
                 w.gripTracked = false;

@@ -134,9 +134,9 @@ Port a right-handed Babylon.js scene by keeping its positions, rotations and cam
 
 ## What is covered
 
-The arc-rotate and orthographic cameras, the free camera's view (not its keyboard/mouse input directions), glTF loading (including skinned and animated assets, embedded cameras and negative-scale nodes), PBR and Standard materials, image-based lighting from an environment texture, procedural meshes, mirrored meshes, and hemispheric, directional and point lights without shadows. Lab scenes 321 to 331 check these against Babylon.js.
+Everything in Lite that Babylon.js treats differently with `useRightHandedSystem = true`: cameras and their keyboard, mouse and touch inputs (arc-rotate, free, orthographic, geospatial, glTF and `.babylon` cameras), glTF loading (skinned, animated, morphed, embedded cameras, negative-scale nodes, `EXT_lights_image_based`, interactivity camera paths), PBR, Standard, Node and shader materials, image-based lighting, skyboxes and reflections, shadows and cascaded shadows, procedural meshes, CSG2, sprites and billboards (and their picking), gizmos, Havok mesh shapes, USD, and WebXR (poses, pointers, teleportation, hands and controller models).
 
-Not covered yet in a right-handed build: shadows, the skybox, Standard material reflections, Node PBR, refraction, parallax, free-camera input directions, the geospatial camera, spot lights, sprites, screen-space reflections, reflection probes, gizmos, WebXR and text. Use the default left-handed build if you rely on them.
+The lab scenes listed below check them against Babylon.js, and the test suite fails whenever the left-handed code changes without its right-handed counterpart (see the [architecture page](architecture/61-right-handed-system.md#tests)).
 
 ## Limits
 
@@ -145,6 +145,5 @@ Not covered yet in a right-handed build: shadows, the skybox, Standard material 
 
 ## See it in the lab
 
-Scenes 321 to 331 of the lab gallery are right-handed twins of scenes 2, 5, 13, 28, 38, 11, 25, 250, 266, 268 and 270: the same Lite code, compiled with `babylon-lite-rh`, checked against the same Babylon.js reference with `useRightHandedSystem = true`.
-
+Scenes 321 to 347 of the lab gallery are right-handed twins of scenes 2, 5, 13, 28, 38, 11, 25, 250, 266, 268, 270, 4, 214, 72, 60, 159, 54, 94, 223, 225, 91, 265, 24, 143, 103, 149 and 9: the same Lite code, compiled with `babylon-lite-rh`, checked against the same Babylon.js reference with `useRightHandedSystem = true`.
 For the implementation, see [Right-Handed System architecture](architecture/61-right-handed-system.md).

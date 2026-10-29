@@ -1,10 +1,20 @@
+import { _rightHanded } from "#coordinate-system";
+import type { Mat4Storage } from "../math/types.js";
+
 interface XrPoseTarget {
     position: { set(x: number, y: number, z: number): void };
     rotationQuaternion: { set(x: number, y: number, z: number, w: number): void };
 }
 
-/** @internal Convert a WebXR right-handed rigid matrix to Lite's left-handed space. */
-export function copyXrRigidMatrixToLeftHanded(out: Mat4Storage, source: ArrayLike<number>): void {
+/** @internal Copy a WebXR rigid matrix into Lite's world: mirrored into the left-handed world by default,
+ *  verbatim in a right-handed build, whose world is WebXR's own. */
+export function copyXrRigidMatrixToWorld(out: Mat4Storage, source: ArrayLike<number>): void {
+    if (_rightHanded !== null) {
+        for (let i = 0; i < 16; i++) {
+            out[i] = source[i]!;
+        }
+        return;
+    }
     out[0] = source[0]!;
     out[1] = source[1]!;
     out[2] = -source[2]!;
@@ -23,7 +33,8 @@ export function copyXrRigidMatrixToLeftHanded(out: Mat4Storage, source: ArrayLik
     out[15] = source[15]!;
 }
 
-/** @internal Convert a WebXR projection so it consumes left-handed view coordinates. */
+/** @internal Convert a WebXR projection so it consumes left-handed view coordinates. Lite's view space is
+ *  left-handed in both builds (a right-handed camera's view matrix is `Sz·V_RH`), so this holds for both. */
 export function copyXrProjectionToLeftHanded(out: Mat4Storage, source: ArrayLike<number>): void {
     for (let i = 0; i < 16; i++) {
         out[i] = source[i]!;
@@ -34,11 +45,11 @@ export function copyXrProjectionToLeftHanded(out: Mat4Storage, source: ArrayLike
     out[11] = -out[11]!;
 }
 
-/** @internal Apply a WebXR pose to a left-handed scene node without allocating. */
-export function setXrPoseToLeftHanded(target: XrPoseTarget, transform: XRRigidTransform): void {
+/** @internal Apply a WebXR pose to a scene node in Lite's world without allocating (mirrored into the
+ *  left-handed world by default, verbatim in a right-handed build). */
+export function setXrPoseToWorld(target: XrPoseTarget, transform: XRRigidTransform): void {
     const p = transform.position;
     const o = transform.orientation;
-    target.position.set(p.x, p.y, -p.z);
-    target.rotationQuaternion.set(o.x, o.y, -o.z, -o.w);
+    target.position.set(p.x, p.y, _rightHanded ? p.z : -p.z);
+    target.rotationQuaternion.set(o.x, o.y, _rightHanded ? o.z : -o.z, _rightHanded ? o.w : -o.w);
 }
-import type { Mat4Storage } from "../math/types.js";

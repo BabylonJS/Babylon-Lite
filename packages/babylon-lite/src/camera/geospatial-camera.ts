@@ -7,9 +7,10 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
 import { writeLookAtWorldMat4LHIntoBuffer } from "../math/write-look-at-world-mat4-lh-into-buffer.js";
 import type { GeospatialLimits } from "./geospatial-limits.js";
 import { createGeospatialLimits, getEffectivePitchMax, GEO_EPSILON } from "./geospatial-limits.js";
+import { _rightHanded } from "#coordinate-system";
 
 const TWO_PI = Math.PI * 2;
-/** Babylon.js world "north" axis in a left-handed scene = +Z (LeftHandedForward). */
+/** Babylon.js world "north" axis = +Z (`LeftHandedForward`, used by both handednesses). */
 const WORLD_NORTH: Vec3 = { x: 0, y: 0, z: 1 };
 const WORLD_RIGHT: Vec3 = { x: 1, y: 0, z: 0 };
 /** sin of the spherical-latitude limit (~89.96°) used to keep the centre off the poles. */
@@ -87,9 +88,10 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /**
- * Build the east/north/up orthonormal basis at a point on the globe (left-handed
- * convention). `up` is the geocentric normal (normalized position); `east` and
- * `north` complete a right-handed-looking tangent frame given the LH world.
+ * Build the east/north/up orthonormal basis at a point on the globe. `up` is the
+ * geocentric normal (normalized position); `east` and `north` complete the tangent
+ * frame. Like Babylon.js's `ComputeLocalBasisToRefs`, a right-handed build swaps the
+ * cross products, which turns `east` around and keeps `north`.
  * Writes into the provided result objects and returns nothing.
  */
 export function computeLocalBasis(worldPos: Vec3, refEast: Vec3, refNorth: Vec3, refUp: Vec3): void {
@@ -99,16 +101,16 @@ export function computeLocalBasis(worldPos: Vec3, refEast: Vec3, refNorth: Vec3,
     refUp.y = worldPos.y / upLen;
     refUp.z = worldPos.z / upLen;
 
-    // east = cross(up, worldNorth)
-    cross(refUp, WORLD_NORTH, refEast);
+    // east = cross(up, worldNorth), or cross(worldNorth, up) in a right-handed build
+    cross(_rightHanded ? WORLD_NORTH : refUp, _rightHanded ? refUp : WORLD_NORTH, refEast);
     if (lengthSq(refEast) < GEO_EPSILON) {
         // At a pole, cross with worldRight instead.
-        cross(refUp, WORLD_RIGHT, refEast);
+        cross(_rightHanded ? WORLD_RIGHT : refUp, _rightHanded ? refUp : WORLD_RIGHT, refEast);
     }
     normalizeInPlace(refEast);
 
-    // north = cross(east, up)
-    cross(refEast, refUp, refNorth);
+    // north = cross(east, up), or cross(up, east) in a right-handed build
+    cross(_rightHanded ? refUp : refEast, _rightHanded ? refEast : refUp, refNorth);
     normalizeInPlace(refNorth);
 }
 
@@ -217,6 +219,13 @@ export function createGeospatialCamera(options: GeospatialCameraOptions): Geospa
     function cameraLocalWorldMatrix(): Mat4 {
         const center3: Vec3 = { x: position.x + lookAt.x, y: position.y + lookAt.y, z: position.z + lookAt.z };
         writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, position, center3, upVector);
+        if (_rightHanded !== null) {
+            // Right-handed cameras look down their local -Z with +X to the right: W_RH = W_LH·diag(-1, 1, -1).
+            const s = _localMat as unknown as Mat4Storage;
+            for (const i of [0, 1, 2, 8, 9, 10]) {
+                s[i] = -s[i]!;
+            }
+        }
         return _localMat;
     }
 

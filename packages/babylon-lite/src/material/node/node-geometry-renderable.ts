@@ -104,8 +104,8 @@ function geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | un
 }
 
 /** Build the per-attachment WGSL write for one geometry texture type, reading a
- *  connected graph input when present and falling back to the engine default. */
-function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, NodeExpr>, gpRef: { needsGp: boolean }): string {
+ *  connected graph input when present and falling back to the engine default. @internal Exported for tests. */
+export function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, NodeExpr>, gpRef: { needsGp: boolean }): string {
     const wg = "1.0"; // opaque node materials: writeGeometryInfo gate is always 1.
     const v = inputs.get(type);
     const wp = inputs.get(GeometryTextureType.WORLD_POSITION);
@@ -131,14 +131,21 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
             if (v) {
                 return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
-            return wp ? wgsl`vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})` : ZERO(wg);
+            // Babylon.js's right-handed view depth is the negated z of the Z-mirrored scene view.
+            return wp
+                ? _rightHanded
+                    ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})`
+                    : wgsl`vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})`
+                : ZERO(wg);
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
             if (v) {
                 return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
             if (wp) {
                 gpRef.needsGp = true;
-                return wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+                return _rightHanded
+                    ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`
+                    : wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
             }
             return ZERO(wg);
         case GeometryTextureType.LINEAR_VELOCITY:

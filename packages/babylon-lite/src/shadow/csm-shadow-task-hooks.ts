@@ -8,6 +8,7 @@
  */
 
 import type { Camera } from "../camera/camera.js";
+import { _rightHanded } from "#coordinate-system";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Material, MaterialView } from "../material/material.js";
@@ -575,6 +576,12 @@ export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: 
     const ux = fy * rz - fz * ry;
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
+    if (_rightHanded !== null) {
+        // Right-handed: mirror the light's X axis, as `buildLightViewMatrix` does.
+        rx = -rx;
+        ry = -ry;
+        rz = -rz;
+    }
     out[0] = rx;
     out[1] = ux;
     out[2] = fx;

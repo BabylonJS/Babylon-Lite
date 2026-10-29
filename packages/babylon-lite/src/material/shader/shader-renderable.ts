@@ -33,6 +33,7 @@ import {
     shaderSystemDependencies,
     shaderSystemDependency,
 } from "./shader-system-dependencies.js";
+import { _rightHanded } from "#coordinate-system";
 
 type UniformBatchFactory = (signature: RenderTargetSignature) => UniformCopyBatch;
 
@@ -291,6 +292,9 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     const engine = scene.surface.engine;
     const systemData = new F32(systemSpec._totalBytes / 4);
     systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
+    if (_rightHanded !== null) {
+        _toRightHandedShaderSystemUniforms(systemData, systemSpec._offsets);
+    }
     const systemUBO = createUniformBuffer(engine, systemData, "shader-system-ubo");
     const packet: ShaderPacket = {
         mesh,
@@ -443,6 +447,9 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
             packet._lastAlphaCutoff !== alphaCutoff
         ) {
             systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+            if (_rightHanded !== null) {
+                _toRightHandedShaderSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec._offsets);
+            }
             if (uniformBatch) {
                 uniformBatch.queue(packet.systemUBO, packet.systemData);
             } else {
@@ -780,6 +787,26 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
             data[f + 1] = targetHeight;
         } else if (dependency & ALPHA_CUTOFF) {
             data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
+        }
+    }
+}
+
+/** @internal Turn the `view`, `worldView` and `projection` ShaderMaterial system uniforms into Babylon.js's
+ *  right-handed matrices, in place: the engine's view is `Sz·V_RH` and its projection `P_RH·Sz`, so the
+ *  view-side ones get their third row negated and the projection its third column. Products such as
+ *  `viewProjection` already match and are left alone. Right-handed builds only; applied after whichever
+ *  system writer is installed, so the cached writer needs no seam of its own. */
+export function _toRightHandedShaderSystemUniforms(data: Float32Array, offsets: Iterable<readonly [string, number]>): void {
+    for (const [name, offset] of offsets) {
+        const f = offset / 4;
+        if (name === "view" || name === "worldView") {
+            for (let c = 0; c < 16; c += 4) {
+                data[f + c + 2] = -data[f + c + 2]!;
+            }
+        } else if (name === "projection") {
+            for (let r = 8; r < 12; r++) {
+                data[f + r] = -data[f + r]!;
+            }
         }
     }
 }

@@ -520,6 +520,21 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         _esmShadowParamsBinding,
         _geometryGpBinding,
         _pipelineForMesh(gpu) {
+            if (_rightHanded !== null && (gpu as MeshGPU & { _ccw?: 1 })._ccw && descriptor.primitive!.frontFace) {
+                // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike
+                // the procedural meshes the material-level "cw" is set for.
+                const key = "ccw" + gpu._vbKey;
+                let ccw = meshPipelines?.get(key);
+                if (!ccw) {
+                    ccw = device.createRenderPipeline({
+                        ...descriptor,
+                        vertex: { ...descriptor.vertex, buffers: gpu._vbLayout ? createVertexBuffers(gpu._vbLayout) : vertexBuffers },
+                        primitive: { ...descriptor.primitive, frontFace: "ccw" },
+                    });
+                    (meshPipelines ??= new Map()).set(key, ccw);
+                }
+                return ccw;
+            }
             if (!gpu._vbLayout || !gpu._vbKey) {
                 return _pipeline;
             }

@@ -10,6 +10,7 @@ import type { EnvironmentSkyboxKind, SceneContext } from "../../scene/scene-core
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { createMappedBuffer } from "../../resource/mapped-buffer.js";
+import { _rightHanded } from "#coordinate-system";
 
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
@@ -38,6 +39,12 @@ export function createSkyboxBuffers(engine: EngineContext, S: number): [position
  *  Taking the fragment as a parameter keeps each raw WGSL import referenced once per caller,
  *  so minifiers cannot inline the shader string twice. */
 export async function composeSkyboxFragment(scene: SceneContext, fragment: string, kind: EnvironmentSkyboxKind): Promise<string> {
+    if (_rightHanded !== null) {
+        // Right-handed: negate the cube lookup's Z after every environment patch (rotation, blur), like
+        // Babylon.js's REFLECTIONMAP_OPPOSITEZ and the PBR `rotateY`. The shader is minified, so the
+        // lookup is found by shape: the direction is the third `textureSampleLevel` argument.
+        return ((await scene._environmentSkyboxShaderComposer?.(fragment, kind)) ?? fragment).replace(/(textureSampleLevel\([^,]+,[^,]+,)([^,]+)/, "$1($2)*vec3f(1.,1.,-1.)");
+    }
     return (await scene._environmentSkyboxShaderComposer?.(fragment, kind)) ?? fragment;
 }
 

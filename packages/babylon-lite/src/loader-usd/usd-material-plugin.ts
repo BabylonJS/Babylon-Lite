@@ -2,6 +2,7 @@ import type { MaterialPlugin, MaterialPluginPoint, PluginTextureBinding, PluginU
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { UsdTextureSource } from "./usd-textures.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** @internal One authored UsdPreviewSurface texture connection. */
 export interface UsdTextureBinding {
@@ -80,7 +81,25 @@ function normalCode(binding: UsdTextureBinding | undefined): WgslSource {
     if (!binding) {
         return wgsl``;
     }
-    return wgsl`{
+    // A right-handed engine reverses both frame axes (its world is the Z mirror of the left-handed one;
+    // Babylon.js flips `vTangentSpaceParams` the same way). Whole templates, so the left-handed one is unchanged.
+    return _rightHanded
+        ? wgsl`{
+let usdNormalSample=${sampleExpression("normal")}.rgb*material.usdNormalScale.rgb+material.usdNormalBias.rgb;
+let usdDp1=dpdx(input.worldPos);
+let usdDp2=dpdy(input.worldPos);
+let usdDuv1=dpdx(${uvExpression("normal")});
+let usdDuv2=dpdy(${uvExpression("normal")});
+let usdDp2Perp=cross(usdDp2,N_geom);
+let usdDp1Perp=cross(N_geom,usdDp1);
+let usdTangent=-(usdDp2Perp*usdDuv1.x+usdDp1Perp*usdDuv2.x);
+let usdBitangent=usdDp2Perp*usdDuv1.y+usdDp1Perp*usdDuv2.y;
+let usdDet=max(dot(usdTangent,usdTangent),dot(usdBitangent,usdBitangent));
+let usdInvMax=select(inverseSqrt(usdDet),0.0,usdDet==0.0);
+let usdCotangentFrame=mat3x3<f32>(usdTangent*usdInvMax,usdBitangent*usdInvMax,N_geom);
+N=normalize(usdCotangentFrame*normalize(vec3<f32>(usdNormalSample.xy*material.normalScale,usdNormalSample.z)));
+}`
+        : wgsl`{
 let usdNormalSample=${sampleExpression("normal")}.rgb*material.usdNormalScale.rgb+material.usdNormalBias.rgb;
 let usdDp1=dpdx(input.worldPos);
 let usdDp2=dpdy(input.worldPos);

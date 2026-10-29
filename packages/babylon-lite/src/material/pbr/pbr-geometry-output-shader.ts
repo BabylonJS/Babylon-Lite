@@ -30,6 +30,7 @@ import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
+import { _rightHanded } from "#coordinate-system";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -135,7 +136,7 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
  *  in-scope PBR fragment vars at the BC slot location (after tonemap +
  *  gamma + contrast; same scope as the alpha-block).
  *  @internal */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): WgslSource {
+export function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS PREPASS_IRRADIANCE (pbrBlockPrePass.fx): `finalDiffuse + finalIrradiance`
@@ -154,13 +155,20 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean):
             // the whole vec4 masked by writeGeometryInfo. Lite's `colorF0` is the F0 reflectance.
             return wgsl`vec4<f32>(colorF0, 1.0 - roughness) * ${wg}`;
         case GeometryTextureType.VIEW_DEPTH:
-            return wgsl`vec4<f32>((scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`;
+            // Babylon.js's right-handed view space is the Z-mirrored scene view.
+            return _rightHanded
+                ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>((scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
-            return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>(((scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz), ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz * vec3<f32>(1.0, 1.0, -1.0)), ${wg})`
+                : wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(N, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
             return wgsl`vec4<f32>(N * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:
