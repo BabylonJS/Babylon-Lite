@@ -391,16 +391,12 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
                 fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
                 attributes: ["position"],
             });
-            const mesh = (name: string, ccw?: 1) =>
-                initMeshTransform({
-                    name,
-                    children: [],
-                    material,
-                    receiveShadows: false,
-                    _gpu: { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32", _ccw: ccw },
-                } as never);
+            // One geometry shared by both nodes (as gltf-share does): the winding belongs to the mesh, not to its GPU data.
+            const geometry = { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32" };
+            const mesh = (name: string, bits?: number) =>
+                initMeshTransform({ name, children: [], material, receiveShadows: false, _gpu: geometry, _primitiveFeatures: bits } as never);
             const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() };
-            const { renderables } = buildShaderMaterialRenderables(scene as never, [mesh("procedural"), mesh("gltf", 1)]);
+            const { renderables } = buildShaderMaterialRenderables(scene as never, [mesh("procedural"), mesh("gltf", GLTF_WINDING)]);
             for (const renderable of renderables) {
                 renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
             }
@@ -425,22 +421,16 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
                 fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
                 attributes: ["position"],
             });
-            const mesh = (name: string, ccw?: 1) =>
-                initMeshTransform({
-                    name,
-                    children: [],
-                    material,
-                    receiveShadows: false,
-                    thinInstances: { count: 2 },
-                    _gpu: { positionBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32", _ccw: ccw },
-                } as never);
+            const geometry = { positionBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32" };
+            const mesh = (name: string, bits?: number) =>
+                initMeshTransform({ name, children: [], material, receiveShadows: false, thinInstances: { count: 2 }, _gpu: geometry, _primitiveFeatures: bits } as never);
             const scene = { surface: { engine } };
             const unused = (): never => {
                 throw new Error("unused");
             };
             const { renderables } = buildShaderRenderablesWithInstancing(
                 scene as never,
-                [mesh("procedural"), mesh("gltf", 1)],
+                [mesh("procedural"), mesh("gltf", GLTF_WINDING)],
                 unused,
                 (_scene: unknown, _material: unknown, _spec: unknown, packetMesh: unknown) => ({ mesh: packetMesh }) as never,
                 unused,
@@ -457,6 +447,39 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
         // Left-handed: both meshes share one pipeline at the default "ccw".
         expect(lh).toEqual([undefined]);
         expect(rh).toEqual(["cw", "ccw"]);
+    });
+
+    it("async ShaderMaterial preparation compiles the pipeline each mesh's winding binds", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { createShaderMaterial } = await import(`${SRC}material/shader/shader-material`);
+            const { prepareShaderMaterialPipeline } = await import(`${SRC}material/shader/enable-async-shader-pipeline-compilation`);
+            const { getOrCreateShaderPipelineBindings } = await import(`${SRC}material/shader/shader-pipeline`);
+            const { wgsl } = await import(`${SRC}shader/wgsl`);
+            const gpu = fakeDevice();
+            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 } };
+            const material = createShaderMaterial({
+                vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+                fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+                attributes: ["position"],
+            });
+            const task = { _renderables: [], _targetSignature: { _colorFormat: "rgba8unorm", _sampleCount: 1 } };
+            const geometry = { positionBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32" };
+            const prepared: [string[], unknown][] = [];
+            for (const bits of [undefined, GLTF_WINDING]) {
+                await prepareShaderMaterialPipeline(engine as never, material, "mesh", task as never, { _gpu: geometry, _primitiveFeatures: bits } as never);
+                prepared.push([[...getOrCreateShaderPipelineBindings(engine as never, material).pipelines.keys()], gpu.pipelines.at(-1)!.primitive!.frontFace]);
+            }
+            return prepared.map(([keys, frontFace]) => [keys.length, frontFace]);
+        });
+        // Left-handed: one pipeline serves both meshes, so the second preparation finds it ready.
+        expect(lh).toEqual([
+            [1, undefined],
+            [1, undefined],
+        ]);
+        expect(rh).toEqual([
+            [1, "cw"],
+            [2, "ccw"],
+        ]);
     });
 
     it("Node material pipelines wind glTF geometry apart from procedural geometry", async () => {
@@ -486,19 +509,90 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
                 findBlockByClassName(graph, "VertexOutputBlock")!.id
             );
             const gpu = fakeDevice();
-            const compile = compileNodePipeline(emitted.state, emitted.vertexWgsl, emitted.fragmentWgsl, {
-                _engine: { _device: gpu.device, format: "rgba8unorm", msaaSamples: 1 } as never,
-                _format: "rgba8unorm",
-                _msaaSamples: 1,
+            // The colour pass, then the depth/shadow pass (no colour output), whose light view mirrors like the camera's.
+            return [false, true].map((noColorOutput) => {
+                const compile = compileNodePipeline(emitted.state, emitted.vertexWgsl, emitted.fragmentWgsl, {
+                    _engine: { _device: gpu.device, format: "rgba8unorm", msaaSamples: 1 } as never,
+                    _format: "rgba8unorm",
+                    _msaaSamples: 1,
+                    _noColorOutput: noColorOutput,
+                });
+                const procedural = gpu.pipelines.at(-1)!.primitive!.frontFace;
+                if (!compile._pipelineForCcwMesh) {
+                    return [procedural];
+                }
+                compile._pipelineForCcwMesh({} as never);
+                return [procedural, gpu.pipelines.at(-1)!.primitive!.frontFace];
             });
-            const materialPipeline = gpu.pipelines.at(-1)!;
-            return [{}, { _ccw: 1 }].map((meshGpu) =>
-                compile._pipelineForMesh(meshGpu as never) === compile._pipeline ? materialPipeline.primitive!.frontFace : gpu.pipelines.at(-1)!.primitive!.frontFace
+        });
+        // Left-handed: the glTF root mirror makes both windings agree, so there is no glTF pipeline at all.
+        expect(lh).toEqual([["ccw"], [undefined]]);
+        expect(rh).toEqual([
+            ["cw", "ccw"],
+            ["cw", "ccw"],
+        ]);
+    });
+
+    it("Node material renderables never merge glTF and procedural meshes sharing one material and one geometry", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { buildNodeMeshRenderables } = await import(`${SRC}material/node/node-renderable`);
+            const gpu = fakeDevice();
+            const engine = { format: "rgba8unorm", _retirements: null, _device: gpu.device };
+            const scene = {
+                surface: { engine },
+                lights: [],
+                meshes: [],
+                _renderables: [],
+                _materialSwapQueue: [],
+                _groups: new Map(),
+                _meshDisposables: new Map(),
+                _meshAuxDisposables: new Map(),
+                _renderableVersion: 0,
+                _disposables: [],
+                _frameGraph: { _tasks: [] },
+            };
+            const material = {
+                _buildGroup: () => undefined,
+                _compile: {
+                    _meshBGL: {},
+                    _nodeUboBinding: null,
+                    _nodeUboSpec: null,
+                    _meshUboFloats: 20,
+                    _usesMeshAttributeFlags: false,
+                    _textureBindings: [],
+                    _envBindings: null,
+                    _shadowBindings: [],
+                    _esmShadowParamsBinding: null,
+                    _pipeline: "material",
+                    _pipelineForMesh: () => "material",
+                    _pipelineForCcwMesh: () => "ccw",
+                },
+                _renderFeatures: null,
+                _state: { usesInstanceIndex: false },
+                _vertexAttrNames: ["position"],
+                _needsAlphaBlending: false,
+                _uboDirty: false,
+                _uniformValues: new Map(),
+            };
+            const geometry = { indexCount: 3, _baseVertex: 0, indexBuffer: {}, indexFormat: "uint16", positionBuffer: {}, vertexBuffers: new Map([["position", {}]]) };
+            const mesh = (bits?: number) => ({
+                material,
+                visible: true,
+                parent: null,
+                worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1]),
+                worldMatrixVersion: 1,
+                receiveShadows: false,
+                _gpu: geometry,
+                _primitiveFeatures: bits,
+            });
+            const { renderables } = buildNodeMeshRenderables(scene as never, [mesh(), mesh(GLTF_WINDING)] as never);
+            return renderables.map(
+                (renderable: { bind(engine: never, signature: never): { pipeline: unknown } }) =>
+                    renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never).pipeline
             );
         });
-        // Left-handed: the glTF root mirror makes both windings agree, so both meshes get the material pipeline.
-        expect(lh).toEqual(["ccw", "ccw"]);
-        expect(rh).toEqual(["cw", "ccw"]);
+        expect(lh).toEqual(["material"]);
+        expect(rh).toEqual(["material", "ccw"]);
     });
 });
 

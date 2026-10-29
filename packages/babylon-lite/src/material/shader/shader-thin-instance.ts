@@ -114,7 +114,7 @@ export function buildShaderRenderablesWithInstancing(
         const hasColor = !!ti.colors && material._tic != 0;
         const baseLocation = material.attributes.length;
         const variantKey =
-            _rightHanded && (mesh._gpu as typeof mesh._gpu & { _ccw?: 1 })._ccw
+            _rightHanded && ((mesh as typeof mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)
                 ? // Right-handed glTF geometry keeps glTF's own winding (no mirroring root): its own pipeline.
                   `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}|ccw`
                 : `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;

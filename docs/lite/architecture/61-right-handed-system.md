@@ -77,10 +77,14 @@ With `Sz = diag(1, 1, -1)`:
 - **Winding** — the mirrored view reverses triangle winding on screen, so camera-pass pipelines flip
   `frontFace`: `"cw"` for ordinary meshes (Babylon.js's right-handed rule), and the mirrored-mesh rule
   in `std-mirrored-support.ts` is inverted. glTF meshes, which keep glTF's winding (see below), stay
-  `"ccw"`: the primitive feature marks them (`MeshGPU._ccw`, mesh-feature bit 11), and every material
-  path reads the mark — PBR through its per-mesh winding, Standard through bit 11 of its mesh-feature
-  key, Node through `_pipelineForMesh`, and shader materials by splitting glTF and procedural meshes
-  into separately wound pipelines (`|ccw` variant key).
+  `"ccw"`: the primitive feature marks each of them with mesh-feature bit 11 (`_primitiveFeatures`), and
+  every material path reads that per-mesh mark — PBR through its per-mesh winding, Standard through bit
+  11 of its mesh-feature key, Node through `_pipelineForCcwMesh` (its renderables never group marked and
+  unmarked meshes, even when they share one geometry), and shader materials by splitting glTF and
+  procedural meshes into separately wound pipelines (`|ccw` variant key). The mark lives on the mesh,
+  not on its shared GPU geometry: a negative-scale node instancing the same glTF mesh is not marked and
+  stays `"cw"`, and a device-loss rebuild of the geometry keeps it. Depth and shadow passes use the same
+  winding as the colour pass, since light views mirror like the camera's.
 - **glTF** — the loader keeps glTF's native right-handed space: the `__root__` node has no X mirror,
   `computeNodeWorldMatrix` drops the root conversion, the skeleton and animation-mixer root transforms
   (`skeleton-pose.ts`, `skeleton-updater.ts`, `weighted-gltf-mixer.ts`) are the identity to match, the
@@ -108,9 +112,13 @@ With `Sz = diag(1, 1, -1)`:
   screen-space raymarch normal reconstruction behind contact shadows and SSGI (its `cross` operands
   swap, like the derivative normal view behind cavity), the mesh-blending inverse view, and WebXR
   (poses, pointer, teleport, hand meshes, controller models), which stays in WebXR's native
-  right-handed space instead of being Z-mirrored. `EXT_lights_image_based` keeps one convention:
-  the right-handed environment sampling already mirrors its yaw, and twin 342 renders exactly like
-  scene 265.
+  right-handed space instead of being Z-mirrored.
+- **Not ported: `EXT_lights_image_based`** — `envYawFromQuaternion` returns the left-handed yaw −A in
+  both builds, so a right-handed build samples the environment along `Sz·Ry(−A)·d`. Babylon.js's loader
+  inverts the extension's rotation only when left-handed, i.e. samples `Sz·Ry(A)·d` when right-handed:
+  the two agree only for A = 0° or 180°. Flipping the sign alone did not reproduce Babylon.js's
+  right-handed render of scene 265 either (the irradiance still differs), so the port stays open, and
+  twin 342 (A = 90°) is compared with scene 265's left-handed reference (`BJS_RH_BROKEN`).
 
 Files whose handedness-sensitive code needs no seam are listed, with the reason, in `HANDEDNESS_EXEMPT`
 of `tests/lite/unit/handedness-guard.test.ts` (orthographic projection, text, glTF primitive winding,
@@ -159,10 +167,10 @@ exercises the left-handed one:
   against Babylon.js with `useRightHandedSystem = true`. Their Lite wrapper and Babylon.js reference
   only import the source scene (the reference through `lab/lite/src/bjs/right-handed-twin.ts`), so they
   follow every change to it, and CI's impact selection runs them with the source. The guard checks
-  that they stay pure re-runs. Two Babylon.js 9.28 right-handed bugs are worked around on the
+  that they stay pure re-runs. A Babylon.js 9.28 right-handed bug is worked around on the
   reference side: `right-handed-twin.ts` replaces the zero refraction matrix of an unrotated
-  `CubeTexture` (twin 334), and twin 342 keeps scene 265's left-handed reference (`BJS_RH_BROKEN`)
-  because Babylon.js lights `EXT_lights_image_based` wrongly when right-handed.
+  `CubeTexture` (twin 334). Twin 342 keeps scene 265's left-handed reference (`BJS_RH_BROKEN`)
+  because Lite does not port `EXT_lights_image_based` yet (see above).
 - Two twins carry a looser `maxMad` than their source scene, set from measured runs: 323 (0.01 vs
   scene 13's 0.008) measured 0.0089, where Babylon.js right- vs left-handed differ by 0.779 and Lite by
   0.782, i.e. noise; 328 (6.4 vs scene 250's 6.1) measured 6.21. Scene 250 has no skybox, but its PBR

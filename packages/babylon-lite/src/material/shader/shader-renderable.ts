@@ -285,7 +285,7 @@ function buildMaterialRenderables(
     if (_rightHanded) {
         // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
         // meshes, so the two cannot share one opaque pipeline.
-        const ccw = packets.filter((packet) => (packet.mesh._gpu as MeshGPU & { _ccw?: 1 })._ccw);
+        const ccw = packets.filter((packet) => ((packet.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11));
         if (ccw.length && ccw.length < packets.length) {
             return [packets.filter((packet) => !ccw.includes(packet)), ccw].flatMap((part) => {
                 const groups = vbRender?._group(part);
@@ -400,7 +400,7 @@ function createShaderRenderable(
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
         },
     };
-    if (_rightHanded && (first.mesh._gpu as MeshGPU & { _ccw?: 1 })._ccw) {
+    if (_rightHanded && ((first.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)) {
         // Every packet here shares the winding (see `buildMaterialRenderables`): key its pipeline apart.
         (r as Renderable & { _ccw?: 1 })._ccw = 1;
     }

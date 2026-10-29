@@ -23,6 +23,8 @@ const LAB = join(ROOT, "lab/lite");
 
 /** Files with handedness-sensitive code that deliberately do not import `#coordinate-system`. */
 const HANDEDNESS_EXEMPT: Record<string, string> = {
+    "loader-gltf/gltf-feature-primitive.ts":
+        "marks each mirrored mesh (world det > 0 under the glTF root) with mesh-feature bit 11 in both builds; every material pipeline reads that per-mesh bit (pair-tested in right-handed-pairs.test.ts)",
     "camera/orthographic.ts": "projection only: Babylon.js's right-handed ortho projection is the left-handed one times Sz, which camera.ts folds into the view matrix",
     "material/pbr/fragments/anisotropy-fragment.ts":
         "a right-handed build reverses both cotangent-frame axes together, and the anisotropic lobe and bent normal are quadratic in them (dot², length, cross·cross): no visible change",
@@ -117,7 +119,7 @@ const TWIN_HINT =
  * left-handed source's, since a right-handed twin must look exactly like its source.
  */
 const BJS_RH_BROKEN: Record<number, string> = {
-    342: "Babylon.js 9.28 lights EXT_lights_image_based wrongly in a right-handed scene (white dielectrics turn black)",
+    342: "EXT_lights_image_based is not ported to right-handed builds yet (see docs/lite/07-right-handed-system.md, Limits): Lite keeps the left-handed environment yaw",
 };
 
 function importsOf(path: string): string[] {
@@ -164,7 +166,6 @@ describe("handedness guard: right-handed twin scenes", () => {
 const RH_TWIN_COVERAGE: Record<string, number[]> = {
     "gizmo/camera-gizmo.ts": [339],
     "loader-gltf/gltf-feature-camera.ts": [328],
-    "loader-gltf/gltf-feature-primitive.ts": [346],
     "loader-gltf/gltf-feature-registry.ts": [322, 324, 326, 343, 347],
     "loader-gltf/gltf-parser.ts": [322, 324, 326, 343, 347],
     "loader-gltf/load-gltf.ts": [322, 324, 326, 343, 347],

@@ -130,20 +130,20 @@ It matches Babylon.js with `scene.useRightHandedSystem = true`:
 - **Cameras** look down their local **−Z** axis; for the same position and target, the image is the mirror of the left-handed one.
 - **glTF** assets keep glTF's native right-handed space: no mirroring root node, like Babylon.js.
 - **Triangle winding**: front faces follow Babylon.js's right-handed rule, so back-face culling keeps working on glTF and procedural meshes alike, with PBR, Standard, Node and shader materials.
-- **Environment lighting** (IBL) is oriented as in Babylon.js's right-handed scenes.
+- **Environment lighting** (IBL) is oriented as in Babylon.js's right-handed scenes (except the glTF `EXT_lights_image_based` yaw, see [Limits](#limits)).
 
 Port a right-handed Babylon.js scene by keeping its positions, rotations and camera angles as they are: the same numbers give the same image.
 
 ## What is covered
 
-Everything in Lite that Babylon.js treats differently with `useRightHandedSystem = true`: cameras and their keyboard, mouse and touch inputs (arc-rotate, free, orthographic, geospatial, glTF and `.babylon` cameras), glTF loading (skinned, animated, morphed, embedded cameras, negative-scale nodes, Gaussian splats, `EXT_lights_image_based`, interactivity camera paths), PBR, Standard, Node and shader materials, image-based lighting, skyboxes and reflections, shadows and cascaded shadows, screen-space effects that rebuild normals from depth (contact shadows, SSGI, cavity) and mesh blending, procedural meshes, CSG2, sprites and billboards (and their picking), gizmos, Havok mesh shapes, USD, and WebXR (poses, pointers, teleportation, hands and controller models).
+Everything in Lite that Babylon.js treats differently with `useRightHandedSystem = true`: cameras and their keyboard, mouse and touch inputs (arc-rotate, free, orthographic, geospatial, glTF and `.babylon` cameras), glTF loading (skinned, animated, morphed, embedded cameras, negative-scale nodes, Gaussian splats, interactivity camera paths), PBR, Standard, Node and shader materials, image-based lighting, skyboxes and reflections, shadows and cascaded shadows, screen-space effects that rebuild normals from depth (contact shadows, SSGI, cavity) and mesh blending, procedural meshes, CSG2, sprites and billboards (and their picking), gizmos, Havok mesh shapes, USD, and WebXR (poses, pointers, teleportation, hands and controller models).
 
-The lab scenes listed below check them against Babylon.js, and the test suite fails whenever the left-handed code changes without its right-handed counterpart (see the [architecture page](architecture/61-right-handed-system.md#tests)).
+The lab scenes listed below check most of them against Babylon.js. Gaussian splats, the screen-space effects (contact shadows, SSGI, cavity) and mesh blending have no right-handed lab scene yet: only unit pair tests check them, by comparing their right-handed result with the left-handed one. In every case the test suite fails whenever the left-handed code changes without its right-handed counterpart (see the [architecture page](architecture/61-right-handed-system.md#tests)).
 
 ## Limits
 
 - **One handedness per bundle.** Every engine your bundle creates has the same handedness. Two pages that need different handedness need two builds.
-- **`EXT_lights_image_based`** renders exactly like the left-handed scene. Babylon.js 9.28 lights it differently when right-handed, which we take for a Babylon.js bug, so twin 342 is checked against the left-handed reference.
+- **`EXT_lights_image_based` is not ported.** A right-handed build applies the extension's environment rotation with the left-handed sign, so the environment is turned differently from Babylon.js's right-handed scene whenever that rotation is not 0° or 180°. Twin 342 (a 90° rotation) is therefore checked against its left-handed source's reference, not against Babylon.js right-handed.
 - **The CDN build and the [Lite Playground](04-playground.md) are left-handed.** They are prebuilt with the default condition.
 
 ## See it in the lab

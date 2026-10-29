@@ -113,12 +113,6 @@ exports[`right-handed drift guard > loader-gltf/gltf-feature-gaussian-splatting.
 }
 `;
 
-exports[`right-handed drift guard > loader-gltf/gltf-feature-primitive.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
-{
-  "applyMesh if-rh": "«» → «( mesh._gpu as typeof mesh._gpu & { _ccw ? : 1 } ) ._ccw = 1 ;»",
-}
-`;
-
 exports[`right-handed drift guard > loader-gltf/gltf-feature-registry.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "_features ||": "«hasNegDetNode ( j )» → «true»",
@@ -182,13 +176,22 @@ exports[`right-handed drift guard > material/node/node-geometry-renderable.ts: r
   "frontFace ?:": "" «ccw» → «cw» "",
   "geomWrite ?:": "> ( «» → «-» ( scene.view",
   "geomWrite ?: #2": "( ( «» → «-» ( scene.view",
+  "pipeline &&": "«» → «( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
 }
 `;
 
 exports[`right-handed drift guard > material/node/node-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "_pipelineForMesh if-rh": "«if ( ! gpu._vbLayout | | !» → «const key = " ccw " +» gpu._vbKey ) … ! gpu._vbKey «) { return _pipeline» → «» ; let … _pipeline ; «} const cached» → «let ccw» = meshPipelines … .get ( «gpu._vbKey» → «key» ) ; … if ( «cached» → «! ccw» ) { … ) { «return cached ; } const pipeline» → «ccw» = device.createRenderPipeline … buffers : «» → «gpu._vbLayout ?» createVertexBuffers ( … gpu._vbLayout ) «» → «: vertexBuffers» } , … } , «» → «primitive : { ...descriptor.primitive , frontFace : " ccw "» } , … " } «» → «, }» ) ; … .set ( «gpu._vbKey» → «key» , ccw … gpu._vbKey , «pipeline» → «ccw» ) ; … ) ; «» → «}» return ccw … } return «pipeline» → «ccw» ;",
-  "frontFace ?:": "" «ccw» → «cw» "",
+  "compileNodePipeline if-rh": "«» → «result._pipelineForCcwMesh = ( gpu ) = > { const key = " ccw " + gpu._vbKey ; let ccw = meshPipelines ? .get ( key ) ; if ( ! ccw ) { ccw = device.createRenderPipeline ( { ...descriptor , vertex : { ...descriptor.vertex , buffers : gpu._vbLayout ? createVertexBuffers ( gpu._vbLayout ) : vertexBuffers } , primitive : { ...descriptor.primitive , frontFace : " ccw " } , } ) ; ( meshPipelines ? ? = new Map ( ) ) .set ( key , ccw ) ; } return ccw ; } ;»",
+  "frontFace ?:": "«noColorOutput ? undefined :» → «» " cw … : " «ccw» → «cw» "",
+}
+`;
+
+exports[`right-handed drift guard > material/node/node-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildNodeMeshRenderablesImpl ?:": "«groupNodeMeshPackets» → «groupRightHandedNodeMeshPackets» ( packets",
+  "pipeline &&": "«» → «isCcwMesh ( pkt._mesh )»",
+  "pipeline && #2": "«» → «isCcwMesh ( selectedPackets [ 0 ] ! ._mesh )»",
 }
 `;
 
@@ -258,6 +261,13 @@ exports[`right-handed drift guard > material/pbr/pbr-pipeline.ts: right-handed b
 }
 `;
 
+exports[`right-handed drift guard > material/shader/enable-async-shader-pipeline-compilation.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "prepareScene &&": "«» → «( ( renderable as Renderable & { _ccw ? : 1 } ) ._ccw | | ( ( renderable.mesh as ( Mesh & { _primitiveFeatures ? : number } ) | undefined ) ? ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) )»",
+  "prepareShaderMaterialPipeline &&": "«» → «( ( mesh as ( Mesh & { _primitiveFeatures ? : number } ) | undefined ) ? ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+}
+`;
+
 exports[`right-handed drift guard > material/shader/normal-view.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "buildNormalFragment if-rh": "cross ( «dpdx» → «dpdy» ( input. … ) , «dpdy» → «dpdx» ( input.",
@@ -272,9 +282,9 @@ exports[`right-handed drift guard > material/shader/shader-pipeline.ts: right-ha
 
 exports[`right-handed drift guard > material/shader/shader-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const ccw = packets.filter ( ( packet ) = > ( packet.mesh._gpu as MeshGPU & { _ccw ? : 1 } ) ._ccw ) ; if ( ccw.length & & ccw.length < packets.length ) { return [ packets.filter ( ( packet ) = > ! ccw.includes ( packet ) ) , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
+  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const ccw = packets.filter ( ( packet ) = > ( ( packet.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ) ; if ( ccw.length & & ccw.length < packets.length ) { return [ packets.filter ( ( packet ) = > ! ccw.includes ( packet ) ) , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
   "createPacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( systemData , systemSpec._offsets ) ;»",
-  "createShaderRenderable &&": "«» → «( first.mesh._gpu as MeshGPU & { _ccw ? : 1 } ) ._ccw»",
+  "createShaderRenderable &&": "«» → «( ( first.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
   "pipeline &&": "«» → «( renderable as Renderable & { _ccw ? : 1 } ) ._ccw»",
   "updatePacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( packet.systemData , state._shaderBindings ! .systemSpec._offsets ) ;»",
 }
@@ -282,7 +292,7 @@ exports[`right-handed drift guard > material/shader/shader-renderable.ts: right-
 
 exports[`right-handed drift guard > material/shader/shader-thin-instance.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "variantKey &&": "«» → «( mesh._gpu as typeof mesh._gpu & { _ccw ? : 1 } ) ._ccw»",
+  "variantKey &&": "«» → «( ( mesh as typeof mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
 }
 `;
 

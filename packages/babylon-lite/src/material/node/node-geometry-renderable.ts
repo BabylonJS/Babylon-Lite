@@ -444,7 +444,15 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 pass.drawIndexed(g.indexCount, 1, g._firstIndex ?? 0, g._baseVertex);
                 return 1;
             };
-            return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };
+            return {
+                renderable: r,
+                pipeline:
+                    _rightHanded && ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)
+                        ? compile._pipelineForCcwMesh!(mesh._gpu)
+                        : compile._pipelineForMesh(mesh._gpu),
+                update,
+                draw,
+            };
         },
     };
     r._worldCenter = sortCenter;

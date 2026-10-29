@@ -93,6 +93,8 @@ export interface NodeCompileResult {
     readonly _geometryGpBinding: number | null;
     /** @internal Resolve a pipeline whose vertex layouts honor one mesh's packing. */
     readonly _pipelineForMesh: (gpu: MeshGPU) => GPURenderPipeline;
+    /** @internal Right-handed builds only: `_pipelineForMesh` wound "ccw", for glTF geometry (mesh `_primitiveFeatures` bit 11). */
+    _pipelineForCcwMesh?: (gpu: MeshGPU) => GPURenderPipeline;
 }
 
 // ─── Pipeline cache ─────────────────────────────────────────────────
@@ -497,7 +499,9 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
               primitive: {
                   topology: "triangle-list",
                   cullMode: opts._backFaceCulling !== false ? "back" : "none",
-                  frontFace: noColorOutput ? undefined : _rightHanded ? "cw" : "ccw",
+                  // Right-handed: the depth/shadow passes mirror like the camera pass (shadow-base.ts), so they
+                  // wind "cw" like the colour pass and like Standard/PBR casters.
+                  frontFace: _rightHanded ? "cw" : noColorOutput ? undefined : "ccw",
               },
           };
 
@@ -520,21 +524,6 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         _esmShadowParamsBinding,
         _geometryGpBinding,
         _pipelineForMesh(gpu) {
-            if (_rightHanded !== null && (gpu as MeshGPU & { _ccw?: 1 })._ccw && descriptor.primitive!.frontFace) {
-                // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike
-                // the procedural meshes the material-level "cw" is set for.
-                const key = "ccw" + gpu._vbKey;
-                let ccw = meshPipelines?.get(key);
-                if (!ccw) {
-                    ccw = device.createRenderPipeline({
-                        ...descriptor,
-                        vertex: { ...descriptor.vertex, buffers: gpu._vbLayout ? createVertexBuffers(gpu._vbLayout) : vertexBuffers },
-                        primitive: { ...descriptor.primitive, frontFace: "ccw" },
-                    });
-                    (meshPipelines ??= new Map()).set(key, ccw);
-                }
-                return ccw;
-            }
             if (!gpu._vbLayout || !gpu._vbKey) {
                 return _pipeline;
             }
@@ -550,6 +539,24 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
             return pipeline;
         },
     };
+    if (_rightHanded !== null) {
+        // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike the
+        // procedural meshes the material-level "cw" is set for. The winding is a property of the
+        // mesh (`_isCcwMesh`), never of its shared GPU geometry.
+        result._pipelineForCcwMesh = (gpu) => {
+            const key = "ccw" + gpu._vbKey;
+            let ccw = meshPipelines?.get(key);
+            if (!ccw) {
+                ccw = device.createRenderPipeline({
+                    ...descriptor,
+                    vertex: { ...descriptor.vertex, buffers: gpu._vbLayout ? createVertexBuffers(gpu._vbLayout) : vertexBuffers },
+                    primitive: { ...descriptor.primitive, frontFace: "ccw" },
+                });
+                (meshPipelines ??= new Map()).set(key, ccw);
+            }
+            return ccw;
+        };
+    }
     cache.set(cacheKey, result);
     return result;
 }
