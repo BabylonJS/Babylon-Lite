@@ -24,6 +24,7 @@ import type { NodeBuildState, NodeMeshFeatureWriter, NodeVertexFeatureBinder } f
 import { wgsl } from "../../shader/wgsl.js";
 import type { NodeShadowEmitter, ShadowBinding } from "./node-shadow-emitter.js";
 import type { MeshGPU, MeshVbLayout } from "../../mesh/mesh.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ─── Shared WGSL preamble ───────────────────────────────────────────
 
@@ -493,7 +494,11 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
                   depthWriteEnabled: shadowOutput || depthWriteEnabled,
               },
               multisample: { count: _msaaSamples },
-              primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none", frontFace: noColorOutput ? undefined : "ccw" },
+              primitive: {
+                  topology: "triangle-list",
+                  cullMode: opts._backFaceCulling !== false ? "back" : "none",
+                  frontFace: noColorOutput ? undefined : _rightHanded ? "cw" : "ccw",
+              },
           };
 
     const _pipeline = device.createRenderPipeline(descriptor);

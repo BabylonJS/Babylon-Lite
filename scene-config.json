@@ -2841,5 +2841,129 @@
         "description": "Upstream Textured - Area Lights - PBR (#T7FXR8#102): three scaled, rotated emitters use distinct white, cyberpunk-image, and grey processed emission maps to illuminate a glossy grey dielectric ground.",
         "tags": ["pbr", "std", "procedural", "area-light", "ltc", "texture", "emission"],
         "skipPerf": true
+    },
+    {
+        "id": 321,
+        "slug": "scene321-rh-sphere",
+        "name": "Scene 321 — Sphere (right-handed)",
+        "maxMad": 0.01,
+        "maxRegionMad": 0.01,
+        "maxRawKB": 46,
+        "description": "Right-handed twin of scene 2: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. StandardMaterial sphere with Blinn-Phong, directional light, ground plane.",
+        "tags": ["std", "procedural", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 322,
+        "slug": "scene322-rh-alien",
+        "name": "Scene 322 — Alien Skeleton (right-handed)",
+        "maxMad": 0.01,
+        "maxRegionMad": 0.08,
+        "maxRawKB": 92.2,
+        "description": "Right-handed twin of scene 5: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. glTF Alien model with PBR, skeleton/bones, normal map, hemispheric light.",
+        "tags": ["pbr", "gltf", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 323,
+        "slug": "scene323-rh-pbr-spheres",
+        "name": "Scene 323 — PBR Spheres Grid (right-handed)",
+        "maxMad": 0.01,
+        "maxRawKB": 91.5,
+        "description": "Right-handed twin of scene 13: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. 12 spheres with varying metallic/roughness baseColorFactor, default environment.",
+        "tags": ["pbr", "gltf", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 324,
+        "slug": "scene324-rh-clearcoat-gltf",
+        "name": "Scene 324 — Clearcoat glTF (right-handed)",
+        "maxMad": 0.02,
+        "maxRawKB": 86.7,
+        "description": "Right-handed twin of scene 28: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. ClearCoatTest.gltf (6×3 grid: clearcoat variants) with default environment (IBL only). Matches PG #YG3BBF#33.",
+        "tags": ["pbr", "gltf", "env", "clearcoat", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 325,
+        "slug": "scene325-rh-procedural-builders",
+        "name": "Scene 325 — Procedural Builders (right-handed)",
+        "maxMad": 0.02,
+        "maxRawKB": 60.7,
+        "description": "Right-handed twin of scene 38: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Cylinder, cone, plane, disc, ring, polyhedron, ribbon, tube, and extruded shape rendered with StandardMaterial. Parity check against BJS MeshBuilder.",
+        "tags": ["std", "procedural", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 326,
+        "slug": "scene326-rh-shark",
+        "name": "Scene 326 — Shark GLB (right-handed)",
+        "maxMad": 0.01,
+        "maxRawKB": 88.8,
+        "description": "Right-handed twin of scene 11: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
+        "tags": ["pbr", "gltf", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 327,
+        "slug": "scene327-rh-ktx-texture",
+        "name": "Scene 327 — KTX Texture (right-handed)",
+        "maxMad": 0.5,
+        "maxRawKB": 50.4,
+        "description": "Right-handed twin of scene 25: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Ground plane with KTX compressed texture (auto-format selection), UV tiling, FreeCamera, hemispheric light.",
+        "tags": ["std", "procedural", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 328,
+        "slug": "scene328-rh-virtual-city",
+        "name": "Scene 328 — VirtualCity (right-handed)",
+        "maxMad": 6.4,
+        "maxRawKB": 92.2,
+        "description": "Right-handed twin of scene 250: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. VirtualCity.gltf — cx20 gltf-test parity. Exercises the glTF `camera` node property via the `_camera` loader feature: cx20's compat matrix flags Babylon Lite with ':warning: embedded camera' for this model because loadGltf used to silently drop all 14 embedded glTF cameras. Scene selects the imported camera named camera6 (an animated flying-vehicle chase camera) as scene.camera, frozen at seekTime=5.0.",
+        "tags": ["gltf", "camera", "animation", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 329,
+        "slug": "scene329-rh-negative-scale-doublesided",
+        "name": "Scene 329 — Negative Scale (Double-Sided) (right-handed)",
+        "maxMad": 0.15,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 79.9,
+        "description": "Right-handed twin of scene 266: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Khronos NegativeScaleTest.glb: a grid of double-sided PBR material spheres, each rendered as an un-mirrored copy and a negative-determinant (mirrored) copy. Validates that winding reversal on mirrored double-sided meshes keeps WebGPU front_facing consistent with the geometry; Lite previously flipped the cull face instead of the front-face winding, so the double-sided normal flip inverted the outward normal and the mirrored reflective spheres rendered black.",
+        "tags": ["gltf", "transform", "pbr", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 330,
+        "slug": "scene330-rh-orthographic-camera",
+        "name": "Scene 330 — Orthographic Camera (right-handed)",
+        "maxMad": 0.4,
+        "maxRawKB": 44.7,
+        "description": "Right-handed twin of scene 268: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Two rows of identical boxes receding in depth under an orthographic projection. Validates the opt-in orthographic camera seam: reverse-Z OrthoOffCenterLH matrix (near→1, far→0) and the aspect-derived horizontal extent, against Babylon's Camera.ORTHOGRAPHIC_CAMERA.",
+        "tags": ["camera", "standard", "procedural", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 331,
+        "slug": "scene331-rh-mirrored-standard-meshes",
+        "name": "Scene 331 — Mirrored Standard Meshes (right-handed)",
+        "maxMad": 0.1,
+        "maxRawKB": 49.7,
+        "description": "Right-handed twin of scene 270: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Four StandardMaterial boxes: not mirrored, mirrored before build, mirrored at runtime, and mirrored by an ancestor at runtime. Validates triangle-winding reversal on the Standard pipeline (which previously had none) and runtime re-resolution when a transform's determinant sign flips.",
+        "tags": ["standard", "transform", "procedural", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
     }
 ]

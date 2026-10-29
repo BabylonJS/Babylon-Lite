@@ -4,6 +4,7 @@ import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { writePerspectiveMat4LHIntoBuffer } from "../math/write-perspective-mat4-lh-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { OrthographicBounds } from "./orthographic.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Minimal camera contract — any camera that can provide view/projection matrices.
  *  Both ArcRotateCamera and FreeCamera implement this interface.
@@ -135,6 +136,14 @@ export function getViewMatrix(camera: Camera): Mat4 {
     v[13] = -(w[4]! * cx + w[5]! * cy + w[6]! * cz);
     v[14] = -(w[8]! * cx + w[9]! * cy + w[10]! * cz);
     v[15] = 1;
+    if (_rightHanded !== null) {
+        // Right-handed: mirror Z into Lite's left-handed view space (V = Sz·V_RH), so the left-handed
+        // projection and every view-space consumer stay unchanged. Folds away in left-handed bundles.
+        v[2] = -v[2]!;
+        v[6] = -v[6]!;
+        v[10] = -v[10]!;
+        v[14] = -v[14]!;
+    }
     camera._viewVer = ver;
     return v as unknown as Mat4;
 }

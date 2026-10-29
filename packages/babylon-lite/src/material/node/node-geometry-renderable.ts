@@ -39,6 +39,7 @@ import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
 import type { NodeGeometryMaterialView } from "./node-geometry-view.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that node geometry views point
  *  at via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -247,7 +248,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
             fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((format) => geometryColorTarget(format, blend, device)) },
             depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
             multisample: { count: a._msaaSamples },
-            primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+            primitive: { topology: "triangle-list", cullMode, frontFace: _rightHanded ? "cw" : "ccw" },
         }),
     };
     const compile = compileNodePipeline(res._geomState, res._vertexWgsl, res._fragmentWgsl, {

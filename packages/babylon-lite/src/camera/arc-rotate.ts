@@ -8,6 +8,8 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { _rightHanded } from "#coordinate-system";
+import { _toRightHandedCameraWorld } from "../engine/right-handed-helpers.js";
 
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
@@ -99,6 +101,9 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 
     function cameraLocalWorldMatrix(): Mat4 {
         writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, localEyePosition(), cam.target, Vec3Up);
+        if (_rightHanded !== null) {
+            _toRightHandedCameraWorld(_localMat);
+        }
         return _localMat;
     }
 

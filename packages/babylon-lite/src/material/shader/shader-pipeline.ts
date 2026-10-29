@@ -14,6 +14,7 @@ import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import { _attributeInfo, _attributeLayout, _getShaderVbSupport } from "./shader-vb-support.js";
 import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -255,7 +256,7 @@ export function getOrCreateShaderPipeline(
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         // WebGPU defaults an omitted topology to triangle-list.
-        primitive: { topology: material._topology, cullMode: material.backFaceCulling ? "back" : "none" },
+        primitive: { topology: material._topology, cullMode: material.backFaceCulling ? "back" : "none", ...(_rightHanded && { frontFace: "cw" as GPUFrontFace }) },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;

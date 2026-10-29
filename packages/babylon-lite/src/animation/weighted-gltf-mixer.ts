@@ -9,6 +9,7 @@ import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { _rightHanded } from "#coordinate-system";
 import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
@@ -39,9 +40,10 @@ const T_OFF = 0;
 const R_OFF = 3;
 const S_OFF = 7;
 
-// RH->LH root transform (same as skeleton-updater.ts)
+// glTF root transform, same as the loader's `__root__` (load-gltf.ts): the RH→LH X mirror diag(-1, 1, 1, 1),
+// or identity in a right-handed engine, which keeps glTF's native space.
 // prettier-ignore
-const RH_TO_LH = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const ROOT_TRANSFORM = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
 
 const _boneTmp = new F32(16);
 
@@ -499,7 +501,7 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         if (parentIdx >= 0) {
             multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {
-            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, ROOT_TRANSFORM, 0, localMat, nodeIdx * 16);
         }
     }
 

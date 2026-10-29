@@ -10,6 +10,7 @@ import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { getLoaderTmpLocal } from "./_loader-scratch.js";
+import { _rightHanded } from "#coordinate-system";
 
 // glTF 2.0 component types
 const FLOAT = 5126;
@@ -185,6 +186,10 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
 
     const node = json.nodes[nodeIdx];
     const parentIdx = findParent(parentMap, nodeIdx);
+    if (_rightHanded !== null) {
+        // A right-handed engine keeps glTF's native space: the root conversion becomes the identity.
+        (RH_TO_LH_ROOT as unknown as Mat4Storage)[0] = 1;
+    }
     // Resolve parent FIRST so any recursive call can safely reuse the shared scratch below.
     const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : RH_TO_LH_ROOT;
 

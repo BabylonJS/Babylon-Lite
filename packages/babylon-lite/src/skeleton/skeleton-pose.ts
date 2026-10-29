@@ -8,6 +8,7 @@ import { F32, I32, U8 } from "../engine/typed-arrays.js";
 import type { NodeRest, SkeletonBinding } from "../animation/types.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { _rightHanded } from "#coordinate-system";
 import type { Mat4Storage } from "../math/types.js";
 
 /** TRS layout per node: 12 floats — [0..2] translation, [3..6] rotation (xyzw), [7..9] scale. */
@@ -16,9 +17,10 @@ export const T_OFF = 0;
 export const R_OFF = 3;
 export const S_OFF = 7;
 
-// RH→LH root transform (same as load-gltf.ts / skeleton-updater.ts): diag(-1, 1, 1, 1)
+// glTF root transform, same as the loader's `__root__` (load-gltf.ts): the RH→LH X mirror diag(-1, 1, 1, 1),
+// or identity in a right-handed engine, which keeps glTF's native space.
 // prettier-ignore
-const RH_TO_LH = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const ROOT_TRANSFORM = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
 
 // Scratch 4x4 reused during bone-matrix composition.
 const _boneTmp = new F32(16);
@@ -106,7 +108,7 @@ export function computeNodeWorldMatrices(
         if (parentIdx >= 0) {
             multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {
-            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, ROOT_TRANSFORM, 0, localMat, nodeIdx * 16);
         }
     }
 }

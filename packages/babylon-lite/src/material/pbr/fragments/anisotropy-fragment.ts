@@ -11,6 +11,7 @@ import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_ANISOTROPY } from "../pbr-flag-bits.js";
 import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -73,6 +74,8 @@ anisoB = normalize(cross(N, anisoT));
     // bitangent) so the anisotropy tangent agrees with BJS, which derives the anisotropy
     // T/B from the same TBN used for normal mapping. The shading normal N is used only for
     // the third column (matching BJS `mat3(normalize(TBN[0]),normalize(TBN[1]),normalize(N))`).
+    // That includes the right-handed reversal of both axes; the `wgsl` tag minifies only the
+    // static text, so both interpolated variants are written minified.
     return wgsl`${pre}var anisoT: vec3<f32>;
 var anisoB: vec3<f32>;
 {
@@ -83,8 +86,8 @@ let aniso_duv1 = dpdx(input.uv);
 let aniso_duv2 = dpdy(input.uv);
 let aniso_dp2perp = cross(aniso_dp2, aniso_Ngeom);
 let aniso_dp1perp = cross(aniso_Ngeom, aniso_dp1);
-let aniso_tct = aniso_dp2perp * aniso_duv1.x + aniso_dp1perp * aniso_duv2.x;
-let aniso_bct = -(aniso_dp2perp * aniso_duv1.y + aniso_dp1perp * aniso_duv2.y);
+let aniso_tct=${_rightHanded ? "-(aniso_dp2perp*aniso_duv1.x+aniso_dp1perp*aniso_duv2.x)" : "aniso_dp2perp*aniso_duv1.x+aniso_dp1perp*aniso_duv2.x"};
+let aniso_bct=${_rightHanded ? "aniso_dp2perp*aniso_duv1.y+aniso_dp1perp*aniso_duv2.y" : "-(aniso_dp2perp*aniso_duv1.y+aniso_dp1perp*aniso_duv2.y)"};
 let aniso_det = max(dot(aniso_tct, aniso_tct), dot(aniso_bct, aniso_bct));
 let aniso_inv = select(inverseSqrt(aniso_det), 0.0, aniso_det == 0.0);
 let anisoTBN = mat3x3<f32>(normalize(aniso_tct * aniso_inv), normalize(aniso_bct * aniso_inv), N);

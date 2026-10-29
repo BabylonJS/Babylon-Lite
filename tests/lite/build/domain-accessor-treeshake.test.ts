@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { rollup, type OutputChunk, type Plugin } from "rollup";
 import ts from "typescript";
 
-import { ensureLibBuilt, isExternalRequest, LIB_ENTRY, PACKAGE_DIR } from "./bundler-harness";
+import { ensureLibBuilt, isExternalRequest, LIB_ENTRY, PACKAGE_DIR, packageImportsPlugin } from "./bundler-harness";
 
 const DTS_PATH = resolve(PACKAGE_DIR, "build/index.d.ts");
 const VITE_JS = resolve(PACKAGE_DIR, "node_modules/vite/bin/vite.js");
@@ -94,7 +94,7 @@ async function bundleVirtualEntry(source: string): Promise<BundleSnapshot> {
             external: (id: string) => isExternalRequest(id),
             treeshake: true,
             onwarn: (warning) => warnings.push(`[${warning.code}] ${warning.message}`),
-            plugins: [virtualEntryPlugin],
+            plugins: [virtualEntryPlugin, packageImportsPlugin()],
         });
         const { output } = await bundle.generate({
             format: "es",

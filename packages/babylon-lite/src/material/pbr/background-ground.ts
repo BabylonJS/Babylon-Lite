@@ -17,6 +17,7 @@ import { createMappedBuffer } from "../../resource/mapped-buffer.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
 //    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──
@@ -166,7 +167,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
                     depthWriteEnabled: false,
                 },
                 multisample: { count: sig._sampleCount },
-                primitive: { topology: "triangle-list", cullMode: "back", frontFace: "ccw" },
+                primitive: { topology: "triangle-list", cullMode: "back", frontFace: _rightHanded ? "cw" : "ccw" },
             });
             _gndPipelines.set(key, pipeline);
             return pipeline;
