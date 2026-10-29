@@ -6,7 +6,7 @@ Babylon Lite is **left-handed** by default, like Babylon.js. Babylon.js switches
 
 Nothing else changes in your code: you keep calling `createEngine`, `createArcRotateCamera`, `loadGltf`… and the types are the same.
 
-Why at build time? Because then it costs nothing. The handedness is a constant the bundler folds away: a right-handed bundle carries only the right-handed code, and a left-handed bundle is byte-for-byte the one you had before this feature existed. A runtime switch would add bytes to every scene, left-handed or not.
+Why at build time? Because then it can cost nothing. The handedness is a constant the minifier folds away: a right-handed bundle carries only the right-handed code, and, with Rolldown (the bundler of the lab scenes, checked scene by scene), a left-handed bundle is byte-for-byte the one you had before this feature existed. Minifiers that do not inline an imported constant, such as esbuild's, keep the handedness checks and a few small helpers: the left-handed result is the same, the bundle is slightly larger. A runtime switch would add bytes to every scene, left-handed or not.
 
 ---
 
@@ -102,6 +102,8 @@ export default {
 
 Every engine module that depends on handedness imports its flag from `#coordinate-system`. Your bundler resolves that import once, with your conditions: with `babylon-lite-rh` it picks the right-handed file, otherwise the left-handed one. Any bundler that supports `package.json` `imports` and custom conditions works the same way.
 
+Because of this import, the modules in `lib/` need a bundler that reads `package.json` `imports` (all those above do; bare Rollup needs `@rollup/plugin-node-resolve`). Native browser ESM cannot resolve `#coordinate-system` on its own: load the prebuilt `dist/index.js` instead, which is left-handed.
+
 ---
 
 ## 2. Check that it worked
@@ -127,20 +129,21 @@ It matches Babylon.js with `scene.useRightHandedSystem = true`:
 
 - **Cameras** look down their local **−Z** axis; for the same position and target, the image is the mirror of the left-handed one.
 - **glTF** assets keep glTF's native right-handed space: no mirroring root node, like Babylon.js.
-- **Triangle winding**: front faces follow Babylon.js's right-handed rule, so back-face culling keeps working on glTF and procedural meshes alike.
+- **Triangle winding**: front faces follow Babylon.js's right-handed rule, so back-face culling keeps working on glTF and procedural meshes alike, with PBR, Standard, Node and shader materials.
 - **Environment lighting** (IBL) is oriented as in Babylon.js's right-handed scenes.
 
 Port a right-handed Babylon.js scene by keeping its positions, rotations and camera angles as they are: the same numbers give the same image.
 
 ## What is covered
 
-Everything in Lite that Babylon.js treats differently with `useRightHandedSystem = true`: cameras and their keyboard, mouse and touch inputs (arc-rotate, free, orthographic, geospatial, glTF and `.babylon` cameras), glTF loading (skinned, animated, morphed, embedded cameras, negative-scale nodes, `EXT_lights_image_based`, interactivity camera paths), PBR, Standard, Node and shader materials, image-based lighting, skyboxes and reflections, shadows and cascaded shadows, procedural meshes, CSG2, sprites and billboards (and their picking), gizmos, Havok mesh shapes, USD, and WebXR (poses, pointers, teleportation, hands and controller models).
+Everything in Lite that Babylon.js treats differently with `useRightHandedSystem = true`: cameras and their keyboard, mouse and touch inputs (arc-rotate, free, orthographic, geospatial, glTF and `.babylon` cameras), glTF loading (skinned, animated, morphed, embedded cameras, negative-scale nodes, Gaussian splats, `EXT_lights_image_based`, interactivity camera paths), PBR, Standard, Node and shader materials, image-based lighting, skyboxes and reflections, shadows and cascaded shadows, screen-space effects that rebuild normals from depth (contact shadows, SSGI, cavity) and mesh blending, procedural meshes, CSG2, sprites and billboards (and their picking), gizmos, Havok mesh shapes, USD, and WebXR (poses, pointers, teleportation, hands and controller models).
 
 The lab scenes listed below check them against Babylon.js, and the test suite fails whenever the left-handed code changes without its right-handed counterpart (see the [architecture page](architecture/61-right-handed-system.md#tests)).
 
 ## Limits
 
 - **One handedness per bundle.** Every engine your bundle creates has the same handedness. Two pages that need different handedness need two builds.
+- **`EXT_lights_image_based`** renders exactly like the left-handed scene. Babylon.js 9.28 lights it differently when right-handed, which we take for a Babylon.js bug, so twin 342 is checked against the left-handed reference.
 - **The CDN build and the [Lite Playground](04-playground.md) are left-handed.** They are prebuilt with the default condition.
 
 ## See it in the lab

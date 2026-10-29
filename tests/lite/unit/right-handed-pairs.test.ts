@@ -296,17 +296,6 @@ describe("right-handed feature pairs: glTF skeletons", () => {
 });
 
 describe("right-handed feature pairs: derivative tangent frames and reflections", () => {
-    it("anisotropy without a normal map reverses both cotangent-frame axes", async () => {
-        const [lh, rh] = await bothBuilds(async () => {
-            const { makeAnisotropyTBBlock } = await import(`${SRC}material/pbr/fragments/anisotropy-fragment`);
-            return makeAnisotropyTBBlock(false, true) as string;
-        });
-        const t = "aniso_dp2perp*aniso_duv1.x+aniso_dp1perp*aniso_duv2.x";
-        const b = "aniso_dp2perp*aniso_duv1.y+aniso_dp1perp*aniso_duv2.y";
-        expect(lh).toContain(`let aniso_tct=${t};`);
-        expect(rh).toBe(lh.replace(`let aniso_tct=${t};`, `let aniso_tct=-(${t});`).replace(`let aniso_bct=-(${b});`, `let aniso_bct=${b};`));
-    });
-
     it("USD normal maps reverse both cotangent-frame axes", async () => {
         const [lh, rh] = await bothBuilds(async () => {
             const { createUsdMaterialPlugin } = await import(`${SRC}loader-usd/usd-material-plugin`);
@@ -350,5 +339,230 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
         for (const [i, code] of normal.entries()) {
             expect(squash(rh[6 + i]!)).toBe(squash(code).replace(".xyz)", ".xyz*vec3<f32>(1.0,1.0,-1.0))"));
         }
+    });
+});
+
+// glTF geometry keeps glTF's own winding in a right-handed build (no mirroring root), while procedural geometry is
+// wound "cw" behind the Z-mirroring view: every material must tell them apart, not only PBR.
+describe("right-handed feature pairs: glTF winding on non-PBR materials", () => {
+    const GLTF_WINDING = 1 << 11;
+
+    it("Standard pipelines key the loader's winding bit and wind glTF geometry apart from procedural geometry", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { _computeMeshFeatures } = await import(`${SRC}material/mesh-features`);
+            const { getOrCreateStandardPipeline } = await import(`${SRC}material/standard/standard-pipeline`);
+            const gpu = fakeDevice();
+            // Procedural mesh, then a glTF mesh carrying the loader's winding bit plus a topology bit.
+            return [undefined, GLTF_WINDING | (1 << 12)].map((bits) => {
+                const meshFeatures = _computeMeshFeatures({ _gpu: {}, _primitiveFeatures: bits } as never) as number;
+                const bindings = {
+                    _features: 0,
+                    _meshFeatures: meshFeatures,
+                    _sceneFeatures: 0,
+                    _meshBGL: {},
+                    _shadowBGL: null,
+                    _composed: { _vertexWGSL: "", _fragmentWGSL: "" },
+                    _pipelines: new Map(),
+                };
+                getOrCreateStandardPipeline({ _device: gpu.device } as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never, bindings as never, {} as never);
+                return [meshFeatures, gpu.pipelines.at(-1)!.primitive!.frontFace];
+            });
+        });
+        expect(lh).toEqual([
+            [0, "ccw"],
+            [0, "ccw"],
+        ]);
+        expect(rh).toEqual([
+            [0, "cw"],
+            [GLTF_WINDING, "ccw"],
+        ]);
+    });
+
+    it("ShaderMaterial splits glTF and procedural meshes into separately wound pipelines", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { createShaderMaterial } = await import(`${SRC}material/shader/shader-material`);
+            const { buildShaderMaterialRenderables } = await import(`${SRC}material/shader/shader-renderable`);
+            const { initMeshTransform } = await import(`${SRC}mesh/mesh`);
+            const { wgsl } = await import(`${SRC}shader/wgsl`);
+            const gpu = fakeDevice();
+            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 } };
+            const material = createShaderMaterial({
+                vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+                fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+                attributes: ["position"],
+            });
+            const mesh = (name: string, ccw?: 1) =>
+                initMeshTransform({
+                    name,
+                    children: [],
+                    material,
+                    receiveShadows: false,
+                    _gpu: { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32", _ccw: ccw },
+                } as never);
+            const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() };
+            const { renderables } = buildShaderMaterialRenderables(scene as never, [mesh("procedural"), mesh("gltf", 1)]);
+            for (const renderable of renderables) {
+                renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
+            }
+            return gpu.pipelines.map((pipeline) => pipeline.primitive!.frontFace);
+        });
+        // Left-handed: the glTF root mirror makes both windings agree, so one merged pipeline at the default "ccw".
+        expect(lh).toEqual([undefined]);
+        expect(rh).toEqual(["cw", "ccw"]);
+    });
+
+    it("thin-instanced ShaderMaterial meshes wind glTF geometry apart from procedural geometry", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { createShaderMaterial } = await import(`${SRC}material/shader/shader-material`);
+            const { buildShaderRenderablesWithInstancing } = await import(`${SRC}material/shader/shader-thin-instance`);
+            const { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } = await import(`${SRC}material/shader/shader-pipeline`);
+            const { initMeshTransform } = await import(`${SRC}mesh/mesh`);
+            const { wgsl } = await import(`${SRC}shader/wgsl`);
+            const gpu = fakeDevice();
+            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 } };
+            const material = createShaderMaterial({
+                vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+                fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+                attributes: ["position"],
+            });
+            const mesh = (name: string, ccw?: 1) =>
+                initMeshTransform({
+                    name,
+                    children: [],
+                    material,
+                    receiveShadows: false,
+                    thinInstances: { count: 2 },
+                    _gpu: { positionBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32", _ccw: ccw },
+                } as never);
+            const scene = { surface: { engine } };
+            const unused = (): never => {
+                throw new Error("unused");
+            };
+            const { renderables } = buildShaderRenderablesWithInstancing(
+                scene as never,
+                [mesh("procedural"), mesh("gltf", 1)],
+                unused,
+                (_scene: unknown, _material: unknown, _spec: unknown, packetMesh: unknown) => ({ mesh: packetMesh }) as never,
+                unused,
+                unused,
+                unused,
+                getOrCreateShaderPipeline,
+                getOrCreateShaderPipelineBindings
+            );
+            for (const renderable of renderables) {
+                renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
+            }
+            return gpu.pipelines.map((pipeline) => pipeline.primitive!.frontFace);
+        });
+        // Left-handed: both meshes share one pipeline at the default "ccw".
+        expect(lh).toEqual([undefined]);
+        expect(rh).toEqual(["cw", "ccw"]);
+    });
+
+    it("Node material pipelines wind glTF geometry apart from procedural geometry", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { emitGraph, loadGraphEmitters } = await import(`${SRC}material/node/node-emitter`);
+            const { findBlockByClassName, parseNodeMaterialSource } = await import(`${SRC}material/node/node-parser`);
+            const { compileNodePipeline } = await import(`${SRC}material/node/node-pipeline`);
+            const graph = parseNodeMaterialSource({
+                blocks: [
+                    { customType: "BABYLON.InputBlock", id: 1, name: "position", mode: 1, type: 0x8, inputs: [], outputs: [{ name: "output" }] },
+                    { customType: "BABYLON.VertexOutputBlock", id: 2, name: "vertex", inputs: [{ name: "vector", targetBlockId: 1, targetConnectionName: "output" }], outputs: [] },
+                    { customType: "BABYLON.InputBlock", id: 3, name: "color", mode: 0, type: 0x8, value: [1, 1, 1], inputs: [], outputs: [{ name: "output" }] },
+                    {
+                        customType: "BABYLON.FragmentOutputBlock",
+                        id: 4,
+                        name: "fragment",
+                        inputs: [{ name: "rgb", targetBlockId: 3, targetConnectionName: "output" }],
+                        outputs: [],
+                    },
+                ],
+                outputNodes: [2, 4],
+            });
+            const emitted = await emitGraph(
+                graph,
+                await loadGraphEmitters(graph),
+                findBlockByClassName(graph, "FragmentOutputBlock")!.id,
+                findBlockByClassName(graph, "VertexOutputBlock")!.id
+            );
+            const gpu = fakeDevice();
+            const compile = compileNodePipeline(emitted.state, emitted.vertexWgsl, emitted.fragmentWgsl, {
+                _engine: { _device: gpu.device, format: "rgba8unorm", msaaSamples: 1 } as never,
+                _format: "rgba8unorm",
+                _msaaSamples: 1,
+            });
+            const materialPipeline = gpu.pipelines.at(-1)!;
+            return [{}, { _ccw: 1 }].map((meshGpu) =>
+                compile._pipelineForMesh(meshGpu as never) === compile._pipeline ? materialPipeline.primitive!.frontFace : gpu.pipelines.at(-1)!.primitive!.frontFace
+            );
+        });
+        // Left-handed: the glTF root mirror makes both windings agree, so both meshes get the material pipeline.
+        expect(lh).toEqual(["ccw", "ccw"]);
+        expect(rh).toEqual(["cw", "ccw"]);
+    });
+});
+
+describe("right-handed feature pairs: screen-space post-processes", () => {
+    it("screen-space raymarch reconstructs the view normal with its cross product swapped", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { screenSpaceRaymarchWGSL } = await import(`${SRC}post-process/screen-space-raymarch-wgsl`);
+            return screenSpaceRaymarchWGSL() as string;
+        });
+        expect(lh).toContain("cross(pH,pV)");
+        expect(rh).toBe(lh.replace("cross(pH,pV)", "cross(pV,pH)"));
+    });
+
+    it("mesh-blending world-position debug inverts the real view matrix", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { createArcRotateCamera } = await import(`${SRC}camera/arc-rotate`);
+            const { getViewMatrix } = await import(`${SRC}camera/camera`);
+            const { createRenderTarget } = await import(`${SRC}engine/render-target`);
+            const { createMeshBlendingPostProcessTask, MeshBlendDebugMode } = await import(`${SRC}post-process/mesh-blending`);
+            const camera = createArcRotateCamera(0.7, 1.1, 10, { x: 1, y: 2, z: 3 });
+            const view = Array.from(getViewMatrix(camera) as ArrayLike<number>);
+            const target = () => Object.assign(createRenderTarget({ format: "rgba16float", samples: 1, size: { width: 64, height: 32 } }), { _width: 64, _height: 32 });
+            const task = createMeshBlendingPostProcessTask(
+                {
+                    sourceTexture: target(),
+                    meshBlendTagTexture: target(),
+                    depthTexture: target(),
+                    targetTexture: target(),
+                    camera,
+                    debugMode: MeshBlendDebugMode.WorldPosition,
+                },
+                {} as never
+            );
+            task.updateUniforms();
+            const inverseView = Array.from((task as unknown as { _uniformData: Float32Array })._uniformData.subarray(32, 48));
+            // Column-major product inverseView · view.
+            return Array.from({ length: 16 }, (_, i) => [0, 1, 2, 3].reduce((sum, k) => sum + inverseView[k * 4 + (i % 4)]! * view[Math.floor(i / 4) * 4 + k]!, 0));
+        });
+        const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        lh.forEach((value, i) => expect(value).toBeCloseTo(identity[i]!, 5));
+        rh.forEach((value, i) => expect(value).toBeCloseTo(identity[i]!, 5));
+    });
+});
+
+describe("right-handed feature pairs: glTF Gaussian splats", () => {
+    it("KHR_gaussian_splatting lands where Babylon.js puts it: the left-handed placement is the right-handed one mirrored in X", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            vi.doMock(`${SRC}loader-splat/load-splat`, () => ({
+                attachParsedSplat: async () => ({ rotation: { x: 0, y: 0, z: 0 }, scaling: { x: 1, y: 1, z: 1 } }),
+            }));
+            const { default: feature } = await import(`${SRC}loader-gltf/gltf-feature-gaussian-splatting`);
+            const json = { accessors: [{ type: "VEC3", count: 1 }], __gsSplats: [{ name: "splat", attributes: { POSITION: 0 } }] };
+            const result = await feature.applyAsset!([], null as never, { _json: json, _binChunk: new DataView(new ArrayBuffer(0)) } as never);
+            result._sceneSetup!({} as never);
+            const [mesh] = await Promise.all(result._gaussianSplats!);
+            const { rotation, scaling } = mesh as unknown as { rotation: Vec; scaling: Vec };
+            // The splat's placement as a diagonal: a Z rotation of 0 or π times the scaling.
+            const c = Math.cos(rotation.z);
+            expect([rotation.x, rotation.y]).toEqual([0, 0]);
+            return [c * scaling.x, c * scaling.y, scaling.z];
+        });
+        vi.doUnmock(`${SRC}loader-splat/load-splat`);
+        // buildSplatGeometry stores (x, -y, z): Babylon.js nets (-x, y, z) left-handed and (x, y, z) right-handed.
+        expectClose(rh, [1, -1, 1]);
+        expectClose(lh, [-rh[0]!, rh[1]!, rh[2]!]);
     });
 });

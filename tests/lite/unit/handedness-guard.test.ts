@@ -3,7 +3,8 @@
  * from silently rotting while every scene, test and golden keeps exercising the left-handed default.
  *
  * 1. Every engine file holding handedness-sensitive code (a pipeline `frontFace`, a left-handed
- *    matrix builder, the glTF RH→LH root mirror, a derivative-based tangent frame) must either import
+ *    matrix builder, the glTF RH→LH root mirror, a derivative-based tangent frame, a screen-space
+ *    normal cross product) must either import
  *    the `#coordinate-system` seam or sit in `HANDEDNESS_EXEMPT` with the reason it needs none. New
  *    code therefore cannot assume left-handedness without someone deciding, in review, what it does
  *    in a right-handed engine.
@@ -23,6 +24,10 @@ const LAB = join(ROOT, "lab/lite");
 /** Files with handedness-sensitive code that deliberately do not import `#coordinate-system`. */
 const HANDEDNESS_EXEMPT: Record<string, string> = {
     "camera/orthographic.ts": "projection only: Babylon.js's right-handed ortho projection is the left-handed one times Sz, which camera.ts folds into the view matrix",
+    "material/pbr/fragments/anisotropy-fragment.ts":
+        "a right-handed build reverses both cotangent-frame axes together, and the anisotropic lobe and bent normal are quadratic in them (dot², length, cross·cross): no visible change",
+    "material/pbr/fragments/flat-normal-wgsl.ts":
+        "the derivative face normal is re-oriented toward the viewer right after the cross product, so its sign never depends on the handedness",
     "material/node/blocks/perturb-normal.ts": "node-material normal frame: Babylon.js's PerturbNormalBlock flips only on its invertX/invertY options, never with the handedness",
     "shader/wgsl-helpers.ts": "Standard bump frame: Babylon.js flips it only with invertNormalMapX/Y, which only its glTF loader ties to the handedness",
     "text/_gpu/text-pipeline.ts": "cullMode none: winding cannot change what is drawn",
@@ -34,6 +39,7 @@ const MARKERS: [name: string, pattern: RegExp][] = [
     ["left-handed matrix builder", /\bimport\s[^;]*?\sfrom\s+"[./]*\/math\/[\w-]*-lh[\w-]*\.js"/],
     ["glTF RH→LH root mirror", /\bRH_TO_LH\w*|F32\(\[\s*-1\s*,\s*0\s*,\s*0\s*,\s*0\s*,/],
     ["derivative tangent frame", /cross\(\s*\w*dp2/i],
+    ["screen-space normal cross product", /cross\(\s*(dpd[xy]\w*\(|p[HV]\s*,)/],
 ];
 
 const SEAM_IMPORT = /from\s+"#coordinate-system"/;

@@ -143,9 +143,10 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
 
 // --- Node Hierarchy → World Matrix (Memoized) ---
 
-// Babylon.js RH→LH root: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1,1,1,1)
+// Babylon.js RH→LH root: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1,1,1,1). A right-handed engine
+// keeps glTF's native space, so its root conversion is the identity.
 // prettier-ignore
-const RH_TO_LH_ROOT = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]) as unknown as Mat4;
+const GLTF_ROOT = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]) as unknown as Mat4;
 
 /** Build a parent index map by scanning node.children arrays once. O(n). */
 export function buildParentMap(json: any): Map<number, number> {
@@ -186,12 +187,8 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
 
     const node = json.nodes[nodeIdx];
     const parentIdx = findParent(parentMap, nodeIdx);
-    if (_rightHanded !== null) {
-        // A right-handed engine keeps glTF's native space: the root conversion becomes the identity.
-        (RH_TO_LH_ROOT as unknown as Mat4Storage)[0] = 1;
-    }
     // Resolve parent FIRST so any recursive call can safely reuse the shared scratch below.
-    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : RH_TO_LH_ROOT;
+    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : GLTF_ROOT;
 
     let localBuf: import("../math/types.js").Mat4Storage;
     if (node.matrix) {

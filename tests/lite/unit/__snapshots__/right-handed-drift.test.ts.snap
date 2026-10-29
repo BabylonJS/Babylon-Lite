@@ -107,6 +107,12 @@ exports[`right-handed drift guard > loader-gltf/gltf-feature-camera.ts: right-ha
 }
 `;
 
+exports[`right-handed drift guard > loader-gltf/gltf-feature-gaussian-splatting.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "sceneSetup use": "«» → «if ( _rightHanded ) { mesh.scaling.y = - 1 ; } else { mesh.rotation.z = Math.PI ; }»",
+}
+`;
+
 exports[`right-handed drift guard > loader-gltf/gltf-feature-primitive.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "applyMesh if-rh": "«» → «( mesh._gpu as typeof mesh._gpu & { _ccw ? : 1 } ) ._ccw = 1 ;»",
@@ -121,7 +127,7 @@ exports[`right-handed drift guard > loader-gltf/gltf-feature-registry.ts: right-
 
 exports[`right-handed drift guard > loader-gltf/gltf-parser.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "computeNodeWorldMatrix if-rh": "«» → «( RH_TO_LH_ROOT as unknown as Mat4Storage ) [ 0 ] = 1 ;»",
+  "GLTF_ROOT ?:": "«-» → «» 1",
 }
 `;
 
@@ -142,6 +148,12 @@ exports[`right-handed drift guard > loader-usd/usd-materialize.ts: right-handed 
 {
   "root ?:": "«» → «-» scale",
   "root ?: #2": "«-» → «» scale",
+}
+`;
+
+exports[`right-handed drift guard > material/mesh-features.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "_computeMeshFeatures use": "«» → «if ( _rightHanded ) { features | = ( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ; }»",
 }
 `;
 
@@ -189,13 +201,6 @@ exports[`right-handed drift guard > material/pbr/background-ground.ts: right-han
 exports[`right-handed drift guard > material/pbr/cubemap-skybox-material.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "composeSkyboxFragment if-rh": "return ( «» → «(» await scene._environmentSkyboxShaderComposer … ? fragment «» → «) .replace ( / ( textureSampleLevel \\ ( [ ^ , ] + , [ ^ , ] + , ) ( [ ^ , ] + ) / , " $ 1 ( $ 2 ) * vec3f ( 1. , 1. , - 1. ) " )» ;",
-}
-`;
-
-exports[`right-handed drift guard > material/pbr/fragments/anisotropy-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
-{
-  "makeAnisotropyTBBlock ?:": "" «» → «- (» aniso_dp2perp * … * aniso_duv2.x «» → «)» "",
-  "makeAnisotropyTBBlock ?: #2": "" «- (» → «» aniso_dp2perp * … * aniso_duv2.y «)» → «» "",
 }
 `;
 
@@ -261,14 +266,23 @@ exports[`right-handed drift guard > material/shader/normal-view.ts: right-handed
 
 exports[`right-handed drift guard > material/shader/shader-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "primitive &&": "«» → «{ frontFace : " cw " as GPUFrontFace }»",
+  "primitive &&": "«» → «{ frontFace : ( variantKey.includes ( " | ccw " ) ? " ccw " : " cw " ) as GPUFrontFace }»",
 }
 `;
 
 exports[`right-handed drift guard > material/shader/shader-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
+  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const ccw = packets.filter ( ( packet ) = > ( packet.mesh._gpu as MeshGPU & { _ccw ? : 1 } ) ._ccw ) ; if ( ccw.length & & ccw.length < packets.length ) { return [ packets.filter ( ( packet ) = > ! ccw.includes ( packet ) ) , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
   "createPacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( systemData , systemSpec._offsets ) ;»",
+  "createShaderRenderable &&": "«» → «( first.mesh._gpu as MeshGPU & { _ccw ? : 1 } ) ._ccw»",
+  "pipeline &&": "«» → «( renderable as Renderable & { _ccw ? : 1 } ) ._ccw»",
   "updatePacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( packet.systemData , state._shaderBindings ! .systemSpec._offsets ) ;»",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/shader-thin-instance.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "variantKey &&": "«» → «( mesh._gpu as typeof mesh._gpu & { _ccw ? : 1 } ) ._ccw»",
 }
 `;
 
@@ -300,13 +314,13 @@ exports[`right-handed drift guard > material/standard/standard-geometry-output-s
 
 exports[`right-handed drift guard > material/standard/standard-geometry-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "frontFace ?:": "" «ccw» → «cw» "",
+  "frontFace ?:": "«» → «( res._meshFeatures & ( 1 < < 11 ) ?» " ccw … ccw " «» → «: " cw " )»",
 }
 `;
 
 exports[`right-handed drift guard > material/standard/standard-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "frontFace ?:": "" «ccw» → «cw» "",
+  "frontFace ?:": "«» → «( bindings._meshFeatures & ( 1 < < 11 ) ?» " ccw … ccw " «» → «: " cw " )»",
 }
 `;
 
@@ -331,6 +345,18 @@ exports[`right-handed drift guard > physics/havok.ts: right-handed branches stil
 exports[`right-handed drift guard > picking/billboard-pick-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "uvAssign ?:": "in.b , «q» → «vec2f ( 1.0 - q.x , q.y )» ) ;",
+}
+`;
+
+exports[`right-handed drift guard > post-process/mesh-blending.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "writeUniforms use": "«» → «if ( _rightHanded ) { data [ 40 ] = - data [ 40 ] ! ; data [ 41 ] = - data [ 41 ] ! ; data [ 42 ] = - data [ 42 ] ! ; }»",
+}
+`;
+
+exports[`right-handed drift guard > post-process/screen-space-raymarch-wgsl.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "screenSpaceRaymarchWGSL ?:": "" «» → «pV ,» pH , … , pH «, pV» → «» "",
 }
 `;
 

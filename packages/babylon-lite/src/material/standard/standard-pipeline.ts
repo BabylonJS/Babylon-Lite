@@ -310,7 +310,11 @@ export function getOrCreateStandardPipeline(
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         primitive: _stdPrimitiveResolver
             ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
-            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: _rightHanded ? "cw" : "ccw" },
+            : {
+                  topology: "triangle-list",
+                  cullMode: features & DOUBLE_SIDED ? "none" : "back",
+                  frontFace: _rightHanded ? (bindings._meshFeatures & (1 << 11) ? "ccw" : "cw") : "ccw",
+              },
     });
 
     bindings._pipelines.set(key, pipeline);

@@ -9,7 +9,8 @@
 
 Let an application render in Babylon.js's right-handed system (`scene.useRightHandedSystem = true`)
 instead of Lite's default left-handed one, without making left-handed applications pay a byte or a
-runtime test.
+runtime test (with a minifier that inlines imported constants, as Rolldown does; see
+[Why a build-time choice](#why-a-build-time-choice)).
 
 User guide, with the setup for each bundler:
 [Right-Handed Coordinate System](../07-right-handed-system.md).
@@ -46,6 +47,15 @@ but anything it _imports_ has already been linked into the bundle by then. A lef
 byte-identical to one built before this feature only because right-handed branches import nothing of
 their own (see [Writing handedness-dependent code](#writing-handedness-dependent-code)).
 
+That holds for the lab's bundler, Rolldown, whose minifier inlines the imported constant; it is
+checked scene by scene. esbuild's minifier (0.28) does not inline it: its left-handed bundles keep the
+`_rightHanded` tests and the small same-module right-handed helpers (`_toRightHandedCameraWorld`…).
+They behave the same, they are just not byte-identical.
+
+The published `lib/` modules import the bare specifier `#coordinate-system`, so they need a bundler
+that reads `package.json` `imports`; native browser ESM cannot resolve it. The prebundled
+`dist/index.js` has no such import.
+
 A runtime flag cannot get that: in a code-split bundle the flag lives in one chunk and is imported by
 the lazy ones (PBR pipeline, background ground…), and no bundler can prove an imported `let` is never
 reassigned. Measured on 18 lab scenes, a runtime flag cost 0–0.4 KB raw (≤ 0.1 KB gzip) per scene,
@@ -66,18 +76,24 @@ With `Sz = diag(1, 1, -1)`:
   camera's forward as local -Z accordingly.
 - **Winding** — the mirrored view reverses triangle winding on screen, so camera-pass pipelines flip
   `frontFace`: `"cw"` for ordinary meshes (Babylon.js's right-handed rule), and the mirrored-mesh rule
-  in `std-mirrored-support.ts` is inverted.
+  in `std-mirrored-support.ts` is inverted. glTF meshes, which keep glTF's winding (see below), stay
+  `"ccw"`: the primitive feature marks them (`MeshGPU._ccw`, mesh-feature bit 11), and every material
+  path reads the mark — PBR through its per-mesh winding, Standard through bit 11 of its mesh-feature
+  key, Node through `_pipelineForMesh`, and shader materials by splitting glTF and procedural meshes
+  into separately wound pipelines (`|ccw` variant key).
 - **glTF** — the loader keeps glTF's native right-handed space: the `__root__` node has no X mirror,
   `computeNodeWorldMatrix` drops the root conversion, the skeleton and animation-mixer root transforms
   (`skeleton-pose.ts`, `skeleton-updater.ts`, `weighted-gltf-mixer.ts`) are the identity to match, the
   glTF camera fixup keeps +X, and the primitive feature module (per-mesh winding) is always loaded.
   `Mesh._authoredSign` stays `-1`: it is relative to the left-handed rule, which the right-handed
-  winding in `std-mirrored-support.ts` already inverts.
+  winding in `std-mirrored-support.ts` already inverts. Gaussian splats from
+  `KHR_gaussian_splatting` replace the left-handed `rotation.z = π` (which, combined with the root
+  mirror, equals a Y mirror) with `scaling.y = -1`, since there is no root mirror to combine with.
 - **Environment** — `rotateY` in the PBR IBL helpers (and the mesh-LoD copy) negates Z after the
   rotation, like Babylon.js's `REFLECTIONMAP_OPPOSITEZ`, for radiance, irradiance, clearcoat and local
   cubemaps.
 - **Normal mapping without tangents** — the PBR cotangent frames (base normal map, clearcoat normal
-  map, anisotropy direction, mesh-LoD copy) reverse both their tangent and bitangent, like Babylon.js's
+  map, mesh-LoD copy) reverse both their tangent and bitangent, like Babylon.js's
   glTF loader, which ties `invertNormalMapX/Y` to the handedness. Standard and node materials keep
   their frames: Babylon.js flips those only on explicit options.
 
@@ -88,7 +104,9 @@ With `Sz = diag(1, 1, -1)`:
   Babylon.js's right-handed matrices), the derivative normal view, node-material `View`/`Projection`
   inputs and PBR helpers, billboard and billboard-picking texture U, camera inputs, gizmos, the
   geospatial camera, `.babylon` cameras, glTF cameras, interactivity
-  camera paths, the procedural sky, CSG2, Havok mesh shapes, USD roots and normal maps, and WebXR
+  camera paths, the procedural sky, CSG2, Havok mesh shapes, USD roots and normal maps, the
+  screen-space raymarch normal reconstruction behind contact shadows and SSGI (its `cross` operands
+  swap, like the derivative normal view behind cavity), the mesh-blending inverse view, and WebXR
   (poses, pointer, teleport, hand meshes, controller models), which stays in WebXR's native
   right-handed space instead of being Z-mirrored. `EXT_lights_image_based` keeps one convention:
   the right-handed environment sampling already mirrors its yaw, and twin 342 renders exactly like
@@ -96,7 +114,8 @@ With `Sz = diag(1, 1, -1)`:
 
 Files whose handedness-sensitive code needs no seam are listed, with the reason, in `HANDEDNESS_EXEMPT`
 of `tests/lite/unit/handedness-guard.test.ts` (orthographic projection, text, glTF primitive winding,
-node and Standard bump frames).
+node and Standard bump frames, the PBR anisotropy direction — both tangent axes would reverse and the
+lobe is quadratic in them — and the flat normal, which is re-oriented toward the viewer).
 
 ## Writing handedness-dependent code
 
@@ -144,11 +163,20 @@ exercises the left-handed one:
   reference side: `right-handed-twin.ts` replaces the zero refraction matrix of an unrotated
   `CubeTexture` (twin 334), and twin 342 keeps scene 265's left-handed reference (`BJS_RH_BROKEN`)
   because Babylon.js lights `EXT_lights_image_based` wrongly when right-handed.
+- Two twins carry a looser `maxMad` than their source scene, set from measured runs: 323 (0.01 vs
+  scene 13's 0.008) measured 0.0089, where Babylon.js right- vs left-handed differ by 0.779 and Lite by
+  0.782, i.e. noise; 328 (6.4 vs scene 250's 6.1) measured 6.21. Scene 250 has no skybox, but its PBR
+  windows reflect the environment map, and scene 250's known Lite gap (over-bright window reflections,
+  absent in Babylon.js) moves with the mirrored view onto the larger right tower: Lite right- vs
+  left-handed differ by 7.5, Babylon.js by 5.3.
 
 Also:
 
 - `tests/lite/unit/right-handed-system.test.ts` and `right-handed-seams.test.ts` — view matrices
-  against Babylon.js `LookAtRH`, camera world matrices, front-face flips and per-seam values.
+  against Babylon.js `LookAtRH`, camera world matrices and per-seam values (shader-material system
+  uniforms included). Front-face winding of glTF against procedural geometry on Standard, Node and
+  shader materials is asserted by the "glTF winding on non-PBR materials" pairs in
+  `right-handed-pairs.test.ts`.
 - `tests/lite/unit/coordinate-system-variants.test.ts` — both variants and the `imports` map.
 - The `build` test project bundles the published `build/lib`, where `#coordinate-system` stays a
   bare specifier. Bare Rollup does not read `imports`, so its harness resolves the specifier with

@@ -282,6 +282,17 @@ function buildMaterialRenderables(
     if (material.needAlphaBlending) {
         return packets.map((packet) => build([packet], true));
     }
+    if (_rightHanded) {
+        // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
+        // meshes, so the two cannot share one opaque pipeline.
+        const ccw = packets.filter((packet) => (packet.mesh._gpu as MeshGPU & { _ccw?: 1 })._ccw);
+        if (ccw.length && ccw.length < packets.length) {
+            return [packets.filter((packet) => !ccw.includes(packet)), ccw].flatMap((part) => {
+                const groups = vbRender?._group(part);
+                return groups ? Array.from(groups, (group) => build(group)) : [build(part)];
+            });
+        }
+    }
     // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
     // describe their own vertex packing cannot share it with tightly-packed ones.
     const groups = vbRender?._group(packets);
@@ -389,6 +400,10 @@ function createShaderRenderable(
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
         },
     };
+    if (_rightHanded && (first.mesh._gpu as MeshGPU & { _ccw?: 1 })._ccw) {
+        // Every packet here shares the winding (see `buildMaterialRenderables`): key its pipeline apart.
+        (r as Renderable & { _ccw?: 1 })._ccw = 1;
+    }
     _asyncPipelineRegistrar?.(scene, material, r, undefined, asyncVertexLayout);
     return r;
 }
@@ -407,7 +422,14 @@ function createShaderBinding(
     const uniformBatch = getUniformBatch?.(signature);
     return {
         renderable,
-        pipeline: getOrCreateShaderPipeline(engine, signature, material, bindings, vertexLayout?._key, vertexLayout?._vbs),
+        pipeline: getOrCreateShaderPipeline(
+            engine,
+            signature,
+            material,
+            bindings,
+            _rightHanded && (renderable as Renderable & { _ccw?: 1 })._ccw ? `${vertexLayout?._key ?? ""}|ccw` : vertexLayout?._key,
+            vertexLayout?._vbs
+        ),
         _updateBatches: uniformBatch ? [uniformBatch] : undefined,
         update: (context) => update(context, uniformBatch),
         draw: (pass) => draw(pass, engine),

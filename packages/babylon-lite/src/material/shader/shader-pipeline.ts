@@ -256,7 +256,13 @@ export function getOrCreateShaderPipeline(
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         // WebGPU defaults an omitted topology to triangle-list.
-        primitive: { topology: material._topology, cullMode: material.backFaceCulling ? "back" : "none", ...(_rightHanded && { frontFace: "cw" as GPUFrontFace }) },
+        primitive: {
+            topology: material._topology,
+            cullMode: material.backFaceCulling ? "back" : "none",
+            // Right-handed: procedural geometry is wound "cw" behind the mirroring view matrix; glTF
+            // geometry keeps its own winding, which its renderables key as "|ccw".
+            ...(_rightHanded && { frontFace: (variantKey.includes("|ccw") ? "ccw" : "cw") as GPUFrontFace }),
+        },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;

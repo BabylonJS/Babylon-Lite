@@ -701,7 +701,11 @@ function _getOrCreateGeometryPipeline(
         // otherwise be culled away. Resolution goes through the opt-in hook so unmirrored bundles
         // fold the whole thing to the plain "ccw" literal. The variant key already includes
         // meshFeatures, so a winding change gets its own pipeline.
-        primitive: { topology: "triangle-list", cullMode, frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : _rightHanded ? "cw" : "ccw" },
+        primitive: {
+            topology: "triangle-list",
+            cullMode,
+            frontFace: _geometryWinding ? _geometryWinding(res._meshFeatures) : _rightHanded ? (res._meshFeatures & (1 << 11) ? "ccw" : "cw") : "ccw",
+        },
     });
     res._pipelines.set(key, pipeline);
     return pipeline;
