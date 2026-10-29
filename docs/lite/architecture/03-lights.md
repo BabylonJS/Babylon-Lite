@@ -14,7 +14,7 @@ Factory functions create light objects with sensible defaults; callers add them 
 - Version tracking (`_lightVersion` plus `worldMatrixVersion`) so scalar and transform changes,
   including inherited parent transforms, refresh the shared light UBO
 
-PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. Standard, PBR, and NodeMaterial consume the scene-owned `LightsUniforms` UBO at `@group(0) @binding(1)`. Per-mesh UBOs carry material-independent light selection (`lc` plus packed `li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>`) computed from `LightBase.includedOnlyMeshIds` / `excludedMeshIds`; shaders index the scene lights array through those mesh indices. Exactly one eligible non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
+PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. Standard, PBR, and NodeMaterial consume the scene-owned `LightsUniforms` UBO at `@group(0) @binding(1)`. Per-mesh UBOs carry material-independent light selection (`lc` plus packed `li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>`) computed from `LightBase.includedOnlyMeshes` / `excludedMeshes` and `includedOnlyMeshIds` / `excludedMeshIds` (see [Per-mesh light filtering](#per-mesh-light-filtering)); shaders index the scene lights array through those mesh indices. Exactly one eligible non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
 
 ---
 
@@ -27,6 +27,8 @@ PBR no longer uses per-light extension registration or light fields in `SceneUni
 export interface LightBase extends IWorldMatrixProvider, IParentable {
     readonly lightType: string;
     children: SceneNode[];
+    excludedMeshes?: ReadonlySet<Mesh>;
+    includedOnlyMeshes?: ReadonlySet<Mesh>;
     excludedMeshIds?: ReadonlySet<string>;
     includedOnlyMeshIds?: ReadonlySet<string>;
     shadowGenerator?: ShadowGenerator;
@@ -263,7 +265,7 @@ lc: u32,
 li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>,
 ```
 
-Each packed index addresses `lights.lights[index]` in the scene-wide UBO (`li[i / 4u][i % 4u]`). `render/lights-ubo.ts` computes this list per mesh by skipping lights whose `includedOnlyMeshIds` excludes the mesh or whose `excludedMeshIds` includes it.
+Each packed index addresses `lights.lights[index]` in the scene-wide UBO (`li[i / 4u][i % 4u]`). `render/mesh-light-selection.ts` computes this list per mesh with `lightAffectsMesh(light, mesh)`, skipping lights the mesh is filtered out of by either pair of lists (see [Per-mesh light filtering](#per-mesh-light-filtering)).
 
 **Default total UBO size:** `getLightsUboSize() = 16 + MAX_LIGHTS × 64` bytes (1040 bytes when `MAX_LIGHTS = 16`)
 
@@ -313,6 +315,56 @@ export function refreshLightsUBO(engine: EngineContextInternal, buffer: GPUBuffe
 2. Iterate lights, skip those without `_writeLightUbo`, stop at `MAX_LIGHTS`
 3. Call each light's `_writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS)`
 4. Write `count` into the first u32 slot via `Uint32Array` view
+
+### Per-mesh light filtering
+
+Two pairs of lists on `LightBase` restrict which meshes a light reaches. `render/mesh-light-selection.ts`
+exports the single predicate both the packed selection and the material feature mirrors use:
+
+```typescript
+export function lightAffectsMesh(light: LightBase, mesh: Mesh): boolean;
+```
+
+**Object-identity lists.** `excludedMeshes` and `includedOnlyMeshes` are `ReadonlySet<Mesh>`. Both apply:
+a non-empty `includedOnlyMeshes` restricts the light to those meshes, and `excludedMeshes` then subtracts
+from the result. This matches Babylon.js `Light.canAffectMesh`.
+
+**ID lists.** `excludedMeshIds` and `includedOnlyMeshIds` are `ReadonlySet<string>` matched against
+`Mesh.id`, which only the `.babylon` loader writes. Their precedence differs and is deliberate: a
+non-empty `includedOnlyMeshIds` wins outright and exclusions are not subtracted from it.
+
+**Precedence.** The object lists are evaluated first. When `includedOnlyMeshes` is non-empty the ID lists
+are not consulted at all; otherwise an object exclusion is final, and only an unexcluded mesh falls
+through to the ID lists. A light with no list set takes an allocation-free path.
+
+An ID cannot identify a mesh on its own, which is why the object lists exist: loading one asset twice
+yields distinct meshes carrying the same asset-local ID, and a clone is spread from its source, so it
+arrives with the source's ID. Compat clears `id` on a mesh clone for that reason.
+
+**Cloning.** `copyLightBase` in `light/light-clone.ts` carries all four sets onto the clone, so a cloned
+light keeps its filter rather than becoming unrestricted. The sets are shared by reference, not copied.
+
+**Consistency with shader selection.** The selection is baked when a renderable is built: into the
+shader's light-mode permutation, into the mesh UBO's packed indices, and into any material feature bits
+that mirror the selection (`SceneLightingExtension._pbrFeatures(mesh)`, used by rectangular area lights).
+`buildPbrRenderables` therefore rescans the selection after its dynamic imports and loads anything still
+missing, so the light WGSL it composes against is always a superset of what the final selection needs.
+
+**Lifecycle.** The per-frame updater only revisits the selection when the light count or the mesh's world
+matrix changes, so an edit under a stable light count needs a renderable rebuild. Compat drives that:
+
+1. `Light.excludedMeshes` / `includedOnlyMeshes` hand out the light's own live array with `push` and
+   `splice` hooked, the two methods Babylon.js hooks. One hook per array, reading a subscriber set, so an
+   array shared between lights carries a single wrapper.
+2. Publishing is coalesced onto the microtask queue, and the rebuild is coalesced per scene. Empty lists
+   publish `undefined`.
+3. `Scene._hasStarted` turns true several awaits before `registerScene` sets `_built`, and
+   `rebuildSceneRenderables` is a documented no-op until then. An edit inside that window is held on the
+   engine's late-work queue and applied once registration finishes, so it reaches groups already built.
+4. A light is released from an array when its list is replaced, when the light is disposed, and when its
+   scene is disposed (through `onSceneDispose`), leaving other live consumers of that array subscribed.
+5. The rebuild is skipped for a light held by a clustered container, which is outside the per-mesh light
+   path. Babylon.js skips its own resync for the same reason.
 
 ### PBR Light Shader Paths
 
@@ -428,7 +480,7 @@ spot.angle = Math.PI / 4;
 3. **Per-frame refresh:** `refreshSceneLightsUBO(engine, scene)` compares the aggregate light version and light count, then writes the shared UBO only when needed.
 4. **Light filtering:** only lights with `_writeLightUbo` defined are packed; up to `MAX_LIGHTS`.
 5. **Resize for cap changes:** if `MAX_LIGHTS` changes and the UBO byte size changes, `ensureSceneLightState()` destroys/recreates the scene light buffer and render-pass tasks rebuild their group-0 bind group.
-6. **Mesh selection:** material renderables write per-mesh `lc` and packed `li` indices into the mesh UBO; this selection respects `includedOnlyMeshIds` and `excludedMeshIds`.
+6. **Mesh selection:** material renderables write per-mesh `lc` and packed `li` indices into the mesh UBO; this selection respects both the object-identity lists and the ID lists.
 
 **No GPU resources are created by light modules.** Light packing and scene-owned GPU state live in `lights-ubo.ts`; materials only own shaders, mesh/material UBOs, textures, and bind groups.
 
@@ -455,8 +507,10 @@ spot.angle = Math.PI / 4;
 | `SpotLight.exponent`                          | `SpotLight.exponent`                                          |
 | `SpotLight.range`                             | `SpotLight.range`                                             |
 | `LightBase.lightType` string discriminator    | Class hierarchy + `getTypeID()` (internal)                    |
-| `LightBase.excludedMeshIds`                   | `Light.excludedMeshes`                                        |
-| `LightBase.includedOnlyMeshIds`               | `Light.includedOnlyMeshes`                                    |
+| `LightBase.excludedMeshes`                    | `Light.excludedMeshes`                                        |
+| `LightBase.includedOnlyMeshes`                | `Light.includedOnlyMeshes`                                    |
+| `LightBase.excludedMeshIds`                   | `.babylon` loader light lists (no Babylon.js equivalent)      |
+| `LightBase.includedOnlyMeshIds`               | `.babylon` loader light lists (no Babylon.js equivalent)      |
 | `LightBase.shadowGenerator`                   | `Light.getShadowGenerator()`                                  |
 | `LightBase.parent` (IWorldMatrixProvider)     | `Light.parent` (TransformNode)                                |
 | Plain data objects (no scene ref)             | Class instances with scene reference                          |

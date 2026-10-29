@@ -283,7 +283,19 @@ export class TransformNode extends Node {
         // Babylon.js `node.parent = x` keeps the child's LOCAL transform and lets
         // its world position move under the new parent (unlike `setParent`, which
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
-        this._node.parent = liteNodeOf(parent);
+        const node = this._node;
+        const liteParent = liteNodeOf(parent);
+        // Leave the previous Lite parent's `children`, as Lite's `setParent` does: removing that parent walks the
+        // list and would otherwise take this node out of the scene with it.
+        const previous = node.parent as SceneNode | null;
+        if (previous && previous !== liteParent) {
+            const siblings = previous.children;
+            const index = siblings ? siblings.indexOf(node) : -1;
+            if (index !== -1) {
+                siblings.splice(index, 1);
+            }
+        }
+        node.parent = liteParent;
     }
 
     /** @internal Remove this wrapper's node without letting Lite recurse for `dispose(true)`. */
@@ -313,6 +325,12 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    /**
+     * @internal The mesh renders a material that exists only on its Lite node: a natively loaded glTF
+     * material has no compat wrapper, so `material` reads `null`. Clones keep that Lite material, and the
+     * deferred registration does not replace it with `scene.defaultMaterial`. Any `material` assignment clears it.
+     */
+    public _liteOnlyMaterial = false;
     private _meshBlendingTag = 0;
     protected _visible = true;
 
@@ -346,6 +364,7 @@ export class AbstractMesh extends TransformNode {
     }
     public set material(value: CompatMaterial | null) {
         this._material = value;
+        this._liteOnlyMaterial = false;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
         if (renderMaterial && scene) {
@@ -641,7 +660,7 @@ export class AbstractMesh extends TransformNode {
         if (normals) {
             // Transform normals by the inverse-transpose upper 3×3 so they stay
             // correct under non-uniform scale/shear, then renormalize.
-            const nm = matrix.invert().transpose().m;
+            const nm = matrix.invertToRef(new Matrix()).transpose().m;
             newNormals = new Float32Array(normals.length);
             for (let i = 0; i < normals.length; i += 3) {
                 const x = normals[i]!,
@@ -762,6 +781,7 @@ export class Mesh extends AbstractMesh {
     public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
         const mesh = new Mesh(lite.name ?? "", lite);
         mesh._container = container;
+        mesh._liteOnlyMaterial = !!lite.material;
         mesh._visible = lite.visible !== false;
         if (scene) {
             mesh._bindLoadedScene(scene);
@@ -958,7 +978,13 @@ export class Mesh extends AbstractMesh {
             wrapper.metadata = source.metadata;
             wrapper.setEnabled(source.isEnabled(false));
             if (wrapper instanceof Mesh && source instanceof Mesh) {
-                wrapper.material = source.material;
+                // The Lite clone already shares a Lite-only material; assigning the source's `null` would
+                // replace it with `scene.defaultMaterial`.
+                if (source._liteOnlyMaterial) {
+                    wrapper._liteOnlyMaterial = true;
+                } else {
+                    wrapper.material = source.material;
+                }
                 wrapper.isVisible = source.isVisible;
                 wrapper.meshBlendingTag = source.meshBlendingTag;
             }
@@ -1385,7 +1411,7 @@ export function registerMeshAtStart(mesh: Mesh, scene: Scene, afterAdd?: () => v
         if (mesh.isDisposed()) {
             return;
         }
-        const mat = mesh.material ?? scene.defaultMaterial;
+        const mat = mesh.material ?? (mesh._liteOnlyMaterial ? null : scene.defaultMaterial);
         if (mat) {
             attachMaterialToScene(mat, scene);
         }

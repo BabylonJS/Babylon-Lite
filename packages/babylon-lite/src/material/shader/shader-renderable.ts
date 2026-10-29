@@ -225,7 +225,7 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         cull,
         _resolveShaderMeshVertexLayout,
         _asyncPipelineRegistrar
-            ? (mesh, material, hasColor, vertexLayout) => _asyncPipelineRegistrar!(scene, material, mesh, hasColor ? "thin-instances-color" : "thin-instances", vertexLayout)
+            ? (key, material, hasColor, vertexLayout) => _asyncPipelineRegistrar!(scene, material, key, hasColor ? "thin-instances-color" : "thin-instances", vertexLayout)
             : undefined
     );
 }

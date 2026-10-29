@@ -31,6 +31,7 @@ import type { Color3 } from "../math/color.js";
 import type { Observable } from "../misc/observable.js";
 import type { Matrix } from "../math/matrix.js";
 import type { StorageBuffer } from "../buffers/storage-buffer.js";
+import type { AssetContainer } from "../loading/scene-loader.js";
 
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
@@ -39,7 +40,7 @@ const DITHERED_TILE_FADE_UNSUPPORTED =
 const GAUSSIAN_SPLATTING_MATERIAL_UNSUPPORTED =
     "Lite's Gaussian-splat renderable fixes shader fragments and render state at load time and exposes no post-load material replacement or pipeline-rebuild lifecycle. Supporting Babylon.js GaussianSplattingMaterial plugins requires an opt-in Lite splat-material lifecycle design.";
 const GAUSSIAN_POINT_SPLATTING_UNSUPPORTED =
-    "Babylon.js Gaussian Point Splatting is a separate stochastic WebGPU compute-renderer subsystem with accumulation, Hi-Z culling, depth-pass integration, and fullscreen compositing lifecycles. Lite's sorted-splat renderer has no equivalent compute or pass-ownership model, and adding one requires broad engine design rather than a small mechanical export.";
+    "Lite exposes Gaussian Point Splatting through a scene-integrated high-level handle. Babylon.js's standalone renderer and blit-material classes expose manual accumulation/depth buffers and pass-level GPU control, which cannot be adapted without exposing raw GPU resources forbidden by Lite's public API.";
 const SHADER_MATERIAL_UNSUPPORTED =
     "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
 // ─── Flow graph validation ───────────────────────────────────────────
@@ -72,6 +73,41 @@ export function ValidateFlowGraph(_flowGraph: unknown): IFlowGraphValidationResu
 
 export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlocks: unknown[]): IFlowGraphValidationResult {
     return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export interface FlowGraphPlayAnimationBlock {
+    getClassName(): string;
+}
+
+export interface FlowGraphContext {
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal -- Public Babylon.js FlowGraph context method.
+    _getGlobalContextVariable<T>(name: string, defaultValue: T): T;
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal -- Public Babylon.js FlowGraph context method.
+    _setGlobalContextVariable<T>(name: string, value: T): void;
+}
+
+export interface Observer<T> {
+    callback: (eventData: T, eventState: unknown) => void;
+    mask: number;
+    scope: any;
+    unregisterOnNextCall: boolean;
+    remove(defer?: boolean): void;
+}
+
+export interface IFlowGraphAnimationObserverSet {
+    block: FlowGraphPlayAnimationBlock;
+    groupEnd: Observer<AnimationGroup>;
+    animationEnd: Observer<any>;
+    animationLoop: Observer<any>;
+    groupLoop: Observer<AnimationGroup>;
+}
+
+export function RemoveFlowGraphAnimationGroupObservers(_context: FlowGraphContext, _animationGroup: AnimationGroup): FlowGraphPlayAnimationBlock | undefined {
+    return unsupported("RemoveFlowGraphAnimationGroupObservers", FLOW_GRAPH_UNSUPPORTED);
+}
+
+export function defaultValueParseFunction(_key: string, _serializationObject: any, _assetsContainer: AssetContainer, _scene: Scene): any {
+    return unsupported("defaultValueParseFunction", FLOW_GRAPH_UNSUPPORTED);
 }
 
 // ─── Fluid rendering ─────────────────────────────────────────────────
@@ -754,13 +790,6 @@ export class OpenPBRMaterialLoadingAdapter {
             "OpenPBRMaterialLoadingAdapter",
             "The adapter translates glTF material data into OpenPBRMaterial, whose shader/material subsystem requires Lite maintainer design."
         );
-    }
-}
-
-// ─── Lights ──────────────────────────────────────────────────────────
-export class RectAreaLight {
-    public constructor() {
-        unsupported("RectAreaLight", "Area lights are not implemented in Babylon Lite. Use Point/Spot/Directional/Hemispheric lights.");
     }
 }
 

@@ -12,7 +12,7 @@ vi.mock("babylon-lite", async (importActual) => {
 });
 
 import { rebuildSceneRenderables } from "babylon-lite";
-import { DirectionalLight, HemisphericLight, PointLight, SpotLight } from "../src/lights/lights";
+import { AreaLight, DirectionalLight, HemisphericLight, PointLight, RectAreaLight, SpotLight } from "../src/lights/lights";
 import type { Light } from "../src/lights/lights";
 import { Color3 } from "../src/math/color";
 import { Vector3 } from "../src/math/vector";
@@ -159,6 +159,39 @@ describe("Light vectors and colours are live objects, as in Babylon.js", () => {
         expect(sun.direction.x).toBe(0);
     });
 
+    describe("RectAreaLight", () => {
+        it("forwards the Babylon.js constructor and mutable light properties", () => {
+            const light = new RectAreaLight("panel", new Vector3(1, 2, 3), 6, 4);
+
+            expect(light.getClassName()).toBe("RectAreaLight");
+            expect(light.getTypeID()).toBe(4);
+            expect(light).toBeInstanceOf(AreaLight);
+            expect([light.position.x, light.position.y, light.position.z]).toEqual([1, 2, 3]);
+            expect(light.width).toBe(6);
+            expect(light.height).toBe(4);
+
+            light.width = 8;
+            light.height = 5;
+            light.diffuse = new Color3(0.2, 0.4, 0.6);
+            light.specular.set(0.1, 0.3, 0.5);
+
+            expect(light._lite.width).toBe(8);
+            expect(light._lite.height).toBe(5);
+            expect(light._lite.diffuse).toEqual([0.2, 0.4, 0.6]);
+            expect(light._lite.specular).toEqual([0.1, 0.3, 0.5]);
+        });
+
+        it("parents the native emitter while preserving its local position", () => {
+            const parent = new TransformNode("panel");
+            const light = new RectAreaLight("light", Vector3.Zero(), 2, 3);
+
+            light.parent = parent;
+
+            expect(light._lite.parent).toBe(parent._node);
+            expect([light._lite.position.x, light._lite.position.y, light._lite.position.z]).toEqual([0, 0, 0]);
+        });
+    });
+
     it("writes an in-place position edit through for directional, point and spot lights", () => {
         const lights = [
             new DirectionalLight("d", new Vector3(0, -1, 0)),
@@ -224,7 +257,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         const lateWork: LateWork[] = [];
         return {
             _hasStarted: started,
-            _lite: { id: "scene-lite", _built: built },
+            _lite: { id: "scene-lite", _built: built, lights: [], _disposables: [] },
             _registerLight: vi.fn(),
             _unregisterNode: vi.fn(),
             getEngine: () => ({

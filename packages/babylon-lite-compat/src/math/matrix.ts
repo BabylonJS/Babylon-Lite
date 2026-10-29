@@ -130,10 +130,9 @@ export class Matrix {
         return determinant(this.m);
     }
 
+    /** Babylon.js `invert`: inverts this matrix in place and returns it. */
     public invert(): Matrix {
-        const result = new Matrix();
-        this.invertToRef(result);
-        return result;
+        return this.invertToRef(this);
     }
 
     public invertToRef(result: Matrix): Matrix {
@@ -310,7 +309,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionLHToRef(forward, up, result)`. */
     public static LookDirectionLHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 
@@ -321,7 +320,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionRHToRef(forward, up, result)`. */
     public static LookDirectionRHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 

@@ -1,6 +1,14 @@
 // Babylon Lite — Public API
 // Tree-shakable: import only what you use.
 
+// ─── Standalone browser input ─────────────────────────────────────────
+export { createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput } from "./input/keyboard-input.js";
+export type { KeyboardInput } from "./input/keyboard-input.js";
+export { createPointerInput, resetPointerInput, disposePointerInput } from "./input/pointer-input.js";
+export type { PointerInput } from "./input/pointer-input.js";
+export { readGamepad } from "./input/gamepad-input.js";
+export type { GamepadState, GamepadButtonState } from "./input/gamepad-input.js";
+
 // ─── Core ────────────────────────────────────────────────────────────
 export {
     createEngine,
@@ -56,7 +64,7 @@ export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
-export { setEnvironmentRotation } from "./scene/set-environment-rotation.js";
+export { setEnvironmentRotation, setEnvironmentLightingRotation, setEnvironmentSkyboxRotation } from "./scene/set-environment-rotation.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
@@ -239,6 +247,10 @@ export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
+export { createRectAreaLight } from "./light/rect-area-light.js";
+export type { RectAreaLight } from "./light/rect-area-light.js";
+export { enableRectAreaLights } from "./light/enable-rect-area-lights.js";
+export { processAreaLightTexture } from "./light/process-area-light-texture.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export { setLightIntensity } from "./light/set-light-intensity.js";
@@ -816,6 +828,7 @@ export {
     setBoneWorldPoseDeferred,
     bakeSkeleton,
     clearBoneOverride,
+    getMeshSkeleton,
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
@@ -1206,9 +1219,9 @@ export { buildNodeParticleSetWithEmitterProvider, withNodeParticleEmitterProvide
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem, isParticleSystemStarted } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
-export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { registerNodeParticleSet, getParticleSystems } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
 export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";

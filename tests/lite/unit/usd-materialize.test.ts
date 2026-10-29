@@ -332,6 +332,7 @@ describe("USD command materialization", () => {
         const meshes = getContainerMeshes(container);
         expect(meshes).toHaveLength(4);
         expect(meshes.every((mesh) => mesh.morphTargets?.count === 1)).toBe(true);
+        expect(meshes.every((mesh) => mesh.morphTargets?.names?.[0] === "Fixture")).toBe(true);
         expect(meshes[2]!.morphTargets).toBe(meshes[0]!.morphTargets);
         expect(meshes[3]!.morphTargets).toBe(meshes[1]!.morphTargets);
         expect(meshes[0]!.morphTargets!.targets[0]!.positions).toEqual(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0]));

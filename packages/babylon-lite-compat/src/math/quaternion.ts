@@ -43,12 +43,13 @@ export class Quaternion {
         return this;
     }
 
+    /** Babylon.js `multiply`: the product `this · other` as a new quaternion. */
     public multiply(other: Quaternion): Quaternion {
         return new Quaternion(
-            other.w * this.x + other.x * this.w + other.y * this.z - other.z * this.y,
-            other.w * this.y - other.x * this.z + other.y * this.w + other.z * this.x,
-            other.w * this.z + other.x * this.y - other.y * this.x + other.z * this.w,
-            other.w * this.w - other.x * this.x - other.y * this.y - other.z * this.z
+            this.x * other.w + this.y * other.z - this.z * other.y + this.w * other.x,
+            -this.x * other.z + this.y * other.w + this.z * other.x + this.w * other.y,
+            this.x * other.y - this.y * other.x + this.z * other.w + this.w * other.z,
+            -this.x * other.x - this.y * other.y - this.z * other.z + this.w * other.w
         );
     }
 
@@ -173,7 +174,7 @@ export class Quaternion {
     /** Babylon.js `Quaternion.FromLookDirectionLHToRef(forward, up, result)`. */
     public static FromLookDirectionLHToRef<T extends Quaternion>(forward: Vector3, up: Vector3, result: T): T {
         const matrix = (lookDirectionRotationScratch ??= new Float32Array(16));
-        writeMat4FromLookDirectionLHIntoBuffer(matrix, forward, up);
+        writeMat4FromLookDirectionRHIntoBuffer(matrix, forward, up);
         return Quaternion._FromRotationStorageToRef(matrix, result);
     }
 
@@ -185,7 +186,7 @@ export class Quaternion {
     /** Babylon.js `Quaternion.FromLookDirectionRHToRef(forward, up, result)`. */
     public static FromLookDirectionRHToRef<T extends Quaternion>(forward: Vector3, up: Vector3, result: T): T {
         const matrix = (lookDirectionRotationScratch ??= new Float32Array(16));
-        writeMat4FromLookDirectionRHIntoBuffer(matrix, forward, up);
+        writeMat4FromLookDirectionLHIntoBuffer(matrix, forward, up);
         return Quaternion._FromRotationStorageToRef(matrix, result);
     }
 

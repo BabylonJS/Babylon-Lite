@@ -202,11 +202,23 @@ describe("Matrix", () => {
 
     it("inverts a transform back to the identity", () => {
         const m = Matrix.Translation(3, -2, 5).multiply(Matrix.RotationY(0.7));
-        const round = m.multiply(m.invert());
+        const round = m.multiply(m.clone().invert());
         expect(round.equals(Matrix.Identity())).toBe(false); // float drift expected
         for (let i = 0; i < 16; i++) {
             const expected = i % 5 === 0 ? 1 : 0;
             expect(round.m[i]).toBeCloseTo(expected, 5);
+        }
+    });
+
+    it("inverts in place and returns itself, like Babylon.js", () => {
+        const m = Matrix.Translation(3, -2, 5).multiply(Matrix.RotationY(0.7));
+        const original = m.clone();
+
+        expect(m.invert()).toBe(m);
+
+        const round = original.multiply(m);
+        for (let i = 0; i < 16; i++) {
+            expect(round.m[i]).toBeCloseTo(i % 5 === 0 ? 1 : 0, 5);
         }
     });
 
@@ -273,17 +285,17 @@ describe("Matrix", () => {
         const lh = Matrix.LookDirectionLH(forward, up);
         const rh = Matrix.LookDirectionRH(forward, up);
 
-        expect(Vector3.TransformNormal(Vector3.Forward(), lh).asArray()).toEqual([1, 0, 0]);
-        expect(Vector3.TransformNormal(new Vector3(0, 0, -1), rh).asArray()).toEqual([1, 0, 0]);
+        expect(Vector3.TransformNormal(new Vector3(0, 0, -1), lh).asArray()).toEqual([1, 0, 0]);
+        expect(Vector3.TransformNormal(Vector3.Forward(), rh).asArray()).toEqual([1, 0, 0]);
 
         const result = Matrix.Translation(7, 8, 9);
-        expect(Matrix.LookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
+        expect(Matrix.LookDirectionLHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
         expect(result.toArray()).toEqual(
             Matrix.Identity()
                 .toArray()
                 .map((value) => expect.closeTo(value))
         );
-        expect(Matrix.LookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
+        expect(Matrix.LookDirectionRHToRef(Vector3.Forward(), up, result)).toBe(result);
         expect(result.toArray()).toEqual(
             Matrix.Identity()
                 .toArray()
@@ -354,6 +366,18 @@ describe("Quaternion", () => {
         expect(q.length()).toBeCloseTo(1, 6);
     });
 
+    it("multiplies in Babylon.js order: a.multiply(b) is a·b", () => {
+        const a = new Quaternion(Math.sin(0.35), 0, 0, Math.cos(0.35)); // 0.7 rad around X
+        const b = new Quaternion(0, Math.sin(0.2), 0, Math.cos(0.2)); // 0.4 rad around Y
+
+        // Reference values from Babylon.js 9.17 `Quaternion.multiply`.
+        const ab = a.multiply(b);
+        expect([ab.x, ab.y, ab.z, ab.w].map((v) => v.toFixed(9))).toEqual(["0.336062681", "0.186624548", "0.068123278", "0.920647800"]);
+        const ba = b.multiply(a);
+        expect([ba.x, ba.y, ba.z, ba.w].map((v) => v.toFixed(9))).toEqual(["0.336062681", "0.186624548", "-0.068123278", "0.920647800"]);
+        expect([a.x, a.y, a.z, a.w]).toEqual([Math.sin(0.35), 0, 0, Math.cos(0.35)]);
+    });
+
     it("round-trips through a rotation matrix via FromRotationMatrix", () => {
         const src = Quaternion.RotationYawPitchRoll(0.4, -0.6, 1.1).normalize();
         const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
@@ -419,8 +443,8 @@ describe("Quaternion", () => {
         const lh = Quaternion.FromLookDirectionLH(forward, up);
         const rh = Quaternion.FromLookDirectionRH(forward, up);
 
-        const lhForward = Vector3.TransformNormal(Vector3.Forward(), Matrix.Compose(new Vector3(1, 1, 1), lh, Vector3.Zero()));
-        const rhForward = Vector3.TransformNormal(new Vector3(0, 0, -1), Matrix.Compose(new Vector3(1, 1, 1), rh, Vector3.Zero()));
+        const lhForward = Vector3.TransformNormal(new Vector3(0, 0, -1), Matrix.Compose(new Vector3(1, 1, 1), lh, Vector3.Zero()));
+        const rhForward = Vector3.TransformNormal(Vector3.Forward(), Matrix.Compose(new Vector3(1, 1, 1), rh, Vector3.Zero()));
         for (const transformed of [lhForward, rhForward]) {
             expect(transformed.x).toBeCloseTo(1);
             expect(transformed.y).toBeCloseTo(0);
@@ -428,9 +452,9 @@ describe("Quaternion", () => {
         }
 
         const result = new Quaternion(7, 8, 9, 10);
-        expect(Quaternion.FromLookDirectionLHToRef(Vector3.Forward(), up, result)).toBe(result);
+        expect(Quaternion.FromLookDirectionLHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
         expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
-        expect(Quaternion.FromLookDirectionRHToRef(new Vector3(0, 0, -1), up, result)).toBe(result);
+        expect(Quaternion.FromLookDirectionRHToRef(Vector3.Forward(), up, result)).toBe(result);
         expect(result.asArray()).toEqual([expect.closeTo(0), expect.closeTo(0), expect.closeTo(0), expect.closeTo(1)]);
     });
 });

@@ -230,6 +230,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
 
         const frags: ShaderFragment[] = [];
         const fragCtx: _PbrFragCtx = {
+            _sceneFeatures: sceneFeatures,
+            _lightMode: lightMode,
             _features: features,
             _features2: features2,
             _pi: pluginIndex,

@@ -50,7 +50,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2 } from "./pbr-flags.js";
-import { createPbrMeshBindGroup } from "./pbr-pipeline.js";
+import { createPbrMeshBindGroup, _pbrBindingIdentity, _createPbrBindingDisposers } from "./pbr-pipeline.js";
 import type { _PbrGeometryContext } from "./pbr-renderable.js";
 import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
@@ -170,8 +170,21 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
     const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey, mesh._gpu._vbLayout, mesh._gpu._vbKey ?? "");
+    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh) ?? 0);
+    const variantKey = `${sceneFeatures}:` + _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
+    const res = _ensureViewResources(
+        view,
+        engine,
+        ctx,
+        sceneFeatures,
+        meshFeatures,
+        lightMode,
+        singleLightType,
+        pluginIndex,
+        variantKey,
+        mesh._gpu._vbLayout,
+        mesh._gpu._vbKey ?? ""
+    );
     // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
     // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
     // topology bits this mirrors, so a cached variant only ever sees one value here.
@@ -207,11 +220,13 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     // candidate rolled back after a failed compile releases exactly what it acquired.
     const heldModules: string[] = [];
     let perMeshDisposed = false;
+    const bindingDisposers = _createPbrBindingDisposers?.();
     const _disposePerMesh = (): void => {
         if (perMeshDisposed) {
             return;
         }
         perMeshDisposed = true;
+        bindingDisposers?.splice(0).forEach((dispose) => dispose());
         _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
         materialUBO?.destroy();
@@ -242,7 +257,19 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
     let materialBindGroupStatic: GPUBindGroup;
     try {
-        materialBindGroupStatic = createPbrMeshBindGroup(engine, _wrapBindings(res), composed, meshUBO, materialUBO, view as unknown as PbrMaterialProps, ctx._envTextures, mesh);
+        materialBindGroupStatic = createPbrMeshBindGroup(
+            engine,
+            _wrapBindings(res),
+            composed,
+            meshUBO,
+            materialUBO,
+            view as unknown as PbrMaterialProps,
+            ctx._envTextures,
+            mesh,
+            undefined,
+            _pbrBindingIdentity?.(scene._lighting?._bindingId),
+            bindingDisposers
+        );
     } finally {
         _setActivePbrGeometryAttachments(prev);
     }
@@ -428,6 +455,7 @@ function _ensureViewResources(
     view: PbrGeometryMaterialView,
     engine: EngineContext,
     ctx: _PbrGeometryContext,
+    sceneFeatures: number,
     meshFeatures: number,
     lightMode: 0 | 1 | 2,
     singleLightType: string,
@@ -460,7 +488,6 @@ function _ensureViewResources(
 
     const features = view._renderFeatures.features;
     const features2 = view._renderFeatures.features2 ?? 0;
-    const sceneFeatures = ctx._sceneFeatures;
     const source = view.source as PbrMaterialProps;
     const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
@@ -601,7 +628,7 @@ function _getOrCreateGeometryPipeline(
 
 // ─── Helpers cribbed from pbr-renderable (no static cycle) ─────────────
 
-function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): "hemispheric" | "directional" | "spot" | "point" {
+function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): string {
     let packed = 0;
     for (const light of lights) {
         if (!light._writeLightUbo) {
@@ -609,7 +636,7 @@ function _getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: 
         }
         if (packed === packedIndex) {
             const t = light.lightType;
-            return t === "hemispheric" || t === "directional" || t === "spot" ? t : "point";
+            return t;
         }
         packed++;
     }

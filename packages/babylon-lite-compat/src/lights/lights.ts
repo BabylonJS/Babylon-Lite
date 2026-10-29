@@ -16,14 +16,26 @@
  * `LightBase.excludedMeshes` / `includedOnlyMeshes` as sets of Lite meshes.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, rebuildSceneRenderables, removeFromScene } from "babylon-lite";
+import {
+    addToScene,
+    createHemisphericLight,
+    createDirectionalLight,
+    createPointLight,
+    createRectAreaLight,
+    createSpotLight,
+    enableRectAreaLights,
+    rebuildSceneRenderables,
+    removeFromScene,
+} from "babylon-lite";
 import type {
     Mesh as LiteMesh,
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
     PointLight as LitePointLight,
+    RectAreaLight as LiteRectAreaLight,
     SpotLight as LiteSpotLight,
     LightBase,
+    SceneNode,
 } from "babylon-lite";
 
 import type { AbstractMesh } from "../meshes/meshes.js";
@@ -33,8 +45,67 @@ import { liteBackedVector3 } from "../math/vector.js";
 import type { Vector3 } from "../math/vector.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
+import type { BaseTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
+
+interface RectAreaLightReconcileState {
+    revision: number;
+    scheduled: boolean;
+    mutations: Array<() => void>;
+}
+
+let rectAreaLightReconcileStates: WeakMap<Scene, RectAreaLightReconcileState> | null = null;
+
+function requestRectAreaLightReconcile(scene: Scene, mutation?: () => void): void {
+    const states = (rectAreaLightReconcileStates ??= new WeakMap());
+    let state = states.get(scene);
+    if (!state) {
+        state = { revision: 0, scheduled: false, mutations: [] };
+        states.set(scene, state);
+    }
+    if (mutation) {
+        state.mutations.push(mutation);
+    }
+    state.revision++;
+    if (state.scheduled) {
+        return;
+    }
+    state.scheduled = true;
+    const engine = scene.getEngine();
+    const schedule = (): void => {
+        engine._registerLateWork(async () => {
+            engine._pauseForSceneMutation();
+            try {
+                let reconciledRevision = 0;
+                while (reconciledRevision !== state.revision) {
+                    const requestedRevision = state.revision;
+                    const mutations = state.mutations.splice(0);
+                    for (const apply of mutations) {
+                        apply();
+                    }
+                    try {
+                        await enableRectAreaLights(scene._lite);
+                        await rebuildSceneRenderables(scene._lite);
+                        reconciledRevision = requestedRevision;
+                    } catch (error) {
+                        if (requestedRevision === state.revision) {
+                            throw error;
+                        }
+                    }
+                }
+            } finally {
+                state.scheduled = false;
+                await engine._resumeAfterSceneMutation();
+            }
+        });
+    };
+    if (engine._lite?._currentEncoder) {
+        queueMicrotask(schedule);
+    } else {
+        schedule();
+    }
+}
 
 /** Babylon.js `Light` — base class for all lights (derives from `Node`). */
 export abstract class Light extends Node {
@@ -56,9 +127,11 @@ export abstract class Light extends Node {
      */
     public _shadowGenerator: object | null = null;
 
-    protected constructor(name: string, scene?: Scene) {
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
         super(name, scene);
-        scene?._registerLight(this);
+        if (!dontAddToScene) {
+            scene?._registerLight(this);
+        }
     }
 
     public override getClassName(): string {
@@ -241,7 +314,7 @@ export abstract class Light extends Node {
      *
      * Published as sets of Lite meshes, not of ids: an id cannot identify a mesh on its own, since
      * loading one asset twice yields distinct meshes carrying the same asset-local id. Empty lists
-     * publish `undefined` to keep the "no lists" fast path in `affectsMesh` allocation-free.
+     * publish `undefined` to keep the "no lists" fast path in `lightAffectsMesh` allocation-free.
      */
     private _syncMeshLists(): void {
         this._lite.excludedMeshes = liteMeshSet(this._excludedMeshes);
@@ -271,8 +344,25 @@ export abstract class Light extends Node {
     protected override _disposeSelf(_doNotRecurse: boolean): void {
         meshListSubscribers?.get(this._excludedMeshes)?.delete(this);
         meshListSubscribers?.get(this._includedOnlyMeshes)?.delete(this);
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
+        const scene = this._scene;
+        if (scene) {
+            const needsRectAreaReconcile =
+                scene._hasStarted &&
+                (this._lite.lightType === "rectArea" ||
+                    scene._lite.lights.some((light) => light.lightType === "rectArea" && (light as LiteRectAreaLight).emissionTexture !== null));
+            if (needsRectAreaReconcile) {
+                // Keep ancestor removal from recursively bypassing the queued light-slot reconciliation.
+                const parent = this._lite.parent as SceneNode | null;
+                if (parent) {
+                    const index = parent.children.indexOf(this._lite);
+                    if (index !== -1) {
+                        parent.children.splice(index, 1);
+                    }
+                }
+                requestRectAreaLightReconcile(scene, () => removeFromScene(scene._lite, this._lite));
+            } else {
+                removeFromScene(scene._lite, this._lite);
+            }
         } else {
             this._lite.shadowGenerator = undefined;
         }
@@ -579,5 +669,125 @@ export class SpotLight extends Light {
     }
     public set specular(value: Color3) {
         this._writeColor(this._lite.specular, value);
+    }
+}
+
+/** Babylon.js `AreaLight` hierarchy node shared by rectangular area lights. */
+export abstract class AreaLight extends Light {
+    protected constructor(name: string, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+    }
+
+    public abstract get position(): Vector3;
+    public abstract set position(value: Vector3);
+}
+
+/** Babylon.js `RectAreaLight` over Lite's native LTC-backed rectangular emitter. */
+export class RectAreaLight extends AreaLight {
+    /** @internal Underlying Babylon Lite rectangular area light. */
+    public readonly _lite: LiteRectAreaLight;
+    /** @internal Caller-visible texture wrapper assigned through `emissionTexture`. */
+    private _emissionTexture: BaseTexture | null = null;
+
+    public constructor(name: string, position: Vector3, width: number, height: number, scene?: Scene, dontAddToScene = false) {
+        super(name, scene, dontAddToScene);
+        this._lite = createRectAreaLight(position.asArray(), width, height);
+        this._lite.name = name;
+        if (scene && !dontAddToScene) {
+            if (scene._hasStarted) {
+                requestRectAreaLightReconcile(scene, () => addToScene(scene._lite, this._lite));
+            } else {
+                addToScene(scene._lite, this._lite);
+            }
+        }
+    }
+
+    public override getClassName(): string {
+        return "RectAreaLight";
+    }
+
+    public getTypeID(): number {
+        return 4;
+    }
+
+    public override get position(): Vector3 {
+        return liteBackedVector3(this._lite.position);
+    }
+    public override set position(value: Vector3) {
+        this._lite.position.set(value.x, value.y, value.z);
+    }
+
+    public get width(): number {
+        return this._lite.width;
+    }
+    public set width(value: number) {
+        this._lite.width = value;
+    }
+
+    public get height(): number {
+        return this._lite.height;
+    }
+    public set height(value: number) {
+        this._lite.height = value;
+    }
+
+    public get diffuse(): Color3 {
+        return this._liveColor(this._lite.diffuse);
+    }
+    public set diffuse(value: Color3) {
+        this._writeColor(this._lite.diffuse, value);
+    }
+
+    public get specular(): Color3 {
+        return this._liveColor(this._lite.specular);
+    }
+    public set specular(value: Color3) {
+        this._writeColor(this._lite.specular, value);
+    }
+
+    public get emissionTexture(): BaseTexture | null {
+        return this._emissionTexture;
+    }
+    public set emissionTexture(value: BaseTexture | null) {
+        this._emissionTexture = value;
+        const apply = (): void => {
+            if (this._emissionTexture === value) {
+                const texture = value?._lite ?? null;
+                if (this._lite.emissionTexture !== texture) {
+                    const scene = this._scene;
+                    if (scene?._hasStarted) {
+                        requestRectAreaLightReconcile(scene, () => {
+                            if (this._emissionTexture === value) {
+                                this._lite.emissionTexture = texture;
+                            }
+                        });
+                    } else {
+                        this._lite.emissionTexture = texture;
+                    }
+                }
+            }
+        };
+        if (value) {
+            value._onReady(apply);
+        } else {
+            apply();
+        }
+    }
+
+    /** @internal Preserve Babylon.js local-transform parenting on the Lite light node. */
+    protected override _applyParent(parent: Node | null): void {
+        const source = parent as unknown as { _node?: SceneNode; _lite?: SceneNode } | null;
+        const next = source?._node ?? source?._lite ?? null;
+        const previous = this._lite.parent as SceneNode | null;
+        if (previous && previous !== next) {
+            const index = previous.children.indexOf(this._lite);
+            if (index !== -1) {
+                previous.children.splice(index, 1);
+            }
+        }
+        this._lite.parent = next;
+        if (next && !next.children.includes(this._lite)) {
+            next.children.push(this._lite);
+        }
     }
 }

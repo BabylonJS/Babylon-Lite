@@ -148,3 +148,29 @@ export type { GLSprite, GLSpriteColor, GLSpriteRendererOptions, GLSpriteRenderer
 // GLSamplingMode is a const + same-name type; one value re-export carries both.
 export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
 export type { GLHtmlElementTextureOptions } from "./html-texture.js";
+
+// ─── Text (analytic Slug coverage) ───────────────────────────────────
+export type { GLFont } from "./text/font.js";
+export { loadFont, createFontFromBuffer } from "./text/font.js";
+export { extractGlyphCurves, cubicToQuadratics } from "./text/glyph-extraction.js";
+export type { GLTextLayoutOptions } from "./text/layout.js";
+export type { GLGlyphStorage, GLCurveSetId, GLQuadCurve, GLGlyphBounds, GLGlyphCurves } from "./text/glyph-storage.js";
+export { createGlyphStorage, updateGlyphStorage, disposeGlyphStorage } from "./text/glyph-storage.js";
+export type { GLTextData, GLPlacedGlyph, GLGlyphRun, GLTextDataUpdate } from "./text/text-data.js";
+export { createTextData, updateTextData, disposeTextData } from "./text/text-data.js";
+export type { GLDefaultTextData } from "./text/default-text-data.js";
+export { createDefaultTextData, updateDefaultTextData, disposeDefaultTextData } from "./text/default-text-data.js";
+export type { GLTextLayer, GLTextLayerOptions, GLTextRenderer, GLTextRendererOptions } from "./text/text-renderer.js";
+export {
+    createTextLayer,
+    setTextLayerPosition,
+    createTextRenderer,
+    renderText,
+    isTextRendererReady,
+    addTextRendererLayer,
+    removeTextRendererLayer,
+    registerTextRenderer,
+    unregisterTextRenderer,
+    disposeTextRenderer,
+} from "./text/text-renderer.js";
+export { setFontWeightOffset } from "./text/set-font-weight-offset.js";

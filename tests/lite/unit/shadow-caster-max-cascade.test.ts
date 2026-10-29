@@ -72,7 +72,9 @@ describe("setShadowCasterMaxCascade", () => {
             _materialViews: new Map([[material, view]]),
             _casterMaterials: new Map([[material, material]]),
             _casterMatGens: new Map([[material, undefined]]),
+            _casterMatFeatures: new Map([[material, undefined]]),
             _casterMaxCascades: new Map([[mesh, undefined]]),
+            _casterGens: new Map([[mesh, undefined]]),
         } as unknown as CsmTaskState;
         // Its group is built, so a caster joining with it is not held for it.
         const scene = { _renderableVersion: 2, _materialEpoch: 1, _groups: new Map([[material._buildGroup, { r() {} }]]) } as unknown as SceneContext;
