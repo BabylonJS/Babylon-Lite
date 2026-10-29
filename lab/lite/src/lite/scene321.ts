@@ -1,4 +1,4 @@
-// Scene 316: glTF export, Negative World Matrix. Babylon.js visualization test "GLTF Serializer with Negative World
+// Scene 321: glTF export, Negative World Matrix. Babylon.js visualization test "GLTF Serializer with Negative World
 // Matrix (left handed, twice)", playground #KX53VK#88.
 // Four vertex-colored triangles (CCW / CW winding, two under a negatively scaled + rotated parent) are exported with
 // exportSceneAsGlb and reloaded with loadGltf `iterations` times (default 1). The parity test uses `?iterations=2`.

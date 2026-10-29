@@ -1,4 +1,4 @@
-// Scene 318 — BJS reference for the glTF export "Morph Target Animation" test.
+// Scene 323 — BJS reference for the glTF export "Morph Target Animation" test.
 // Mirrors playground #84M2SR#107 (Babylon.js visualization test "GLTF Serializer Morph Target Animation"):
 // a textured sphere with two animated morph targets, exported with GLTF2Export, reloaded with SceneLoader and
 // both animation groups started on frame 60 (from = to = 60).

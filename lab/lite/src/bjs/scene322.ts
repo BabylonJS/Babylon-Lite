@@ -1,4 +1,4 @@
-// Scene 317 — BJS reference for the glTF export "Shared Buffer Conversions" test.
+// Scene 322 — BJS reference for the glTF export "Shared Buffer Conversions" test.
 // Mirrors playground #KX53VK#85 (Babylon.js visualization test "GLTF Serializer Shared Buffer Conversions";
 // reference image glTFSerializerSharedBufferConversions.png): two meshes share one vertex-colored Geometry,
 // exported with GLTF2Export and reloaded. The test sets `meshCount = 2` (default in the snippet is 3).

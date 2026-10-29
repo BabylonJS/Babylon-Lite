@@ -1,5 +1,5 @@
 /**
- * Scene 318 — glTF export of a textured sphere with two animated morph targets
+ * Scene 323 — glTF export of a textured sphere with two animated morph targets
  *
  * Babylon.js visualization test: "GLTF Serializer Morph Target Animation"
  * Playground: #84M2SR#107. Babylon.js reference image: gltfSerializerMorphTargetAnimation.png (errorRatio 1.1; the test is
@@ -9,24 +9,24 @@
  * two influence animations are not authored, because the Lite exporter exports only glTF-clip animation groups.
  * The test therefore covers morph-target export and reload, not morph-animation export; the weights Babylon.js
  * reaches at frame 60 (1.25, 1.25) are applied directly after the reload.
- * See the header of lab/lite/src/lite/scene318.ts.
+ * See the header of lab/lite/src/lite/scene323.ts.
  */
 import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(318);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene318-gltf-export-morph-target-animation");
+const sceneConfig = getSceneConfig(323);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene323-gltf-export-morph-target-animation");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 318 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 323 skipped via skipParity in scene-config.json");
 
-test("Scene 318 — GLTF Serializer Morph Target Animation matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 323 — GLTF Serializer Morph Target Animation matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 318, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 323, timeout: 90_000 });
 
-    await page.goto("/scene318.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 318 Lite", pollMs: 100 });
+    await page.goto("/scene323.html");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 323 Lite", pollMs: 100 });
     // The scene is static and `ready` follows its first rendered frame, so remove the loader overlay
     // instead of waiting out its fade.
     await page.evaluate(() => document.getElementById("loader-overlay")?.remove());
