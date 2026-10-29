@@ -297,6 +297,12 @@ export abstract class Light extends Node {
 
     /** @internal Release this light from its lists when its scene is torn down. */
     private _watchSceneForMeshListRelease(scene: Scene): void {
+        // A disposal callback registered on an already-disposed scene never runs, so there is nothing
+        // left to wait for and the light has to come off its lists now.
+        if (scene._lite._z) {
+            this._releaseMeshLists();
+            return;
+        }
         this._meshListSceneRelease ??= onSceneDispose(scene._lite, () => {
             this._meshListSceneRelease = null;
             this._releaseMeshLists();
@@ -315,6 +321,15 @@ export abstract class Light extends Node {
      * renderables once per mesh.
      */
     private _scheduleMeshListSync(): void {
+        // Registered here, not from the queued sync below: the two happen in different ticks, and a scene
+        // disposed in the same tick as the edit would drain its disposables before a watcher queued behind
+        // it existed, leaving this light on an application-owned array for good. This is the one
+        // synchronous point both paths that touch a list reach, the setters and the `push`/`splice` hooks,
+        // and it is reached only by lights that use the lists at all.
+        const scene = this._scene;
+        if (scene) {
+            this._watchSceneForMeshListRelease(scene);
+        }
         if (this._meshListSyncScheduled) {
             return;
         }
@@ -340,11 +355,10 @@ export abstract class Light extends Node {
         if (!scene) {
             return;
         }
-        this._watchSceneForMeshListRelease(scene);
         // A light held by a clustered container is out of the per-mesh light path entirely
         // (the container calls `removeFromScene`), so nothing would read the sets back.
         // Babylon.js skips its resync for the same reason.
-        if (!scene._hasStarted || this._clusteredContainer) {
+        if (!scene._hasStarted || scene._lite._z || this._clusteredContainer) {
             return;
         }
         // The selection is baked into each renderable at build time (the shader's light-count

@@ -257,7 +257,7 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         const lateWork: LateWork[] = [];
         return {
             _hasStarted: started,
-            _lite: { id: "scene-lite", _built: built, lights: [], _disposables: [] },
+            _lite: { id: "scene-lite", _built: built, lights: [], _disposables: [], _z: false },
             _registerLight: vi.fn(),
             _unregisterNode: vi.fn(),
             getEngine: () => ({
@@ -275,8 +275,10 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
 
     /** Tear the scene down the way `disposeScene` does, without touching its lights. */
     function disposeSceneStub(scene: SceneStub): void {
-        const disposables = (scene._lite as unknown as { _disposables: (() => void)[] })._disposables;
-        disposables.splice(0).forEach((dispose) => dispose());
+        const lite = scene._lite as unknown as { _disposables: (() => void)[]; _z: boolean };
+        // `disposeScene` marks the scene before draining, which is what a later registration reads.
+        lite._z = true;
+        lite._disposables.splice(0).forEach((dispose) => dispose());
     }
 
     /**
@@ -706,6 +708,45 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         // Only the retired scene's light comes off the array; the live scene keeps observing it.
         expect(excluded(led)).toEqual(shared.map((m) => m._lite));
         expect(excluded(old)).toEqual([shared[0]!._lite]);
+    });
+
+    it("releases a retained list when the scene is disposed in the same tick as the assignment", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const moduleMeshes = [mesh("floor")];
+
+        rim.excludedMeshes = moduleMeshes;
+        // Deliberately no `flush()`: the publish is still queued, so the release has to be in place from
+        // the assignment itself rather than from the sync running behind it.
+        disposeSceneStub(scene);
+        await flush();
+        rebuildMock.mockClear();
+
+        const wall = mesh("wall");
+        moduleMeshes.push(wall);
+        await flush();
+
+        expect(rebuildMock).not.toHaveBeenCalled();
+        expect(excluded(rim)).toEqual([moduleMeshes[0]!._lite]);
+    });
+
+    it("does not retain a light whose list is first assigned after its scene was disposed", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const moduleMeshes = [mesh("floor")];
+
+        disposeSceneStub(scene);
+        rim.excludedMeshes = moduleMeshes;
+        await flush();
+        rebuildMock.mockClear();
+
+        const wall = mesh("wall");
+        moduleMeshes.push(wall);
+        await flush();
+
+        // There is no disposal left to wait for, so nothing would ever take this light off the array.
+        expect(rebuildMock).not.toHaveBeenCalled();
+        expect(excluded(rim)).toEqual([moduleMeshes[0]!._lite]);
     });
 
     it("survives repeated create, dispose and reuse against one retained list", async () => {
