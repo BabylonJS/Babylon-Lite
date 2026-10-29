@@ -542,7 +542,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     if (_rightHanded !== null) {
         // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike the
         // procedural meshes the material-level "cw" is set for. The winding is a property of the
-        // mesh (`_isCcwMesh`), never of its shared GPU geometry.
+        // mesh (`_primitiveFeatures` bit 11), never of its shared GPU geometry.
         result._pipelineForCcwMesh = (gpu) => {
             const key = "ccw" + gpu._vbKey;
             let ccw = meshPipelines?.get(key);
