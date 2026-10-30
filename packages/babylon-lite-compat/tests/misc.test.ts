@@ -33,6 +33,7 @@ describe("Constants", () => {
         expect(Constants.ALPHA_ONEONE).toBe(6);
         expect(Constants.ALPHA_PREMULTIPLIED).toBe(7);
         expect(Constants.ALPHA_REPLACE_COLOR).toBe(21);
+        expect(Constants.TEXTURE_CREATIONFLAG_SAMPLED_DATA_ONLY).toBe(2);
     });
 });
 

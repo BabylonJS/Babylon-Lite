@@ -1,4 +1,4 @@
-import { clearBoneOverride, getBoneByName as getLiteBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling } from "babylon-lite";
+import { clearBoneOverride, getBoneByName as getLiteBoneByName, resetSkeletonToRest, setBonePosition, setBoneRotationQuaternion, setBoneScaling } from "babylon-lite";
 import type { Bone as LiteBone, Skeleton as LiteSkeleton } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -28,8 +28,12 @@ export class Skeleton {
             name: { value: `skeleton${index}`, enumerable: true },
             id: { value: `skeleton${index}`, enumerable: true },
             _lite: { value: lite },
-            bones: { value: lite.bones.map((bone) => Bone._fromLite(bone, skeleton)) },
         });
+        const wrappers = new Map<LiteBone, Bone>();
+        for (const bone of lite.bones) {
+            wrappers.set(bone, Bone._fromLite(bone, skeleton, wrappers));
+        }
+        Object.defineProperty(skeleton, "bones", { value: [...wrappers.values()], enumerable: true });
         return skeleton;
     }
 
@@ -42,12 +46,21 @@ export class Skeleton {
         const index = this.getBoneIndexByName(name);
         return index < 0 ? null : this.bones[index]!;
     }
+
+    /** Babylon.js `Skeleton.returnToRest()` — clear every compat bone override. */
+    public returnToRest(): void {
+        resetSkeletonToRest(this._lite);
+    }
+
+    /** Babylon.js `Skeleton.prepare()` — Lite keeps loaded/evaluated bone matrices ready, so no additional bake is needed. */
+    public prepare(_dontCheckFrameId = false): void {}
 }
 
 export class Bone {
     private _enabled = true;
 
     public readonly name!: string;
+    public readonly parent!: Bone | null;
 
     /** @internal Underlying loader-produced Babylon Lite bone. */
     public readonly _lite!: LiteBone;
@@ -62,10 +75,11 @@ export class Bone {
     }
 
     /** @internal Wrap a loader-produced Babylon Lite bone. */
-    public static _fromLite(lite: LiteBone, skeleton: Skeleton): Bone {
+    public static _fromLite(lite: LiteBone, skeleton: Skeleton, wrappers?: ReadonlyMap<LiteBone, Bone>): Bone {
         const bone = Object.create(Bone.prototype) as Bone;
         Object.defineProperties(bone, {
             name: { value: lite.name, enumerable: true },
+            parent: { get: () => (lite.parent ? (wrappers?.get(lite.parent) ?? null) : null), enumerable: true },
             _lite: { value: lite },
             _skeleton: { value: skeleton },
             _enabled: { value: true, writable: true },

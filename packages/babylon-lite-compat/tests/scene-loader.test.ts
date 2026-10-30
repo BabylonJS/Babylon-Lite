@@ -68,6 +68,19 @@ describe("AssetContainer.addAllToScene", () => {
         expect(container.meshes).toEqual(wrappers);
     });
 
+    it("removes adopted skeletons from scene.skeletons when the container is disposed", () => {
+        const skeleton = { bones: [], _byName: new Map(), _overrides: new Map(), _worldOverrides: new Map(), _bake: vi.fn() };
+        const lite = { entities: [], skeletons: [skeleton] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite);
+        const scene = new Scene(new NullEngine());
+
+        container.addAllToScene(scene);
+        expect(scene.skeletons).toHaveLength(1);
+
+        container.dispose();
+        expect(scene.skeletons).toEqual([]);
+    });
+
     it("detaches reparented USD meshes and retires their canonical wrappers", () => {
         const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
         const root = { name: "__root__", children: [mesh] };

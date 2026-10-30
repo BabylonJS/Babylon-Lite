@@ -29,6 +29,8 @@ import {
     ThinFSR1SharpenPostProcess,
     ParticleHelper,
     PointsCloudSystem,
+    KHR_materials_scatter,
+    RegisterKHR_materials_scatter,
     CannonJSPlugin,
     AmmoJSPlugin,
     RecastJSPlugin,
@@ -131,6 +133,19 @@ describe("Extended unsupported stubs throw on construction", () => {
     it("exports the min/max node registration stub with its structural blocker", () => {
         expect(() => RegisterMinMaxReducerBlock()).toThrow(LiteCompatError);
         expect(() => RegisterMinMaxReducerBlock()).toThrow(/FrameGraph handles/);
+    });
+
+    it("registers KHR_materials_scatter idempotently and defers failure until the extension is used", () => {
+        expect(() => RegisterKHR_materials_scatter()).not.toThrow();
+        const extension = new KHR_materials_scatter({ isExtensionUsed: () => true });
+        expect(extension.name).toBe("KHR_materials_scatter");
+        expect(extension.enabled).toBe(true);
+        expect(extension.order).toBe(172);
+        expect(extension.loadMaterialPropertiesAsync("/materials/0", {}, {})).toBeNull();
+        expect(() => extension.loadMaterialPropertiesAsync("/materials/0", { extensions: { KHR_materials_scatter: {} } }, {})).toThrow(LiteCompatError);
+        expect(() => extension.loadMaterialPropertiesAsync("/materials/0", { extensions: { KHR_materials_scatter: {} } }, {})).toThrow(
+            /screen-space subsurface-scattering prepass/
+        );
     });
 
     it("keeps Effect callbacks structurally usable before construction throws", () => {

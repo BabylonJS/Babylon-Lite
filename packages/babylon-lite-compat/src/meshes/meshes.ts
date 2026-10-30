@@ -42,6 +42,7 @@ import {
     updateLineSystem,
     createLineMaterial,
     setLineMaterialColor,
+    shareMeshMorphTargets,
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
@@ -60,7 +61,7 @@ import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
 import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
-import type { MorphTargetManager } from "../morph/morph.js";
+import { MorphTargetManager } from "../morph/morph.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial | LinesMaterial;
 
@@ -789,6 +790,19 @@ export class Mesh extends AbstractMesh {
         return mesh;
     }
 
+    /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
+    public override _bindLoadedScene(scene: Scene): void {
+        super._bindLoadedScene(scene);
+        for (const manager of this._ownedMorphTargetManagers) {
+            scene._retainMorphTargetManagerOwnership(manager);
+        }
+        if (this._morphTargetManager?._lite) {
+            this._morphTargetManager._adoptEngine(scene._getLiteEngine());
+        } else if (this._morphTargetManager) {
+            scene._registerMorphTargetManager(this, this._morphTargetManager);
+        }
+    }
+
     /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
     public static _fromLiteHierarchy(
         lite: LiteMesh,
@@ -815,6 +829,12 @@ export class Mesh extends AbstractMesh {
     }
 
     private _morphTargetManager: MorphTargetManager | null = null;
+    private readonly _ownedMorphTargetManagers = new Set<MorphTargetManager>();
+
+    private _retainMorphTargetManagerOwnership(manager: MorphTargetManager): void {
+        this._ownedMorphTargetManagers.add(manager);
+        this._scene?._retainMorphTargetManagerOwnership?.(manager);
+    }
 
     /**
      * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
@@ -823,13 +843,40 @@ export class Mesh extends AbstractMesh {
      * CPU geometry exists) and assigns it onto the Lite mesh before registration.
      */
     public get morphTargetManager(): MorphTargetManager | null {
+        if (!this._morphTargetManager && this._lite.morphTargets) {
+            this._morphTargetManager = MorphTargetManager._fromLite(this._lite.morphTargets, this._scene?._getLiteEngine());
+            this._retainMorphTargetManagerOwnership(this._morphTargetManager);
+        }
         return this._morphTargetManager;
     }
     public set morphTargetManager(value: MorphTargetManager | null) {
-        this._morphTargetManager = value;
-        if (value && this._scene) {
-            this._scene._registerMorphTargetManager(this, value);
+        const lite = value?._lite ?? null;
+        if (this._morphTargetManager === value && this._lite.morphTargets === lite) {
+            return;
         }
+        this._morphTargetManager = value;
+        if (value) {
+            this._retainMorphTargetManagerOwnership(value);
+        }
+        this._scene?._registerMorphTargetManager(this, value?._lite ? null : value);
+        if (!value) {
+            shareMeshMorphTargets(this._lite, null);
+            return;
+        }
+        if (lite) {
+            shareMeshMorphTargets(this._lite, lite);
+            if (this._scene) {
+                value._adoptEngine(this._scene._getLiteEngine());
+            }
+        }
+    }
+
+    /** @internal Release manager ownership claims during scene/container teardown. */
+    public _releaseMorphTargetManagerOwnership(): void {
+        for (const manager of this._ownedMorphTargetManagers) {
+            manager.dispose();
+        }
+        this._ownedMorphTargetManagers.clear();
     }
 
     // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
