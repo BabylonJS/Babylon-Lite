@@ -177,7 +177,9 @@ exercises the left-handed one:
   because Lite does not port `EXT_lights_image_based` yet (see above). Their specs recapture the
   Babylon.js reference on the test browser on every run (`captureGolden({ force: true })`, as specs
   165, 212 and 214 do): the committed goldens were captured on another GPU and only seed the gallery
-  thumbnails, while CI renders on BrowserStack's macOS GPU.
+  thumbnails, while CI renders on BrowserStack's macOS GPU. Two exceptions keep their source scene's
+  committed golden, as the source does: 336 (scene 159's reference writes 0.10, which some GPUs round
+  to 26/255, Lite 25/255) and 342 (its reference is scene 265's, so its golden is a copy of 265's).
 - Two twins carry a looser `maxMad` than their source scene, set from measured runs: 323 (0.01 vs
   scene 13's 0.008) measured 0.0089, where Babylon.js right- vs left-handed differ by 0.779 and Lite by
   0.782, i.e. noise; 328 (6.4 vs scene 250's 6.1) measured 6.21. Scene 250 has no skybox, but its PBR

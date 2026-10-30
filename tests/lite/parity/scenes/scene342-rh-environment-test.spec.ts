@@ -18,7 +18,10 @@ test.skip(!!sceneConfig.skipParity, "Scene 342 skipped via skipParity in scene-c
 
 test("Scene 342 — EnvironmentTest matches Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 342, force: true, timeout: 90_000 });
+    // No `force`, as in scene 265: this twin's reference page renders scene 265's reference (see
+    // lab/lite/src/bjs/scene342.ts), so its golden is a byte copy of 265's committed golden, against which
+    // scene 265's maxMad was measured. Recapturing it on another GPU measures that GPU, not handedness.
+    await captureGolden(browser, { sceneId: 342, timeout: 90_000 });
 
     await page.goto("/scene342.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
