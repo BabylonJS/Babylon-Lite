@@ -4,6 +4,7 @@ import { rebuildDynamicTexture2D } from "../../../packages/babylon-lite/src/text
 import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { enableDeviceLostSpriteRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-sprite-recovery";
 
 interface Captured {
     createDesc?: GPUTextureDescriptor;
@@ -20,6 +21,8 @@ function fakeSource(width = 8, height = 8): HTMLCanvasElement {
 
 function makeEngine(cap: Captured, opts: { throwOnCopy?: boolean } = {}): EngineContext {
     const device = {
+        features: new Set<GPUFeatureName>(),
+        lost: new Promise<GPUDeviceLostInfo>(() => undefined),
         createTexture: (desc: GPUTextureDescriptor) => {
             cap.createDesc = desc;
             return {
@@ -94,6 +97,21 @@ describe("createDynamicTexture", () => {
 });
 
 describe("updateDynamicTexture", () => {
+    it("does not inspect recovery metadata when recovery is disabled", () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        const tex = createDynamicTexture(engine, 16, 16);
+        Object.defineProperty(tex, "_recoverySource", {
+            get(): never {
+                throw new Error("Disabled recovery must not inspect texture recovery metadata");
+            },
+        });
+
+        updateDynamicTexture(engine, tex, fakeSource(16, 16));
+
+        expect(cap.copyCalls).toHaveLength(1);
+    });
+
     it("blits the source with flipY (Y-up default) and no CPU readback", () => {
         const cap = newCap();
         const engine = makeEngine(cap);
@@ -122,15 +140,36 @@ describe("updateDynamicTexture", () => {
 });
 
 describe("createDynamicTexture device-lost recovery", () => {
-    /** Enable recovery by making `engine._dlr` truthy. The capture hook owns both halves of a
-     *  stamp — assigning `_recoverySource` and remembering the texture so recovery can rebuild it
-     *  even when nothing else references it — so the stub mirrors the assignment. */
+    it("restores the latest source and flags after capture is disabled and re-enabled", async () => {
+        const cap = newCap();
+        const engine = makeEngine(cap);
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const tex = createDynamicTexture(engine, 16, 16);
+        const first = fakeSource(16, 16);
+        const latest = fakeSource(16, 16);
+        updateDynamicTexture(engine, tex, first);
+        recovery.disable();
+        expect(engine._dlr).toBeUndefined();
+        updateDynamicTexture(engine, tex, latest, { invertY: false, premultiplyAlpha: true });
+        const uncaptured = createDynamicTexture(engine, 16, 16);
+        updateDynamicTexture(engine, uncaptured, latest);
+        expect(uncaptured._recoverySource).toBeUndefined();
+
+        const resumed = enableDeviceLostSpriteRecovery(engine);
+        try {
+            cap.copyCalls.length = 0;
+            await rebuildDynamicTexture2D(engine, tex);
+            expect(cap.copyCalls).toHaveLength(1);
+            expect(cap.copyCalls[0]!.src.source).toBe(latest);
+            expect(cap.copyCalls[0]!.src.flipY).toBe(false);
+            expect(cap.copyCalls[0]!.dst.premultipliedAlpha).toBe(true);
+        } finally {
+            resumed.disable();
+        }
+    });
+
     function withRecovery(engine: EngineContext): void {
-        (engine as unknown as { _dlr: unknown })._dlr = {
-            t: (tex: { _recoverySource?: unknown }, source: unknown): void => {
-                tex._recoverySource = source;
-            },
-        };
+        enableDeviceLostSpriteRecovery(engine);
     }
 
     it("registers a pure-data 'dynamic' recovery source (creation params, no logic)", () => {

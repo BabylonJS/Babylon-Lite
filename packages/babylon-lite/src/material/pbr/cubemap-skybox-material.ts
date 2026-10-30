@@ -42,13 +42,7 @@ export async function composeSkyboxFragment(scene: SceneContext, fragment: strin
 }
 
 /** Wrap a cubemap skybox material, bind group and cube buffers as an opaque order-0 Renderable. */
-export function createCubemapSkyboxRenderable(
-    mat: CubemapSkyboxMaterial,
-    bindGroup: GPUBindGroup,
-    positionBuffer: GPUBuffer,
-    indexBuffer: GPUBuffer,
-    rebuild: () => Promise<Renderable>
-): Renderable {
+export function createCubemapSkyboxRenderable(mat: CubemapSkyboxMaterial, bindGroup: GPUBindGroup, positionBuffer: GPUBuffer, indexBuffer: GPUBuffer): Renderable {
     const r: Renderable = {
         order: 0,
         isTransparent: false,
@@ -66,7 +60,6 @@ export function createCubemapSkyboxRenderable(
             };
         },
     };
-    r._rebuild = rebuild;
     return r;
 }
 

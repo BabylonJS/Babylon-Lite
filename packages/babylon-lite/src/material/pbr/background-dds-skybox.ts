@@ -36,9 +36,9 @@ export async function buildDdsSkyboxRenderable(
     const ubo = createDdsMeshUBO(engine, rootPosition, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
-    return createCubemapSkyboxRenderable(mat, bindGroup, positionBuffer, indexBuffer, () =>
-        buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxTextureUrl, enableNoise)
-    );
+    const renderable = createCubemapSkyboxRenderable(mat, bindGroup, positionBuffer, indexBuffer);
+    engine._dlr?.c(renderable, buildDdsSkyboxRenderable, scene, skyHalfSize, rootPosition, primaryColor, skyboxTextureUrl, enableNoise);
+    return renderable;
 }
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────

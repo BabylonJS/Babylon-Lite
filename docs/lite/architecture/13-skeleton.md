@@ -8,6 +8,26 @@ Provides GPU-accelerated skeletal animation infrastructure. Creates bone texture
 
 ## Public API Surface
 
+### Opt-in skeleton discovery
+
+```typescript
+interface Bone {
+    readonly name: string;
+    /** Nearest ancestor joint in the same skin, skipping non-joint nodes. */
+    readonly parent: Bone | null;
+}
+
+function getMeshSkeleton(mesh: Mesh): Skeleton | undefined;
+```
+
+Enable `enableBoneControl()` or `enableBoneControlForSkinnedAssets()` **before** loading glTF skins. The opt-in builder creates the bones in glTF joint order, then resolves each parent by walking the node ancestry until another joint of this skin is found; roots have `parent: null`. The array position is the bone index; there is no separate `Bone.index`. Linked scene nodes are unsupported.
+
+The builder stamps a direct internal `SkeletonData._skeleton` reference alongside the existing `_overrides` on each binding. `getMeshSkeleton` reads `mesh.skeleton?._skeleton` without a registry. It returns `undefined` for non-skinned meshes, skins loaded without bone control, USD skins, and authored skeleton data. No public wrappers are created for the latter sources.
+
+To enumerate, walk `scene.meshes`, call `getMeshSkeleton`, and dedupe by `Skeleton` identity. Clones sharing runtime skeleton data share the public handle and override state. Recovery replaces GPU fields through `Object.assign` without overwriting the optional association. Bones and their parent references remain stable. Existing `setBoneVisible` and `clearBoneOverride` provide hide/show and reset; use `setMeshVisible` rather than assigning mesh visibility directly.
+
+Discovery costs one parent reference per bone and one association write per binding inside the opt-in builder. Scenes without bone control do not create these handles. Focused discovery tests cover skipped non-joint ancestors, out-of-order joints, roots, association identity, clones, unavailable handles, and recovery-style assignment. No shader or rendering changes are required.
+
 ### Functions
 
 ```typescript

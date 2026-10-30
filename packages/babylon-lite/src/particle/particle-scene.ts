@@ -3,6 +3,13 @@ import { createParticleBillboard, syncParticleBillboard } from "./particle-billb
 import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { NodeParticleSet } from "./node/node-particle.js";
+import type { ParticleSystem } from "./particle-system.js";
+
+/** Systems registered through registerNodeParticleSet, in first-registration order, listed once.
+ *  Returns a live readonly array; copy for a snapshot. Scene disposal clears the list. */
+export function getParticleSystems(scene: SceneContext): readonly ParticleSystem[] {
+    return scene._particleSystems ?? [];
+}
 
 /** One simulated frame at 60 fps, used to convert frame delta time to an update-speed ratio. */
 const FRAME_MS = 1000 / 60;
@@ -24,6 +31,16 @@ export function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSe
     for (const system of set.systems) {
         const billboard = createParticleBillboard(system);
         (system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard);
+
+        if (!scene._particleSystems) {
+            const systems: ParticleSystem[] = (scene._particleSystems = []);
+            scene._disposables.push(() => {
+                systems.length = 0;
+            });
+        }
+        if (!scene._particleSystems.includes(system)) {
+            scene._particleSystems.push(system);
+        }
 
         if (autoStart) {
             startParticleSystem(system);

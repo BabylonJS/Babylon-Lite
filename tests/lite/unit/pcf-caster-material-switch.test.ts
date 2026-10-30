@@ -87,11 +87,11 @@ function build(scene: SceneContext, buildGroup: MeshGroupBuilder): void {
     scene._groups.set(buildGroup, { r: rebuild } as unknown as SceneMeshGroup);
 }
 
-/** What the runtime build does when it lands: the group gets its rebuild, the mesh's material its next generation, and the
+/** What the runtime build does when it lands: the group gets its rebuild, the mesh its next renderable generation, and the
  *  renderable version moves. */
 function buildLanded(scene: SceneContext, mesh: Mesh): void {
     build(scene, mesh.material!._buildGroup);
-    mesh.material!._csmGen = (mesh.material!._csmGen ?? 0) + 1;
+    mesh._renderableGen = (mesh._renderableGen ?? 0) + 1;
     scene._renderableVersion++;
     scene._materialEpoch++;
 }
@@ -168,6 +168,79 @@ async function setup() {
 async function loaded(sg: ShadowGenerator): Promise<void> {
     await vi.waitFor(() => expect(sg._preloadPending).toBeUndefined());
 }
+
+describe("a registered PCF caster whose own renderable is rebuilt", () => {
+    it("rebuilds the task, whose packet may reference the per-mesh resources the rebuild retired", async () => {
+        const { lite, shaders, caster, register, frame, state } = await setup();
+        const shared = material("shared", shaders);
+        const mesh = caster(shared);
+        await register([mesh]);
+        frame();
+        const first = state();
+        const tasks = created.tasks;
+
+        // Replaced GPU geometry, for example: no material changes, only the mesh's renderable is rebuilt.
+        lite.markMeshRenderableDirty(mesh);
+        frame();
+
+        expect(state()).not.toBe(first);
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, shared]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+});
+
+describe("a registered PCF caster that casts through a PBR override", () => {
+    /** A caster whose override is also the material of a mesh outside the caster set, with the task built. */
+    async function overrideShared() {
+        const ctx = await setup();
+        const pbr = group("pbr");
+        build(ctx.scene, pbr);
+        const receive = material("receive", ctx.shaders);
+        const override = material("override", pbr);
+        override._renderFeatures = { features: 1 };
+        ctx.lite.setShadowCasterMaterial(receive, override);
+        const mesh = ctx.caster(receive);
+        const other = ctx.caster(override);
+        await ctx.register([mesh]);
+        ctx.frame();
+        return { ...ctx, override, mesh, other, first: ctx.state(), tasks: created.tasks };
+    }
+
+    it("rebuilds the task when a mesh that casts no shadow rebuilds the override with new render features", async () => {
+        const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
+
+        // An alpha-test or culling change of the override: its features are recomputed and only the meshes that draw it are
+        // rebuilt, here the non-caster. Neither the override's generation nor the caster's renderable generation moves.
+        override._renderFeatures = { features: 2 };
+        lite.markMeshRenderableDirty(other);
+        frame();
+
+        expect(state()).not.toBe(first);
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, override]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+
+    it("keeps the task while the override's features are dropped, and rebuilds it once they are recomputed", async () => {
+        const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
+
+        // A pending rebuild dropped the features: a view built now would read none of them.
+        override._renderFeatures = undefined;
+        frame();
+        expect(state()).toBe(first);
+
+        override._renderFeatures = { features: 2 };
+        lite.markMeshRenderableDirty(other);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+        expect(casts(state())).toEqual([[mesh, override]]);
+        frame();
+        expect(created.tasks).toBe(tasks + 1);
+    });
+});
 
 describe("a registered PCF caster whose material changes with the caster set unchanged", () => {
     it("rebuilds the task through the new material when its view can be built", async () => {

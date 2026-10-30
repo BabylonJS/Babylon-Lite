@@ -108,6 +108,9 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
 
         const capacity = typeof systemBlock.serialized.capacity === "number" ? systemBlock.serialized.capacity : 1000;
         const system = createParticleSystem(capacity);
+        if (typeof systemBlock.name === "string" && systemBlock.name.length > 0) {
+            system.name = systemBlock.name;
+        }
 
         let emitterWorldMatrix: Mat4;
         const emitter: Vec3 = { x: 0, y: 0, z: 0 };

@@ -18,7 +18,7 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
-import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache } from "./pbr-pipeline.js";
+import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache, _pbrBindingIdentity } from "./pbr-pipeline.js";
 import {
     _registerPbrExt,
     _getPbrExts,
@@ -46,8 +46,9 @@ import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, _meshTangentFeature, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+import type { SingleLightShaderSource } from "../../light/lighting-extension.js";
 
-type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
+type SingleLightType = string;
 
 // PBR shader paths whose WGSL a group build loads only when one of its meshes needs it. The group's
 // synchronous rebuild closure cannot compose a path its build did not load, so `group._w` (consulted on
@@ -72,10 +73,6 @@ export function _lazyPbrCaps(mesh: Mesh): number {
 /** Widening predicate for a closure built with `caps` loaded (null when nothing can be missing). */
 function lazyCapsWidening(caps: number): LazyCapsWidening | null {
     return caps === ALL_LAZY_CAPS ? null : Object.assign((mesh: Mesh) => _lazyPbrCaps(mesh) & ~caps, { _c: caps });
-}
-interface SingleLightWgslModule {
-    SINGLE_LIGHT_STRUCTS: string;
-    getSingleLightBlock(): string;
 }
 
 type SyncThinInstanceBuffers = (
@@ -187,16 +184,22 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let _multiLightLoop = "";
     if (needsSingleLightPath) {
         for (const type of singleLightTypes) {
-            const single = await importSingleLightWgsl(type);
+            const single = scene._lighting?._single?.(type) ?? (await importSingleLightWgsl(type));
             _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
             singleLightBlocks[type] = single.getSingleLightBlock;
         }
-        _getSingleLightBlock = (type) => singleLightBlocks[toSingleLightType(type)]?.() ?? "";
+        _getSingleLightBlock = (type) => singleLightBlocks[type]?.() ?? "";
     }
     if (needsMultiLightPath) {
-        const wgslMod = await import("./fragments/multilight-wgsl.js");
-        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
-        _multiLightLoop = wgslMod.getMultiLightLoop();
+        const contribution = scene._lighting?._multi?.();
+        if (contribution) {
+            _multiLightWGSL = contribution._helpers;
+            _multiLightLoop = contribution._loop;
+        } else {
+            const wgslMod = await import("./fragments/multilight-wgsl.js");
+            _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+            _multiLightLoop = wgslMod.getMultiLightLoop();
+        }
     }
     if (hasAnyAffectedLight && hasSomeShadows) {
         const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
@@ -327,6 +330,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const isOverride = materialOverride != null;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
+        const sceneFeatures = geometryContext._sceneFeatures | (s._lighting?._pbrFeatures?.(mesh.id) ?? 0);
         const lightCount = lr > 0 ? 1 : -lr;
         const features = renderFeatures.features;
         const features2 = renderFeatures.features2 ?? 0;
@@ -387,7 +391,21 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
-        const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
+        const materialBindGroupStatic = needsTaskRefraction
+            ? null
+            : createPbrMeshBindGroup(
+                  engine,
+                  bindings,
+                  composed,
+                  meshUBO,
+                  materialUBO,
+                  mat,
+                  envTextures ?? null,
+                  mesh,
+                  undefined,
+                  _pbrBindingIdentity?.(s._lighting?._bindingId),
+                  disposers
+              );
 
         const shadowBindGroup = receiveShadows && bindings._shadowBGL ? shadowBindings!(bindings._shadowBGL) : null;
 
@@ -522,7 +540,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             bind(eng, sig) {
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
-                    ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
+                    ? createPbrMeshBindGroup(
+                          engine,
+                          bindings,
+                          composed,
+                          meshUBO,
+                          materialUBO,
+                          mat,
+                          envTextures ?? null,
+                          mesh,
+                          sig._transmissionTexture,
+                          _pbrBindingIdentity?.(s._lighting?._bindingId),
+                          disposers
+                      )
                     : materialBindGroupStatic!;
                 // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
                 const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update, sig);
@@ -582,10 +612,6 @@ export interface _PbrGeometryContext {
     _b?: ReadonlySet<string>;
 }
 
-function toSingleLightType(type: string): SingleLightType {
-    return type === "hemispheric" || type === "directional" || type === "spot" ? type : "point";
-}
-
 function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): SingleLightType {
     let packed = 0;
     for (const light of lights) {
@@ -593,14 +619,14 @@ function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: n
             continue;
         }
         if (packed === packedIndex) {
-            return toSingleLightType(light.lightType);
+            return light.lightType;
         }
         packed++;
     }
     return "point";
 }
 
-async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLightWgslModule> {
+async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLightShaderSource> {
     if (type === "hemispheric") {
         return import("./fragments/singlelight-hemispheric-wgsl.js");
     }

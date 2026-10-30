@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createParticleSystem, startParticleSystem, animateParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
+import {
+    createParticleSystem,
+    startParticleSystem,
+    stopParticleSystem,
+    isParticleSystemStarted,
+    animateParticleSystem,
+} from "../../../packages/babylon-lite/src/particle/particle-system";
 
 /**
  * SPIKE validation for the data-oriented simulation loop. Hand-wires minimal create/update steps and
@@ -7,6 +13,30 @@ import { createParticleSystem, startParticleSystem, animateParticleSystem } from
  * object runtime's `animateParticleSystem` — the reusable foundation the block port will target.
  */
 describe("Particle system simulation loop", () => {
+    it("reports started state independently of draining live particles", () => {
+        const system = createParticleSystem(4);
+        system.emitRate = 10;
+        system.updateSpeed = 0.1;
+        system.createLifeTime = (i) => {
+            system.buffer.lifeTime[i] = 2;
+        };
+        expect(isParticleSystemStarted(system)).toBe(false);
+        startParticleSystem(system);
+        expect(isParticleSystemStarted(system)).toBe(true);
+        animateParticleSystem(system, 1);
+        expect(system.buffer.alive).toBe(1);
+        stopParticleSystem(system);
+        expect(isParticleSystemStarted(system)).toBe(false);
+        expect(system.buffer.alive).toBe(1);
+        animateParticleSystem(system, 1);
+        expect(system.buffer.alive).toBe(1);
+        startParticleSystem(system);
+        expect(isParticleSystemStarted(system)).toBe(true);
+        system.targetStopDuration = 0.1;
+        animateParticleSystem(system, 1);
+        expect(isParticleSystemStarted(system)).toBe(false);
+    });
+
     it("emits at the expected rate, integrates position, and recycles at lifetime", () => {
         const system = createParticleSystem(200);
         system.emitRate = 100;

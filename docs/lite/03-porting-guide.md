@@ -67,6 +67,11 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 
 ## Key Differences
 
+For rectangular emitters, see [Rectangular Area Lights](06-area-lights.md).
+Create the light with `createRectAreaLight(position, width, height)`, add it to
+the scene, and await `enableRectAreaLights(scene)` before `registerScene(scene)`.
+Dimensions are local-space full extents; emission points along local **-Z**.
+
 ### 1. No Scene in Constructors
 
 BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `addToScene()` them explicitly.
@@ -201,6 +206,12 @@ await loadEnvironment(scene, envUrl, {
     brdfUrl: "/brdf-lut.png",
 });
 ```
+
+The asset container keeps the glTF node hierarchy: each glTF node is a transform node and each primitive is a mesh under it,
+where Babylon.js returns one `Mesh` for a single-primitive node. Through `@babylonjs/lite-compat`, `ImportMeshAsync(...).meshes`
+is a flattened view of that hierarchy, so reparent loaded meshes with `setParent()` rather than assigning `.parent` to every
+entry, or transforms inherited from glTF nodes are lost. See
+[glTF import hierarchy and reparenting](https://github.com/BabylonJS/Babylon-Lite/blob/master/packages/babylon-lite-compat/README.md#gltf-import-hierarchy-and-reparenting).
 
 ### 6. Shadows Attach to Lights
 
