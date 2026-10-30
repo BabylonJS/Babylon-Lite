@@ -1,8 +1,9 @@
 # Testing
 
 Babylon Lite uses four categories of automated tests, all orchestrated by
-Playwright and/or Vitest. An Azure Pipelines CI pipeline runs parallel
-jobs on every PR targeting `master`.
+Playwright and/or Vitest. An Azure Pipelines CI pipeline runs ten parallel
+jobs on every PR targeting `master`, and three validation jobs after each push
+to `master`.
 
 ---
 
@@ -324,18 +325,32 @@ For local development, add these to `.env.local` (git-ignored).
 ## Azure Pipelines CI
 
 **Config:** `azure-pipelines.yml`  
-**Trigger:** PRs targeting `master`
+**Triggers:** PRs targeting `master` and pushes to `master`
 
-Parallel jobs include:
+PR builds validate a proposed merge against the current base. Post-merge builds
+run the existing Unit Tests, Lint, and Compat jobs against the commit that
+actually landed, catching interactions between independently validated PRs.
 
-| Job                    | What it does                                                   |
-| ---------------------- | -------------------------------------------------------------- |
-| **Unit Tests**         | Vitest unit tests + Playwright plumbing tests                  |
-| **Bundle Size**        | Ceiling checks + delta vs baseline                             |
-| **Perf Regression**    | Current vs baseline on BrowserStack (macOS Chrome)             |
-| **Parity (Cloud)**     | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)         |
-| **WebGPU Integration** | Nonvisual point-splatting shader/readback tests on real WebGPU |
-| **Lint**               | ESLint + TypeScript `--noEmit` type-check                      |
+| Job                     | PR build | `master` push | What it does                                                    |
+| ----------------------- | -------- | ------------- | --------------------------------------------------------------- |
+| **Release Markers**     | Yes      | No            | Breaking-change marker validation                               |
+| **API Report**          | Yes      | No            | Public API diff and breaking-change validation                  |
+| **Unit Tests**          | Yes      | Yes           | Unit/build tests, plumbing, and lite-gl integration/parity/perf |
+| **Bundle Size**         | Yes      | No            | Ceiling checks and delta vs published baseline                  |
+| **Perf Regression**     | Yes      | No            | Current vs baseline on BrowserStack (macOS Chrome)              |
+| **Parity (Cloud)**      | Yes      | No            | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)          |
+| **WebGPU Integration**  | Yes      | No            | Nonvisual point-splatting shader/readback tests on real WebGPU  |
+| **Lint**                | Yes      | Yes           | ESLint and TypeScript `--noEmit` type-check                     |
+| **Compat Layer**        | Yes      | Yes           | Compat type-check, package build, and unit tests                |
+| **Playground Snapshot** | Yes      | No            | Per-PR playground deployment and URL comment                    |
+
+The seven jobs excluded on `master` use a job-level branch condition. This keeps
+PR reporting and snapshot deployments out of post-merge runs and avoids repeating
+cloud-browser tests. Bundle ceilings on `master` remain enforced by the separate
+`azure-pipelines-bundle-manifest.yml` pipeline.
+
+The condition excludes `refs/heads/master`; it does not require PR context.
+Manually queued feature-branch runs retain their existing behavior.
 
 ### Required Pipeline Variable Groups
 
