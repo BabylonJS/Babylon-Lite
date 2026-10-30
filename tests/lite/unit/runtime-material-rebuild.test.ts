@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
@@ -15,6 +15,9 @@ import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/sce
 import { B as startRuntimeMeshBuild, C as materializeRuntimeMeshes } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+
+const composed = vi.hoisted(() => ({ value: false }));
+vi.mock("../../../packages/babylon-lite/src/material/pbr/pbr-built-variant.js", () => ({ _pbrRebuildsComposed: () => composed.value }));
 
 function createScene(engine: EngineContext): SceneContext {
     return {
@@ -851,17 +854,139 @@ describe("shared PBR group rebuild", () => {
         builder._materialFamily = "pbr";
         const createMaterial = (): Material => ({ _buildGroup: builder }) as Material;
         const createMeshes = (material: Material, count: number): Mesh[] => Array.from({ length: count }, () => ({ _gpu: {}, material, children: [] }) as unknown as Mesh);
-        const addBuiltGroup = (meshes: Mesh[]): void => {
+        // The meshes the built group's own closure rebuilt one by one.
+        const singles: Mesh[] = [];
+        const addBuiltGroup = (meshes: Mesh[]): SceneMeshGroup => {
             const output = meshes.map(renderable);
             scene.meshes.push(...meshes);
             scene._renderables.push(...output);
-            scene._groups.set(builder, Object.assign([...meshes], { r: (_target: SceneContext, mesh: Mesh) => renderable(mesh), o: output }));
+            const group = Object.assign([...meshes], { r: (_target: SceneContext, mesh: Mesh) => (singles.push(mesh), renderable(mesh)), o: output }) as SceneMeshGroup;
+            scene._groups.set(builder, group);
+            return group;
         };
         const recover = (): void => {
             failure = undefined;
         };
-        return { scene, builder, builds, outputs, started, finish: () => finishBuild(), recover, createMaterial, createMeshes, addBuiltGroup };
+        return { scene, builder, builds, outputs, singles, started, finish: () => finishBuild(), recover, createMaterial, createMeshes, addBuiltGroup };
     }
+
+    // `_pbrRebuildsComposed` (its own tests run the real PBR build) answers whether the group already composed the variants.
+    beforeEach(() => {
+        composed.value = false;
+    });
+
+    // The first PBR material rebuild only starts importing the check (see the cold-start case below).
+    beforeAll(async () => {
+        const { scene, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        addBuiltGroup(createMeshes(material, 1));
+        await rebuildMaterial(scene, material);
+        await vi.dynamicImportSettled();
+    });
+
+    it("rebuilds the group on the first PBR material rebuild, and decides with the check once it is loaded", async () => {
+        vi.resetModules();
+        const { rebuildMaterial: coldRebuildMaterial } = await import("../../../packages/babylon-lite/src/material/material-rebuild");
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+        composed.value = true;
+
+        await coldRebuildMaterial(scene, material);
+        expect(builds).toEqual([meshes]);
+        expect(singles).toEqual([]);
+
+        // Loaded now: the meshes are rebuilt on their own, without another group build or frame-graph build.
+        await vi.dynamicImportSettled();
+        const frameGraphBuilds = vi.mocked(scene._frameGraph.build).mock.calls.length;
+        await coldRebuildMaterial(scene, material);
+        expect(builds).toHaveLength(1);
+        expect(scene._frameGraph.build).toHaveBeenCalledTimes(frameGraphBuilds);
+    });
+
+    it("rebuilds only a PBR material's meshes, through the group closure, when the group already composed their variants", async () => {
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const changed = createMaterial();
+        const rebuilt = createMeshes(changed, 2);
+        const kept = createMeshes(createMaterial(), 1);
+        const group = addBuiltGroup([...rebuilt, ...kept]);
+        const before = [...scene._renderables];
+        composed.value = true;
+
+        await rebuildMaterial(scene, changed);
+
+        // No group build and no frame-graph build: the material's meshes are rebuilt like material assignments.
+        expect(builds).toHaveLength(0);
+        expect(scene._frameGraph.build).not.toHaveBeenCalled();
+        expect(singles).toEqual(rebuilt);
+        expect(scene._renderables.filter((entry) => before.includes(entry))).toEqual([before[2]]);
+        expect(scene._renderables).toHaveLength(3);
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(expect.arrayContaining([...rebuilt, ...kept]));
+        // The group's tracked output follows, so a later group rebuild drops the new renderables, not the old ones.
+        expect(group.o).toHaveLength(3);
+        expect(group.o!.every((entry) => scene._renderables.includes(entry))).toBe(true);
+    });
+
+    it("rebuilds the whole PBR group when it did not compose their variants", async () => {
+        const { scene, builds, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const meshes = createMeshes(material, 2);
+        addBuiltGroup(meshes);
+
+        await rebuildMaterial(scene, material);
+
+        expect(builds).toEqual([meshes]);
+        expect(singles).toEqual([]);
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual(meshes);
+    });
+
+    it("leaves meshes queued for other reasons to the next frame's drain", async () => {
+        const { scene, singles, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const changed = createMaterial();
+        const [rebuilt, queued] = createMeshes(changed, 1).concat(createMeshes(createMaterial(), 1));
+        addBuiltGroup([rebuilt!, queued!]);
+        scene._materialSwapQueue.push(queued!);
+        composed.value = true;
+
+        await rebuildMaterial(scene, changed);
+
+        expect(singles).toEqual([rebuilt]);
+        expect(scene._materialSwapQueue).toEqual([queued]);
+    });
+
+    it("rebuilds the frame graph once afterwards when asked, also on the per-mesh path", async () => {
+        const { scene, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        addBuiltGroup(createMeshes(material, 2));
+        composed.value = true;
+
+        await rebuildMaterial(scene, material, { rebuildFrameGraph: true });
+
+        expect(scene._frameGraph.build).toHaveBeenCalledOnce();
+    });
+
+    it("reports a mesh rebuild that throws on the per-mesh path and rebuilds the group instead", async () => {
+        const { scene, builds, createMaterial, createMeshes, addBuiltGroup } = createPbrFixture();
+        const material = createMaterial();
+        const [mesh] = createMeshes(material, 1);
+        const group = addBuiltGroup([mesh!]);
+        const failure = new Error("rebuildSingle failed");
+        group.r = () => {
+            throw failure;
+        };
+        composed.value = true;
+        const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+
+        // Reported once, and the mesh is rebuilt with the group instead of staying queued for every frame drain to rethrow.
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(scene._materialSwapQueue).toEqual([]);
+        await vi.waitFor(() => expect(builds).toEqual([[mesh]]));
+        expect(scene._renderables.map((entry) => entry.mesh)).toEqual([mesh]);
+        report.mockRestore();
+    });
 
     it("builds one PBR group for every mesh of one swap drain", async () => {
         const { scene, builds, outputs, createMaterial, createMeshes } = createPbrFixture();

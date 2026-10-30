@@ -294,6 +294,31 @@ Material renderables intentionally do not import material-view helpers or unwrap
 
 `markMaterialUboDirty()` increments `source._uboVersion`, so every renderable/view derived from that source can observe scalar/vector UBO changes independently. `rebuildMaterial()` scans scene meshes and matches either the source or views whose `source` is that material; `rebuildViews: false` limits matching to the exact supplied material/view. Use it for feature/layout changes such as texture changes, sampler/layout changes, alpha/culling changes, or view feature changes.
 
+### PBR Material Rebuild Lifecycle
+
+`rebuildMaterial()` clears the source material's cached `_renderFeatures`, runs the optional `scene._materialRebuild` seam, and collects the matching scene meshes. Meshes whose material family is not `"pbr"` always rebuild one by one through their group's closure (`resolveMeshRebuild`). The PBR meshes of the call take one of two paths, decided synchronously inside the call, so a request joins a pending PBR group rebuild exactly when it would without the choice:
+
+- **Group rebuild (default).** Each PBR mesh goes through the runtime mesh build (`scene-runtime-mesh-build.ts`) and joins one PBR group rebuild (`rebuildScenePbrPipelines`): every PBR renderable of the scene is replaced, the captured scene state is refreshed, a new PBR context is published, and the frame graph is rebuilt. Before the scene is built, a PBR mesh without a built group is skipped (the deferred build will build it).
+- **Per-mesh rebuild.** Taken only when `_pbrRebuildsComposed(scene, pbrMeshes)` (`material/pbr/pbr-built-variant.ts`) returns `true` for the whole set. Each PBR mesh is rebuilt through the scene-local group closure `r`, exactly like a material assignment, and no other PBR renderable, the PBR context or the frame graph is touched.
+
+**Cold start.** `material-rebuild.ts` loads `pbr-built-variant.ts` with a dynamic import and keeps `_pbrRebuildsComposed` in a module-level variable. The first `rebuildMaterial()` that matches a PBR mesh (in any scene) only starts that import and takes the group rebuild; once the import has resolved, later calls use the check. A failed import is ignored and PBR rebuilds keep taking the group rebuild. Scenes that never rebuild a PBR material fetch none of this code.
+
+**Build-time snapshot.** `buildPbrRenderables()` builds all of its meshes through `rebuildSingle`, then stores `_b = new Set(composePbr._c.keys())` on its PBR geometry context (`_PbrGeometryContext._b`): the composer-cache keys that this group build composed (see 06-pbr-material, Composed Shader Caching). Every variant in the snapshot was composed after the build loaded the lazy WGSL and helper modules its meshes need, so composing it again returns a complete shader. Variants composed later through the closure (runtime material assignments) are not added: such a variant may lack a module the build never loaded. Each group build (initial build, the per-mesh context of a runtime build, group rebuild) stores its own snapshot on the context it publishes.
+
+**Eligibility.** `_pbrRebuildsComposed` returns `true` only when no runtime build is in flight (`scene._runtimeBuilds.w`) and every PBR mesh of the set passes all of:
+
+1. The material's scene-local group exists, has its closure `r`, and lists the mesh (a mesh outside the member list needs the group rebuild to move it in).
+2. The mesh has no thin instances and no runtime thin-instance build (`_runtimeThinBuild`), and the material is not transmissive (`_transmissive`): their closures also capture culling and refraction state the key does not encode.
+3. The key the closure will ask its composer for is in the context's `_b`. The key is `_pbrComposeKey(features, features2, meshFeatures, ctx._sceneFeatures, lightMode, singleLightType, mesh._gpu._vbKey ?? "", mat._uv2Mask ?? 0, mat._pi ?? 0)`, where `features`/`features2` come from the cached `_renderFeatures` or, when it was cleared, from `_computePbrMaterialFeatures(mat)` without populating the cache, and `ctx`, `meshFeatures`, `lightMode` and `singleLightType` come from `_pbrMeshRequest(scene, mesh, features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT))`.
+
+One ineligible mesh sends all PBR meshes of the call to the group rebuild. If the check throws, the error is reported through the returned promise and the PBR meshes take the group rebuild.
+
+**Per-mesh execution.** The call empties the scene's material-swap queue, fills it with the PBR meshes of the call, drains it synchronously with `processMaterialSwaps(scene)`, and then puts back the meshes that were queued for other reasons, which keep their place for the next frame's drain. The drain rebuilds each mesh through `r` and bumps the material's `_csmGen`, `scene._renderableVersion` and `scene._materialEpoch`, as a material assignment does. The reused closure keeps the scene state it captured (environment textures, shadow lights, fog, tone mapping) instead of refreshing it. With `rebuildFrameGraph: true`, the frame graph is rebuilt once after all pending work settles, on either path.
+
+**Fallback.** If the drain throws, the call empties the queue, reports the error once through the returned promise (`rebuildMaterial()` forwards it to `scene._runtimeBuilds._x` and `console.error`), and sends those meshes to the group rebuild. The drain has already retired the failing mesh's renderable, so the mesh draws again once that group rebuild commits. Leaving the meshes queued instead would make the frame drain rethrow every frame.
+
+**Tests.** `tests/lite/unit/pbr-built-variant.test.ts` covers the eligibility rules (a variant another mesh of the group was built with; a variant composed through the closure after the build; UV2, UV-transform and shadow-receiving changes the build never composed; thin-instanced, transmissive and non-member meshes; a runtime build in flight). `tests/lite/unit/runtime-material-rebuild.test.ts` covers the cold start, both paths, meshes queued for other reasons, `rebuildFrameGraph` on the per-mesh path, and the fallback after a throwing rebuild.
+
 ## `_buildGroup` Pattern
 
 Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` groups meshes by builder, and deferred builders run before rendering to produce renderables.

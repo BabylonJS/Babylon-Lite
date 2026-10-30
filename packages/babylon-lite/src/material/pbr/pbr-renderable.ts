@@ -573,6 +573,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     };
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
+    geometryContext._b = new Set(composePbr._c.keys());
 
     // Stash the per-scene PBR context on the scene so the PBR geometry-renderer
     // path can reuse the same composer / env / shadow setup without re-running
@@ -605,6 +606,10 @@ export interface _PbrGeometryContext {
     readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
     readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null;
+    /** @internal The variant keys (`_pbrComposeKey`) this context's group build composed, each with everything it needs
+     *  loaded. A variant composed later through the build's closure (a runtime material assignment) may lack something
+     *  the build never loaded, so it is not listed. */
+    _b?: ReadonlySet<string>;
 }
 
 function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): SingleLightType {
