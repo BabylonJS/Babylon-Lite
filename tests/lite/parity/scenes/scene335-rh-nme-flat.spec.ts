@@ -17,7 +17,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 335 skipped via skipParity in scene-c
 
 test("Scene 335 — NME flat colour matches Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 335 });
+    await captureGolden(browser, { sceneId: 335, force: true });
 
     await page.goto("/scene335.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

@@ -11,7 +11,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 336 skipped via skipParity in scene-c
 
 test("Scene 336 - ShaderMaterial basic color matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 336, settleMs: 500 });
+    await captureGolden(browser, { sceneId: 336, force: true, settleMs: 500 });
 
     await page.goto("/scene336.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

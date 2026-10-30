@@ -21,7 +21,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 330 skipped via skipParity in scene-c
 
 test("Scene 330 — orthographic camera projection matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 330 });
+    await captureGolden(browser, { sceneId: 330, force: true });
 
     await page.goto("/scene330.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

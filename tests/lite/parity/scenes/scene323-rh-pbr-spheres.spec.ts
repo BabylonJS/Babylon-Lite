@@ -24,7 +24,7 @@ test("Scene 323 — PBR Spheres grid matches right-handed Babylon.js reference",
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 323, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 323, force: true, timeout: 120_000 });
 
     await page.goto("/scene323.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

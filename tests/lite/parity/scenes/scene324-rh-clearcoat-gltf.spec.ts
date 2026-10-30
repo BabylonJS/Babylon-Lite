@@ -20,7 +20,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 324 skipped via skipParity in scene-c
 
 test("Scene 324 — Clearcoat glTF matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 324 });
+    await captureGolden(browser, { sceneId: 324, force: true });
 
     await page.goto("/scene324.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

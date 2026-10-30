@@ -174,7 +174,10 @@ exercises the left-handed one:
   that they stay pure re-runs. A Babylon.js 9.28 right-handed bug is worked around on the
   reference side: `right-handed-twin.ts` replaces the zero refraction matrix of an unrotated
   `CubeTexture` (twin 334). Twin 342 keeps scene 265's left-handed reference (`BJS_RH_BROKEN`)
-  because Lite does not port `EXT_lights_image_based` yet (see above).
+  because Lite does not port `EXT_lights_image_based` yet (see above). Their specs recapture the
+  Babylon.js reference on the test browser on every run (`captureGolden({ force: true })`, as specs
+  165, 212 and 214 do): the committed goldens were captured on another GPU and only seed the gallery
+  thumbnails, while CI renders on BrowserStack's macOS GPU.
 - Two twins carry a looser `maxMad` than their source scene, set from measured runs: 323 (0.01 vs
   scene 13's 0.008) measured 0.0089, where Babylon.js right- vs left-handed differ by 0.779 and Lite by
   0.782, i.e. noise; 328 (6.4 vs scene 250's 6.1) measured 6.21. Scene 250 has no skybox, but its PBR

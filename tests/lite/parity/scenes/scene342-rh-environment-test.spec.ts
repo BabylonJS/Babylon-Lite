@@ -18,7 +18,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 342 skipped via skipParity in scene-c
 
 test("Scene 342 — EnvironmentTest matches Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 342, timeout: 90_000 });
+    await captureGolden(browser, { sceneId: 342, force: true, timeout: 90_000 });
 
     await page.goto("/scene342.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

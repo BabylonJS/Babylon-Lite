@@ -23,7 +23,7 @@ test("Scene 347 — Sponza (.babylon) matches Babylon.js reference (right-handed
     test.setTimeout(180_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 347, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 347, force: true, timeout: 120_000 });
 
     await page.goto("/scene347.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });

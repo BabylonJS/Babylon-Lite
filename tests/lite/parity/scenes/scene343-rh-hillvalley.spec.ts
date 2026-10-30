@@ -22,7 +22,7 @@ test("Scene 343 — Hill Valley matches Babylon.js reference (right-handed)", as
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 343, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 343, force: true, timeout: 120_000 });
 
     await page.goto("/scene343.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 90_000 });

@@ -36,7 +36,7 @@ test("Scene 329 — negative-scale double-sided matches right-handed Babylon.js 
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 329, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 329, force: true, timeout: 120_000 });
 
     await page.goto("/scene329.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

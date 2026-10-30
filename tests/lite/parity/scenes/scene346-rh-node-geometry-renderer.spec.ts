@@ -13,7 +13,7 @@ test("Scene 346 — node-material geometry renderer task matches Babylon.js refe
     test.setTimeout(180_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 346, timeout: 120_000, settleMs: 5_000 });
+    await captureGolden(browser, { sceneId: 346, force: true, timeout: 120_000, settleMs: 5_000 });
 
     await page.goto("/scene346.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 346 Lite" });

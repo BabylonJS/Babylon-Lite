@@ -21,16 +21,16 @@ test("Scene 339 — Camera + Light Gizmos match Babylon.js reference (right-hand
     test.setTimeout(60_000);
     const browser = page.context().browser()!;
 
-    if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
-        const { page: bjsPage, release } = await acquireReferencePage(browser);
-        await bjsPage.goto("/babylon-ref-scene339.html");
-        await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
-        await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
-        await bjsPage.waitForTimeout(500);
-        fs.mkdirSync(REFERENCE_DIR, { recursive: true });
-        await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
-        await release();
-    }
+    // The committed golden was captured on another GPU: recapture the right-handed
+    // reference on the test browser, as the force:true twin specs do.
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
+    await bjsPage.goto("/babylon-ref-scene339.html");
+    await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+    await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
+    await bjsPage.waitForTimeout(500);
+    fs.mkdirSync(REFERENCE_DIR, { recursive: true });
+    await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
+    await release();
 
     await page.goto("/scene339.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

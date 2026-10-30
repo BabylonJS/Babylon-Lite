@@ -23,7 +23,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 321 skipped via skipParity in scene-c
 
 test("Scene 321 — Sphere + DirectionalLight matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 321 });
+    await captureGolden(browser, { sceneId: 321, force: true });
 
     await page.goto("/scene321.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

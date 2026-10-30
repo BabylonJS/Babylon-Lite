@@ -20,7 +20,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 325 skipped via skipParity in scene-c
 
 test("Scene 325 — Procedural Builders matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 325 });
+    await captureGolden(browser, { sceneId: 325, force: true });
 
     await page.goto("/scene325.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

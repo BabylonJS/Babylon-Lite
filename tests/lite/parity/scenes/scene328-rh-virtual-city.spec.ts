@@ -28,7 +28,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 328 skipped via skipParity in scene-c
 test("Scene 328 — VirtualCity matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 328, seekTime: SEEK_TIME, timeout: 90_000 });
+    await captureGolden(browser, { sceneId: 328, force: true, seekTime: SEEK_TIME, timeout: 90_000 });
 
     await page.goto(`/scene328.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

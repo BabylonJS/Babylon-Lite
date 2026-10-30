@@ -20,7 +20,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 334 skipped via skipParity in scene-c
 
 test("Scene 334 — NME PBR Full (D8AK3Z) matches Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 334 });
+    await captureGolden(browser, { sceneId: 334, force: true });
 
     await page.goto("/scene334.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

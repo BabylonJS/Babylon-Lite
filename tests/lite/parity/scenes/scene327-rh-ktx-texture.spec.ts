@@ -24,7 +24,7 @@ test("Scene 327 — KTX Texture matches right-handed Babylon.js reference", asyn
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 327, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 327, force: true, timeout: 120_000 });
 
     await page.goto("/scene327.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 90_000 });

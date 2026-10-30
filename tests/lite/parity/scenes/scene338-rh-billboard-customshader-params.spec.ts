@@ -11,7 +11,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 338 skipped via skipParity in scene-c
 
 test("Scene 338 - billboard custom shader (params tint) matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 338, settleMs: 500 });
+    await captureGolden(browser, { sceneId: 338, force: true, settleMs: 500 });
 
     await page.goto("/scene338.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

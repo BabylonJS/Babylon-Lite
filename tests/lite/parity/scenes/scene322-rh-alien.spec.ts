@@ -19,7 +19,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 322 skipped via skipParity in scene-c
 
 test("Scene 322 — Alien PBR + Skeleton Animation matches right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 322, seekTime: 2 });
+    await captureGolden(browser, { sceneId: 322, force: true, seekTime: 2 });
 
     await page.goto("/scene322.html?seekTime=2");
 

@@ -48,7 +48,7 @@ async function captureBjsData(browser: Browser): Promise<string | undefined> {
 
 test("Scene 345 — Thin-instance raycast picking matches Babylon.js reference (right-handed)", async ({ page }) => {
     const browser = page.context().browser()!;
-    const goldenPath = await captureGolden(browser, { sceneId: 345, queryParams: `captureFrame=${CAPTURE_FRAME}`, waitFlag: "captureReady" });
+    const goldenPath = await captureGolden(browser, { sceneId: 345, force: true, queryParams: `captureFrame=${CAPTURE_FRAME}`, waitFlag: "captureReady" });
     const bjsRayHits = await captureBjsData(browser);
 
     await page.goto(`/scene345.html${CAPTURE_QUERY}`);

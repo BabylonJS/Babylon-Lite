@@ -25,7 +25,7 @@ test("Scene 326 — Shark GLB matches right-handed Babylon.js reference", async 
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 326, seekTime: 1.91, timeout: 120_000 });
+    await captureGolden(browser, { sceneId: 326, force: true, seekTime: 1.91, timeout: 120_000 });
 
     await page.goto(`/scene326.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

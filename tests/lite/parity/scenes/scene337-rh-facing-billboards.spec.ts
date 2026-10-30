@@ -18,7 +18,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 337 skipped via skipParity in scene-c
 
 test("Scene 337 - Facing billboards match Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 337, settleMs: 500 });
+    await captureGolden(browser, { sceneId: 337, force: true, settleMs: 500 });
 
     await page.goto("/scene337.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

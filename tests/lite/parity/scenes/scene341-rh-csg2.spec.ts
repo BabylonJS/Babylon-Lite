@@ -11,7 +11,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 341 skipped via skipParity in scene-c
 
 test("Scene 341 — CSG2 operations match Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 341, timeout: 90_000, settleMs: 1000 });
+    await captureGolden(browser, { sceneId: 341, force: true, timeout: 90_000, settleMs: 1000 });
 
     await page.goto("/scene341.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });

@@ -24,7 +24,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 331 skipped via skipParity in scene-c
 
 test("Scene 331 — mirrored Standard meshes match right-handed Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 331 });
+    await captureGolden(browser, { sceneId: 331, force: true });
 
     await page.goto("/scene331.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

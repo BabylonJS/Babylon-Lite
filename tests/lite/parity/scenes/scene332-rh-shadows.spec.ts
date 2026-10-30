@@ -22,7 +22,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 332 skipped via skipParity in scene-c
 
 test("Scene 332 — Shadows matches Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 332 });
+    await captureGolden(browser, { sceneId: 332, force: true });
 
     await page.goto("/scene332.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
