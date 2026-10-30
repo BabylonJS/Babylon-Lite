@@ -8,6 +8,7 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
@@ -54,6 +55,13 @@ export function _createFreeCamera(position: Vec3, target: Vec3, up: Vec3): FreeC
 
     function cameraLocalWorldMatrix(): Mat4 {
         writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, cam.position, cam.target, up);
+        if (_rightHanded !== null) {
+            // Right-handed cameras look down their local -Z with +X to the right: W_RH = W_LH·diag(-1, 1, -1).
+            const s = _localMat as unknown as Mat4Storage;
+            for (const i of [0, 1, 2, 8, 9, 10]) {
+                s[i] = -s[i]!;
+            }
+        }
         return _localMat;
     }
 

@@ -52,6 +52,7 @@ import type * as PbrFog from "./pbr-fog-wgsl.js";
 import { composeMeshLoDWgsl, meshLoDShaderKey } from "./pbr-mesh-lod-compose.js";
 import { StandardToneMapping } from "./tone-mapping.js";
 import { meshLoDClusterDebugAttr, meshLoDConeDebugAttr, meshLoDDebugModeCode, meshLoDPageRequestCode, meshLoDPageResidencyCode } from "./pbr-mesh-lod-debug.js";
+import { _rightHanded } from "#coordinate-system";
 
 const DRAW_VERTEX_STRIDE = 16; // 4 × u32
 const INSTANCE_STRIDE = 128; // world mat4 (64) + 3 normal-matrix vec4 (48) + pad (16)
@@ -278,7 +279,7 @@ function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: Ren
         fragment: sig._colorFormat ? { module: packet.shaderModule, entryPoint: "fs", targets: [{ format: sig._colorFormat }] } : undefined,
         depthStencil: sig._depthStencilFormat ? { format: sig._depthStencilFormat, depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true } : undefined,
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: packet.features.doubleSided ? "none" : "back", frontFace: "ccw" },
+        primitive: { topology: "triangle-list", cullMode: packet.features.doubleSided ? "none" : "back", frontFace: _rightHanded ? "cw" : "ccw" },
     });
     packet.pipelines.set(key, pipeline);
     return pipeline;

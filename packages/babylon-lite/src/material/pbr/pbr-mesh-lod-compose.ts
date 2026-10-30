@@ -16,6 +16,7 @@ import type { ToneMapping } from "./tone-mapping.js";
 import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
 import { PBR_BRDF_WGSL, PBR_ROUGHNESS_WGSL, PBR_SPECULAR_AA_WGSL } from "./pbr-brdf-wgsl.js";
 import type * as PbrFog from "./pbr-fog-wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Detected features for the guaranteed opaque metallic-roughness subset. */
 export interface MeshLoDShaderFeatures {
@@ -148,10 +149,11 @@ return vec4<f32>(mix(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), visibil
 return vec4<f32>(0.0, 0.0, 0.0, -1.0);
 }`;
 
+// A right-handed build negates Z after `rotateY`, like the IBL helpers in fragments/ibl-fragment.ts.
 const PBR_HELPERS = `fn rotateY(v: vec3<f32>, angle: f32) -> vec3<f32> {
 let c = cos(angle);
 let s = sin(angle);
-return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
+return vec3<f32>(v.x * c + v.z * s, v.y, ${_rightHanded ? "v.x * s - v.z * c" : "-v.x * s + v.z * c"});
 }
 fn environmentHorizonOcclusion(V: vec3<f32>, N: vec3<f32>, geoN: vec3<f32>) -> f32 {
 let R = reflect(V, N);
@@ -170,6 +172,7 @@ return scene.vSphericalL00.rgb
 }`;
 
 function normalBlock(hasNormalMap: boolean): string {
+    // A right-handed build reverses both cotangent-frame axes, like fragments/pbr-normal-cotangent-wgsl.ts.
     if (hasNormalMap) {
         return `let normalMap = textureSample(normalTexture, normalSampler_, input.uv).rgb * 2.0 - 1.0;
 let scaledN = normalize(vec3<f32>(normalMap.xy * material.mrp.z, normalMap.z));
@@ -180,8 +183,8 @@ let duv1 = dpdx(input.uv);
 let duv2 = dpdy(input.uv);
 let dp2perp = cross(dp2, Ngeom);
 let dp1perp = cross(Ngeom, dp1);
-let Tt = dp2perp * duv1.x + dp1perp * duv2.x;
-let Bt = -(dp2perp * duv1.y + dp1perp * duv2.y);
+let Tt = ${_rightHanded ? "-(dp2perp * duv1.x + dp1perp * duv2.x)" : "dp2perp * duv1.x + dp1perp * duv2.x"};
+let Bt = ${_rightHanded ? "dp2perp * duv1.y + dp1perp * duv2.y" : "-(dp2perp * duv1.y + dp1perp * duv2.y)"};
 let det = max(dot(Tt, Tt), dot(Bt, Bt));
 let invmax = select(inverseSqrt(det), 0.0, det == 0.0);
 let TBN = mat3x3<f32>(Tt * invmax, Bt * invmax, Ngeom);

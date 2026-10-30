@@ -1,0 +1,47 @@
+// Right-handed twin of scene223-camera-light-gizmos.spec.ts: the same checks against the Babylon.js reference with useRightHandedSystem = true.
+/**
+ * Scene 339 — Camera + Light Gizmos parity test.
+ *
+ * Pure display scene — both BJS and Lite render a CameraGizmo + LightGizmo
+ * over a ground plane.  No scripted interaction; we just wait for the
+ * scene to settle and compare the captured frame against the BJS reference.
+ */
+import { test, expect, acquireReferencePage } from "../parity-fixtures";
+import * as fs from "fs";
+import * as path from "path";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
+
+const sceneConfig = getSceneConfig(339);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene339-rh-camera-light-gizmos");
+const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
+
+test.skip(!!sceneConfig.skipParity, "Scene 339 skipped via skipParity in scene-config.json");
+
+test("Scene 339 — Camera + Light Gizmos match Babylon.js reference (right-handed)", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    const browser = page.context().browser()!;
+
+    // The committed golden was captured on another GPU: recapture the right-handed
+    // reference on the test browser, as the force:true twin specs do.
+    const { page: bjsPage, release } = await acquireReferencePage(browser);
+    await bjsPage.goto("/babylon-ref-scene339.html");
+    await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+    await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
+    await bjsPage.waitForTimeout(500);
+    fs.mkdirSync(REFERENCE_DIR, { recursive: true });
+    await bjsPage.locator("canvas").screenshot({ path: GOLDEN_REF });
+    await release();
+
+    await page.goto("/scene339.html");
+    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+    await page.waitForTimeout(500);
+
+    const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");
+    await page.locator("canvas").screenshot({ path: screenshotPath });
+
+    const full = compareImages(screenshotPath, GOLDEN_REF);
+    await attachCompareArtifacts(testInfo, screenshotPath, GOLDEN_REF, REFERENCE_DIR);
+    console.log(`Full image (${full.totalPixels} px): MAD=${full.mad.toFixed(3)}`);
+
+    expect(full.mad, `Full image MAD should be ≤ ${sceneConfig.maxMad}`).toBeLessThanOrEqual(sceneConfig.maxMad);
+});

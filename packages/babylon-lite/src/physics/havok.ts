@@ -24,6 +24,7 @@ import type { NativeMassProperties } from "./havok-mass-properties.js";
 import type { HavokThinInstanceAdvancedContext } from "./havok-thin-instance-advanced.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
 import type { PhysicsConstraintDebug } from "./physics-viewer.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -1202,9 +1203,13 @@ class MeshAccumulator {
             const a = indices[i]! + indexOffset;
             const b = indices[i + 1]! + indexOffset;
             const c = indices[i + 2]! + indexOffset;
-            // Babylon Lite scenes use Babylon.js' default left-handed winding, so
-            // reverse triangle order for Havok's mesh-shape interior optimization.
-            this._indices.push(c, b, a);
+            // Havok's mesh-shape interior optimization wants right-handed winding: like Babylon.js, a
+            // left-handed engine reverses the triangle order and a right-handed one keeps it.
+            if (_rightHanded) {
+                this._indices.push(a, b, c);
+            } else {
+                this._indices.push(c, b, a);
+            }
         }
     }
 }

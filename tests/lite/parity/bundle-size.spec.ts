@@ -334,7 +334,7 @@ for (const scene of SCENES) {
         // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
         // scene. Guard both directions — no other scene may pull the module in, and the
         // explicitly orthographic scenes must.
-        const ORTHO_SCENE_IDS = new Set([187, 268, 311, 312]);
+        const ORTHO_SCENE_IDS = new Set([187, 268, 311, 312, 330]);
         if (ORTHO_SCENE_IDS.has(scene.id)) {
             expect(
                 runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),
@@ -349,8 +349,9 @@ for (const scene of SCENES) {
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
         // 262/263/264/276/277/280/281/283/284/302/305 are NPE billboard scenes; 300/301/303 use Sprite2D.
+        // 337/338 are the right-handed twins of the billboard scenes 54 and 94.
         const SPRITE_USING_IDS = new Set([
-            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303, 305,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303, 305, 337, 338,
         ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));

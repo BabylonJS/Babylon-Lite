@@ -16,6 +16,7 @@ import { _installStdPrimitiveResolver } from "./standard-pipeline.js";
 import { _installStdGeometryWinding } from "./standard-geometry-renderable.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Front-face winding for a mirrored mesh's geometry-pass pipeline.
  *
@@ -25,7 +26,8 @@ import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
  *  cannot be tree-shaken). One line duplicated buys back those bytes for every scene that never
  *  calls `enableMirroredMeshes`. */
 function _windingFrontFace(meshFeatures: number): GPUFrontFace {
-    return meshFeatures & (1 << 11) ? "cw" : "ccw";
+    // A right-handed engine reverses the winding of every camera-pass pipeline (its view matrix mirrors Z).
+    return _rightHanded ? (meshFeatures & (1 << 11) ? "ccw" : "cw") : meshFeatures & (1 << 11) ? "cw" : "ccw";
 }
 
 /** Primitive state for the Standard pipeline, which has no winding reversal of its own. Declared
@@ -90,7 +92,14 @@ export function installMirroredMeshSupport(scene: SceneContext): void {
             // than masking it on the shared path — keeps that cost in this opt-in module. The
             // loader's topology bits are untouched.
             const bits = (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures;
-            if (bits) {
+            if (_rightHanded) {
+                // Right-handed, the bit is also the per-mesh winding mark that Node and ShaderMaterial
+                // read ("wind ccw"), and `mirrored` is exactly that answer kept live: rewrite it rather
+                // than clear it, or a glTF mesh switched from PBR to one of those draws inside out.
+                if (bits !== undefined || mirrored) {
+                    (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = ((bits ?? 0) & ~(1 << 11)) | (mirrored ? 1 << 11 : 0);
+                }
+            } else if (bits) {
                 (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = bits & ~(1 << 11);
             }
             return mirrored ? 1 << 11 : 0;

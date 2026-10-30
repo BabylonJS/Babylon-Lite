@@ -1,5 +1,6 @@
 import type { FreeCamera } from "./free-camera.js";
 import type { SceneContext } from "../scene/scene.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Keyboard customization for {@link attachConfigurableFreeControl}. */
 export interface FreeCameraControlOptions {
@@ -103,7 +104,9 @@ export function attachConfigurableFreeControl(camera: FreeCamera, canvas: HTMLCa
         const hasRotation = rotationX !== 0 || rotationY !== 0;
 
         if (hasRotation) {
-            camera._yaw += rotationY;
+            // Right-handed: yaw turns the other way on screen, so the same drag turns the same way (Babylon.js
+            // flips its pointer offsets and the local strafe axis too).
+            camera._yaw += _rightHanded ? -rotationY : rotationY;
             camera._pitch -= rotationX;
             const maxPitch = Math.PI / 2 - 0.01;
             camera._pitch = Math.max(-maxPitch, Math.min(maxPitch, camera._pitch));
@@ -114,9 +117,9 @@ export function attachConfigurableFreeControl(camera: FreeCamera, canvas: HTMLCa
             const sinYaw = Math.sin(camera._yaw);
             const cosPitch = Math.cos(camera._pitch);
             const sinPitch = Math.sin(camera._pitch);
-            camera.position.x += sinYaw * cosPitch * directionZ + cosYaw * directionX;
+            camera.position.x += sinYaw * cosPitch * directionZ + cosYaw * (_rightHanded ? -directionX : directionX);
             camera.position.y += sinPitch * directionZ + directionY;
-            camera.position.z += cosYaw * cosPitch * directionZ - sinYaw * directionX;
+            camera.position.z += cosYaw * cosPitch * directionZ - sinYaw * (_rightHanded ? -directionX : directionX);
         }
 
         if (hasMovement || hasRotation) {

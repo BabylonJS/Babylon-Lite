@@ -37,6 +37,7 @@ import { setSubtreeVisible } from "../scene/visibility.js";
 import { createRayPickSnapshot, pickWithRaySnapshot } from "../picking/ray-pick.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
 import type { _WritableVisibility } from "../scene/scene-node.js";
+import { _rightHanded } from "#coordinate-system";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -362,7 +363,8 @@ function viewForward(pose: XRViewerPose): [number, number, number] | null {
         return null;
     }
     const fx = -2 * (o.x * o.z + o.w * o.y);
-    const fz = 1 - 2 * (o.x * o.x + o.y * o.y);
+    // Lite's left-handed world mirrors WebXR's Z; a right-handed build keeps it.
+    const fz = _rightHanded ? 2 * (o.x * o.x + o.y * o.y) - 1 : 1 - 2 * (o.x * o.x + o.y * o.y);
     const len = Math.hypot(fx, fz) || 1;
     return [fx / len, 0, fz / len];
 }
@@ -502,8 +504,8 @@ function orientIndicator(indicator: Mesh, at: [number, number, number], dir: [nu
  *  current position in `ref`) to floor point `to`, preserving eye height. Returns the
  *  new reference space. */
 function teleportRef(ref: XRReferenceSpace, from: [number, number, number], to: [number, number, number], floorY: number): XRReferenceSpace {
-    // `from`/`to` are in Lite's LH world; reference-space offsets are WebXR RH.
-    const t = { x: from[0] - to[0], y: floorY - to[1], z: -(from[2] - to[2]) };
+    // `from`/`to` are in Lite's world (LH unless the build is right-handed); reference-space offsets are WebXR RH.
+    const t = { x: from[0] - to[0], y: floorY - to[1], z: _rightHanded ? from[2] - to[2] : -(from[2] - to[2]) };
     return ref.getOffsetReferenceSpace(new XRRigidTransform(t));
 }
 
@@ -512,12 +514,14 @@ function teleportRef(ref: XRReferenceSpace, from: [number, number, number], to: 
 function turnRef(ref: XRReferenceSpace, v: [number, number, number], angle: number): XRReferenceSpace {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
-    const rx = v[0] * c - v[2] * s;
-    const rz = v[0] * s + v[2] * c;
+    // The pivot is worked in the left-handed world, so a right-handed build mirrors its Z first: the turn
+    // then stays to the right for a positive angle, as Babylon.js's right-handed snap turn does.
+    const rx = v[0] * c - (_rightHanded ? -v[2] : v[2]) * s;
+    const rz = v[0] * s + (_rightHanded ? -v[2] : v[2]) * c;
     const half = angle / 2;
     // Convert the LH yaw/translation back to the RH offset transform WebXR expects.
     const q = { x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) };
-    return ref.getOffsetReferenceSpace(new XRRigidTransform({ x: v[0] - rx, y: 0, z: -(v[2] - rz) }, q));
+    return ref.getOffsetReferenceSpace(new XRRigidTransform({ x: v[0] - rx, y: 0, z: -((_rightHanded ? -v[2] : v[2]) - rz) }, q));
 }
 
 /**
@@ -560,7 +564,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                     const pose = frame.getViewerPose(ref);
                     if (pose) {
                         const p = pose.transform.position;
-                        ref = turnRef(ref, [p.x, p.y, -p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
+                        ref = turnRef(ref, [p.x, p.y, _rightHanded ? p.z : -p.z], tx > 0 ? opts.rotationAngle : -opts.rotationAngle);
                     }
                     unit.turnLatched = true;
                 }
@@ -576,9 +580,10 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
             if (src.targetRayTracked) {
                 const m = src.targetRayMatrix as unknown as Mat4;
                 const origin: [number, number, number] = [m[12]!, m[13]!, m[14]!];
-                let fx = m[8]!,
-                    fy = m[9]!,
-                    fz = m[10]!;
+                // Controller forward: +Z in the left-handed world, WebXR's -Z in a right-handed build.
+                let fx = _rightHanded ? -m[8]! : m[8]!,
+                    fy = _rightHanded ? -m[9]! : m[9]!,
+                    fz = _rightHanded ? -m[10]! : m[10]!;
                 const flen = Math.hypot(fx, fy, fz) || 1;
                 fx /= flen;
                 fy /= flen;
@@ -587,7 +592,9 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
 
                 const info = traceArc(tp, origin, dir, unit.arcPath);
                 const pose = frame.getViewerPose(ref);
-                const camPos: [number, number, number] = pose ? [pose.transform.position.x, pose.transform.position.y, -pose.transform.position.z] : origin;
+                const camPos: [number, number, number] = pose
+                    ? [pose.transform.position.x, pose.transform.position.y, _rightHanded ? pose.transform.position.z : -pose.transform.position.z]
+                    : origin;
                 updateArcRibbon(tp, unit, camPos);
                 setSubtreeVisible(unit.arc, true);
 
@@ -626,7 +633,8 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                         const fwd = pose ? viewForward(pose) : null;
                         if (fwd) {
                             // Preview arrow points where the reference-space offset will turn the view.
-                            orientIndicator(unit.indicator, info.point, rotateY(fwd, unit.landingTurn));
+                            // A positive turn is to the right: +Y yaw in the left-handed world, -Y yaw in a right-handed one.
+                            orientIndicator(unit.indicator, info.point, rotateY(fwd, _rightHanded ? -unit.landingTurn : unit.landingTurn));
                             setSubtreeVisible(unit.indicator, true);
                         } else {
                             setSubtreeVisible(unit.indicator, false);
@@ -649,7 +657,7 @@ export function updateXrTeleportation(tp: XrTeleportation, input: XrInputManager
                 if (pose) {
                     const p = pose.transform.position;
                     const target = unit.target;
-                    ref = teleportRef(ref, [p.x, p.y, -p.z], target, tp._floorY);
+                    ref = teleportRef(ref, [p.x, p.y, _rightHanded ? p.z : -p.z], target, tp._floorY);
                     tp._floorY = target[1];
                     if (opts.rotateToDirection && Math.abs(unit.landingTurn) > 1e-4) {
                         ref = turnRef(ref, target, unit.landingTurn);

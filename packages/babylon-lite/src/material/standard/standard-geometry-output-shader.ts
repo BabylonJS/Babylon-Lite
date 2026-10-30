@@ -35,6 +35,7 @@ import type { StandardSceneShaderContext } from "./standard-material.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { composeStandardShader } from "./standard-pipeline.js";
 import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { _rightHanded } from "#coordinate-system";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -80,8 +81,9 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *    - `gp.cameraNearFar` / `gp.previousViewProjection` — from the geometry
  *       params UBO (added only when `needsGpUbo`).
  *    - `input.vCurrentClip` / `input.vPreviousClip` — added by the velocity
- *       fragment when LINEAR_VELOCITY is requested. */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): WgslSource {
+ *       fragment when LINEAR_VELOCITY is requested.
+ *  @internal Exported for tests. */
+export function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS Standard material can't split irradiance — outputs (0, 0, 0).
@@ -101,15 +103,22 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
                 ? wgsl`(vec4<f32>(pow(textureSample(sT, sS, ${specularUv}).rgb, vec3<f32>(2.2)), textureSample(sT, sS, ${specularUv}).a) * ${wg})`
                 : wgsl`vec4<f32>(pow(mat.sc.rgb, vec3<f32>(2.2)), 1.0) * ${wg}`;
         case GeometryTextureType.VIEW_DEPTH:
-            return wgsl`vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
+            // Babylon.js's right-handed view space is the Z-mirrored scene view.
+            return _rightHanded
+                ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
-            return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             // `clipPos` is the @builtin(position) fragment input declared by
             // shader-composer (fragment input struct).
             return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz * vec3<f32>(1.0, 1.0, -1.0)), ${wg})`
+                : wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
             return wgsl`vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:

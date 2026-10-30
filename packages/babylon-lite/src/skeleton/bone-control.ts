@@ -27,6 +27,7 @@ import { createIdentityMat4 } from "../math/create-identity-mat4.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { TRS_STRIDE, T_OFF, R_OFF, S_OFF, computeTopoOrder, resetTRS, computeNodeWorldMatrices, writeBoneTextures } from "./skeleton-pose.js";
 import { _installBoneControl } from "./bone-control-hooks.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** @internal Per-bone local-transform override. `mask` bits: 1 = translation,
  *  2 = rotation, 4 = scale, 8 = hidden. Bits 1/2/4 are applied before channel
@@ -195,7 +196,8 @@ export function setBoneWorldPoseDeferred(skeleton: Skeleton, bone: Bone, px: num
         world = new F32(16);
         skeleton._worldOverrides.set(bone._nodeIndex, world);
     }
-    composeMat4IntoBuffer(world, 0, px, py, pz, rx, ry, rz, rw, -1, 1, 1);
+    // The glTF root's handedness reflection: an X mirror for the left-handed scene, none when right-handed.
+    composeMat4IntoBuffer(world, 0, px, py, pz, rx, ry, rz, rw, _rightHanded ? 1 : -1, 1, 1);
 }
 
 /** Recompute a skeleton's node hierarchy from rest + overrides and upload its bone

@@ -124,7 +124,7 @@ describe("_camera feature", () => {
 
         const result = await feature.applyAsset!([], createTransformNode("root"), ctx);
         expect(result.cameras).toHaveLength(1);
-        // computeNodeWorldMatrix's OWN root fallback (RH_TO_LH_ROOT, scale.x = -1) applies here
+        // computeNodeWorldMatrix's OWN root fallback (GLTF_ROOT, scale.x = -1 in the left-handed build) applies here
         // too, so node 0's translation.x (5) flips sign, and node 1 adds its own (0,7,0) on top.
         const w = result.cameras![0]!.worldMatrix;
         expect(w[12]).toBeCloseTo(-5);

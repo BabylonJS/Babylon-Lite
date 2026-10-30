@@ -1,0 +1,475 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`right-handed drift guard > animation/weighted-gltf-mixer.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "ROOT_TRANSFORM ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > camera/arc-rotate.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "cameraLocalWorldMatrix if-rh": "«» → «const s = _localMat as unknown as Mat4Storage ; for ( const i of [ 0 , 1 , 2 , 8 , 9 , 10 ] ) { s [ i ] = - s [ i ] ! ; }»",
+}
+`;
+
+exports[`right-handed drift guard > camera/arc-rotate-controls.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "applyInertia ?:": "«» → «-» camera.inertialAlphaOffset",
+  "panX ?:": "«» → «-» camera.inertialPanningX",
+}
+`;
+
+exports[`right-handed drift guard > camera/camera.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "getViewMatrix if-rh": "«» → «v [ 2 ] = - v [ 2 ] ! ; v [ 6 ] = - v [ 6 ] ! ; v [ 10 ] = - v [ 10 ] ! ; v [ 14 ] = - v [ 14 ] ! ;»",
+}
+`;
+
+exports[`right-handed drift guard > camera/configurable-free-camera-controls.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "update ?:": "«» → «-» rotationY",
+  "update ?: #2": "«» → «-» directionX",
+  "update ?: #3": "«» → «-» directionX",
+}
+`;
+
+exports[`right-handed drift guard > camera/free-camera.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "cameraLocalWorldMatrix if-rh": "«» → «const s = _localMat as unknown as Mat4Storage ; for ( const i of [ 0 , 1 , 2 , 8 , 9 , 10 ] ) { s [ i ] = - s [ i ] ! ; }»",
+}
+`;
+
+exports[`right-handed drift guard > camera/free-camera-controls.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "update ?:": "«» → «-» crY",
+  "update ?: #2": "«» → «-» cdX",
+  "update ?: #3": "«» → «-» cdX",
+}
+`;
+
+exports[`right-handed drift guard > camera/geospatial-camera.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "cameraLocalWorldMatrix if-rh": "«» → «const s = _localMat as unknown as Mat4Storage ; for ( const i of [ 0 , 1 , 2 , 8 , 9 , 10 ] ) { s [ i ] = - s [ i ] ! ; }»",
+  "computeLocalBasis ?:": "«refUp» → «WORLD_NORTH»",
+  "computeLocalBasis ?: #2": "«WORLD_NORTH» → «refUp»",
+  "computeLocalBasis ?: #3": "«refUp» → «WORLD_RIGHT»",
+  "computeLocalBasis ?: #4": "«WORLD_RIGHT» → «refUp»",
+  "computeLocalBasis ?: #5": "«refEast» → «refUp»",
+  "computeLocalBasis ?: #6": "«refUp» → «refEast»",
+}
+`;
+
+exports[`right-handed drift guard > flow-graph/gltf/path-converter.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "w ?:": "«-» → «» q.w",
+  "x ?:": "«-» → «» value.worldMatrix [",
+  "x ?: #2": "«-» → «» q.x",
+}
+`;
+
+exports[`right-handed drift guard > gizmo/camera-gizmo.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildFrustumWireframe if-rh": "«» → «for ( const corner of corners ) { corner.z = - corner.z ; }»",
+  "outerRot ?:": "«-» → «» Math.PI *",
+}
+`;
+
+exports[`right-handed drift guard > gizmo/gizmo-core.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "fx ?:": "«» → «-» cw [",
+  "fy ?:": "«» → «-» cw [",
+  "fz ?:": "«» → «-» cw [",
+}
+`;
+
+exports[`right-handed drift guard > gizmo/plane-rotation-gizmo.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "createPlaneRotationGizmo ?:": "«» → «-» angle",
+}
+`;
+
+exports[`right-handed drift guard > loader-babylon/parse-camera.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "cam ?:": "] ! «+» → «-» cp * … ] ! «-» → «+» Math.sin ( … ] ! «+» → «-» cp *",
+}
+`;
+
+exports[`right-handed drift guard > loader-env/procedural-sky-environment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "loadProceduralSkyEnvironment if-rh": "«» → «options = _toCubeSpaceSun ( options ) ;»",
+  "updateProceduralSkyEnvironment if-rh": "«» → «options = _toCubeSpaceSun ( options ) ;»",
+}
+`;
+
+exports[`right-handed drift guard > loader-gltf/gltf-feature-camera.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "fixupNode ?:": "«-» → «» inverseScale",
+}
+`;
+
+exports[`right-handed drift guard > loader-gltf/gltf-feature-gaussian-splatting.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "sceneSetup use": "«» → «if ( _rightHanded ) { mesh.scaling.y = - 1 ; } else { mesh.rotation.z = Math.PI ; }»",
+}
+`;
+
+exports[`right-handed drift guard > loader-gltf/gltf-feature-registry.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "_features ||": "«hasNegDetNode ( j )» → «true»",
+}
+`;
+
+exports[`right-handed drift guard > loader-gltf/gltf-parser.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "GLTF_ROOT ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > loader-gltf/load-gltf.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "assetUsesGltfFeatures ||": "«json.extensionsUsed ? .length» → «true»",
+  "root ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > loader-usd/usd-material-plugin.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "normalCode ?:": "usdTangent = «» → «- (» usdDp2Perp * … * usdDuv2.x «» → «)» ; let … usdBitangent = «- (» → «» usdDp2Perp * … * usdDuv2.y «)» → «» ; let",
+}
+`;
+
+exports[`right-handed drift guard > loader-usd/usd-materialize.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "root ?:": "«» → «-» scale",
+  "root ?: #2": "«-» → «» scale",
+}
+`;
+
+exports[`right-handed drift guard > material/mesh-features.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "_computeMeshFeatures use": "«» → «if ( _rightHanded ) { features | = ( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ; }»",
+}
+`;
+
+exports[`right-handed drift guard > material/node/blocks/input-block.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "expr ?:": "" «» → «( mat4x4f ( 1. , 0. , 0. , 0. , 0. , 1. , 0. , 0. , 0. , 0. , - 1. , 0. , 0. , 0. , 0. , 1. ) *» sceneU.view ) … * sceneU.view «» → «)» "",
+  "expr ?: #2": "" «» → «(» sceneU.projection * … ( sceneU.projection «» → «* mat4x4f ( 1. , 0. , 0. , 0. , 0. , 1. , 0. , 0. , 0. , 0. , - 1. , 0. , 0. , 0. , 0. , 1. ) )» "",
+  "expr ?: #3": "" ( «» → «mat4x4f ( 1. , 0. , 0. , 0. , 0. , 1. , 0. , 0. , 0. , 0. , - 1. , 0. , 0. , 0. , 0. , 1. ) *» sceneU.view *",
+}
+`;
+
+exports[`right-handed drift guard > material/node/blocks/pbr-mr-helper-core.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildPbrMrHelperCore if-rh": "request.useEnv ) «» → «.replace ( / - ( \\ w + ) \\ .x \\ s * \\ * \\ s * sinA \\ s * \\ + \\ s * \\ 1 \\ .z \\ s * \\ * \\ s * cosA / g , " $ 1.x * sinA - $ 1.z * cosA " )» ;",
+}
+`;
+
+exports[`right-handed drift guard > material/node/blocks/pbr-mr-helper-full.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildPbrMrHelperFull if-rh": "request.remapClearcoatF0 ) «» → «.replace ( / - ( \\ w + ) \\ .x \\ s * \\ * \\ s * sinA \\ s * \\ + \\ s * \\ 1 \\ .z \\ s * \\ * \\ s * cosA / g , " $ 1.x * sinA - $ 1.z * cosA " )» ;",
+}
+`;
+
+exports[`right-handed drift guard > material/node/node-geometry-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "" «ccw» → «cw» "",
+  "geomWrite ?:": "> ( «» → «-» ( scene.view",
+  "geomWrite ?: #2": "( ( «» → «-» ( scene.view",
+  "pipeline &&": "«» → «( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+}
+`;
+
+exports[`right-handed drift guard > material/node/node-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "compileNodePipeline if-rh": "«» → «result._pipelineForCcwMesh = ( gpu ) = > { const key = " ccw " + gpu._vbKey ; let ccw = meshPipelines ? .get ( key ) ; if ( ! ccw ) { ccw = device.createRenderPipeline ( { ...descriptor , vertex : { ...descriptor.vertex , buffers : gpu._vbLayout ? createVertexBuffers ( gpu._vbLayout ) : vertexBuffers } , primitive : { ...descriptor.primitive , frontFace : " ccw " } , } ) ; ( meshPipelines ? ? = new Map ( ) ) .set ( key , ccw ) ; } return ccw ; } ;»",
+  "frontFace ?:": "«noColorOutput ? undefined :» → «» " cw … : " «ccw» → «cw» "",
+}
+`;
+
+exports[`right-handed drift guard > material/node/node-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildNodeMeshRenderablesImpl ?:": "«groupNodeMeshPackets» → «groupRightHandedNodeMeshPackets» ( packets",
+  "pipeline &&": "«» → «isCcwMesh ( pkt._mesh )»",
+  "pipeline && #2": "«» → «isCcwMesh ( selectedPackets [ 0 ] ! ._mesh )»",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/background-ground.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "" «ccw» → «cw» "",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/cubemap-skybox-material.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "composeSkyboxFragment if-rh": "return ( «» → «(» await scene._environmentSkyboxShaderComposer … ? fragment «» → «) .replace ( / ( textureSampleLevel \\ ( [ ^ , ] + , [ ^ , ] + , ) ( [ ^ , ] + ) / , " $ 1 ( $ 2 ) * vec3f ( 1. , 1. , - 1. ) " )» ;",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/fragments/clearcoat-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "CC_NORMAL_COMPUTE ?:": "" «» → «- (» cc_dp2perp * … * cc_duv2.x «» → «)» "",
+  "CC_NORMAL_COMPUTE ?: #2": "" «- (» → «» cc_dp2perp * … * cc_duv2.y «)» → «» "",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/fragments/ibl-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "IBL_HELPERS ?:": "" «-» → «» v.x * … * s «+» → «-» v.z *",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/fragments/pbr-normal-cotangent-wgsl.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "cotangentNormalFragment ?:": "" «» → «- (» dp2perp * … * duv2.x «» → «)» "",
+  "cotangentNormalFragment ?: #2": "" «- (» → «» dp2perp * … * duv2.y «)» → «» "",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/pbr-geometry-output-shader.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "attachmentExpr ?:": "> ( «» → «-» ( scene.view",
+  "attachmentExpr ?: #2": "( ( «» → «-» ( scene.view",
+  "attachmentExpr ?: #3": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/pbr-geometry-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "primitive &&": "«» → «{ frontFace : res._composed._prim ? .frontFace = = = " cw " ? " ccw " : " cw " }»",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/pbr-mesh-lod-compose.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "PBR_HELPERS ?:": "" «-» → «» v.x * … * s «+» → «-» v.z *",
+  "normalBlock ?:": "" «» → «- (» dp2perp * … * duv2.x «» → «)» "",
+  "normalBlock ?: #2": "" «- (» → «» dp2perp * … * duv2.y «)» → «» "",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/pbr-mesh-lod-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "" «ccw» → «cw» "",
+}
+`;
+
+exports[`right-handed drift guard > material/pbr/pbr-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "primitive &&": "«» → «{ frontFace : composed._prim ? .frontFace = = = " cw " ? " ccw " : " cw " }»",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/enable-async-shader-pipeline-compilation.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "prepareScene &&": "«» → «( ( renderable as Renderable & { _ccw ? : 1 } ) ._ccw | | ( ( renderable.mesh as ( Mesh & { _primitiveFeatures ? : number } ) | undefined ) ? ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) )»",
+  "prepareShaderMaterialPipeline &&": "«» → «( ( mesh as ( Mesh & { _primitiveFeatures ? : number } ) | undefined ) ? ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/normal-view.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildNormalFragment if-rh": "cross ( «dpdx» → «dpdy» ( input. … ) , «dpdy» → «dpdx» ( input.",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/shader-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "primitive &&": "«» → «{ frontFace : ( variantKey.includes ( " | ccw " ) ? " ccw " : " cw " ) as GPUFrontFace }»",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/shader-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const ccw = packets.filter ( ( packet ) = > ( ( packet.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ) ; if ( ccw.length & & ccw.length < packets.length ) { return [ packets.filter ( ( packet ) = > ! ccw.includes ( packet ) ) , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
+  "createPacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( systemData , systemSpec._offsets ) ;»",
+  "createShaderRenderable &&": "«» → «( ( first.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+  "pipeline &&": "«» → «( renderable as Renderable & { _ccw ? : 1 } ) ._ccw»",
+  "updatePacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( packet.systemData , state._shaderBindings ! .systemSpec._offsets ) ;»",
+}
+`;
+
+exports[`right-handed drift guard > material/shader/shader-thin-instance.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "variantKey &&": "«» → «( ( mesh as typeof mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/fragments/std-cube-reflection-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "AD ?:": "normalW ) «» → «* vec3f ( 1. , 1. , - 1.» ) ) … 1. ) «» → «)» .rgb *",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/fragments/std-reflection-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "REFLECTION_HELPERS ?:": "r.z = «» → «-» r.z -",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/skybox-cubemap.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "code ?:": "«skyFragSrc» → «skyFragSrc.replace ( " vPositionLocal ) " , " vPositionLocal ) * vec3f ( 1. , 1. , - 1. ) " )»",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/standard-geometry-output-shader.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "attachmentExpr ?:": "> ( «» → «-» ( scene.view",
+  "attachmentExpr ?: #2": "( ( «» → «-» ( scene.view",
+  "attachmentExpr ?: #3": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/standard-geometry-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "«» → «( res._meshFeatures & ( 1 < < 11 ) ?» " ccw … ccw " «» → «: " cw " )»",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/standard-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "«» → «( bindings._meshFeatures & ( 1 < < 11 ) ?» " ccw … ccw " «» → «: " cw " )»",
+}
+`;
+
+exports[`right-handed drift guard > material/standard/std-mirrored-support.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "_windingFrontFace ?:": "«» → «(» meshFeatures & … ? " «cw» → «ccw» " : … : " «ccw» → «cw» " ) … ccw " «» → «)»",
+  "installMirroredMeshSupport use": "«» → «if ( _rightHanded ) { if ( bits ! = = undefined | | mirrored ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = ( ( bits ? ? 0 ) & ~ ( 1 < < 11 ) ) | ( mirrored ? 1 < < 11 : 0 ) ; } } else if ( bits ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = bits & ~ ( 1 < < 11 ) ; }»",
+}
+`;
+
+exports[`right-handed drift guard > mesh/csg2.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "createCsg2FromMesh if-rh": "«» → «const w = world as unknown as ArrayLike < number > ; const det = w [ 0 ] ! * ( w [ 5 ] ! * w [ 10 ] ! - w [ 9 ] ! * w [ 6 ] ! ) - w [ 4 ] ! * ( w [ 1 ] ! * w [ 10 ] ! - w [ 9 ] ! * w [ 2 ] ! ) + w [ 8 ] ! * ( w [ 1 ] ! * w [ 6 ] ! - w [ 5 ] ! * w [ 2 ] ! ) ; if ( det < 0 ! = = ( mesh._authoredSign ? ? 1 ) < 0 ) { triVerts.set ( geometry.indices ) ; }»",
+}
+`;
+
+exports[`right-handed drift guard > physics/havok.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "_addNodeMesh use": "«» → «if ( _rightHanded ) { this._indices.push ( a , b , c ) ; } else { this._indices.push ( c , b , a ) ; }»",
+}
+`;
+
+exports[`right-handed drift guard > picking/billboard-pick-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "uvAssign ?:": "in.b , «q» → «vec2f ( 1.0 - q.x , q.y )» ) ;",
+}
+`;
+
+exports[`right-handed drift guard > post-process/mesh-blending.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "writeUniforms use": "«» → «if ( _rightHanded ) { data [ 40 ] = - data [ 40 ] ! ; data [ 41 ] = - data [ 41 ] ! ; data [ 42 ] = - data [ 42 ] ! ; }»",
+}
+`;
+
+exports[`right-handed drift guard > post-process/screen-space-raymarch-wgsl.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "screenSpaceRaymarchWGSL ?:": "" «» → «pV ,» pH , … , pH «, pV» → «» "",
+}
+`;
+
+exports[`right-handed drift guard > render/linear-depth-material.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "VERTEX ?:": "out.viewZ = «» → «-» viewPos.z ;",
+}
+`;
+
+exports[`right-handed drift guard > render/scene-helpers.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frontFace ?:": "" «ccw» → «cw» "",
+}
+`;
+
+exports[`right-handed drift guard > shadow/csm-shadow-task-hooks.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildLightViewMatrixInto if-rh": "«» → «rx = - rx ; ry = - ry ; rz = - rz ;»",
+}
+`;
+
+exports[`right-handed drift guard > shadow/shadow-base.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "buildLightViewMatrix if-rh": "«» → «rx = - rx ; ry = - ry ; rz = - rz ;»",
+}
+`;
+
+exports[`right-handed drift guard > skeleton/bone-control.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "setBoneWorldPoseDeferred ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > skeleton/skeleton-pose.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "ROOT_TRANSFORM ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > skeleton/skeleton-updater.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "ROOT_TRANSFORM ?:": "«-» → «» 1",
+}
+`;
+
+exports[`right-handed drift guard > sprite/billboard-custom-shader.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "makeCustomBillboardWgsl if-rh": "return «code» → «code.replace ( / mix \\ ( in \\ .a , \\ s * in \\ .b , \\ s * q \\ ) / , " mix ( in.a , in.b , vec2f ( 1.0 - q.x , q.y ) ) " )» ;",
+}
+`;
+
+exports[`right-handed drift guard > sprite/billboard-pipeline.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "makeBillboardWgsl if-rh": "return «code» → «code.replace ( / mix \\ ( in \\ .a , \\ s * in \\ .b , \\ s * q \\ ) / , " mix ( in.a , in.b , vec2f ( 1.0 - q.x , q.y ) ) " )» ;",
+}
+`;
+
+exports[`right-handed drift guard > xr/xr-controller-models.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "updateXrControllerModels if-lh": "unit.active.rotationQuaternion.set ( «-» → «rot.x , rot.y ,» rot.z , … , rot.w «, rot.x , - rot.y» → «» ) ;",
+}
+`;
+
+exports[`right-handed drift guard > xr/xr-coordinates.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "copyXrRigidMatrixToWorld if-rh": "«out [ 0 ]» → «for ( let i» = source … ] = «source [» → «» 0 ] … [ 0 «] !» → «» ; i … ! ; «out [ 1 ] = source [ 1 ] !» → «i < 16» ; i … ! ; «» → «i + + ) {» out [ … out [ «2» → «i» ] = … ] = «-» → «» source [ … source [ «2» → «i» ] ! … ! ; «out [ 3 ] = source [ 3 ] !» → «} return» ; out … ! ; «out [ 4 ] = source [ 4 ] ! ; out [ 5 ] = source [ 5 ] ! ; out [ 6 ] = - source [ 6 ] ! ; out [ 7 ] = source [ 7 ] ! ; out [ 8 ] = - source [ 8 ] ! ; out [ 9 ] = - source [ 9 ] ! ; out [ 10 ] = source [ 10 ] ! ; out [ 11 ] = - source [ 11 ] ! ; out [ 12 ] = source [ 12 ] ! ; out [ 13 ] = source [ 13 ] ! ; out [ 14 ] = - source [ 14 ] ! ; out [ 15 ] = source [ 15 ] ! ;» → «»",
+  "setXrPoseToWorld ?:": "«-» → «» p.z",
+  "setXrPoseToWorld ?: #2": "«-» → «» o.z",
+  "setXrPoseToWorld ?: #3": "«-» → «» o.w",
+}
+`;
+
+exports[`right-handed drift guard > xr/xr-hand-mesh.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "poseHandMesh ?:": "«-» → «» p.z",
+  "poseHandMesh ?: #2": "«-» → «» o.z",
+  "poseHandMesh ?: #3": "«-» → «» o.w",
+}
+`;
+
+exports[`right-handed drift guard > xr/xr-pointer.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "eye ?:": "«-» → «» p.z",
+  "fx ?:": "«» → «-» m [",
+  "fy ?:": "«» → «-» m [",
+  "fz ?:": "«» → «-» m [",
+}
+`;
+
+exports[`right-handed drift guard > xr/xr-teleport.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "camPos ?:": "«-» → «» pose.transform.position.z",
+  "fx ?:": "«» → «-» m [",
+  "fy ?:": "«» → «-» m [",
+  "fz ?:": "«1 -» → «» 2 * … o.y ) «» → «- 1»",
+  "fz ?: #2": "«» → «-» m [",
+  "rx ?:": "«» → «-» v [",
+  "rz ?:": "«» → «-» v [",
+  "updateXrTeleportation ?:": "«-» → «» p.z",
+  "updateXrTeleportation ?: #2": "«» → «-» unit.landingTurn",
+  "updateXrTeleportation ?: #3": "«-» → «» p.z",
+  "z ?:": "«- (» → «» from [ … 2 ] «)» → «»",
+  "z ?: #2": "«» → «-» v [",
+}
+`;

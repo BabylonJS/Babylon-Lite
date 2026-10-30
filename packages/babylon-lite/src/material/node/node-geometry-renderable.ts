@@ -39,6 +39,7 @@ import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
 import type { NodeGeometryMaterialView } from "./node-geometry-view.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that node geometry views point
  *  at via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -103,8 +104,8 @@ function geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | un
 }
 
 /** Build the per-attachment WGSL write for one geometry texture type, reading a
- *  connected graph input when present and falling back to the engine default. */
-function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, NodeExpr>, gpRef: { needsGp: boolean }): string {
+ *  connected graph input when present and falling back to the engine default. @internal Exported for tests. */
+export function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, NodeExpr>, gpRef: { needsGp: boolean }): string {
     const wg = "1.0"; // opaque node materials: writeGeometryInfo gate is always 1.
     const v = inputs.get(type);
     const wp = inputs.get(GeometryTextureType.WORLD_POSITION);
@@ -130,14 +131,21 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
             if (v) {
                 return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
-            return wp ? wgsl`vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})` : ZERO(wg);
+            // Babylon.js's right-handed view depth is the negated z of the Z-mirrored scene view.
+            return wp
+                ? _rightHanded
+                    ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})`
+                    : wgsl`vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})`
+                : ZERO(wg);
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
             if (v) {
                 return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
             if (wp) {
                 gpRef.needsGp = true;
-                return wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+                return _rightHanded
+                    ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`
+                    : wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
             }
             return ZERO(wg);
         case GeometryTextureType.LINEAR_VELOCITY:
@@ -247,7 +255,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
             fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((format) => geometryColorTarget(format, blend, device)) },
             depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
             multisample: { count: a._msaaSamples },
-            primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+            primitive: { topology: "triangle-list", cullMode, frontFace: _rightHanded ? "cw" : "ccw" },
         }),
     };
     const compile = compileNodePipeline(res._geomState, res._vertexWgsl, res._fragmentWgsl, {
@@ -436,7 +444,15 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 pass.drawIndexed(g.indexCount, 1, g._firstIndex ?? 0, g._baseVertex);
                 return 1;
             };
-            return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };
+            return {
+                renderable: r,
+                pipeline:
+                    _rightHanded && ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)
+                        ? compile._pipelineForCcwMesh!(mesh._gpu)
+                        : compile._pipelineForMesh(mesh._gpu),
+                update,
+                draw,
+            };
         },
     };
     r._worldCenter = sortCenter;

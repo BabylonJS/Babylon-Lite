@@ -33,6 +33,7 @@ import {
     shaderSystemDependencies,
     shaderSystemDependency,
 } from "./shader-system-dependencies.js";
+import { _rightHanded } from "#coordinate-system";
 
 type UniformBatchFactory = (signature: RenderTargetSignature) => UniformCopyBatch;
 
@@ -281,6 +282,17 @@ function buildMaterialRenderables(
     if (material.needAlphaBlending) {
         return packets.map((packet) => build([packet], true));
     }
+    if (_rightHanded) {
+        // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
+        // meshes, so the two cannot share one opaque pipeline.
+        const ccw = packets.filter((packet) => ((packet.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11));
+        if (ccw.length && ccw.length < packets.length) {
+            return [packets.filter((packet) => !ccw.includes(packet)), ccw].flatMap((part) => {
+                const groups = vbRender?._group(part);
+                return groups ? Array.from(groups, (group) => build(group)) : [build(part)];
+            });
+        }
+    }
     // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
     // describe their own vertex packing cannot share it with tightly-packed ones.
     const groups = vbRender?._group(packets);
@@ -291,6 +303,9 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     const engine = scene.surface.engine;
     const systemData = new F32(systemSpec._totalBytes / 4);
     systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
+    if (_rightHanded !== null) {
+        _toRightHandedShaderSystemUniforms(systemData, systemSpec._offsets);
+    }
     const systemUBO = createUniformBuffer(engine, systemData, "shader-system-ubo");
     const packet: ShaderPacket = {
         mesh,
@@ -385,6 +400,10 @@ function createShaderRenderable(
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
         },
     };
+    if (_rightHanded && ((first.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)) {
+        // Every packet here shares the winding (see `buildMaterialRenderables`): key its pipeline apart.
+        (r as Renderable & { _ccw?: 1 })._ccw = 1;
+    }
     _asyncPipelineRegistrar?.(scene, material, r, undefined, asyncVertexLayout);
     return r;
 }
@@ -403,7 +422,14 @@ function createShaderBinding(
     const uniformBatch = getUniformBatch?.(signature);
     return {
         renderable,
-        pipeline: getOrCreateShaderPipeline(engine, signature, material, bindings, vertexLayout?._key, vertexLayout?._vbs),
+        pipeline: getOrCreateShaderPipeline(
+            engine,
+            signature,
+            material,
+            bindings,
+            _rightHanded && (renderable as Renderable & { _ccw?: 1 })._ccw ? `${vertexLayout?._key ?? ""}|ccw` : vertexLayout?._key,
+            vertexLayout?._vbs
+        ),
         _updateBatches: uniformBatch ? [uniformBatch] : undefined,
         update: (context) => update(context, uniformBatch),
         draw: (pass) => draw(pass, engine),
@@ -443,6 +469,9 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
             packet._lastAlphaCutoff !== alphaCutoff
         ) {
             systemUniformWriter(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, camera, context.targetWidth, context.targetHeight);
+            if (_rightHanded !== null) {
+                _toRightHandedShaderSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec._offsets);
+            }
             if (uniformBatch) {
                 uniformBatch.queue(packet.systemUBO, packet.systemData);
             } else {
@@ -780,6 +809,26 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
             data[f + 1] = targetHeight;
         } else if (dependency & ALPHA_CUTOFF) {
             data[f] = material._uniformValues.get("alphaCutoff")?.value[0] ?? 0.4;
+        }
+    }
+}
+
+/** @internal Turn the `view`, `worldView` and `projection` ShaderMaterial system uniforms into Babylon.js's
+ *  right-handed matrices, in place: the engine's view is `Sz·V_RH` and its projection `P_RH·Sz`, so the
+ *  view-side ones get their third row negated and the projection its third column. Products such as
+ *  `viewProjection` already match and are left alone. Right-handed builds only; applied after whichever
+ *  system writer is installed, so the cached writer needs no seam of its own. */
+export function _toRightHandedShaderSystemUniforms(data: Float32Array, offsets: Iterable<readonly [string, number]>): void {
+    for (const [name, offset] of offsets) {
+        const f = offset / 4;
+        if (name === "view" || name === "worldView") {
+            for (let c = 0; c < 16; c += 4) {
+                data[f + c + 2] = -data[f + c + 2]!;
+            }
+        } else if (name === "projection") {
+            for (let r = 8; r < 12; r++) {
+                data[f + r] = -data[f + r]!;
+            }
         }
     }
 }

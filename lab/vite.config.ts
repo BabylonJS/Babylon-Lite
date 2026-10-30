@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, normalizePath, type Plugin } from "vite";
 import { extname, isAbsolute, relative, resolve, sep } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { spawn } from "child_process";
@@ -959,8 +959,51 @@ function compatScenesPlugin(): Plugin {
     };
 }
 
+/**
+ * Right-handed twin scenes (`"rightHanded": true` in scene-config.json) run ordinary Lite code that an
+ * application would build with the `babylon-lite-rh` resolve condition (see
+ * docs/lite/architecture/61-right-handed-system.md). Resolve conditions are global to a Vite server, so
+ * this server tags every first-party module reached from such a scene's entry with `?lite-rh`: the
+ * browser loads the tagged graph as separate module instances, and `#coordinate-system` resolves to
+ * the right-handed variant inside it. Every other page keeps the untagged, left-handed graph.
+ */
+function rightHandedScenesPlugin(): Plugin {
+    const sceneConfig = JSON.parse(readFileSync(resolve(__dirname, "../scene-config.json"), "utf-8")) as Array<{ id: number; rightHanded?: boolean }>;
+    const entries = new Set(sceneConfig.filter((s) => s.rightHanded).map((s) => normalizePath(resolve(__dirname, `lite/src/lite/scene${s.id}.ts`))));
+    const rightHandedVariant = normalizePath(resolve(__dirname, "../packages/babylon-lite/src/engine/coordinate-system-rh.ts"));
+    const tagged = /[?&]lite-rh(?:&|$)/;
+    const scriptModule = /\.[cm]?[jt]sx?$/;
+    return {
+        name: "lab-right-handed-scenes",
+        enforce: "pre",
+        async resolveId(source, importer, options) {
+            if (!importer || !(tagged.test(importer) || entries.has(normalizePath(importer.split("?")[0])))) {
+                return null;
+            }
+            if (source === "#coordinate-system") {
+                return rightHandedVariant;
+            }
+            const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+            const id = resolved?.id;
+            if (!resolved || resolved.external || !id || id.startsWith("\0") || id.includes("/node_modules/") || tagged.test(id) || !scriptModule.test(id.split("?")[0])) {
+                return resolved;
+            }
+            return { ...resolved, id: `${id}${id.includes("?") ? "&" : "?"}lite-rh` };
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), compatScenesPlugin(), gaussianSplatAssetPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin(), ...(LAB_HTTPS ? [basicSsl()] : [])],
+    plugins: [
+        rightHandedScenesPlugin(),
+        pagesDemoPlugin(),
+        compatScenesPlugin(),
+        gaussianSplatAssetPlugin(),
+        serveReferenceImages(),
+        apiDocsPlugin(),
+        tabContentPlugin(),
+        ...(LAB_HTTPS ? [basicSsl()] : []),
+    ],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.

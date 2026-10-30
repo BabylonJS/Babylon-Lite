@@ -11,6 +11,12 @@
             "types": "./src/index.ts"
         }
     },
+    "imports": {
+        "#coordinate-system": {
+            "babylon-lite-rh": "./src/engine/coordinate-system-rh.ts",
+            "default": "./src/engine/coordinate-system.ts"
+        }
+    },
     "files": [
         "dist"
     ],

@@ -90,6 +90,35 @@ CI. Rendering is out of scope. See the
 [Headless (Null Engine) guide](https://doc.babylonjs.com/lite/05-headless-null-engine) for details,
 supported runtimes, and limitations.
 
+## Right-handed coordinate system
+
+Babylon Lite is left-handed by default. To render right-handed, like Babylon.js
+with `scene.useRightHandedSystem = true`, add the `babylon-lite-rh` resolve
+condition to your bundler. Your code does not change, and the handedness is a
+constant the minifier folds away: with Rolldown, which builds the lab scenes, a
+left-handed bundle is byte-for-byte the one built before this option existed.
+esbuild keeps the handedness checks and a few small helpers, so its bundles grow
+slightly.
+
+The modules in `lib/` import `#coordinate-system`, a package import declared in
+this package's `imports` map. Bundlers that read `imports` (Vite, webpack 5,
+esbuild, Rolldown, Rollup with `@rollup/plugin-node-resolve`) resolve it; native
+browser ESM and bundlers without `imports` support do not. The prebuilt
+`dist/index.js` has no such import and is left-handed.
+
+```ts
+// vite.config.ts
+import { defineConfig, defaultClientConditions } from "vite";
+
+export default defineConfig({
+    resolve: { conditions: [...defaultClientConditions, "babylon-lite-rh"] },
+});
+```
+
+Every engine in that bundle is right-handed. See the
+[Right-Handed Coordinate System guide](https://doc.babylonjs.com/lite/07-right-handed-system) for
+webpack, esbuild and Rollup, and for the features covered so far.
+
 ## License
 
 [Apache-2.0](./LICENSE)

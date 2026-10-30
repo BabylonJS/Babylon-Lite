@@ -3,6 +3,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_CUBE_REFLECTION } from "../standard-flags.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 export function createStdCubeReflectionFragment(): ShaderFragment {
     return {
@@ -12,7 +13,10 @@ export function createStdCubeReflectionFragment(): ShaderFragment {
             { _name: "cRS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: 0x2 },
         ],
         _fragmentSlots: {
-            AD: wgsl`{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
+            // Right-handed: negate the lookup's Z, like Babylon.js's REFLECTIONMAP_OPPOSITEZ.
+            AD: _rightHanded
+                ? wgsl`{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)*vec3f(1.,1.,-1.)).rgb*mat.rLvl;}`
+                : wgsl`{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
         },
     };
 }

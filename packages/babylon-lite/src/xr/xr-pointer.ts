@@ -28,6 +28,7 @@ import { pickWithRay } from "../picking/ray-pick.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
 import type { _WritableVisibility } from "../scene/scene-node.js";
+import { _rightHanded } from "#coordinate-system";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -347,10 +348,11 @@ export function updateXrPointer(pointer: XrPointer, input: XrInputManager, eyePo
 
         const m = src.targetRayMatrix as unknown as Mat4;
         const origin: [number, number, number] = [m[12]!, m[13]!, m[14]!];
-        // The WebXR -Z target ray becomes +Z after the RH-to-LH boundary conversion.
-        let fx = m[8]!,
-            fy = m[9]!,
-            fz = m[10]!;
+        // The WebXR -Z target ray becomes +Z after the RH-to-LH boundary conversion; a right-handed build
+        // keeps WebXR's world, so the ray stays along -Z.
+        let fx = _rightHanded ? -m[8]! : m[8]!,
+            fy = _rightHanded ? -m[9]! : m[9]!,
+            fz = _rightHanded ? -m[10]! : m[10]!;
         const flen = Math.hypot(fx, fy, fz) || 1;
         fx /= flen;
         fy /= flen;
@@ -467,7 +469,7 @@ export function pointerSelection(options: XrPointerOptions = {}): XrFeatureSpec 
                 update(frame): void {
                     const pose = frame.getViewerPose?.(ctx.referenceSpace);
                     const p = pose?.transform.position;
-                    const eye: [number, number, number] | null = p ? [p.x, p.y, -p.z] : null;
+                    const eye: [number, number, number] | null = p ? [p.x, p.y, _rightHanded ? p.z : -p.z] : null;
                     updateXrPointer(pointer, input, eye);
                 },
                 dispose(): void {

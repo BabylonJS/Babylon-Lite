@@ -1,4 +1,5 @@
 import type { Mesh } from "../mesh/mesh.js";
+import { _rightHanded } from "#coordinate-system";
 
 export const MSH_HAS_TANGENTS = 1 << 0;
 export const MSH_HAS_SKELETON = 1 << 1;
@@ -15,7 +16,8 @@ export const MSH_FLAT_NORMAL = 1 << 10;
 // Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
 // glTF primitive feature, which pre-encodes them on the affected meshes as `_primitiveFeatures`.
 // The PBR renderables fold those in themselves — they exist only to key the composed shader variant,
-// which the Standard path has no equivalent of — so nothing here has to read them.
+// which the Standard path has no equivalent of — so nothing here has to read them, except the
+// winding bit in a right-handed build (see the end of `_computeMeshFeatures`).
 
 /** Extra mesh-feature encoder installed only by runtime opt-ins such as mirrored procedural meshes. */
 let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
@@ -69,6 +71,12 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     }
     if (_meshFeatureExtra) {
         features |= _meshFeatureExtra(mesh);
+    }
+    if (_rightHanded) {
+        // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
+        // meshes: carry the loader's winding bit so the Standard pipelines key and wind it apart.
+        // Read after the opt-in encoder above, which rewrites that bit from the live determinant.
+        features |= ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11);
     }
     return features;
 }

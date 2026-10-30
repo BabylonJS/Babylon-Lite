@@ -330,11 +330,11 @@ Byte offset = `bufferView.byteOffset + accessor.byteOffset` (both default to 0).
 glTF uses right-handed coordinates. Babylon Lite uses left-handed. The conversion is done via a root world matrix pre-multiply (not by negating Z in vertex data):
 
 ```typescript
-// Root matrix: diag(-1, 1, 1, 1) — negates X axis
-const RH_TO_LH_ROOT: Mat4 = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+// Root matrix: diag(-1, 1, 1, 1) — negates X axis (left-handed build; the identity in a right-handed build)
+const GLTF_ROOT: Mat4 = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 ```
 
-For top-level nodes: `worldMatrix = RH_TO_LH_ROOT × localMatrix`.
+For top-level nodes: `worldMatrix = GLTF_ROOT × localMatrix`.
 For child nodes: `worldMatrix = parentWorldMatrix × localMatrix`.
 
 Local matrices are computed from glTF TRS: `composeMat4(translation, rotation, scale)`, or directly from `node.matrix` if present.
@@ -795,7 +795,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `addToScene(scene, await loadGltf(engine, url))`                      | `BABYLON.SceneLoader.Append(url, scene)`                                            |
 | `Mesh` (with `_gpu` field)                                            | Internal mesh representation                                                        |
-| `RH_TO_LH_ROOT`                                                       | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]`                                   |
+| `GLTF_ROOT`                                                           | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]`                                   |
 | `loadEnvironment(scene, url, { brdfUrl })`                            | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
 | `.env` file format                                                    | Babylon-proprietary environment file                                                |
 | RGBD decode                                                           | `FromRGBD` shader in Babylon                                                        |
@@ -846,8 +846,8 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `parseGlbContainer extracts JSON + BIN`             | Verify correct chunk parsing                                                                                                                                                                                                                                                                                                                                              |
 | `resolveAccessor FLOAT`                             | Returns Float32Array with correct count                                                                                                                                                                                                                                                                                                                                   |
 | `resolveAccessor UNSIGNED_SHORT`                    | Returns Uint16Array                                                                                                                                                                                                                                                                                                                                                       |
-| `RH_TO_LH_ROOT negates X`                           | Verify diag(-1,1,1,1)                                                                                                                                                                                                                                                                                                                                                     |
-| `computeNodeWorldMatrix top-level`                  | Pre-multiplied by RH_TO_LH_ROOT                                                                                                                                                                                                                                                                                                                                           |
+| `GLTF_ROOT negates X`                               | Verify diag(-1,1,1,1)                                                                                                                                                                                                                                                                                                                                                     |
+| `computeNodeWorldMatrix top-level`                  | Pre-multiplied by GLTF_ROOT                                                                                                                                                                                                                                                                                                                                               |
 | `computeNodeWorldMatrix child`                      | Parent world × child local                                                                                                                                                                                                                                                                                                                                                |
 | `extractMaterial defaults`                          | Missing material → baseColorFactor [1,1,1,1], metallic 1, roughness 1                                                                                                                                                                                                                                                                                                     |
 | `uploadTexture sRGB format`                         | baseColor uses rgba8unorm-srgb                                                                                                                                                                                                                                                                                                                                            |

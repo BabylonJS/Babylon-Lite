@@ -7,6 +7,7 @@ import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
@@ -105,6 +106,6 @@ export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): G
             depthWriteEnabled: opts._depthWriteEnabled ?? true,
         },
         multisample: { count: opts._msaaSamples },
-        primitive: { topology: "triangle-list", cullMode: opts._cullMode ?? "back", frontFace: "ccw" },
+        primitive: { topology: "triangle-list", cullMode: opts._cullMode ?? "back", frontFace: _rightHanded ? "cw" : "ccw" },
     };
 }
