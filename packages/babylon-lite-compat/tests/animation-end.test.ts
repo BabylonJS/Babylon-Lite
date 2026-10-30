@@ -332,3 +332,43 @@ describe.each([
         });
     });
 });
+
+describe("scene._tick when a scene is disposed during the advance", () => {
+    it("does not throw when a property setter of a fallback track disposes the scene", () => {
+        const scene = new Scene(new NullEngine());
+        let armed = false;
+        let disposed = 0;
+        // The fallback evaluator writes through this setter inside the first pass; it disposes the scene once armed.
+        const target = {
+            position: {
+                _x: 0,
+                get x(): number {
+                    return this._x;
+                },
+                set x(value: number) {
+                    this._x = value;
+                    if (armed && !disposed++) {
+                        scene.dispose();
+                    }
+                },
+            },
+        };
+        const constant = (name: string): Animation => {
+            const animation = new Animation(name, "position.x", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+            animation.setKeys([
+                { frame: 0, value: 0 },
+                { frame: 10, value: 10 },
+            ]);
+            return animation;
+        };
+        const first = scene.beginDirectAnimation(target, [constant("first")], 0, 10, false);
+        const second = scene.beginDirectAnimation({ position: { x: 0 } }, [constant("second")], 0, 10, false);
+        expect(first._lite).toBeUndefined();
+        expect(second._lite).toBeUndefined();
+        armed = true;
+
+        expect(() => scene._tick(500)).not.toThrow();
+        expect(disposed).toBe(1);
+        expect(scene.animatables).toHaveLength(0);
+    });
+});

@@ -330,8 +330,9 @@ export class Scene extends AbstractScene {
         // cannot spin within one tick.)
         const running = this._runningAnimatables;
         const count = running.length;
+        // Both passes run user code (easing functions, property setters, end callbacks); a `dispose()` there empties the list.
         for (let i = 0; i < count; i++) {
-            running[i]!._advance(deltaMs);
+            running[i]?._advance(deltaMs);
         }
         for (let i = 0; i < count; i++) {
             running[i]?._completeFrame();
