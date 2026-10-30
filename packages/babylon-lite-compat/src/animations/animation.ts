@@ -22,6 +22,7 @@ import {
 import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineContext, PropertyAnimationInterpolation, PropertyAnimationTrackOptions } from "babylon-lite";
 
 import type { IEasingFunction } from "./easing.js";
+import { Observable } from "../misc/observable.js";
 
 /** Structural vector/quaternion value accepted by Babylon.js animation keys. */
 export interface IAnimationVectorValue {
@@ -351,6 +352,10 @@ interface AnimatableNativeState {
  */
 export class Animatable {
     public masterFrame = 0;
+    /** Babylon.js `onAnimationEnd`: called when the animatable ends, on its own or through `stop()`. */
+    public onAnimationEnd: (() => void) | null = null;
+    /** Babylon.js `onAnimationEndObservable`: notified right after `onAnimationEnd`. */
+    public readonly onAnimationEndObservable = new Observable<Animatable>();
     /** @internal Lite group backing a natively-delegated property animation. */
     public readonly _lite?: LiteAnimationGroup;
     /** @internal Reason all or part of this animatable retained the compat CPU evaluator. */
@@ -453,6 +458,7 @@ export class Animatable {
             if (!this._loop && this._lite._stopped && !fallbackRunning) {
                 this._detachLite();
                 this._stopped = true;
+                this._raiseOnAnimationEnd();
             }
             return;
         }
@@ -461,6 +467,7 @@ export class Animatable {
         this._applyFallback();
         if (!this._loop && !anyFallbackRunning) {
             this._stopped = true;
+            this._raiseOnAnimationEnd();
         }
     }
 
@@ -513,16 +520,35 @@ export class Animatable {
     }
 
     public stop(): void {
+        const ended = !this._stopped;
         this._paused = false;
         this._stopped = true;
         if (this._lite) {
             stopAnimation(this._lite);
             this._detachLite();
         }
+        if (ended) {
+            this._raiseOnAnimationEnd();
+        }
+    }
+
+    /** Babylon.js `waitAsync()`: resolves with this animatable when it next ends. */
+    public waitAsync(): Promise<Animatable> {
+        return new Promise((resolve) => this.onAnimationEndObservable.addOnce(() => resolve(this)));
+    }
+
+    /** @internal Whether this animatable animates `target`. */
+    public _animates(target: unknown): boolean {
+        return this._target === target;
     }
 
     public get animationStarted(): boolean {
         return !this._paused && !this._stopped;
+    }
+
+    private _raiseOnAnimationEnd(): void {
+        this.onAnimationEnd?.();
+        this.onAnimationEndObservable.notifyObservers(this);
     }
 
     private _applyFallback(): void {
