@@ -103,23 +103,25 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let needsSingleLightPath = false;
     let needsMultiLightPath = false;
     const singleLightTypes: SingleLightType[] = [];
-    for (const mesh of meshes) {
-        const lr = writeMeshLightSelection(mesh, scene.lights);
-        const affectedCount = lr > 0 ? 1 : -lr;
-        hasAnyAffectedLight ||= affectedCount > 0;
-        if (affectedCount === 1) {
-            needsSingleLightPath = true;
-            const type = getPackedSingleLightType(scene.lights, lr - 1);
-            if (!singleLightTypes.includes(type)) {
-                singleLightTypes.push(type);
+
+    const scanLightPaths = (): void => {
+        for (const mesh of meshes) {
+            const lr = writeMeshLightSelection(mesh, scene.lights);
+            const affectedCount = lr > 0 ? 1 : -lr;
+            hasAnyAffectedLight ||= affectedCount > 0;
+            if (affectedCount === 1) {
+                needsSingleLightPath = true;
+                const type = getPackedSingleLightType(scene.lights, lr - 1);
+                if (!singleLightTypes.includes(type)) {
+                    singleLightTypes.push(type);
+                }
+                needsMultiLightPath ||= mesh.receiveShadows && hasSomeShadows;
+            } else if (affectedCount > 0) {
+                needsMultiLightPath = true;
             }
-            // A mono-light shadow receiver uses the multi-light path in the main pass,
-            // but its no-color caster override disables receiving and falls back to single-light.
-            needsMultiLightPath ||= mesh.receiveShadows && hasSomeShadows;
-        } else if (affectedCount > 0) {
-            needsMultiLightPath = true;
         }
-    }
+    };
+    scanLightPaths();
 
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
@@ -182,30 +184,44 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const singleLightBlocks: Partial<Record<SingleLightType, () => string>> = {};
     let _multiLightWGSL = "";
     let _multiLightLoop = "";
-    if (needsSingleLightPath) {
-        for (const type of singleLightTypes) {
-            const single = scene._lighting?._single?.(type) ?? (await importSingleLightWgsl(type));
-            _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
-            singleLightBlocks[type] = single.getSingleLightBlock;
+    let multiLightLoaded = false;
+
+    const loadLightPaths = async (): Promise<void> => {
+        if (needsSingleLightPath) {
+            for (const type of singleLightTypes) {
+                if (singleLightBlocks[type]) {
+                    continue;
+                }
+                const single = scene._lighting?._single?.(type) ?? (await importSingleLightWgsl(type));
+                _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
+                singleLightBlocks[type] = single.getSingleLightBlock;
+            }
+            _getSingleLightBlock = (type) => singleLightBlocks[type]?.() ?? "";
         }
-        _getSingleLightBlock = (type) => singleLightBlocks[type]?.() ?? "";
-    }
-    if (needsMultiLightPath) {
-        const contribution = scene._lighting?._multi?.();
-        if (contribution) {
-            _multiLightWGSL = contribution._helpers;
-            _multiLightLoop = contribution._loop;
-        } else {
-            const wgslMod = await import("./fragments/multilight-wgsl.js");
-            _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
-            _multiLightLoop = wgslMod.getMultiLightLoop();
+        if (needsMultiLightPath && !multiLightLoaded) {
+            multiLightLoaded = true;
+            const contribution = scene._lighting?._multi?.();
+            if (contribution) {
+                _multiLightWGSL = contribution._helpers;
+                _multiLightLoop = contribution._loop;
+            } else {
+                const wgslMod = await import("./fragments/multilight-wgsl.js");
+                _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+                _multiLightLoop = wgslMod.getMultiLightLoop();
+            }
         }
-    }
-    if (hasAnyAffectedLight && hasSomeShadows) {
-        const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
-        _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
-        shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
-    }
+        if (hasAnyAffectedLight && hasSomeShadows && !_createPbrShadowFragment) {
+            const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
+            _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
+            shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
+        }
+    };
+    /** Whether a light path the current selection needs has not been loaded yet. */
+    const lightPathsMissing = (): boolean =>
+        (needsSingleLightPath && singleLightTypes.some((type) => !singleLightBlocks[type])) ||
+        (needsMultiLightPath && !multiLightLoaded) ||
+        (hasAnyAffectedLight && hasSomeShadows && !_createPbrShadowFragment);
+    await loadLightPaths();
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
     // Each optional PBR fragment module exports a uniform `pbrExt`, so registration
@@ -288,6 +304,15 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (const m of meshes) {
         loadCaps |= _lazyPbrCaps(m);
     }
+    // Normal-map and spec-gloss WGSL
+    const _tangentNormal = loadCaps & PBR_LAZY_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined;
+    const _cotangentNormal = loadCaps & PBR_LAZY_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined;
+    const _specGloss = loadCaps & PBR_LAZY_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined;
+    scanLightPaths();
+    while (lightPathsMissing()) {
+        await loadLightPaths();
+        scanLightPaths();
+    }
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -298,10 +323,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _fogBlock,
         _createPbrTemplateExt,
         _flatNormalWgsl,
-        // Normal-map and spec-gloss WGSL, loaded only when a mesh of the group samples them.
-        _tangentNormal: loadCaps & PBR_LAZY_TANGENT_NORMAL ? await import("./fragments/pbr-normal-tangent-wgsl.js") : undefined,
-        _cotangentNormal: loadCaps & PBR_LAZY_COTANGENT_NORMAL ? await import("./fragments/pbr-normal-cotangent-wgsl.js") : undefined,
-        _specGloss: loadCaps & PBR_LAZY_SPEC_GLOSS ? await import("./fragments/pbr-spec-gloss-wgsl.js") : undefined,
+        _tangentNormal,
+        _cotangentNormal,
+        _specGloss,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,
@@ -330,7 +354,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const isOverride = materialOverride != null;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
-        const sceneFeatures = geometryContext._sceneFeatures | (s._lighting?._pbrFeatures?.(mesh.id) ?? 0);
+        const sceneFeatures = geometryContext._sceneFeatures | (s._lighting?._pbrFeatures?.(mesh) ?? 0);
         const lightCount = lr > 0 ? 1 : -lr;
         const features = renderFeatures.features;
         const features2 = renderFeatures.features2 ?? 0;

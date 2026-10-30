@@ -51,7 +51,7 @@ export async function enableRectAreaLights(scene: SceneContext): Promise<void> {
         _prepare: () => enableRectAreaLights(scene),
         _single: pbr.rectAreaSingleLightSource,
         _multi: pbr.rectAreaMultiLightSource,
-        _pbrFeatures: (meshId) => pbr.rectAreaPbrFeatures(scene.lights, meshId),
+        _pbrFeatures: (mesh) => pbr.rectAreaPbrFeatures(scene.lights, mesh),
         _standard: standard.rectAreaStandardContext,
         _validateNode: (usesLights) => {
             if (usesLights && scene.lights.some((light) => light.lightType === "rectArea")) {

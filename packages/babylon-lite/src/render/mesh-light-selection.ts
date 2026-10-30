@@ -5,13 +5,19 @@ import type { Mesh } from "../mesh/mesh.js";
 
 const MSH_LIGHT_INDEX_WORD_OFFSET = 20;
 
-/** @internal Shared inclusion/exclusion predicate for a packed-light receiver ID. */
-export function lightAffectsMeshId(light: LightBase, meshId: string | undefined): boolean {
-    const included = light.includedOnlyMeshIds;
-    if (included?.size) {
-        return !!meshId && included.has(meshId);
+/** @internal Shared inclusion/exclusion predicate for a packed-light receiver.
+ *  Object sets are applied first and both apply: an inclusion restricts the light and an exclusion
+ *  then subtracts from it, matching Babylon.js `Light.canAffectMesh`. The ID sets keep their own
+ *  precedence, where an inclusion wins outright, so `.babylon`-loaded lists are unchanged. */
+export function lightAffectsMesh(light: LightBase, mesh: Mesh): boolean {
+    const isExcluded = light.excludedMeshes?.has(mesh);
+    const includedMeshes = light.includedOnlyMeshes;
+    if (includedMeshes?.size) {
+        return includedMeshes.has(mesh) && !isExcluded;
     }
-    return !meshId || !light.excludedMeshIds?.has(meshId);
+    const meshId = mesh.id;
+    const includedIds = light.includedOnlyMeshIds;
+    return isExcluded ? false : includedIds?.size ? !!meshId && includedIds.has(meshId) : !meshId || !light.excludedMeshIds?.has(meshId);
 }
 
 /** @internal Writes mesh light indices when data is provided.
@@ -28,7 +34,7 @@ export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[]
         if (!light._writeLightUbo) {
             continue;
         }
-        if (lightAffectsMeshId(light, mesh.id)) {
+        if (lightAffectsMesh(light, mesh)) {
             single = pi;
             if (u32) {
                 u32[MSH_LIGHT_INDEX_WORD_OFFSET + count] = pi;

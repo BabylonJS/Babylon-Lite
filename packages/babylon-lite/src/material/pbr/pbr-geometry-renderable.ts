@@ -170,7 +170,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
     const pluginIndex = source._pi ?? 0;
 
-    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh.id) ?? 0);
+    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh) ?? 0);
     const variantKey = `${sceneFeatures}:` + _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
     const res = _ensureViewResources(
         view,

@@ -5,6 +5,7 @@
  *  light type is encoded by its factory in vLightData.w; material extensions
  *  own any additional packed interpretations. */
 
+import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneLightingExtension } from "./lighting-extension.js";
 
@@ -19,6 +20,11 @@ export interface LightBase extends SceneNode {
     excludedMeshIds?: ReadonlySet<string>;
     /** If non-empty, ONLY these mesh IDs are lit by this light. Takes priority over excludedMeshIds. */
     includedOnlyMeshIds?: ReadonlySet<string>;
+    /** Meshes excluded from this light by object identity. Applied before the ID sets. */
+    excludedMeshes?: ReadonlySet<Mesh>;
+    /** If non-empty, ONLY these meshes are lit by this light, minus any in {@link excludedMeshes}.
+     *  Applied before the ID sets. */
+    includedOnlyMeshes?: ReadonlySet<Mesh>;
     /** Shadow generator attached to this light. Set this to make the light cast shadows. */
     shadowGenerator?: import("../shadow/shadow-generator.js").ShadowGenerator;
 
