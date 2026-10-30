@@ -216,6 +216,11 @@ export abstract class AbstractScene {
         return this.getMeshById(id);
     }
 
+    /** Babylon.js `scene.getMeshByUniqueId(uniqueId)` — the mesh with that auto-generated `uniqueId`, else `null`. */
+    public getMeshByUniqueId(uniqueId: number): TransformNode | null {
+        return this.meshes.find((m) => m.uniqueId === uniqueId) ?? null;
+    }
+
     /** Babylon.js `scene.getNodeByName(name)` — searches meshes, cameras, and lights. */
     public getNodeByName(name: string): Node | null {
         return this.meshes.find((m) => m.name === name) ?? this._cameras.find((c) => c.name === name) ?? this._lights.find((l) => l.name === name) ?? null;
