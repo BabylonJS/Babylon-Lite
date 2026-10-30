@@ -167,6 +167,35 @@ describe("_pbrRebuildsComposed", () => {
         expect(_pbrRebuildsComposed(scene, [rebuilt])).toBe(false);
     });
 
+    // `RECT_AREA_PBR_SCENE`: a per-mesh scene feature of the rect-area-light extension. Its fragment is not registered
+    // here, so it only keys the variant.
+    const AREA_LIGHT_FEATURE = 1 << 6;
+
+    it("accepts a mesh whose lighting extension adds a per-mesh scene feature the group was built with", async () => {
+        const scene = makeScene();
+        scene._lighting = { _prepare: () => Promise.resolve(), _pbrFeatures: () => AREA_LIGHT_FEATURE };
+        const { material, rebuilt } = await twoMaterials(scene);
+
+        material.doubleSided = true;
+        requestRebuild(material);
+
+        expect(_pbrRebuildsComposed(scene, [rebuilt])).toBe(true);
+    });
+
+    it("refuses a mesh whose lighting extension added a per-mesh scene feature after the build", async () => {
+        const scene = makeScene();
+        let features = 0;
+        scene._lighting = { _prepare: () => Promise.resolve(), _pbrFeatures: () => features };
+        const { material, rebuilt } = await twoMaterials(scene);
+
+        // The double-sided variant without the feature was composed for `built`; `rebuildSingle` now asks for it with one.
+        features = AREA_LIGHT_FEATURE;
+        material.doubleSided = true;
+        requestRebuild(material);
+
+        expect(_pbrRebuildsComposed(scene, [rebuilt])).toBe(false);
+    });
+
     it("refuses thin-instanced and transmissive meshes, a mesh outside its group and any mesh during a runtime build", async () => {
         const { scene, group, material, rebuilt } = await twoMaterials();
         material.doubleSided = true;

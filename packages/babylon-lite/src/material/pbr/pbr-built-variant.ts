@@ -46,7 +46,7 @@ export function _pbrRebuildsComposed(scene: SceneContext, meshes: readonly Mesh[
                     features.features,
                     features2,
                     meshFeatures,
-                    ctx._sceneFeatures,
+                    ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh.id) ?? 0),
                     lightMode,
                     singleLightType,
                     mesh._gpu._vbKey ?? "",
