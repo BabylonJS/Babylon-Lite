@@ -23,6 +23,8 @@ const mockedResize = vi.mocked(resizeMeshGeometry);
 function makeMesh(overrides?: { normals?: Float32Array; uvs?: Float32Array; uv2?: Float32Array; tangents?: Float32Array; colors?: Float32Array }): Mesh {
     const mesh = Object.create(Mesh.prototype) as Mesh;
     const lite = {
+        // No GPU geometry is modelled, so the write takes the (mocked) resize path.
+        _gpu: {},
         _cpuPositions: new Float32Array([1, 1, 1]),
         _cpuNormals: overrides?.normals,
         _cpuIndices: new Uint32Array([0, 1, 2]),
