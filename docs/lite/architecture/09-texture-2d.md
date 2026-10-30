@@ -458,10 +458,12 @@ loadGltf(engine, url)
   ├─ dynamic import("./gltf-ext-basisu.js")
   ├─ gltf-ext-basisu strips KTX2 textureInfos from core material parsing
   ├─ fetch image.uri or bufferView bytes for the referenced KTX2 image
-  ├─ dynamic decoder script: https://cdn.babylonjs.com/babylon.ktx2Decoder.js
+  ├─ dynamic decoder script: https://cdn.babylonjs.com/v9.32.1/babylon.ktx2Decoder.js
   ├─ decoder.decode(..., { forceRGBA: true }) returns mip levels
   └─ uploadKtx2Texture2D() creates Texture2D with full mip chain
 ```
+
+The lazy default decoder is pinned to a verified CDN release so its embedded transcoder URLs resolve to the same published JS/WASM asset set. The moving unversioned script can reference assets that are not yet available. `setKtx2DecoderUrl()` still overrides the script and optional transcoder URLs for both main-thread and worker decoding.
 
 ### Upload Rules
 
