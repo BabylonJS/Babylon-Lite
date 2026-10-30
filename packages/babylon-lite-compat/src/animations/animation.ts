@@ -23,6 +23,7 @@ import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineCont
 
 import type { IEasingFunction } from "./easing.js";
 import { Observable } from "../misc/observable.js";
+import { unsupported } from "../error.js";
 
 /** Structural vector/quaternion value accepted by Babylon.js animation keys. */
 export interface IAnimationVectorValue {
@@ -356,6 +357,9 @@ export class Animatable {
     public onAnimationEnd: (() => void) | null = null;
     /** Babylon.js `onAnimationEndObservable`: notified right after `onAnimationEnd`. */
     public readonly onAnimationEndObservable = new Observable<Animatable>();
+    /** Babylon.js `disposeOnEnd`: when the animatable completes on its own, its end callback and observers are cleared once
+     *  they ran (default true). Unlike Babylon.js, compat keeps it in `scene.animatables`. */
+    public disposeOnEnd = true;
     /** @internal Lite group backing a natively-delegated property animation. */
     public readonly _lite?: LiteAnimationGroup;
     /** @internal Reason all or part of this animatable retained the compat CPU evaluator. */
@@ -458,7 +462,7 @@ export class Animatable {
             if (!this._loop && this._lite._stopped && !fallbackRunning) {
                 this._detachLite();
                 this._stopped = true;
-                this._raiseOnAnimationEnd();
+                this._raiseOnCompletion();
             }
             return;
         }
@@ -467,7 +471,7 @@ export class Animatable {
         this._applyFallback();
         if (!this._loop && !anyFallbackRunning) {
             this._stopped = true;
-            this._raiseOnAnimationEnd();
+            this._raiseOnCompletion();
         }
     }
 
@@ -519,8 +523,15 @@ export class Animatable {
         }
     }
 
-    public stop(): void {
-        const ended = !this._stopped;
+    /**
+     * Babylon.js `stop(animationName?, targetMask?, useGlobalSplice?, skipOnAnimationEnd?)`: stops the animatable and raises
+     * its end unless `skipOnAnimationEnd`. Stopping only the tracks matching `animationName` or `targetMask` is not supported.
+     */
+    public stop(animationName?: string, targetMask?: (target: unknown) => boolean, _useGlobalSplice = false, skipOnAnimationEnd = false): void {
+        if (animationName || targetMask) {
+            unsupported("Animatable.stop(animationName | targetMask)", "Only the whole animatable can be stopped: call `stop()`.");
+        }
+        const ended = !this._stopped && !skipOnAnimationEnd;
         this._paused = false;
         this._stopped = true;
         if (this._lite) {
@@ -549,6 +560,14 @@ export class Animatable {
     private _raiseOnAnimationEnd(): void {
         this.onAnimationEnd?.();
         this.onAnimationEndObservable.notifyObservers(this);
+    }
+
+    private _raiseOnCompletion(): void {
+        this._raiseOnAnimationEnd();
+        if (this.disposeOnEnd) {
+            this.onAnimationEnd = null;
+            this.onAnimationEndObservable.clear();
+        }
     }
 
     private _applyFallback(): void {

@@ -67,17 +67,73 @@ describe.each([
         expect(onEnd).toHaveBeenCalledTimes(1);
     });
 
-    it("reports a new end after a restart", () => {
+    it("clears its end callback and observers once it completed, unless disposeOnEnd is false", () => {
         const scene = new Scene(new NullEngine());
-        const onEnd = vi.fn();
-        const animatable = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, false, 1, onEnd);
-        scene._tick(1100);
-        expect(onEnd).toHaveBeenCalledTimes(1);
+        const disposed = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, false, 1, vi.fn());
+        disposed.onAnimationEndObservable.add(vi.fn());
+        const kept = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, false, 1, vi.fn());
+        kept.disposeOnEnd = false;
+        kept.onAnimationEndObservable.add(vi.fn());
 
-        animatable.restart();
         scene._tick(1100);
 
-        expect(onEnd).toHaveBeenCalledTimes(2);
+        expect(disposed.onAnimationEnd).toBeNull();
+        expect(disposed.onAnimationEndObservable.hasObservers()).toBe(false);
+        expect(kept.onAnimationEnd).not.toBeNull();
+        expect(kept.onAnimationEndObservable.hasObservers()).toBe(true);
+    });
+
+    it("raises its end on stop() while paused, and not after it completed or with skipOnAnimationEnd", () => {
+        const scene = new Scene(new NullEngine());
+        const onPausedEnd = vi.fn();
+        const onSkippedEnd = vi.fn();
+        const onCompletedEnd = vi.fn();
+        const paused = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, true, 1, onPausedEnd);
+        const skipped = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, true, 1, onSkippedEnd);
+        const completed = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, false, 1, onCompletedEnd);
+        // Kept, so a second raise would be seen.
+        completed.disposeOnEnd = false;
+        scene._tick(1100);
+        expect(onCompletedEnd).toHaveBeenCalledTimes(1);
+
+        paused.pause();
+        paused.stop();
+        skipped.stop(undefined, undefined, false, true);
+        completed.stop();
+
+        expect(onPausedEnd).toHaveBeenCalledTimes(1);
+        expect(onSkippedEnd).not.toHaveBeenCalled();
+        expect(onCompletedEnd).toHaveBeenCalledTimes(1);
+        expect(skipped.animationStarted).toBe(false);
+    });
+
+    it("first advances an animation chained from its end on the next frame", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { position: { x: 0 } };
+        let started = 0;
+        // Each animation lasts 0.1 s; before the fix the whole chain ran within one tick (capped here so it cannot hang).
+        const next = (): void => {
+            if (++started < 50) {
+                scene.beginDirectAnimation(target, [slide(interpolation)], 0, 1, false, 1, next);
+            }
+        };
+        scene.beginDirectAnimation(target, [slide(interpolation)], 0, 1, false, 1, next);
+
+        scene._tick(2000);
+
+        expect(started).toBe(1);
+        expect(target.position.x).toBe(0);
+        scene._tick(2000);
+        expect(started).toBe(2);
+    });
+
+    it("rejects stopping part of its tracks instead of stopping all of them", () => {
+        const scene = new Scene(new NullEngine());
+        const animatable = scene.beginDirectAnimation({ position: { x: 0 } }, [slide(interpolation)], 0, 10, true);
+
+        expect(() => animatable.stop("slide")).toThrow(LiteCompatError);
+        expect(() => animatable.stop(undefined, () => true)).toThrow(LiteCompatError);
+        expect(animatable.animationStarted).toBe(true);
     });
 });
 

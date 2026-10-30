@@ -322,8 +322,11 @@ export class Scene extends AbstractScene {
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        for (const a of this._runningAnimatables) {
-            a._tick(deltaMs);
+        // Only the animatables running when the frame started: one that an `onAnimationEnd` raised here starts is first
+        // advanced next frame, as in Babylon.js, so a chain of animations shorter than a frame cannot spin within one tick.
+        const running = this._runningAnimatables;
+        for (let i = 0, count = running.length; i < count; i++) {
+            running[i]?._tick(deltaMs);
         }
         if (this._structuralGroups.length > 0) {
             for (const g of this._structuralGroups) {
