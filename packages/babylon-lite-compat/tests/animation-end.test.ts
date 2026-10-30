@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
+import type { Animatable } from "../src/animations/animation";
 import { LiteCompatError } from "../src/error";
 
 /**
@@ -182,5 +183,152 @@ describe("scene.beginAnimation and scene.stopAnimation", () => {
         expect(() => scene.stopAnimation(target, "slide")).toThrow(LiteCompatError);
         expect(() => scene.stopAnimation(target, undefined, () => true)).toThrow(LiteCompatError);
         expect(animatable.animationStarted).toBe(true);
+    });
+});
+
+const CYCLE = Animation.ANIMATIONLOOPMODE_CYCLE;
+// A non-looping CONSTANT track keeps its interpolation but runs on the compat fallback.
+const CONSTANT = Animation.ANIMATIONLOOPMODE_CONSTANT;
+
+describe.each([
+    ["delegated to Lite", [CYCLE]],
+    ["on the compat fallback", [CONSTANT]],
+    ["split between Lite and the compat fallback", [CYCLE, CONSTANT]],
+] as const)("an animatable %s that another animatable's end callback changes", (_path, modes) => {
+    function ramp(name: string, property: string, frames: number, mode: number): Animation {
+        const animation = new Animation(name, property, 10, Animation.ANIMATIONTYPE_FLOAT, mode);
+        animation.setKeys([
+            { frame: 0, value: 0 },
+            { frame: frames, value: frames },
+        ]);
+        return animation;
+    }
+
+    /** The second animatable's target and tracks: x on the first mode, y on the second when there is one. */
+    function second(frames: number) {
+        const target = { position: { x: 0, y: 0 } };
+        const animations = modes.map((mode, i) => ramp(`second${i}`, i === 0 ? "position.x" : "position.y", frames, mode));
+        const values = (): number[] => (modes.length === 1 ? [target.position.x] : [target.position.x, target.position.y]);
+        return { target, animations, values };
+    }
+
+    function start(scene: Scene, frames: number, onEnd: () => void) {
+        const tracks = second(frames);
+        const animatable = scene.beginDirectAnimation(tracks.target, tracks.animations, 0, frames, false, 1, onEnd);
+        const used: readonly number[] = modes;
+        expect(animatable._lite !== undefined).toBe(used.includes(CYCLE));
+        expect(animatable._nativeFallbackReason !== undefined).toBe(used.includes(CONSTANT));
+        return { ...tracks, animatable };
+    }
+
+    const first = (scene: Scene, onEnd: () => void): Animatable =>
+        scene.beginDirectAnimation({ position: { x: 0 } }, [ramp("first", "position.x", 10, CYCLE)], 0, 10, false, 1, onEnd);
+
+    it("stops where this frame advanced it, unlike Babylon.js, when the callback stops it", () => {
+        const scene = new Scene(new NullEngine());
+        const onSecondEnd = vi.fn();
+        const later: { b?: ReturnType<typeof start> } = {};
+        // Done after one second: its end is reported while the second, two seconds long, is halfway through.
+        first(scene, () => scene.stopAnimation(later.b!.target));
+        const b = (later.b = start(scene, 20, onSecondEnd));
+
+        scene._tick(1100);
+
+        // Every animatable advanced before any end was reported. Babylon.js, which steps them one at a time, would leave 0.
+        for (const value of b.values()) {
+            expect(value).toBeCloseTo(11, 5);
+        }
+        expect(b.animatable.animationStarted).toBe(false);
+        expect(onSecondEnd).toHaveBeenCalledTimes(1);
+        scene._tick(1100);
+        for (const value of b.values()) {
+            expect(value).toBeCloseTo(11, 5);
+        }
+    });
+
+    it("first advances on the next frame when the callback resumes it", () => {
+        const scene = new Scene(new NullEngine());
+        const onSecondEnd = vi.fn();
+        const later: { b?: ReturnType<typeof start> } = {};
+        first(scene, () => later.b!.animatable.restart());
+        const b = (later.b = start(scene, 10, onSecondEnd));
+        b.animatable.pause();
+
+        scene._tick(1100);
+
+        expect(b.values().every((value) => value === 0)).toBe(true);
+        expect(b.animatable.animationStarted).toBe(true);
+        expect(onSecondEnd).not.toHaveBeenCalled();
+        scene._tick(1100);
+        expect(b.values().every((value) => value === 10)).toBe(true);
+        expect(onSecondEnd).toHaveBeenCalledTimes(1);
+    });
+
+    describe("ending in the same frame", () => {
+        it.each([
+            ["before", false],
+            ["after", true],
+        ] as const)("reports its end once when created %s the one whose callback stops it", (_order, secondFirst) => {
+            const scene = new Scene(new NullEngine());
+            const onSecondEnd = vi.fn();
+            const later: { b?: ReturnType<typeof start> } = {};
+            if (secondFirst) {
+                later.b = start(scene, 10, onSecondEnd);
+            }
+            first(scene, () => later.b!.animatable.stop());
+            const b = (later.b ??= start(scene, 10, onSecondEnd));
+
+            scene._tick(1100);
+            scene._tick(1100);
+
+            expect(onSecondEnd).toHaveBeenCalledTimes(1);
+            expect(b.animatable.animationStarted).toBe(false);
+        });
+
+        it("reports no end when the callback pauses it, and reports it once resumed", () => {
+            const scene = new Scene(new NullEngine());
+            const onSecondEnd = vi.fn();
+            const later: { b?: ReturnType<typeof start> } = {};
+            first(scene, () => later.b!.animatable.pause());
+            const b = (later.b = start(scene, 10, onSecondEnd));
+
+            scene._tick(1100);
+            expect(onSecondEnd).not.toHaveBeenCalled();
+            expect(b.animatable.animationStarted).toBe(false);
+
+            b.animatable.restart();
+            scene._tick(1100);
+            expect(onSecondEnd).toHaveBeenCalledTimes(1);
+        });
+
+        it("reports no end when the callback seeks it, and plays on from there", () => {
+            const scene = new Scene(new NullEngine());
+            const onSecondEnd = vi.fn();
+            const later: { b?: ReturnType<typeof start> } = {};
+            first(scene, () => later.b!.animatable.goToFrame(0));
+            const b = (later.b = start(scene, 10, onSecondEnd));
+
+            scene._tick(1100);
+            expect(onSecondEnd).not.toHaveBeenCalled();
+            expect(b.values().every((value) => value === 0)).toBe(true);
+
+            scene._tick(500);
+            expect(b.values().every((value) => Math.abs(value - 5) < 1e-5)).toBe(true);
+            scene._tick(600);
+            expect(onSecondEnd).toHaveBeenCalledTimes(1);
+        });
+
+        it("reports its end on the next frame when the callback restarts it", () => {
+            const scene = new Scene(new NullEngine());
+            const onSecondEnd = vi.fn();
+            const later: { b?: ReturnType<typeof start> } = {};
+            first(scene, () => later.b!.animatable.restart());
+            later.b = start(scene, 10, onSecondEnd);
+
+            scene._tick(1100);
+            expect(onSecondEnd).not.toHaveBeenCalled();
+            scene._tick(100);
+            expect(onSecondEnd).toHaveBeenCalledTimes(1);
+        });
     });
 });

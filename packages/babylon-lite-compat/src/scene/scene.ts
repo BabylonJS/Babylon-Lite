@@ -322,11 +322,19 @@ export class Scene extends AbstractScene {
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        // Only the animatables running when the frame started: one that an `onAnimationEnd` raised here starts is first
-        // advanced next frame, as in Babylon.js, so a chain of animations shorter than a frame cannot spin within one tick.
+        // Lite advanced every native group above, in one manager update. So the fallback tracks advance first too, for every
+        // animatable present at frame start, and only then are the ends reported, in order. An end callback therefore sees
+        // every animatable advanced for this frame, and a stop, pause, restart or new animation it asks for takes effect
+        // from the next frame on both evaluators. Unlike Babylon.js, which steps animatables one at a time, an animatable
+        // stopped by an earlier one's end callback keeps this frame's advance. (A chain of animations shorter than a frame
+        // cannot spin within one tick.)
         const running = this._runningAnimatables;
-        for (let i = 0, count = running.length; i < count; i++) {
-            running[i]?._tick(deltaMs);
+        const count = running.length;
+        for (let i = 0; i < count; i++) {
+            running[i]!._advance(deltaMs);
+        }
+        for (let i = 0; i < count; i++) {
+            running[i]?._completeFrame();
         }
         if (this._structuralGroups.length > 0) {
             for (const g of this._structuralGroups) {
