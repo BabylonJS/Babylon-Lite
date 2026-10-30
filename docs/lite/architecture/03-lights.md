@@ -366,9 +366,11 @@ matrix changes, so an edit under a stable light count needs a renderable rebuild
    engine's late-work queue and applied once registration finishes, so it reaches groups already built.
 4. A light is released from an array when its list is replaced, when the light is disposed, and when its
    scene is disposed (through `onSceneDispose`), leaving other live consumers of that array subscribed.
-   The scene registration is made synchronously by the edit, not by the publish queued behind it, so a
-   scene disposed in the same tick still releases the light; a list edited against an already-disposed
-   scene releases it immediately, since a disposal callback registered then would never run.
+   The scene registration is made synchronously when a list is handed out or edited, not by the publish
+   queued behind it, so a scene disposed in the same tick still releases the light, and an array shared
+   out of one light into another scene's light does not keep the first light's scene reachable. A list
+   touched when the scene is already disposed releases immediately, since a disposal callback registered
+   then would never run.
 5. The rebuild is skipped for a light held by a clustered container, which is outside the per-mesh light
    path. Babylon.js skips its own resync for the same reason.
 

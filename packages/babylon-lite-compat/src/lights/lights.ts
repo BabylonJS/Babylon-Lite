@@ -230,6 +230,7 @@ export abstract class Light extends Node {
      * `light.excludedMeshes = [...]` and `light.excludedMeshes.push(mesh)` reach the Lite light.
      */
     public get excludedMeshes(): AbstractMesh[] {
+        this._watchSceneForMeshListRelease();
         return this._excludedMeshes;
     }
     public set excludedMeshes(value: AbstractMesh[]) {
@@ -241,6 +242,7 @@ export abstract class Light extends Node {
 
     /** Meshes this light lights exclusively. Live in the same way as {@link excludedMeshes}. */
     public get includedOnlyMeshes(): AbstractMesh[] {
+        this._watchSceneForMeshListRelease();
         return this._includedOnlyMeshes;
     }
     public set includedOnlyMeshes(value: AbstractMesh[]) {
@@ -296,7 +298,11 @@ export abstract class Light extends Node {
     }
 
     /** @internal Release this light from its lists when its scene is torn down. */
-    private _watchSceneForMeshListRelease(scene: Scene): void {
+    private _watchSceneForMeshListRelease(): void {
+        const scene = this._scene;
+        if (!scene) {
+            return;
+        }
         // A disposal callback registered on an already-disposed scene never runs, so there is nothing
         // left to wait for and the light has to come off its lists now.
         if (scene._lite._z) {
@@ -323,13 +329,8 @@ export abstract class Light extends Node {
     private _scheduleMeshListSync(): void {
         // Registered here, not from the queued sync below: the two happen in different ticks, and a scene
         // disposed in the same tick as the edit would drain its disposables before a watcher queued behind
-        // it existed, leaving this light on an application-owned array for good. This is the one
-        // synchronous point both paths that touch a list reach, the setters and the `push`/`splice` hooks,
-        // and it is reached only by lights that use the lists at all.
-        const scene = this._scene;
-        if (scene) {
-            this._watchSceneForMeshListRelease(scene);
-        }
+        // it existed, leaving this light on an application-owned array for good.
+        this._watchSceneForMeshListRelease();
         if (this._meshListSyncScheduled) {
             return;
         }

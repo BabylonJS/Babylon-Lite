@@ -749,6 +749,28 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(excluded(rim)).toEqual([moduleMeshes[0]!._lite]);
     });
 
+    it("releases a light whose constructor-created list was shared out before its scene was disposed", async () => {
+        const retired = sceneStub(true);
+        const current = sceneStub(true);
+        const old = new DirectionalLight("old", new Vector3(0, -1, 0), retired);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, current);
+        // The array `old` was built with, handed to another scene's light without `old` ever editing it.
+        const shared = old.excludedMeshes;
+        led.excludedMeshes = shared;
+        await flush();
+
+        disposeSceneStub(retired);
+        rebuildMock.mockClear();
+
+        const wall = mesh("wall");
+        shared.push(wall);
+        await flush();
+
+        // The live scene keeps publishing, and the disposed scene's light is neither notified nor retained.
+        expect(excluded(led)).toEqual([wall._lite]);
+        expect(excluded(old)).toBeUndefined();
+    });
+
     it("survives repeated create, dispose and reuse against one retained list", async () => {
         const scene = sceneStub(true);
         const moduleMeshes = [mesh("floor")];
