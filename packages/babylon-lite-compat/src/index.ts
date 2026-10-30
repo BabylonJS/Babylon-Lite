@@ -36,7 +36,7 @@ export { PickingInfo } from "./culling/picking-info.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
-export type { WebGPUEngineOptions } from "./engine/engine.js";
+export type { AbstractEngineOptions, EngineOptions, WebGPUEngineOptions } from "./engine/engine.js";
 
 // ─── Compute and buffers ─────────────────────────────────────────────
 export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
@@ -52,6 +52,9 @@ export { AbstractScene } from "./scene/abstract-scene.js";
 export { Scene } from "./scene/scene.js";
 export type { MeshPredicate, TrianglePickingPredicate } from "./scene/scene.js";
 export { PointerEventTypes, PointerInfo } from "./events/pointer-events.js";
+export { DeviceInputEventType, DeviceSource, DeviceSourceManager, DeviceType, EventConstants, PointerInput } from "./events/device-input.js";
+export type { DeviceInput, DeviceSourceEvent, IKeyboardEvent, IMouseEvent, IPointerEvent, IUIEvent, IWheelEvent } from "./events/device-input.js";
+export { DualShockInput, DualSenseInput, SwitchInput, XboxInput } from "./events/device-input.js";
 
 // ─── Cameras ─────────────────────────────────────────────────────────
 export {
@@ -71,8 +74,9 @@ export {
 } from "./cameras/cameras.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
-export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from "./lights/lights.js";
+export { Light, AreaLight, HemisphericLight, DirectionalLight, PointLight, RectAreaLight, SpotLight } from "./lights/lights.js";
 export { ClusteredLightContainer } from "./lights/clustered-light-container.js";
+export { AreaLightTextureTools } from "./lights/area-light-texture-tools.js";
 
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, LinesMesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
@@ -321,7 +325,6 @@ export {
     OpenPBRMaterialDefines,
     RegisterOpenpbrMaterial,
     OpenPBRMaterialLoadingAdapter,
-    RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
@@ -402,6 +405,8 @@ export {
     FlowGraphValidationSeverity,
     ValidateFlowGraph,
     ValidateFlowGraphWithBlockList,
+    RemoveFlowGraphAnimationGroupObservers,
+    defaultValueParseFunction,
 } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
@@ -418,6 +423,10 @@ export type {
     IGaussianSplattingDebugOptions,
     IFlowGraphValidationIssue,
     IFlowGraphValidationResult,
+    IFlowGraphAnimationObserverSet,
+    FlowGraphContext,
+    FlowGraphPlayAnimationBlock,
+    Observer,
     IRootMotionClipOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
@@ -430,6 +439,9 @@ export type {
     GaussianSplattingStreamDebugLodSource,
     GaussianSplattingStreamLod0SplatCount,
     IGaussianSplattingStreamOptions,
+    IGaussianSplattingStreamRangePack,
+    IGaussianSplattingStreamRangeResidencyStats,
+    IGaussianSplattingStreamSourceRange,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
 } from "./meshes/gaussian-splatting-stream.js";

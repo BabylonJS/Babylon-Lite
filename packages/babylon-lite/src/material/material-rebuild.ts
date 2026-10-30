@@ -40,6 +40,10 @@ function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Materia
     const rebuildViews = options?.rebuildViews !== false;
     let changed = false;
     const pending: Promise<void>[] = [];
+    const extra = scene._materialRebuild?.((material) => matchesMaterial(material, source, materialOrView, rebuildViews));
+    if (extra) {
+        pending.push(extra);
+    }
 
     for (const mesh of scene.meshes) {
         if (matchesMaterial(mesh.material, source, materialOrView, rebuildViews)) {
@@ -47,9 +51,12 @@ function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Materia
             if (typeof rebuilt !== "boolean") {
                 pending.push(rebuilt);
             } else if (rebuilt && mesh.material) {
-                // Per-material generation (twin of scene-material-swap): lets the CSM detect when a CASTER's own
-                // material was rebuilt — and ONLY then rebuild its shadow views — instead of on the global epoch.
+                // Per-material generation: lets the CSM detect when a CASTER's own material was rebuilt — and ONLY then
+                // rebuild its shadow views — instead of on the global epoch. The mesh's own generation also moves, as on
+                // every path that retires its per-mesh resources: a caster casting through an override (whose terminal
+                // generation does not move) is requeued too.
                 mesh.material._csmGen = (mesh.material._csmGen ?? 0) + 1;
+                mesh._renderableGen = -~mesh._renderableGen!;
                 changed = true;
             }
         }

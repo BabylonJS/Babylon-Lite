@@ -27,7 +27,7 @@ describe("Slug band-reference row wrapping", () => {
 
         packAppendGlyph(atlas, glyph);
 
-        const bandRef = (texel: number) => Array.from(atlas._bandTexData.subarray(texel * 4, texel * 4 + 2));
+        const bandRef = (texel: number) => Array.from(atlas._bandTexData.subarray(texel * 2, texel * 2 + 2));
         expect(bandRef(TEX_WIDTH - 1)).toEqual([0, 0]);
         expect(bandRef(TEX_WIDTH)).toEqual([2, 0]);
         const normalizedBaseFragment = composeSlugShader(null)._frag.replace(/\s+/g, "");

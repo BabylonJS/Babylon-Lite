@@ -78,6 +78,7 @@ import { Observable } from "../misc/observable.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { Ray } from "../math/ray.js";
+import { unsupported } from "../error.js";
 
 /** Babylon.js drag move payload. */
 export type DragEvent = {
@@ -216,7 +217,7 @@ abstract class GizmoBase {
 export class PositionGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LitePositionGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: AxisDragGizmo | null = null;
     private _yGizmo: AxisDragGizmo | null = null;
     private _zGizmo: AxisDragGizmo | null = null;
@@ -257,18 +258,23 @@ export class PositionGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachPositionGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /**
+     * Babylon.js `attachedNode` — a mesh, a `TransformNode` (whose Lite node is `_node` rather than `_lite`) or a light.
+     * Cameras throw a `LiteCompatError`: see {@link transformTargetLite}.
+     */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        const target = transformTargetLite(value, "PositionGizmo.attachedNode");
+        this._attached = value;
+        attachPositionGizmoToNode(this._lite, target);
     }
 
     public override dispose(): void {
@@ -286,7 +292,7 @@ export class PositionGizmo extends GizmoBase {
 export class RotationGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteRotationGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: PlaneRotationGizmo | null = null;
     private _yGizmo: PlaneRotationGizmo | null = null;
     private _zGizmo: PlaneRotationGizmo | null = null;
@@ -325,18 +331,23 @@ export class RotationGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachRotationGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /**
+     * Babylon.js `attachedNode` — a mesh, a `TransformNode` (whose Lite node is `_node` rather than `_lite`) or a light.
+     * Cameras throw a `LiteCompatError`: see {@link transformTargetLite}.
+     */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        const target = transformTargetLite(value, "RotationGizmo.attachedNode");
+        this._attached = value;
+        attachRotationGizmoToNode(this._lite, target);
     }
 
     public override dispose(): void {
@@ -354,7 +365,7 @@ export class RotationGizmo extends GizmoBase {
 export class ScaleGizmo extends GizmoBase {
     /** @internal */
     public readonly _lite: LiteScaleGizmo;
-    private _attached: AbstractMesh | null = null;
+    private _attached: Node | null = null;
     private _xGizmo: AxisScaleGizmo | null = null;
     private _yGizmo: AxisScaleGizmo | null = null;
     private _zGizmo: AxisScaleGizmo | null = null;
@@ -383,18 +394,23 @@ export class ScaleGizmo extends GizmoBase {
     }
 
     public get attachedMesh(): AbstractMesh | null {
-        return this._attached;
+        return this._attached as AbstractMesh | null;
     }
     public set attachedMesh(value: AbstractMesh | null) {
-        this._attached = value;
-        attachScaleGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        this.attachedNode = value;
     }
 
-    public get attachedNode(): AbstractMesh | null {
+    /**
+     * Babylon.js `attachedNode` — a mesh, a `TransformNode` (whose Lite node is `_node` rather than `_lite`) or a light.
+     * Cameras throw a `LiteCompatError`: see {@link transformTargetLite}.
+     */
+    public get attachedNode(): Node | null {
         return this._attached;
     }
-    public set attachedNode(value: AbstractMesh | null) {
-        this.attachedMesh = value;
+    public set attachedNode(value: Node | null) {
+        const target = transformTargetLite(value, "ScaleGizmo.attachedNode");
+        this._attached = value;
+        attachScaleGizmoToNode(this._lite, target);
     }
 
     public override dispose(): void {
@@ -526,6 +542,19 @@ function nodeLite(value: Node | null): SceneNode | null {
     }
     const n = value as { _lite?: SceneNode; _node?: SceneNode };
     return n._lite ?? n._node ?? null;
+}
+
+/**
+ * Lite node for a composite gizmo target. The native gizmos edit the target's `position`, `rotationQuaternion` and
+ * `scaling`. Meshes, transform nodes and lights have them; Lite cameras do not (an orbit camera has none, a free camera
+ * only `position`), so a camera is rejected before attachment instead of failing on the first drag.
+ */
+function transformTargetLite(value: Node | null, api: string): SceneNode | null {
+    const lite = nodeLite(value);
+    if (lite && !(lite.position && lite.rotationQuaternion && lite.scaling)) {
+        unsupported(api, `A ${value!.getClassName()} has no editable transform in Babylon Lite. Attach the gizmo to a mesh, transform node or light.`);
+    }
+    return lite;
 }
 
 /**

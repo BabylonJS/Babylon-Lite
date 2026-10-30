@@ -35,6 +35,187 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes physics discovery and allocation-free inspection without internal state", () => {
+        const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getPhysicsWorlds, getPhysicsBodies, getPhysicsConstraints, getPhysicsBodyWorld,
+    getPhysicsBodyPrestepType, getPhysicsBodyShape, getPhysicsBodyMassPropertiesToRef,
+    getPhysicsBodyLinearDamping, setPhysicsBodyLinearDamping,
+    getPhysicsBodyAngularDamping, setPhysicsBodyAngularDamping,
+    getPhysicsBodyGravityFactor, setPhysicsBodyGravityFactor,
+    getPhysicsBodyLinearVelocityToRef, getPhysicsBodyAngularVelocityToRef,
+    getPhysicsShapeType, getPhysicsShapeParameters, getPhysicsShapeMaterialToRef,
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask,
+    getPhysicsShapeDensity, getPhysicsShapeChildCount,
+    isPhysicsConstraintEnabled, setPhysicsConstraintEnabled,
+    getPhysicsConstraintDebug, hidePhysicsConstraint,
+    type SceneContext, type PhysicsWorld, type PhysicsBody, type PhysicsConstraint,
+    type PhysicsShape, type PhysicsShapeMaterial, type PhysicsMassProperties,
+    type PhysicsShapeParameters, type PhysicsShapeType, type PhysicsPrestepType,
+    type PhysicsConstraintDebug, type PhysicsViewer, type Vec3,
+} from "./index.js";
+declare const scene: SceneContext;
+declare const world: PhysicsWorld;
+declare const body: PhysicsBody;
+declare const shape: PhysicsShape;
+declare const constraint: PhysicsConstraint;
+declare const viewer: PhysicsViewer;
+declare const vector: Vec3;
+declare const massOut: Required<PhysicsMassProperties>;
+declare const materialOut: PhysicsShapeMaterial;
+const worlds: readonly PhysicsWorld[] = getPhysicsWorlds(scene);
+const bodies: readonly PhysicsBody[] = getPhysicsBodies(world);
+const constraints: readonly PhysicsConstraint[] = getPhysicsConstraints(world);
+const owner: PhysicsWorld = getPhysicsBodyWorld(body);
+const prestep: PhysicsPrestepType = getPhysicsBodyPrestepType(body);
+const baseShape: PhysicsShape | null = getPhysicsBodyShape(body);
+const mass: Required<PhysicsMassProperties> = getPhysicsBodyMassPropertiesToRef(world, body, massOut);
+getPhysicsBodyMassPropertiesToRef(world, body, massOut, 1);
+const linear: Vec3 = getPhysicsBodyLinearVelocityToRef(world, body, vector);
+getPhysicsBodyLinearVelocityToRef(world, body, vector, 1);
+const angular: Vec3 = getPhysicsBodyAngularVelocityToRef(world, body, vector);
+getPhysicsBodyAngularVelocityToRef(world, body, vector, 1);
+const dampingGetters: ((world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number) => number)[] =
+    [getPhysicsBodyLinearDamping, getPhysicsBodyAngularDamping, getPhysicsBodyGravityFactor];
+const dampingSetters: ((world: PhysicsWorld, body: PhysicsBody, value: number) => void)[] =
+    [setPhysicsBodyLinearDamping, setPhysicsBodyAngularDamping, setPhysicsBodyGravityFactor];
+const type: PhysicsShapeType = getPhysicsShapeType(shape);
+const parameters: Readonly<PhysicsShapeParameters> | null = getPhysicsShapeParameters(shape);
+const material: PhysicsShapeMaterial = getPhysicsShapeMaterialToRef(world, shape, materialOut);
+const scalarGetters: ((world: PhysicsWorld, shape: PhysicsShape) => number)[] = [
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask, getPhysicsShapeDensity, getPhysicsShapeChildCount,
+];
+const enabled: boolean = isPhysicsConstraintEnabled(world, constraint);
+setPhysicsConstraintEnabled(world, constraint, false);
+const debug: PhysicsConstraintDebug = getPhysicsConstraintDebug(constraint);
+const hidden: boolean = hidePhysicsConstraint(viewer, debug);
+// @ts-expect-error World discovery registry is internal.
+scene._physicsWorlds;
+// @ts-expect-error Constraint registry is internal.
+world._constraints;
+// @ts-expect-error Cached shape parameters are internal.
+shape._parameters;
+// @ts-expect-error Cached viewer mapping is internal.
+constraint._debug;
+// @ts-expect-error Owning world field is internal.
+body._world;
+// @ts-expect-error Discovery arrays are readonly.
+worlds.push(world);
+// @ts-expect-error Discovery arrays are readonly.
+bodies.push(body);
+// @ts-expect-error Discovery arrays are readonly.
+constraints.push(constraint);
+// @ts-expect-error Cached parameters are readonly.
+if (parameters) { parameters.radius = 1; }
+void [owner, prestep, baseShape, mass, linear, angular, dampingGetters, dampingSetters, type, material, scalarGetters, enabled, hidden];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes read-mostly skeleton, morph, and particle discovery without internal registries", () => {
+        const probePath = resolve(BUILD_DIR, "p9-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getMeshSkeleton, createMorphTargets, getParticleSystems, isParticleSystemStarted,
+    type Bone, type Skeleton, type Mesh, type MorphTargetData, type ParticleSystem,
+    type SceneContext, type EngineContext,
+} from "./index.js";
+declare const mesh: Mesh;
+declare const scene: SceneContext;
+declare const engine: EngineContext;
+declare const bone: Bone;
+declare const morph: MorphTargetData;
+declare const system: ParticleSystem;
+const skeleton: Skeleton | undefined = getMeshSkeleton(mesh);
+const parent: Bone | null = bone.parent;
+const names: readonly string[] | undefined = morph.names;
+const name: string | undefined = system.name;
+const systems: readonly ParticleSystem[] = getParticleSystems(scene);
+const started: boolean = isParticleSystemStarted(system);
+createMorphTargets(engine, [{ positions: new Float32Array(3), normals: null }], 1, [0], ["Smile"]);
+createMorphTargets(engine, [{ positions: new Float32Array(3), normals: null }], 1, null);
+// @ts-expect-error Parent references are readonly.
+bone.parent = null;
+// @ts-expect-error A bone's index is its array position, not a public field.
+bone.index;
+// @ts-expect-error glTF node indices are internal.
+bone._nodeIndex;
+// @ts-expect-error Public-handle associations are internal.
+mesh.skeleton?._skeleton;
+// @ts-expect-error Particle storage is not a public scene collection.
+scene._particleSystems;
+// @ts-expect-error The enumeration result is readonly.
+systems.push(system);
+// @ts-expect-error Names are readonly.
+morph.names?.push("extra");
+void [skeleton, parent, names, name, started];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes standalone device state and hides observer cleanup hooks", () => {
+        const probePath = resolve(BUILD_DIR, "device-input.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput,
+    createPointerInput, resetPointerInput, disposePointerInput, readGamepad,
+    type KeyboardInput, type PointerInput, type GamepadState, type GamepadButtonState,
+} from "./index.js";
+const keyboard: KeyboardInput = createKeyboardInput(window);
+const pointer: PointerInput = createPointerInput(document.createElement("canvas"));
+const held: boolean = isKeyboardKeyDown(keyboard, "KeyW");
+const codeSet: ReadonlySet<string> = keyboard.keys;
+const delta: number = pointer.deltaX;
+const pad: GamepadState | null = readGamepad(0);
+const button: GamepadButtonState | undefined = pad?.buttons[0];
+// @ts-expect-error The held-key set has no public mutation API.
+keyboard.keys.add("KeyW");
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+keyboard._dispose;
+// @ts-expect-error Listener cleanup is internal and removed from declarations.
+pointer._dispose;
+resetPointerInput(pointer);
+disposeKeyboardInput(keyboard);
+disposePointerInput(pointer);
+void [held, codeSet, delta, button];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks for a strict consumer that loads no ambient @types packages", () => {
         // A consumer with `compilerOptions.types: []` (or one that never lists `webxr`) gets no
         // automatic @types inclusion. The public WebXR API still references ambient XR globals, so the
@@ -132,6 +313,115 @@ const collision: SplatVoxelCollision = parseSplatVoxelCollision(metadata, buffer
 const position: [number, number, number] = moveSplatVoxelCamera(collision, [1, 2, 3], [4, 5, 6], 0.2);
 const loaded: Promise<SplatVoxelCollision> = loadSplatVoxelCollision("https://example.test/scene.voxel.json", new AbortController().signal);
 void [position, loaded];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes task removal for graphs and scenes through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "remove-task.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { removeTask, type FrameGraph, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const task: Task;
+const removedFromGraph: boolean = removeTask(graph, task);
+const removedFromScene: boolean = removeTask(scene, task);
+// @ts-expect-error A target must be a graph or scene.
+removeTask({}, task);
+// @ts-expect-error A task must satisfy the Task contract.
+removeTask(graph, { name: "incomplete" });
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes readonly live task discovery through the root API without internal storage", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).toContain("export declare function getFrameGraphTasks(frameGraph: FrameGraph): readonly Task[];");
+        expect(dts.match(/declare function getFrameGraphTasks\(/g)).toHaveLength(1);
+        expect(dts).not.toMatch(/^\s*_tasks:/m);
+        const probePath = resolve(BUILD_DIR, "frame-graph-task-discovery.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { getFrameGraph, getFrameGraphTasks, type FrameGraph, type FrameGraphContext, type SceneContext, type Task } from "./index.js";
+declare const graph: FrameGraph;
+declare const scene: SceneContext;
+declare const context: FrameGraphContext;
+declare const task: Task;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+const exactSignature: Equal<typeof getFrameGraphTasks, (frameGraph: FrameGraph) => readonly Task[]> = true;
+const sceneTasks: readonly Task[] = getFrameGraphTasks(getFrameGraph(scene));
+const standaloneTasks: readonly Task[] = getFrameGraphTasks(context.frameGraph);
+const tasks = getFrameGraphTasks(graph);
+// The array is readonly; task execution gates remain writable.
+tasks[0]!.executionEnabled = false;
+// @ts-expect-error The live list is not a mutable array.
+const mutable: Task[] = tasks;
+// @ts-expect-error Consumers must not append to the live list.
+tasks.push(task);
+// @ts-expect-error Consumers must not replace entries.
+tasks[0] = task;
+// @ts-expect-error Consumers must not clear the live list.
+tasks.length = 0;
+// @ts-expect-error There is no SceneContext overload.
+getFrameGraphTasks(scene);
+// @ts-expect-error Internal storage is not public.
+graph._tasks;
+// @ts-expect-error The argument must be a frame graph.
+getFrameGraphTasks({});
+void [exactSignature, sceneTasks, standaloneTasks];
 `
             );
             const result = spawnSync(
@@ -847,6 +1137,58 @@ void options;
             );
             const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
             expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes custom RenderTarget post-processes without internal shader fields", () => {
+        const probePath = resolve(BUILD_DIR, "custom-post-process.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createCustomPostProcessTask, wgsl,
+    type CustomPostProcessTaskConfig, type PostProcessTask, type EngineContext,
+    type SceneContext, type RenderTarget,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const source: RenderTarget;
+declare const destination: RenderTarget;
+const config: CustomPostProcessTaskConfig = {
+    sourceTexture: source, targetTexture: destination,
+    fragmentWGSL: wgsl\`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}\`,
+    extraTextures: [source],
+    extraTextureWGSL: "@group(0) @binding(2) var second:texture_2d<f32>;",
+    uniformWGSL: "@group(0) @binding(3) var<uniform> gain:vec4f;",
+    uniformByteLength: 16,
+    writeUniforms: data => { data[0] = 0.5; },
+};
+const standalone: PostProcessTask = createCustomPostProcessTask(config, engine);
+const inScene: PostProcessTask = createCustomPostProcessTask(config, engine, scene);
+standalone.updateUniforms();
+const output: RenderTarget = inScene.outputTexture;
+void output;
+// @ts-expect-error Application shaders are required.
+createCustomPostProcessTask({ sourceTexture: source }, engine);
+// @ts-expect-error The internal shader configuration is not public.
+config._shader;
+// @ts-expect-error Bindings follow the public fixed convention.
+config.uniformBinding = 7;
+// @ts-expect-error Internal GPU rebuild hooks are not public.
+standalone._rebuildGpuState();
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", probePath],
+                {
+                    cwd: BUILD_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
         } finally {
             rmSync(probePath, { force: true });
         }

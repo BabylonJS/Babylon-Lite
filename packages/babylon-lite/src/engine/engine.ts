@@ -12,6 +12,7 @@ import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { Renderable } from "../render/renderable.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -140,6 +141,8 @@ export interface EngineContext extends SurfaceContext {
     _attachGpuEvents?: (engine: EngineContext) => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
+    /** @internal Installed only by recovery opt-in; keeps already-captured dynamic sources current across disable/re-enable. */
+    _updateCapturedDynamicTexture?: (tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean) => void;
     /** @internal */
     _deviceLostRecovery?: DeviceLostRecoveryState;
     /** @internal */
@@ -157,6 +160,8 @@ export interface EngineContext extends SurfaceContext {
     _cbs: GPUCommandBuffer[];
     /** @internal Frame-boundary flush installed on the first queued GPU resource retirement. */
     _flushGpuRetirements?: (engine: EngineContext) => void;
+    /** @internal Opt-in frame boundary for features collecting per-draw work. */
+    _finishOptionalFrame?: (submitted: boolean) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
@@ -261,6 +266,8 @@ export function getRenderingContextKind(context: RenderingContext): string {
 /** @internal */
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;
+    dt(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, levels: number, samplerDesc: GPUSamplerDescriptor): void;
+    c<Args extends unknown[]>(renderable: Renderable, builder: (...args: Args) => Renderable | Promise<Renderable>, ...args: Args): void;
     x(
         source: GPUCopyExternalImageSource,
         width: number,
@@ -617,6 +624,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
+    let submitted = false;
     try {
         // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
         // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
@@ -658,6 +666,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
+        submitted = true;
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
@@ -665,6 +674,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerResolve?.();
     } finally {
         engine._currentEncoder = undefined!;
+        engine._finishOptionalFrame?.(submitted);
     }
 }
 

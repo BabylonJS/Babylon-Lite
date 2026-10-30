@@ -18,6 +18,8 @@ import {
     createDefaultCamera as liteCreateDefaultCamera,
     setFog,
     setClipPlane,
+    setEnvironmentLightingRotation,
+    setEnvironmentSkyboxRotation,
     loadEnvironment,
     loadDdsEnvironment,
     loadHdrEnvironment,
@@ -173,6 +175,9 @@ export class Scene extends AbstractScene {
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
     public cameraToUseForPointers: Camera | null = null;
+    /** Babylon.js `scene.pointerX` / `pointerY`: the last pointer position in CSS pixels relative to the canvas. */
+    public pointerX = 0;
+    public pointerY = 0;
     private _defaultMaterial: StandardMaterial | null = null;
     private _fogMode = 0;
     private _fogStart = 0;
@@ -189,6 +194,8 @@ export class Scene extends AbstractScene {
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
     private _envTexture: CubeTexture | HDRCubeTexture | null = null;
+    /** Environment lighting rotation last forwarded to Lite. */
+    private _envRotation = 0;
     private _brdfTexture: BaseTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: CompatShadowGenerator[] = [];
@@ -269,7 +276,18 @@ export class Scene extends AbstractScene {
                 default:
                     return;
             }
-            this.onPointerObservable.notifyObservers(new PointerInfo(type, event as PointerEvent | WheelEvent, null), type);
+            const pointerEvent = event as PointerEvent | WheelEvent;
+            const rect = this._engine.getRenderingCanvasClientRect();
+            if (rect && typeof pointerEvent.clientX === "number") {
+                this.pointerX = pointerEvent.clientX - rect.x;
+                this.pointerY = pointerEvent.clientY - rect.y;
+            }
+            // As in Babylon.js, the pick at this event's position runs only if an observer reads `pickInfo`, through the
+            // pointer camera when one is set (`scene.pick` alone prefers the active camera).
+            const x = this.pointerX;
+            const y = this.pointerY;
+            const camera = this.cameraToUseForPointers;
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, pointerEvent, null, () => this.pick(x, y, undefined, false, camera)), type);
         };
 
         for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
@@ -321,6 +339,7 @@ export class Scene extends AbstractScene {
         for (const callback of this._beforeRenderFlushCallbacks) {
             callback();
         }
+        this._syncEnvironmentRotation();
     }
 
     /** @internal Register work that must observe all compat before-render mutations before Lite renders. */
@@ -789,6 +808,21 @@ export class Scene extends AbstractScene {
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
         this._envTexture = value;
+        this._syncEnvironmentRotation();
+    }
+
+    /**
+     * Forward the environment texture's `rotationY` to the image-based lighting only. As in Babylon.js, a skybox keeps the
+     * orientation it was created with (see {@link createDefaultSkybox}) and the `createDefaultEnvironment` background never
+     * turns. Also runs every frame, so the texture needs no link back to the scenes that use it. A scene whose
+     * environment is never rotated never calls Lite.
+     */
+    private _syncEnvironmentRotation(): void {
+        const rotation = this._envTexture?.rotationY ?? 0;
+        if (rotation !== this._envRotation) {
+            this._envRotation = rotation;
+            setEnvironmentLightingRotation(this._lite, rotation);
+        }
     }
 
     /**
@@ -868,7 +902,13 @@ export class Scene extends AbstractScene {
      */
     public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
-            this._envTexture = texture;
+            this.environmentTexture = texture;
+        }
+        // Babylon.js builds the skybox from a clone of the texture, so the skybox keeps the rotation of this moment while
+        // later `rotationY` changes only turn the lighting.
+        const skyboxRotation = (texture ?? this._envTexture)?.rotationY ?? 0;
+        if (skyboxRotation) {
+            setEnvironmentSkyboxRotation(this._lite, skyboxRotation);
         }
         this._defaultEnvOptions = {
             ...(this._defaultEnvOptions ?? {}),

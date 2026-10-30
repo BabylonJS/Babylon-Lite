@@ -12,7 +12,6 @@ import {
     OpenPBRMaterialDefines,
     RegisterOpenpbrMaterial,
     OpenPBRMaterialLoadingAdapter,
-    RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
     HighlightLayer,
@@ -85,7 +84,6 @@ import {
     GaussianPointSplattingDepthBlitMaterial,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
-import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import {
     GLTF1,
     GLTF2,
@@ -203,7 +201,6 @@ describe("Unsupported API stubs throw on construction", () => {
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
-        ["RectAreaLight", () => new RectAreaLight()],
         ["ParticleSystem", () => new ParticleSystem()],
         ["GPUParticleSystem", () => new GPUParticleSystem()],
         ["SolidParticleSystem", () => new SolidParticleSystem()],
@@ -239,27 +236,6 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
-    });
-
-    it("preserves passive point-splatting state and fails loudly when the mode is enabled", () => {
-        const mesh = Object.create(GaussianSplattingMesh.prototype) as GaussianSplattingMesh;
-        mesh.pointSplattingRenderScale = 0.5;
-        mesh.pointSplattingOcclusionCulling = true;
-        mesh.pointSplattingScale = 2;
-
-        expect(mesh.pointSplattingRenderScale).toBe(0.5);
-        expect(mesh.pointSplattingOcclusionCulling).toBe(true);
-        expect(mesh.pointSplattingScale).toBe(2);
-        expect(mesh.pointSplattingRenderMode).toBe(false);
-        expect(mesh.pointSplattingDepthRenderMode).toBe(false);
-        expect(mesh.pointSplattingProgress).toBeNull();
-        expect(() => {
-            mesh.pointSplattingRenderMode = false;
-            mesh.pointSplattingDepthRenderMode = false;
-        }).not.toThrow();
-        expect(() => {
-            mesh.pointSplattingRenderMode = true;
-        }).toThrow(/compute-renderer subsystem/);
     });
 
     it("exposes the Gaussian Point Splatting blit and renderer member shapes", () => {
@@ -300,9 +276,9 @@ describe("Unsupported API stubs throw on construction", () => {
         expect(context.messages[0]).toContain("'ShaderMaterial'");
         expect(context.messages[0]).toContain("shader preprocessing subsystem");
         expect(context.messages[1]).toContain("'GaussianPointSplattingBlitMaterial'");
-        expect(context.messages[1]).toContain("compute-renderer subsystem");
+        expect(context.messages[1]).toContain("scene-integrated high-level handle");
         expect(context.messages[2]).toContain("'GaussianPointSplattingDepthBlitMaterial'");
-        expect(context.messages[2]).toContain("compute-renderer subsystem");
+        expect(context.messages[2]).toContain("scene-integrated high-level handle");
     });
 
     describe("Gaussian splatting material stubs", () => {

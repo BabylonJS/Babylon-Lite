@@ -14,7 +14,7 @@ import {
 } from "../../../packages/babylon-lite/src/physics/havok";
 
 function makeScene(): SceneContext {
-    return { _beforeRender: [] } as unknown as SceneContext;
+    return { _beforeRender: [], _disposables: [] } as unknown as SceneContext;
 }
 
 function makeNode(): Mesh {

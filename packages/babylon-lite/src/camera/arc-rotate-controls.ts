@@ -249,6 +249,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
     const PANNING_EPSILON = 0.0001;
+    // Decay one inertial offset by `factor`, snapping it to 0 once its magnitude drops below `epsilon`. Kept local so
+    // the bundler can still inline attachControl into a scene that calls it once.
+    const decayInertia = (offset: number, factor: number, epsilon: number): number => (Math.abs((offset *= factor)) < epsilon ? 0 : offset);
 
     let isDragging = false;
     let isPanning = false;
@@ -352,44 +355,43 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (camera.wheelPrecision * 1000);
     }
 
-    function onContextMenu(e: Event): void {
-        e.preventDefault();
-    }
-
-    function onTouchStart(e: TouchEvent): void {
+    /** Record the changed touches; returns true while two or more fingers are down. */
+    function trackTouches(e: TouchEvent): boolean {
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i]!;
             activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
         }
-        if (activeTouches.size >= 2) {
+        return activeTouches.size >= 2;
+    }
+
+    /** Distance between the first two active touches. */
+    function pinchDistance(): number {
+        const iter = activeTouches.values();
+        const p0 = iter.next().value!;
+        const p1 = iter.next().value!;
+        return Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+
+    function onTouchStart(e: TouchEvent): void {
+        if (trackTouches(e)) {
             // A second finger landed: this is a pinch, not a rotate. Cancel any
             // in-progress pointer rotate/pan so the gesture only zooms, and stop
             // the browser from hijacking the two-finger gesture as a page zoom
             // (iOS Safari ignores touch-action:none for pinch-zoom).
             isDragging = false;
             isPanning = false;
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            pinchStartDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            pinchStartDist = pinchDistance();
             pinchStartRadius = camera.radius;
             e.preventDefault();
         }
     }
 
     function onTouchMove(e: TouchEvent): void {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i]!;
-            activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-        }
-        if (activeTouches.size >= 2) {
+        if (trackTouches(e)) {
             // Prevent the browser's native pinch-to-zoom (page zoom on iOS) so the
             // gesture drives the camera radius instead.
             e.preventDefault();
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            const dist = pinchDistance();
             if (pinchStartDist > 0 && dist > 0) {
                 // Direct write — the camera's radius setter self-clamps to any
                 // configured orbit limits, so no transient out-of-bounds value
@@ -416,10 +418,11 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
     }
 
-    // iOS Safari fires non-standard gesture* events for pinch and still zooms the
-    // page even with touch-action:none; preventing them keeps the gesture for the
-    // camera. (No-op on browsers that don't emit these events.)
-    function onGesture(e: Event): void {
+    // Suppresses the canvas context menu. iOS Safari also fires non-standard
+    // gesture* events for pinch and still zooms the page even with
+    // touch-action:none; preventing them keeps the gesture for the camera.
+    // (No-op on browsers that don't emit these events.)
+    function preventDefault(e: Event): void {
         e.preventDefault();
     }
 
@@ -435,15 +438,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             const eps = 0.01;
             camera.beta = Math.max(eps, Math.min(Math.PI - eps, camera.beta));
 
-            camera.inertialAlphaOffset *= camera.inertia;
-            camera.inertialBetaOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialAlphaOffset) < ROTATION_EPSILON) {
-                camera.inertialAlphaOffset = 0;
-            }
-            if (Math.abs(camera.inertialBetaOffset) < ROTATION_EPSILON) {
-                camera.inertialBetaOffset = 0;
-            }
+            camera.inertialAlphaOffset = decayInertia(camera.inertialAlphaOffset, camera.inertia, ROTATION_EPSILON);
+            camera.inertialBetaOffset = decayInertia(camera.inertialBetaOffset, camera.inertia, ROTATION_EPSILON);
         }
 
         // --- Zoom inertia ---
@@ -451,36 +447,42 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             camera.radius -= camera.inertialRadiusOffset;
             camera.radius = Math.max(0.01, camera.radius);
 
-            camera.inertialRadiusOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialRadiusOffset) < RADIUS_EPSILON) {
-                camera.inertialRadiusOffset = 0;
-            }
+            camera.inertialRadiusOffset = decayInertia(camera.inertialRadiusOffset, camera.inertia, RADIUS_EPSILON);
         }
 
         // --- Panning inertia ---
         if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
-            const cosA = Math.cos(camera.alpha);
-            const sinA = Math.sin(camera.alpha);
-            const rightX = -sinA;
-            const rightZ = cosA;
-            const panScale = camera.radius * 0.001;
-
+            // The camera places its eye at sinβ = 0.0001 when sinβ is exactly 0.
+            const sinB = Math.sin(camera.beta) || 0.0001;
+            // The camera looks at its target with world up, so for sinβ < 0 (an unclamped β below 0 or above π) its right
+            // and up vectors both flip. Fold that sign into the scale, except where the look-at degenerates (below).
+            const panScale = camera.radius / (sinB <= -1e-10 ? -1000 : 1000);
+            const panX = camera.inertialPanningX * panScale;
+            const panY = camera.inertialPanningY * panScale;
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.
-            camera.target.x += rightX * camera.inertialPanningX * panScale;
-            camera.target.y += camera.inertialPanningY * panScale;
-            camera.target.z += rightZ * camera.inertialPanningX * panScale;
+            const target = camera.target;
 
-            camera.inertialPanningX *= camera.panningInertia;
-            camera.inertialPanningY *= camera.panningInertia;
+            if (Math.abs(sinB) < 1e-10) {
+                // The eye is straight above or below the target, so the camera's look-at falls back to the identity basis
+                // (its right axis has length |sinβ| there, below the helper's 1e-10 threshold): right +X, up +Y.
+                target.x += panX;
+                target.y += panY;
+            } else {
+                // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector ±(-sinα, 0, cosα), Y
+                // along its up vector ±(-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
+                // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
+                // target never moves towards or away from the eye.
+                const cosA = Math.cos(camera.alpha);
+                const sinA = Math.sin(camera.alpha);
+                const panYAcross = Math.cos(camera.beta) * panY;
+                target.x -= sinA * panX + cosA * panYAcross;
+                target.y += sinB * panY;
+                target.z += cosA * panX - sinA * panYAcross;
+            }
 
-            if (Math.abs(camera.inertialPanningX) < PANNING_EPSILON) {
-                camera.inertialPanningX = 0;
-            }
-            if (Math.abs(camera.inertialPanningY) < PANNING_EPSILON) {
-                camera.inertialPanningY = 0;
-            }
+            camera.inertialPanningX = decayInertia(camera.inertialPanningX, camera.panningInertia, PANNING_EPSILON);
+            camera.inertialPanningY = decayInertia(camera.inertialPanningY, camera.panningInertia, PANNING_EPSILON);
         }
     }
 
@@ -491,18 +493,19 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         scene._beforeRender.push(applyInertia);
     }
 
+    const nonPassive: AddEventListenerOptions = { passive: false };
     const listeners: [string, EventListener, AddEventListenerOptions?][] = [
         ["pointerdown", onPointerDown as EventListener],
         ["pointermove", onPointerMove as EventListener],
         ["pointerup", onPointerUp as EventListener],
-        ["wheel", onWheel as EventListener, { passive: false }],
-        ["contextmenu", onContextMenu as EventListener],
-        ["touchstart", onTouchStart as EventListener, { passive: false }],
-        ["touchmove", onTouchMove as EventListener, { passive: false }],
+        ["wheel", onWheel as EventListener, nonPassive],
+        ["contextmenu", preventDefault],
+        ["touchstart", onTouchStart as EventListener, nonPassive],
+        ["touchmove", onTouchMove as EventListener, nonPassive],
         ["touchend", onTouchEnd as EventListener],
-        ["gesturestart", onGesture as EventListener, { passive: false }],
-        ["gesturechange", onGesture as EventListener, { passive: false }],
-        ["gestureend", onGesture as EventListener, { passive: false }],
+        ["gesturestart", preventDefault, nonPassive],
+        ["gesturechange", preventDefault, nonPassive],
+        ["gestureend", preventDefault, nonPassive],
     ];
     for (const [ev, h, opts] of listeners) {
         canvas.addEventListener(ev, h, opts);

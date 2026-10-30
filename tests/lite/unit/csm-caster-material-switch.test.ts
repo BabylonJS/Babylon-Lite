@@ -125,11 +125,11 @@ function buildOwning(scene: SceneContext, buildGroup: MeshGroupBuilder): void {
     scene._groups.set(buildGroup, { r: rebuild } as unknown as SceneMeshGroup);
 }
 
-/** What the runtime build does when it lands (`materializeRuntimeMesh`): the group gets its rebuild, the mesh's material
- *  its next generation, and the renderable version and material epoch move. */
+/** What the runtime build does when it lands (`materializeRuntimeMesh`): the group gets its rebuild, the mesh its next
+ *  renderable generation, and the renderable version and material epoch move. */
 function buildLanded(scene: SceneContext, mesh: Mesh): void {
     build(scene, mesh.material!._buildGroup);
-    mesh.material!._csmGen = (mesh.material!._csmGen ?? 0) + 1;
+    mesh._renderableGen = (mesh._renderableGen ?? 0) + 1;
     scene._renderableVersion++;
     scene._materialEpoch++;
 }
@@ -365,6 +365,173 @@ describe("a registered CSM caster that switches to a material the snapshot has n
         frame();
         expect(retired()).toBe(2);
         expect(cascades(state())).toEqual([[[mesh, after]], [[mesh, after]]]);
+    });
+});
+
+describe("a rebuild of one caster's renderable", () => {
+    /** The packet each cascade task has recorded for `mesh`. */
+    const packetsOf = (state: CsmTaskState, mesh: Mesh): (Renderable | undefined)[] => state._tasks.map((task) => task._renderables.find((packet) => packet.mesh === mesh));
+
+    it.each(["default", "cache"] as const)("leaves the %s cascades of the material's other casters alone when another mesh joins with it", async (hooks) => {
+        const { shaders, caster, register, frame, state, retired } = await setup(hooks);
+        const shared = material("shared", shaders);
+        const first = caster(shared);
+        const second = caster(shared);
+        await register([first, second]);
+        frame();
+        const before = [packetsOf(state(), first), packetsOf(state(), second)];
+
+        // A mesh entering the running scene is queued like a material assignment; the drain builds it with `shared`.
+        const joining = caster(null);
+        joining.material = shared;
+        await register([first, second, joining]);
+        frame();
+
+        expect(retired()).toBe(0);
+        expect([packetsOf(state(), first), packetsOf(state(), second)]).toEqual(before);
+        expect(packetsOf(state(), first).every((packet, cascade) => packet === before[0]![cascade])).toBe(true);
+        expect(cascades(state()).map((cascade) => cascade.filter(([mesh]) => mesh === joining))).toEqual([[[joining, shared]], [[joining, shared]]]);
+    });
+
+    it.each(["default", "cache"] as const)("requeues only the caster whose renderable was rebuilt (%s cascades)", async (hooks) => {
+        const { lite, shaders, caster, register, frame, state, retired } = await setup(hooks);
+        const shared = material("shared", shaders);
+        const rebuilt = caster(shared);
+        const kept = caster(shared);
+        await register([rebuilt, kept]);
+        frame();
+        const keptPackets = packetsOf(state(), kept);
+        const rebuiltPackets = packetsOf(state(), rebuilt);
+
+        // Replaced GPU geometry, for example: the mesh's renderable is rebuilt and its per-mesh resources retired.
+        lite.markMeshRenderableDirty(rebuilt);
+        frame();
+
+        // Only the rebuilt caster's packet in each of the two cascades retires.
+        expect(retired()).toBe(2);
+        expect(packetsOf(state(), kept).every((packet, cascade) => packet === keptPackets[cascade])).toBe(true);
+        expect(packetsOf(state(), rebuilt).some((packet, cascade) => packet === rebuiltPackets[cascade])).toBe(false);
+        expect(cascades(state())).toEqual([
+            [
+                [kept, shared],
+                [rebuilt, shared],
+            ],
+            [
+                [kept, shared],
+                [rebuilt, shared],
+            ],
+        ]);
+        frame();
+        expect(retired()).toBe(2);
+    });
+
+    it("still requeues every caster of a material that is rebuilt", async () => {
+        const { lite, scene, shaders, caster, register, frame, state, retired } = await setup("default");
+        const shared = material("shared", shaders);
+        const first = caster(shared);
+        const second = caster(shared);
+        await register([first, second]);
+        frame();
+
+        void lite.rebuildMaterial(scene, shared);
+        frame();
+
+        expect(retired()).toBe(4);
+        expect(cascades(state())).toEqual([
+            [
+                [first, shared],
+                [second, shared],
+            ],
+            [
+                [first, shared],
+                [second, shared],
+            ],
+        ]);
+    });
+
+    it("requeues every caster through a fresh view when the material's features are invalidated and its meshes rebuilt one by one", async () => {
+        const { lite, shaders, caster, register, frame, state, retired } = await setup("default");
+        const shared = material("shared", shaders);
+        const first = caster(shared);
+        const second = caster(shared);
+        await register([first, second]);
+        frame();
+        const before = cascadeViews(state(), first);
+
+        // What `reconcileMaterialPlugins` does: drop the features, queue every mesh of the material, no generation moves.
+        shared._renderFeatures = { features: 1 };
+        lite.markMeshRenderableDirty(first);
+        lite.markMeshRenderableDirty(second);
+        frame();
+
+        expect(retired()).toBe(4);
+        const after = cascadeViews(state(), first);
+        expect(after.every((view, cascade) => view && view !== before[cascade])).toBe(true);
+        expect(cascadeViews(state(), second)).toEqual(after);
+    });
+
+    it("keeps the current view while the material's features are dropped, and requeues once they are recomputed", async () => {
+        const { shaders, caster, register, frame, state, retired } = await setup("default");
+        const shared = material("shared", shaders);
+        shared._renderFeatures = { features: 1 };
+        const first = caster(shared);
+        const second = caster(shared);
+        await register([first, second]);
+        frame();
+        const before = cascadeViews(state(), first);
+
+        // A pending rebuild dropped the features: a view built now would read none of them.
+        shared._renderFeatures = undefined;
+        frame();
+        expect(retired()).toBe(0);
+        expect(cascadeViews(state(), first)).toEqual(before);
+
+        // The rebuild recomputed them: one requeue of every caster through a fresh view.
+        shared._renderFeatures = { features: 1 };
+        frame();
+        expect(retired()).toBe(4);
+        expect(cascadeViews(state(), first).every((view, cascade) => view !== before[cascade])).toBe(true);
+        frame();
+        expect(retired()).toBe(4);
+    });
+
+    it.each([
+        ["its own renderable is rebuilt", (lite: Awaited<ReturnType<typeof setup>>["lite"], _scene: SceneContext, mesh: Mesh) => lite.markMeshRenderableDirty(mesh)],
+        ["its receive material is rebuilt", (lite: Awaited<ReturnType<typeof setup>>["lite"], scene: SceneContext, mesh: Mesh) => void lite.rebuildMaterial(scene, mesh.material!)],
+    ])("requeues a caster that casts through an override when %s", async (_case, rebuild) => {
+        const { lite, scene, shaders, caster, register, frame, state, retired } = await setup("default");
+        const receive = material("receive", shaders);
+        const terminal = material("terminal", shaders);
+        lite.setShadowCasterMaterial(receive, terminal);
+        const mesh = caster(receive);
+        await register([mesh]);
+        frame();
+        const before = packetsOf(state(), mesh);
+
+        // The terminal's generation and features do not move: only the caster's own renderable generation does.
+        rebuild(lite, scene, mesh);
+        frame();
+
+        expect(retired()).toBe(2);
+        expect(packetsOf(state(), mesh).some((packet, cascade) => packet === before[cascade])).toBe(false);
+        expect(cascades(state())).toEqual([[[mesh, terminal]], [[mesh, terminal]]]);
+    });
+
+    it("forgets the renderable generation of a caster that leaves the set", async () => {
+        const { shaders, caster, register, frame, state } = await setup("default");
+        const shared = material("shared", shaders);
+        const staying = caster(shared);
+        const leaving = caster(shared);
+        await register([staying, leaving]);
+        frame();
+
+        await register([staying]);
+        frame();
+        expect([...state()._casterGens.keys()]).toEqual([staying]);
+
+        await register([staying, leaving]);
+        frame();
+        expect([...state()._casterGens.keys()]).toEqual([staying, leaving]);
     });
 });
 

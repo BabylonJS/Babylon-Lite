@@ -7,6 +7,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import { retain } from "../resource/ref-count.js";
+import { copyLightBase } from "../light/light-clone.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
 
@@ -16,8 +17,21 @@ export type { SceneNode } from "./scene-node.js";
 export type TransformNode = SceneNode;
 
 /** Create a TransformNode (SceneNode) with TRS values and lazy world matrix.
- *  Parameters: name, position (px,py,pz), rotation quaternion (qx,qy,qz,qw), scaling (sx,sy,sz). */
-export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): TransformNode {
+ *  Parameters: name, position (px,py,pz), rotation quaternion (qx,qy,qz,qw), scaling (sx,sy,sz).
+ *  Omitted values default to the identity transform (applied once, in `initSceneNodeTransform`). */
+export function createTransformNode(
+    name: string,
+    px?: number,
+    py?: number,
+    pz?: number,
+    qx?: number,
+    qy?: number,
+    qz?: number,
+    qw?: number,
+    sx?: number,
+    sy?: number,
+    sz?: number
+): TransformNode {
     return createSceneNode(name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
@@ -29,7 +43,7 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
     }
 
     const clone =
-        src._cloneNode?.() ??
+        src._cloneNode?.(copyLightBase) ??
         (src._localMatrix
             ? src._localMatrixLocked
                 ? createSceneNodeFromMatrix(src.name + "_clone", (src._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4)

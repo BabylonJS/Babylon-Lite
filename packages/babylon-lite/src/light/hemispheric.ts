@@ -1,8 +1,8 @@
 /** Hemispheric light data.
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase } from "./types.js";
-import { ObservableVec3, createLightBase, applyLightBase, copyLightBase, writeWorldLightDirection } from "./light-base.js";
+import type { LightBase, LightBaseCopier } from "./types.js";
+import { ObservableVec3, createLightBase, applyLightBase, writeWorldLightDirection } from "./light-base.js";
 
 export interface HemisphericLight extends LightBase {
     readonly lightType: "hemispheric";
@@ -26,12 +26,12 @@ export function createHemisphericLight(direction: [number, number, number] = [0,
             diffuseColor: [1, 1, 1] as [number, number, number],
             specularColor: [1, 1, 1] as [number, number, number],
             groundColor: [0, 0, 0] as [number, number, number],
-            _cloneNode: () => {
+            _cloneNode: (copyBase: LightBaseCopier) => {
                 const clone = createHemisphericLight([light.direction.x, light.direction.y, light.direction.z], light.intensity);
                 clone.diffuseColor = [...light.diffuseColor];
                 clone.specularColor = [...light.specularColor];
                 clone.groundColor = [...light.groundColor];
-                copyLightBase(light, clone);
+                copyBase(light, clone);
                 return clone;
             },
 

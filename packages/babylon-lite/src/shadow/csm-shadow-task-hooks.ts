@@ -18,17 +18,8 @@ import { _enableTaskMeshPopulation, addMeshToTask, createRenderTask, type Render
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import {
-    getNoColorView,
-    hasNoColorViewFactory,
-    preloadPcfShadowTaskState,
-    resolveShadowCasterMaterial,
-    shadowCasterMaterialChanged,
-    snapshotShadowCasterMaterial,
-} from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
-import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -92,8 +83,14 @@ export interface CsmTaskState extends ShadowTaskInternalState {
      *  those casters are requeued. This is precise, unlike the global `_materialEpoch`, which also bumps for swaps of
      *  unrelated (non-caster) materials. */
     _casterMatGens: Map<Material, number | undefined>;
+    /** @internal Per-caster-material render-features (`_renderFeatures`) snapshot, taken with `_casterMatGens`: a view
+     *  built from features that were invalidated since is stale even when no material generation moved. */
+    _casterMatFeatures: Map<Material, unknown>;
     /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
     _casterMaxCascades: Map<Mesh, number | undefined>;
+    /** @internal Per-caster renderable-generation (`Mesh._renderableGen`) snapshot, taken when the caster was queued. A
+     *  caster whose own renderable was rebuilt since is requeued alone, through the cached view of its material. */
+    _casterGens: Map<Mesh, number | undefined>;
     /** @internal The casters the last reconcile (or the first build) kept out of every task (`_reconcileCsmCasters`):
      *  changed ones whose view could not be built yet, and ones without a material and without a packet. While they are
      *  unchanged the reconcile adopts this set, so an ensure with the same caster array and no stale material touches no
@@ -223,15 +220,18 @@ export function ensureCsmShadowTaskState(
     // Snapshot each caster material's gen so a later reconcile can tell which CASTER materials were rebuilt (→ requeue
     // their casters) from a pure caster-set change (→ add/remove only, keeping unchanged casters' packets).
     const casterMatGens = new Map<Material, number | undefined>();
+    const casterMatFeatures = new Map<Material, unknown>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
+    const casterGens = new Map<Mesh, number | undefined>();
     // A caster without a material gets no packet, and so no cap entry: it waits in `_held`, and the reconcile queues it
     // once it has one, also when it gets it before the next ensure.
     let held: Set<Mesh> | undefined;
     for (const m of casterMeshes) {
         if (m.material) {
             casterMaxCascades.set(m, m._shadowMaxCascade);
-            snapshotShadowCasterMaterial(m.material, casterMaterials, casterMatGens);
+            casterGens.set(m, m._renderableGen);
+            snapshotShadowCasterMaterial(m.material, casterMaterials, casterMatGens, casterMatFeatures);
         } else {
             (held ??= new Set()).add(m);
         }
@@ -251,7 +251,9 @@ export function ensureCsmShadowTaskState(
         _materialViews: materialViews,
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
+        _casterMatFeatures: casterMatFeatures,
         _casterMaxCascades: casterMaxCascades,
+        _casterGens: casterGens,
         _held: held,
         _cascadeScratch: _createCascadeScratch(n),
     };
@@ -263,11 +265,14 @@ export function ensureCsmShadowTaskState(
  *  through a stale no-colour view are dropped, in one pass per task; unchanged casters keep their resolved packets. The
  *  dropped casters that are still in the set are queued again: through a fresh view when theirs was stale, and through
  *  the cached view of their material when only their cap changed. A view is stale when the caster's material was
- *  rebuilt (`_csmGen`) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when its material is missing
- *  from it: the caster switched material or got its first one, or it joins with an unseen material, whose chain may
- *  hold a view another caster's chain cached before the terminal was rebuilt.
+ *  rebuilt (`_csmGen`), had its render features invalidated or was re-pointed (`setShadowCasterMaterial`) since the
+ *  snapshot, or when its material is missing from it: the caster switched material or got its first one, or it joins
+ *  with an unseen material, whose chain may hold a view another caster's chain cached before the terminal was rebuilt.
+ *  A caster whose own renderable was rebuilt since it was queued (`Mesh._renderableGen`: a material assignment, a
+ *  runtime add, replaced geometry) is dropped and requeued too, alone and through the cached view of its material: its
+ *  packets may reference the per-mesh resources that rebuild retired, and the other casters of the material keep theirs.
  *
- *  A changed caster whose view cannot be built yet (`holdCsmCaster`) is held instead, without holding back any other
+ *  A changed caster whose view cannot be built yet (`holdShadowCaster`) is held instead, without holding back any other
  *  caster: it leaves every task once, its packets retired behind the frame fence, since they may reference per-mesh
  *  resources retired with its previous material, possibly in a frame this reconcile did not see (the generator was
  *  parked). A registered one keeps its cap entry, and its material is not snapshotted, so it still reads as changed and
@@ -290,11 +295,14 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
     const views = state._materialViews;
     const materials = state._casterMaterials;
     const gens = state._casterMatGens;
+    const features = state._casterMatFeatures;
     const caps = state._casterMaxCascades;
+    const casterGens = state._casterGens;
     const tasks = state._tasks;
     const last = state._held;
     let stale: Set<Material> | undefined;
     let held: Set<Mesh> | undefined;
+    let rebuilt: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
         const material = mesh.material;
         if (!material) {
@@ -304,18 +312,20 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
             if (last?.has(mesh) || !caps.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh)) {
                 (held ??= new Set()).add(mesh);
             }
-        } else if (shadowCasterMaterialChanged(material, materials, gens)) {
-            if (holdCsmCaster(scene, sg, material)) {
+        } else if (shadowCasterMaterialChanged(material, materials, gens, features)) {
+            if (holdShadowCaster(scene, sg, material)) {
                 (held ??= new Set()).add(mesh);
             } else {
                 (stale ??= new Set()).add(material);
             }
+        } else if (caps.has(mesh) && !last?.has(mesh) && casterGens.get(mesh) !== mesh._renderableGen) {
+            (rebuilt ??= new Set()).add(mesh);
         }
     }
     if (last && held?.size === last.size && [...held].every((mesh) => last.has(mesh))) {
         held = last;
     }
-    if (!stale && held === last && state._casterMeshes === casterMeshes) {
+    if (!stale && !rebuilt && held === last && state._casterMeshes === casterMeshes) {
         return undefined;
     }
     // `getNoColorView` caches an override's view under every link of its chain, and receive materials may share links:
@@ -337,8 +347,9 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
             if (!last?.has(mesh) && caps.has(mesh)) {
                 drop.add(mesh);
             }
-        } else if (!next.has(mesh) || (material && stale?.has(material)) || mesh._shadowMaxCascade !== caps.get(mesh)) {
+        } else if (!next.has(mesh) || (material && stale?.has(material)) || rebuilt?.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh)) {
             caps.delete(mesh);
+            casterGens.delete(mesh);
             drop.add(mesh);
         }
     }
@@ -366,7 +377,8 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
                 _enableTaskMeshPopulation(task);
                 task._pendingMeshes!.push({ mesh, material: view ?? material });
             }
-            snapshotShadowCasterMaterial(material, materials, gens);
+            casterGens.set(mesh, mesh._renderableGen);
+            snapshotShadowCasterMaterial(material, materials, gens, features);
         }
         caps.set(mesh, maxCascade);
     }
@@ -399,6 +411,7 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         if (!used.has(material)) {
             materials.delete(material);
             gens.delete(material);
+            features.delete(material);
         }
     }
     for (const material of views.keys()) {
@@ -452,28 +465,6 @@ export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undef
         task._ob.length = 0;
         task._lastVersion = -1;
     }
-}
-
-/** Whether the no-colour view of a caster material cannot be built yet. When the view factory of the family the caster
- *  casts through is not imported, building the view would call an undefined factory: this re-supplies the generator's
- *  registered caster set through `setShadowTaskCasterMeshes`, which parks the generator while the factory imports, as any
- *  re-supplied set does. A caster casting through its own material also waits while that material's group is not built
- *  in this scene, or recording the view would throw inside the frame: the mesh's swap drain or runtime build builds it.
- *  A build that fails reports its own error, and the hold lasts until the caster's material is reassigned or the caster
- *  leaves the set. A `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's
- *  lifecycle builds it: recording it throws as before, naming the problem. */
-function holdCsmCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
-    const terminal = resolveShadowCasterMaterial(material);
-    if (!hasNoColorViewFactory(terminal)) {
-        // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
-        // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
-        const registered = _getShadowTaskCasterMeshes(sg);
-        if (registered && !sg._preloadPending) {
-            setShadowTaskCasterMeshes(sg, registered);
-        }
-        return true;
-    }
-    return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
 }
 
 /** Render every cascade layer for this frame, recomputing splits/matrices from the active camera. */

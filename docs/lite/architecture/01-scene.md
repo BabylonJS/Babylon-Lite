@@ -69,6 +69,12 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
 /** Set environment rotation around the Y axis, in radians. */
 export function setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 
+/** Rotate only the image-based lighting around the Y axis, in radians; the visible skybox keeps its own orientation. */
+export function setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void;
+
+/** Give the visible skybox a fixed Y rotation, in radians, independent of the lighting. Call before the skybox is built. */
+export function setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void;
+
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;
 
@@ -212,7 +218,7 @@ A mesh's GPU resources (geometry `_gpu`, skeleton, morph targets, thin instances
 - Scene disposal drains a snapshot of `_disposables`, so every callback present when disposal starts runs exactly once even when a callback unregisters itself or a related shared-resource callback during cleanup. Repeated `disposeScene` calls are no-ops.
 - **Disposal is terminal, for the mesh.** `disposeMeshGpu` marks the mesh `_disposed` and returns early on any repeat call, so the idempotent `removeFromScene` never releases a claim twice (a second release would report the surviving clone's claim as the last one and destroy buffers still in use). `addToScene` throws for a disposed mesh from then on: `Mesh "<name>" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`, and `cloneTransformNode` likewise refuses it — a clone of a disposed mesh could never release the claims cloning retains. The flag is per-mesh, not per-resource, because both failure modes are per-mesh: a sole owner would draw with destroyed handles, while a shared owner would release a second claim it no longer holds and free buffers a surviving sibling still renders with. It also covers resources destroyed independently of the shared geometry (a per-node skeleton or morph target whose geometry is shared) and stale handles left behind by device-loss recovery, which only rebuilds meshes still in a scene.
 - The guard runs before any scene state is mutated, so a rejected mesh add leaves the scene untouched. Adding a hierarchy or asset container is not transactional: entities processed before the offending mesh stay added.
-- Removing a mesh you intend to show again is therefore never valid unless another scene still holds it. Otherwise build a new mesh. To hide a mesh temporarily, prefer `mesh.visible = false` / `setSubtreeVisible` over removing it.
+- Removing a mesh you intend to show again is therefore never valid unless another scene still holds it. Otherwise build a new mesh. To hide a mesh temporarily, call `setMeshVisible(mesh, false)` instead of removing it, and `setMeshVisible(mesh, true)` to show it again. `SceneNode.visible` is read-only in the public API: `setMeshVisible` cascades the value to descendants and bumps the visibility epoch so cached opaque render bundles are re-recorded, which a plain field write would not do.
 
 ### Deferred Building & `_buildGroup` Pattern
 
