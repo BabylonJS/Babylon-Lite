@@ -174,6 +174,18 @@ export abstract class Camera extends Node {
         return Matrix.FromArray(liteGetViewMatrix(this._lite));
     }
 
+    /** Babylon.js `camera.getDirection(localAxis)`: `localAxis` in world space, without translation. */
+    public getDirection(localAxis: Vector3): Vector3 {
+        const result = Vector3.Zero();
+        this.getDirectionToRef(localAxis, result);
+        return result;
+    }
+
+    /** Babylon.js `camera.getDirectionToRef(localAxis, result)`. The camera's world matrix is the inverse of its view matrix. */
+    public getDirectionToRef(localAxis: Vector3, result: Vector3): void {
+        result.copyFrom(Vector3.TransformNormal(localAxis, this.getViewMatrix().invert()));
+    }
+
     /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
     public getProjectionMatrix(): Matrix {
         return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()));

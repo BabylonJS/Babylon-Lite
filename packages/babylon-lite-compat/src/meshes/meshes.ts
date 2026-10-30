@@ -269,6 +269,14 @@ export class TransformNode extends Node {
     }
 
     /**
+     * Babylon.js `getChildTransformNodes(directDescendantsOnly?, predicate?)` — the descendants that are transform nodes
+     * (meshes included). As in Babylon.js, `predicate` is called on every evaluated descendant.
+     */
+    public getChildTransformNodes(directDescendantsOnly?: boolean, predicate?: (node: Node) => boolean): TransformNode[] {
+        return this.getDescendants(directDescendantsOnly, (node) => (!predicate || predicate(node)) && node instanceof TransformNode) as TransformNode[];
+    }
+
+    /**
      * Babylon.js `setParent(node)` — reparent while **preserving world position**
      * (the child's local transform is recomputed). Distinct from the `parent`
      * setter, which keeps the local transform and lets the world move.

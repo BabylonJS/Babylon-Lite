@@ -18,6 +18,7 @@ import { Vector3 } from "./vector.js";
 import type { Matrix } from "./matrix.js";
 
 let lookDirectionRotationScratch: Float32Array | undefined;
+let axesRotationScratch: Float32Array | undefined;
 
 export class Quaternion {
     public constructor(
@@ -196,6 +197,32 @@ export class Quaternion {
 
     public static FromEulerAngles(x: number, y: number, z: number): Quaternion {
         return Quaternion.RotationYawPitchRoll(y, x, z);
+    }
+
+    /** Babylon.js `Quaternion.FromEulerVector(vec)`: `vec` holds pitch (x), yaw (y) and roll (z). */
+    public static FromEulerVector(vec: Vector3): Quaternion {
+        return Quaternion.RotationYawPitchRoll(vec.y, vec.x, vec.z);
+    }
+
+    /** Babylon.js `Quaternion.FromEulerVectorToRef(vec, result)`. */
+    public static FromEulerVectorToRef<T extends Quaternion>(vec: Vector3, result: T): T {
+        return result.copyFrom(Quaternion.RotationYawPitchRoll(vec.y, vec.x, vec.z));
+    }
+
+    /** Babylon.js `Quaternion.RotationQuaternionFromAxis(axis1, axis2, axis3)`: the rotation of the XYZ system onto these axes. */
+    public static RotationQuaternionFromAxis(axis1: Vector3, axis2: Vector3, axis3: Vector3): Quaternion {
+        return Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, new Quaternion());
+    }
+
+    /** Babylon.js `Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, ref)`. Like Babylon.js, it normalizes
+     *  copies of the axes and uses them as the rows of a rotation matrix (`Matrix.FromXYZAxesToRef`); the axes are left as they are. */
+    public static RotationQuaternionFromAxisToRef<T extends Quaternion>(axis1: Vector3, axis2: Vector3, axis3: Vector3, ref: T): T {
+        const x = axis1.clone().normalize();
+        const y = axis2.clone().normalize();
+        const z = axis3.clone().normalize();
+        const matrix = (axesRotationScratch ??= new Float32Array(16));
+        matrix.set([x.x, x.y, x.z, 0, y.x, y.y, y.z, 0, z.x, z.y, z.z, 0, 0, 0, 0, 1]);
+        return Quaternion._FromRotationStorageToRef(matrix, ref);
     }
 
     public static RotationYawPitchRoll(yaw: number, pitch: number, roll: number): Quaternion {

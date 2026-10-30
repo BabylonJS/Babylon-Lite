@@ -240,6 +240,17 @@ export class Matrix {
         return result;
     }
 
+    /** Babylon.js `Matrix.Invert(source)`: a new matrix holding the inverse of `source`, which is left as it is. */
+    public static Invert(source: Matrix): Matrix {
+        return source.invertToRef(new Matrix());
+    }
+
+    /** Babylon.js `Matrix.FromXYZAxesToRef(xaxis, yaxis, zaxis, result)`: the axes as the first three rows. */
+    public static FromXYZAxesToRef<T extends Matrix>(xaxis: Vector3, yaxis: Vector3, zaxis: Vector3, result: T): T {
+        result.m.set([xaxis.x, xaxis.y, xaxis.z, 0, yaxis.x, yaxis.y, yaxis.z, 0, zaxis.x, zaxis.y, zaxis.z, 0, 0, 0, 0, 1]);
+        return result;
+    }
+
     public static Identity(): Matrix {
         return Matrix.FromValues(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
     }
