@@ -22,6 +22,8 @@ import {
 import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineContext, PropertyAnimationInterpolation, PropertyAnimationTrackOptions } from "babylon-lite";
 
 import type { IEasingFunction } from "./easing.js";
+import { Observable } from "../misc/observable.js";
+import { unsupported } from "../error.js";
 
 /** Structural vector/quaternion value accepted by Babylon.js animation keys. */
 export interface IAnimationVectorValue {
@@ -351,6 +353,13 @@ interface AnimatableNativeState {
  */
 export class Animatable {
     public masterFrame = 0;
+    /** Babylon.js `onAnimationEnd`: called when the animatable ends, on its own or through `stop()`. */
+    public onAnimationEnd: (() => void) | null = null;
+    /** Babylon.js `onAnimationEndObservable`: notified right after `onAnimationEnd`. */
+    public readonly onAnimationEndObservable = new Observable<Animatable>();
+    /** Babylon.js `disposeOnEnd`: when the animatable completes on its own, its end callback and observers are cleared once
+     *  they ran (default true). Unlike Babylon.js, compat keeps it in `scene.animatables`. */
+    public disposeOnEnd = true;
     /** @internal Lite group backing a natively-delegated property animation. */
     public readonly _lite?: LiteAnimationGroup;
     /** @internal Reason all or part of this animatable retained the compat CPU evaluator. */
@@ -359,6 +368,8 @@ export class Animatable {
     private _speedRatio: number;
     private _paused = false;
     private _stopped = false;
+    /** @internal This frame's `_advance` reached the end, which `_completeFrame` reports. */
+    private _frameEnded = false;
     private readonly _nativeManager: AnimationManager | undefined;
     private readonly _fallbackAnimations: readonly Animation[];
     private readonly _fallbackFrames = new Map<Animation, number>();
@@ -441,8 +452,17 @@ export class Animatable {
         }
     }
 
-    /** @internal Advance the animation by `deltaMs`, called once per scene frame. */
+    /** @internal Advance the animation by `deltaMs` and report its end if it reached it: one standalone frame. The scene
+     *  runs the two steps separately, `_advance` for all its animatables and then `_completeFrame` for each. */
     public _tick(deltaMs: number): void {
+        this._advance(deltaMs);
+        this._completeFrame();
+    }
+
+    /** @internal Advance the fallback tracks by `deltaMs` (Lite advances the native group in its manager update) and
+     *  note whether the animatable reached its end, without reporting it yet. */
+    public _advance(deltaMs: number): void {
+        this._frameEnded = false;
         if (this._paused || this._stopped) {
             return;
         }
@@ -450,21 +470,31 @@ export class Animatable {
             this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
             const fallbackRunning = this._advanceFallback(deltaMs);
             this._applyFallback();
-            if (!this._loop && this._lite._stopped && !fallbackRunning) {
-                this._detachLite();
-                this._stopped = true;
-            }
+            this._frameEnded = !this._loop && this._lite._stopped && !fallbackRunning;
             return;
         }
         const anyFallbackRunning = this._advanceFallback(deltaMs);
         this.masterFrame = this._fallbackFrames.get(this._animations[0]!) ?? this._from;
         this._applyFallback();
-        if (!this._loop && !anyFallbackRunning) {
-            this._stopped = true;
+        this._frameEnded = !this._loop && !anyFallbackRunning;
+    }
+
+    /** @internal Report the end that this frame's `_advance` reached. A pause, restart, seek or stop since then (from an
+     *  end callback raised earlier in the frame) has cleared it. */
+    public _completeFrame(): void {
+        if (!this._frameEnded) {
+            return;
         }
+        this._frameEnded = false;
+        if (this._lite) {
+            this._detachLite();
+        }
+        this._stopped = true;
+        this._raiseOnCompletion();
     }
 
     public goToFrame(frame: number): void {
+        this._frameEnded = false;
         this._completedFallbackAnimations.clear();
         for (const animation of this._fallbackAnimations) {
             this._resetFallbackAnimation(animation, frame);
@@ -482,6 +512,7 @@ export class Animatable {
     }
 
     public pause(): void {
+        this._frameEnded = false;
         this._paused = true;
         if (this._lite) {
             pauseAnimation(this._lite);
@@ -490,6 +521,7 @@ export class Animatable {
     }
 
     public restart(): void {
+        this._frameEnded = false;
         const restartFromBeginning = this._stopped;
         this._paused = false;
         this._stopped = false;
@@ -512,17 +544,52 @@ export class Animatable {
         }
     }
 
-    public stop(): void {
+    /**
+     * Babylon.js `stop(animationName?, targetMask?, useGlobalSplice?, skipOnAnimationEnd?)`: stops the animatable and raises
+     * its end unless `skipOnAnimationEnd`. Stopping only the tracks matching `animationName` or `targetMask` is not supported.
+     */
+    public stop(animationName?: string, targetMask?: (target: unknown) => boolean, _useGlobalSplice = false, skipOnAnimationEnd = false): void {
+        if (animationName || targetMask) {
+            unsupported("Animatable.stop(animationName | targetMask)", "Only the whole animatable can be stopped: call `stop()`.");
+        }
+        const ended = !this._stopped && !skipOnAnimationEnd;
+        this._frameEnded = false;
         this._paused = false;
         this._stopped = true;
         if (this._lite) {
             stopAnimation(this._lite);
             this._detachLite();
         }
+        if (ended) {
+            this._raiseOnAnimationEnd();
+        }
+    }
+
+    /** Babylon.js `waitAsync()`: resolves with this animatable when it next ends. */
+    public waitAsync(): Promise<Animatable> {
+        return new Promise((resolve) => this.onAnimationEndObservable.addOnce(() => resolve(this)));
+    }
+
+    /** @internal Whether this animatable animates `target`. */
+    public _animates(target: unknown): boolean {
+        return this._target === target;
     }
 
     public get animationStarted(): boolean {
         return !this._paused && !this._stopped;
+    }
+
+    private _raiseOnAnimationEnd(): void {
+        this.onAnimationEnd?.();
+        this.onAnimationEndObservable.notifyObservers(this);
+    }
+
+    private _raiseOnCompletion(): void {
+        this._raiseOnAnimationEnd();
+        if (this.disposeOnEnd) {
+            this.onAnimationEnd = null;
+            this.onAnimationEndObservable.clear();
+        }
     }
 
     private _applyFallback(): void {

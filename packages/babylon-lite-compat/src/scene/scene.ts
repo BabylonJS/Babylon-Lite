@@ -322,8 +322,20 @@ export class Scene extends AbstractScene {
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        for (const a of this._runningAnimatables) {
-            a._tick(deltaMs);
+        // Lite advanced every native group above, in one manager update. So the fallback tracks advance first too, for every
+        // animatable present at frame start, and only then are the ends reported, in order. An end callback therefore sees
+        // every animatable advanced for this frame, and a stop, pause, restart or new animation it asks for takes effect
+        // from the next frame on both evaluators. Unlike Babylon.js, which steps animatables one at a time, an animatable
+        // stopped by an earlier one's end callback keeps this frame's advance. (A chain of animations shorter than a frame
+        // cannot spin within one tick.)
+        const running = this._runningAnimatables;
+        const count = running.length;
+        // Both passes run user code (easing functions, property setters, end callbacks); a `dispose()` there empties the list.
+        for (let i = 0; i < count; i++) {
+            running[i]?._advance(deltaMs);
+        }
+        for (let i = 0; i < count; i++) {
+            running[i]?._completeFrame();
         }
         if (this._structuralGroups.length > 0) {
             for (const g of this._structuralGroups) {
@@ -1163,12 +1175,12 @@ export class Scene extends AbstractScene {
     }
 
     /**
-     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
+     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?, onAnimationEnd?)`.
      * Delegates supported tracks to Babylon Lite property animation and retains
      * explicit compat evaluation only for unsupported tracks. Returns one facade
      * coordinating both subsets.
      */
-    public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
+    public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1, onAnimationEnd?: () => void): Animatable {
         if (speedRatio < 0) {
             [from, to] = [to, from];
             speedRatio = -speedRatio;
@@ -1187,6 +1199,7 @@ export class Scene extends AbstractScene {
             speedRatio,
             blockedNativeBindings
         );
+        animatable.onAnimationEnd = onAnimationEnd ?? null;
         this._runningAnimatables.push(animatable);
         return animatable;
     }
@@ -1232,11 +1245,43 @@ export class Scene extends AbstractScene {
     }
 
     /**
-     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?)`. Runs
-     * the animations already attached to `target.animations`.
+     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?, onAnimationEnd?, animatable?, stopCurrent?)`.
+     * Runs the animations already attached to `target.animations`. As in Babylon.js, the target's running animatables
+     * are stopped first unless `stopCurrent` is false. Appending to an existing `animatable` is not supported.
      */
-    public beginAnimation(target: { animations?: Animation[] }, from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        return this.beginDirectAnimation(target, target.animations ?? [], from, to, loop, speedRatio);
+    public beginAnimation(
+        target: { animations?: Animation[] },
+        from: number,
+        to: number,
+        loop = false,
+        speedRatio = 1,
+        onAnimationEnd?: () => void,
+        animatable?: Animatable | null,
+        stopCurrent = true
+    ): Animatable {
+        if (animatable) {
+            unsupported("Scene.beginAnimation(…, animatable)", "Appending animations to an existing Animatable is not supported: start a new one.");
+        }
+        if (stopCurrent) {
+            this.stopAnimation(target);
+        }
+        return this.beginDirectAnimation(target, target.animations ?? [], from, to, loop, speedRatio, onAnimationEnd);
+    }
+
+    /**
+     * Babylon.js `scene.stopAnimation(target)`: stops every running animatable of `target`, which raises their
+     * `onAnimationEnd`. Stopping only the tracks matching `animationName` or `targetMask` is not supported.
+     */
+    public stopAnimation(target: unknown, animationName?: string, targetMask?: (target: unknown) => boolean): void {
+        if (animationName !== undefined || targetMask) {
+            unsupported("Scene.stopAnimation(…, animationName | targetMask)", "Only whole animatables can be stopped: call `stopAnimation(target)`.");
+        }
+        // A snapshot: an `onAnimationEnd` raised here may start a new animation on the same target, which must keep running.
+        for (const running of this._runningAnimatables.slice()) {
+            if (running._animates(target)) {
+                running.stop();
+            }
+        }
     }
 
     public dispose(): void {
