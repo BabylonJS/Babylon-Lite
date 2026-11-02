@@ -53,7 +53,7 @@ overrides:
   '@protobufjs/utf8': '>=1.1.1'
   dompurify: '>=3.4.13'
   postcss: '>=8.5.23'
-  sharp: '>=0.35.4'
+  sharp: '>=0.35.5'
   '@typescript-eslint/utils': '>=8.65.0'
   esbuild-wasm: '>=0.28.2 <0.29.0'
   'nanoid@>=3.0.0 <3.3.18': '>=3.3.18 <4.0.0'
