@@ -316,26 +316,32 @@ export class Scene extends AbstractScene {
         // observers) reflects the current frame.
         this._engine._lastDeltaMs = deltaMs;
         this.onBeforeAnimationsObservable.notifyObservers(this);
+        // Which animatables play this frame is settled here, before Lite's manager update: that update only advances the
+        // native groups attached now, and it already runs user code (easing functions of native tracks, setters of
+        // natively bound properties).
+        const running = this._runningAnimatables;
+        const count = running.length;
+        for (let i = 0; i < count; i++) {
+            running[i]!._beginFrame();
+        }
         if (this._blendManager) {
             updateAnimationManager(this._blendManager, deltaMs);
         }
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        // Lite stepped every native group above, in one manager update. The fallback tracks of the animatables present at
-        // frame start follow in three passes: `_advance` steps them all in time and notes their ends, running no user code;
-        // `_applyFrame` writes their values (easing functions, property setters); `_completeFrame` reports the ends, in
-        // order. Which animatables play this frame is thus settled before any user code runs, as for the native groups: a
-        // stop, pause, seek, restart or new animation that a setter or an end callback asks for changes playback from the
-        // next frame on both evaluators, and an animatable it stops or pauses keeps this frame's advance (Babylon.js, which
-        // steps animatables one at a time, would not advance it). A chain of animations shorter than a frame cannot spin
-        // within one tick.
-        const running = this._runningAnimatables;
-        const count = running.length;
+        // Lite stepped the native groups above, in one manager update. The fallback tracks of the same animatables follow
+        // in three passes: `_advance` steps them all in time and notes their ends, running no user code; `_applyFrame`
+        // writes their values (easing functions, property setters); `_completeFrame` reports the ends, in order. A stop,
+        // pause, seek, restart or new animation that user code asks for during the frame therefore changes playback from
+        // the next frame on both evaluators. An animatable that is stopped or paused after its tracks were stepped keeps
+        // this frame's advance (Babylon.js, which steps animatables one at a time, would not advance it); `stop()` and
+        // `pause()` write that pose at once, so what the code writes after them stays. A chain of animations shorter than a
+        // frame cannot spin within one tick.
+        // The manager update and the passes run user code; a `dispose()` there empties the list.
         for (let i = 0; i < count; i++) {
-            running[i]!._advance(deltaMs);
+            running[i]?._advance(deltaMs);
         }
-        // These two passes run user code; a `dispose()` there empties the list.
         for (let i = 0; i < count; i++) {
             running[i]?._applyFrame();
         }

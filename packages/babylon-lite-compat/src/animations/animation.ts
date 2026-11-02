@@ -372,6 +372,8 @@ export class Animatable {
     private _frameEnded = false;
     /** @internal This frame's `_advance` stepped the fallback tracks, whose values `_applyFrame` writes. */
     private _frameStepped = false;
+    /** @internal The animatable was playing when this frame started, before any of the frame's user code ran. */
+    private _framePlaying = false;
     private readonly _nativeManager: AnimationManager | undefined;
     private readonly _fallbackAnimations: readonly Animation[];
     private readonly _fallbackFrames = new Map<Animation, number>();
@@ -455,11 +457,18 @@ export class Animatable {
     }
 
     /** @internal Advance the animation by `deltaMs` and report its end if it reached it: one standalone frame. The scene
-     *  runs the three steps separately, each for all its animatables: `_advance`, `_applyFrame`, then `_completeFrame`. */
+     *  runs the steps separately, each for all its animatables: `_beginFrame`, then (after Lite's manager update)
+     *  `_advance`, `_applyFrame` and `_completeFrame`. */
     public _tick(deltaMs: number): void {
+        this._beginFrame();
         this._advance(deltaMs);
         this._applyFrame();
         this._completeFrame();
+    }
+
+    /** @internal Note whether the animatable plays this frame, before the frame's user code can resume it. */
+    public _beginFrame(): void {
+        this._framePlaying = !this._paused && !this._stopped;
     }
 
     /** @internal Step the fallback tracks by `deltaMs` (Lite steps the native group in its manager update) and note whether
@@ -467,7 +476,8 @@ export class Animatable {
     public _advance(deltaMs: number): void {
         this._frameEnded = false;
         this._frameStepped = false;
-        if (this._paused || this._stopped) {
+        // Resumed during the frame: its native group was not attached for the manager update either.
+        if (!this._framePlaying || this._paused || this._stopped) {
             return;
         }
         this._frameStepped = true;
@@ -505,6 +515,8 @@ export class Animatable {
     }
 
     public goToFrame(frame: number): void {
+        // The seek writes its own pose below, which replaces the one this frame stepped to.
+        this._frameStepped = false;
         this._frameEnded = false;
         this._completedFallbackAnimations.clear();
         for (const animation of this._fallbackAnimations) {
@@ -523,6 +535,8 @@ export class Animatable {
     }
 
     public pause(): void {
+        // The pose this frame stepped to is written now, so what the code writes after the pause stays.
+        this._applyFrame();
         this._frameEnded = false;
         this._paused = true;
         if (this._lite) {
@@ -563,6 +577,8 @@ export class Animatable {
         if (animationName || targetMask) {
             unsupported("Animatable.stop(animationName | targetMask)", "Only the whole animatable can be stopped: call `stop()`.");
         }
+        // The pose this frame stepped to is written before the end is reported, so what the end callback writes stays.
+        this._applyFrame();
         const ended = !this._stopped && !skipOnAnimationEnd;
         this._frameEnded = false;
         this._paused = false;

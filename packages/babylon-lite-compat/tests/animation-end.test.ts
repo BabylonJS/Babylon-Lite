@@ -224,10 +224,12 @@ describe.each([
     const first = (scene: Scene, onEnd: () => void): Animatable =>
         scene.beginDirectAnimation({ position: { x: 0 } }, [ramp("first", "position.x", 10, CYCLE)], 0, 10, false, 1, onEnd);
 
-    /** A looping fallback animatable whose property setter runs `action` once, at its first write of the next frame. */
-    function armedFirst(scene: Scene, action: (animatable: Animatable) => void, onEnd?: () => void): Animatable {
+    /** A looping animatable, on the fallback (CONSTANT) or delegated to Lite (CYCLE), whose property setter runs `action`
+     *  once, at its first write of the next frame. Lite's native track writes through the setter in its manager update. */
+    function armedFirst(scene: Scene, action: (animatable: Animatable) => void, onEnd?: () => void, mode: number = CONSTANT) {
         const later: { a?: Animatable } = {};
         let armed = false;
+        let fired = 0;
         const target = {
             position: {
                 _x: 0,
@@ -238,15 +240,16 @@ describe.each([
                     this._x = value;
                     if (armed) {
                         armed = false;
+                        fired++;
                         action(later.a!);
                     }
                 },
             },
         };
-        const a = (later.a = scene.beginDirectAnimation(target, [ramp("first", "position.x", 10, CONSTANT)], 0, 10, true, 1, onEnd));
-        expect(a._lite).toBeUndefined();
+        const a = (later.a = scene.beginDirectAnimation(target, [ramp("first", "position.x", 10, mode)], 0, 10, true, 1, onEnd));
+        expect(a._lite === undefined).toBe(mode === CONSTANT);
         armed = true;
-        return a;
+        return { animatable: a, fired: () => fired };
     }
 
     it("stops where this frame advanced it, unlike Babylon.js, when the callback stops it", () => {
@@ -289,27 +292,81 @@ describe.each([
         expect(onSecondEnd).toHaveBeenCalledTimes(1);
     });
 
-    it("first advances on the next frame when a setter's stop resumes it from the end callback", () => {
-        const scene = new Scene(new NullEngine());
-        const onSecondEnd = vi.fn();
-        const later: { b?: ReturnType<typeof start> } = {};
-        // The setter's stop() reports the first animatable's end at once, while the frame's values are being written.
-        armedFirst(
-            scene,
-            (a) => a.stop(),
-            () => later.b!.animatable.restart()
-        );
-        const b = (later.b = start(scene, 10, onSecondEnd));
-        b.animatable.pause();
+    describe.each([
+        ["on the compat fallback", CONSTANT],
+        ["delegated to Lite", CYCLE],
+    ] as const)("when the setter of an animatable %s", (_firstPath, firstMode) => {
+        it("first advances on the next frame when the setter's stop resumes it from the end callback", () => {
+            const scene = new Scene(new NullEngine());
+            const onSecondEnd = vi.fn();
+            const later: { b?: ReturnType<typeof start> } = {};
+            // The setter's stop() reports the first animatable's end at once: in the middle of the frame's fallback writes,
+            // or, delegated to Lite, inside Lite's manager update.
+            const a = armedFirst(
+                scene,
+                (animatable) => animatable.stop(),
+                () => later.b!.animatable.restart(),
+                firstMode
+            );
+            const b = (later.b = start(scene, 10, onSecondEnd));
+            b.animatable.pause();
 
-        scene._tick(1100);
+            scene._tick(1100);
 
-        expect(b.values().every((value) => value === 0)).toBe(true);
-        expect(b.animatable.animationStarted).toBe(true);
-        expect(onSecondEnd).not.toHaveBeenCalled();
-        scene._tick(1100);
-        expect(b.values().every((value) => value === 10)).toBe(true);
-        expect(onSecondEnd).toHaveBeenCalledTimes(1);
+            expect(a.fired()).toBe(1);
+            expect(b.values().every((value) => value === 0)).toBe(true);
+            expect(b.animatable.animationStarted).toBe(true);
+            expect(onSecondEnd).not.toHaveBeenCalled();
+            scene._tick(1100);
+            expect(b.values().every((value) => value === 10)).toBe(true);
+            expect(onSecondEnd).toHaveBeenCalledTimes(1);
+        });
+
+        it("keeps what its end callback writes when the setter stops it", () => {
+            const scene = new Scene(new NullEngine());
+            const later: { b?: ReturnType<typeof start> } = {};
+            const a = armedFirst(scene, () => later.b!.animatable.stop(), undefined, firstMode);
+            later.b = start(scene, 20, () => {
+                later.b!.target.position.x = 99;
+                later.b!.target.position.y = 99;
+            });
+
+            scene._tick(1100);
+
+            expect(a.fired()).toBe(1);
+            expect(later.b.values().every((value) => value === 99)).toBe(true);
+        });
+
+        it.each([
+            // Paused before this frame is stepped (setter delegated to Lite), or after it with the stepped pose written at
+            // once (setter on the fallback): nothing writes after the setter in this frame.
+            ["pausing", (animatable: Animatable) => animatable.pause(), 99, 99],
+            // Delegated to Lite, the setter runs before this frame is stepped, so it plays on from the seek: 1.1 s of a
+            // 2 s ramp. On the fallback it runs after the step, and the seek's pose replaces it.
+            ["seeking", (animatable: Animatable) => animatable.goToFrame(0), 99, 11],
+        ] as const)("keeps what the setter writes after %s it", (_how, change, afterFallbackSetter, afterLiteSetter) => {
+            const scene = new Scene(new NullEngine());
+            const later: { b?: ReturnType<typeof start> } = {};
+            const a = armedFirst(
+                scene,
+                () => {
+                    change(later.b!.animatable);
+                    later.b!.target.position.x = 99;
+                    later.b!.target.position.y = 99;
+                },
+                undefined,
+                firstMode
+            );
+            later.b = start(scene, 20, vi.fn());
+
+            scene._tick(1100);
+
+            expect(a.fired()).toBe(1);
+            const expected = firstMode === CYCLE ? afterLiteSetter : afterFallbackSetter;
+            for (const value of later.b.values()) {
+                expect(value).toBeCloseTo(expected, 5);
+            }
+        });
     });
 
     it("keeps this frame's advance when a setter pauses it", () => {
@@ -492,7 +549,7 @@ describe("scene._tick when a scene is disposed during the advance", () => {
         const scene = new Scene(new NullEngine());
         let armed = false;
         let disposed = 0;
-        // The fallback evaluator writes through this setter inside the first pass; it disposes the scene once armed.
+        // The fallback evaluator writes through this setter in the apply pass; it disposes the scene once armed.
         const target = {
             position: {
                 _x: 0,
