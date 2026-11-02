@@ -22,7 +22,7 @@ vi.mock("node:fs", () => ({
 
 vi.mock("node:crypto", () => ({
     createHash: (algorithm: string) => {
-        expect(algorithm).toBe("sha1");
+        expect(algorithm).toBe("sha256");
         return {
             update: mocks.update,
             digest: mocks.digest,
@@ -53,6 +53,7 @@ describe("Kenney Voxel Pack fixture setup", () => {
 
         expect(fetchMock).not.toHaveBeenCalled();
         expect(mocks.read).toHaveBeenCalledTimes(VOXELPACK_FILES.length);
+        expect(mocks.update).toHaveBeenCalledWith(bytes);
         expect(mocks.write).not.toHaveBeenCalled();
     });
 
@@ -67,13 +68,14 @@ describe("Kenney Voxel Pack fixture setup", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(VOXELPACK_FILES.length);
         expect(fetchMock).toHaveBeenCalledWith(
-            "https://raw.githubusercontent.com/series-ai/jam-ready-assets/ab1b21fe61bc3adeb759c286e770033563f18a97/kenney-voxel-pack/2D/prototype-blocks/PNG/Tiles/dirt.png",
+            "https://media.githubusercontent.com/media/series-ai/jam-ready-assets/ab1b21fe61bc3adeb759c286e770033563f18a97/kenney-voxel-pack/2D/prototype-blocks/PNG/Tiles/dirt.png",
             { signal: expect.any(AbortSignal) }
         );
         expect(fetchMock).toHaveBeenCalledWith(
             "https://raw.githubusercontent.com/series-ai/jam-ready-assets/ab1b21fe61bc3adeb759c286e770033563f18a97/kenney-voxel-pack/2D/prototype-blocks/License.txt",
             { signal: expect.any(AbortSignal) }
         );
+        expect(mocks.update).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
         expect(mocks.write).toHaveBeenCalledTimes(VOXELPACK_FILES.length);
         expect(mocks.rename).toHaveBeenCalledTimes(VOXELPACK_FILES.length);
         expect(mocks.remove).toHaveBeenCalledTimes(VOXELPACK_FILES.length);
@@ -99,6 +101,20 @@ describe("Kenney Voxel Pack fixture setup", () => {
         );
 
         await expect(fetchVoxelpack()).rejects.toThrow(/integrity check failed: .*dirt\.png/);
+
+        expect(mocks.write).not.toHaveBeenCalled();
+        expect(mocks.rename).not.toHaveBeenCalled();
+    });
+
+    it("rejects a Git LFS pointer body even if its digest mock matches", async () => {
+        mocks.digest.mockReturnValue(VOXELPACK_FILES[0][1]);
+        const pointer = ["version https://git-lfs.github.com/spec/v1", `oid sha256:${VOXELPACK_FILES[0][1]}`, "size 1955", ""].join("\n");
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation(() => Promise.resolve(new Response(pointer)))
+        );
+
+        await expect(fetchVoxelpack()).rejects.toThrow(/returned a Git LFS pointer instead of the payload/);
 
         expect(mocks.write).not.toHaveBeenCalled();
         expect(mocks.rename).not.toHaveBeenCalled();

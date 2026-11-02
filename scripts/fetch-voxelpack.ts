@@ -12,64 +12,70 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACK_VERSION = "1.0";
-const SOURCE = "https://raw.githubusercontent.com/series-ai/jam-ready-assets/ab1b21fe61bc3adeb759c286e770033563f18a97/kenney-voxel-pack/2D/prototype-blocks";
+const REVISION = "ab1b21fe61bc3adeb759c286e770033563f18a97";
+const MEDIA_SOURCE = `https://media.githubusercontent.com/media/series-ai/jam-ready-assets/${REVISION}/kenney-voxel-pack/2D/prototype-blocks`;
+const RAW_SOURCE = `https://raw.githubusercontent.com/series-ai/jam-ready-assets/${REVISION}/kenney-voxel-pack/2D/prototype-blocks`;
 
 export const VOXELPACK_FILES = [
-    ["dirt.png", "1b69d6f77be725207c2354b0d03e713dea265c5e"],
-    ["dirt_grass.png", "d4430eb4b7236756c4b3fe7a7f92c04810c982af"],
-    ["grass_top.png", "2acd92ddf4362834fee88655c7b69178a02b3cb9"],
-    ["dirt_sand.png", "cb083ba4cda2459d4830b4bdf88eb576a75e2f2e"],
-    ["dirt_snow.png", "2ad158ce0fdac35b895c00af635d79dca295ea2c"],
-    ["sand.png", "e77226eaa1123adae782573f858d9d8f5508b457"],
-    ["snow.png", "8795576b8a406d19c6205412dbc339de8d7e2a64"],
-    ["stone.png", "77da007ab03123fa035d80b7204e35120f39d826"],
-    ["greystone.png", "d34f17ac50af576904228fd1e2706c8571508e0e"],
-    ["gravel_stone.png", "cfdcb8362a332dba584b4aa1c7b3cd56f5ba62ee"],
-    ["rock.png", "fe0530728851ba39f1ad7fc855063c0cba02c995"],
-    ["rock_moss.png", "7f79d71f321f2f72b5209a32bbfec4a0d0e253b4"],
-    ["ice.png", "7b8125681a8fa420ee1c968b7dacf0fd414cb621"],
-    ["water.png", "a991a79cbf0185023e612f5833e864e29ccebfaf"],
-    ["lava.png", "b61712ad4285fc07c6e517568756f698f26fd4a2"],
-    ["glass.png", "cdb0dc1efd1391965603956598c32cbcea647dfb"],
-    ["leaves.png", "888eca9598cd29e46ea2f0b689434b01be4486d9"],
-    ["leaves_transparent.png", "88a654b4b4a13f354f212819d5c0783c9c785037"],
-    ["leaves_orange_transparent.png", "6d0da62dbfca2db93d40190f085bce0d58018e79"],
-    ["trunk_side.png", "2275c0900de85aea778831593af43d0f2313f8ec"],
-    ["trunk_top.png", "94de47a47a7d3b23966180bc4d9c9c42dd15653a"],
-    ["trunk_white_side.png", "0cfcc4718b9217f99d455003706db793ce4618ca"],
-    ["trunk_white_top.png", "47163a87cdc8aa23deca99e3a282cca546f09b50"],
-    ["wood.png", "8f59a1eac78805c3407e3cf3aee04d2ee2fc8409"],
-    ["wood_red.png", "c34d8ac32cb4ca19b0ef8ffa569eda67c8cd24f9"],
-    ["brick_red.png", "f06fdb003e0385349c4a82f3d66f331ffbf0b7b1"],
-    ["brick_grey.png", "12bdf6d4a75c39b573f7b09c5b873f9a65b32681"],
-    ["stone_coal.png", "67d72e8795c39011bcaa5d989ec6296ef56d6546"],
-    ["stone_iron.png", "acd32c94f9fd379e930e1e0117fca853574a332c"],
-    ["stone_gold.png", "27f9b5b08048c43321e7b95e2865d230c4ea2c93"],
-    ["stone_diamond.png", "76063d221b644de65b0eb8cf4960e6da939c187e"],
-    ["stone_silver.png", "7d2c4ceb863f71ab6844e623c8b7f43a4c931482"],
-    ["greystone_ruby.png", "6c8b37dc89307d86544f0dd780e32703b029e6f8"],
-    ["redstone_emerald.png", "73eb74ae562ac3dde5ce53356b96ab3c62723f72"],
-    ["cactus_side.png", "5f75b5aa10c80d81250c85ca85657292081d5335"],
-    ["cactus_top.png", "ebeb8ffa6dfeaed84ac4b6929c5e79ec84d210aa"],
-    ["cactus_inside.png", "2890f79a84c9b732cd33fc1eb1b15864aee3f866"],
-    ["greysand.png", "99e71e989ae602c00c6183bb8b78f56d31dd6b95"],
-    ["redsand.png", "292f431a06e9a142ac1c128ed3737bd9da3efc65"],
-    ["cotton_blue.png", "5c37c3b91aa132409bf2a0d32d01d391d0e19ac1"],
-    ["cotton_green.png", "31e1a4a69261c83b97d740481ac204384a0d34dc"],
-    ["cotton_red.png", "b7b2279eb884d994233b7dd01e6441af6da90979"],
-    ["cotton_tan.png", "90dfbd108e7067584fd0d7a8308e183a442032a3"],
-    ["License.txt", "23b3eede5a413a3ad99a5a14a82af7e4337b6d92"],
+    ["dirt.png", "7e08116d9a68f5bae2073505d13be8f6716c4f1e7b0bfe2bd78a68f622c2f25a"],
+    ["dirt_grass.png", "872c5b31354a0e5899dc0d4dfabc45398a2a32cd68e0e00a239814ead5a1cb84"],
+    ["grass_top.png", "26198710dbcf0263c2f215eff6e65031d57035147311ae660b69588ff6f46dc1"],
+    ["dirt_sand.png", "8f1ebc39a5bf6d152faebaede6b87f412d54f038d687eb72543bf758247ba10e"],
+    ["dirt_snow.png", "02ed08cc74a773a8514a6cc1fa4486a8c8d4b7455d11e0ead7182ca052294e84"],
+    ["sand.png", "fbb7dff45b32e6334c0a9ea90187b55707cc6685daf0a479353e4f00e1dc5cd7"],
+    ["snow.png", "f694001ed497d0c506f0e3b9d4439fb9444445049e5c337f894aac0ca186f882"],
+    ["stone.png", "d3e76a0f22d40d949949db03c5de9587955a0c2ec275789beb54b5c117a2c276"],
+    ["greystone.png", "2ba076aee5e4a4e323400888c169e05c343eab6cbf04eaad3a06341e5ba3d611"],
+    ["gravel_stone.png", "ccd5960e77b2f0183e37508a005fce40c20feec4bca4722eb0faadc97a5308ef"],
+    ["rock.png", "bfb523e4122ad9924b3da26666769d8bf621e6c3a3a32ecdab82e0cc86cb3923"],
+    ["rock_moss.png", "301481fee7b5ec2a7f621a82817617a722ce8c37f3fd7a0f0613c305b295a19b"],
+    ["ice.png", "b4ad41eb60c6f256c0284ff36c7d2ad58008ba0e4e856000a6f2e6ec389affd8"],
+    ["water.png", "74ab57cfa5120b4608070036b8cbecdf01419a464a2356dadf224683157afbbc"],
+    ["lava.png", "03a8a247890c274897ed8dacc2f0cf9ce80cfa9abca15e2650bf4b9d92c11ce9"],
+    ["glass.png", "edfeefd2cad1fe888599161db8c7e40e3d08818008257d85f2848d2bb403ebff"],
+    ["leaves.png", "4209bef3d6eab83f2fa92235ff01ee8fe296cc61caf9e191c26a328c1e05418b"],
+    ["leaves_transparent.png", "b73c5de803bf81aaddabc6019a54c9acfa5ec14dab4ee3fcaa303df75f9ff22b"],
+    ["leaves_orange_transparent.png", "1d6901d733a3f461239e6d395b45e3ef0fbd8fc713e1748e441d316f07ccb7dc"],
+    ["trunk_side.png", "915acfcb7768586def6b95818e866d8eb69c03095daafee32edb422a2bc26e0a"],
+    ["trunk_top.png", "2f8ad801032a08f96b31f2cb77838344a1b428afcdfdbcc97c1cf00ea8a69df3"],
+    ["trunk_white_side.png", "5e172f908509b18a363b52713336d484c5e765e4bb7791160a4ae82fc34be938"],
+    ["trunk_white_top.png", "85862f9f21e9bb204427e77f3badecb65ced0b474893aeb8f3b6e18344beda0e"],
+    ["wood.png", "3caa10d9c3e20492c0ab40ec5b916ce5cff70f649a91975702b7af5feb4e9177"],
+    ["wood_red.png", "f6c43b7aebdb2f1e3e542b069f3e978fa7705d5b356dc15ec1f780e055d7d0cf"],
+    ["brick_red.png", "59f2146abbec646777c000f54317e56c779f7bd37274d707ab191fe98dfafae8"],
+    ["brick_grey.png", "b71acebcae06e5b73cde51a934ad7cd266ba0df65f489d26632fa7897d4e91c4"],
+    ["stone_coal.png", "5d9b29e28be44b5a31cff7ca56545b002c8579e7fe2b2d7c3343879acf71283d"],
+    ["stone_iron.png", "8acc237369ec455f8b3d6bbd325c7b86be0ad0ea30beb9ed104f0b2f45b65111"],
+    ["stone_gold.png", "131df636541078160aa0d900e922482c60b6994a52a81acec52b1ea3c558724e"],
+    ["stone_diamond.png", "ddd5987d3d784ff0927f30d538a3b265ec90b1b164197c4cb6c9ba6744fab138"],
+    ["stone_silver.png", "ede1bf076416368f803d43cf9d45e6ebe57e4f1d8ea5cd0e85796bf5fff21dc8"],
+    ["greystone_ruby.png", "9c03b22f41982035020a1405ce2f22aca5e6bcdadb90d458f06b3fca33525f6a"],
+    ["redstone_emerald.png", "3b1bc948f753be7a0f81e9d4350898982840a0d13d0b781bd97d090ef638c6c7"],
+    ["cactus_side.png", "ca50b9a8e8c5c6f2dd8d0c2e08b9d6f4f8136333202b023e219ae843517d51cd"],
+    ["cactus_top.png", "432fb900895957c60ac86291c90ba73f5217d4138c6e51ffb2c748908d862d11"],
+    ["cactus_inside.png", "6e2c4a0a032629077b34a12b45ddedd73185c40c693eb3ea926588eb0a26a573"],
+    ["greysand.png", "6e81e733d91ef494c9ecbcdcab7dd492d1f502d80264d371347c3ac047d7b593"],
+    ["redsand.png", "74c1ac51b20d7bfbebd8bd0fd10d57f25337ed3b9bd8415a061d4f97633539b2"],
+    ["cotton_blue.png", "f4627ff18307f389cabefd92ece0296c50024f0998c7d2919abb0ddcdb6e7a00"],
+    ["cotton_green.png", "0c5029f9ab9b11db3cc8c4a4d381f51c5d704cafc687e489fc55968f33da41e6"],
+    ["cotton_red.png", "926d1ac7e25d839fc38c9d57f1188507869243ee73c8497fd362703fc10d1b63"],
+    ["cotton_tan.png", "abc5065e275fcbe47a1ad77830749e79afa8bc10e71adc557e30bed1d06077c9"],
+    ["License.txt", "268825d3247e7a0f66b64ef3e1f5a76b228ab3345f913abf534bf61f7da7d8c7"],
 ] as const;
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "lab", "public", "minecraft", "voxelpack");
 
-function blobDigest(bytes: Uint8Array): string {
-    return createHash("sha1").update(`blob ${bytes.byteLength}\0`).update(bytes).digest("hex");
+function contentDigest(bytes: Uint8Array): string {
+    return createHash("sha256").update(bytes).digest("hex");
+}
+
+function isGitLfsPointer(bytes: Uint8Array): boolean {
+    return Buffer.from(bytes).subarray(0, 128).toString("utf8").startsWith("version https://git-lfs.github.com/spec/v1\n");
 }
 
 function sourceUrl(name: string): string {
-    return name === "License.txt" ? `${SOURCE}/${name}` : `${SOURCE}/PNG/Tiles/${name}`;
+    return name === "License.txt" ? `${RAW_SOURCE}/${name}` : `${MEDIA_SOURCE}/PNG/Tiles/${name}`;
 }
 
 export async function fetchVoxelpack(): Promise<void> {
@@ -79,7 +85,7 @@ export async function fetchVoxelpack(): Promise<void> {
         const results = await Promise.allSettled(
             VOXELPACK_FILES.slice(offset, offset + 6).map(async ([name, digest]) => {
                 const dest = join(OUT_DIR, name);
-                if (existsSync(dest) && blobDigest(readFileSync(dest)) === digest) {
+                if (existsSync(dest) && contentDigest(readFileSync(dest)) === digest) {
                     return;
                 }
 
@@ -97,7 +103,10 @@ export async function fetchVoxelpack(): Promise<void> {
                     });
                 }
 
-                if (blobDigest(bytes) !== digest) {
+                if (isGitLfsPointer(bytes)) {
+                    throw new Error(`Kenney Voxel Pack asset source returned a Git LFS pointer instead of the payload: ${url}`);
+                }
+                if (contentDigest(bytes) !== digest) {
                     throw new Error(`Kenney Voxel Pack asset integrity check failed: ${url}`);
                 }
 
