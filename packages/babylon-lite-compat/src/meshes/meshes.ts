@@ -33,6 +33,7 @@ import {
     setThinInstanceColors,
     createMeshFromData,
     resizeMeshGeometry,
+    updateMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
     computeAabb,
@@ -167,6 +168,49 @@ function computeFlatNormals(positions: Float32Array, indices: Uint32Array): Floa
 /** @internal Return an attribute only when it has exactly one value tuple per vertex. */
 function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCount: number, components: number): Float32Array | undefined {
     return data?.length === vertexCount * components ? data : undefined;
+}
+
+/** @internal Whether an optional attribute keeps the presence and length its GPU buffer was created with. */
+function keepsAttributeLayout(values: Float32Array | undefined, present: boolean | undefined, length: number): boolean {
+    return !!values?.length === !!present && (!present || values!.length === length);
+}
+
+/**
+ * @internal Write new geometry into a Lite mesh. When the vertex and index counts and the attribute layout are
+ * unchanged, `updateMeshGeometry` rewrites the existing GPU buffers, so the buffers, the mesh's renderable and every
+ * recorded bundle stay valid. Anything else goes through `resizeMeshGeometry`, which allocates new buffers and makes
+ * every scene re-record its bundles. The in-place conditions are `updateMeshGeometry`'s own, plus geometry that only
+ * this mesh writes (no clone sharing it, no borrowed vertex slab or shared index buffer) and no active draw range.
+ */
+function writeMeshGeometry(
+    engine: EngineContext,
+    mesh: LiteMesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
+    const gpu = mesh._gpu;
+    const vertexCount = positions.length / 3;
+    const inPlace =
+        !gpu._vbLayout &&
+        gpu._ownsVertexBuffers !== false &&
+        gpu._ownsIndexBuffer !== false &&
+        (gpu._refCount ?? 1) <= 1 &&
+        !gpu._drawRangeSource &&
+        gpu.indexFormat === "uint32" &&
+        mesh._cpuPositions?.length === positions.length &&
+        normals.length === positions.length &&
+        mesh._cpuIndices?.length === indices.length &&
+        indices.length <= (gpu._indexCapacity ?? gpu.indexCount) &&
+        keepsAttributeLayout(uvs, gpu.hasUv, vertexCount * 2) &&
+        keepsAttributeLayout(uvs2, gpu.hasUv2, vertexCount * 2) &&
+        keepsAttributeLayout(tangents, gpu.hasTangent, vertexCount * 4) &&
+        keepsAttributeLayout(colors, gpu.hasColor, vertexCount * 4);
+    (inPlace ? updateMeshGeometry : resizeMeshGeometry)(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
 }
 
 /**
@@ -500,8 +544,8 @@ export class AbstractMesh extends TransformNode {
 
     /**
      * Babylon.js `mesh.setVerticesData(kind, data)` — replace a vertex attribute.
-     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry in
-     * place; the last-set `color`/`tangent` buffers are retained so successive calls
+     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry, into the
+     * existing GPU buffers when its layout is unchanged (`writeMeshGeometry`); the last-set `color`/`tangent` buffers are retained so successive calls
      * (e.g. set tangent then set color) keep both. Skinning/morph attributes
      * (`matricesIndices`, etc.) are accepted but not applied (Babylon Lite drives
      * skinning through its own loaded-skeleton path).
@@ -539,7 +583,7 @@ export class AbstractMesh extends TransformNode {
         const uvs2 = kind === "uv2" ? f32 : matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2);
         const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
         const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
+        writeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
     }
 
     /**
@@ -555,8 +599,8 @@ export class AbstractMesh extends TransformNode {
 
     /**
      * Babylon.js `mesh.setIndices(indices)` — replace the mesh's index (topology)
-     * buffer. Babylon Lite re-uploads the geometry in place via `resizeMeshGeometry`,
-     * keeping the existing position/normal/uv/tangent/color attributes and swapping
+     * buffer. The geometry is re-uploaded through `writeMeshGeometry` (into the existing
+     * buffers when the index count is unchanged), keeping the existing position/normal/uv/tangent/color attributes and swapping
      * only the indices. Returns the mesh for chaining.
      */
     public setIndices(indices: number[] | Uint16Array | Uint32Array | Int32Array, _totalVertices?: number | null, _updatable?: boolean): this {
@@ -571,7 +615,7 @@ export class AbstractMesh extends TransformNode {
         const normals = this._normalsFollowIndices
             ? computeFlatNormals(positions, u32)
             : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
-        resizeMeshGeometry(
+        writeMeshGeometry(
             engine,
             this._lite,
             positions,
@@ -703,7 +747,7 @@ export class AbstractMesh extends TransformNode {
             }
         }
 
-        resizeMeshGeometry(
+        writeMeshGeometry(
             engine,
             this._lite,
             newPositions,
@@ -1289,7 +1333,8 @@ export class VertexData {
     /**
      * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
      * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite
-     * mesh's geometry in place via `resizeMeshGeometry`. Normals are computed flat
+     * mesh's geometry through `writeMeshGeometry` (into the existing buffers when the
+     * layout is unchanged, new ones otherwise). Normals are computed flat
      * if omitted (Babylon Lite requires a normals buffer).
      */
     public applyToMesh(mesh: Mesh): void {
@@ -1306,7 +1351,7 @@ export class VertexData {
         const normals = this.normals ? toF32(this.normals) : computeFlatNormals(positions, indices);
         const uvs = this.uvs ? toF32(this.uvs) : undefined;
         const colors = this.colors ? toF32(this.colors) : undefined;
-        resizeMeshGeometry(engine, mesh._lite, positions, normals, indices, uvs, undefined, undefined, colors);
+        writeMeshGeometry(engine, mesh._lite, positions, normals, indices, uvs, undefined, undefined, colors);
     }
 
     /** Merge another `VertexData` into this one (concatenating attributes + reindexing). */
