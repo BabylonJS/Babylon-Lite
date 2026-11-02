@@ -312,6 +312,8 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
         const [lh, rh] = await bothBuilds(async () => {
             const { pbrExt: skybox } = await import(`${SRC}material/pbr/fragments/skybox-fragment`);
             const { pbrExt: ibl } = await import(`${SRC}material/pbr/fragments/ibl-fragment`);
+            const { IBL_SKYBOX_CALCULATION } = await import(`${SRC}material/pbr/fragments/ibl-skybox-wgsl`);
+            expect(skybox._skyboxCalc).toBe(IBL_SKYBOX_CALCULATION);
             // The composer hands the skybox hook registered by `setPbrSkybox` to the IBL fragment.
             const fragment = ibl.frag!({ _hasIbl: true, _hasAnyNormal: false, _iblSkyboxCalc: skybox._skyboxCalc } as never)!;
             return String(fragment._fragmentSlots!.AI);
