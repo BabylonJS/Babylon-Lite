@@ -86,9 +86,11 @@ With `Sz = diag(1, 1, -1)`:
   stays `"cw"`, and a device-loss rebuild of the geometry keeps it. Whenever a PBR or Standard
   renderable is built, the `enableMirroredMeshes()` opt-in clears that bit in a left-handed build;
   right-handed, it rewrites it from the live determinant instead, so a glTF mesh moved from PBR or
-  Standard to a Node or shader material keeps its `"ccw"`. Otherwise Node and shader materials read the
-  load-time mark, as in a left-handed build. Depth and shadow passes use the same
-  winding as the colour pass, since light views mirror like the camera's.
+  Standard to a Node or shader material keeps its `"ccw"`. Node and shader materials build without that
+  encoder, so right-handed the opt-in also refreshes the mark at install and whenever its watcher sees a
+  world matrix change (before the same frame's material swaps), and rebuilds a mesh whose mark was
+  stale. Without the opt-in they read the load-time mark, as in a left-handed build. Depth and shadow
+  passes use the same winding as the colour pass, since light views mirror like the camera's.
 - **glTF** — the loader keeps glTF's native right-handed space: the `__root__` node has no X mirror,
   `computeNodeWorldMatrix` drops the root conversion, the skeleton and animation-mixer root transforms
   (`skeleton-pose.ts`, `skeleton-updater.ts`, `weighted-gltf-mixer.ts`) are the identity to match, the
@@ -107,16 +109,22 @@ With `Sz = diag(1, 1, -1)`:
 
 - **Everything else** — each Babylon.js `useRightHandedSystem` branch reachable from a Lite feature has
   its counterpart: light views of shadow maps and cascades, the linear-depth pass, Standard skybox and
-  reflections (`REFLECTIONMAP_OPPOSITEZ`, spherical mapping), the PBR cubemap skybox and background
-  ground, shader-material system uniforms (`view`, `viewProjection`, … are handed to user shaders as
-  Babylon.js's right-handed matrices), the derivative normal view, node-material `View`/`Projection`
+  reflections (`REFLECTIONMAP_OPPOSITEZ`, spherical mapping), the PBR cubemap skybox (including the
+  IBL skybox mode, `IBL_SKYBOX_CALCULATION`) and background ground, shader-material system uniforms
+  (`view`, `viewProjection`, … are handed to user shaders as Babylon.js's right-handed matrices), the derivative normal view, node-material `View`/`Projection`
   inputs and PBR helpers, billboard and billboard-picking texture U, camera inputs, gizmos, the
   geospatial camera, `.babylon` cameras, glTF cameras, interactivity
   camera paths, the procedural sky, CSG2, Havok mesh shapes, USD roots and normal maps, the
   screen-space raymarch normal reconstruction behind contact shadows and SSGI (its `cross` operands
-  swap, like the derivative normal view behind cavity), the mesh-blending inverse view, and WebXR
+  swap, like the derivative normal view behind cavity), the mesh-blending inverse view and projection
+  (its depth decode negates the projection's Z column, so View and Screen depths reconstruct the same
+  engine view point), and WebXR
   (poses, pointer, teleport, hand meshes, controller models), which stays in WebXR's native
   right-handed space instead of being Z-mirrored.
+- **Geometry-buffer depth** — `VIEW_DEPTH` is signed like Babylon.js's right-handed view z (negative in
+  front of the camera), but `NORMALIZED_VIEW_DEPTH` stays in [0, 1] in both builds: the engine's view z
+  is the positive distance, like the positive near/far bounds it is normalized against. (Babylon.js
+  right-handed returns negative normalized depths; consumers expect [0, 1].)
 - **Not ported: `EXT_lights_image_based`** — `envYawFromQuaternion` returns the left-handed yaw −A in
   both builds, so a right-handed build samples the environment along `Sz·Ry(−A)·d`. Babylon.js's loader
   inverts the extension's rotation only when left-handed, i.e. samples `Sz·Ry(A)·d` when right-handed:

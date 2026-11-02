@@ -160,9 +160,8 @@ export function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: bo
                 ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`
                 : wgsl`vec4<f32>((scene.view * vec4<f32>(input.worldPos, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
-            return _rightHanded
-                ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`
-                : wgsl`vec4<f32>(((scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+            // The engine's view z is the positive distance in both builds, like the positive near/far bounds: [0, 1].
+            return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.worldPos, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:

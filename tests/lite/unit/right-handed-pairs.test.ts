@@ -308,6 +308,19 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
         expect(rh).toBe(lh.replace(`let usdTangent=${t};`, `let usdTangent=-(${t});`).replace(`let usdBitangent=-(${b});`, `let usdBitangent=${b};`));
     });
 
+    it("PBR skybox mode samples the IBL cubemap with Babylon.js's right-handed Z flip", async () => {
+        const [lh, rh] = await bothBuilds(async () => {
+            const { pbrExt: skybox } = await import(`${SRC}material/pbr/fragments/skybox-fragment`);
+            const { pbrExt: ibl } = await import(`${SRC}material/pbr/fragments/ibl-fragment`);
+            // The composer hands the skybox hook registered by `setPbrSkybox` to the IBL fragment.
+            const fragment = ibl.frag!({ _hasIbl: true, _hasAnyNormal: false, _iblSkyboxCalc: skybox._skyboxCalc } as never)!;
+            return String(fragment._fragmentSlots!.AI);
+        });
+        const direction = "input.worldPos-scene.vEyePosition.xyz";
+        expect(lh).toContain(`let R=${direction};`);
+        expect(rh).toBe(lh.replace(`let R=${direction};`, `let R=(${direction})*vec3<f32>(1.0,1.0,-1.0);`));
+    });
+
     it("Standard spherical reflection mirrors the view-space reflection's Z", async () => {
         const [lh, rh] = await bothBuilds(async () => {
             const { createStdReflectionFragment } = await import(`${SRC}material/standard/fragments/std-reflection-fragment`);
@@ -317,7 +330,7 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
         expect(rh).toBe(lh.replace("r.z = r.z - 1.0;", "r.z = -r.z - 1.0;"));
     });
 
-    it("geometry renderer view depth and view normal are Babylon.js's right-handed view space", async () => {
+    it("geometry renderer view depth and view normal are Babylon.js's right-handed view space, normalized depth stays in [0, 1]", async () => {
         const squash = (code: string): string => code.replace(/\s+/g, "");
         const [lh, rh] = await bothBuilds(async () => {
             const { GeometryTextureType: T } = await import(`${SRC}frame-graph/geometry-types`);
@@ -332,12 +345,35 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
             ]);
         });
         const [depth, normalizedDepth, normal] = [lh.slice(0, 3), lh.slice(3, 6), lh.slice(6, 9)];
-        for (const [i, code] of [...depth, ...normalizedDepth].entries()) {
+        for (const [i, code] of depth.entries()) {
             expect(code).toContain("((scene.view");
             expect(squash(rh[i]!)).toBe(squash(code.replace("((scene.view", "(-(scene.view")));
         }
+        for (const [i, code] of normalizedDepth.entries()) {
+            expect(squash(rh[3 + i]!)).toBe(squash(code));
+        }
         for (const [i, code] of normal.entries()) {
             expect(squash(rh[6 + i]!)).toBe(squash(code).replace(".xyz)", ".xyz*vec3<f32>(1.0,1.0,-1.0))"));
+        }
+        // Evaluate the depth outputs at the near plane, halfway and the far plane. The engine's view z (`scene.view`)
+        // is the positive distance in both builds; near = 1, far = 11.
+        const evaluate = (code: string, viewZ: number): number =>
+            new Function(
+                "v",
+                `return ${squash(code)
+                    .replace(/\(scene\.view\*vec4<f32>\([^()]*,1\.0\)\)\.z/g, String(viewZ))
+                    .replace(/(gp|nmeGeom)\.cameraNearFar\.x/g, "1")
+                    .replace(/(gp|nmeGeom)\.cameraNearFar\.y/g, "11")
+                    .replace(/vec4<f32>\(/g, "v(")};`
+            )((x: number) => x) as number;
+        const at = (code: string): number[] => [1, 6, 11].map((viewZ) => evaluate(code, viewZ));
+        for (const [i, code] of depth.entries()) {
+            expect(at(code)).toEqual([1, 6, 11]);
+            expect(at(rh[i]!)).toEqual([-1, -6, -11]);
+        }
+        for (const [i, code] of normalizedDepth.entries()) {
+            expect(at(code)).toEqual([0, 0.5, 1]);
+            expect(at(rh[3 + i]!)).toEqual([0, 0.5, 1]);
         }
     });
 });
@@ -482,29 +518,63 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
         ]);
     });
 
-    it("the mirrored-mesh opt-in keeps the winding mark live for the Node and ShaderMaterial meshes that read it", async () => {
+    it("the mirrored-mesh watcher refreshes the winding mark that Node and ShaderMaterial builders read after a flip", async () => {
         const [lh, rh] = await bothBuilds(async (rightHanded) => {
             const { installMirroredMeshSupport } = await import(`${SRC}material/standard/std-mirrored-support`);
-            const { _computeMeshFeatures } = await import(`${SRC}material/mesh-features`);
             const { createShaderMaterial } = await import(`${SRC}material/shader/shader-material`);
             const { buildShaderMaterialRenderables } = await import(`${SRC}material/shader/shader-renderable`);
+            const { buildNodeMeshRenderables } = await import(`${SRC}material/node/node-renderable`);
             const { initMeshTransform } = await import(`${SRC}mesh/mesh`);
             const { wgsl } = await import(`${SRC}shader/wgsl`);
             const gpu = fakeDevice();
-            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 } };
-            const material = createShaderMaterial({
+            const engine = { _device: gpu.device, canvas: { width: 64, height: 64 }, format: "rgba8unorm", _retirements: null };
+            const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 };
+            const shaderMaterial = createShaderMaterial({
                 vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
                 fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
                 attributes: ["position"],
             });
-            const geometry = { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint32" };
-            const procedural = initMeshTransform({ name: "procedural", children: [], material, receiveShadows: false, _gpu: geometry } as never);
+            const nodeMaterial = {
+                _buildGroup: () => undefined,
+                _compile: {
+                    _meshBGL: {},
+                    _nodeUboBinding: null,
+                    _nodeUboSpec: null,
+                    _meshUboFloats: 20,
+                    _usesMeshAttributeFlags: false,
+                    _textureBindings: [],
+                    _envBindings: null,
+                    _shadowBindings: [],
+                    _esmShadowParamsBinding: null,
+                    _pipeline: "material",
+                    _pipelineForMesh: () => "material",
+                    _pipelineForCcwMesh: () => "ccw",
+                },
+                _renderFeatures: null,
+                _state: { usesInstanceIndex: false },
+                _vertexAttrNames: ["position"],
+                _needsAlphaBlending: false,
+                _uboDirty: false,
+                _uniformValues: new Map(),
+            };
+            const geometry = {
+                positionBuffer: {},
+                normalBuffer: {},
+                uvBuffer: {},
+                indexBuffer: {},
+                indexCount: 3,
+                indexFormat: "uint32",
+                _baseVertex: 0,
+                vertexBuffers: new Map([["position", {}]]),
+            };
+            const procedural = initMeshTransform({ name: "procedural", children: [], material: shaderMaterial, visible: true, receiveShadows: false, _gpu: geometry } as never);
             // An ordinary glTF mesh as the loader leaves it: left-handed under the X-mirroring root, unmarked;
             // right-handed with no root and the loader's winding mark.
             const gltf = initMeshTransform({
                 name: "gltf",
                 children: [],
-                material,
+                material: shaderMaterial,
+                visible: true,
                 receiveShadows: false,
                 _gpu: geometry,
                 _authoredSign: -1,
@@ -513,22 +583,86 @@ describe("right-handed feature pairs: glTF winding on non-PBR materials", () => 
             if (!rightHanded) {
                 gltf.worldMatrix.set([-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
             }
-            const scene = { surface: { engine }, camera: null, meshes: [procedural, gltf], _beforeRender: [], _meshDisposables: new Map() };
+            const scene = {
+                surface: { engine },
+                camera: null,
+                lights: [],
+                meshes: [procedural, gltf],
+                _beforeRender: [],
+                _renderables: [],
+                _materialSwapQueue: [],
+                _groups: new Map(),
+                _meshDisposables: new Map(),
+                _meshAuxDisposables: new Map(),
+                _renderableVersion: 0,
+                _disposables: [],
+                _frameGraph: { _tasks: [] },
+            };
             installMirroredMeshSupport(scene as never);
-            // Drawn first with PBR or Standard, which runs the opt-in's feature encoder; then switched to a ShaderMaterial.
-            for (const mesh of scene.meshes) {
-                _computeMeshFeatures(mesh as never);
-            }
-            const { renderables } = buildShaderMaterialRenderables(scene as never, scene.meshes as never);
-            for (const renderable of renderables) {
-                renderable.bind(engine as never, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
-            }
-            return [scene.meshes.map((mesh) => (mesh as { _primitiveFeatures?: number })._primitiveFeatures), gpu.pipelines.map((pipeline) => pipeline.primitive!.frontFace)];
+            // No PBR or Standard build ever runs the opt-in's encoder here: the watcher has to keep the mark live.
+            const flipGltfXThenRunFrame = (): unknown[] => {
+                gltf.scaling.x = -gltf.scaling.x;
+                if (!rightHanded) {
+                    gltf.worldMatrix.set([-gltf.worldMatrix[0]!, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+                }
+                for (const callback of scene._beforeRender as ((deltaMs: number) => void)[]) {
+                    callback(16);
+                }
+                return (scene._materialSwapQueue.splice(0) as { name: string }[]).map((mesh) => mesh.name);
+            };
+            const shaderBuild = (): unknown[] => {
+                for (const mesh of scene.meshes) {
+                    (mesh as { material: unknown }).material = shaderMaterial;
+                }
+                const { renderables } = buildShaderMaterialRenderables(scene as never, scene.meshes as never);
+                return renderables.map((renderable: { mesh?: { name: string }; _ccw?: 1; bind(engine: never, signature: never): unknown }) => {
+                    renderable.bind(engine as never, signature as never);
+                    return [renderable.mesh?.name ?? "both", renderable._ccw ?? 0];
+                });
+            };
+            const nodeBuild = (): unknown[] => {
+                for (const mesh of scene.meshes) {
+                    (mesh as { material: unknown }).material = nodeMaterial;
+                }
+                const { renderables } = buildNodeMeshRenderables(scene as never, scene.meshes as never);
+                return renderables.map(
+                    (renderable: { bind(engine: never, signature: never): { pipeline: unknown } }) => renderable.bind(engine as never, signature as never).pipeline
+                );
+            };
+            const marks = (): unknown[] => scene.meshes.map((mesh) => (mesh as { _primitiveFeatures?: number })._primitiveFeatures);
+            const asLoaded = [shaderBuild(), gpu.pipelines.map((pipeline) => pipeline.primitive!.frontFace), marks()];
+            // Mirror the glTF mesh, then swap it to a Node material in the same frame.
+            const mirrored = flipGltfXThenRunFrame();
+            const mirroredNode = [mirrored, nodeBuild(), marks()];
+            // Mirror it back, then swap it to a ShaderMaterial.
+            const restored = flipGltfXThenRunFrame();
+            const restoredShader = [restored, shaderBuild(), marks()];
+            return [asLoaded, mirroredNode, restoredShader];
         });
-        expect(lh).toEqual([[undefined, undefined], [undefined]]);
+        expect(lh).toEqual([
+            [[["both", 0]], [undefined], [undefined, undefined]],
+            [["gltf"], ["material"], [undefined, undefined]],
+            [["gltf"], [["both", 0]], [undefined, undefined]],
+        ]);
         expect(rh).toEqual([
-            [undefined, GLTF_WINDING],
-            ["cw", "ccw"],
+            [
+                [
+                    ["procedural", 0],
+                    ["gltf", 1],
+                ],
+                ["cw", "ccw"],
+                [undefined, GLTF_WINDING],
+            ],
+            // The glTF mesh now winds like procedural geometry: one renderable, the procedural pipeline.
+            [["gltf"], ["material"], [undefined, 0]],
+            [
+                ["gltf"],
+                [
+                    ["procedural", 0],
+                    ["gltf", 1],
+                ],
+                [undefined, GLTF_WINDING],
+            ],
         ]);
     });
 
@@ -656,14 +790,14 @@ describe("right-handed feature pairs: screen-space post-processes", () => {
         expect(rh).toBe(lh.replace("cross(pH,pV)", "cross(pV,pH)"));
     });
 
-    it("mesh-blending world-position debug inverts the real view matrix", async () => {
-        const [lh, rh] = await bothBuilds(async () => {
+    it("mesh-blending world-position debug reconstructs the world point from real View and Screen depths", async () => {
+        const point = [1.5, 2.5, 2];
+        const [lh, rh] = await bothBuilds(async (rightHanded) => {
             const { createArcRotateCamera } = await import(`${SRC}camera/arc-rotate`);
-            const { getViewMatrix } = await import(`${SRC}camera/camera`);
+            const { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix } = await import(`${SRC}camera/camera`);
             const { createRenderTarget } = await import(`${SRC}engine/render-target`);
             const { createMeshBlendingPostProcessTask, MeshBlendDebugMode } = await import(`${SRC}post-process/mesh-blending`);
             const camera = createArcRotateCamera(0.7, 1.1, 10, { x: 1, y: 2, z: 3 });
-            const view = Array.from(getViewMatrix(camera) as ArrayLike<number>);
             const target = () => Object.assign(createRenderTarget({ format: "rgba16float", samples: 1, size: { width: 64, height: 32 } }), { _width: 64, _height: 32 });
             const task = createMeshBlendingPostProcessTask(
                 {
@@ -677,13 +811,30 @@ describe("right-handed feature pairs: screen-space post-processes", () => {
                 {} as never
             );
             task.updateUniforms();
-            const inverseView = Array.from((task as unknown as { _uniformData: Float32Array })._uniformData.subarray(32, 48));
-            // Column-major product inverseView · view.
-            return Array.from({ length: 16 }, (_, i) => [0, 1, 2, 3].reduce((sum, k) => sum + inverseView[k * 4 + (i % 4)]! * view[Math.floor(i / 4) * 4 + k]!, 0));
+            const data = Array.from((task as unknown as { _uniformData: Float32Array })._uniformData);
+            // Column-major 4×4 at `offset` times a vec4.
+            const mul = (m: ArrayLike<number>, offset: number, v: number[]): number[] =>
+                [0, 1, 2, 3].map((row) => [0, 1, 2, 3].reduce((sum, k) => sum + m[offset + k * 4 + row]! * v[k]!, 0));
+            // What the geometry renderer writes for `point`: the engine's view z (positive in both builds) is
+            // Babylon.js's signed view z negated in a right-handed build; Screen depth is the projected NDC z.
+            const view = mul(getViewMatrix(camera) as ArrayLike<number>, 0, [...point, 1]);
+            const clip = mul(getProjectionMatrix(camera, getEffectiveAspectRatio(camera, 64, 32)) as ArrayLike<number>, 0, view);
+            const ndc = clip.map((value) => value / clip[3]!);
+            // The shader's `dn` and `rv`, then the debug output's inverse view.
+            const reconstruct = (depth: number, screen: boolean): number[] => {
+                const projected = mul(data, 0, [0, 0, depth, 1]);
+                const viewPoint = mul(data, 16, [ndc[0]!, ndc[1]!, screen ? depth : projected[2]! / projected[3]!, 1]);
+                return mul(
+                    data,
+                    32,
+                    viewPoint.map((value) => value / viewPoint[3]!)
+                ).slice(0, 3);
+            };
+            return [reconstruct(rightHanded ? -view[2]! : view[2]!, false), reconstruct(ndc[2]!, true)];
         });
-        const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-        lh.forEach((value, i) => expect(value).toBeCloseTo(identity[i]!, 5));
-        rh.forEach((value, i) => expect(value).toBeCloseTo(identity[i]!, 5));
+        for (const reconstructed of [...lh, ...rh]) {
+            reconstructed.forEach((value, i) => expect(value).toBeCloseTo(point[i]!, 4));
+        }
     });
 });
 

@@ -59,6 +59,20 @@ interface Watched {
 
 let _installed = false;
 
+/** Right-handed builds: rewrite the per-mesh winding mark (bit 11 of `_primitiveFeatures`) that Node and
+ *  ShaderMaterial read ("wind ccw") to `mirrored`. PBR and Standard refresh it through the mesh-feature
+ *  encoder on every build; Node and ShaderMaterial build without that encoder, so the watcher below keeps it
+ *  live for them. Returns whether the mark changed. */
+function writeWindingMark(mesh: Mesh, mirrored: boolean): boolean {
+    const bits = (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures;
+    if (bits === undefined && !mirrored) {
+        return false;
+    }
+    const next = ((bits ?? 0) & ~(1 << 11)) | (mirrored ? 1 << 11 : 0);
+    (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = next;
+    return next !== bits;
+}
+
 /** The watcher callback currently installed per scene, so a re-install replaces it instead of
  *  stacking a second one. Lazily allocated — a module-level `new WeakMap()` is a side effect. */
 let _watchers: WeakMap<SceneContext, (deltaMs: number) => void> | null = null;
@@ -96,9 +110,7 @@ export function installMirroredMeshSupport(scene: SceneContext): void {
                 // Right-handed, the bit is also the per-mesh winding mark that Node and ShaderMaterial
                 // read ("wind ccw"), and `mirrored` is exactly that answer kept live: rewrite it rather
                 // than clear it, or a glTF mesh switched from PBR to one of those draws inside out.
-                if (bits !== undefined || mirrored) {
-                    (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = ((bits ?? 0) & ~(1 << 11)) | (mirrored ? 1 << 11 : 0);
-                }
+                writeWindingMark(mesh, mirrored);
             } else if (bits) {
                 (mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures = bits & ~(1 << 11);
             }
@@ -121,6 +133,10 @@ export function installMirroredMeshSupport(scene: SceneContext): void {
     // if the renderable had been built mirrored, and no rebuild would ever be enqueued.
     for (const mesh of scene.meshes) {
         seen.set(mesh, { v: mesh.worldMatrixVersion, sign: detSign(mesh.worldMatrix) });
+        if (_rightHanded) {
+            // Node and ShaderMaterial build from the winding mark without running the encoder.
+            writeWindingMark(mesh, isMirrored(mesh));
+        }
     }
 
     // The pipeline's `frontFace` is baked into the GPU pipeline object, so a flip has to go through
@@ -135,9 +151,16 @@ export function installMirroredMeshSupport(scene: SceneContext): void {
                 continue;
             }
             const sign = detSign(mesh.worldMatrix);
-            // A mesh added after install is seeded on first sight, with the sign its renderable was
-            // just built from.
-            if (prev && prev.sign !== sign) {
+            if (_rightHanded) {
+                // Refresh the winding mark before the rebuild, which may go to a Node or ShaderMaterial
+                // (a material swap in the same frame). A mesh added after install was built from the
+                // mark it arrived with: rebuild it if that mark was stale.
+                if (writeWindingMark(mesh, isMirrored(mesh)) || (prev && prev.sign !== sign)) {
+                    enqueueMaterialSwap(scene, mesh);
+                }
+            } else if (prev && prev.sign !== sign) {
+                // A mesh added after install is seeded on first sight, with the sign its renderable was
+                // just built from.
                 enqueueMaterialSwap(scene, mesh);
             }
             seen.set(mesh, { v, sign });

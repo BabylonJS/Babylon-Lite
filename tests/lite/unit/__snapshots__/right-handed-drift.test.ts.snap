@@ -175,7 +175,6 @@ exports[`right-handed drift guard > material/node/node-geometry-renderable.ts: r
 {
   "frontFace ?:": "" «ccw» → «cw» "",
   "geomWrite ?:": "> ( «» → «-» ( scene.view",
-  "geomWrite ?: #2": "( ( «» → «-» ( scene.view",
   "pipeline &&": "«» → «( ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
 }
 `;
@@ -220,6 +219,12 @@ exports[`right-handed drift guard > material/pbr/fragments/ibl-fragment.ts: righ
 }
 `;
 
+exports[`right-handed drift guard > material/pbr/fragments/ibl-skybox-wgsl.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "IBL_SKYBOX_CALCULATION ?:": "" «» → «(» input.worldPos - … - scene.vEyePosition.xyz «» → «) * vec3 < f32 > ( 1.0 , 1.0 , - 1.0 )» "",
+}
+`;
+
 exports[`right-handed drift guard > material/pbr/fragments/pbr-normal-cotangent-wgsl.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "cotangentNormalFragment ?:": "" «» → «- (» dp2perp * … * duv2.x «» → «)» "",
@@ -230,8 +235,7 @@ exports[`right-handed drift guard > material/pbr/fragments/pbr-normal-cotangent-
 exports[`right-handed drift guard > material/pbr/pbr-geometry-output-shader.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "attachmentExpr ?:": "> ( «» → «-» ( scene.view",
-  "attachmentExpr ?: #2": "( ( «» → «-» ( scene.view",
-  "attachmentExpr ?: #3": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
+  "attachmentExpr ?: #2": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
 }
 `;
 
@@ -317,8 +321,7 @@ exports[`right-handed drift guard > material/standard/skybox-cubemap.ts: right-h
 exports[`right-handed drift guard > material/standard/standard-geometry-output-shader.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "attachmentExpr ?:": "> ( «» → «-» ( scene.view",
-  "attachmentExpr ?: #2": "( ( «» → «-» ( scene.view",
-  "attachmentExpr ?: #3": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
+  "attachmentExpr ?: #2": ") .xyz «» → «* vec3 < f32 > ( 1.0 , 1.0 , - 1.0» ) ) … 1.0 ) «» → «)» , $",
 }
 `;
 
@@ -337,7 +340,9 @@ exports[`right-handed drift guard > material/standard/standard-pipeline.ts: righ
 exports[`right-handed drift guard > material/standard/std-mirrored-support.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "_windingFrontFace ?:": "«» → «(» meshFeatures & … ? " «cw» → «ccw» " : … : " «ccw» → «cw» " ) … ccw " «» → «)»",
-  "installMirroredMeshSupport use": "«» → «if ( _rightHanded ) { if ( bits ! = = undefined | | mirrored ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = ( ( bits ? ? 0 ) & ~ ( 1 < < 11 ) ) | ( mirrored ? 1 < < 11 : 0 ) ; } } else if ( bits ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = bits & ~ ( 1 < < 11 ) ; }»",
+  "installMirroredMeshSupport use": "«» → «if ( _rightHanded ) { writeWindingMark ( mesh , mirrored ) ; } else if ( bits ) { ( mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures = bits & ~ ( 1 < < 11 ) ; }»",
+  "installMirroredMeshSupport use #2": "«» → «if ( _rightHanded ) { writeWindingMark ( mesh , isMirrored ( mesh ) ) ; }»",
+  "watch use": "«» → «if ( _rightHanded ) { if ( writeWindingMark ( mesh , isMirrored ( mesh ) ) | | ( prev & & prev.sign ! = = sign ) ) { enqueueMaterialSwap ( scene , mesh ) ; } } else if ( prev & & prev.sign ! = = sign ) { enqueueMaterialSwap ( scene , mesh ) ; }»",
 }
 `;
 
@@ -361,7 +366,8 @@ exports[`right-handed drift guard > picking/billboard-pick-pipeline.ts: right-ha
 
 exports[`right-handed drift guard > post-process/mesh-blending.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "writeUniforms use": "«» → «if ( _rightHanded ) { data [ 40 ] = - data [ 40 ] ! ; data [ 41 ] = - data [ 41 ] ! ; data [ 42 ] = - data [ 42 ] ! ; }»",
+  "writeUniforms use": "«» → «if ( _rightHanded ) { data [ 8 ] = - data [ 8 ] ! ; data [ 9 ] = - data [ 9 ] ! ; data [ 10 ] = - data [ 10 ] ! ; data [ 11 ] = - data [ 11 ] ! ; }»",
+  "writeUniforms use #2": "«» → «if ( _rightHanded ) { data [ 40 ] = - data [ 40 ] ! ; data [ 41 ] = - data [ 41 ] ! ; data [ 42 ] = - data [ 42 ] ! ; }»",
 }
 `;
 

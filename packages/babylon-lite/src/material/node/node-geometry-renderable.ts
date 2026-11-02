@@ -143,9 +143,8 @@ export function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTexture
             }
             if (wp) {
                 gpRef.needsGp = true;
-                return _rightHanded
-                    ? wgsl`vec4<f32>((-(scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`
-                    : wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+                // The engine's view z is the positive distance in both builds, like the positive near/far bounds: [0, 1].
+                return wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
             }
             return ZERO(wg);
         case GeometryTextureType.LINEAR_VELOCITY:
