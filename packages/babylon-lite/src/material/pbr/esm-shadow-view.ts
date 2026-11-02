@@ -2,7 +2,7 @@
 
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
-import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR_HAS_NORMAL_MAP, PBR_HAS_SPEC_GLOSS, PBR2_ESM_SHADOW_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { wgsl } from "../../shader/wgsl.js";
 
@@ -20,7 +20,8 @@ return vec4<f32>(depthSM, 1.0, 1.0, 1.0);`;
 export function createPbrEsmShadowMaterialView(source: PbrMaterialProps, shadowParamsUBO: GPUBuffer): PbrEsmShadowMaterialView {
     const features = source._renderFeatures ?? { features: 0, features2: 0 };
     const view = createMaterialView(source, {
-        features: features.features & ~PBR_HAS_ALPHA_BLEND,
+        // Shading-only features are dropped as in the no-color view: the depth code reads neither.
+        features: features.features & ~(PBR_HAS_ALPHA_BLEND | PBR_HAS_NORMAL_MAP | PBR_HAS_SPEC_GLOSS),
         features2: (features.features2 ?? 0) | PBR2_ESM_SHADOW_OUTPUT,
     }) as PbrEsmShadowMaterialView;
     Object.defineProperty(view, "_esmShadowParamsUBO", { value: shadowParamsUBO, enumerable: false });
