@@ -3,6 +3,7 @@
 
 import { expect, vi } from "vitest";
 import { PNG } from "pngjs";
+import { parseGlb, readAccessor as readGlbAccessor } from "../../export-gltf-binary";
 import type { AssetContainer } from "../../../../packages/babylon-lite/src/asset-container";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import { exportSceneAsGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-gltf";
@@ -14,6 +15,8 @@ import { addToScene, createSceneContext } from "../../../../packages/babylon-lit
 import type { SceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
 import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
+
+export { parseGlb };
 
 /** A fake GPUTexture carrying its mip-0 bytes in storage order (RGBA8 for every format, float formats included). */
 export interface FakeGpuTexture {
@@ -299,46 +302,9 @@ export async function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContaine
     return container;
 }
 
-/** Split a GLB into its JSON document and BIN payload, checking the framing. */
-export function parseGlb(bytes: Uint8Array): { json: ParsedGlb["json"]; bin: Uint8Array } {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (view.getUint32(0, true) !== 0x46546c67 || view.getUint32(4, true) !== 2 || view.getUint32(8, true) !== bytes.byteLength) {
-        throw new Error("bad GLB header");
-    }
-    const jsonLength = view.getUint32(12, true);
-    if (view.getUint32(16, true) !== 0x4e4f534a) {
-        throw new Error("bad JSON chunk");
-    }
-    const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)));
-    const binHeader = 20 + jsonLength;
-    const binLength = view.getUint32(binHeader, true);
-    if (view.getUint32(binHeader + 4, true) !== 0x004e4942) {
-        throw new Error("bad BIN chunk");
-    }
-    return { json, bin: bytes.subarray(binHeader + 8, binHeader + 8 + binLength) };
-}
-
-const COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
-
 /** Read an accessor's elements as plain numbers. */
 export function readAccessor(glb: { json: ParsedGlb["json"]; bin: Uint8Array }, index: number): number[] {
-    const accessor = glb.json.accessors[index];
-    const view = glb.json.bufferViews[accessor.bufferView];
-    const offset = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-    const n = accessor.count * COMPONENTS[accessor.type]!;
-    const buffer = glb.bin.buffer.slice(glb.bin.byteOffset + offset, glb.bin.byteOffset + offset + n * 4);
-    switch (accessor.componentType) {
-        case 5126:
-            return Array.from(new Float32Array(buffer, 0, n));
-        case 5125:
-            return Array.from(new Uint32Array(buffer, 0, n));
-        case 5123:
-            return Array.from(new Uint16Array(glb.bin.buffer.slice(glb.bin.byteOffset + offset, glb.bin.byteOffset + offset + n * 2)));
-        case 5121:
-            return Array.from(glb.bin.subarray(offset, offset + n));
-        default:
-            throw new Error(`unsupported componentType ${accessor.componentType}`);
-    }
+    return readGlbAccessor(glb.json, glb.bin, index);
 }
 
 /** The bytes of a bufferView. */

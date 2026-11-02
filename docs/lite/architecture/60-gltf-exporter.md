@@ -1285,12 +1285,7 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 307 tests in twelve files, built on one harness. To count parameterized cases without running the tests, use `pnpm exec vitest list --project unit tests/lite/unit/export-gltf --no-staticParse --maxWorkers=1 --no-file-parallelism --json`.
 
-The unit suite, including its helper, is 2,554 lines against 3,688 exporter source lines (0.693 raw test lines per source line). This directory-only measurement excludes plumbing and paired fixtures; it does not establish a whole-PR code-line ratio. The reduction from 6,063 lines and 520 cases removes repeated setup, overlapping assertions and private-helper permutations; it does not move tests into other suites. Count both directories with the same command:
-
-```sh
-find tests/lite/unit/export-gltf -type f -name '*.ts' -print0 | xargs -0 wc -l
-find packages/babylon-lite/src/export-gltf -type f -name '*.ts' -print0 | xargs -0 wc -l
-```
+Independent GLB framing checks and accessor decoding live in `tests/lite/export-gltf-binary.ts`, shared with the plumbing suite. Include that helper, plumbing and paired fixtures in whole-PR test-code accounting; a unit-directory-only line count is incomplete.
 
 **Harness — `export-test-utils.ts`.** It supplies everything a test needs without a GPU:
 
@@ -1565,6 +1560,7 @@ The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.t
 | `lab/lite/src/export-gltf-test.ts`                                                               | `window.exportGltfTest`: round trip for assets and a native scene; single export of a GLB                        |
 | `tests/lite/plumbing/export-gltf.spec.ts`                                                        | plumbing spec: 9 assets plus a native scene (idempotence), sRGB readback on both paths, Babylon.js test ports    |
 | `tests/lite/plumbing/export-gltf-helpers.ts`                                                     | triangle fixture, GLB building and parsing, accessor reads                                                       |
+| `tests/lite/export-gltf-binary.ts`                                                               | independent GLB framing checks and accessor decoding shared by unit and plumbing tests                           |
 | `azure-pipelines.yml`                                                                            | adds `tests/lite/plumbing/export-gltf.spec.ts` to the CI plumbing job                                            |
 
 _End of spec. Regeneration target: deterministic GLB output, pass-through fidelity for glTF-sourced geometry and transforms, pixel-exact images, the documented warnings at the boundary, and no production change outside `export-gltf/` except the root re-export and the type-only `Mesh._flatNormal` declaration._

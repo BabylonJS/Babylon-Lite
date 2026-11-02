@@ -1,4 +1,4 @@
-import { crc32 as zlibCrc32 } from "node:zlib";
+import { crc32 as zlibCrc32, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { computeMinMax, createBufferBuilder } from "../../../../packages/babylon-lite/src/export-gltf/export-buffers";
 import { frameGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-glb";
@@ -60,14 +60,21 @@ describe("binary encoding", () => {
         expect(Array.from(png.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
         const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
         const types: string[] = [];
+        const compressed: Uint8Array[] = [];
         for (let offset = 8; offset < png.length;) {
             const size = view.getUint32(offset);
-            types.push(new TextDecoder().decode(png.subarray(offset + 4, offset + 8)));
+            const type = new TextDecoder().decode(png.subarray(offset + 4, offset + 8));
+            types.push(type);
+            if (type === "IDAT") {
+                compressed.push(png.subarray(offset + 8, offset + 8 + size));
+            }
             expect(view.getUint32(offset + 8 + size)).toBe(zlibCrc32(png.subarray(offset + 4, offset + 8 + size)));
             offset += size + 12;
         }
         expect(types).toEqual(["IHDR", "IDAT", "IEND"]);
         expect(Array.from(png.subarray(24, 29))).toEqual([8, 6, 0, 0, 0]);
+        const raw = inflateSync(Buffer.concat(compressed));
+        expect(Array.from({ length: height }, (_, y) => raw[y * (width * 4 + 1)])).toEqual(new Array(height).fill(0));
         expect(await decodePng(png)).toEqual({ width, height, rgba });
     });
 });

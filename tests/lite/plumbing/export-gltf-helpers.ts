@@ -2,19 +2,9 @@
  *  reading, and a hand-built triangle glTF fixture that tests extend with extra accessors. */
 
 import { PNG } from "pngjs";
-import { expect } from "../parity/parity-fixtures";
-
-/** A glTF document as plain JSON. Tests index into it freely. */
-export type GltfJson = Record<string, any>;
-
-/** A parsed GLB. */
-export interface ParsedGlb {
-    json: GltfJson;
-    /** The BIN chunk payload. */
-    bin: Buffer;
-    /** The whole file. */
-    bytes: Buffer;
-}
+import type { GltfJson } from "../export-gltf-binary";
+export { parseGlb, readAccessor } from "../export-gltf-binary";
+export type { GltfJson, ParsedGlb } from "../export-gltf-binary";
 
 const GLB_MAGIC = 0x46546c67;
 const CHUNK_JSON = 0x4e4f534a;
@@ -39,65 +29,6 @@ export function buildGlb(json: GltfJson, bin: Uint8Array): Buffer {
     out.writeUInt32LE(CHUNK_BIN, binHeader + 4);
     Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength).copy(out, binHeader + 8);
     return out;
-}
-
-/** Split a GLB (a Buffer, or its base64 text) into JSON and BIN, asserting the framing. */
-export function parseGlb(source: string | Buffer): ParsedGlb {
-    const bytes = typeof source === "string" ? Buffer.from(source, "base64") : source;
-    expect(bytes.readUInt32LE(0)).toBe(GLB_MAGIC);
-    expect(bytes.readUInt32LE(4)).toBe(2);
-    expect(bytes.readUInt32LE(8)).toBe(bytes.length);
-    expect(bytes.readUInt32LE(16)).toBe(CHUNK_JSON);
-    const jsonLength = bytes.readUInt32LE(12);
-    const json = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString("utf8")) as GltfJson;
-    const binHeader = 20 + jsonLength;
-    expect(bytes.readUInt32LE(binHeader + 4)).toBe(CHUNK_BIN);
-    const binLength = bytes.readUInt32LE(binHeader);
-    return { json, bin: bytes.subarray(binHeader + 8, binHeader + 8 + binLength), bytes };
-}
-
-const COMPONENT_COUNT: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
-const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
-
-/** Read an accessor's raw components as a flat array, honoring the bufferView offset and stride.
- *  Normalization is not applied. */
-export function readAccessor(json: GltfJson, bin: Uint8Array, index: number): number[] {
-    const accessor = json.accessors[index];
-    const view = json.bufferViews[accessor.bufferView];
-    const components = COMPONENT_COUNT[accessor.type]!;
-    const size = COMPONENT_BYTES[accessor.componentType];
-    if (size === undefined) {
-        throw new Error(`Unsupported accessor component type ${accessor.componentType}`);
-    }
-    const stride = view.byteStride ?? components * size;
-    const data = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
-    const result: number[] = [];
-    for (let i = 0; i < accessor.count; i++) {
-        for (let c = 0; c < components; c++) {
-            const offset = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0) + i * stride + c * size;
-            switch (accessor.componentType) {
-                case 5120:
-                    result.push(data.getInt8(offset));
-                    break;
-                case 5121:
-                    result.push(data.getUint8(offset));
-                    break;
-                case 5122:
-                    result.push(data.getInt16(offset, true));
-                    break;
-                case 5123:
-                    result.push(data.getUint16(offset, true));
-                    break;
-                case 5125:
-                    result.push(data.getUint32(offset, true));
-                    break;
-                default:
-                    result.push(data.getFloat32(offset, true));
-                    break;
-            }
-        }
-    }
-    return result;
 }
 
 /** A glTF document under construction together with its BIN payload. */
