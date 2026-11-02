@@ -78,9 +78,8 @@ The module is a leaf. It reads existing scene, engine and loader state, and chan
  *  export is in flight. Valid before or after `registerScene`, but after `addToScene` (which sets
  *  parent links). Under a null engine, textured slots are omitted.
  *
- *  Content glTF cannot express, or that this exporter does not support yet (skins, texture
- *  sampling modes, original image bytes, …), logs a `console.warn` and degrades; see the
- *  architecture doc `docs/lite/architecture/60-gltf-exporter.md`.
+ *  Unsupported content is omitted or converted according to the limitations and diagnostics in
+ *  `docs/lite/architecture/60-gltf-exporter.md`.
  *
  *  @param scene - The scene to export.
  *  @returns A Blob holding the GLB file. */
@@ -1557,6 +1556,7 @@ The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.t
 | `tests/lite/unit/export-gltf/lights.test.ts`                                                     | `KHR_lights_punctual`                                                                                            |
 | `tests/lite/unit/export-gltf/animations.test.ts`                                                 | animation channels, samplers and conversion                                                                      |
 | `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | visual parity scenes 321–325: Lite page and Babylon.js reference page                                            |
+| `lab/public/export-gltf-fixtures.css`                                                            | shared canvas layout for the fifteen exporter fixture pages                                                      |
 | `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | visual parity specs                                                                                              |
 | `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | goldens and gallery thumbnails                                                                                   |
 | `scene-config.json`                                                                              | ids 321–325 with `maxMad` and `maxRawKB`                                                                         |

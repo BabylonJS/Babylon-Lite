@@ -24,9 +24,8 @@ import { exportLights } from "./ext/export-ext-lights-punctual.js";
  *  export is in flight. Valid before or after `registerScene`, but after `addToScene` (which sets
  *  parent links). Under a null engine, textured slots are omitted.
  *
- *  Content glTF cannot express, or that this exporter does not support yet (skins, texture
- *  sampling modes, original image bytes, …), logs a `console.warn` and degrades; see the
- *  architecture doc `docs/lite/architecture/60-gltf-exporter.md`.
+ *  Unsupported content is omitted or converted according to the limitations and diagnostics in
+ *  `docs/lite/architecture/60-gltf-exporter.md`.
  *
  *  @param scene - The scene to export.
  *  @returns A Blob holding the GLB file. */
