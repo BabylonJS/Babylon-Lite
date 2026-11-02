@@ -22,6 +22,9 @@ export interface RenderingContext {
 /** Return the surface's live rendering-context list in render order. */
 export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[];
 
+/** Move a registered context to its final position in the surface's render order. */
+export function moveRenderingContext(surface: SurfaceContext, context: RenderingContext, index: number): boolean;
+
 /** Return the rendering context's stable family identifier. */
 export function getRenderingContextKind(context: RenderingContext): string;
 
@@ -30,6 +33,19 @@ export interface SceneContext extends RenderingContext {
     /** Optional display name for tooling and diagnostics. */
     name?: string;
 }
+
+/** A utility scene and the scene it composites onto. */
+export interface UtilityLayer {
+    readonly scene: SceneContext;
+    readonly mainScene: SceneContext;
+}
+export interface UtilityLayerOptions {
+    addDefaultLight?: boolean;
+    lightIntensity?: number;
+}
+export function createUtilityLayer(mainScene: SceneContext, options?: UtilityLayerOptions): UtilityLayer;
+export function registerUtilityLayer(utility: UtilityLayer): Promise<void>;
+export function disposeUtilityLayer(utility: UtilityLayer): void;
 
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal — not user-facing. */
@@ -138,6 +154,24 @@ interface EngineContextInternal extends EngineContext {
 ### Rendering-Context Introspection
 
 `getRenderingContexts(surface)` returns the surface's existing registry array as a readonly live view; it does not allocate a snapshot. Registration and unregistration are therefore visible through a previously returned reference, in render order, with no per-frame work. `getRenderingContextKind(context)` returns `"scene"`, `"frame-graph-context"`, `"effect-renderer"`, `"sprite-renderer"`, or `"text-renderer"` for the current built-in contexts. Its return type is intentionally the open `string` type, so adding a new context family is not a breaking API change. It throws a `TypeError` when passed a structural public object that is not a rendering context created by Lite. A utility layer registers an ordinary scene context with the default name `"UtilityLayer"`; tools can display `SceneContext.name` without treating utility layers as a separate rendering-context family.
+
+### Render Order and Utility Layers
+
+`moveRenderingContext(surface, context, index)` moves an already registered context to its final integer position `index` (clamped to the registry bounds) and returns `false` without changing anything for an unregistered context. Non-integer indices throw `RangeError` before the registry is changed. It locates the context by identity, removes it, and inserts it into the same live registry array at the clamped position; moving an already-correct context also returns `true`. Contexts render in list order. Its standalone `rendering-context-order.ts` module imports the surface and context types only, allowing the operation to tree-shake from applications that never use it.
+
+A utility layer composites onto its own `mainScene`: `createUtilityLayer(mainScene, options?)` binds the utility scene to the main scene's surface and records the main scene as the utility scene's internal `_overlayBase`. The surface supplies the engine, so callers of the previous `createUtilityLayer(engine, mainScene, options?)` signature must drop the engine argument. `registerScene` configures the overlay against the main scene rather than against whichever context was registered last. `registerUtilityLayer` uses `moveRenderingContext` to group the layer immediately after its main scene and existing sibling overlays, preserving their registration order and leaving unrelated contexts in their existing relative order. With `msaaSamples === 1` the overlay loads the swapchain; with MSAA it renders into the main task's current MSAA color attachment and resolves it again. The grouping therefore puts later contexts such as text renderers after the layers, so their pixels are not overwritten by an overlay resolve.
+
+A utility layer whose main scene is not registered on the surface (not yet registered, unregistered, or disposed) stays registered but skips its `_update` and `_record` work. When its main scene is registered again, scene registration moves it back before its associated overlays and groups those overlays after it. An already registered overlay is not used as its own base's compositing source; the context immediately before the overlay group supplies the ordinary scene fallback. Explicitly moving contexts afterward can change this order, so callers using `moveRenderingContext` must preserve the overlay grouping.
+
+Utility layers may themselves host utility layers. Their groups remain contiguous in depth-first order, with sibling layers in registration order. A layer is active only while every scene in its main-scene chain is registered. Reconfiguring an overlay restores its prior task's original clear state before applying a new base or task; MSAA overlays also replace their previous before-render callback rather than accumulating callbacks and restore the task's original enable state. Overlay bookkeeping is allocated lazily by the overlay module and is removed when its scene is disposed, even if the caller retains that scene.
+
+Utility-layer creation installs engine-owned scene-overlay hooks for base selection and post-registration ordering. Scene registration and the generic swapchain overlay module each use a no-op-by-default hook lookup; the utility feature installs the lookups, and they resolve hooks on the scene's engine. Without the feature, the lookups and utility-ordering code tree-shake away. Generic overlay state is tracked independently so a scene configured before a utility layer was created can still restore its original task state; this also makes ordinary multi-scene overlays safely retargetable when re-registered against a different base. `utility-layer-overlay.ts` owns descendant discovery, engine-hook installation, and depth-first ordering. It also invokes the generic overlay configurator after registration when a scene is the first context: a first utility scene still targets its associated base, while an ordinary first scene restores any earlier overlay state without selecting itself as a base.
+
+The installed hook's `selectBase(scene)` returns the explicit `_overlayBase` for a utility scene; for a root with earlier-registered descendants it returns the context immediately before the earliest descendant, or `null` if there is none. For an ordinary first scene it returns `null`; otherwise it returns `undefined`, meaning the generic configurator should use the last registered context. Its `registered(scene)` hook moves a re-registered root before any earlier descendant, then recursively moves each direct child and its subtree after the root, in the children's existing relative order. Registration invokes the hook only after a new context is successfully inserted, including the shadow-support registration path.
+
+The generic configurator skips disposed scenes and overlapping registrations that have already inserted the scene. When the feature explicitly selects a base (including `null`), or the ordinary fallback has a frame graph, it restores any previous overlay task's original clear state, removes its before-render and disposal callbacks and restores its original enabled state when the before-render callback existed. If the ordinary fallback is a non-scene context, it leaves an existing overlay configuration untouched. It then finds the first swapchain-targeting render task and records its original state in a lazily allocated, weakly keyed map. Each entry installs one scene-disposal callback that deletes the entry, releasing its task and base-scene references; reconfiguration removes the old callback before installing a new one. Single-sample tasks disable color clearing; MSAA tasks stay disabled until a base task's resolved attachment is available, then a before-render callback shares that live attachment and enables loading and resolving. The first-context post-registration call allows a utility scene registered before its main scene to be configured and allows a former overlay to restore its clear state when no other contexts remain.
+
+`tests/lite/unit/swapchain-overlay.test.ts` and `rendering-context-registration.test.ts` cover generic overlay state, explicit base selection, utility ordering, absent ancestors, re-registration, disposal, and overlapping work. `tests/lite/integration/utility-layer-overlay.spec.ts` checks actual WebGPU pixels for scene, nested utility, and text composition at sample counts 1 and 4, including utility-first registration, late activation after an ordinary overlay, and retargeting an ordinary overlay without enabling utility support.
 
 ### Render Targets
 
@@ -363,9 +397,9 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 
 ## Dependencies
 
-- **Imports**: `SceneContext` from `../scene/scene.js` (type-only, for `start()` parameter).
+- **Ordering helper**: type-only imports of `RenderingContext` and `SurfaceContext`.
+- **Utility overlay hooks**: engine and scene types, the ordering helper, and scene-overlay registration/configuration seams.
 - **External**: WebGPU API (`navigator.gpu`, `GPUDevice`, `GPUCanvasContext`, etc.).
-- **No other internal dependencies.**
 
 ## Test Specification
 
@@ -377,6 +411,7 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
 | `rendering-context query is live and readonly`    | Verify stable array identity, registration-order updates, and public kind discriminators       |
+| `rendering-context ordering`                      | Verify clamped moves, unregistered contexts, and stable utility-layer grouping and lifecycle   |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 
@@ -385,6 +420,8 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | File                                    | Size       | Purpose                                                                                                |
 | --------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `src/engine/engine.ts`                  | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/rendering-context-order.ts` | ~20 lines  | Tree-shakable move operation for a surface's rendering-context registry                                |
+| `src/gizmo/utility-layer-overlay.ts`    | ~80 lines  | Opt-in engine hooks for utility-layer base selection and contiguous ordering                           |
 | `src/engine/engine-dispose.ts`          | ~25 lines  | Explicit engine teardown and synchronous resource-retirement drain                                     |
 | `src/engine/gpu-resource-retirement.ts` | ~110 lines | Deferred retirement, exactly-once batch ownership, and awaitable teardown                              |
 | `src/engine/gpu-timer.ts`               | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |

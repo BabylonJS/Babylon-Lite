@@ -218,6 +218,9 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Scene whose swapchain output this scene composites onto. When unset,
+     *  registration uses the context before any existing overlays, or the last context. */
+    _overlayBase?: SceneContext;
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
     /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
@@ -690,6 +693,13 @@ export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneCon
     _prepareShaderPipelines = prepare;
 }
 
+let _sceneOverlayHookLookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"] = () => undefined;
+
+/** @internal Install the lookup for optional engine-owned scene-registration hooks. */
+export function _installSceneOverlayHookLookup(lookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"]): void {
+    _sceneOverlayHookLookup = lookup;
+}
+
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
  * and adds the scene to its bound surface's render list in overlay order. The scene is
@@ -715,7 +725,7 @@ export async function registerScene(scene: SceneContext): Promise<void> {
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _sceneOverlayHookLookup(surface.engine)?.registered(ctx));
 }
 
 /**
@@ -743,7 +753,7 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
         const overlay = await import("./swapchain-overlay.js");
         overlay.configureSwapchainOverlayScene(surface, ctx);
     }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _sceneOverlayHookLookup(surface.engine)?.registered(ctx));
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;

@@ -9,16 +9,18 @@ import {
     type EngineContext,
     type RenderingContext,
 } from "../../../packages/babylon-lite/src/engine/engine";
+import { moveRenderingContext } from "../../../packages/babylon-lite/src/engine/rendering-context-order";
 import { createEffectRenderer, createEffectWrapper } from "../../../packages/babylon-lite/src/effect/effect-renderer";
 import { createFrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
 import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
-import { _installAsyncShaderPipelinePreparation } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { _installAsyncShaderPipelinePreparation, registerSceneWithShadowSupport } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import { createUtilityLayer } from "../../../packages/babylon-lite/src/gizmo/utility-layer";
+import { createUtilityLayer, disposeUtilityLayer, registerUtilityLayer } from "../../../packages/babylon-lite/src/gizmo/utility-layer";
+import type { RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -30,7 +32,7 @@ gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUSh
 gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
 gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 } as unknown as GPUTextureUsage;
 
-function makeMockEngine(): EngineContext {
+function makeMockEngine(msaaSamples = 4): EngineContext {
     const device = {
         createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout,
         createBuffer: (descriptor: GPUBufferDescriptor) => ({ descriptor, destroy: () => undefined }) as unknown as GPUBuffer,
@@ -48,7 +50,7 @@ function makeMockEngine(): EngineContext {
 
     const eng = {
         canvas: {} as HTMLCanvasElement,
-        msaaSamples: 4,
+        msaaSamples,
         drawCallCount: 0,
         useHighPrecisionMatrix: false,
         useFloatingOrigin: false,
@@ -97,7 +99,7 @@ describe("rendering context registration helpers", () => {
     it("returns a stable live view with public context kinds and scene names", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        const utility = createUtilityLayer(engine, scene, { addDefaultLight: false });
+        const utility = createUtilityLayer(scene, { addDefaultLight: false });
         const frameGraph = createFrameGraphContext(engine);
         const effect = createEffectRenderer(
             engine,
@@ -162,6 +164,431 @@ describe("registerScene / unregisterScene", () => {
         expect(list).toEqual([]);
     });
 
+    it.each([1, 4])("does not reconfigure a scene when registrations overlap at MSAA %i", async (samples) => {
+        const engine = makeMockEngine(samples);
+        const first = createSceneContext(engine);
+        const second = createSceneContext(engine);
+        await registerScene(first);
+        let finish!: () => void;
+        const pending = new Promise<void>((resolve) => (finish = resolve));
+        second._frameGraph._tasks[0]!._preload = () => pending;
+
+        const registrations = [registerScene(second), registerScene(second)];
+        finish();
+        await Promise.all(registrations);
+
+        expect(getRenderingContexts(engine)).toEqual([first, second]);
+        expect(second._beforeRender).toHaveLength(samples > 1 ? 1 : 0);
+        second._update();
+        expect((second._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(false);
+    });
+
+    it.each([1, 4])("preserves a generic overlay when re-registered after a non-scene context at MSAA %i", async (samples) => {
+        const engine = makeMockEngine(samples);
+        const first = createSceneContext(engine);
+        const second = createSceneContext(engine);
+        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+        await registerScene(first);
+        await registerScene(second);
+        second._update();
+        const task = second._frameGraph._tasks[0] as RenderTaskBase;
+        const callbackCount = second._beforeRender.length;
+        expect(task._config.clr).toBe(false);
+        registerRenderingContext(engine, text);
+
+        unregisterScene(second);
+        await registerScene(second);
+        second._update();
+
+        expect(getRenderingContexts(engine)).toEqual([first, text, second]);
+        expect(task._config.clr).toBe(false);
+        expect(second._beforeRender).toHaveLength(callbackCount);
+    });
+
+    it("replaces a generic MSAA overlay callback when re-registering", async () => {
+        const engine = makeMockEngine();
+        const first = createSceneContext(engine);
+        const second = createSceneContext(engine);
+        await registerScene(first);
+        await registerScene(second);
+        for (let i = 0; i < 3; i++) {
+            unregisterScene(second);
+            await registerScene(second);
+            expect(second._beforeRender).toHaveLength(1);
+        }
+    });
+
+    it.each([1, 4])("releases generic overlay bookkeeping on disposal at MSAA %i", async (samples) => {
+        const engine = makeMockEngine(samples);
+        const first = createSceneContext(engine);
+        const second = createSceneContext(engine);
+        await registerScene(first);
+        await registerScene(second);
+        const cleanupCount = second._disposables.length;
+        for (let i = 0; i < 3; i++) {
+            unregisterScene(second);
+            await registerScene(second);
+            expect(second._disposables).toHaveLength(cleanupCount);
+        }
+
+        const deleteEntry = vi.spyOn(WeakMap.prototype, "delete");
+        try {
+            disposeScene(second);
+            expect(deleteEntry).toHaveBeenCalledWith(second);
+            expect(second._disposables).toHaveLength(0);
+            expect(second._beforeRender).toHaveLength(0);
+        } finally {
+            deleteEntry.mockRestore();
+        }
+        disposeScene(first);
+    });
+
+    describe("utility layer registration", () => {
+        function defaultTask(scene: SceneContext): RenderTaskBase {
+            return scene._frameGraph._tasks[0] as RenderTaskBase;
+        }
+
+        it("moves a registered context to a clamped index", () => {
+            const engine = makeMockEngine();
+            const [a, b, c] = [makeRenderingContext(), makeRenderingContext(), makeRenderingContext()];
+            const unregistered = makeRenderingContext();
+            for (const context of [a, b, c]) {
+                registerRenderingContext(engine, context);
+            }
+
+            expect(moveRenderingContext(engine, c, 1)).toBe(true);
+            expect(getRenderingContexts(engine)).toEqual([a, c, b]);
+            expect(moveRenderingContext(engine, a, 99)).toBe(true);
+            expect(getRenderingContexts(engine)).toEqual([c, b, a]);
+            expect(moveRenderingContext(engine, a, -5)).toBe(true);
+            expect(getRenderingContexts(engine)).toEqual([a, c, b]);
+            expect(moveRenderingContext(engine, unregistered, 0)).toBe(false);
+            expect(getRenderingContexts(engine)).toEqual([a, c, b]);
+            for (const index of [NaN, Infinity, -Infinity, 1.5]) {
+                expect(() => moveRenderingContext(engine, a, index)).toThrow(RangeError);
+                expect(getRenderingContexts(engine)).toEqual([a, c, b]);
+            }
+        });
+
+        it.each([1, 4])("orders multiple layers after their main scene and before text at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const first = createUtilityLayer(main, { addDefaultLight: false });
+            const second = createUtilityLayer(main, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            await registerScene(main);
+            registerRenderingContext(engine, text);
+            await registerUtilityLayer(first);
+            await registerUtilityLayer(second);
+            await registerUtilityLayer(first);
+
+            expect(getRenderingContexts(engine)).toEqual([main, first.scene, second.scene, text]);
+            for (const utility of [first, second]) {
+                utility.scene._update();
+                expect(defaultTask(utility.scene)._config.clr).toBe(false);
+                if (samples > 1) {
+                    expect(defaultTask(utility.scene)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
+                }
+            }
+            expect(defaultTask(main)._config.clr).toBe(true);
+
+            moveRenderingContext(engine, second.scene, 3);
+            expect(getRenderingContexts(engine)).toEqual([main, first.scene, text, second.scene]);
+            await registerUtilityLayer(second);
+            expect(getRenderingContexts(engine)).toEqual([main, first.scene, second.scene, text]);
+
+            unregisterScene(first.scene);
+            await registerUtilityLayer(first);
+            expect(getRenderingContexts(engine)).toEqual([main, second.scene, first.scene, text]);
+        });
+
+        it("groups layers with their own main scenes and preserves sibling order", async () => {
+            const engine = makeMockEngine();
+            const a = createSceneContext(engine);
+            const b = createSceneContext(engine);
+            const a1 = createUtilityLayer(a, { addDefaultLight: false });
+            const a2 = createUtilityLayer(a, { addDefaultLight: false });
+            const b1 = createUtilityLayer(b, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            await registerScene(a);
+            await registerScene(b);
+            registerRenderingContext(engine, text);
+            await registerUtilityLayer(a1);
+            await registerUtilityLayer(b1);
+            await registerUtilityLayer(a2);
+            expect(getRenderingContexts(engine)).toEqual([a, a1.scene, a2.scene, b, b1.scene, text]);
+
+            unregisterScene(a);
+            await registerScene(a);
+            expect(getRenderingContexts(engine)).toEqual([a, a1.scene, a2.scene, b, b1.scene, text]);
+            expect(defaultTask(a)._config.clr).toBe(true);
+
+            disposeUtilityLayer(a1);
+            expect(getRenderingContexts(engine)).toEqual([a, a2.scene, b, b1.scene, text]);
+            a2.scene._update();
+            expect(defaultTask(a2.scene)._config.clr).toBe(false);
+        });
+
+        it.each([1, 4])("keeps nested layers with their parent and suspends the entire absent-main chain at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const parent = createUtilityLayer(main, { addDefaultLight: false });
+            const nested = createUtilityLayer(parent.scene, { addDefaultLight: false });
+            const sibling = createUtilityLayer(main, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            const callback = vi.fn();
+            const execute = vi.spyOn(nested.scene._frameGraph, "execute").mockReturnValue(3);
+            nested.scene._beforeRender.push(callback);
+            const contexts = [main, parent.scene, nested.scene, sibling.scene, text];
+            const order = (): number[] => getRenderingContexts(engine).map((context) => contexts.indexOf(context));
+
+            await registerScene(main);
+            await registerUtilityLayer(parent);
+            await registerUtilityLayer(nested);
+            registerRenderingContext(engine, text);
+            await registerUtilityLayer(sibling);
+            expect(order()).toEqual([0, 1, 2, 3, 4]);
+
+            unregisterScene(main);
+            nested.scene._update();
+            expect(nested.scene._record()).toBe(0);
+            expect(callback).not.toHaveBeenCalled();
+            expect(execute).not.toHaveBeenCalled();
+
+            await registerScene(main);
+            expect(order()).toEqual([0, 1, 2, 3, 4]);
+            nested.scene._update();
+            expect(nested.scene._record()).toBe(3);
+            expect(callback).toHaveBeenCalledOnce();
+
+            unregisterScene(parent.scene);
+            nested.scene._update();
+            expect(nested.scene._record()).toBe(0);
+            expect(callback).toHaveBeenCalledOnce();
+            await registerUtilityLayer(parent);
+            expect(order()).toEqual([0, 3, 1, 2, 4]);
+        });
+
+        it.each([1, 4])("restores child-first registration without using a descendant as the root base at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const parent = createUtilityLayer(main, { addDefaultLight: false });
+            const nested = createUtilityLayer(parent.scene, { addDefaultLight: false });
+            const sibling = createUtilityLayer(main, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            const contexts = [main, sibling.scene, parent.scene, nested.scene, text];
+
+            await registerUtilityLayer(nested);
+            await registerUtilityLayer(sibling);
+            registerRenderingContext(engine, text);
+            await registerUtilityLayer(parent);
+            expect(nested.scene._record()).toBe(0);
+
+            await registerScene(main);
+            expect(getRenderingContexts(engine).map((context) => contexts.indexOf(context))).toEqual([0, 1, 2, 3, 4]);
+            expect(defaultTask(main)._config.clr).toBe(true);
+            expect(main._beforeRender).toHaveLength(0);
+        });
+
+        it.each([1, 4])("does not accumulate overlay callbacks when a layer is re-registered at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            await registerScene(main);
+            await registerUtilityLayer(utility);
+            const callbackCount = utility.scene._beforeRender.length;
+
+            for (let i = 0; i < 3; i++) {
+                unregisterScene(utility.scene);
+                await registerUtilityLayer(utility);
+                expect(utility.scene._beforeRender).toHaveLength(callbackCount);
+            }
+
+            utility.scene._update();
+            expect(defaultTask(utility.scene)._config.clr).toBe(false);
+        });
+
+        it("restores an overlay disabled while its MSAA attachment was unavailable", async () => {
+            const engine = makeMockEngine();
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            await registerScene(main);
+            await registerUtilityLayer(utility);
+            const task = defaultTask(main);
+            const resolveTarget = task._config.rst;
+            task._config.rst = undefined;
+            utility.scene._update();
+            expect(defaultTask(utility.scene).enabled).toBe(false);
+
+            unregisterScene(utility.scene);
+            await registerUtilityLayer(utility);
+            task._config.rst = resolveTarget;
+            utility.scene._update();
+            expect(defaultTask(utility.scene).enabled).not.toBe(false);
+            expect(defaultTask(utility.scene)._config.clr).toBe(false);
+        });
+
+        it.each([1, 4])("restores a main scene configured as an overlay before utility creation at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const first = createSceneContext(engine);
+            const main = createSceneContext(engine);
+            await registerScene(first);
+            await registerScene(main);
+            main._update();
+            expect(defaultTask(main)._config.clr).toBe(false);
+
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            await registerUtilityLayer(utility);
+            unregisterScene(main);
+            unregisterScene(first);
+            await registerScene(main);
+
+            expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
+            expect(defaultTask(main)._config.clr).toBe(true);
+            main._update();
+            utility.scene._update();
+            expect(defaultTask(utility.scene)._config.clr).toBe(false);
+            if (samples > 1) {
+                expect(defaultTask(utility.scene)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
+            }
+
+            unregisterScene(main);
+            unregisterScene(utility.scene);
+            await registerScene(first);
+            await registerScene(main);
+            main._update();
+            expect(defaultTask(main)._config.clr).toBe(false);
+            unregisterScene(main);
+            unregisterScene(first);
+            await registerScene(main);
+            expect(getRenderingContexts(engine)).toEqual([main]);
+            expect(defaultTask(main)._config.clr).toBe(true);
+        });
+
+        it("orders the layer on its main scene's surface", async () => {
+            const engine = makeMockEngine();
+            const surface = makeMockEngine();
+            Object.assign(surface, { engine });
+            const main = createSceneContext(surface);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            await registerScene(main);
+            registerRenderingContext(surface, text);
+            await registerUtilityLayer(utility);
+
+            expect(utility.scene.surface).toBe(surface);
+            expect(getRenderingContexts(surface)).toEqual([main, utility.scene, text]);
+            expect(getRenderingContexts(engine)).toEqual([]);
+        });
+
+        it.each([1, 4])("stays inert while its main scene is not registered at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const callback = vi.fn();
+            const execute = vi.spyOn(utility.scene._frameGraph, "execute").mockReturnValue(3);
+            utility.scene._beforeRender.push(callback);
+            await registerUtilityLayer(utility);
+            utility.scene._drawCallsPre = 12;
+
+            utility.scene._update();
+            expect(utility.scene._record()).toBe(0);
+            expect(utility.scene._drawCallsPre).toBe(0);
+            expect(callback).not.toHaveBeenCalled();
+            expect(execute).not.toHaveBeenCalled();
+            expect(isRenderingContextRegistered(engine, utility.scene)).toBe(true);
+
+            await registerScene(main);
+            expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
+            expect(defaultTask(main)._config.clr).toBe(true);
+            utility.scene._update();
+            expect(utility.scene._record()).toBe(3);
+            expect(callback).toHaveBeenCalledOnce();
+            expect(defaultTask(utility.scene)._config.clr).toBe(false);
+
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+            registerRenderingContext(engine, text);
+            unregisterScene(main);
+            utility.scene._update();
+            expect(utility.scene._record()).toBe(0);
+            expect(callback).toHaveBeenCalledOnce();
+            await registerScene(main);
+            expect(getRenderingContexts(engine)).toEqual([main, utility.scene, text]);
+            utility.scene._update();
+            expect(utility.scene._record()).toBe(3);
+            expect(callback).toHaveBeenCalledTimes(2);
+
+            disposeScene(main);
+            expect(getRenderingContexts(engine)).toEqual([utility.scene, text]);
+            utility.scene._update();
+            expect(utility.scene._record()).toBe(0);
+            expect(callback).toHaveBeenCalledTimes(2);
+            expect(execute).toHaveBeenCalledTimes(2);
+
+            disposeUtilityLayer(utility);
+            disposeUtilityLayer(utility);
+            unregisterRenderingContext(engine, text);
+            expect(getRenderingContexts(engine)).toEqual([]);
+        });
+
+        it("restores overlay ordering when a main scene registers with shadow support", async () => {
+            const engine = makeMockEngine();
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const shadow = {
+                name: "shadow",
+                engine,
+                _passes: [],
+                record: vi.fn(),
+                execute: vi.fn(() => 0),
+                dispose: vi.fn(),
+            } as unknown as Task;
+            addTaskAtStart(main, shadow);
+            await registerUtilityLayer(utility);
+            await registerSceneWithShadowSupport(main);
+            expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
+        });
+
+        it("does not revive a layer disposed during asynchronous registration", async () => {
+            const engine = makeMockEngine();
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            await registerScene(main);
+            let finish!: () => void;
+            const pending = new Promise<void>((resolve) => (finish = resolve));
+            defaultTask(utility.scene)._preload = () => pending;
+            const registration = registerUtilityLayer(utility);
+            disposeUtilityLayer(utility);
+            finish();
+            await registration;
+            expect(getRenderingContexts(engine)).toEqual([main]);
+            expect(utility.scene._beforeRender).toHaveLength(0);
+        });
+
+        it.each([false, true])("does not duplicate callbacks when layer registrations overlap, utility-first=%s", async (utilityFirst) => {
+            const engine = makeMockEngine();
+            const main = createSceneContext(engine);
+            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            if (!utilityFirst) {
+                await registerScene(main);
+            }
+            let finish!: () => void;
+            const pending = new Promise<void>((resolve) => (finish = resolve));
+            defaultTask(utility.scene)._preload = () => pending;
+
+            const first = registerUtilityLayer(utility);
+            const second = registerUtilityLayer(utility);
+            finish();
+            await Promise.all([first, second]);
+
+            expect(getRenderingContexts(engine)).toEqual(utilityFirst ? [utility.scene] : [main, utility.scene]);
+            expect(utility.scene._beforeRender).toHaveLength(2);
+            if (utilityFirst) {
+                await registerScene(main);
+                expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
+            }
+        });
+    });
     it("unregisters the scene when disposing", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
