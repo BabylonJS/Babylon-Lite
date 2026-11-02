@@ -25,6 +25,7 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { DrawUpdateContext } from "../../render/renderable.js";
 
 /** BJS-compatible injection-point names accepted by {@link MaterialPlugin.getCustomCode}. */
 export type MaterialPluginPoint =
@@ -92,6 +93,14 @@ export interface MaterialPlugin {
     /** Re-upload this plugin's Standard-material UBO values before every rendered frame.
      *  PBR plugin values already follow the material UBO's versioned update path. */
     dynamic?: boolean;
+    /** @internal Exclude this plugin, including its bindings, outside opaque PBR IBL color passes. */
+    _pbrIblOnly?: boolean;
+    /** @internal Increment when texture backing identities change, not when texture contents change. */
+    _bindingVersion?(): number;
+    /** @internal Validate the consuming pass before using screen-dependent resources. */
+    _validateDraw?(context: DrawUpdateContext): void;
+    /** @internal Select opaque consuming-scene state before resource collection/binding. */
+    _selectBindingScope?(scope: object): void;
     /** Static defines folded into the pipeline cache key (and available to the
      *  plugin when it builds its custom code). */
     defines?: Record<string, boolean | number>;

@@ -15,8 +15,7 @@ The shape and texture types mirror Babylon.js'
 exposes a strict subset, biased toward minimal bundle size:
 
 - `ALBEDO_SQRT` excluded — only `ALBEDO` is exposed.
-- `VELOCITY` (screen-space vec2) excluded — only `LINEAR_VELOCITY` (world-space
-  vec3) is exposed.
+- `VELOCITY` excluded — the `LINEAR_VELOCITY` contract is specified below.
 - `IRRADIANCE_LEGACY` excluded — only `IRRADIANCE` is exposed.
 - `COLOR` excluded — callers wire a separate scene color RT through the task's
   optional `targetTexture` color attachment (matches BJS `PREPASS_COLOR_INDEX`).
@@ -68,6 +67,11 @@ export interface GeometryRendererTaskConfig {
     readonly textureDescriptions: readonly GeometryRendererTextureDescription[];
     reverseCulling?: boolean;
 }
+
+export interface GeometryVelocityOptions {
+    previousDepth?: boolean;
+}
+export function enableGeometryVelocity(task: GeometryRendererTask, options?: GeometryVelocityOptions): void;
 
 export interface GeometryRendererTask extends Task {
     readonly name: string;
@@ -173,6 +177,100 @@ const engine = await createEngine(canvas, {
 ```
 
 ## Design
+
+### PBR interleaved geometry
+
+The PBR geometry factory reads vertex layout and layout key from
+`mesh._gpu._vbLayout` / `mesh._gpu._vbKey`, exactly like forward PBR rendering.
+Pass both into shader composition and include the layout key in per-view
+resource-cache identity. Layout is per mesh, never material-owned: meshes sharing
+a material may use different attribute strides/offsets. Bind vertex buffers at
+offset zero; attribute offsets belong to the composed pipeline layouts.
+
+### Deformation-aware velocity (PBR and Standard)
+
+`LINEAR_VELOCITY` is previous-minus-current NDC XY divided by two (Y up),
+not world-space velocity. Z remains zero by default, preserving existing
+velocity visualization and consumers. Call `enableGeometryVelocity(task)` before
+scene registration to opt into PBR rigid/deformation motion and shared previous-pose
+resources. `enableGeometryVelocity(task, { previousDepth: true })`
+also opts into previous positive view depth in Z (previous clip W), requires a
+floating-point RGBA velocity attachment and a perspective camera, and uses the
+reserved geometry-parameter scalar `gp.cameraNearFar.z = 1`. The AO demo enables
+the producer flag together with its temporal consumer's matching flag.
+The same contract serves SSAO and other temporal
+consumers without AO-specific work in the geometry renderer.
+
+Non-instanced live skeleton and morph meshes reconstruct the **previous**
+deformed local position, in the same order as current geometry: base position,
+previous morph weights applied to immutable position deltas, then previous
+four/eight-influence bone blend, then previous mesh world and previous task
+view-projection. Using current morphed positions with previous bones is wrong
+when both change. World/camera motion composes with deformation; a stopped
+pose yields zero deformation motion on the next frame, not repeated motion.
+
+A material-agnostic deformation-velocity feature owns the previous-pose shader
+code and per-renderable resources. The explicit enabler installs it and the
+PBR geometry-velocity implementation behind nullable typed seams; ordinary
+PBR geometry retains its historical camera-only velocity without importing
+matrix inversion or previous-pose code. Existing Standard skeletal-velocity
+preloading remains available independently.
+Implementation installation alone does not activate another task: the enabler
+decorates only its task's PBR view factory after preload, tags those views, and
+uses the task-local tag for previous-pose allocation and shader selection.
+The shared composer cache key includes the enabled velocity variant. Active
+feature-view scope is restored after synchronous composition/binding, including
+nested calls, so legacy and opted-in tasks can coexist in one scene.
+No previous pose is allocated by color-only or non-velocity geometry passes.
+The generic task contains no new velocity policy, allocation or imports; it
+retains only an optional effective-camera validator. The enabler initializes
+reserved task parameter field 18 once, which parameter uploads preserve.
+Repeated enabling with the same contract is idempotent; changing that contract,
+enabling after registration, missing/disposed velocity targets, incompatible
+formats and perspective-only previous depth fail explicitly.
+
+Each geometry renderable owns one previous-bone RGBA32F texture and/or one
+previous-morph-weight read-only storage buffer, plus CPU pose snapshots.
+Bindings are created once. Before each geometry draw, upload the prior snapshot
+and snapshot the current CPU mirrors for the following draw; first use,
+exclusion/re-inclusion and hidden/reappearing meshes use current pose as their
+neutral initialization. All history is task/renderable-local: shared materials,
+skeletons, morph weights, other geometry tasks and forward/shadow passes cannot
+advance another consumer's previous state. No current source resource is mutated
+or destroyed, and no vectors/arrays/bind groups are allocated in the update loop.
+Retirement disposes previous resources with the existing generation's fenced
+lifetime. Device rebuild starts neutral.
+
+The shared skeleton influence generator is reused for previous-bone blending.
+The velocity feature rewrites its one named previous-weight storage binding,
+including minified WGSL, and requires exactly one match. Ordinary morph rendering
+keeps its existing two-binding rewrite unchanged; the composer gains no
+storage-buffer semantics and morph-only bundles retain no previous-pose policy.
+Current position/normal deformation and normal/material shading are unchanged.
+After drawing, camera history copies the current matrix directly from the task's
+own scene-UBO scratch. No second current-view-projection array or intermediate
+per-frame copy is needed; floating-origin adjustment already happened before
+that UBO was uploaded.
+
+Arbitrary NodeMaterial graph deformations, baked VAT and independently animated
+thin-instance transforms remain separate contracts; this does not invent a
+previous transform for them. Existing explicit custom graph velocity remains
+available. Numerical regressions cover PBR and Standard, skin/morph/combined
+deformation, four/eight influences, simultaneous world/camera motion, previous
+depth, first frame, stopping/reversal, exclusions, shared source state and
+disposal. The AO demo includes separate animated skinned and morphed examples
+and an animation toggle; diagnostic/contact runners explicitly pause them to
+keep their existing trajectories deterministic.
+
+`pnpm test:geometry:velocity` checks actual PBR/Standard MRT values against
+analytic previous material-point reconstruction; `--software` explicitly uses
+SwiftShader and is wired into the existing PR unit-test job. It covers four
+and eight influences, five morph weights, combined deformation, first frame,
+pause/reversal, world/camera motion, exclusion/re-inclusion and hiding. A second
+geometry task verifies histories are independent and default velocity Z remains
+zero while the opt-in task writes previous depth. SSAO consumes the resulting
+RGBA velocity in the same scene. This is numerical readback, not visual parity
+or a performance test.
 
 ### Two-phase task: `record()` plus `execute()`
 

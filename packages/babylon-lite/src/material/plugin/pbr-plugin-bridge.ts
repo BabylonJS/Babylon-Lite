@@ -34,7 +34,8 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     return index;
 }
 
-const pbrPluginExt: PbrExt = {
+/** @internal The ordinary bridge is also the starting point for an explicitly installed decorator. */
+export const pbrPluginExt: PbrExt = {
     id: "plugin",
     phase: "fragment",
     detect(mat) {

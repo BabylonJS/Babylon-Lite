@@ -32,6 +32,17 @@ describe("bundle tooling correctness", () => {
         expect(isDeferredLiteErrorFile(root, sceneChange)).toBe(true);
         expect(isDeferredLiteErrorFile(root, core)).toBe(false);
         expect([tree, core, twin, sceneChange, compute].sort((a, b) => compareLiteErrorFiles(root, a, b))).toEqual([core, compute, tree, twin, sceneChange]);
+        for (const relative of [
+            "frame-graph/enable-geometry-velocity.ts",
+            "post-process/ssao.ts",
+            "material/geometry-deformation-velocity.ts",
+            "material/pbr/pbr-geometry-velocity.ts",
+            "material/plugin/dynamic-pbr-bindings.ts",
+        ]) {
+            const optional = join(root, relative);
+            expect(isDeferredLiteErrorFile(root, optional)).toBe(true);
+            expect(compareLiteErrorFiles(root, sceneChange, optional)).toBeLessThan(0);
+        }
     });
 
     it("keeps a loaded chunk byte-identical when an unrelated chunk is minified first", async () => {

@@ -15,6 +15,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { _installMeshBlendingGeometrySupport } from "../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending";
 import { createGeometryRendererTask, type GeometryRendererTaskConfig } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
+import { enableGeometryVelocity } from "../../../packages/babylon-lite/src/frame-graph/enable-geometry-velocity";
 import { _computeMeshFeatures } from "../../../packages/babylon-lite/src/material/mesh-features";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
@@ -104,6 +105,48 @@ function makeMockEngine(): EngineContext {
 }
 
 describe("GeometryRendererTask", () => {
+    it("keeps explicitly enabled PBR velocity views local to their task", async () => {
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const engine = makeMockEngine(),
+            scene = createSceneContext(engine) as SceneContext,
+            material = createPbrMaterial();
+        scene.meshes.push({ material } as Mesh);
+        const config = { textureDescriptions: [{ type: GeometryTextureType.LINEAR_VELOCITY }] };
+        const plain = createGeometryRendererTask(config, engine, scene),
+            extended = createGeometryRendererTask(config, engine, scene);
+        enableGeometryVelocity(extended);
+        await Promise.all([plain._preload!(), extended._preload!()]);
+        const viewConfig = { attachments: [GeometryTextureType.LINEAR_VELOCITY], emitColor: false };
+        expect(plain._createPbrGeometryView!(material, viewConfig)._geometryVelocity).toBeUndefined();
+        expect(extended._createPbrGeometryView!(material, viewConfig)._geometryVelocity).toBe(true);
+        await extended._preload!();
+        expect(plain._createPbrGeometryView!(material, viewConfig)._geometryVelocity).toBeUndefined();
+        expect(extended._createPbrGeometryView!(material, viewConfig)._geometryVelocity).toBe(true);
+        plain.dispose();
+        extended.dispose();
+    });
+    it("requires an explicit floating-point RGBA velocity attachment for previous depth", () => {
+        const engine = makeMockEngine(),
+            scene = createSceneContext(engine) as SceneContext;
+        for (const textureDescriptions of [
+            [{ type: GeometryTextureType.WORLD_POSITION }],
+            [{ type: GeometryTextureType.LINEAR_VELOCITY, format: "rg32float" as const }],
+            [{ type: GeometryTextureType.LINEAR_VELOCITY, format: "rgba8unorm" as const }],
+        ]) {
+            const task = createGeometryRendererTask({ textureDescriptions }, engine, scene);
+            expect(() => enableGeometryVelocity(task, { previousDepth: true })).toThrow(/velocity requires|velocity attachment/);
+            task.dispose();
+        }
+        const plain = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.LINEAR_VELOCITY }] }, engine, scene);
+        const extended = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.LINEAR_VELOCITY }] }, engine, scene);
+        enableGeometryVelocity(extended, { previousDepth: true });
+        expect(plain._paramsData![18]).toBe(0);
+        expect(extended._paramsData![18]).toBe(1);
+        expect(() => enableGeometryVelocity(extended, { previousDepth: true })).not.toThrow();
+        expect(() => enableGeometryVelocity(extended)).toThrow("different previous-depth contract");
+        plain.dispose();
+        extended.dispose();
+    });
     it("throws when textureDescriptions is empty", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;

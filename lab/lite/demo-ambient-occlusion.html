@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Babylon Lite - Ambient Occlusion</title>
+        <link rel="icon" href="data:," />
+        <style>
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #10151e;
+                font-family: system-ui, sans-serif;
+                color: #edf1fa;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .controls {
+                position: fixed;
+                top: 16px;
+                left: 16px;
+                padding: 14px 18px;
+                border: 1px solid #56647a;
+                border-radius: 12px;
+                background: #17202deb;
+                max-width: calc(100vw - 70px);
+            }
+            .gpu-timings {
+                position: fixed;
+                top: 16px;
+                right: 16px;
+                width: 245px;
+                padding: 14px 18px;
+                border: 1px solid #56647a;
+                border-radius: 12px;
+                background: #17202deb;
+                pointer-events: none;
+            }
+            .gpu-timings h2 {
+                margin: 0 0 10px;
+                font-size: 14px;
+            }
+            .gpu-timings pre {
+                margin: 0;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+                font-size: 12px;
+                font-variant-numeric: tabular-nums;
+            }
+            .gpu-timings p {
+                margin: 10px 0 0;
+                font-size: 11px;
+                color: #b6c4da;
+            }
+            @media (max-width: 720px) {
+                .gpu-timings {
+                    top: auto;
+                    bottom: 60px;
+                }
+            }
+            h1 {
+                margin: 0 0 12px;
+                font-size: 17px;
+            }
+            .row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin: 8px 0;
+                flex-wrap: wrap;
+            }
+            select {
+                background: #26354c;
+                color: inherit;
+                padding: 5px;
+                border: 1px solid #8191a8;
+                border-radius: 5px;
+            }
+            label {
+                font-size: 13px;
+            }
+            summary {
+                cursor: pointer;
+                font-size: 13px;
+            }
+            input {
+                vertical-align: middle;
+            }
+            input[type="range"] {
+                width: 130px;
+            }
+            .hint {
+                margin: 4px 0 10px;
+                font-size: 11px;
+                color: #b6c4da;
+            }
+            #status {
+                position: fixed;
+                bottom: 16px;
+                left: 16px;
+                right: 16px;
+                font-size: 13px;
+                text-shadow: 0 1px 4px #000;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <section class="controls" aria-label="Ambient occlusion controls">
+            <h1>Screen-space ambient occlusion</h1>
+            <p class="hint">XeGTAO ambient occlusion</p>
+            <div class="row">
+                <label
+                    >AO quality
+                    <select id="quality" aria-describedby="qualityHint">
+                        <option value="low">Low (4 samples/pixel)</option>
+                        <option value="medium">Medium (8 samples/pixel)</option>
+                        <option value="high" selected>High (18 samples/pixel)</option>
+                        <option value="ultra">Ultra (54 samples/pixel)</option>
+                    </select></label
+                >
+            </div>
+            <p id="qualityHint" class="hint">Spatial sampling only. Noisier presets can increase temporal/transport cost, even in AO-only view.</p>
+            <div class="row">
+                <label><input id="enabled" type="checkbox" checked /> AO enabled</label>
+                <label><input id="aoOnly" type="checkbox" /> AO only</label>
+                <label><input id="direct" type="checkbox" /> Direct light</label>
+            </div>
+            <div class="row">
+                <label><input id="temporal" type="checkbox" checked /> Temporal filter</label>
+                <label title="Only estimation is reduced; geometry/history stay full size. Half requires 320x224.">
+                    AO resolution
+                    <select id="resolution">
+                        <option value="full">Full</option>
+                        <option value="half" selected>Half (1/4 AO pixels)</option>
+                    </select>
+                </label>
+                <label title="Switches AO input only. The geometry pass still writes its normal and velocity attachments.">
+                    <input id="useNormalTexture" type="checkbox" checked /> Use normal texture</label
+                >
+                <label title="Skip unnecessary history-transport searches; gains depend on scene motion."
+                    ><input id="motionPruning" type="checkbox" checked /> Motion-mask pruning</label
+                >
+                <label><input id="moving" type="checkbox" /> Moving sphere</label>
+                <label title="Green: skeletal bending. Purple: morph-target animation."><input id="deforming" type="checkbox" checked /> Skin/morph animation</label>
+                <label><input id="gpuTiming" type="checkbox" checked /> GPU timings</label>
+            </div>
+            <div class="row">
+                <label>Radius <input id="radius" type="range" min="0.1" max="1.5" step="0.05" value="0.6" /> <output id="radiusValue">0.6</output></label>
+            </div>
+            <div class="row">
+                <label>Intensity <input id="intensity" type="range" min="0" max="1" step="0.05" value="1" /> <output id="intensityValue">1</output></label>
+            </div>
+            <details>
+                <summary>Advanced temporal settings</summary>
+                <div class="row">
+                    <label
+                        >History sample limit
+                        <input id="historySamples" type="range" min="1" max="16" step="1" value="16" aria-describedby="temporalHint" />
+                        <output id="historySamplesValue" for="historySamples">16 (0.9375 max history weight)</output></label
+                    >
+                </div>
+                <p id="temporalHint" class="hint">Frames of history, not spatial samples. Lower limits react faster but may shimmer; they do not reduce estimation cost.</p>
+            </details>
+        </section>
+        <section class="gpu-timings" aria-label="GPU task timings">
+            <h2>GPU timings</h2>
+            <pre id="gpuTimingValues">Waiting for GPU timestamp readback...</pre>
+            <p>GPU averages over ~0.25 s. AO includes all active estimation and filtering passes. GPU power-state changes can affect these timings.</p>
+        </section>
+        <div id="status" role="status">Loading the lighting environment...</div>
+        <script type="module" src="/lite/bundle/demos/ambient-occlusion.js"></script>
+    </body>
+</html>

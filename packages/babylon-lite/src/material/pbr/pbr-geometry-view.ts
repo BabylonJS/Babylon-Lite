@@ -24,6 +24,7 @@ import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } fro
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { _pbrMeshRequest, getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
+import type { GeometryDeformationVelocity } from "../geometry-deformation-velocity.js";
 
 const PBR2_GEOMETRY_OUTPUT = 1 << 21;
 
@@ -52,10 +53,14 @@ export interface PbrGeometryViewConfig {
      *  invalidation must use THIS camera so they share the same origin as the task's
      *  view-projection. Falls back to `scene.camera` when unset. */
     readonly camera?: Camera | null;
+    /** Meshes whose geometry-motion history should be excluded. */
+    readonly velocityExclusions?: ReadonlySet<Mesh>;
 }
 
 /** PBR material view that emits geometry textures instead of shaded colour. */
 export interface PbrGeometryMaterialView extends MaterialView {
+    /** @internal Present only on views created for an explicitly enabled velocity task. */
+    _geometryVelocity?: boolean;
     /** @internal Ordered MRT attachment list — index = `@location(i)`. */
     readonly _geometryAttachments: PbrGeometryAttachments;
     /** @internal Geometry pipeline carries an extra `@location(N)` color attachment. */
@@ -69,6 +74,12 @@ export interface PbrGeometryMaterialView extends MaterialView {
      *  `null` when the task uses the scene's active camera. A plain reference — no
      *  GPU resource, so nothing to dispose. */
     readonly _camera: Camera | null;
+    /** @internal Per-renderable previous-world binding, absent on the shared view. */
+    readonly _previousWorldUBO?: GPUBuffer | null;
+    /** @internal Per-renderable previous skeletal/morph state, never on a shared view. */
+    readonly _deformationVelocity?: GeometryDeformationVelocity | null;
+    /** @internal */
+    readonly _velocityExclusions?: ReadonlySet<Mesh>;
     /** @internal Shared per-view resources cache populated lazily by the renderable
      *  factory. Opaque to callers. PBR's cached per-variant resources are composed
      *  WGSL, bind-group layouts, pipeline layouts and pipelines, one set per forward
@@ -147,6 +158,7 @@ export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: 
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
     Object.defineProperty(view, "_camera", { value: config.camera ?? null, enumerable: false });
+    Object.defineProperty(view, "_velocityExclusions", { value: config.velocityExclusions, enumerable: false });
     Object.defineProperty(view, "_buildGroup", { value: getPbrGeometryGroupBuilder(), enumerable: false });
     return view;
 }

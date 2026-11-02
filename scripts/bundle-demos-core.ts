@@ -57,6 +57,7 @@ const ANTIGRAVITY_RACER_SRC = resolve(labDir, "public/antigravity-racer");
 const PLAYROOM_SRC = resolve(labDir, "public/playroom");
 const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
 const MESH_LOD_SRC = resolve(labDir, "public/mesh-lod");
+const SSAO_COMPARISON_SRC = resolve(labDir, "public/ssao-comparison");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 const _demoRequire = createRequire(import.meta.url);
@@ -257,8 +258,11 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(RACER_SRC, resolve(demosDir, "racer"), "Racer");
     }
 
-    if (demos.some((demo) => demo.slug === "screen-space-effects")) {
+    if (demos.some((demo) => demo.slug === "screen-space-effects" || demo.slug === "ssao-comparison")) {
         copyRequiredDir(SCREEN_SPACE_EFFECTS_SRC, resolve(demosDir, "screen-space-effects"), "Screen-space effects");
+    }
+    if (demos.some((demo) => demo.slug === "ssao-comparison")) {
+        copyRequiredDir(SSAO_COMPARISON_SRC, resolve(demosDir, "ssao-comparison"), "SSAO Kitchen comparison");
     }
 
     if (demos.some((demo) => demo.slug === "antigravity-racer")) {
@@ -340,6 +344,7 @@ export async function buildDemo(slug: string, options: { debug?: boolean } = {})
     // Standalone demos have no import map, so Havok can't be externalized to
     // /vendor/havok.js like scenes do — bundle its ESM build inline instead.
     const havokEsm = havokEsmEntry();
+    const comparisonPlugins = slug === "ssao-comparison" ? [await (await import("./ao-reference/comparison-baseline.js")).comparisonBaselinePlugin(ROOT)] : [];
 
     const buildResult = await build({
         root: labDir,
@@ -347,7 +352,7 @@ export async function buildDemo(slug: string, options: { debug?: boolean } = {})
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
+        plugins: [...comparisonPlugins, litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration

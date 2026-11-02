@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Babylon Lite - SSAO Comparison</title>
+        <link rel="icon" href="data:," />
+        <style>
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #10151e;
+                color: #edf1fa;
+                font-family: system-ui, sans-serif;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .panel {
+                position: fixed;
+                top: 14px;
+                padding: 14px 18px;
+                border: 1px solid #56647a;
+                border-radius: 10px;
+                background: #17202deb;
+                max-width: calc(100vw - 64px);
+            }
+            .controls {
+                left: 14px;
+                width: 370px;
+                max-height: calc(100vh - 100px);
+                overflow: auto;
+            }
+            .timings {
+                right: 14px;
+                width: 285px;
+                pointer-events: none;
+            }
+            h1 {
+                font-size: 17px;
+                margin: 0 0 10px;
+            }
+            h2 {
+                font-size: 14px;
+                margin: 0 0 8px;
+            }
+            .row {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                flex-wrap: wrap;
+                margin: 8px 0;
+            }
+            label,
+            summary {
+                font-size: 13px;
+            }
+            summary,
+            button {
+                cursor: pointer;
+            }
+            select,
+            button {
+                background: #26354c;
+                color: inherit;
+                border: 1px solid #8191a8;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            input {
+                vertical-align: middle;
+            }
+            input[type="range"] {
+                width: 120px;
+            }
+            input[type="number"] {
+                width: 42px;
+            }
+            .hint {
+                font-size: 11px;
+                color: #c1ccdc;
+                margin: 8px 0;
+            }
+            a {
+                color: #8dcbff;
+            }
+            pre {
+                white-space: pre-wrap;
+                font-size: 12px;
+                font-variant-numeric: tabular-nums;
+                margin: 0;
+            }
+            #status {
+                position: fixed;
+                bottom: 12px;
+                left: 14px;
+                right: 14px;
+                font-size: 12px;
+                text-shadow: 0 1px 3px #000;
+            }
+            #laneLabel {
+                font-size: 13px;
+                color: #a4d5ff;
+            }
+            @media (max-width: 800px) {
+                .timings {
+                    top: auto;
+                    bottom: 50px;
+                    width: 270px;
+                }
+                .controls {
+                    width: 335px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <section class="panel controls" aria-label="SSAO comparison controls">
+            <h1>SSAO comparison</h1>
+            <p class="hint">
+                XeGTAO vs <a id="baselineLink" target="_blank" rel="noopener noreferrer">BLite PR #839</a> (unmerged, <span id="baselineRef"></span>). One shared engine and depth
+                target.
+            </p>
+            <p class="hint">
+                <a href="../ao-temporal-reference/kitchen.html" target="_blank" rel="noopener noreferrer">Kitchen vs original native DiligentFX</a> — synchronized recorded
+                comparison, not GPU timings.
+            </p>
+            <div class="row">
+                <label
+                    >Scene
+                    <select id="scene"></select
+                ></label>
+            </div>
+            <div class="row">
+                <label
+                    >Mode
+                    <select id="mode">
+                        <option value="split">Split / wipe</option>
+                        <option value="single">Single / A-B</option>
+                    </select></label
+                >
+                <label
+                    >Algorithm
+                    <select id="algorithm">
+                        <option value="current">XeGTAO</option>
+                        <option value="existing">BLite PR839</option>
+                    </select></label
+                >
+            </div>
+            <div id="laneLabel"></div>
+            <div class="row">
+                <label><input id="ssaoEnabled" type="checkbox" checked /> Enable SSAO</label>
+            </div>
+            <div class="row">
+                <label>Divider <input id="divider" type="range" min="0" max="1" step="0.001" value="0.5" /></label
+                ><label><input id="aoOnly" type="checkbox" checked /> AO only</label>
+            </div>
+            <div class="row">
+                <label><input id="animate" type="checkbox" /> Animate objects</label><label><input id="sweep" type="checkbox" /> Camera sweep</label
+                ><button id="reset">Reset camera / motion</button>
+            </div>
+            <div class="row">
+                <label>Radius <input id="radius" type="range" min="0.05" max="2" step="0.05" value="0.6" /> <span id="radiusValue"></span></label>
+            </div>
+            <div class="row">
+                <label>Intensity <input id="intensity" type="range" min="0" max="1" step="0.05" value="0.5" /> <span id="intensityValue"></span></label>
+            </div>
+            <details>
+                <summary>Inputs and native settings</summary>
+                <p class="hint">Scene/input changes reload the controlled configuration. A/B switches reset both histories. Split mode uses identical full-viewport UVs.</p>
+                <div class="row">
+                    <label><input id="temporal" type="checkbox" checked /> Temporal</label><label><input id="half" type="checkbox" checked /> Half resolution</label
+                    ><label><input id="normals" type="checkbox" checked /> Geometry normals (XeGTAO)</label>
+                    <label><input id="pruning" type="checkbox" checked /> Motion pruning (XeGTAO)</label>
+                </div>
+                <div class="row">
+                    <label
+                        >XeGTAO reconstruction
+                        <select id="reconstruction">
+                            <option value="full">Full (fine contacts)</option>
+                            <option value="half">Half pipeline (fast)</option>
+                        </select></label
+                    >
+                </div>
+                <p class="hint">
+                    Half pipeline reduces geometry, denoising and history too, then upsamples the result. It can lose thin/contact detail; Full reconstruction preserves the
+                    existing mode.
+                </p>
+                <div class="row">
+                    <label
+                        >XeGTAO spatial sampling
+                        <select id="quality">
+                            <option value="low">Low (4 taps)</option>
+                            <option value="medium">Medium (8 taps)</option>
+                            <option value="high" selected>High (18 taps)</option>
+                            <option value="ultra">Ultra (54 taps)</option>
+                        </select></label
+                    >
+                </div>
+                <p class="hint">
+                    These presets change only depth-sample count, not resolution, history length or reconstruction filtering. High/Ultra can look very similar after denoising;
+                    compare with Temporal disabled or during motion. Fewer samples do not imply a proportional reduction in total task time.
+                </p>
+                <div class="row">
+                    <label>PR839 slices <input id="slices" type="number" min="1" max="8" value="3" /></label
+                    ><label>steps <input id="steps" type="number" min="1" max="8" value="4" /></label>
+                </div>
+                <p class="hint">
+                    PR839 display intensity is scaled by 3. Native shaping is preserved: XeGTAO radius multiplier; PR839 bias 0.05 and power 1.5. Equal radius is not equal
+                    perceived strength. Temporal off still runs PR839's resolve/copy at weight 1.
+                </p>
+                <p class="hint">Lit view applies the same whole-image multiply to both outputs. It does not compare the implementations' different native lighting integration.</p>
+                <p class="hint">Motion pruning skips unnecessary transport searches. Half pipeline reduces temporal work; Half with Full reconstruction only reduces estimation.</p>
+            </details>
+            <label><input id="timing" type="checkbox" checked /> GPU timings (single mode)</label>
+        </section>
+        <section class="panel timings" aria-label="Isolated GPU timings">
+            <h2>GPU task timings</h2>
+            <pre id="timingValues">Preparing comparison...</pre>
+            <p class="hint">
+                A/B runs only the selected algorithm and its required producer. Relay/composite passes are listed separately. Both algorithms run in split mode, so timings are
+                hidden. Total includes the producer, AO, relay and composite.
+            </p>
+            <p class="hint">GPU clocks affect timings. Use a consistent driver power profile; these measurements are not clock-normalized.</p>
+        </section>
+        <div id="status" role="status">Loading comparison...</div>
+        <script type="module" src="/lite/bundle/demos/ssao-comparison.js"></script>
+    </body>
+</html>

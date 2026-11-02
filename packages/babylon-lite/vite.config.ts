@@ -252,6 +252,18 @@ const SUPPLEMENTAL_NOTICES: ReadonlyArray<{ title: string; embeddedBy: string; s
         source: "https://github.com/emscripten-core/emscripten",
         file: "emscripten-LICENSE.txt",
     },
+    {
+        title: "XeGTAO ambient-occlusion algorithms",
+        embeddedBy: "@babylonjs/lite opt-in SSAO shaders",
+        source: "https://github.com/GameTechDev/XeGTAO/tree/a5b1686c7ea37788eeb3576b5be47f7c03db532c",
+        file: "xegtao-LICENSE.txt",
+    },
+    {
+        title: "DiligentFX temporal ambient-occlusion reconstruction",
+        embeddedBy: "@babylonjs/lite opt-in temporal SSAO (adapted history reconstruction)",
+        source: "https://github.com/DiligentGraphics/DiligentFX/tree/eaf6ab785968bdee2393210c5a67033a4d9140cc",
+        file: "diligentfx-LICENSE.txt",
+    },
 ];
 
 const THIRD_PARTY_NOTICES_DIR = resolve(__dirname, "third-party-notices");
@@ -287,8 +299,8 @@ function emitThirdPartyNotices(): Plugin {
 
             sections.push(
                 `${divider}\nBundled upstream components\n${divider}\n\n` +
-                    "The following native/runtime components are compiled into the WebAssembly\n" +
-                    "artifacts of the packages above. Their upstream licenses are reproduced here."
+                    "The following upstream components are adapted by Lite or compiled into the\n" +
+                    "WebAssembly artifacts above. Their upstream licenses are reproduced here."
             );
             for (const notice of SUPPLEMENTAL_NOTICES) {
                 const licensePath = resolve(THIRD_PARTY_NOTICES_DIR, notice.file);

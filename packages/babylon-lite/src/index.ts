@@ -125,6 +125,8 @@ export type { GenerateMipMapsTask, GenerateMipMapsTaskConfig } from "./frame-gra
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
 export type { DepthResolveTaskConfig } from "./frame-graph/depth-resolve-task.js";
 export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
+export { enableGeometryVelocity } from "./frame-graph/enable-geometry-velocity.js";
+export type { GeometryVelocityOptions } from "./frame-graph/enable-geometry-velocity.js";
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
@@ -180,6 +182,16 @@ export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/s
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
+export { createSsaoTask } from "./post-process/ssao.js";
+export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
+export { enablePbrSsao } from "./post-process/ssao-pbr.js";
+export { enableSsaoTemporal, resetSsaoTemporal } from "./post-process/ssao-temporal.js";
+export type { SsaoTemporalOptions, SsaoTemporalSettings } from "./post-process/ssao-temporal.js";
+export { enableSsaoMotionPruning } from "./post-process/ssao-motion-pruning.js";
+export type { SsaoMotionPruningSettings } from "./post-process/ssao-motion-pruning.js";
+export { enableSsaoHalfResolution } from "./post-process/ssao-half-resolution.js";
+export { enableSsaoHalfPipeline } from "./post-process/ssao-half-pipeline.js";
+export type { SsaoHalfResolutionSettings } from "./post-process/ssao-half-resolution.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <link rel="icon" href="data:," />
+        <title>AO temporal reference - BLite and native DiligentFX</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                font:
+                    14px/1.5 system-ui,
+                    sans-serif;
+                background: #10151d;
+                color: #e5edf9;
+            }
+            body {
+                margin: 20px;
+            }
+            h1 {
+                font-size: 23px;
+                margin-bottom: 8px;
+            }
+            p {
+                max-width: 1150px;
+                color: #b5c4d8;
+            }
+            .controls {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 12px;
+                padding: 14px 0;
+            }
+            button,
+            select {
+                background: #233147;
+                color: inherit;
+                border: 1px solid #62738c;
+                padding: 7px 11px;
+                border-radius: 5px;
+            }
+            input[type="range"] {
+                flex: 1;
+                min-width: 180px;
+            }
+            main {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 14px;
+            }
+            figure {
+                margin: 0;
+                background: #192333;
+                padding: 12px;
+                border-radius: 8px;
+            }
+            h2 {
+                font-size: 15px;
+                margin: 0 0 4px;
+            }
+            figcaption {
+                min-height: 52px;
+                font-size: 12px;
+                color: #aebed4;
+            }
+            canvas {
+                display: block;
+                width: 100%;
+                height: auto;
+                image-rendering: pixelated;
+                background: white;
+            }
+            pre {
+                white-space: pre-wrap;
+                font-size: 12px;
+            }
+            #error {
+                color: #ffb8b8;
+            }
+            #frameInfo {
+                font-variant-numeric: tabular-nums;
+                min-width: 240px;
+            }
+            @media (max-width: 700px) {
+                main {
+                    grid-template-columns: 1fr;
+                }
+                figcaption {
+                    min-height: 0;
+                    margin-bottom: 8px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Independent native temporal AO comparison</h1>
+        <p>
+            The same captured floor, moving sphere, camera, depth, normals, and motion feed both pipelines. Full-scene TAA is off. The shared-input column receives the exact noisy
+            BLite AO before temporal filtering. No brightness matching or display blur is applied.
+        </p>
+        <div class="controls">
+            <button id="play">Pause</button>
+            <button id="previous" aria-label="Previous frame">Previous</button>
+            <button id="next" aria-label="Next frame">Next</button>
+            <label
+                >Comparison
+                <select id="comparison">
+                    <option value="candidate">Anti-ghosting candidate</option>
+                    <option value="reference">Unmodified references</option>
+                </select></label
+            >
+            <label
+                >Stage
+                <select id="stage">
+                    <option value="final">Final AO</option>
+                    <option value="temporal">After accumulation</option>
+                    <option value="raw">Noisy input</option>
+                    <option value="reference">64-phase spatial mean</option>
+                </select></label
+            >
+            <label><input id="detail" type="checkbox" checked /> Floor detail</label>
+            <label><input id="warmup" type="checkbox" /> Play warmup</label>
+            <label
+                >Playback
+                <select id="speed">
+                    <option value="60">60 fps</option>
+                    <option value="30" selected>30 fps (half speed)</option>
+                    <option value="15">15 fps</option>
+                </select></label
+            >
+        </div>
+        <div class="controls"><input id="frame" type="range" min="0" value="0" aria-label="Recorded frame" /><output id="frameInfo"></output></div>
+        <main>
+            <figure>
+                <h2>BLite</h2>
+                <figcaption>Integrated anti-ghosting guide with long accumulation.</figcaption>
+                <canvas id="blite"></canvas>
+            </figure>
+            <figure>
+                <h2>Native DiligentFX</h2>
+                <figcaption>Original upstream GTAO, temporal accumulation, history reconstruction, and spatial filtering.</figcaption>
+                <canvas id="native"></canvas>
+            </figure>
+            <figure>
+                <h2>DiligentFX - shared BLite input</h2>
+                <figcaption>The same BLite noisy AO, processed by the original native Diligent denoiser. Not stock whole-pipeline output.</figcaption>
+                <canvas id="shared"></canvas>
+            </figure>
+        </main>
+        <p id="error" role="alert"></p>
+        <details>
+            <summary>Settings, provenance, and limitations</summary>
+            <pre id="provenance"></pre>
+        </details>
+        <script type="module">
+            window.addEventListener("error", (event) => {
+                document.getElementById("error").textContent = event.message;
+            });
+            window.addEventListener("unhandledrejection", (event) => {
+                document.getElementById("error").textContent = String(event.reason);
+            });
+            const manifestURL = new URL("COMPARISON_JSON_URL", location.href);
+            const response = await fetch(manifestURL, { cache: "no-store" });
+            if (!response.ok) throw new Error("Cannot load comparison metadata");
+            const data = await response.json();
+            if (!data.conventionsValidated || !data.normalEncoding) throw new Error("This capture has not passed the corrected camera, motion, and normal convention checks.");
+            const slider = document.getElementById("frame");
+            const comparison = document.getElementById("comparison");
+            if (data.port) {
+                const option = document.createElement("option");
+                option.value = "port";
+                option.textContent = "Verified WGSL port";
+                comparison.append(option);
+            }
+            if (!data.candidate) {
+                comparison.value = "reference";
+                comparison.options[0].disabled = true;
+            }
+            slider.max = data.frames.length - 1;
+            slider.value = data.config.warmup;
+            document.getElementById("provenance").textContent = JSON.stringify(
+                {
+                    source: data.upstream,
+                    core: data.core,
+                    backend: data.backend,
+                    configuration: data.config,
+                    settings: data.settings,
+                    sourceLockSha256: data.sourceLockSha256,
+                    repeatExact: data.nativeRepeatExact,
+                    cameraMaxError: data.maxPositionError,
+                    motionMaxError: data.maxMotionError,
+                    normalEncoding: data.normalEncoding,
+                    sphereNormalMaxError: data.maxSphereNormalError,
+                    distinctNativeHeldSamples: data.distinctNativeHeldSamples,
+                    heldFloorRms: data.heldFloorRms,
+                    departingFloorResidualProxy: data.departingFloorResidualProxy,
+                    candidate: data.candidate,
+                    fixedPoseQuality: data.quality,
+                    note: "DiligentFX is XeGTAO-derived, not bit-identical Intel XeGTAO. Lower static variance alone does not establish acceptable moving-shadow lag. This is a recorded comparison, not a live performance benchmark.",
+                },
+                null,
+                2
+            );
+            const cache = new Map();
+            async function image(path) {
+                if (!cache.has(path)) {
+                    const promise = new Promise((resolve, reject) => {
+                        const picture = new Image();
+                        picture.onload = () => resolve(picture);
+                        picture.onerror = () => reject(new Error("Image failed: " + path));
+                        picture.src = new URL(path, manifestURL);
+                    });
+                    cache.set(path, promise);
+                    if (cache.size > 18) cache.delete(cache.keys().next().value);
+                }
+                return cache.get(path);
+            }
+            let busy = false;
+            let playing = true;
+            let requested = 0;
+            async function render() {
+                const token = ++requested;
+                const frame = data.frames[Number(slider.value)];
+                const selector = document.getElementById("stage");
+                selector.options[3].disabled = !data.quality || comparison.value !== "candidate";
+                if (selector.value === "reference" && selector.options[3].disabled) selector.value = "final";
+                const stage = selector.value;
+                const lanes =
+                    comparison.value === "candidate" ? ["blite", "shared", "clipped"] : comparison.value === "port" ? ["wgsl", "shared", "clipped"] : ["blite", "native", "shared"];
+                const sources =
+                    stage === "reference"
+                        ? lanes.map(() => frame.prefix + "reference.png")
+                        : lanes.map((lane) => frame.prefix + ((lane === "shared" || lane === "clipped") && stage === "raw" ? "blite-raw" : lane + "-" + stage) + ".png");
+                const pictures = await Promise.all(sources.map(image));
+                if (token !== requested) return;
+                const detail = document.getElementById("detail").checked;
+                const crop = detail ? data.crop : { x: 0, y: 0, width: data.config.width, height: data.config.height };
+                ["blite", "native", "shared"].forEach((lane, i) => {
+                    const canvas = document.getElementById(lane);
+                    const labels = {
+                        blite: ["BLite - integrated fix", "Long AO accumulation with an independent fast clipping guide in moving-shadow regions."],
+                        native: ["Native DiligentFX", "Unmodified upstream GTAO and complete denoiser."],
+                        shared: ["DiligentFX - shared input", "Unmodified upstream denoiser, with the same BLite noisy AO. This is the smoother, ghosting baseline."],
+                        clipped: [
+                            "Diligent-derived - history clipped",
+                            "Labelled adaptation, not an upstream reference. Clips stale AO to the current variance envelope without globally shortening history.",
+                        ],
+                        wgsl: [
+                            "Verified WGSL native-format port",
+                            "Complete unmodified-behavior Diligent reconstruction and R8 feedback; still exhibits the reference's ghosting.",
+                        ],
+                    };
+                    if (data.blitePipeline === "native-format-transport" && !data.port) {
+                        labels.blite = [
+                            "BLite - integrated transported history",
+                            "Complete native-format reconstruction, valid-surface accumulation, and geometry-driven occlusion-history transport.",
+                        ];
+                    }
+                    if (data.port) {
+                        labels.blite = ["BLite - previous rejected filter", "The previous guide-only implementation, unchanged in this recording."];
+                        labels.clipped = [
+                            "WGSL - transported AO history",
+                            "Replay-only candidate. Moves occlusion history with the occluder, without noisy clipping or shortened accumulation. Not yet integrated.",
+                        ];
+                        if (data.candidate.integrated) {
+                            labels.clipped = [
+                                "BLite - integrated transported history",
+                                "Actual renderer capture: complete native-format reconstruction, long accumulation, and occlusion-history transport.",
+                            ];
+                        }
+                    }
+                    canvas.parentElement.querySelector("h2").textContent = labels[lanes[i]][0];
+                    canvas.parentElement.querySelector("figcaption").textContent = labels[lanes[i]][1];
+                    canvas.width = crop.width;
+                    canvas.height = crop.height;
+                    const context = canvas.getContext("2d");
+                    context.imageSmoothingEnabled = false;
+                    context.drawImage(pictures[i], crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+                    canvas.dataset.frame = String(frame.index);
+                    canvas.dataset.stage = stage;
+                    canvas.dataset.lane = lanes[i];
+                });
+                document.getElementById("frameInfo").textContent =
+                    `Frame ${frame.index}/${data.frames.length - 1} | ${frame.stage} | x=${frame.sphereX.toFixed(3)} | phase ${frame.phase}`;
+            }
+            function paused() {
+                playing = false;
+                document.getElementById("play").textContent = "Play";
+            }
+            function fail(error) {
+                paused();
+                document.getElementById("error").textContent = String(error);
+            }
+            document.getElementById("play").onclick = () => {
+                playing = !playing;
+                document.getElementById("play").textContent = playing ? "Pause" : "Play";
+            };
+            slider.oninput = () => {
+                paused();
+                render().catch(fail);
+            };
+            for (const id of ["stage", "detail", "comparison"]) document.getElementById(id).onchange = () => render().catch(fail);
+            document.getElementById("previous").onclick = () => {
+                paused();
+                slider.value = Math.max(0, Number(slider.value) - 1);
+                render().catch(fail);
+            };
+            document.getElementById("next").onclick = () => {
+                paused();
+                slider.value = Math.min(data.frames.length - 1, Number(slider.value) + 1);
+                render().catch(fail);
+            };
+            let last = 0;
+            async function tick(time) {
+                if (playing && !busy && time - last >= 1000 / Number(document.getElementById("speed").value)) {
+                    last = time;
+                    busy = true;
+                    let index = Number(slider.value) + 1;
+                    if (index >= data.frames.length) index = document.getElementById("warmup").checked ? 0 : data.config.warmup;
+                    slider.value = index;
+                    try {
+                        await render();
+                    } catch (error) {
+                        fail(error);
+                    }
+                    busy = false;
+                }
+                requestAnimationFrame(tick);
+            }
+            try {
+                await render();
+                requestAnimationFrame(tick);
+            } catch (error) {
+                fail(error);
+            }
+        </script>
+    </body>
+</html>

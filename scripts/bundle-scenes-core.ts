@@ -34,6 +34,7 @@ import {
 } from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchFlightHelmet } from "./fetch-flight-helmet";
+import { fetchSsaoKitchen } from "./fetch-ssao-kitchen";
 
 /**
  * Vite plugin: mangle underscore-prefixed properties via Terser.
@@ -1432,6 +1433,9 @@ export async function buildBundleScenes(): Promise<void> {
     }
     if (scenesToBuild.includes("scene112") || bjsScenesRequested.includes("bjs-scene112")) {
         await fetchFlightHelmet();
+    }
+    if (scenesToBuild.includes("scene321") || bjsScenesRequested.includes("bjs-scene321")) {
+        await fetchSsaoKitchen();
     }
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).

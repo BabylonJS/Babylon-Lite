@@ -1,0 +1,174 @@
+{
+    "schema": "diligent-ao-source-v1",
+    "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+    "sources": [
+        {
+            "name": "HLSLDefinitions.fxh",
+            "repository": "DiligentGraphics/DiligentCore",
+            "commit": "074060cfd1db73064d7a18cf40df86af6531520c",
+            "path": "Graphics/ShaderTools/include/HLSLDefinitions.fxh",
+            "sha256": "499f185241af665e1d9d695d1f80e245b1287ea759d3a1abaa758a023ad4e44c"
+        },
+        {
+            "name": "License.txt",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "License.txt",
+            "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+        },
+        {
+            "name": "PostFXContext.cpp",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "PostProcess/Common/src/PostFXContext.cpp",
+            "sha256": "06257b56c6be0f948aa89db2ad4d4213f5ba723115d5775fe1c5453e6d015207"
+        },
+        {
+            "name": "ScreenSpaceAmbientOcclusion.hpp",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "PostProcess/ScreenSpaceAmbientOcclusion/interface/ScreenSpaceAmbientOcclusion.hpp",
+            "sha256": "dc99361342933281999be999c36233ae0658b548cf44b484c4f20612156881d1"
+        },
+        {
+            "name": "ScreenSpaceAmbientOcclusion.cpp",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "PostProcess/ScreenSpaceAmbientOcclusion/src/ScreenSpaceAmbientOcclusion.cpp",
+            "sha256": "15bd3b04074cd479c34eca30cde84f9ca06f33d1a6793fc1da458463985da128"
+        },
+        {
+            "name": "ComputeBlueNoiseTexture.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/private/ComputeBlueNoiseTexture.fx",
+            "sha256": "422dce3ba24bf1f4c78c7686626c23e8fe52b0089ec28442855daf2edb06bf56"
+        },
+        {
+            "name": "ComputeClosestMotion.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/private/ComputeClosestMotion.fx",
+            "sha256": "b46edffd757b01f9db4ff167c0e4366899814f3895992e0cddadcb8123984112"
+        },
+        {
+            "name": "ComputeReprojectedDepth.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/private/ComputeReprojectedDepth.fx",
+            "sha256": "710ea4c5ed58c9c29ab789ba479a7f8c0039ce6991ff259d7aa44e95f56ddbb9"
+        },
+        {
+            "name": "FullScreenTriangleVS.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/private/FullScreenTriangleVS.fx",
+            "sha256": "2aefe4f63f91ca5caf99b30bc25152c3fcc4d455a486c3503fffb5e390233518"
+        },
+        {
+            "name": "FullScreenTriangleVSOutput.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/private/FullScreenTriangleVSOutput.fxh",
+            "sha256": "2da915e163a373046f5861448d1d4af4b8841bd30ffa33926fba82df9f9ca246"
+        },
+        {
+            "name": "BasicStructures.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/public/BasicStructures.fxh",
+            "sha256": "f7ea6f6c0ffbd106a312884342b1798244d11ba795286b8a00928e7e6ae90ce4"
+        },
+        {
+            "name": "PBR_Common.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/public/PBR_Common.fxh",
+            "sha256": "935029077af6ebfc8befe05a689ba6080603fc860a4dcb16e86683f938e9beec"
+        },
+        {
+            "name": "PostFX_Common.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/public/PostFX_Common.fxh",
+            "sha256": "15650e669bde8129147bd46b39c295981ff1afd37f24838a0c45e89a2e38f86b"
+        },
+        {
+            "name": "ShaderDefinitions.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/public/ShaderDefinitions.fxh",
+            "sha256": "a796e3d4631a01d2f88c31b1e0d7dde74bb15bf36b49005c65527638611bae0b"
+        },
+        {
+            "name": "ShaderUtilities.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/Common/public/ShaderUtilities.fxh",
+            "sha256": "84fd0214e122ec4f7de7ee6c50ea4e2992182ed68fbb907c7da901177daee3b3"
+        },
+        {
+            "name": "SSAO_Common.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_Common.fxh",
+            "sha256": "2afd9c91041f8d28496e0561a3c51b4f9b01331fb7117b2f1c0c204afda6c961"
+        },
+        {
+            "name": "SSAO_ComputeAmbientOcclusion.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputeAmbientOcclusion.fx",
+            "sha256": "719fd0f204b0aa77cc63fe9a33d4c4753ca71367c9f79e3c20965de6d8da1a61"
+        },
+        {
+            "name": "SSAO_ComputeConvolutedDepthHistory.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputeConvolutedDepthHistory.fx",
+            "sha256": "4bb40eda6b1c97dfc664af5fabd744b8ee2be9ca768c8a3d66c81399b047b0f1"
+        },
+        {
+            "name": "SSAO_ComputePrefilteredDepthBuffer.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputePrefilteredDepthBuffer.fx",
+            "sha256": "f4d152fe0a757aad3d854e87f79743242ff8094cea11ecad38eb0557c10f974f"
+        },
+        {
+            "name": "SSAO_ComputeResampledHistory.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputeResampledHistory.fx",
+            "sha256": "f8d4c06513b9efc4c4b21c5d9bd5e59d2d0801049d86b0b30b86f6e26fb97fa9"
+        },
+        {
+            "name": "SSAO_ComputeSpatialReconstruction.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputeSpatialReconstruction.fx",
+            "sha256": "eb6cf0b43739798bcdd29f5807a1f22bc8cb0088743bbc6aa9e14169f80e587d"
+        },
+        {
+            "name": "SSAO_ComputeTemporalAccumulation.fx",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/private/SSAO_ComputeTemporalAccumulation.fx",
+            "sha256": "9649f1f0f964b028c45efd9d662cdf8ae87fa76b83fe002f173ac9949b49066b"
+        },
+        {
+            "name": "ScreenSpaceAmbientOcclusionStructures.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/ScreenSpaceAmbientOcclusion/public/ScreenSpaceAmbientOcclusionStructures.fxh",
+            "sha256": "3495714e91626994d51fb00884a48d0c07ccfd345f1c8be06e94529f898cdfa2"
+        },
+        {
+            "name": "TemporalAntiAliasingStructures.fxh",
+            "repository": "DiligentGraphics/DiligentFX",
+            "commit": "eaf6ab785968bdee2393210c5a67033a4d9140cc",
+            "path": "Shaders/PostProcess/TemporalAntiAliasing/public/TemporalAntiAliasingStructures.fxh",
+            "sha256": "b037292836badc2d3b1d82598894f5929f5783d1492b8f13140714ef4439a14d"
+        }
+    ]
+}
