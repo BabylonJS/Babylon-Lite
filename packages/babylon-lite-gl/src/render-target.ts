@@ -26,7 +26,7 @@
  * (BYO) color texture lives in the engine's `_textures` registry and is restored
  * there first; the RT then re-attaches its freshly-swapped handle.
  */
-import { bindTextureForUpload, pickSizedInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
+import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */
@@ -37,30 +37,19 @@ const HALF_FLOAT = 0x140b;
 const FLOAT = 0x1406;
 /** GL `gl.RGBA`. */
 const RGBA = 0x1908;
-/** GL `gl.RGBA8` — the default sized internalFormat. */
-const RGBA8 = 0x8058;
 /** GL `gl.RED`. */
 const RED = 0x1903;
 /** GL `gl.RG`. */
 const RG = 0x8227;
-/** GL `gl.R8`. */
-const R8 = 0x8229;
-/** GL `gl.RG8`. */
-const RG8 = 0x822b;
 /** GL `gl.LINEAR`. */
 const LINEAR = 0x2601;
 /** GL `gl.CLAMP_TO_EDGE`. */
 const CLAMP_TO_EDGE = 0x812f;
 
-/** Options for {@link createRenderTarget}. `width`/`height` are required; every
- *  other field has a Babylon-matching default. The bare
- *  `createRenderTarget(engine, { width, height })` makes an RGBA8 color-only
- *  target with linear filtering and clamp wrapping. */
+/** Options for {@link createRenderTarget}. Every field has a Babylon-matching
+ *  default: the bare `createRenderTarget(engine, width, height)` makes an RGBA8
+ *  color-only target with linear filtering and clamp wrapping. */
 export interface GLRenderTargetOptions {
-    /** Color attachment width in texels. Must be a positive integer. */
-    width: number;
-    /** Color attachment height in texels. Must be a positive integer. */
-    height: number;
     /** Allocate a depth renderbuffer (`DEPTH_COMPONENT16`). Default `false`.
      *  Stencil is NOT a create option — opt in (packed depth+stencil, or
      *  stencil-only) via `generateRenderTargetStencil`
@@ -70,7 +59,7 @@ export interface GLRenderTargetOptions {
     /** 8-bit color attachment format: `gl.RGBA` (default, `RGBA8`), `gl.RG`
      *  (`RG8`) or `gl.RED` (`R8`) — ≙ Babylon's `RenderTargetCreationOptions.format`.
      *  Ignored when {@link colorTexture} is supplied. Read single/two-channel
-     *  targets tightly via `readRenderTargetPixels(…, format)`. */
+     *  targets tightly via `readRenderTargetPixels(rt, { format })`. */
     format?: GLenum;
     /** Color texture minification filter. Default `gl.LINEAR`. */
     minFilter?: GLenum;
@@ -96,6 +85,25 @@ export interface GLFloatRenderTargetOptions extends Omit<GLRenderTargetOptions, 
      *  (`caps.textureFloatRender` / `caps.textureHalfFloatRender`), mirroring
      *  Babylon's `getTextureType`. */
     type?: GLenum;
+}
+
+/** Options for {@link readRenderTargetPixels}. Every field is optional: the bare
+ *  `readRenderTargetPixels(rt)` reads the whole target as RGBA into a fresh
+ *  buffer. */
+export interface GLReadPixelsOptions {
+    /** Lower-left X of the read rectangle, in texels. Default `0`. */
+    x?: number;
+    /** Lower-left Y of the read rectangle, in texels. Default `0`. */
+    y?: number;
+    /** Read rectangle width in texels. Default: the target's width. */
+    width?: number;
+    /** Read rectangle height in texels. Default: the target's height. */
+    height?: number;
+    /** Preallocated buffer (`width*height*channels` elements of the matching
+     *  type), reused to avoid per-call allocation. Default: a fresh buffer. */
+    into?: ArrayBufferView;
+    /** Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or `gl.RED` (1). */
+    format?: GLenum;
 }
 
 /** Resolved (defaults-applied) attachment description, retained on the render
@@ -171,20 +179,22 @@ export interface GLRenderTarget {
  * caller-managed (BYO) one. Mirrors Babylon's `createRenderTargetTexture`.
  *
  * @param engine - The engine to allocate GL resources on.
- * @param options - See {@link GLRenderTargetOptions} (`width`/`height` required).
+ * @param width - Color attachment width in texels. Must be a positive integer.
+ * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param options - See {@link GLRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
  *  positive integers, a GL handle could not be allocated, or the resulting
  *  framebuffer is not complete. On failure every partial GPU object (including
  *  an owned color texture) is released first.
  */
-export function createRenderTarget(engine: GLEngineContext, options: GLRenderTargetOptions): GLRenderTarget {
-    const format = options.format ?? RGBA;
-    const internalFormat = format === RGBA ? RGBA8 : format === RG ? RG8 : format === RED ? R8 : 0;
-    if (internalFormat === 0) {
+export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
+    const opts = options ?? {};
+    const format = opts.format ?? RGBA;
+    if (format !== RGBA && format !== RG && format !== RED) {
         throw new Error(`lite-gl: unsupported render target format 0x${format.toString(16)}`);
     }
-    return buildRT(engine, options, internalFormat, format, UNSIGNED_BYTE);
+    return buildRT(engine, width, height, opts, resolveLdrInternalFormat(engine.gl, format, UNSIGNED_BYTE), format, UNSIGNED_BYTE);
 }
 
 /**
@@ -198,14 +208,17 @@ export function createRenderTarget(engine: GLEngineContext, options: GLRenderTar
  * supports (mirroring Babylon's `getTextureType`).
  *
  * @param engine - The engine to allocate GL resources on.
+ * @param width - Color attachment width in texels. Must be a positive integer.
+ * @param height - Color attachment height in texels. Must be a positive integer.
  * @param options - See {@link GLFloatRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws As {@link createRenderTarget}.
  */
-export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloatRenderTargetOptions): GLRenderTarget {
-    const type = resolveColorType(engine, options.type ?? HALF_FLOAT);
+export function createFloatRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLFloatRenderTargetOptions): GLRenderTarget {
+    const opts = options ?? {};
+    const type = resolveColorType(engine, opts.type ?? HALF_FLOAT);
     const internalFormat = pickSizedInternalFormat(engine.gl, RGBA, type);
-    return buildRT(engine, options, internalFormat, RGBA, type);
+    return buildRT(engine, width, height, opts, internalFormat, RGBA, type);
 }
 
 /**
@@ -334,19 +347,18 @@ export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: nu
  * major browsers).
  *
  * @param rt - The render target to read from.
- * @param x - Lower-left X of the read rectangle, in texels.
- * @param y - Lower-left Y of the read rectangle, in texels.
- * @param width - Read rectangle width in texels.
- * @param height - Read rectangle height in texels.
- * @param into - Optional preallocated buffer (`width*height*channels` elements
- *  of the matching type). Reused to avoid per-call allocation.
- * @param format - Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or
- *  `gl.RED` (1).
+ * @param options - See {@link GLReadPixelsOptions}. Default: the whole target,
+ *  as RGBA, into a fresh buffer.
  * @returns The pixel buffer (the provided `into`, or a freshly allocated one).
  *  Empty buffer on a lost/disposed context.
  */
-export function readRenderTargetPixels(rt: GLRenderTarget, x: number, y: number, width: number, height: number, into?: ArrayBufferView, format: GLenum = RGBA): ArrayBufferView {
+export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView {
     const engine = rt._engine;
+    const opts = options ?? {};
+    const width = opts.width ?? rt.width;
+    const height = opts.height ?? rt.height;
+    const format = opts.format ?? RGBA;
+    const into = opts.into;
     const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
     if (engine._isLost || engine._disposed || rt._disposed) {
         return into ?? new Uint8Array(0);
@@ -366,7 +378,7 @@ export function readRenderTargetPixels(rt: GLRenderTarget, x: number, y: number,
         // Not cached: a sync readback dwarfs it, and callers may change it directly.
         gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
     }
-    gl.readPixels(x, y, width, height, format, type, buffer);
+    gl.readPixels(opts.x ?? 0, opts.y ?? 0, width, height, format, type, buffer);
     return buffer;
 }
 
@@ -424,9 +436,7 @@ export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void
  *  exact sized `internalFormat` by the caller — NO format-table lookup), wires
  *  the owned-or-BYO color texture, allocates the GPU set atomically, and
  *  registers the target. */
-function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
-    const width = options.width;
-    const height = options.height;
+function buildRT(engine: GLEngineContext, width: number, height: number, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
     validateSize(width, height);
     const gl = engine.gl;
     const byo = options.colorTexture;

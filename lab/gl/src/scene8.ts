@@ -87,7 +87,7 @@ const engine = createGLEngine(canvas, { alpha: false });
 
 // Offscreen color target. RGBA8, LINEAR/CLAMP (the createRenderTarget
 // defaults), no depth — this is a pure 2D round-trip.
-const rt = createRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE });
+const rt = createRenderTarget(engine, RT_SIZE, RT_SIZE);
 
 const patternWrapper = createEffectWrapper(engine, {
     name: "gl-scene8-rtt-pattern",

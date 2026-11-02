@@ -98,11 +98,7 @@ describe("lite-gl createTextureFromSource", () => {
 
     it("resets previous unpack flags and selects unit zero after multi-sampler use", () => {
         const { mock, engine, gl } = setup();
-        const previous = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, {
-            invertY: true,
-            premultiplyAlpha: true,
-            unpackAlignment: 1,
-        });
+        const previous = createRawTexture(engine, null, 1, 1, { invertY: true, premultiplyAlpha: true, unpackAlignment: 1 });
         bindTexture(previous, 3);
         mock.clear();
         const source = bitmap();
@@ -411,7 +407,7 @@ describe("lite-gl createTextureFromSource", () => {
         const errors = vi.spyOn(console, "error").mockImplementation(() => {});
         const source = bitmap();
         const tex = createTextureFromSource(engine, source);
-        const later = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
+        const later = createRawTexture(engine, null, 1, 1);
         // ImageBitmap.close() reports 0x0 dimensions.
         Object.assign(source, { width: 0, height: 0 });
         fireLost(canvas);

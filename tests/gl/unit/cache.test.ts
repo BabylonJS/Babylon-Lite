@@ -197,7 +197,7 @@ describe("lite-gl cache: textures + samplers", () => {
         // After finalization, there should be exactly 2 uniform1i calls — one per sampler.
         expect(mock.count("uniform1i")).toBe(2);
         mock.clear();
-        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
         // Repeated setEffectTexture calls must NEVER re-issue uniform1i
         for (let i = 0; i < 50; i++) {
             setEffectTexture(effect, "s0", tex);
@@ -207,7 +207,7 @@ describe("lite-gl cache: textures + samplers", () => {
 
     it("bindTexture elides when same texture is already bound on the unit", () => {
         const { mock, engine } = makeReadyEffect();
-        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
         mock.clear();
         bindTexture(tex, 0);
         bindTexture(tex, 0);
@@ -218,8 +218,8 @@ describe("lite-gl cache: textures + samplers", () => {
 
     it("bindTexture switches handle on same unit (no extra activeTexture)", () => {
         const { mock, engine } = makeReadyEffect();
-        const a = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        const b = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const a = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        const b = createRawTexture(engine, new Uint8Array(4), 1, 1);
         // Park unit 0 on `a`
         bindTexture(a, 0);
         mock.clear();
@@ -230,8 +230,8 @@ describe("lite-gl cache: textures + samplers", () => {
 
     it("disposeTexture clears _state.boundTextures (next bind to same unit is NOT elided)", () => {
         const { mock, engine } = makeReadyEffect();
-        const a = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        const b = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const a = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        const b = createRawTexture(engine, new Uint8Array(4), 1, 1);
         bindTexture(a, 0);
         disposeTexture(a);
         mock.clear();
@@ -497,7 +497,7 @@ describe("lite-gl: context loss / restore", () => {
 
     it("context restored → raw texture upload replayed via _upload closure", () => {
         const { mock, canvas, engine } = makeReadyEffect();
-        const tex = createRawTexture(engine, new Uint8Array([255, 0, 0, 255]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array([255, 0, 0, 255]), 1, 1);
         const handleBefore = tex.handle;
         fireLost(canvas);
         mock.clear();

@@ -84,7 +84,7 @@ describe("lite-gl native 3D pixel textures", () => {
     it("keeps 2D and 3D unit caches independent and unbinds only the requested target", () => {
         const { mock, engine } = makeEngine();
         const volume = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        const flat = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const flat = createRawTexture(engine, new Uint8Array(4), 1, 1);
         mock.clear();
         bindTexture3D(volume, 1);
         bindTexture3D(volume, 1);
@@ -115,11 +115,7 @@ describe("lite-gl native 3D pixel textures", () => {
 
     it("resets unpack flags after a differently configured 2D upload", () => {
         const { mock, engine } = makeEngine();
-        createRawTexture(engine, new Uint8Array(3), 1, 1, engine.gl.RGB, engine.gl.UNSIGNED_BYTE, {
-            invertY: true,
-            premultiplyAlpha: true,
-            unpackAlignment: 1,
-        });
+        createRawTexture(engine, new Uint8Array(3), 1, 1, { format: engine.gl.RGB, invertY: true, premultiplyAlpha: true, unpackAlignment: 1 });
         mock.clear();
         createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         const unpackFlags: GLenum[] = [engine.gl.UNPACK_FLIP_Y_WEBGL, engine.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, engine.gl.UNPACK_ALIGNMENT];
@@ -157,7 +153,7 @@ describe("lite-gl native 3D pixel textures", () => {
     it("disposing a 3D texture leaves a 2D texture on the same unit bound", () => {
         const { mock, engine } = makeEngine();
         const volume = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        const flat = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const flat = createRawTexture(engine, new Uint8Array(4), 1, 1);
         bindTexture3D(volume, 2);
         bindTexture(flat, 2);
         disposeTexture3D(volume);

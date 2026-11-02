@@ -372,7 +372,7 @@ function cappedRtSize(w: number, h: number): { w: number; h: number } {
 // so the FXAA pass can sample it smoothly). No depth, no ping-pong — Buffer A
 // reads nothing, so one render target is enough.
 const initRt = cappedRtSize(canvas.width || 1, canvas.height || 1);
-const rt = createRenderTarget(engine, { width: initRt.w, height: initRt.h });
+const rt = createRenderTarget(engine, initRt.w, initRt.h);
 let rtW = initRt.w;
 let rtH = initRt.h;
 

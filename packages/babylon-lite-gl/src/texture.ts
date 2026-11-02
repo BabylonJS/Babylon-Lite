@@ -215,7 +215,7 @@ export interface GLSamplingFilters {
  *
  * @example
  * ```ts
- * const tex = createRawTexture(engine, data, w, h, gl.RGBA, gl.UNSIGNED_BYTE, { ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) });
+ * const tex = createRawTexture(engine, data, w, h, getSamplingModeFilters(GLSamplingMode.TRILINEAR, true));
  * generateTextureMipMaps(tex); // required by the mipmapped min filter
  * ```
  *
@@ -253,24 +253,41 @@ export function setTexImageSourceSize(tex: GLTexture, source: TexImageSourceSize
     tex.height = (source.videoHeight ?? source.naturalHeight ?? source.displayHeight ?? source.height) || 1;
 }
 
-/** Uint8 / float raw texture upload. The pixel data can be replaced later via
- *  {@link updateRawTexture}; the sampling and wrap can be changed via
- *  {@link updateTextureSamplingMode} / {@link updateTextureWrapMode}. */
-export function createRawTexture(
-    engine: GLEngineContext,
-    data: ArrayBufferView | null,
-    width: number,
-    height: number,
-    format: GLenum,
-    type: GLenum,
-    options?: GLTextureOptions
-): GLTexture {
+/** Options for {@link createRawTexture}: the shared {@link GLTextureOptions}
+ *  plus the pixel `format` / `type` of `data`. */
+export interface GLRawTextureOptions extends GLTextureOptions {
+    /** Pixel format of `data` (`gl.RGBA`, `gl.RGB`, `gl.RG`, `gl.RED`,
+     *  `gl.LUMINANCE`…). Default `gl.RGBA`. */
+    format?: GLenum;
+    /** Pixel type of `data`. Default `gl.UNSIGNED_BYTE`. For float data, prefer
+     *  {@link createFloatTexture}, which also picks the sized float internalFormat. */
+    type?: GLenum;
+}
+
+/**
+ * Create a raw texture from a typed array (or an uninitialised allocation).
+ * RGBA8 by default; set {@link GLRawTextureOptions.format} / `type` for other
+ * layouts. The pixel data can be replaced later via {@link updateRawTexture};
+ * the sampling and wrap can be changed via {@link updateTextureSamplingMode} /
+ * {@link updateTextureWrapMode}.
+ *
+ * @param engine - The engine.
+ * @param data - Initial pixels matching `format` / `type`, or `null` for an
+ *  uninitialised allocation.
+ * @param width - Texture width in texels.
+ * @param height - Texture height in texels.
+ * @param options - See {@link GLRawTextureOptions}.
+ * @returns The new {@link GLTexture}.
+ */
+export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView | null, width: number, height: number, options?: GLRawTextureOptions): GLTexture {
     const gl = engine.gl;
     const handle = gl.createTexture();
     if (handle === null) {
         throw new Error("lite-gl: gl.createTexture returned null");
     }
     const opts = options ?? {};
+    const format = opts.format ?? gl.RGBA;
+    const type = opts.type ?? gl.UNSIGNED_BYTE;
     const minFilter = opts.minFilter ?? gl.LINEAR;
     const magFilter = opts.magFilter ?? gl.LINEAR;
     const wrapS = opts.wrapS ?? gl.CLAMP_TO_EDGE;
@@ -365,7 +382,7 @@ export function createFloatTexture(engine: GLEngineContext, data: ArrayBufferVie
     // `createRawTexture`'s inline LDR resolver is bypassed and the float table
     // stays out of byte-only bundles.
     const internalFormat = pickSizedInternalFormat(gl, format, type);
-    return createRawTexture(engine, data, width, height, format, type, { ...o, internalFormat });
+    return createRawTexture(engine, data, width, height, { ...o, format, type, internalFormat });
 }
 
 /**
@@ -763,8 +780,9 @@ export function disposeTexture(tex: GLTexture): void {
  *  paths ONLY: RGBA→RGBA8, RGB→RGB8, RG→RG8, RED→R8, LUMINANCE passthrough.
  *  Deliberately knows nothing about FLOAT / HALF_FLOAT so the float-format table
  *  in {@link pickSizedInternalFormat} tree-shakes out of byte-only bundles.
+ *  Shared with the render-target module (which validates the format first).
  *  @internal */
-function resolveLdrInternalFormat(gl: WebGL2RenderingContext, format: GLenum, type: GLenum): GLenum {
+export function resolveLdrInternalFormat(gl: WebGL2RenderingContext, format: GLenum, type: GLenum): GLenum {
     if (type === gl.UNSIGNED_BYTE) {
         if (format === gl.RGBA) {
             return gl.RGBA8;

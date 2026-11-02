@@ -30,9 +30,7 @@ function setup() {
 
 function mixedTextures(engine: GLEngineContext, count: number): (GLTexture | GLTexture3D)[] {
     return Array.from({ length: count }, (_, index) =>
-        index % 2 === 0
-            ? createRawTexture(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE)
-            : createTexture3DFromPixels(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, 1)
+        index % 2 === 0 ? createRawTexture(engine, new Uint8Array([index, 0, 0, 255]), 1, 1) : createTexture3DFromPixels(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, 1)
     );
 }
 
@@ -51,14 +49,14 @@ afterEach(() => {
 
 describe("lite-gl texture registry", () => {
     it("registers every managed factory in creation order", async () => {
-        const { mock, engine, gl } = setup();
+        const { mock, engine } = setup();
         vi.stubGlobal("HTMLImageElement", class {});
         vi.stubGlobal("HTMLVideoElement", class {});
         const source = { width: 2, height: 1, close: vi.fn() } as ImageBitmap;
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]))));
         vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(source));
         const textures = [
-            createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE),
+            createRawTexture(engine, null, 1, 1),
             createFloatTexture(engine, null, 1, 1),
             createDynamicTexture(engine, 1, 1),
             createTextureFromSource(engine, source),
@@ -80,8 +78,8 @@ describe("lite-gl texture registry", () => {
     });
 
     it("removes front/middle/end and arbitrary batches from 15,000 textures with one registry delete per release", () => {
-        const { mock, engine, gl } = setup();
-        const textures = Array.from({ length: 15_000 }, () => createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE));
+        const { mock, engine } = setup();
+        const textures = Array.from({ length: 15_000 }, () => createRawTexture(engine, null, 1, 1));
         const indices = [7_500, 14_999, 0, ...Array.from({ length: 100 }, (_, index) => (index * 127 + 37) % textures.length)];
         const removed = new Set(indices.map((index) => textures[index]!));
         const deletion = vi.spyOn(engine._textures, "delete");
@@ -98,8 +96,8 @@ describe("lite-gl texture registry", () => {
     });
 
     it.each(["2D", "3D"])("keeps a shared %s texture registered until its final release", (kind) => {
-        const { mock, engine, gl } = setup();
-        const tex = kind === "2D" ? createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE) : createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        const { mock, engine } = setup();
+        const tex = kind === "2D" ? createRawTexture(engine, null, 1, 1) : createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         tex._refCount = 2;
         const deletion = vi.spyOn(engine._textures, "delete");
         mock.clear();
@@ -117,9 +115,9 @@ describe("lite-gl texture registry", () => {
     });
 
     it("safely disposes unregistered and already-removed textures without disturbing live entries", () => {
-        const { mock, engine, gl } = setup();
-        const live = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
-        const removed = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
+        const { mock, engine } = setup();
+        const live = createRawTexture(engine, null, 1, 1);
+        const removed = createRawTexture(engine, null, 1, 1);
         engine._textures.delete(removed);
         const external = createTextureFromHandle(engine, {} as WebGLTexture, 1, 1);
         mock.clear();

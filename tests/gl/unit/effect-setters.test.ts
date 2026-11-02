@@ -109,7 +109,7 @@ describe("lite-gl effect: extended uniform setters", () => {
             samplerNames: ["u_tex"],
         });
         isEffectReady(eff);
-        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1);
         setEffectTexture(eff, "u_tex", tex);
         mock.clear();
 

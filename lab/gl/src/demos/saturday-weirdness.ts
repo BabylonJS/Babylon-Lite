@@ -301,9 +301,7 @@ const gl = engine.gl;
 // previous frame as iChannel0. RGBA8 is sufficient: Buffer A's output is already
 // ACES-tonemapped + gamma-encoded into [0,1]. REPEAT + LINEAR mirror Shadertoy's
 // default buffer-channel sampling (the feedback UV `tp` can leave [0,1]).
-const pingpong = createPingPong(engine, {
-    width: canvas.width || 1,
-    height: canvas.height || 1,
+const pingpong = createPingPong(engine, canvas.width || 1, canvas.height || 1, {
     minFilter: gl.LINEAR,
     magFilter: gl.LINEAR,
     wrapS: gl.REPEAT,

@@ -127,12 +127,7 @@ const engine = createGLEngine(canvas, { alpha: false });
 const gl = engine.gl;
 
 // (a) Raw checkerboard — crisp cells via NEAREST filtering + REPEAT wrapping.
-const texA = createRawTexture(engine, makeCheckerboard(), CHECKER_SIZE, CHECKER_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, {
-    minFilter: gl.NEAREST,
-    magFilter: gl.NEAREST,
-    wrapS: gl.REPEAT,
-    wrapT: gl.REPEAT,
-});
+const texA = createRawTexture(engine, makeCheckerboard(), CHECKER_SIZE, CHECKER_SIZE, { minFilter: gl.NEAREST, magFilter: gl.NEAREST, wrapS: gl.REPEAT, wrapT: gl.REPEAT });
 
 // (b) Async PNG decode — usable immediately (1x1 placeholder), swaps in the
 // decoded image once ready while keeping the same texture handle.

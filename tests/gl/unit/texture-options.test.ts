@@ -32,8 +32,8 @@ function filters(mock: MockGL, gl: WebGL2RenderingContext): [unknown, unknown] {
     return [last(gl.TEXTURE_MIN_FILTER), last(gl.TEXTURE_MAG_FILTER)];
 }
 
-function raw(engine: ReturnType<typeof createGLEngine>, options?: Parameters<typeof createRawTexture>[6]) {
-    return createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE, options);
+function raw(engine: ReturnType<typeof createGLEngine>, options?: Parameters<typeof createRawTexture>[4]) {
+    return createRawTexture(engine, new Uint8Array(4), 1, 1, options);
 }
 
 function fakeSource(width: number, height: number): TexImageSource {

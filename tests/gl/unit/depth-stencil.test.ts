@@ -395,7 +395,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("default → packed DEPTH24_STENCIL8 on DEPTH_STENCIL_ATTACHMENT, replacing the core depth-only buffer", () => {
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         const depthOnly = rt._depthStencil;
         mock.clear();
         generateRenderTargetStencil(rt);
@@ -414,7 +414,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("{ depth: false } → stencil-only STENCIL_INDEX8 on STENCIL_ATTACHMENT", () => {
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         mock.clear();
         generateRenderTargetStencil(rt, { depth: false });
         const store = callsNamed(mock, "renderbufferStorage");
@@ -429,7 +429,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("installs a rebuild hook that re-creates the packed buffer on context restore", () => {
         const { mock, canvas, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         generateRenderTargetStencil(rt);
         expect(rt._rebuildDepthStencil).toBeDefined();
         fireLost(canvas);
@@ -445,7 +445,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("the hook rebuilds the packed buffer at the NEW size on resize", () => {
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         generateRenderTargetStencil(rt);
         mock.clear();
         resizeRenderTarget(rt, 128, 128);
@@ -458,7 +458,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
 
     it("is a no-op on a disposed target", () => {
         const { mock, engine } = makeRTEngine();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         disposeRenderTarget(rt);
         mock.clear();
         generateRenderTargetStencil(rt);
@@ -467,7 +467,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
 
     it("is a no-op on a lost context", () => {
         const { mock, canvas, engine } = makeRTEngine();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         fireLost(canvas);
         mock.clear();
         generateRenderTargetStencil(rt);
@@ -476,8 +476,8 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
 
     it("is state-neutral — restores the previously-bound draw target after attaching", () => {
         const { mock, engine } = makeRTEngine();
-        const other = createRenderTarget(engine, { width: 32, height: 32 });
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const other = createRenderTarget(engine, 32, 32);
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         // Make another RT the active draw target, then add stencil to `rt`.
         bindRenderTarget(other);
         const prevFb = engine._state.boundFramebuffer;
@@ -493,7 +493,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("deletes the new renderbuffer and restores the binding when the framebuffer is incomplete", () => {
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64 }); // no depth/stencil yet
+        const rt = createRenderTarget(engine, 64, 64); // no depth/stencil yet
         expect(rt._depthStencil).toBeNull();
         const prevFb = engine._state.boundFramebuffer;
         mock.clear();
@@ -517,7 +517,7 @@ describe("lite-gl render-target stencil opt-in (generateRenderTargetStencil)", (
     it("rolls back to the core depth buffer when a with-depth attach is incomplete", () => {
         const { mock, engine } = makeRTEngine();
         const gl = engine.gl;
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         const coreDepth = rt._depthStencil;
         expect(coreDepth).not.toBeNull();
         mock.clear();

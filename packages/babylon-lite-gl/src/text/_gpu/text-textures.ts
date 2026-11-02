@@ -26,7 +26,9 @@ export function createTextTexture(engine: GLEngineContext, pixels: Float32Array 
     checkSize(engine, width, height);
     const gl = engine.gl;
     const integer = pixels instanceof Uint32Array;
-    return createRawTexture(engine, pixels, width, height, integer ? gl.RG_INTEGER : gl.RGBA, integer ? gl.UNSIGNED_INT : gl.FLOAT, {
+    return createRawTexture(engine, pixels, width, height, {
+        format: integer ? gl.RG_INTEGER : gl.RGBA,
+        type: integer ? gl.UNSIGNED_INT : gl.FLOAT,
         internalFormat: integer ? gl.RG32UI : gl.RGBA32F,
         minFilter: gl.NEAREST,
         magFilter: gl.NEAREST,

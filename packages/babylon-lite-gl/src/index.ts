@@ -90,7 +90,7 @@ export {
     // GLSamplingMode is a const + same-name type; one value re-export carries both.
     GLSamplingMode,
 } from "./texture.js";
-export type { GLTextureOptions, GLTextureUpdateOptions, GLFloatTextureOptions, GLTexture, GLSamplingFilters } from "./texture.js";
+export type { GLTextureOptions, GLTextureUpdateOptions, GLRawTextureOptions, GLFloatTextureOptions, GLTexture, GLSamplingFilters } from "./texture.js";
 export { createTextureFromSource } from "./texture-source.js";
 export type { GLTextureSourceOptions } from "./texture-source.js";
 export {
@@ -119,7 +119,7 @@ export {
     readRenderTargetPixels,
     disposeRenderTarget,
 } from "./render-target.js";
-export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions } from "./render-target.js";
+export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions, GLReadPixelsOptions } from "./render-target.js";
 
 // ─── Meshes / buffers / instancing ───────────────────────────────────
 export {

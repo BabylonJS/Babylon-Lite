@@ -56,7 +56,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
     it("creates one FBO, attaches the color texture at COLOR_ATTACHMENT0, validates completeness, and registers in _renderTargets", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        const rt = createRenderTarget(engine, { width: 256, height: 128 });
+        const rt = createRenderTarget(engine, 256, 128);
         expect(mock.count("createFramebuffer")).toBe(1);
         const attach = callsNamed(mock, "framebufferTexture2D");
         expect(attach).toHaveLength(1);
@@ -85,7 +85,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
     it("uses a sized RGBA8 internal format + RGBA/UNSIGNED_BYTE for a byte target", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        createRenderTarget(engine, { width: 64, height: 32 });
+        createRenderTarget(engine, 64, 32);
         const ti = callsNamed(mock, "texImage2D");
         expect(ti).toHaveLength(1);
         // texImage2D(target, level, internalFormat, w, h, border, format, type, data)
@@ -100,21 +100,14 @@ describe("lite-gl render-target: createRenderTarget", () => {
 
     it("restores the previous framebuffer binding after building (leaves the default FB bound)", () => {
         const { engine } = setup();
-        createRenderTarget(engine, { width: 16, height: 16 });
+        createRenderTarget(engine, 16, 16);
         expect(engine._state.boundFramebuffer).toBeNull();
     });
 
     it("honors custom filter / wrap options on the color texture", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        createRenderTarget(engine, {
-            width: 8,
-            height: 8,
-            minFilter: gl.NEAREST,
-            magFilter: gl.NEAREST,
-            wrapS: gl.REPEAT,
-            wrapT: gl.REPEAT,
-        });
+        createRenderTarget(engine, 8, 8, { minFilter: gl.NEAREST, magFilter: gl.NEAREST, wrapS: gl.REPEAT, wrapT: gl.REPEAT });
         const params = callsNamed(mock, "texParameteri").map((c) => c.args[2]);
         expect(params).toContain(gl.NEAREST);
         expect(params).toContain(gl.REPEAT);
@@ -122,10 +115,10 @@ describe("lite-gl render-target: createRenderTarget", () => {
 
     it("rejects non-positive / non-integer sizes", () => {
         const { engine } = setup();
-        expect(() => createRenderTarget(engine, { width: 0, height: 16 })).toThrow();
-        expect(() => createRenderTarget(engine, { width: 16, height: 0 })).toThrow();
-        expect(() => createRenderTarget(engine, { width: -4, height: 16 })).toThrow();
-        expect(() => createRenderTarget(engine, { width: 1.5, height: 16 })).toThrow();
+        expect(() => createRenderTarget(engine, 0, 16)).toThrow();
+        expect(() => createRenderTarget(engine, 16, 0)).toThrow();
+        expect(() => createRenderTarget(engine, -4, 16)).toThrow();
+        expect(() => createRenderTarget(engine, 1.5, 16)).toThrow();
     });
 
     it("format RED / RG allocates R8 / RG8 and keeps it across resize and restore", () => {
@@ -135,7 +128,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
             [gl.RG, gl.RG8],
         ] as const) {
             mock.clear();
-            const rt = createRenderTarget(engine, { width: 4, height: 4, format });
+            const rt = createRenderTarget(engine, 4, 4, { format });
             const expectStorage = (): void => {
                 const ti = lastCall(mock, "texImage2D");
                 expect(ti?.args[2]).toBe(internalFormat);
@@ -154,7 +147,7 @@ describe("lite-gl render-target: createRenderTarget", () => {
 
     it("rejects an unsupported format", () => {
         const { engine, gl } = setup();
-        expect(() => createRenderTarget(engine, { width: 4, height: 4, format: gl.RGB })).toThrow(/unsupported render target format/);
+        expect(() => createRenderTarget(engine, 4, 4, { format: gl.RGB })).toThrow(/unsupported render target format/);
     });
 });
 
@@ -162,7 +155,7 @@ describe("lite-gl render-target: depth attachment", () => {
     it("depth-only → DEPTH_COMPONENT16 on DEPTH_ATTACHMENT", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        const rt = createRenderTarget(engine, { width: 100, height: 100, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 100, 100, { generateDepthBuffer: true });
         expect(mock.count("createRenderbuffer")).toBe(1);
         const store = callsNamed(mock, "renderbufferStorage");
         expect(store).toHaveLength(1);
@@ -179,7 +172,7 @@ describe("lite-gl render-target: depth attachment", () => {
     it("no depth requested → no renderbuffer + a null _depthStencil", () => {
         const { mock, engine } = setup();
         mock.clear();
-        const rt = createRenderTarget(engine, { width: 8, height: 8 });
+        const rt = createRenderTarget(engine, 8, 8);
         expect(mock.count("createRenderbuffer")).toBe(0);
         expect(mock.count("renderbufferStorage")).toBe(0);
         expect(rt._depthStencil).toBeNull();
@@ -190,7 +183,7 @@ describe("lite-gl render-target: createFloatRenderTarget (HDR opt-in)", () => {
     it("defaults to HALF_FLOAT → RGBA16F", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        const rt = createFloatRenderTarget(engine, { width: 4, height: 4 });
+        const rt = createFloatRenderTarget(engine, 4, 4);
         const ti = callsNamed(mock, "texImage2D")[0];
         expect(ti?.args[2]).toBe(gl.RGBA16F);
         expect(ti?.args[7]).toBe(gl.HALF_FLOAT);
@@ -200,7 +193,7 @@ describe("lite-gl render-target: createFloatRenderTarget (HDR opt-in)", () => {
     it("keeps FLOAT → RGBA32F when EXT_color_buffer_float is present", () => {
         const { mock, engine, gl } = setup();
         mock.clear();
-        createFloatRenderTarget(engine, { width: 4, height: 4, type: gl.FLOAT });
+        createFloatRenderTarget(engine, 4, 4, { type: gl.FLOAT });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(gl.RGBA32F);
         expect(callsNamed(mock, "texImage2D")[0]?.args[7]).toBe(gl.FLOAT);
     });
@@ -208,7 +201,7 @@ describe("lite-gl render-target: createFloatRenderTarget (HDR opt-in)", () => {
     it("downgrades FLOAT → HALF_FLOAT (RGBA16F) when only half-float is renderable", () => {
         const { mock, engine, gl } = setupWithExtensions({ EXT_color_buffer_float: false });
         mock.clear();
-        createFloatRenderTarget(engine, { width: 4, height: 4, type: gl.FLOAT });
+        createFloatRenderTarget(engine, 4, 4, { type: gl.FLOAT });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(gl.RGBA16F);
         expect(callsNamed(mock, "texImage2D")[0]?.args[7]).toBe(gl.HALF_FLOAT);
     });
@@ -216,7 +209,7 @@ describe("lite-gl render-target: createFloatRenderTarget (HDR opt-in)", () => {
     it("downgrades FLOAT → UNSIGNED_BYTE (RGBA8) when neither float nor half-float is renderable", () => {
         const { mock, engine, gl } = setupWithExtensions({ EXT_color_buffer_float: false, EXT_color_buffer_half_float: false });
         mock.clear();
-        createFloatRenderTarget(engine, { width: 4, height: 4, type: gl.FLOAT });
+        createFloatRenderTarget(engine, 4, 4, { type: gl.FLOAT });
         expect(callsNamed(mock, "texImage2D")[0]?.args[2]).toBe(gl.RGBA8);
         expect(callsNamed(mock, "texImage2D")[0]?.args[7]).toBe(gl.UNSIGNED_BYTE);
     });
@@ -225,7 +218,7 @@ describe("lite-gl render-target: createFloatRenderTarget (HDR opt-in)", () => {
 describe("lite-gl render-target: bindRenderTarget", () => {
     it("binds the FBO and sets the viewport to the RT size", () => {
         const { mock, engine, gl } = setup();
-        const rt = createRenderTarget(engine, { width: 320, height: 240 });
+        const rt = createRenderTarget(engine, 320, 240);
         mock.clear();
         bindRenderTarget(rt);
         const bind = callsNamed(mock, "bindFramebuffer");
@@ -238,7 +231,7 @@ describe("lite-gl render-target: bindRenderTarget", () => {
 
     it("elides a redundant bind of the same RT (one bindFramebuffer + one viewport for two calls)", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 128, height: 128 });
+        const rt = createRenderTarget(engine, 128, 128);
         mock.clear();
         bindRenderTarget(rt);
         bindRenderTarget(rt);
@@ -248,7 +241,7 @@ describe("lite-gl render-target: bindRenderTarget", () => {
 
     it("bind(null) restores the default framebuffer and the canvas viewport", () => {
         const { mock, engine, gl } = setup();
-        const rt = createRenderTarget(engine, { width: 128, height: 128 });
+        const rt = createRenderTarget(engine, 128, 128);
         bindRenderTarget(rt);
         mock.clear();
         restoreDefaultFramebuffer(engine);
@@ -262,7 +255,7 @@ describe("lite-gl render-target: bindRenderTarget", () => {
 
     it("is a no-op on a lost context and does not throw", () => {
         const { mock, canvas, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         fireLost(canvas);
         mock.clear();
         expect(() => bindRenderTarget(rt)).not.toThrow();
@@ -271,7 +264,7 @@ describe("lite-gl render-target: bindRenderTarget", () => {
 
     it("is a no-op for a disposed RT", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         disposeRenderTarget(rt);
         mock.clear();
         bindRenderTarget(rt);
@@ -283,14 +276,14 @@ describe("lite-gl render-target: manual mipmap generation", () => {
     it("creation never generates a mip chain (mipmaps are an explicit opt-in function)", () => {
         const { mock, engine } = setup();
         mock.clear();
-        createRenderTarget(engine, { width: 16, height: 16 });
+        createRenderTarget(engine, 16, 16);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
     it("bindRenderTarget never auto-regenerates mips across switch / unbind", () => {
         const { mock, engine } = setup();
-        const a = createRenderTarget(engine, { width: 16, height: 16 });
-        const b = createRenderTarget(engine, { width: 16, height: 16 });
+        const a = createRenderTarget(engine, 16, 16);
+        const b = createRenderTarget(engine, 16, 16);
         bindRenderTarget(a);
         mock.clear();
         bindRenderTarget(b); // leaving `a` — no auto-regen anymore
@@ -301,9 +294,9 @@ describe("lite-gl render-target: manual mipmap generation", () => {
 
     it("generateRenderTargetMipMaps regenerates the color texture's mip chain on demand", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 16, height: 16 });
+        const rt = createRenderTarget(engine, 16, 16);
         // Displace texture unit 0 so the manual call's bind-for-upload is observable.
-        const other = createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const other = createRawTexture(engine, null, 1, 1);
         bindTexture(other, 0);
         mock.clear();
         generateRenderTargetMipMaps(rt);
@@ -315,7 +308,7 @@ describe("lite-gl render-target: manual mipmap generation", () => {
 
     it("generateRenderTargetMipMaps is a no-op on a disposed target", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 16, height: 16 });
+        const rt = createRenderTarget(engine, 16, 16);
         disposeRenderTarget(rt);
         mock.clear();
         generateRenderTargetMipMaps(rt);
@@ -324,7 +317,7 @@ describe("lite-gl render-target: manual mipmap generation", () => {
 
     it("disposing the current target clears the tracked reference", () => {
         const { engine } = setup();
-        const rt = createRenderTarget(engine, { width: 16, height: 16 });
+        const rt = createRenderTarget(engine, 16, 16);
         bindRenderTarget(rt);
         disposeRenderTarget(rt);
         expect(engine._currentRenderTarget).toBeNull();
@@ -334,7 +327,7 @@ describe("lite-gl render-target: manual mipmap generation", () => {
 describe("lite-gl render-target: color texture is a usable GLTexture", () => {
     it("can be bound directly via bindTexture without throwing", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 32, height: 32 });
+        const rt = createRenderTarget(engine, 32, 32);
         mock.clear();
         // Bind onto a unit that did NOT hold it (unit 1) — issues a real bind.
         expect(() => bindTexture(rt.texture, 1)).not.toThrow();
@@ -343,7 +336,7 @@ describe("lite-gl render-target: color texture is a usable GLTexture", () => {
 
     it("routes through setEffectTexture when a sampler unit exists", () => {
         const { engine } = setup();
-        const rt = createRenderTarget(engine, { width: 32, height: 32 });
+        const rt = createRenderTarget(engine, 32, 32);
         const effect = { _engine: engine, isReady: true, samplerUnits: { src: 2 } } as unknown as GLEffect;
         expect(() => setEffectTexture(effect, "src", rt.texture)).not.toThrow();
         expect(engine._state.boundTextures[2]).toBe(rt.texture.handle);
@@ -353,39 +346,40 @@ describe("lite-gl render-target: color texture is a usable GLTexture", () => {
 describe("lite-gl render-target: readback", () => {
     it("binds the FBO and reads RGBA / UNSIGNED_BYTE into a Uint8Array", () => {
         const { mock, engine, gl } = setup();
-        const rt = createRenderTarget(engine, { width: 4, height: 4 });
+        const rt = createRenderTarget(engine, 4, 4);
         mock.clear();
-        const out = readRenderTargetPixels(rt, 0, 0, 4, 4);
+        const out = readRenderTargetPixels(rt);
         expect(out).toBeInstanceOf(Uint8Array);
         expect(out.byteLength).toBe(4 * 4 * 4);
         const rp = callsNamed(mock, "readPixels")[0];
+        expect(rp?.args.slice(0, 4)).toEqual([0, 0, 4, 4]);
         expect(rp?.args[4]).toBe(gl.RGBA);
         expect(rp?.args[5]).toBe(gl.UNSIGNED_BYTE);
     });
 
     it("a FLOAT target reads into a Float32Array with type FLOAT", () => {
         const { mock, engine, gl } = setup();
-        const rt = createFloatRenderTarget(engine, { width: 2, height: 2, type: gl.FLOAT });
+        const rt = createFloatRenderTarget(engine, 2, 2, { type: gl.FLOAT });
         mock.clear();
-        const out = readRenderTargetPixels(rt, 0, 0, 2, 2);
+        const out = readRenderTargetPixels(rt);
         expect(out).toBeInstanceOf(Float32Array);
         expect(callsNamed(mock, "readPixels")[0]?.args[5]).toBe(gl.FLOAT);
     });
 
     it("a HALF_FLOAT target reads into a Uint16Array with type HALF_FLOAT", () => {
         const { mock, engine, gl } = setup();
-        const rt = createFloatRenderTarget(engine, { width: 2, height: 2 });
+        const rt = createFloatRenderTarget(engine, 2, 2);
         mock.clear();
-        const out = readRenderTargetPixels(rt, 0, 0, 2, 2);
+        const out = readRenderTargetPixels(rt);
         expect(out).toBeInstanceOf(Uint16Array);
         expect(callsNamed(mock, "readPixels")[0]?.args[5]).toBe(gl.HALF_FLOAT);
     });
 
     it("reads a RED target tightly with format RED and PACK_ALIGNMENT 1", () => {
         const { mock, engine, gl } = setup();
-        const rt = createRenderTarget(engine, { width: 3, height: 2, format: gl.RED });
+        const rt = createRenderTarget(engine, 3, 2, { format: gl.RED });
         mock.clear();
-        const out = readRenderTargetPixels(rt, 0, 0, 3, 2, undefined, gl.RED);
+        const out = readRenderTargetPixels(rt, { format: gl.RED });
         expect(out).toBeInstanceOf(Uint8Array);
         expect(out.byteLength).toBe(3 * 2);
         const ps = callsNamed(mock, "pixelStorei");
@@ -397,27 +391,36 @@ describe("lite-gl render-target: readback", () => {
 
     it("sizes an RG read at 2 channels and leaves PACK_ALIGNMENT alone for RGBA", () => {
         const { mock, engine, gl } = setup();
-        const rt = createRenderTarget(engine, { width: 2, height: 2, format: gl.RG });
+        const rt = createRenderTarget(engine, 2, 2, { format: gl.RG });
         mock.clear();
-        expect(readRenderTargetPixels(rt, 0, 0, 2, 2, undefined, gl.RG).byteLength).toBe(2 * 2 * 2);
+        expect(readRenderTargetPixels(rt, { format: gl.RG }).byteLength).toBe(2 * 2 * 2);
         mock.clear();
-        expect(readRenderTargetPixels(rt, 0, 0, 2, 2).byteLength).toBe(2 * 2 * 4);
+        expect(readRenderTargetPixels(rt).byteLength).toBe(2 * 2 * 4);
         expect(mock.count("pixelStorei")).toBe(0);
     });
 
     it("reuses a provided buffer", () => {
         const { engine } = setup();
-        const rt = createRenderTarget(engine, { width: 2, height: 2 });
+        const rt = createRenderTarget(engine, 2, 2);
         const into = new Uint8Array(2 * 2 * 4);
-        const out = readRenderTargetPixels(rt, 0, 0, 2, 2, into);
+        const out = readRenderTargetPixels(rt, { into });
         expect(out).toBe(into);
+    });
+
+    it("reads a sub-rectangle sized from the requested width/height", () => {
+        const { mock, engine } = setup();
+        const rt = createRenderTarget(engine, 8, 8);
+        mock.clear();
+        const out = readRenderTargetPixels(rt, { x: 2, y: 3, width: 4, height: 1 });
+        expect(out.byteLength).toBe(4 * 1 * 4);
+        expect(callsNamed(mock, "readPixels")[0]?.args.slice(0, 4)).toEqual([2, 3, 4, 1]);
     });
 });
 
 describe("lite-gl render-target: disposeRenderTarget", () => {
     it("deletes the FBO, the depth renderbuffer, and the owned color texture, and unregisters", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         const fbo = rt._framebuffer;
         const rb = rt._depthStencil;
         const texHandle = rt.texture.handle;
@@ -434,7 +437,7 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 
     it("is idempotent", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         disposeRenderTarget(rt);
         mock.clear();
         expect(() => disposeRenderTarget(rt)).not.toThrow();
@@ -444,7 +447,7 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 
     it("clears bound-texture slots that held the color texture", () => {
         const { engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         bindTexture(rt.texture, 3);
         expect(engine._state.boundTextures[3]).toBe(rt.texture.handle);
         disposeRenderTarget(rt);
@@ -453,7 +456,7 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 
     it("resets boundFramebuffer to default when disposing the currently-bound RT", () => {
         const { engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         bindRenderTarget(rt);
         expect(engine._state.boundFramebuffer).toBe(rt._framebuffer);
         disposeRenderTarget(rt);
@@ -462,8 +465,8 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 
     it("does not touch boundFramebuffer when disposing a non-bound RT", () => {
         const { engine } = setup();
-        const bound = createRenderTarget(engine, { width: 64, height: 64 });
-        const other = createRenderTarget(engine, { width: 64, height: 64 });
+        const bound = createRenderTarget(engine, 64, 64);
+        const other = createRenderTarget(engine, 64, 64);
         bindRenderTarget(bound);
         disposeRenderTarget(other);
         expect(engine._state.boundFramebuffer).toBe(bound._framebuffer);
@@ -471,7 +474,7 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 
     it("engine dispose frees render-target GPU objects", () => {
         const { mock, engine } = setup();
-        createRenderTarget(engine, { width: 8, height: 8 });
+        createRenderTarget(engine, 8, 8);
         mock.clear();
         disposeGLEngine(engine);
         expect(mock.count("deleteFramebuffer")).toBe(1);
@@ -482,7 +485,7 @@ describe("lite-gl render-target: disposeRenderTarget", () => {
 describe("lite-gl render-target: resizeRenderTarget", () => {
     it("reallocates the color texture and rebuilds the FBO at the new size", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 64, 64, { generateDepthBuffer: true });
         const oldFbo = rt._framebuffer;
         mock.clear();
         resizeRenderTarget(rt, 128, 256);
@@ -502,7 +505,7 @@ describe("lite-gl render-target: resizeRenderTarget", () => {
 
     it("is a no-op when the size is unchanged", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         mock.clear();
         resizeRenderTarget(rt, 64, 64);
         expect(mock.count("createFramebuffer")).toBe(0);
@@ -511,7 +514,7 @@ describe("lite-gl render-target: resizeRenderTarget", () => {
 
     it("is a no-op for a disposed RT", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         disposeRenderTarget(rt);
         mock.clear();
         resizeRenderTarget(rt, 32, 32);
@@ -522,7 +525,7 @@ describe("lite-gl render-target: resizeRenderTarget", () => {
 describe("lite-gl render-target: resizeRenderTarget preserves a live binding", () => {
     it("rebinds the freshly-built FBO and resets the viewport to the new size", () => {
         const { mock, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         bindRenderTarget(rt);
         expect(engine._state.boundFramebuffer).toBe(rt._framebuffer);
         mock.clear();
@@ -536,8 +539,8 @@ describe("lite-gl render-target: resizeRenderTarget preserves a live binding", (
 
     it("does not steal the binding when resizing a non-bound target", () => {
         const { engine } = setup();
-        const bound = createRenderTarget(engine, { width: 32, height: 32 });
-        const other = createRenderTarget(engine, { width: 32, height: 32 });
+        const bound = createRenderTarget(engine, 32, 32);
+        const other = createRenderTarget(engine, 32, 32);
         bindRenderTarget(bound);
         resizeRenderTarget(other, 64, 64);
         expect(engine._state.boundFramebuffer).toBe(bound._framebuffer);
@@ -547,7 +550,7 @@ describe("lite-gl render-target: resizeRenderTarget preserves a live binding", (
 describe("lite-gl render-target: context lost / restore", () => {
     it("recreates the FBO and reattaches the (fresh) color texture handle on restore", () => {
         const { mock, canvas, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 128, height: 128, generateDepthBuffer: true });
+        const rt = createRenderTarget(engine, 128, 128, { generateDepthBuffer: true });
         const oldTexHandle = rt.texture.handle;
         fireLost(canvas);
         mock.clear();
@@ -564,7 +567,7 @@ describe("lite-gl render-target: context lost / restore", () => {
 
     it("can bind + draw into the target again after restore", () => {
         const { mock, canvas, engine } = setup();
-        const rt = createRenderTarget(engine, { width: 64, height: 64 });
+        const rt = createRenderTarget(engine, 64, 64);
         fireLost(canvas);
         fireRestored(canvas);
         mock.clear();
@@ -579,9 +582,9 @@ describe("lite-gl render-target: context lost / restore", () => {
 describe("lite-gl render-target: BYO (bring-your-own) color texture", () => {
     it("attaches a caller-supplied GLTexture without creating a new one; it is not owned", () => {
         const { mock, engine } = setup();
-        const byo = createRawTexture(engine, null, 32, 32, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        const byo = createRawTexture(engine, null, 32, 32);
         mock.clear();
-        const rt = createRenderTarget(engine, { width: 32, height: 32, colorTexture: byo });
+        const rt = createRenderTarget(engine, 32, 32, { colorTexture: byo });
         // No new color texture was created — the BYO handle was attached.
         expect(mock.count("createTexture")).toBe(0);
         expect(mock.count("createFramebuffer")).toBe(1);
@@ -594,8 +597,8 @@ describe("lite-gl render-target: BYO (bring-your-own) color texture", () => {
 
     it("disposing the RT does NOT delete or dispose the BYO texture", () => {
         const { mock, engine } = setup();
-        const byo = createRawTexture(engine, null, 16, 16, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        const rt = createRenderTarget(engine, { width: 16, height: 16, colorTexture: byo });
+        const byo = createRawTexture(engine, null, 16, 16);
+        const rt = createRenderTarget(engine, 16, 16, { colorTexture: byo });
         const byoHandle = byo.handle;
         mock.clear();
         disposeRenderTarget(rt);
@@ -609,8 +612,8 @@ describe("lite-gl render-target: BYO (bring-your-own) color texture", () => {
 
     it("re-attaches the BYO's freshly-restored handle after context restore (textures restored first)", () => {
         const { canvas, engine } = setup();
-        const byo = createRawTexture(engine, null, 64, 64, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        const rt = createRenderTarget(engine, { width: 64, height: 64, colorTexture: byo });
+        const byo = createRawTexture(engine, null, 64, 64);
+        const rt = createRenderTarget(engine, 64, 64, { colorTexture: byo });
         const oldHandle = byo.handle;
         fireLost(canvas);
         fireRestored(canvas);
@@ -623,8 +626,8 @@ describe("lite-gl render-target: BYO (bring-your-own) color texture", () => {
 
     it("resizes the BYO storage to the new size (not the stale original) when resized", () => {
         const { mock, engine } = setup();
-        const byo = createRawTexture(engine, null, 16, 16, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
-        const rt = createRenderTarget(engine, { width: 16, height: 16, colorTexture: byo });
+        const byo = createRawTexture(engine, null, 16, 16);
+        const rt = createRenderTarget(engine, 16, 16, { colorTexture: byo });
         mock.clear();
         resizeRenderTarget(rt, 48, 24);
         // The caller's storage was re-specified at the NEW size via the raw-update
@@ -646,14 +649,14 @@ describe("lite-gl render-target: atomic failure cleanup", () => {
         const { mock, engine } = setup();
         // Bind a sentinel target first so there is a NON-default previous
         // framebuffer the failed build must restore to.
-        const sentinel = createRenderTarget(engine, { width: 16, height: 16 });
+        const sentinel = createRenderTarget(engine, 16, 16);
         bindRenderTarget(sentinel);
         expect(engine._state.boundFramebuffer).toBe(sentinel._framebuffer);
         const rtCountBefore = engine._renderTargets.length;
         mock.clear();
         (engine.gl as unknown as { checkFramebufferStatus: () => number }).checkFramebufferStatus = () => FRAMEBUFFER_UNSUPPORTED;
 
-        expect(() => createRenderTarget(engine, { width: 32, height: 32, generateDepthBuffer: true })).toThrow(/incomplete/);
+        expect(() => createRenderTarget(engine, 32, 32, { generateDepthBuffer: true })).toThrow(/incomplete/);
 
         // No leaked handles: every GL object created during the failed build was
         // deleted again.
@@ -672,12 +675,12 @@ describe("lite-gl render-target: atomic failure cleanup", () => {
 
     it("disposes the owned color texture and restores the binding when createFramebuffer returns null", () => {
         const { mock, engine } = setup();
-        const sentinel = createRenderTarget(engine, { width: 16, height: 16 });
+        const sentinel = createRenderTarget(engine, 16, 16);
         bindRenderTarget(sentinel);
         mock.clear();
         (engine.gl as unknown as { createFramebuffer: () => WebGLFramebuffer | null }).createFramebuffer = () => null;
 
-        expect(() => createRenderTarget(engine, { width: 32, height: 32 })).toThrow(/createFramebuffer/);
+        expect(() => createRenderTarget(engine, 32, 32)).toThrow(/createFramebuffer/);
 
         expect(mock.count("deleteFramebuffer")).toBe(0);
         expect(mock.count("createTexture")).toBe(1);

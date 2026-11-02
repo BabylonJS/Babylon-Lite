@@ -444,17 +444,14 @@ export interface GLTexture {
 /** Internal helper for applying sampling and wrap state to the bound upload texture. */
 export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void;
 
-/** Uint8 raw upload. `format` and `type` are GL constants; the caller picks
- *  e.g. (gl.RGBA, gl.UNSIGNED_BYTE). Matches NeonBrush's createRawTexture usage. */
-export function createRawTexture(
-    engine: GLEngineContext,
-    data: ArrayBufferView | null,
-    width: number,
-    height: number,
-    format: GLenum,
-    type: GLenum,
-    options?: GLTextureOptions
-): GLTexture;
+/** Raw typed-array upload, RGBA8 by default. `format` / `type` are optional
+ *  {@link GLRawTextureOptions} fields (default gl.RGBA / gl.UNSIGNED_BYTE), so
+ *  every 2D creator shares the `(engine, [data,] width, height, options?)` shape. */
+export interface GLRawTextureOptions extends GLTextureOptions {
+    format?: GLenum; // default gl.RGBA
+    type?: GLenum; // default gl.UNSIGNED_BYTE
+}
+export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView | null, width: number, height: number, options?: GLRawTextureOptions): GLTexture;
 
 /** Async image upload. The returned texture is usable immediately (1×1 transparent
  *  placeholder uploaded into the final handle) and becomes `isReady=true` when
@@ -976,8 +973,6 @@ equivalent of Babylon's `RenderTargetTexture` / `createRenderTargetTexture` +
 
 ```ts
 export interface GLRenderTargetOptions {
-    width: number; // positive integer (texels)
-    height: number; // positive integer (texels)
     generateDepthBuffer?: boolean; // default false; allocates a DEPTH_COMPONENT16 renderbuffer
     minFilter?: GLenum; // default gl.LINEAR
     magFilter?: GLenum; // default gl.LINEAR
@@ -997,22 +992,33 @@ export interface GLRenderTarget {
 }
 
 // Receiver rule: engine first only on creators / resource-less calls; GL-prefixed, Options-suffixed type names (lite-gl convention).
-export function createRenderTarget(engine: GLEngineContext, options: GLRenderTargetOptions): GLRenderTarget;
+// Size is positional (positive integers, texels) like every 2D creator: (engine, width, height, options?).
+export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget;
 export function bindRenderTarget(rt: GLRenderTarget): void;
 export function restoreDefaultFramebuffer(engine: GLEngineContext): void; // canvas framebuffer + full-canvas viewport
 export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void;
 export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void;
-export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloatRenderTargetOptions): GLRenderTarget; // float / half-float HDR color
+export function createFloatRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLFloatRenderTargetOptions): GLRenderTarget; // float / half-float HDR color
 export function generateRenderTargetMipMaps(rt: GLRenderTarget): void;
 // Stencil is opt-in from the depth-stencil module (NOT a createRenderTarget option),
 // so the packed-renderbuffer code tree-shakes out of the render-target core:
 //   generateRenderTargetStencil(rt, { depth? }): void
 //     packs DEPTH24_STENCIL8 (depth default true) or stencil-only STENCIL_INDEX8 (depth:false),
 //     replacing the core depth-only buffer; installs a restore/resize hook so it survives FBO rebuilds.
-// GPU→CPU readback. `format` defaults to gl.RGBA (always readable); gl.RED / gl.RG
-// read 1 / 2 channels per texel tightly packed (sets PACK_ALIGNMENT 1) — valid when
-// it matches the target's IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
-export function readRenderTargetPixels(rt: GLRenderTarget, x: number, y: number, w: number, h: number, into?: ArrayBufferView, format?: GLenum): ArrayBufferView;
+// GPU→CPU readback. Every option is optional: the rect defaults to the whole target
+// (x/y 0, width/height = rt size), `into` to a fresh buffer, `format` to gl.RGBA
+// (always readable); gl.RED / gl.RG read 1 / 2 channels per texel tightly packed
+// (sets PACK_ALIGNMENT 1) — valid when it matches the target's
+// IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
+export interface GLReadPixelsOptions {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    into?: ArrayBufferView;
+    format?: GLenum;
+}
+export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView;
 ```
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
@@ -1737,44 +1743,44 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 
 ## 8. Babylon.js equivalence map
 
-| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                        |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                 |
-| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                      |
-| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                       |
-| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                |
-| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                      |
-| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                   |
-| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                   |
-| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                    |
-| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                |
-| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, fmt, type, { invertY, ...getSamplingModeFilters(s) })`   |
-| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                          |
-| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })` |
-| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(effect, cb)`                                                              |
-| `effect.isReady()`                                               | `isEffectReady(effect)`                                                                        |
-| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(effect, name, c)`           |
-| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(effect, name, glTexture)`                                                    |
-| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                        |
-| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                          |
-| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(wrapper)`                                                                  |
-| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                           |
-| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                              |
-| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                   |
-| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                               |
-| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                |
-| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                      |
-| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                              |
-| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                           |
-| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(tex, mode, mips)`                                                   |
-| `effectWrapper.effect = existingEffect`                          | `useEffect(existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)               |
-| `texture.isReady()`                                              | `isTextureReady(tex)`                                                                          |
-| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(tex, src, { invertY, premultiplyAlpha })`                                |
-| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(tex, { invertY })` (video: `!invertY`)                               |
-| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                     |
-| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, opts)`                                                             |
-| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`                                   |
-| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(rt, w, h)` / `disposeRenderTarget(rt)`                                     |
+| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                       |
+| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                            |
+| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                             |
+| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                      |
+| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                            |
+| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                         |
+| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                         |
+| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                          |
+| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                      |
+| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, { format: fmt, type, invertY, ...getSamplingModeFilters(s) })` |
+| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                                |
+| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })`       |
+| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(effect, cb)`                                                                    |
+| `effect.isReady()`                                               | `isEffectReady(effect)`                                                                              |
+| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(effect, name, c)`                 |
+| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(effect, name, glTexture)`                                                          |
+| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                              |
+| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                                |
+| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(wrapper)`                                                                        |
+| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                                 |
+| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                                    |
+| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                         |
+| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                                     |
+| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                      |
+| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                            |
+| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                                    |
+| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                                 |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(tex, mode, mips)`                                                         |
+| `effectWrapper.effect = existingEffect`                          | `useEffect(existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)                     |
+| `texture.isReady()`                                              | `isTextureReady(tex)`                                                                                |
+| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(tex, src, { invertY, premultiplyAlpha })`                                      |
+| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(tex, { invertY })` (video: `!invertY`)                                     |
+| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                           |
+| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, width, height, opts)`                                                    |
+| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`                                         |
+| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(rt, w, h)` / `disposeRenderTarget(rt)`                                           |
 
 Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
@@ -1953,7 +1959,7 @@ Example:
 // Before
 this.engine.createRawTexture(new Uint8Array(4), 1, 1, 5, false, false, 1, null, 0);
 // After
-createRawTexture(engine, new Uint8Array(4), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, { invertY: false, minFilter: gl.NEAREST, magFilter: gl.NEAREST });
+createRawTexture(engine, new Uint8Array(4), 1, 1, { invertY: false, minFilter: gl.NEAREST, magFilter: gl.NEAREST });
 ```
 
 ---

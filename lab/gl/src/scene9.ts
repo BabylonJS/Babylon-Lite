@@ -117,7 +117,7 @@ const engine = createGLEngine(canvas, { alpha: false });
 
 // Two same-sized offscreen targets exchanged each pass. RGBA8, LINEAR/CLAMP (the
 // createPingPong defaults), no depth — a pure 2D frame-feedback chain.
-const pingpong = createPingPong(engine, { width: RT_SIZE, height: RT_SIZE });
+const pingpong = createPingPong(engine, RT_SIZE, RT_SIZE);
 
 const seedWrapper = createEffectWrapper(engine, {
     name: "gl-scene9-pingpong-seed",

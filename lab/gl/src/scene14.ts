@@ -101,7 +101,7 @@ const engine = createGLEngine(canvas, { alpha: false });
 // Offscreen HDR color target. Half-float (RGBA16F) by default, LINEAR/CLAMP (the
 // createFloatRenderTarget defaults), no depth — a pure 2D HDR round-trip. The
 // requested HALF_FLOAT type is downgraded by the engine if its caps require it.
-const rt = createFloatRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE });
+const rt = createFloatRenderTarget(engine, RT_SIZE, RT_SIZE);
 
 const patternWrapper = createEffectWrapper(engine, {
     name: "gl-scene14-hdr-pattern",

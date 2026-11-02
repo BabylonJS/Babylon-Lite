@@ -124,7 +124,7 @@ const gl = engine.gl;
 // Offscreen color target with a depth buffer, then upgrade its depth-only
 // renderbuffer to a packed DEPTH24_STENCIL8 attachment so the FBO carries a
 // stencil plane for the masking passes.
-const rt = createRenderTarget(engine, { width: RT_SIZE, height: RT_SIZE, generateDepthBuffer: true });
+const rt = createRenderTarget(engine, RT_SIZE, RT_SIZE, { generateDepthBuffer: true });
 generateRenderTargetStencil(rt);
 
 const discWrapper = createEffectWrapper(engine, {
