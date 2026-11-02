@@ -78,7 +78,7 @@ function componentsOf(pathName: AnimPathName): number {
 }
 
 function outputAccessor(ctx: ExportContext, output: Float32Array, pathName: AnimPathName, convert: boolean, cubic: boolean): number {
-    return cachedAccessor(ctx, output, `animation-${pathName}-${convert ? "c" : "p"}`, () => {
+    return cachedAccessor(ctx, output, `animation-${pathName}-${convert ? "c" : "p"}-${pathName === "rotation" && !cubic}`, () => {
         const components = componentsOf(pathName);
         const type: GltfAccessorType = components === 4 ? "VEC4" : components === 1 ? "SCALAR" : "VEC3";
         const bufferView = ctx.buffers.addBufferView(exportedOutput(output, pathName, convert, cubic));

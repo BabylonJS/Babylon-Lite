@@ -1018,7 +1018,7 @@ Lite's clip model matches glTF, so export passes data through with no resampling
 
 Surviving channels are emitted as follows:
 
-- **Samplers** are emitted on first use by a surviving channel, deduplicated within the animation by (clip sampler index, path, pass kind). `input` and `output` arrays are embedded and deduplicated across animations by array identity and variant. Input accessors carry min/max; output accessors carry none.
+- **Samplers** are emitted on first use by a surviving channel, deduplicated within the animation by (clip sampler index, path, pass kind). `input` and `output` arrays are embedded and deduplicated across animations by array identity and variant, including whether rotation keys are normalized. CUBICSPLINE tangents must not reuse normalized LINEAR/STEP output. Input accessors carry min/max; output accessors carry none.
 - **Converting-pass targets** get per-key conversion on a copy. For `translation`, X is negated on values and tangents. For `rotation`, the linear map `L` is applied to values and tangents. `scale` and `weights` pass through. (Clips never target a camera object: an imported animated camera collapses onto its animated source node, whose channels pass through.)
 - **Rotation renormalization.** In both passes, non-spline rotation keys whose length differs from 1 by more than 0.0005 are renormalized on a copy, as glTF requires. Zero-length keys are left as they are. CUBICSPLINE outputs are never renormalized. Otherwise pass-through output embeds the source bytes unchanged.
 - **Empty animations.** An animation that ends with zero channels is dropped.
@@ -1284,9 +1284,9 @@ Because Lite entities are plain data, unit-test stubs are object literals; no en
 
 ### Unit tests — Vitest, `tests/lite/unit/export-gltf/`
 
-303 tests in twelve files, built on one harness. To count parameterized cases without running the tests, use `pnpm exec vitest list --project unit tests/lite/unit/export-gltf --no-staticParse --maxWorkers=1 --no-file-parallelism --json`.
+307 tests in twelve files, built on one harness. To count parameterized cases without running the tests, use `pnpm exec vitest list --project unit tests/lite/unit/export-gltf --no-staticParse --maxWorkers=1 --no-file-parallelism --json`.
 
-The unit suite, including its helper, is 2,553 lines against 3,688 exporter source lines (0.692 test lines per source line). The reduction from 6,063 lines and 520 cases removes repeated setup, overlapping assertions and private-helper permutations; it does not move tests into other suites. Count both directories with the same command:
+The unit suite, including its helper, is 2,554 lines against 3,688 exporter source lines (0.693 raw test lines per source line). This directory-only measurement excludes plumbing and paired fixtures; it does not establish a whole-PR code-line ratio. The reduction from 6,063 lines and 520 cases removes repeated setup, overlapping assertions and private-helper permutations; it does not move tests into other suites. Count both directories with the same command:
 
 ```sh
 find tests/lite/unit/export-gltf -type f -name '*.ts' -print0 | xargs -0 wc -l

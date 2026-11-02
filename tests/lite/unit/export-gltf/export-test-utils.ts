@@ -2,6 +2,7 @@
  *  paths, fabricated plain-data scenes, and a GLB parser. No real GPU is needed. */
 
 import { expect, vi } from "vitest";
+import { PNG } from "pngjs";
 import type { AssetContainer } from "../../../../packages/babylon-lite/src/asset-container";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import { exportSceneAsGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-gltf";
@@ -346,33 +347,12 @@ export function readBufferView(glb: { json: ParsedGlb["json"]; bin: Uint8Array }
     return glb.bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength);
 }
 
-/** Decode an exported PNG image back to RGBA bytes (filter 0 only, as the exporter writes). */
+/** Decode exported pixels with an independent PNG implementation. */
 export async function decodePng(png: Uint8Array): Promise<{ width: number; height: number; rgba: Uint8Array }> {
-    const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
-    const width = view.getUint32(16);
-    const height = view.getUint32(20);
-    let offset = 8;
-    const idat: Uint8Array[] = [];
-    while (offset < png.length) {
-        const length = view.getUint32(offset);
-        const type = String.fromCharCode(...png.subarray(offset + 4, offset + 8));
-        if (type === "IDAT") {
-            idat.push(png.subarray(offset + 8, offset + 8 + length));
-        }
-        offset += 12 + length;
-    }
-    const compressed = new Uint8Array(idat.reduce((n, c) => n + c.length, 0));
-    let o = 0;
-    for (const c of idat) {
-        compressed.set(c, o);
-        o += c.length;
-    }
-    const raw = new Uint8Array(await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
-    const rgba = new Uint8Array(width * height * 4);
-    for (let y = 0; y < height; y++) {
-        rgba.set(raw.subarray(y * (width * 4 + 1) + 1, (y + 1) * (width * 4 + 1)), y * width * 4);
-    }
-    return { width, height, rgba };
+    const image = await new Promise<PNG>((resolve, reject) => {
+        new PNG().parse(Buffer.from(png), (error, decoded) => (error ? reject(error) : resolve(decoded)));
+    });
+    return { width: image.width, height: image.height, rgba: new Uint8Array(image.data) };
 }
 
 /** Assert `actual` has `expected`'s length and each value matches to `digits` decimal places. */

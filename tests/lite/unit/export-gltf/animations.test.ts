@@ -23,7 +23,7 @@ interface Channel {
 }
 interface Sampler {
     input: number[];
-    output: number[];
+    output: number[] | Float32Array;
     interpolation?: number;
 }
 
@@ -34,7 +34,7 @@ function group(name: string, channels: Channel[], samplers: Sampler[]): Animatio
         channels: channels.map((channel, index) => ({ samplerIdx: channel.samplerIdx ?? index, nodeIdx: index, path: paths[channel.path] })),
         samplers: samplers.map((sampler) => ({
             input: new Float32Array(sampler.input),
-            output: new Float32Array(sampler.output),
+            output: sampler.output instanceof Float32Array ? sampler.output : new Float32Array(sampler.output),
             interpolation: sampler.interpolation ?? INTERP_LINEAR,
         })),
         duration: 1,
@@ -86,6 +86,27 @@ describe("animations", () => {
                 expect(readAccessor(glb, sampler.output)).toEqual(Array.from(new Float32Array(output)));
             }
             expect(sampler.interpolation).toBe(interpolation === INTERP_LINEAR ? undefined : interpolation === INTERP_STEP ? "STEP" : "CUBICSPLINE");
+        });
+
+        it.each([false, true])("separates shared rotation storage by interpolation (spline first: %s)", async (splineFirst) => {
+            const target = createTransformNode("target");
+            if (passThrough) {
+                attach(target, loaderRoot());
+            }
+            const output = new Float32Array([0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3]);
+            const before = output.slice();
+            const modes = splineFirst ? [INTERP_CUBICSPLINE, INTERP_LINEAR] : [INTERP_LINEAR, INTERP_CUBICSPLINE];
+            const animationGroups = modes.map((interpolation) =>
+                group(String(interpolation), [{ target, path: "rotation" }], [{ input: interpolation === INTERP_CUBICSPLINE ? [0] : [0, 1, 2], output, interpolation }])
+            );
+            const glb = await exportAndParse(createScene({ animationGroups }));
+            for (const [index, mode] of modes.entries()) {
+                expectClose(
+                    readAccessor(glb, glb.json.animations[index].samplers[0].output),
+                    mode === INTERP_CUBICSPLINE ? Array.from(before) : [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]
+                );
+            }
+            expect(output).toEqual(before);
         });
     });
 
