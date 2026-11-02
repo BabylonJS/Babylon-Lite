@@ -224,6 +224,31 @@ describe.each([
     const first = (scene: Scene, onEnd: () => void): Animatable =>
         scene.beginDirectAnimation({ position: { x: 0 } }, [ramp("first", "position.x", 10, CYCLE)], 0, 10, false, 1, onEnd);
 
+    /** A looping fallback animatable whose property setter runs `action` once, at its first write of the next frame. */
+    function armedFirst(scene: Scene, action: (animatable: Animatable) => void, onEnd?: () => void): Animatable {
+        const later: { a?: Animatable } = {};
+        let armed = false;
+        const target = {
+            position: {
+                _x: 0,
+                get x(): number {
+                    return this._x;
+                },
+                set x(value: number) {
+                    this._x = value;
+                    if (armed) {
+                        armed = false;
+                        action(later.a!);
+                    }
+                },
+            },
+        };
+        const a = (later.a = scene.beginDirectAnimation(target, [ramp("first", "position.x", 10, CONSTANT)], 0, 10, true, 1, onEnd));
+        expect(a._lite).toBeUndefined();
+        armed = true;
+        return a;
+    }
+
     it("stops where this frame advanced it, unlike Babylon.js, when the callback stops it", () => {
         const scene = new Scene(new NullEngine());
         const onSecondEnd = vi.fn();
@@ -262,6 +287,47 @@ describe.each([
         scene._tick(1100);
         expect(b.values().every((value) => value === 10)).toBe(true);
         expect(onSecondEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("first advances on the next frame when a setter's stop resumes it from the end callback", () => {
+        const scene = new Scene(new NullEngine());
+        const onSecondEnd = vi.fn();
+        const later: { b?: ReturnType<typeof start> } = {};
+        // The setter's stop() reports the first animatable's end at once, while the frame's values are being written.
+        armedFirst(
+            scene,
+            (a) => a.stop(),
+            () => later.b!.animatable.restart()
+        );
+        const b = (later.b = start(scene, 10, onSecondEnd));
+        b.animatable.pause();
+
+        scene._tick(1100);
+
+        expect(b.values().every((value) => value === 0)).toBe(true);
+        expect(b.animatable.animationStarted).toBe(true);
+        expect(onSecondEnd).not.toHaveBeenCalled();
+        scene._tick(1100);
+        expect(b.values().every((value) => value === 10)).toBe(true);
+        expect(onSecondEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps this frame's advance when a setter pauses it", () => {
+        const scene = new Scene(new NullEngine());
+        const later: { b?: ReturnType<typeof start> } = {};
+        armedFirst(scene, () => later.b!.animatable.pause());
+        const b = (later.b = start(scene, 10, vi.fn()));
+
+        scene._tick(500);
+
+        for (const value of b.values()) {
+            expect(value).toBeCloseTo(5, 5);
+        }
+        expect(b.animatable.animationStarted).toBe(false);
+        scene._tick(500);
+        for (const value of b.values()) {
+            expect(value).toBeCloseTo(5, 5);
+        }
     });
 
     describe("ending in the same frame", () => {
@@ -330,6 +396,94 @@ describe.each([
             scene._tick(100);
             expect(onSecondEnd).toHaveBeenCalledTimes(1);
         });
+    });
+});
+
+describe.each([
+    ["on the compat fallback", [CONSTANT]],
+    ["split between Lite and the compat fallback", [CYCLE, CONSTANT]],
+] as const)("an animatable %s whose own property setter changes its playback at the last frame", (_path, modes) => {
+    function play(scene: Scene, action: (animatable: Animatable) => void) {
+        const onEnd = vi.fn();
+        const later: { a?: Animatable } = {};
+        let armed = true;
+        // The fallback writes its track through this setter; at the last frame it changes the playback, once.
+        const target = {
+            position: {
+                x: 0,
+                _y: 0,
+                get y(): number {
+                    return this._y;
+                },
+                set y(value: number) {
+                    this._y = value;
+                    if (armed && value === 10) {
+                        armed = false;
+                        action(later.a!);
+                    }
+                },
+            },
+        };
+        const animations = modes.map((mode, i) => {
+            const animation = new Animation(`track${i}`, i === modes.length - 1 ? "position.y" : "position.x", 10, Animation.ANIMATIONTYPE_FLOAT, mode);
+            animation.setKeys([
+                { frame: 0, value: 0 },
+                { frame: 10, value: 10 },
+            ]);
+            return animation;
+        });
+        const animatable = (later.a = scene.beginDirectAnimation(target, animations, 0, 10, false, 1, onEnd));
+        expect(animatable._lite !== undefined).toBe(modes.length > 1);
+        const values = (): number[] => (modes.length === 1 ? [target.position.y] : [target.position.x, target.position.y]);
+        return { animatable, onEnd, values };
+    }
+
+    it("reports no end when it stops with skipOnAnimationEnd", () => {
+        const scene = new Scene(new NullEngine());
+        const a = play(scene, (animatable) => animatable.stop(undefined, undefined, false, true));
+
+        scene._tick(1100);
+        scene._tick(100);
+
+        expect(a.onEnd).not.toHaveBeenCalled();
+        expect(a.animatable.animationStarted).toBe(false);
+    });
+
+    it("reports its end once when it stops", () => {
+        const scene = new Scene(new NullEngine());
+        const a = play(scene, (animatable) => animatable.stop());
+
+        scene._tick(1100);
+        scene._tick(100);
+
+        expect(a.onEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports no end when it pauses, and reports it once resumed", () => {
+        const scene = new Scene(new NullEngine());
+        const a = play(scene, (animatable) => animatable.pause());
+
+        scene._tick(1100);
+        expect(a.onEnd).not.toHaveBeenCalled();
+        expect(a.animatable.animationStarted).toBe(false);
+
+        a.animatable.restart();
+        scene._tick(100);
+        expect(a.onEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports no end when it seeks, and plays on from there", () => {
+        const scene = new Scene(new NullEngine());
+        const a = play(scene, (animatable) => animatable.goToFrame(0));
+
+        scene._tick(1100);
+        expect(a.onEnd).not.toHaveBeenCalled();
+        expect(a.values().every((value) => value === 0)).toBe(true);
+
+        scene._tick(500);
+        expect(a.values().every((value) => Math.abs(value - 5) < 1e-5)).toBe(true);
+        scene._tick(600);
+        expect(a.onEnd).toHaveBeenCalledTimes(1);
     });
 });
 

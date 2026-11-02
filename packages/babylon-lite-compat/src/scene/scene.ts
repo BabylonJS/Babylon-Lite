@@ -322,17 +322,22 @@ export class Scene extends AbstractScene {
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        // Lite advanced every native group above, in one manager update. So the fallback tracks advance first too, for every
-        // animatable present at frame start, and only then are the ends reported, in order. An end callback therefore sees
-        // every animatable advanced for this frame, and a stop, pause, restart or new animation it asks for takes effect
-        // from the next frame on both evaluators. Unlike Babylon.js, which steps animatables one at a time, an animatable
-        // stopped by an earlier one's end callback keeps this frame's advance. (A chain of animations shorter than a frame
-        // cannot spin within one tick.)
+        // Lite stepped every native group above, in one manager update. The fallback tracks of the animatables present at
+        // frame start follow in three passes: `_advance` steps them all in time and notes their ends, running no user code;
+        // `_applyFrame` writes their values (easing functions, property setters); `_completeFrame` reports the ends, in
+        // order. Which animatables play this frame is thus settled before any user code runs, as for the native groups: a
+        // stop, pause, seek, restart or new animation that a setter or an end callback asks for changes playback from the
+        // next frame on both evaluators, and an animatable it stops or pauses keeps this frame's advance (Babylon.js, which
+        // steps animatables one at a time, would not advance it). A chain of animations shorter than a frame cannot spin
+        // within one tick.
         const running = this._runningAnimatables;
         const count = running.length;
-        // Both passes run user code (easing functions, property setters, end callbacks); a `dispose()` there empties the list.
         for (let i = 0; i < count; i++) {
-            running[i]?._advance(deltaMs);
+            running[i]!._advance(deltaMs);
+        }
+        // These two passes run user code; a `dispose()` there empties the list.
+        for (let i = 0; i < count; i++) {
+            running[i]?._applyFrame();
         }
         for (let i = 0; i < count; i++) {
             running[i]?._completeFrame();

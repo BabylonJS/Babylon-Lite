@@ -370,6 +370,8 @@ export class Animatable {
     private _stopped = false;
     /** @internal This frame's `_advance` reached the end, which `_completeFrame` reports. */
     private _frameEnded = false;
+    /** @internal This frame's `_advance` stepped the fallback tracks, whose values `_applyFrame` writes. */
+    private _frameStepped = false;
     private readonly _nativeManager: AnimationManager | undefined;
     private readonly _fallbackAnimations: readonly Animation[];
     private readonly _fallbackFrames = new Map<Animation, number>();
@@ -453,30 +455,39 @@ export class Animatable {
     }
 
     /** @internal Advance the animation by `deltaMs` and report its end if it reached it: one standalone frame. The scene
-     *  runs the two steps separately, `_advance` for all its animatables and then `_completeFrame` for each. */
+     *  runs the three steps separately, each for all its animatables: `_advance`, `_applyFrame`, then `_completeFrame`. */
     public _tick(deltaMs: number): void {
         this._advance(deltaMs);
+        this._applyFrame();
         this._completeFrame();
     }
 
-    /** @internal Advance the fallback tracks by `deltaMs` (Lite advances the native group in its manager update) and
-     *  note whether the animatable reached its end, without reporting it yet. */
+    /** @internal Step the fallback tracks by `deltaMs` (Lite steps the native group in its manager update) and note whether
+     *  the animatable reached its end, without reporting it yet. Runs no user code. */
     public _advance(deltaMs: number): void {
         this._frameEnded = false;
+        this._frameStepped = false;
         if (this._paused || this._stopped) {
             return;
         }
+        this._frameStepped = true;
+        const fallbackRunning = this._advanceFallback(deltaMs);
         if (this._lite) {
             this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
-            const fallbackRunning = this._advanceFallback(deltaMs);
-            this._applyFallback();
             this._frameEnded = !this._loop && this._lite._stopped && !fallbackRunning;
-            return;
+        } else {
+            this.masterFrame = this._fallbackFrames.get(this._animations[0]!) ?? this._from;
+            this._frameEnded = !this._loop && !fallbackRunning;
         }
-        const anyFallbackRunning = this._advanceFallback(deltaMs);
-        this.masterFrame = this._fallbackFrames.get(this._animations[0]!) ?? this._from;
-        this._applyFallback();
-        this._frameEnded = !this._loop && !anyFallbackRunning;
+    }
+
+    /** @internal Write the values this frame's `_advance` stepped to. Easing functions and property setters run here, after
+     *  the end was noted, so a stop, pause, seek or restart they make clears it. */
+    public _applyFrame(): void {
+        if (this._frameStepped) {
+            this._frameStepped = false;
+            this._applyFallback();
+        }
     }
 
     /** @internal Report the end that this frame's `_advance` reached. A pause, restart, seek or stop since then (from an
