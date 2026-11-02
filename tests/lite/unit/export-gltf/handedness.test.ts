@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertMatrix, convertRotation, needsWindingFlip, rotationToDirection } from "../../../../packages/babylon-lite/src/export-gltf/export-handedness";
+import { convertMatrix, convertRotation, rotationToDirection } from "../../../../packages/babylon-lite/src/export-gltf/export-handedness";
 import { expectClose, rotate } from "./export-test-utils";
 
 describe("handedness", () => {
@@ -40,16 +40,5 @@ describe("handedness", () => {
     ])("orients -Z along direction (%s, %s, %s)", (x, y, z) => {
         const length = Math.hypot(x, y, z);
         expectClose(rotate(rotationToDirection(x, y, z), [0, 0, -1]), [x / length, y / length, z / length], 6);
-    });
-
-    it.each([
-        [undefined, true, false],
-        [1, true, false],
-        [-1, true, true],
-        [undefined, false, true],
-        [1, false, true],
-        [-1, false, false],
-    ] as const)("selects winding for authoredSign=%s, convert=%s", (sign, convert, expected) => {
-        expect(needsWindingFlip(sign, convert)).toBe(expected);
     });
 });

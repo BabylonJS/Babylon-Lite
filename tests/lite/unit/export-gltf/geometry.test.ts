@@ -74,11 +74,13 @@ describe("geometry", () => {
     });
 
     it.each([
+        [false, undefined, [0, 1, 2]],
         [false, 1, [0, 1, 2]],
         [false, -1, [0, 2, 1]],
+        [true, undefined, [0, 2, 1]],
         [true, -1, [0, 1, 2]],
         [true, 1, [0, 2, 1]],
-    ] as const)("uses authored winding in either handedness pass (%s, %s)", async (passThrough, authoredSign, expected) => {
+    ] as const)("preserves authored and default winding in either handedness pass (%s, %s)", async (passThrough, authoredSign, expected) => {
         const gpuIndices = new Uint16Array([0, 1, 2]);
         const glb = await exportMesh(createMesh("m", { authoredSign, gpuIndices }), passThrough);
         expect(readAccessor(glb, firstPrimitive(glb).indices)).toEqual(expected);
