@@ -20,7 +20,7 @@ import type { Renderable } from "../../render/renderable.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { Camera } from "../../camera/camera.js";
-import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT, PBR2_HAS_REFRACTION, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { _pbrMeshRequest, getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
@@ -140,7 +140,9 @@ export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: 
     const baseFeatures2 = source._renderFeatures?.features2 ?? 0;
     const view = createMaterialView(source, {
         features: baseFeatures & ~PBR_HAS_ALPHA_BLEND,
-        features2: baseFeatures2 | PBR2_GEOMETRY_OUTPUT,
+        // The geometry task grabs no scene colour, so refraction is dropped as in the depth views: kept, the bind group
+        // would wait for a refraction texture the task never provides.
+        features2: (baseFeatures2 & ~PBR2_HAS_REFRACTION) | PBR2_GEOMETRY_OUTPUT,
     }) as PbrGeometryMaterialView;
     Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
     Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
