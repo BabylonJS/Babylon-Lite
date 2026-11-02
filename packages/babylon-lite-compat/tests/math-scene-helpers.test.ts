@@ -55,6 +55,15 @@ describe("Quaternion.FromEulerVector", () => {
         expect(Quaternion.FromEulerVectorToRef(vec, result)).toBe(result);
         expect(result.asArray()).toEqual(expected.asArray());
     });
+
+    it("RotationYawPitchRollToRef writes the rotation into the given quaternion", () => {
+        const result = new Quaternion(9, 9, 9, 9);
+
+        expect(Quaternion.RotationYawPitchRollToRef(Math.PI / 2, 0, 0, result)).toBe(result);
+
+        const expected = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
+        result.asArray().forEach((value, i) => expect(value).toBeCloseTo(expected[i]!, 6));
+    });
 });
 
 describe("Quaternion.RotationQuaternionFromAxis", () => {
@@ -98,6 +107,23 @@ describe("Matrix statics", () => {
         expect(Array.from(inverse.m)).toEqual([0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, -0.5, -1, -1.5, 1]);
     });
 
+    it.each([
+        ["a zero matrix", () => Matrix.Zero()],
+        ["a zero scale", () => Matrix.Scaling(0, 2, 3)],
+    ])("inverting %s copies it, as Babylon.js does, and leaves it alone", (_name, create) => {
+        const source = create();
+        expect(source.determinant()).toBe(0);
+        const before = Array.from(source.m);
+        const result = Matrix.FromValues(9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9);
+
+        expect(Array.from(Matrix.Invert(source).m)).toEqual(before);
+        expect(source.invertToRef(result)).toBe(result);
+        expect(Array.from(result.m)).toEqual(before);
+        expect(Array.from(source.m)).toEqual(before);
+        // In place, a singular matrix stays as it is.
+        expect(Array.from(source.invert().m)).toEqual(before);
+    });
+
     it("FromXYZAxesToRef writes the axes as the first three rows", () => {
         const result = Matrix.FromValues(9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9);
 
@@ -131,6 +157,25 @@ describe("Camera.getDirection", () => {
         free.getDirectionToRef(new Vector3(0, 0, 2), result);
         expect(result.z).toBeCloseTo(-2, 6);
         expect(result.x).toBeCloseTo(0, 6);
+    });
+
+    it("reads the camera's world matrix without building a view matrix, and takes the axis as its result", () => {
+        const scene = new Scene(new NullEngine());
+        const free = new FreeCamera("free", new Vector3(4, 5, 6), scene);
+        // Off every axis, so each output component mixes all three input ones.
+        free.setTarget(new Vector3(5, 7, 9));
+        const expected = free.getDirection(new Vector3(1, 2, 3));
+        const fromArray = vi.spyOn(Matrix, "FromArray");
+        const axis = new Vector3(1, 2, 3);
+
+        free.getDirectionToRef(axis, axis);
+
+        expect(fromArray).not.toHaveBeenCalled();
+        fromArray.mockRestore();
+        expect(axis.x).toBeCloseTo(expected.x, 6);
+        expect(axis.y).toBeCloseTo(expected.y, 6);
+        expect(axis.z).toBeCloseTo(expected.z, 6);
+        expect(Math.abs(expected.x) > 0.1 && Math.abs(expected.y) > 0.1 && Math.abs(expected.z) > 0.1).toBe(true);
     });
 });
 
