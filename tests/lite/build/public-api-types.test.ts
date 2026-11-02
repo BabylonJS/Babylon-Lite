@@ -1373,15 +1373,19 @@ void [current, ready];
         expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
     });
 
-    it("exposes the utility-layer factory without an engine argument", () => {
+    it("exposes the overlay-scene and utility-layer factories without an engine argument", () => {
         const probePath = resolve(BUILD_DIR, "utility-layer-api.probe.ts");
         try {
             writeFileSync(
                 probePath,
-                `import { createUtilityLayer, type EngineContext, type SceneContext, type UtilityLayer } from "./index.js";
+                `import { createOverlayScene, createUtilityLayer, type EngineContext, type SceneContext, type UtilityLayer } from "./index.js";
 declare const engine: EngineContext;
 declare const scene: SceneContext;
 const layer: UtilityLayer = createUtilityLayer(scene);
+const overlay: SceneContext = createOverlayScene(scene);
+createUtilityLayer(overlay);
+// @ts-expect-error Overlay scenes derive their surface from the base scene.
+createOverlayScene(engine);
 createUtilityLayer(scene, { addDefaultLight: false, lightIntensity: 0.5 });
 // @ts-expect-error The utility layer derives its engine from the main scene.
 createUtilityLayer(engine, scene);

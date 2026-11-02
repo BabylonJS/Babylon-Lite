@@ -20,6 +20,7 @@ import type { Material } from "../../../packages/babylon-lite/src/material/mater
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { createUtilityLayer, disposeUtilityLayer, registerUtilityLayer } from "../../../packages/babylon-lite/src/gizmo/utility-layer";
+import { createOverlayScene } from "../../../packages/babylon-lite/src/scene/overlay-scene";
 import type { RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
@@ -388,6 +389,44 @@ describe("registerScene / unregisterScene", () => {
             expect(getRenderingContexts(engine).map((context) => contexts.indexOf(context))).toEqual([0, 1, 2, 3, 4]);
             expect(defaultTask(main)._config.clr).toBe(true);
             expect(main._beforeRender).toHaveLength(0);
+        });
+
+        it.each([1, 4])("groups ordinary-registered overlay scenes after their base and before text at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const camera = { kind: "test-camera" } as unknown as SceneContext["camera"];
+            main.camera = camera;
+            const first = createOverlayScene(main);
+            const second = createOverlayScene(main);
+            const utility = createUtilityLayer(first, { addDefaultLight: false });
+            const text = { ...makeRenderingContext(), _kind: "text-renderer" };
+
+            expect(first.surface).toBe(engine);
+            expect(first.clearColor).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+            expect(first.camera).not.toBe(camera);
+
+            await registerScene(second);
+            registerRenderingContext(engine, text);
+            expect(second._record()).toBe(0);
+            await registerScene(main);
+            await registerScene(first);
+            await registerUtilityLayer(utility);
+            expect(getRenderingContexts(engine)).toEqual([main, second, first, utility.scene, text]);
+            for (const overlay of [first, second]) {
+                overlay._update();
+                expect(defaultTask(overlay)._config.clr).toBe(false);
+                if (samples > 1) {
+                    expect(defaultTask(overlay)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
+                }
+            }
+            expect(defaultTask(main)._config.clr).toBe(true);
+            expect(first.camera).not.toBe(camera);
+
+            unregisterScene(main);
+            expect(first._record()).toBe(0);
+            expect(utility.scene._record()).toBe(0);
+            await registerScene(main);
+            expect(getRenderingContexts(engine)).toEqual([main, second, first, utility.scene, text]);
         });
 
         it.each([1, 4])("does not accumulate overlay callbacks when a layer is re-registered at MSAA %i", async (samples) => {

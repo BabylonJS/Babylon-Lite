@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { enableUtilityLayerOverlays } from "../../../packages/babylon-lite/src/gizmo/utility-layer-overlay";
+import { enableOverlayScenes } from "../../../packages/babylon-lite/src/scene/overlay-scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/src/scene/swapchain-overlay";
 
@@ -34,7 +34,7 @@ describe("configureSwapchainOverlayScene", () => {
         const overlay = { _frameGraph: { _tasks: [overlayTask] }, _beforeRender: [], _disposables: [], _overlayBase: base } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [base, { _kind: "text-renderer" }]);
         Object.assign(overlay, { surface });
-        enableUtilityLayerOverlays(surface.engine);
+        enableOverlayScenes(surface.engine);
 
         configureSwapchainOverlayScene(surface, overlay);
         overlay._beforeRender.forEach((cb) => cb(0));
@@ -58,7 +58,7 @@ describe("configureSwapchainOverlayScene", () => {
         } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [layer, unrelated]);
         Object.assign(main, { surface });
-        enableUtilityLayerOverlays(surface.engine);
+        enableOverlayScenes(surface.engine);
 
         configureSwapchainOverlayScene(surface, main);
         expect(mainTask._config.clr).toBe(true);
@@ -77,7 +77,7 @@ describe("configureSwapchainOverlayScene", () => {
         const child = { _overlayBase: layer } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [previous, child, layer, { _kind: "text-renderer" }]);
         Object.assign(main, { surface });
-        enableUtilityLayerOverlays(surface.engine);
+        enableOverlayScenes(surface.engine);
 
         configureSwapchainOverlayScene(surface, main);
         main._beforeRender.forEach((cb) => cb(0));
@@ -202,7 +202,7 @@ describe("configureSwapchainOverlayScene", () => {
             mainTask.enabled = false;
         }
 
-        enableUtilityLayerOverlays(surface.engine);
+        enableOverlayScenes(surface.engine);
         surface._renderingContexts.splice(0, 1, utility);
         configureSwapchainOverlayScene(surface, main);
         expect(mainTask._config.clr).toBe(true);

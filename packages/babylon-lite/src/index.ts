@@ -61,6 +61,8 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+// Opt-in scene overlays: composite a scene onto an explicit base scene on the same surface.
+export { createOverlayScene } from "./scene/overlay-scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
