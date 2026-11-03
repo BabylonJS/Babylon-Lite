@@ -28,6 +28,7 @@ import type { ShaderRenderPass, ShaderVbLayout } from "./shader-vb-support.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
@@ -112,7 +113,11 @@ export function buildShaderRenderablesWithInstancing(
         // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
         const hasColor = !!ti.colors && material._tic != 0;
         const baseLocation = material.attributes.length;
-        const variantKey = `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
+        const variantKey =
+            _rightHanded && ((mesh as typeof mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)
+                ? // Right-handed glTF geometry keeps glTF's own winding (no mirroring root): its own pipeline.
+                  `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}|ccw`
+                : `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
         const vertexBuffers = [...(vertexLayout?._vbs ?? bindings.vertexBuffers)];
         const instanceAttrs = appendInstanceInputs(vertexBuffers, baseLocation, hasColor);
         if (!vertexLayout && mesh._gpu._vbLayout) {

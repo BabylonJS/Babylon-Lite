@@ -27,6 +27,7 @@ import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickContributor, PickPassContext } from "./pick-contributor.js";
 import { getViewMatrix } from "../camera/camera.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Result of a successful {@link pickBillboardSprite} hit (re-exported from the public picker). */
 export interface BillboardPickInfo {
@@ -95,13 +96,15 @@ return B(r, -a);
     }
 }
 
-function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
+/** @internal Exported for tests. */
+export function makeBillboardPickWgsl(orientation: BillboardOrientation, isCutout: boolean, detailed: boolean): string {
     const cutoutBindings = isCutout
         ? wgsl`@group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;`
         : "";
     const uvVarying = isCutout ? wgsl`,\n@location(1) uv: vec2f` : "";
-    const uvAssign = isCutout ? wgsl`out.uv = mix(in.a, in.b, q);` : "";
+    // A right-handed engine mirrors billboard textures horizontally (see `_mirrorBillboardU`); the cutout follows.
+    const uvAssign = isCutout ? (_rightHanded ? wgsl`out.uv = mix(in.a, in.b, vec2f(1.0 - q.x, q.y));` : wgsl`out.uv = mix(in.a, in.b, q);`) : "";
     const cutoutDiscard = isCutout
         ? wgsl`let s = textureSample(atlasTex, atlasSamp, in.uv);
 if (s.a < bb.cutoff) {

@@ -9,7 +9,7 @@
  * chunks that are never loaded (e.g. animation for a static model) are
  * correctly excluded from the manifest numbers.
  */
-import { build, normalizePath, type Plugin, type Rollup } from "vite";
+import { build, defaultClientConditions, normalizePath, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
@@ -302,6 +302,9 @@ interface SceneConfigEntry {
      *  chunk set differs between a developer's GPU and CI's software renderer. Only CI's
      *  measurement is comparable to the published baseline. See `DEVICE_DEPENDENT_NOTE`. */
     deviceDependentChunks?: boolean;
+    /** Right-handed twin scene: built with the `babylon-lite-rh` resolve condition, like an
+     *  application that opts into the right-handed system. */
+    rightHanded?: boolean;
 }
 
 interface BundleManifestEntry {
@@ -1503,6 +1506,7 @@ export async function buildBundleScenes(): Promise<void> {
                 // export map. `build:lib` must run first unless explicit source fallback is
                 // enabled for legacy baselines.
                 dedupe: ["@babylonjs/core"],
+                ...(!isBjs && sceneConfigByName.get(scene)?.rightHanded && { conditions: [...defaultClientConditions, "babylon-lite-rh"] }),
             },
             build: {
                 outDir: sceneOutDir,

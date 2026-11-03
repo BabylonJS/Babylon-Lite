@@ -9,6 +9,7 @@ import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 import { BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 export interface BillboardPipelineDeviceCache {
     /** @internal */
@@ -99,8 +100,9 @@ return s * in.tint * billboards.opacityMul;
 }`;
 }
 
-function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
-    return wgsl`${SCENE_UBO_WGSL}
+/** @internal Exported for tests. */
+export function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
+    const code = wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,
@@ -140,6 +142,11 @@ out.tint = in.c;
 return out;
 }
 ${makeBillboardFragmentWgsl(depthMode, alphaToCoverage)}`;
+    // A right-handed engine mirrors the texture horizontally, as Babylon.js's sprite renderer does.
+    if (_rightHanded !== null) {
+        return code.replace(/mix\(in\.a,\s*in\.b,\s*q\)/, "mix(in.a,in.b,vec2f(1.0-q.x,q.y))");
+    }
+    return code;
 }
 
 export function createBillboardPipelineCache(): BillboardPipelineCache {

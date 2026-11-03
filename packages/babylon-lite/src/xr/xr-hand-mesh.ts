@@ -30,6 +30,7 @@ import { _preloadStdMeshExt } from "../material/standard/standard-group-builder.
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Where + how to load the hand glTF meshes. Resolved by `xr-hand`. */
 export interface HandMeshOptions {
@@ -177,7 +178,8 @@ export function poseHandMesh(loaded: LoadedHandMesh, hand: XRHand, frame: XRFram
         }
         const p = pose.transform.position;
         const o = pose.transform.orientation;
-        setBoneWorldPoseDeferred(loaded.skeleton, bone, p.x, p.y, -p.z, o.x, o.y, -o.z, -o.w);
+        // Joint poses are WebXR right-handed; a right-handed build keeps them verbatim, like setXrPoseToWorld.
+        setBoneWorldPoseDeferred(loaded.skeleton, bone, p.x, p.y, _rightHanded ? p.z : -p.z, o.x, o.y, _rightHanded ? o.z : -o.z, _rightHanded ? o.w : -o.w);
         posedAny = true;
     }
     if (posedAny) {

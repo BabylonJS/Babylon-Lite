@@ -42,6 +42,7 @@ import {
 } from "./standard-flags.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -309,7 +310,11 @@ export function getOrCreateStandardPipeline(
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         primitive: _stdPrimitiveResolver
             ? _stdPrimitiveResolver(bindings._meshFeatures, (features & DOUBLE_SIDED) !== 0)
-            : { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+            : {
+                  topology: "triangle-list",
+                  cullMode: features & DOUBLE_SIDED ? "none" : "back",
+                  frontFace: _rightHanded ? (bindings._meshFeatures & (1 << 11) ? "ccw" : "cw") : "ccw",
+              },
     });
 
     bindings._pipelines.set(key, pipeline);

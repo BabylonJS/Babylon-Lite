@@ -7,6 +7,7 @@ import type { Mesh } from "./mesh.js";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { normalizeVec3TupleOrUp } from "../math/normalize-vec3-tuple-or-up.js";
 import { createMeshFromData } from "./mesh-factories.js";
+import { _rightHanded } from "#coordinate-system";
 
 declare const csg2SolidBrand: unique symbol;
 
@@ -174,6 +175,16 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
         triVerts[i] = geometry.indices[i + 2]!;
         triVerts[i + 1] = geometry.indices[i + 1]!;
         triVerts[i + 2] = geometry.indices[i]!;
+    }
+    if (_rightHanded !== null) {
+        // Like Babylon.js, a right-handed engine keeps the authored order of a mesh whose world winding is
+        // reflected (a glTF mesh, authored for the left-handed import flip, under an identity root), so
+        // Manifold still receives outward-wound triangles.
+        const w = world as unknown as ArrayLike<number>;
+        const det = w[0]! * (w[5]! * w[10]! - w[9]! * w[6]!) - w[4]! * (w[1]! * w[10]! - w[9]! * w[2]!) + w[8]! * (w[1]! * w[6]! - w[5]! * w[2]!);
+        if (det < 0 !== (mesh._authoredSign ?? 1) < 0) {
+            triVerts.set(geometry.indices);
+        }
     }
 
     const manifoldMesh = new runtime.Mesh({
