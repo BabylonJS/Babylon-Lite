@@ -1728,6 +1728,11 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
  * entire recovery path from this scene's recorded size — so that work cannot be moved
  * outside the measured window.
  *
+ * scene348 (SSAO Kitchen) deliberately waits for frame 144: it resets temporal
+ * history at frame 16, then renders two complete 64-frame noise cycles before
+ * freezing. Those frames are substantially slower under SwiftShader. Keep that
+ * readiness contract intact and allow 180s rather than measuring before convergence.
+ *
  * Recording a size only once the scene renders is intentional (the render
  * pipeline's lazy chunks load on first render), so the right fix is a larger
  * budget for these scenes rather than measuring a truncated bundle. We grant the
@@ -1737,9 +1742,11 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
 const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
     scene129: 150_000,
     scene164: 150_000,
+    scene348: 180_000,
 };
 
-function readyTimeoutForScene(scene: string): number {
+/** @internal Shared with focused tests of the measurement readiness budgets. */
+export function readyTimeoutForScene(scene: string): number {
     return READY_TIMEOUT_OVERRIDES_MS[scene] ?? READY_TIMEOUT_MS_DEFAULT;
 }
 

@@ -1241,6 +1241,11 @@ at frame 16 and stops its render loop 128 frames later; the reference stops afte
 lab loader overlay to detach before capturing. SSAO2 draws its hemisphere and noise from
 `Math.random`, so the reference seeds it while creating the pipeline. Repeated
 captures of both pages are bit-exact.
+Bundle measurement retains this same frame-144 readiness signal, rather than
+recording only the initial downloads. It allows 180 seconds for this scene under
+CI's SwiftShader renderer; the normal 50-second budget and strict rejection of
+unready/incomplete measurements remain unchanged for other scenes. This changes
+neither the 177 KiB size ceiling nor the rendering or reference pixels.
 
 Without AO the two renders differ by a full-image MAD of 1.1. The AO algorithms
 and compositing differ (Lite occludes diffuse IBL before tone mapping; SSAO2
