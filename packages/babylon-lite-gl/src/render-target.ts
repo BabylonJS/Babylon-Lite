@@ -87,10 +87,10 @@ export interface GLFloatRenderTargetOptions extends Omit<GLRenderTargetOptions, 
     type?: GLenum;
 }
 
-/** Options for {@link readRenderTargetPixels}. Every field is optional: the bare
- *  `readRenderTargetPixels(rt)` reads the whole target as RGBA into a fresh
- *  buffer. */
-export interface GLReadPixelsOptions {
+/** Read rectangle and channel layout shared by {@link readRenderTargetPixels}
+ *  and {@link readRenderTargetPixelsToBuffer}. Every field is optional: the
+ *  defaults read the whole target as RGBA. */
+export interface GLReadPixelsRegionOptions {
     /** Lower-left X of the read rectangle, in texels. Default `0`. */
     x?: number;
     /** Lower-left Y of the read rectangle, in texels. Default `0`. */
@@ -99,11 +99,24 @@ export interface GLReadPixelsOptions {
     width?: number;
     /** Read rectangle height in texels. Default: the target's height. */
     height?: number;
+    /** Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or `gl.RED` (1). */
+    format?: GLenum;
+}
+
+/** Options for {@link readRenderTargetPixels}. Every field is optional: the bare
+ *  `readRenderTargetPixels(rt)` reads the whole target as RGBA into a fresh
+ *  buffer. */
+export interface GLReadPixelsOptions extends GLReadPixelsRegionOptions {
     /** Preallocated buffer (`width*height*channels` elements of the matching
      *  type), reused to avoid per-call allocation. Default: a fresh buffer. */
     into?: ArrayBufferView;
-    /** Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or `gl.RED` (1). */
-    format?: GLenum;
+}
+
+/** Options for {@link readRenderTargetPixelsToBuffer}. */
+export interface GLReadPixelsToBufferOptions extends GLReadPixelsRegionOptions {
+    /** Byte offset into the destination `WebGLBuffer` where the first texel is
+     *  written. Must be a multiple of the read type's size. Default `0`. */
+    offset?: number;
 }
 
 /** Resolved (defaults-applied) attachment description, retained on the render
@@ -353,15 +366,67 @@ export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: nu
  *  Empty buffer on a lost/disposed context.
  */
 export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView {
-    const engine = rt._engine;
     const opts = options ?? {};
     const width = opts.width ?? rt.width;
     const height = opts.height ?? rt.height;
     const format = opts.format ?? RGBA;
     const into = opts.into;
-    const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
-    if (engine._isLost || engine._disposed || rt._disposed) {
+    const gl = bindForRead(rt, format);
+    if (gl === null) {
         return into ?? new Uint8Array(0);
+    }
+    const type = rt._config.type;
+    let buffer = into;
+    if (buffer === undefined) {
+        const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
+        buffer = type === gl.FLOAT ? new Float32Array(elements) : type === gl.HALF_FLOAT ? new Uint16Array(elements) : new Uint8Array(elements);
+    }
+    gl.readPixels(opts.x ?? 0, opts.y ?? 0, width, height, format, type, buffer);
+    return buffer;
+}
+
+/**
+ * Read a rectangle of the render target's color attachment into a GPU
+ * `WebGLBuffer` (`PIXEL_PACK_BUFFER` readback): `gl.readPixels` with a byte
+ * offset instead of a CPU array, so the copy stays on the GPU and can be
+ * consumed later without a sync stall (e.g. `gl.fenceSync` +
+ * `gl.getBufferSubData`, or as vertex data).
+ *
+ * Same rectangle / `format` rules as {@link readRenderTargetPixels}: whole
+ * target as RGBA by default, `gl.RED` / `gl.RG` read 1 / 2 channels per texel
+ * tightly packed (`PACK_ALIGNMENT` 1). The texel type follows the color
+ * attachment type. `buffer` must already be allocated (`gl.bufferData`) large
+ * enough for `offset + width*height*channels*bytesPerChannel` bytes, and (per
+ * WebGL2) must never have been bound to `ELEMENT_ARRAY_BUFFER`.
+ *
+ * Binds the target's framebuffer (left bound, like
+ * {@link readRenderTargetPixels}), binds `buffer` to `PIXEL_PACK_BUFFER` for
+ * the read and then unbinds it (`null`), so later CPU readbacks keep working.
+ * No-op on a lost/disposed context or a disposed target.
+ *
+ * @param rt - The render target to read from.
+ * @param buffer - Destination `WebGLBuffer`, created on `rt`'s context.
+ * @param options - See {@link GLReadPixelsToBufferOptions}.
+ */
+export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGLBuffer, options?: GLReadPixelsToBufferOptions): void {
+    const opts = options ?? {};
+    const format = opts.format ?? RGBA;
+    const gl = bindForRead(rt, format);
+    if (gl === null) {
+        return;
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+    gl.readPixels(opts.x ?? 0, opts.y ?? 0, opts.width ?? rt.width, opts.height ?? rt.height, format, rt._config.type, opts.offset ?? 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+}
+
+/** Shared readback prologue: bail on a lost/disposed context or target, bind
+ *  `rt`'s framebuffer (cached), and set `PACK_ALIGNMENT` 1 for the tightly
+ *  packed `RED` / `RG` reads. Returns the context, or `null` to skip the read. */
+function bindForRead(rt: GLRenderTarget, format: GLenum): WebGL2RenderingContext | null {
+    const engine = rt._engine;
+    if (engine._isLost || engine._disposed || rt._disposed) {
+        return null;
     }
     const gl = engine.gl;
     const s = engine._state;
@@ -369,17 +434,11 @@ export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixel
         gl.bindFramebuffer(gl.FRAMEBUFFER, rt._framebuffer);
         s.boundFramebuffer = rt._framebuffer;
     }
-    const type = rt._config.type;
-    let buffer = into;
-    if (buffer === undefined) {
-        buffer = type === gl.FLOAT ? new Float32Array(elements) : type === gl.HALF_FLOAT ? new Uint16Array(elements) : new Uint8Array(elements);
-    }
     if (format !== RGBA) {
         // Not cached: a sync readback dwarfs it, and callers may change it directly.
         gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
     }
-    gl.readPixels(opts.x ?? 0, opts.y ?? 0, width, height, format, type, buffer);
-    return buffer;
+    return gl;
 }
 
 /**

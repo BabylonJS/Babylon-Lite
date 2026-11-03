@@ -1010,15 +1010,23 @@ export function generateRenderTargetMipMaps(rt: GLRenderTarget): void;
 // (always readable); gl.RED / gl.RG read 1 / 2 channels per texel tightly packed
 // (sets PACK_ALIGNMENT 1) — valid when it matches the target's
 // IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
-export interface GLReadPixelsOptions {
+export interface GLReadPixelsRegionOptions {
     x?: number;
     y?: number;
     width?: number;
     height?: number;
-    into?: ArrayBufferView;
     format?: GLenum;
 }
+export interface GLReadPixelsOptions extends GLReadPixelsRegionOptions {
+    into?: ArrayBufferView;
+}
 export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView;
+// GPU→GPU readback into a caller-owned PIXEL_PACK_BUFFER (`readPixels` with a byte
+// offset): same rect / format rules, binds `buffer` for the read then unbinds it.
+export interface GLReadPixelsToBufferOptions extends GLReadPixelsRegionOptions {
+    offset?: number; // byte offset into `buffer`, default 0
+}
+export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGLBuffer, options?: GLReadPixelsToBufferOptions): void;
 ```
 
 - **`createRenderTarget`** allocates the FBO + an engine-registered color texture
@@ -1807,10 +1815,11 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
    `DEPTH_COMPONENT16` renderbuffer (`generateDepthBuffer`), opt-in stencil via
    `generateRenderTargetStencil` (packed `DEPTH24_STENCIL8` or
    stencil-only `STENCIL_INDEX8`) and opt-in mipmaps via
-   `generateRenderTargetMipMaps`, and GPU→CPU readback
-   (`readRenderTargetPixels`, with an optional `RED` / `RG` read `format` for
+   `generateRenderTargetMipMaps`, and readback
+   (`readRenderTargetPixels` to the CPU, `readRenderTargetPixelsToBuffer` into a
+   `PIXEL_PACK_BUFFER` at a byte offset, both with an optional `RED` / `RG` read `format` for
    `R8` / `RG8` targets created via the `format` option — Babylon core only
-   reads RGBA). NOT supported: multiple render targets (MRT,
+   reads RGBA to the CPU). NOT supported: multiple render targets (MRT,
    item 10).
 3. `SpriteRenderer` / `ThinSprite` are available from the barrel
    (`createSpriteRenderer` / `renderSprites` / `GLSprite`), matching Babylon's

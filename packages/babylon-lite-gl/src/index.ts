@@ -117,9 +117,17 @@ export {
     generateRenderTargetMipMaps,
     resizeRenderTarget,
     readRenderTargetPixels,
+    readRenderTargetPixelsToBuffer,
     disposeRenderTarget,
 } from "./render-target.js";
-export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions, GLReadPixelsOptions } from "./render-target.js";
+export type {
+    GLRenderTarget,
+    GLRenderTargetOptions,
+    GLFloatRenderTargetOptions,
+    GLReadPixelsRegionOptions,
+    GLReadPixelsOptions,
+    GLReadPixelsToBufferOptions,
+} from "./render-target.js";
 
 // ─── Meshes / buffers / instancing ───────────────────────────────────
 export {

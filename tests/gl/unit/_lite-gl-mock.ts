@@ -88,6 +88,7 @@ export function createMockGL(): MockGL {
     const ENUMS: Record<string, number> = {
         ARRAY_BUFFER: 0x8892,
         ELEMENT_ARRAY_BUFFER: 0x8893,
+        PIXEL_PACK_BUFFER: 0x88eb,
         STATIC_DRAW: 0x88e4,
         TRIANGLES: 0x0004,
         UNSIGNED_SHORT: 0x1403,

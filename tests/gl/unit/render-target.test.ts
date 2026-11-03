@@ -8,6 +8,7 @@ import {
     disposeRenderTarget,
     generateRenderTargetMipMaps,
     readRenderTargetPixels,
+    readRenderTargetPixelsToBuffer,
     resizeRenderTarget,
 } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
@@ -414,6 +415,50 @@ describe("lite-gl render-target: readback", () => {
         const out = readRenderTargetPixels(rt, { x: 2, y: 3, width: 4, height: 1 });
         expect(out.byteLength).toBe(4 * 1 * 4);
         expect(callsNamed(mock, "readPixels")[0]?.args.slice(0, 4)).toEqual([2, 3, 4, 1]);
+    });
+});
+
+describe("lite-gl render-target: readback into a PIXEL_PACK_BUFFER", () => {
+    it("reads a RED target tightly into the bound pack buffer at a byte offset, then unbinds it", () => {
+        const { mock, engine, gl } = setup();
+        const rt = createRenderTarget(engine, 3, 2, { format: gl.RED });
+        const pbo = {} as WebGLBuffer;
+        mock.clear();
+        readRenderTargetPixelsToBuffer(rt, pbo, { format: gl.RED, offset: 64 });
+        const relevant = mock.log.filter((c) => c.name === "bindBuffer" || c.name === "readPixels" || c.name === "pixelStorei");
+        expect(relevant.map((c) => [c.name, ...c.args])).toEqual([
+            ["pixelStorei", gl.PACK_ALIGNMENT, 1],
+            ["bindBuffer", gl.PIXEL_PACK_BUFFER, pbo],
+            ["readPixels", 0, 0, 3, 2, gl.RED, gl.UNSIGNED_BYTE, 64],
+            ["bindBuffer", gl.PIXEL_PACK_BUFFER, null],
+        ]);
+        expect(engine._state.boundFramebuffer).toBe(rt._framebuffer);
+    });
+
+    it("defaults to the whole target as RGBA at offset 0, honoring a sub-rect and the attachment type", () => {
+        const { mock, engine, gl } = setup();
+        const rt = createFloatRenderTarget(engine, 4, 4);
+        mock.clear();
+        readRenderTargetPixelsToBuffer(rt, {} as WebGLBuffer);
+        expect(callsNamed(mock, "readPixels")[0]?.args).toEqual([0, 0, 4, 4, gl.RGBA, gl.HALF_FLOAT, 0]);
+        expect(mock.count("pixelStorei")).toBe(0);
+        mock.clear();
+        readRenderTargetPixelsToBuffer(rt, {} as WebGLBuffer, { x: 1, y: 2, width: 2, height: 1 });
+        expect(callsNamed(mock, "readPixels")[0]?.args.slice(0, 4)).toEqual([1, 2, 2, 1]);
+    });
+
+    it("is a no-op on a disposed target or a lost context", () => {
+        const { mock, canvas, engine } = setup();
+        const rt = createRenderTarget(engine, 2, 2);
+        fireLost(canvas);
+        mock.clear();
+        readRenderTargetPixelsToBuffer(rt, {} as WebGLBuffer);
+        expect(mock.count("readPixels") + mock.count("bindBuffer")).toBe(0);
+        fireRestored(canvas);
+        disposeRenderTarget(rt);
+        mock.clear();
+        readRenderTargetPixelsToBuffer(rt, {} as WebGLBuffer);
+        expect(mock.count("readPixels") + mock.count("bindBuffer")).toBe(0);
     });
 });
 

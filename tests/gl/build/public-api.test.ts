@@ -163,6 +163,7 @@ describe("babylon-lite-gl build output", () => {
             "generateRenderTargetMipMaps",
             "resizeRenderTarget",
             "readRenderTargetPixels",
+            "readRenderTargetPixelsToBuffer",
             "disposeRenderTarget",
             // meshes / buffers / instancing
             "createVertexBuffer",

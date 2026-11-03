@@ -153,10 +153,13 @@ use.
 - **Render targets** — `createRenderTarget` (RGBA8 FBO, or single/two-channel
   `R8` / `RG8` via `format: gl.RED` / `gl.RG`, with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
-  (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),
-  `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`
-  (optional trailing `format` reads `RED` / `RG` targets tightly packed),
-  `disposeRenderTarget`.
+  (float / half-float HDR opt-in), `bindRenderTarget` (cached) /
+  `restoreDefaultFramebuffer` (back to the canvas), `resizeRenderTarget`,
+  `generateRenderTargetMipMaps`, `readRenderTargetPixels` (CPU readback; the
+  optional `{ x, y, width, height, into, format }` defaults to the whole target,
+  and `format` reads `RED` / `RG` targets tightly packed),
+  `readRenderTargetPixelsToBuffer` (same, into a `PIXEL_PACK_BUFFER` at a byte
+  `offset`), `disposeRenderTarget`.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
   `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
 - **Depth / stencil / scissor** — `setDepthState`, `setStencilState`,
