@@ -67,6 +67,14 @@ self-host them.
 Full documentation is available at
 [https://doc.babylonjs.com/lite/](https://doc.babylonjs.com/lite/).
 
+## Optional navigation
+
+[Navcat navigation](https://github.com/BabylonJS/Babylon-Lite/blob/master/docs/lite/architecture/navigation-navcat.md)
+loads offline-baked JSON and runs pure-JavaScript path/surface queries without
+Wasm. Generation, off-mesh mutation and CPU debug geometry are independently
+optional. The existing Recast backend remains available. See the Navcat lab demo
+for filters, mesh replacement and disposal/reload.
+
 ## Headless simulation (null engine)
 
 Babylon Lite can run **without a GPU or canvas** for server-side physics,
@@ -96,7 +104,7 @@ supported runtimes, and limitations.
 
 `@babylonjs/lite` is a derivative of [Babylon.js](https://www.babylonjs.com/)
 (Apache-2.0). It bundles a small number of third-party runtime libraries
-(`manifold-3d`, `@recast-navigation/*`, `text-shaper`) whose code ships inside
+(`manifold-3d`, `@recast-navigation/*`, `text-shaper`, `navcat`, `mathcat`) whose code ships inside
 the published package. Their license texts — together with those of the
 upstream native components embedded in their WebAssembly (Recast &amp; Detour and
 the Emscripten runtime) — are reproduced in
