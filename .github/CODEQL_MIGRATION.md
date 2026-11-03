@@ -9,7 +9,7 @@ This runbook prepares an advanced CodeQL workflow that can scan fork-origin pull
 | Workflow prepared | **Complete locally** | `.github/workflows/codeql.yml` passes independent YAML and Actions validation. |
 | Advanced setup active | **Not complete** | A repository administrator switches from default setup and the committed workflow completes on `master`. |
 | Fork PR successfully scanned | **Not complete** | Both CodeQL matrix jobs complete on an authorized benign fork PR and analyses are attached to its pull request merge ref/SHA. |
-| Merge gate verified | **Not complete** | A separately approved ruleset change is shown blocking an existing genuine qualifying alert, if one is available and separately authorized for evaluation, and permitting a clean PR. Without such an alert, qualifying-alert blocking remains unverified. |
+| Merge gate verified | **Not complete** | The new CodeQL-only ruleset is separately shown blocking missing/in-progress required analysis and permitting completed clean analysis. Qualifying-alert blocking is a separate proof: it requires an existing genuine qualifying alert that is available and separately authorized for evaluation; otherwise that behavior remains unverified. |
 
 Do not describe the local workflow as a successful fork scan or a verified merge gate.
 
@@ -79,9 +79,9 @@ These are manual steps for a repository administrator. They intentionally preser
 | Inventory and switch CodeQL setup | `BabylonJS/Babylon-Lite`; repository administrator | Inventory is recorded; after switching, the advanced workflow is the only active CodeQL configuration | Re-enable default setup with the recorded inventory if advanced coverage is not restored promptly |
 | Start the first advanced baseline | `BabylonJS/Babylon-Lite`; repository write permission or higher | A new `workflow_dispatch` run starts on `master` after default setup is disabled | Cancel an incorrectly targeted run; do not treat the pre-cutover push run as a successful baseline |
 | Inspect runs and analyses | `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning | Both language jobs and uploaded analysis origins match the expected ref and commit | Do not advance status; fix or revert the workflow, then rerun |
-| Approve the authorized benign fork run | `BabylonJS/Babylon-Lite`; repository write permission or higher | Only reviewed workflows are released; both CodeQL jobs run with no privileged resources | Cancel unexpected runs and do not approve further workflow revisions |
-| Change rulesets | `BabylonJS/Babylon-Lite`; repository administrator | Existing rules remain intact and only the reviewed CodeQL rule or exact status contexts are added | Remove only the new CodeQL rule or exact new contexts |
-| Verify enforcement | `BabylonJS/Babylon-Lite`; repository read access for observation; any PR change requires separate authorization | A clean PR passes; an already-existing genuine qualifying alert is blocked if one is separately authorized and available | Leave qualifying-alert blocking marked unverified if no safe genuine case exists |
+| Approve a future authorized benign fork run | `BabylonJS/Babylon-Lite`; repository write permission or higher, after explicit user authorization to create the PR | Only reviewed workflows are released; both CodeQL jobs run with no privileged resources | Cancel unexpected runs and do not approve further workflow revisions |
+| Create the CodeQL-only ruleset | `BabylonJS/Babylon-Lite`; repository administrator | A new disabled ruleset targets only `master`; `Protect Master` remains Active and byte-for-byte unchanged | Delete the unactivated new ruleset, or keep it Disabled, without changing existing rulesets |
+| Verify enforcement | `BabylonJS/Babylon-Lite`; repository read access for observation; any PR change requires separate authorization | Missing/in-progress analysis blocks separately from clean completion; genuine qualifying-alert blocking is evidenced only if a separately authorized existing case is available | Disable only the new CodeQL-only ruleset or remove its exact new rule; leave `Protect Master` Active |
 
 1. **Review and merge the prepared files**
    - Repository: `BabylonJS/Babylon-Lite`.
@@ -122,9 +122,10 @@ These are manual steps for a repository administrator. They intentionally preser
    - Verification: the run event is `workflow_dispatch`, the branch is `master`, and both analyses report the exact explicit categories and the run's commit SHA.
    - Recovery: cancel a run targeted at any branch other than `master`. If either analysis fails, do not add a merge requirement. Fix or revert the workflow; if coverage cannot be restored promptly, re-enable default setup.
 
-5. **Authorize the already pending benign fork validation only after workflow review**
+5. **Authorize a future benign fork validation only after explicit user approval**
    - Repository and permission: `BabylonJS/Babylon-Lite`; repository write permission or higher.
-   - Use only the separately authorized pending benign fork PR. Do not create another test PR or repurpose an unrelated contributor PR.
+   - No benign fork test PR currently exists or is authorized. Keep this item pending unless the user explicitly authorizes creating one.
+   - After that authorization, create only the narrowly approved benign fork PR. Never repurpose [#813](https://github.com/BabylonJS/Babylon-Lite/pull/813) or any other contributor PR for testing.
    - Confirm the benign change touches only the authorized non-executable content and does not modify `.github/workflows/**`, Actions, dependencies, build scripts, or CodeQL configuration.
    - In the PR's **Checks** tab, open **Awaiting approval** and review every workflow awaiting approval. Approval may release workflows other than CodeQL. Do not approve until every pending workflow is safe.
    - Use **Approve workflows to run** only after that review. Keep the repository's `first_time_contributors` approval policy unchanged.
@@ -150,25 +151,27 @@ These are manual steps for a repository administrator. They intentionally preser
    - Verification: compare the post-change ruleset to the saved pre-change JSON and confirm only the reviewed additions or exact replacement changed.
    - Recovery: restore only the replaced exact context; never remove existing unrelated checks.
 
-8. **Choose and add vulnerability merge protection**
+8. **Choose and stage a separate CodeQL-only merge-protection ruleset**
    - Repository and permission: `BabylonJS/Babylon-Lite`; repository administrator.
    - Threshold choice is intentionally pending. Decide explicitly whether to block at **Critical**, **High or higher**, **Medium or higher**, or **All**, and whether non-security alerts block.
-   - Open **Settings → Rulesets → Rulesets** and edit `Protect Master`, or create a narrowly targeted branch ruleset for the default branch.
-   - Add **Require code scanning results**, add tool **CodeQL**, and select the approved **Alerts** and **Security alerts** thresholds.
-   - Preserve all existing rules, required checks, review requirements, bypass actors, deletion protection, and non-fast-forward protection.
-   - Public-repository rulesets currently offer **Active** or **Disabled** enforcement. Keep the new rule **Disabled** until the reviewed activation point if a staged rollout is needed; do not assume an Evaluate mode is available.
-   - Verification: read back the ruleset and confirm its target, enforcement, CodeQL thresholds, existing rules, checks, and bypass actors.
-   - Recovery: remove or disable only the newly added CodeQL rule; preserve every pre-existing rule.
+   - Open **Settings → Rulesets → Rulesets → New ruleset → New branch ruleset**.
+   - Create a new, separate ruleset named for CodeQL merge protection, target only the default branch (`master`), and leave the new ruleset **Disabled** while staging it.
+   - Add **Require code scanning results**, add tool **CodeQL**, and select the explicitly approved **Alerts** and **Security alerts** thresholds.
+   - Do not edit, disable, or replace the existing Active `Protect Master` ruleset. Its required check, review behavior, bypass actors, deletion protection, and non-fast-forward protection must remain unchanged.
+   - Public-repository rulesets currently offer **Active** or **Disabled** enforcement; do not assume an Evaluate mode is available.
+   - Verification while staged: read back both rulesets. Confirm the new CodeQL-only ruleset is **Disabled**, targets only `master`, and contains only the reviewed CodeQL rule. Confirm `Protect Master` remains **Active** and unchanged.
+   - Activation prerequisite: successful `master` baseline, successful explicitly authorized fork scan, explicit threshold decision, and separate explicit approval to activate the new ruleset.
+   - Recovery before activation: delete the new unactivated ruleset or leave it Disabled. Recovery after activation: disable only the new CodeQL-only ruleset or remove its exact CodeQL rule. Never disable an existing whole ruleset.
 
 9. **Verify the merge gate separately**
    - Repository and permission: `BabylonJS/Babylon-Lite`; repository read access for observation. Any PR modification requires separate explicit authorization.
    - Do not create, insert, or preserve a malicious or test vulnerability for gate validation.
-   - Verify that a clean authorized PR completes CodeQL and is not blocked by the CodeQL results rule.
+   - First verify analysis-state enforcement separately: while the new CodeQL-only ruleset is Active, confirm an authorized PR is blocked while required CodeQL analysis is missing or in progress, then confirm the same PR is no longer blocked by that condition after both required analyses complete cleanly.
    - If a real PR already has a genuine alert at or above the chosen threshold and its use for validation is separately authorized, observe whether the rule blocks it. Do not alter the alert solely to manufacture a test.
-   - If no separately authorized genuine qualifying alert exists, leave qualifying-alert blocking marked **Not complete**. A clean pass alone does not verify blocking behavior.
+   - If no separately authorized genuine qualifying alert exists, record analysis-state enforcement as verified but leave qualifying-alert blocking marked **Not complete**. A clean completion proves neither threshold blocking nor alert handling.
    - Do not disable or exclude `js/polynomial-redos` merely to suppress a separate SARIF warning. Investigate the warning independently.
-   - Verification: record the clean-pass evidence and, only if available, the genuine-alert blocking evidence. Mark **Merge gate verified** only when both behaviors are evidenced.
-   - Recovery: if the rule blocks clean PRs unexpectedly, remove or disable only the new CodeQL rule and preserve all previous protections.
+   - Verification: record missing/in-progress blocking and clean-completion evidence separately from any genuine qualifying-alert blocking evidence. Mark the overall merge gate fully verified only when every claimed behavior is evidenced.
+   - Recovery: if the rule blocks clean PRs unexpectedly, disable only the new CodeQL-only ruleset or remove its exact CodeQL rule. Keep `Protect Master` Active and unchanged.
 
 ## Merge queue and Dependabot limitations
 
