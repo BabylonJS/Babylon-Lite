@@ -383,6 +383,12 @@ exports[`right-handed drift guard > post-process/screen-space-raymarch-wgsl.ts: 
 }
 `;
 
+exports[`right-handed drift guard > post-process/ssao.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "createSsaoTask use": "«» → «if ( _rightHanded ) { throw new Error ( " SSAO currently supports only left - handed builds. " ) ; }»",
+}
+`;
+
 exports[`right-handed drift guard > render/linear-depth-material.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "VERTEX ?:": "out.viewZ = «» → «-» viewPos.z ;",

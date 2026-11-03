@@ -359,7 +359,10 @@ another camera (including a secondary view or reflection/probe camera), or no
 camera, samples the existing neutral white texture instead: it renders normally
 without borrowing another view's occlusion. A pass using the AO camera must still
 have the same effective aspect ratio; a mismatched projection remains an explicit
-configuration error.
+configuration error. The pass publishes the actual viewport-adjusted aspect used
+to pack its scene UBO, including canvas dimensions when `RenderTaskConfig.cs` is
+enabled. Validation uses that value, not the physical offscreen target shape:
+a square target using the AO camera's canvas-aspect projection is valid.
 The task is bound to one owning scene. New material attachment happens before
 scene registration; repeated enabling for already attached materials is idempotent.
 Shared source materials retain one dispatcher plugin. Its weak consuming-scene
@@ -426,6 +429,15 @@ groups or invalidate render bundles every frame. Each watched plugin's token is
 compared independently, rather than summed, so opposite selection changes cannot
 cancel each other. Scene selection still runs before camera selection. Disposal,
 output replacement and device replacement retain fenced texture-generation leases.
+Binding users reference-count each cached pass state. Successful generation
+replacement, mesh removal and task disposal retire their removed bindings;
+candidate rollback preserves bindings retained by the live generation.
+The last binding user immediately removes its cached state and schedules its
+texture leases for fenced release, even while the mesh remains alive. One
+mesh-lifetime cleanup callback is retained as a fallback, not one callback per
+temporary pass or output resize. These cold retirement hooks and the pass-aspect
+publisher are installed only by the dynamic-binding enabler through
+`render/draw-binding-lifecycle.ts`, and fold away from ordinary passes.
 
 The feature owns sampled-texture leases, neutral fallback, and old-generation
 retirement. Materials capture only a sampled-texture state object, never the
@@ -1267,6 +1279,7 @@ separately and are not dependencies of the public build or CI.
 - `post-process/ssao/ssao-motion-mask-wgsl.ts`: camera-relative motion bounds, hierarchy union, and conservative transport queries.
 - `post-process/ssao/ssao-pbr.ts`: opt-in diffuse-IBL composition and sampled-output ownership.
 - `material/plugin/dynamic-pbr-bindings.ts`: resource-versioned material bindings and fenced generation leases.
+- `render/draw-binding-lifecycle.ts`: opt-in binding retirement and actual pass-projection metadata hooks.
 - `material/plugin/pbr-plugin-passes.ts`: IBL-only plugin pass policy, signatures and binding selection, installed by `enableDynamicPbrBindings`.
 - `material/plugin/pbr-plugin-decorator.ts`: nullable plugin-bridge decoration seam with a separately tree-shakable installer.
 - `material/pbr/pbr-diffuse-occlusion.ts`: nullable generic shader-expression seam, isolated from lazy namespace exports.

@@ -558,7 +558,8 @@ export function enumerateLibEntries(): Record<string, string> {
                 key === "material/plugin/pbr-plugin-passes" ||
                 key === "shader/binding-extension" ||
                 key === "shader/read-only-storage-binding" ||
-                key === "math/invert-mat4-to-ref"
+                key === "math/invert-mat4-to-ref" ||
+                key === "render/draw-binding-lifecycle"
             ) {
                 extensionEntries[key] = full;
             } else {

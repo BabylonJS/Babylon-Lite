@@ -40,6 +40,7 @@ describe("bundle tooling correctness", () => {
             "shader/binding-extension",
             "shader/read-only-storage-binding",
             "math/invert-mat4-to-ref",
+            "render/draw-binding-lifecycle",
             ...keys.filter((key) => key.startsWith("post-process/ssao")),
         ];
         expect(optional.length).toBeGreaterThan(10);

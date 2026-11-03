@@ -20,6 +20,11 @@ import { createSceneContext } from "../../../packages/babylon-lite/src/scene/sce
 import { getTextureReferenceStore } from "../../../packages/babylon-lite/src/resource/texture-reference-store.js";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
+import { _createAutomaticRenderTask, _removeMeshFromRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task-base.js";
+import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task.js";
+import { drawBindingLifecycle } from "../../../packages/babylon-lite/src/render/draw-binding-lifecycle.js";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable.js";
 
 const install = vi.spyOn(PbrBinding, "installPbrBindingDecorator");
 enableDynamicPbrBindings();
@@ -57,6 +62,56 @@ function sampled(plugin: MaterialPlugin): Texture2D {
     const bindings: PluginTextureBinding[] = [];
     plugin.bindTextures!(bindings);
     return bindings[0]!.texture;
+}
+
+function renderFixture() {
+    const f = fixture();
+    const pass = {
+        setBindGroup: vi.fn(),
+        setPipeline: vi.fn(),
+        setViewport: vi.fn(),
+        setScissorRect: vi.fn(),
+        executeBundles: vi.fn(),
+        end: vi.fn(),
+    };
+    Object.assign(f.device, {
+        createBuffer: (descriptor: GPUBufferDescriptor) => ({ destroy: vi.fn(), getMappedRange: () => new ArrayBuffer(Number(descriptor.size)), unmap: vi.fn() }),
+        createBindGroupLayout: () => ({}),
+        createBindGroup: () => ({}),
+        createRenderBundleEncoder: () => ({ ...pass, finish: () => ({}) }),
+    });
+    Object.assign(f.device.queue, { writeBuffer: vi.fn() });
+    Object.assign(f.engine, {
+        canvas: { width: 128, height: 96 },
+        _currentEncoder: { beginRenderPass: () => pass },
+    });
+    return f;
+}
+
+function publishOutput(f: ReturnType<typeof fixture>, width = 128, height = 96) {
+    const output = texture();
+    const gpu = { visibility: output.texture, width, height } as SsaoGpu;
+    f.task.outputTexture._colorView = output.view;
+    f.task._onOutputChanged!(gpu, f.task.outputTexture);
+    return { output, gpu };
+}
+
+function addDynamicRenderable(f: ReturnType<typeof fixture>) {
+    const ao = f.material.plugins![0]!;
+    const pipeline = {} as GPURenderPipeline;
+    const makeGroup = vi.fn(() => ({ texture: sampled(ao).texture }) as unknown as GPUBindGroup);
+    const disposers: (() => void)[] = [];
+    const renderable: Renderable = {
+        order: 0,
+        isTransparent: false,
+        mesh: {} as Mesh,
+        bind() {
+            const binding: DrawBinding = { renderable, pipeline, draw: () => 1 };
+            return decorate(binding, f.engine, [ao], "ibl", 0, 0, makeGroup, () => 1, disposers, f.scene);
+        },
+    };
+    f.scene._renderables.push(renderable);
+    return { renderable, makeGroup, disposers };
 }
 
 describe("IBL calculation selection", () => {
@@ -252,6 +307,178 @@ describe("PBR SSAO scope and ownership", () => {
 });
 
 describe("dynamic PBR binding generations", () => {
+    it("releases temporary automatic-pass leases before repeated AO resize cycles while the mesh lives", async () => {
+        const f = renderFixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const mesh = addDynamicRenderable(f);
+        let current = publishOutput(f);
+        for (let cycle = 0; cycle < 3; cycle++) {
+            const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 128, height: 96 } });
+            const pass = _createAutomaticRenderTask({ name: "temporary", rt }, f.engine, f.scene);
+            pass.record();
+            pass.execute!();
+            const binding = pass._opaqueBindings[0]!;
+            pass.dispose();
+            pass.dispose();
+            expect(() => binding.update!(pass._updateContext)).toThrow("retired");
+            const previous = current;
+            current = publishOutput(f);
+            previous.gpu.releaseVisibility!();
+            expect(previous.output.texture.destroy).not.toHaveBeenCalled();
+            disposeGpuResourceRetirements(f.engine);
+            expect(previous.output.texture.destroy).toHaveBeenCalledOnce();
+            expect(mesh.disposers).toHaveLength(1);
+        }
+        expect(f.scene._renderables).toContain(mesh.renderable);
+        f.task.dispose();
+        current.gpu.releaseVisibility!();
+        mesh.disposers.forEach((dispose) => dispose());
+        f.scene._disposables.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(f.engine);
+        expect(current.output.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("retires replaced explicit binding generations and removed bindings without retiring the mesh", async () => {
+        const f = renderFixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const mesh = addDynamicRenderable(f);
+        const output = publishOutput(f);
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 128, height: 96 } });
+        const pass = createRenderTask({ name: "explicit", rt }, f.engine, f.scene);
+        pass.record();
+        pass.execute!();
+        const old = pass._opaqueBindings[0]!;
+        pass.record();
+        expect(() => old.draw({} as GPURenderPassEncoder, f.engine)).toThrow("updated before drawing");
+        pass.execute!();
+        expect(mesh.makeGroup).toHaveBeenCalledTimes(2);
+        const active = pass._opaqueBindings[0]!;
+        _removeMeshFromRenderTask(pass, mesh.renderable.mesh!);
+        expect(() => active.update!(pass._updateContext)).toThrow("retired");
+        const next = publishOutput(f);
+        output.gpu.releaseVisibility!();
+        disposeGpuResourceRetirements(f.engine);
+        expect(output.output.texture.destroy).toHaveBeenCalledOnce();
+        expect(mesh.disposers).toHaveLength(1);
+        pass.dispose();
+        f.task.dispose();
+        next.gpu.releaseVisibility!();
+        mesh.disposers.forEach((dispose) => dispose());
+        f.scene._disposables.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("preserves the live generation after a candidate bind fails", async () => {
+        const f = renderFixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const mesh = addDynamicRenderable(f);
+        const output = publishOutput(f);
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 128, height: 96 } });
+        const pass = _createAutomaticRenderTask({ name: "rollback", rt }, f.engine, f.scene);
+        pass.record();
+        pass.execute!();
+        const active = pass._opaqueBindings[0]!;
+        const refs = getTextureReferenceStore().get(output.output.texture);
+        f.scene._renderables.push({
+            order: 0,
+            isTransparent: false,
+            bind: () => {
+                throw new Error("candidate failed");
+            },
+        });
+        expect(() => pass.record()).toThrow("candidate failed");
+        expect(pass._opaqueBindings[0]).toBe(active);
+        disposeGpuResourceRetirements(f.engine);
+        expect(getTextureReferenceStore().get(output.output.texture)).toBe(refs);
+        expect(() => active.draw({} as GPURenderPassEncoder, f.engine)).not.toThrow();
+        pass.dispose();
+        f.task.dispose();
+        output.gpu.releaseVisibility!();
+        mesh.disposers.forEach((dispose) => dispose());
+        f.scene._disposables.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it.each([false, true])("uses canvas projection aspect for square cs passes, including viewports (%s)", async (viewport) => {
+        const f = renderFixture();
+        if (viewport) {
+            f.camera.viewport = { x: 0, y: 0, width: 0.5, height: 1 };
+        }
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const mesh = addDynamicRenderable(f);
+        const output = publishOutput(f);
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 64, height: 64 } });
+        const config = { name: "canvas aspect", rt, cs: true };
+        const pass = _createAutomaticRenderTask(config, f.engine, f.scene);
+        pass.record();
+        expect(() => pass.execute!()).not.toThrow();
+        expect(pass._updateContext._projectionAspect).toBe((128 / 96) * (viewport ? 0.5 : 1));
+        expect(() => pass.execute!()).not.toThrow();
+        expect(mesh.makeGroup).toHaveBeenCalledOnce();
+        config.cs = false;
+        expect(() => pass.execute!()).toThrow("aspect ratio");
+        config.cs = true;
+        f.engine.canvas.width = 96;
+        expect(() => pass.execute!()).toThrow("aspect ratio");
+        const resized = publishOutput(f, 96, 96);
+        expect(() => pass.execute!()).not.toThrow();
+        pass.dispose();
+        f.task.dispose();
+        output.gpu.releaseVisibility!();
+        resized.gpu.releaseVisibility!();
+        mesh.disposers.forEach((dispose) => dispose());
+        f.scene._disposables.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it("retains a shared context state until its last binding retires and preserves retained bindings", () => {
+        const f = fixture();
+        const source = texture();
+        const plugin: MaterialPlugin = { name: "shared", _bindingVersion: () => 0, getActiveTextures: (out) => out.push(source) };
+        const binding: DrawBinding = {
+            renderable: { order: 0, isTransparent: false, bind: () => binding },
+            pipeline: {} as GPURenderPipeline,
+            draw: () => 1,
+        };
+        const disposers: (() => void)[] = [];
+        const a = decorate(
+            binding,
+            f.engine,
+            [plugin],
+            "ibl",
+            0,
+            0,
+            () => ({}) as GPUBindGroup,
+            () => 1,
+            disposers
+        );
+        const b = decorate(
+            binding,
+            f.engine,
+            [plugin],
+            "ibl",
+            0,
+            0,
+            () => ({}) as GPUBindGroup,
+            () => 1,
+            disposers
+        );
+        const context = { targetWidth: 128, targetHeight: 96 };
+        a.update!(context);
+        b.update!(context);
+        drawBindingLifecycle!._retire([[a]]);
+        drawBindingLifecycle!._retire([[b]], [[b]]);
+        disposeGpuResourceRetirements(f.engine);
+        expect(source.texture.destroy).not.toHaveBeenCalled();
+        expect(() => b.draw({} as GPURenderPassEncoder, f.engine)).not.toThrow();
+        drawBindingLifecycle!._retire([[b]]);
+        expect(source.texture.destroy).not.toHaveBeenCalled();
+        disposeGpuResourceRetirements(f.engine);
+        expect(source.texture.destroy).toHaveBeenCalledOnce();
+        expect(disposers).toHaveLength(1);
+        disposers.forEach((dispose) => dispose());
+    });
+
     it("keeps AO and neutral generations isolated for passes sharing one renderable and pipeline", async () => {
         const f = fixture();
         await enablePbrSsao(f.scene, f.task, [f.material]);

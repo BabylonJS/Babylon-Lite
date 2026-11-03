@@ -199,7 +199,8 @@ export async function enablePbrSsao(scene: SceneContext, task: SsaoTask, materia
                 if (
                     useAo &&
                     sampling.width &&
-                    getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) !== getEffectiveAspectRatio(camera, sampling.width, sampling.height)
+                    (context._projectionAspect ?? getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight)) !==
+                        getEffectiveAspectRatio(camera, sampling.width, sampling.height)
                 ) {
                     throw new Error("PBR SSAO and its consuming pass must use the same camera aspect ratio.");
                 }

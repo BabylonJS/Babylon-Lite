@@ -3,6 +3,29 @@ import { build } from "esbuild";
 import { resolve } from "node:path";
 
 describe("SSAO root-entry opt-in", () => {
+    it.each(["createRenderTask", "createSceneContext", "enablePbrSsao"])("isolates pass lifetime and projection hooks behind dynamic PBR (%s)", async (name) => {
+        const result = await build({
+            stdin: {
+                contents: `import { ${name} } from ${JSON.stringify(resolve("packages/babylon-lite/src/index.ts"))}; globalThis.usedExport=${name};`,
+                resolveDir: process.cwd(),
+                loader: "ts",
+            },
+            bundle: true,
+            write: false,
+            format: "esm",
+            platform: "browser",
+            packages: "external",
+            external: ["*?worker&inline"],
+            loader: { ".wgsl": "text", ".wasm": "file" },
+            outdir: ".ao-reference-cache/bundle-check",
+            logLevel: "silent",
+            minify: true,
+            target: "esnext",
+        });
+        const code = result.outputFiles[0]!.text;
+        expect(code.includes("_projectionAspect")).toBe(name === "enablePbrSsao");
+        expect(code.includes("Dynamic material binding has been retired.")).toBe(name === "enablePbrSsao");
+    });
     it.each(["enableMaterialPlugins", "enablePbrMaterialPluginVertexData", "enablePbrSsao", "createGeometryRendererTask", "enableGeometryVelocity"])(
         "isolates optional plugin and velocity implementations (%s)",
         async (name) => {
