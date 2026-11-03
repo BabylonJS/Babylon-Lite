@@ -3,7 +3,7 @@ import { gzipSync } from "node:zlib";
 import { minify } from "terser";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rollup } from "rollup";
-import { cleanupTempDirs, ensureLibBuilt, isExternalRequest, LIB_ENTRY, makeTempEntry } from "./bundler-harness.js";
+import { cleanupTempDirs, ensureLibBuilt, isExternalRequest, LIB_ENTRY, makeTempEntry, packageImportsPlugin } from "./bundler-harness.js";
 
 // Include the real bundled Navcat/mathcat SDK, rather than treating this vendor as a mock.
 async function bundle(source: string): Promise<string> {
@@ -11,6 +11,7 @@ async function bundle(source: string): Promise<string> {
         input: makeTempEntry(source),
         external: (id) => isExternalRequest(id) && !/[\\/]_chunks[\\/]vendor[\\/]navcat/.test(id),
         treeshake: { moduleSideEffects: false },
+        plugins: [packageImportsPlugin()],
         onwarn(warning) {
             if (warning.code !== "CIRCULAR_DEPENDENCY") {
                 throw new Error(warning.message);
