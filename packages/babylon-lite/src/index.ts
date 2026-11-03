@@ -466,6 +466,7 @@ export { createStandardNoColorMaterialView } from "./material/standard/no-color-
 export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
+export { setStandardParallaxOcclusion } from "./material/standard/set-std-parallax-occlusion.js";
 export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
 export { setStandardSpecularTexture } from "./material/standard/set-std-specular.js";
 export { setStandardAmbientTexture } from "./material/standard/set-std-ambient.js";
@@ -488,6 +489,8 @@ export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
 export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrParallaxOcclusion } from "./material/pbr/set-parallax-occlusion.js";
+export type { ParallaxOcclusionProps } from "./material/parallax/parallax-occlusion.js";
 export { setPbrSheen } from "./material/pbr/set-sheen.js";
 export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
 export { setPbrUnlit } from "./material/pbr/set-unlit.js";

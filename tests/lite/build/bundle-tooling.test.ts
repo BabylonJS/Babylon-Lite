@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build, normalizePath, type Plugin } from "vite";
+import ts from "typescript";
 
 import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
 import { createLiteCodeSplitting, litePackageResolverPlugin, resolveLitePackageSpecifier, terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
@@ -18,6 +19,51 @@ afterEach(() => {
 });
 
 describe("bundle tooling correctness", () => {
+    it("keeps short ESM export names without aliases or binding collisions", async () => {
+        const root = mkdtempSync(join(tmpdir(), "lite-mangle-export-bindings-"));
+        tempDirs.push(root);
+        const outDir = join(root, "out");
+        writeFileSync(
+            join(root, "entry.js"),
+            `
+import { amount } from "./value.js";
+const x = amount + 1;
+const y = amount + 2;
+const reservedExport = amount + 3;
+function calculate() { const z = 2; return x * 100 + y * z; }
+export { x as a, y as b, calculate as c, calculate as alias, reservedExport as if };
+`
+        );
+        writeFileSync(join(root, "value.js"), "export const amount = globalThis.Number('40');");
+        await build({
+            root,
+            configFile: false,
+            publicDir: false,
+            logLevel: "silent",
+            plugins: [terserPropertyManglePlugin()],
+            build: {
+                outDir,
+                minify: false,
+                rollupOptions: {
+                    input: join(root, "entry.js"),
+                    preserveEntrySignatures: "strict",
+                    output: { format: "es", entryFileNames: "entry.mjs" },
+                },
+            },
+        });
+        const entry = (await import(pathToFileURL(join(outDir, "entry.mjs")).href)) as { a: number; b: number; if: number; c(): number; alias(): number };
+        expect([entry.a, entry.b, entry.c(), entry.alias(), entry.if]).toEqual([41, 42, 4184, 4184, 43]);
+        const source = ts.createSourceFile("entry.mjs", readFileSync(join(outDir, "entry.mjs"), "utf8"), ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+        const exports = source.statements
+            .filter(ts.isExportDeclaration)
+            .flatMap((statement) => (statement.exportClause && ts.isNamedExports(statement.exportClause) ? statement.exportClause.elements : []));
+        for (const name of ["a", "b", "c"]) {
+            const exported = exports.find((item) => item.name.text === name);
+            expect(exported).toBeDefined();
+            expect(exported!.propertyName).toBeUndefined();
+        }
+    });
+
     it("assigns optional accessibility error codes after core errors", () => {
         const root = join(tmpdir(), "lite-error-order");
         const core = join(root, "scene/scene-core.ts");

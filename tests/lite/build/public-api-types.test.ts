@@ -35,6 +35,61 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes typed parallax setters only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "parallax-occlusion-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createPbrMaterial, createStandardMaterial, setPbrParallaxOcclusion,
+    setStandardParallaxOcclusion, type ParallaxOcclusionProps, type Texture2D,
+} from "./index.js";
+declare const heightTexture: Texture2D;
+const props: ParallaxOcclusionProps = {
+    heightTexture, heightScale: 0.04, heightCenter: 0.5,
+    heightChannel: "a", minSteps: 8, maxSteps: 32, refinementSteps: 8,
+};
+const pbr = createPbrMaterial();
+const standard = createStandardMaterial();
+setPbrParallaxOcclusion(pbr, props);
+setStandardParallaxOcclusion(standard, props);
+setPbrParallaxOcclusion(pbr, null);
+setStandardParallaxOcclusion(standard, null);
+// @ts-expect-error Height channels are explicitly typed.
+setPbrParallaxOcclusion(pbr, { heightTexture, heightChannel: "rgb" });
+// @ts-expect-error Backing state must not bypass extension registration.
+pbr._parallaxOcclusion;
+// @ts-expect-error Backing state must not bypass extension registration.
+standard._parallaxOcclusion;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes physics discovery and allocation-free inspection without internal state", () => {
         const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
         try {
