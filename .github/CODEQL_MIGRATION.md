@@ -9,7 +9,7 @@ This runbook prepares an advanced CodeQL workflow that can scan fork-origin pull
 | Workflow prepared | **Complete locally** | `.github/workflows/codeql.yml` passes independent YAML and Actions validation. |
 | Advanced setup active | **Not complete** | A repository administrator switches from default setup and the committed workflow completes on `master`. |
 | Fork PR successfully scanned | **Not complete** | Both CodeQL matrix jobs complete on an authorized benign fork PR and analyses are attached to its pull request merge ref/SHA. |
-| Merge gate verified | **Not complete** | A separately approved ruleset change blocks a controlled vulnerable PR at the chosen threshold and permits a clean PR. |
+| Merge gate verified | **Not complete** | A separately approved ruleset change is shown blocking an existing genuine qualifying alert, if one is available and separately authorized for evaluation, and permitting a clean PR. Without such an alert, qualifying-alert blocking remains unverified. |
 
 Do not describe the local workflow as a successful fork scan or a verified merge gate.
 
@@ -21,6 +21,7 @@ Path: `.github/workflows/codeql.yml`
 - Languages: `javascript-typescript` and `actions`, matching the two categories in current CodeQL analyses. The default-setup API also reports the aliases `javascript` and `typescript`; CodeQL combines those into the `javascript-typescript` database.
 - Query suite: `security-extended`, which includes the default security queries plus lower-precision security queries.
 - Build mode: `none` for every matrix entry.
+- Analysis categories: explicitly `/language:javascript-typescript` and `/language:actions`, preserving the current analysis origins used to match results.
 - Execution: only `actions/checkout`, `github/codeql-action/init`, and `github/codeql-action/analyze` on a disposable `ubuntu-latest` GitHub-hosted runner.
 - Checkout: the event's normal ref is used. On `pull_request`, this is the pull request merge ref; there is no `ref` override and no `pull_request_target`.
 - Project code: checked out for static extraction only. The workflow has no package installation, dependency restoration, autobuild, shell command, project script, build, test, downloaded project tool, cache, artifact handoff, or custom query execution.
@@ -56,7 +57,7 @@ Observed on 2026-11-03 through GitHub REST/GraphQL APIs:
 | Active ruleset | `Protect Master` targets the default branch and requires `BabylonJS.Babylon-Lite` from integration `9426`; it also blocks deletion/non-fast-forward updates and enables Copilot review. It does not currently require CodeQL or code scanning results. | [Ruleset 14982197](https://github.com/BabylonJS/Babylon-Lite/rules/14982197) |
 | Legacy protection | `master` requires two approvals and conversation resolution; force pushes and deletion are disabled. | [`GET /branches/master/protection`](https://api.github.com/repos/BabylonJS/Babylon-Lite/branches/master/protection) |
 | Merge queue | GraphQL returned `mergeQueue: null`. `merge_group` is included proactively, but there is no queue to verify today. | [Repository](https://github.com/BabylonJS/Babylon-Lite) |
-| Actions policy | Actions are enabled and all actions are allowed. Repository SHA pin enforcement is off. Default workflow token permission is `write`, and workflows may approve pull request reviews. | [`GET /actions/permissions`](https://api.github.com/repos/BabylonJS/Babylon-Lite/actions/permissions), [`GET /actions/permissions/workflow`](https://api.github.com/repos/BabylonJS/Babylon-Lite/actions/permissions/workflow) |
+| Actions policy | Repository-level APIs report that Actions are enabled and all actions are allowed. Repository SHA pin enforcement is off. Default workflow token permission is `write`, and workflows may approve pull request reviews. Organization Actions-policy endpoints returned `403`, so inherited organization policy was not verified. | [`GET /actions/permissions`](https://api.github.com/repos/BabylonJS/Babylon-Lite/actions/permissions), [`GET /actions/permissions/workflow`](https://api.github.com/repos/BabylonJS/Babylon-Lite/actions/permissions/workflow) |
 | Outside contributors | Workflow approval policy is `first_time_contributors`. Approval can release all pending workflows for that commit, not only CodeQL, so every pending workflow must be reviewed before approval. | [`GET /actions/permissions/fork-pr-contributor-approval`](https://api.github.com/repos/BabylonJS/Babylon-Lite/actions/permissions/fork-pr-contributor-approval) |
 | Custom CodeQL configuration | No `.github/codeql*` file, CodeQL workflow, repository property value, or `github-codeql-config-file` organization property was found. The repository code-security-configuration endpoint returned `204 No Content`. | Repository tree; [`GET /properties/values`](https://api.github.com/repos/BabylonJS/Babylon-Lite/properties/values) |
 
@@ -72,64 +73,98 @@ Workflow changes proposed by a pull request remain untrusted. Keep the workflow 
 
 These are manual steps for a repository administrator. They intentionally preserve the existing Actions approval policy and branch protections.
 
+| Step | Repository and required permission | Verification | Recovery |
+| --- | --- | --- | --- |
+| Review and merge files | `BabylonJS/Babylon-Lite`; normal write/merge permission plus all currently required reviews and checks | Both prepared files are present on `master` with no unrelated diff | Revert only the prepared commit through the normal reviewed process |
+| Inventory and switch CodeQL setup | `BabylonJS/Babylon-Lite`; repository administrator | Inventory is recorded; after switching, the advanced workflow is the only active CodeQL configuration | Re-enable default setup with the recorded inventory if advanced coverage is not restored promptly |
+| Inspect runs and analyses | `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning | Both language jobs and uploaded analysis origins match the expected ref and commit | Do not advance status; fix or revert the workflow, then rerun |
+| Approve the authorized benign fork run | `BabylonJS/Babylon-Lite`; repository write permission or higher | Only reviewed workflows are released; both CodeQL jobs run with no privileged resources | Cancel unexpected runs and do not approve further workflow revisions |
+| Change rulesets | `BabylonJS/Babylon-Lite`; repository administrator | Existing rules remain intact and only the reviewed CodeQL rule or exact status contexts are added | Remove only the new CodeQL rule or exact new contexts |
+| Verify enforcement | `BabylonJS/Babylon-Lite`; repository read access for observation; any PR change requires separate authorization | A clean PR passes; an already-existing genuine qualifying alert is blocked if one is separately authorized and available | Leave qualifying-alert blocking marked unverified if no safe genuine case exists |
+
 1. **Review and merge the prepared files**
    - Repository: `BabylonJS/Babylon-Lite`.
+   - Required permission: normal repository write/merge permission, subject to all existing reviews and required checks.
    - Review `.github/workflows/codeql.yml` and this runbook.
    - Confirm there are no unrelated changes and no changes to signing, publishing, dependencies, application code, or other CI.
    - Merge only through the repository's normal reviewed process. This runbook does not authorize a merge.
+   - Verification: both files are present on `master` at the reviewed commit.
+   - Recovery: revert only that commit through the normal reviewed process.
 
 2. **Inventory current default-setup-only configuration**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository administrator.
    - Open **Settings → Advanced Security → CodeQL analysis**.
    - Record the languages, query suite, threat model, model packs, custom configuration property, runner, and schedule.
    - Expected repository-specific baseline: JavaScript/TypeScript plus Actions, default suite, remote threat model, weekly standard runner.
    - If the UI shows model packs or organization configuration not listed above, stop and preserve that coverage before continuing.
+   - Verification: save the complete inventory before any state change.
+   - Recovery: no recovery is needed because this step is read-only.
 
 3. **Switch from default setup to advanced setup**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository administrator.
    - In **Settings → Advanced Security → CodeQL analysis**, open the `…` menu and choose **Switch to advanced**.
    - In the confirmation dialog, choose **Disable CodeQL**.
    - Consequence: this disables only GitHub's managed default setup. It does not activate the replacement by itself. Perform this immediately after the workflow is present on `master`; do not leave the repository without a working CodeQL configuration.
    - Do not try to upload advanced results while default setup is still active; GitHub rejects the competing configuration.
-   - Recovery before a successful advanced run: re-enable default setup with the inventory from step 2.
+   - Verification: the default-setup API no longer reports `state: configured`, and the committed advanced workflow starts for `master`.
+   - Recovery: before a successful advanced run, re-enable default setup with the inventory from step 2.
 
 4. **Verify the first advanced `master` run**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning.
    - Open **Actions → CodeQL** and select the `push` run for the activation commit.
    - Require both `Analyze (javascript-typescript)` and `Analyze (actions)` to complete successfully.
-   - In **Security → Code scanning**, confirm two CodeQL analyses exist for `refs/heads/master` at the activation commit SHA with categories `/language:javascript-typescript` and `/language:actions`.
+   - In **Security and quality → Code scanning**, confirm two CodeQL analyses exist for `refs/heads/master` at the activation commit SHA with categories `/language:javascript-typescript` and `/language:actions`.
    - Confirm the logs contain no install, build, test, project script, custom query, self-hosted runner, secret, PAT, or OIDC use.
-   - If either analysis fails, do not add a merge requirement. Fix or revert the workflow; if coverage cannot be restored promptly, re-enable default setup.
+   - Verification: both analyses report the exact explicit categories and the activation commit.
+   - Recovery: if either analysis fails, do not add a merge requirement. Fix or revert the workflow; if coverage cannot be restored promptly, re-enable default setup.
 
-5. **Authorize one benign fork validation only after workflow review**
-   - Create a new benign fork PR only with explicit authorization; do not repurpose an unrelated contributor PR.
-   - The benign change should touch a non-executable comment or documentation line and must not modify `.github/workflows/**`, Actions, dependencies, build scripts, or CodeQL configuration.
-   - In the PR's **Checks** tab, review every workflow awaiting approval. Approval may release workflows other than CodeQL. Do not approve until every pending workflow is safe.
-   - Use GitHub's normal **Approve and run workflows** control only after that review. Keep the repository's `first_time_contributors` approval policy unchanged.
+5. **Authorize the already pending benign fork validation only after workflow review**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository write permission or higher.
+   - Use only the separately authorized pending benign fork PR. Do not create another test PR or repurpose an unrelated contributor PR.
+   - Confirm the benign change touches only the authorized non-executable content and does not modify `.github/workflows/**`, Actions, dependencies, build scripts, or CodeQL configuration.
+   - In the PR's **Checks** tab, open **Awaiting approval** and review every workflow awaiting approval. Approval may release workflows other than CodeQL. Do not approve until every pending workflow is safe.
+   - Use **Approve workflows to run** only after that review. Keep the repository's `first_time_contributors` approval policy unchanged.
    - Expected result: both CodeQL jobs run with a read-only fork token on GitHub-hosted runners and upload through the supported `pull_request` exception.
+   - Verification: only the reviewed pending workflow revision is released and no privileged resource is present in any released workflow.
+   - Recovery: cancel any unexpected run and do not approve a subsequent workflow revision until it is reviewed again.
 
 6. **Prove the fork PR merge-ref analysis**
-   - Record the PR number, fork head SHA, and GitHub-generated pull request merge SHA from the PR API.
-   - Confirm the CodeQL workflow run uses `event=pull_request` and `head_sha` equal to the current PR merge SHA, not only the fork head SHA.
-   - In the code-scanning analyses API and PR checks, confirm both `/language:javascript-typescript` and `/language:actions` are associated with that PR merge ref/SHA.
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning.
+   - Record the PR number, source fork/head SHA, base branch/SHA, and GitHub-generated pull request merge SHA separately.
+   - Confirm the workflow uses `event=pull_request`. Do not infer the checked-out revision from the workflow-run API's `head_sha`, which may identify a source/head revision.
+   - From the checkout step log, record the checked-out `git rev-parse HEAD` revision and the event's `GITHUB_SHA`; confirm they identify the current pull request merge revision.
+   - In the code-scanning analyses API, confirm both explicit categories are associated with `refs/pull/<number>/merge` and that each analysis `commit_sha` matches the recorded `GITHUB_SHA`.
    - Update the status table only after both jobs and both uploaded analyses are verified.
+   - Recovery: if ref or commit evidence does not match, leave the fork-scan status incomplete, correct the workflow or stale PR merge ref, and rerun without changing security controls.
 
 7. **Handle existing required checks narrowly**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository administrator for any ruleset edit, read access for inventory.
    - Before changing rules, capture the exact successful check names and GitHub App/integration shown on the validated `master` and fork-PR runs.
    - The current ruleset requires `BabylonJS.Babylon-Lite` from integration `9426`. Preserve it.
    - Do not broadly remove old required checks. If an obsolete CodeQL check is already required elsewhere, replace only that exact stale context after proving the new context on both `master` and a fork PR.
    - Prefer the code-scanning results rule for vulnerability thresholds; use required status checks separately when job execution itself must be required.
+   - Verification: compare the post-change ruleset to the saved pre-change JSON and confirm only the reviewed additions or exact replacement changed.
+   - Recovery: restore only the replaced exact context; never remove existing unrelated checks.
 
 8. **Choose and add vulnerability merge protection**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository administrator.
    - Threshold choice is intentionally pending. Decide explicitly whether to block at **Critical**, **High or higher**, **Medium or higher**, or **All**, and whether non-security alerts block.
    - Open **Settings → Rulesets → Rulesets** and edit `Protect Master`, or create a narrowly targeted branch ruleset for the default branch.
    - Add **Require code scanning results**, add tool **CodeQL**, and select the approved **Alerts** and **Security alerts** thresholds.
    - Preserve all existing rules, required checks, review requirements, bypass actors, deletion protection, and non-fast-forward protection.
-   - Start in evaluate mode if available; otherwise make the smallest reviewed change only after successful scans.
+   - Public-repository rulesets currently offer **Active** or **Disabled** enforcement. Keep the new rule **Disabled** until the reviewed activation point if a staged rollout is needed; do not assume an Evaluate mode is available.
+   - Verification: read back the ruleset and confirm its target, enforcement, CodeQL thresholds, existing rules, checks, and bypass actors.
+   - Recovery: remove or disable only the newly added CodeQL rule; preserve every pre-existing rule.
 
 9. **Verify the merge gate separately**
-   - With explicit authorization, use a controlled PR whose new diff contains a known test-only CodeQL finding at or above the chosen threshold.
-   - Verify CodeQL completes and the ruleset blocks merge because of the code-scanning result.
-   - Remove the test finding and verify the same gate clears after a clean rerun.
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository read access for observation. Any PR modification requires separate explicit authorization.
+   - Do not create, insert, or preserve a malicious or test vulnerability for gate validation.
+   - Verify that a clean authorized PR completes CodeQL and is not blocked by the CodeQL results rule.
+   - If a real PR already has a genuine alert at or above the chosen threshold and its use for validation is separately authorized, observe whether the rule blocks it. Do not alter the alert solely to manufacture a test.
+   - If no separately authorized genuine qualifying alert exists, leave qualifying-alert blocking marked **Not complete**. A clean pass alone does not verify blocking behavior.
    - Do not disable or exclude `js/polynomial-redos` merely to suppress a separate SARIF warning. Investigate the warning independently.
-   - Record the evidence URLs and only then mark **Merge gate verified**.
+   - Verification: record the clean-pass evidence and, only if available, the genuine-alert blocking evidence. Mark **Merge gate verified** only when both behaviors are evidenced.
+   - Recovery: if the rule blocks clean PRs unexpectedly, remove or disable only the new CodeQL rule and preserve all previous protections.
 
 ## Merge queue and Dependabot limitations
 
