@@ -25,6 +25,8 @@ export interface StandardMaterialProps extends Material {
     alpha: number;
     specularColor: [number, number, number];
     specularPower: number;
+    /** LTC roughness for rectangular area lights. Default 0; punctual lighting still uses specularPower. */
+    roughness?: number;
     emissiveColor: [number, number, number];
     ambientColor: [number, number, number];
     /** Optional diffuse texture. Null = solid color only. */
@@ -109,6 +111,10 @@ export interface StandardSceneShaderContext {
     readonly _features: number;
     /** @internal */
     readonly _fragments: readonly ShaderFragment[];
+    /** @internal Opaque material feature contribution from a scene extension. */
+    readonly _materialFeatures?: number;
+    /** @internal Material-owned replacement for the default lighting function. */
+    readonly _lightingFunction?: string;
 }
 
 export { collectStdBoundTextures } from "./collect-std-bound-textures.js";

@@ -56,6 +56,18 @@ export function _installPbrIblFallbackResolver(resolve: (material: unknown) => _
     _pbrIblFallbackResolver = resolve;
 }
 
+let bindingContext: ((context: _PbrBindCtx, id: number | undefined, disposers: (() => void)[] | undefined) => void) | null = null;
+/** @internal Lazy scalar transport; null folds out of consumers without a scene-binding extension. */
+export let _pbrBindingIdentity: ((id: number | undefined) => number | undefined) | null = null;
+/** @internal Auxiliary binding lifetime collections are allocated only by opted-in extensions. */
+export let _createPbrBindingDisposers: (() => (() => void)[]) | null = null;
+/** @internal Install generic context transport without unconditional per-scene property reads or allocation. */
+export function _installPbrBindingContext(augment: NonNullable<typeof bindingContext>): void {
+    bindingContext = augment;
+    _pbrBindingIdentity = (id) => id;
+    _createPbrBindingDisposers = () => [];
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -216,7 +228,9 @@ export function createPbrMeshBindGroup(
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
     meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null,
-    refractionTexture?: Texture2D | null
+    refractionTexture?: Texture2D | null,
+    lightingId?: number,
+    disposers?: (() => void)[]
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
@@ -246,6 +260,7 @@ export function createPbrMeshBindGroup(
         _env: env ?? _pbrIblFallbackResolver?.(material) ?? null,
         _refractionTexture: refractionTexture,
     };
+    bindingContext?.(ctx, lightingId, disposers);
 
     const sortedExts = _getPbrExtsSorted();
 

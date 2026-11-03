@@ -292,6 +292,7 @@ export function disposeEffectWrapper(wrapper: EffectWrapper): void {
     for (const slot of internal._uniforms) {
         slot.buffer.destroy();
     }
+
     internal._uniforms.length = 0;
     internal._textures.length = 0;
     internal._pipelines?.clear();
@@ -301,6 +302,18 @@ export function disposeEffectWrapper(wrapper: EffectWrapper): void {
     internal._pipelineLayout = null;
     internal._bindGroup = null;
     internal._bindGroupDirty = true;
+}
+
+/** @internal Record a standalone fullscreen processor without changing the engine's active encoder. */
+export function recordEffectToTexture(wrapper: EffectWrapper, encoder: GPUCommandEncoder, view: GPUTextureView, format: GPUTextureFormat): void {
+    const effect = wrapper as EffectWrapperInternal;
+    const pipeline = getEffectPipeline(effect, { _colorFormat: format, _sampleCount: 1 });
+    const group = getEffectBindGroup(effect);
+    const pass = encoder.beginRenderPass({ colorAttachments: [{ view, loadOp: "clear", storeOp: "store" }] });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, group);
+    pass.draw(3);
+    pass.end();
 }
 
 /**

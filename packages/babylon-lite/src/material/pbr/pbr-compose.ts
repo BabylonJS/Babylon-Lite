@@ -6,7 +6,7 @@
 import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { composeShader } from "../../shader/shader-composer.js";
-import { createPbrTemplate } from "./pbr-template.js";
+import { createPbrTemplate, type PbrCotangentNormalWgsl, type PbrSpecGlossWgsl, type PbrTangentNormalWgsl } from "./pbr-template.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import {
     PBR_HAS_NORMAL_MAP,
@@ -63,13 +63,48 @@ interface PbrComposerDeps {
     /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
      *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
     readonly _flatNormalWgsl: string;
+    /** Normal-map and specular-glossiness WGSL, dynamically loaded by pbr-renderable only when a mesh
+     *  of the group needs that path; absent otherwise so scenes without them bundle zero bytes. */
+    readonly _tangentNormal?: PbrTangentNormalWgsl;
+    readonly _cotangentNormal?: PbrCotangentNormalWgsl;
+    readonly _specGloss?: PbrSpecGlossWgsl;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
 }
 
+/** @internal Lazily loaded WGSL paths a variant composes. */
+export const PBR_LAZY_TANGENT_NORMAL = 2;
+export const PBR_LAZY_COTANGENT_NORMAL = 4;
+export const PBR_LAZY_SPEC_GLOSS = 8;
+
+/** @internal The single rule mapping feature bits to the lazy WGSL modules a variant needs — shared by
+ *  `composePbr` (which consumes the modules) and the group build (which decides which ones to load). */
+export function _pbrLazyWgslNeeds(features: number, meshFeatures: number): number {
+    return (
+        ((features & PBR_HAS_NORMAL_MAP) !== 0 ? ((meshFeatures & MSH_HAS_TANGENTS) !== 0 ? PBR_LAZY_TANGENT_NORMAL : PBR_LAZY_COTANGENT_NORMAL) : 0) |
+        ((features & PBR_HAS_SPEC_GLOSS) !== 0 ? PBR_LAZY_SPEC_GLOSS : 0)
+    );
+}
+
 export type PbrLightMode = 0 | 1 | 2;
-type PbrComposeFn = (
+
+/** @internal The key a composer caches a variant under: also how `_pbrRebuildsComposed` asks whether one was composed. */
+export function _pbrComposeKey(
+    features: number,
+    features2: number,
+    meshFeatures: number,
+    sceneFeatures: number,
+    lightMode: PbrLightMode,
+    singleLightType: string,
+    vbKey: string,
+    uv2Mask: number,
+    pluginIndex: number
+): string {
+    return `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}`;
+}
+
+type PbrComposeFn = ((
     _features: number,
     _features2?: number,
     _meshFeatures?: number,
@@ -81,7 +116,10 @@ type PbrComposeFn = (
     _vbKey?: string,
     _uv2Mask?: number,
     _pi?: number
-) => ComposedShader;
+) => ComposedShader) & {
+    /** @internal The variants composed so far, by `_pbrComposeKey`. */
+    readonly _c: ReadonlyMap<string, ComposedShader>;
+};
 
 /** Local-IBL resolver installed only by `enablePbrLocalCubemap`, keeping extension
  * detection behind the opt-in feature seam instead of scanning every PBR extension. */
@@ -104,12 +142,15 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _fogBlock,
         _createPbrTemplateExt,
         _flatNormalWgsl,
+        _tangentNormal,
+        _cotangentNormal,
+        _specGloss,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
     } = deps;
 
-    return function composePbr(
+    function composePbr(
         features: number,
         features2: number = 0,
         meshFeatures = 0,
@@ -122,7 +163,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         uv2Mask = 0,
         pluginIndex = 0
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}:${uv2Mask}:${pluginIndex}`;
+        const ckey = _pbrComposeKey(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, vbKey, uv2Mask, pluginIndex);
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -131,9 +172,11 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const has = (bit: number) => (features & bit) !== 0;
         const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
         const hasScene = (bit: number) => (sceneFeatures & bit) !== 0;
-        const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
-        const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
+        const lazyNeeds = _pbrLazyWgslNeeds(features, meshFeatures);
+        const hasNormal = (lazyNeeds & PBR_LAZY_TANGENT_NORMAL) !== 0;
+        const hasCotangent = (lazyNeeds & PBR_LAZY_COTANGENT_NORMAL) !== 0;
         const _hasAnyNormal = hasNormal || hasCotangent;
+        const hasSpecGloss = (lazyNeeds & PBR_LAZY_SPEC_GLOSS) !== 0;
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         const extensionIbl = _extensionIblResolver?.(features, features2) ?? false;
         const _hasIbl = hasScene(PBR_HAS_ENV) || extensionIbl;
@@ -162,7 +205,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                       _features2: features2,
                       _hasAnyNormal,
                       _hasEmissiveTexture,
-                      _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+                      _hasSpecGloss: hasSpecGloss,
                   })
                 : undefined;
 
@@ -173,11 +216,12 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _singleLightBlock: lightMode === 1 && _getSingleLightBlock ? _getSingleLightBlock(singleLightType) : "",
             _multiLightWGSL,
             _multiLightLoop,
-            _normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
+            _tangentNormal: hasNormal ? _tangentNormal : undefined,
+            _cotangentNormal: hasCotangent ? _cotangentNormal : undefined,
             _flatGeometricNormal: !_hasAnyNormal && hasMesh(MSH_FLAT_NORMAL),
             _flatNormalWgsl,
             _hasEmissiveTexture,
-            _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+            _specGloss: hasSpecGloss ? _specGloss : undefined,
             _hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
             _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
@@ -205,6 +249,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
 
         const frags: ShaderFragment[] = [];
         const fragCtx: _PbrFragCtx = {
+            _sceneFeatures: sceneFeatures,
+            _lightMode: lightMode,
             _features: features,
             _features2: features2,
             _pi: pluginIndex,
@@ -239,5 +285,6 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const composed = frags.reduce((shader, fragment) => fragment._pc?.(shader) ?? shader, composeShader(template, frags, vbStrides));
         cache.set(ckey, composed);
         return composed;
-    };
+    }
+    return Object.assign(composePbr, { _c: cache });
 }

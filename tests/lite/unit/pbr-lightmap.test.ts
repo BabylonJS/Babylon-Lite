@@ -33,9 +33,7 @@ const PBR2_LIGHTMAP_UV2 = 1 << 29;
 const PBR2_HAS_SHEEN_ROUGH_TEX = 1 << 31;
 
 const defaultPbrConfig: PbrTemplateConfig = {
-    _normalMode: "none",
     _hasEmissiveTexture: false,
-    _hasSpecGloss: false,
     _hasDoubleSided: false,
     _hasTonemap: false,
     _hasAlphaBlend: false,

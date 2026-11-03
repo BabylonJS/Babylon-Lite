@@ -67,6 +67,11 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 
 ## Key Differences
 
+For rectangular emitters, see [Rectangular Area Lights](06-area-lights.md).
+Create the light with `createRectAreaLight(position, width, height)`, add it to
+the scene, and await `enableRectAreaLights(scene)` before `registerScene(scene)`.
+Dimensions are local-space full extents; emission points along local **-Z**.
+
 ### 1. No Scene in Constructors
 
 BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `addToScene()` them explicitly.
@@ -201,6 +206,12 @@ await loadEnvironment(scene, envUrl, {
     brdfUrl: "/brdf-lut.png",
 });
 ```
+
+The asset container keeps the glTF node hierarchy: each glTF node is a transform node and each primitive is a mesh under it,
+where Babylon.js returns one `Mesh` for a single-primitive node. Through `@babylonjs/lite-compat`, `ImportMeshAsync(...).meshes`
+is a flattened view of that hierarchy, so reparent loaded meshes with `setParent()` rather than assigning `.parent` to every
+entry, or transforms inherited from glTF nodes are lost. See
+[glTF import hierarchy and reparenting](https://github.com/BabylonJS/Babylon-Lite/blob/master/packages/babylon-lite-compat/README.md#gltf-import-hierarchy-and-reparenting).
 
 ### 6. Shadows Attach to Lights
 
@@ -591,3 +602,40 @@ so cached bundles are invalidated; pending packet changes refresh before the res
 The default update policy is unchanged.
 
 See `lab/lite/src/lite/scene*.ts` for end-to-end examples of each extension in action.
+
+## Raw gameplay input
+
+`DeviceSourceManager` gameplay polling can use independent native input helpers.
+Camera `attachControl` remains separate. Use physical key codes instead of
+Babylon.js numeric key constants, DOM button masks instead of pointer enums,
+and check a gamepad's mapping before interpreting its axes/buttons.
+
+```ts
+import { createKeyboardInput, createPointerInput, isKeyboardKeyDown, readGamepad, resetPointerInput, disposeKeyboardInput, disposePointerInput } from "@babylonjs/lite";
+
+canvas.tabIndex = 0; // The application decides when the canvas receives focus.
+const keyboard = createKeyboardInput(canvas);
+const pointer = createPointerInput(canvas);
+// In your frame callback:
+const forward = isKeyboardKeyDown(keyboard, "KeyW");
+const lookX = pointer.deltaX;
+const gamepad = readGamepad(0);
+const stickX = gamepad?.mapping === "standard" ? (gamepad.axes[0] ?? 0) : 0;
+resetPointerInput(pointer); // Clear accumulated deltas after reading the frame.
+// During application teardown:
+disposeKeyboardInput(keyboard);
+disposePointerInput(pointer);
+```
+
+Wheel deltas keep their DOM units in `wheelDeltaMode`; normalize pixels, lines,
+or pages in your application. If modes change before a frame reads the state,
+only the latest contiguous mode batch is retained. No input helper captures pointers, prevents
+browser defaults, or installs scene callbacks. Dispose input explicitly, or
+register a disposer through `onSceneDispose`. Gamepads are copied snapshots;
+null means the slot is unavailable, disconnected, or access is denied.
+
+The Playground's **Input — Keyboard, pointer and gamepad** example combines
+WASD movement, pointer look and a standard gamepad. See the
+[device input specification](architecture/60-device-input.md) for focus,
+iframe, primary-touch, reset, and cleanup contracts. This native API does not
+add a `DeviceSourceManager` class to lite-compat or promise Babylon Native support.

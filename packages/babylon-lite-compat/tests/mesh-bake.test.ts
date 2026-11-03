@@ -23,6 +23,8 @@ const mockedResize = vi.mocked(resizeMeshGeometry);
 function makeMesh(overrides?: { normals?: Float32Array; uvs?: Float32Array; uv2?: Float32Array; tangents?: Float32Array; colors?: Float32Array }): Mesh {
     const mesh = Object.create(Mesh.prototype) as Mesh;
     const lite = {
+        // No GPU geometry is modelled, so the write takes the (mocked) resize path.
+        _gpu: {},
         _cpuPositions: new Float32Array([1, 1, 1]),
         _cpuNormals: overrides?.normals,
         _cpuIndices: new Uint32Array([0, 1, 2]),
@@ -47,6 +49,16 @@ describe("Mesh transform bake (issue #475)", () => {
         (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(Matrix.Scaling(2, 3, 4));
         const positions = mockedResize.mock.calls[0]![2];
         expect(Array.from(positions)).toEqual([2, 3, 4]);
+    });
+
+    it("leaves the caller's matrix unchanged when baking normals", () => {
+        const mesh = makeMesh({ normals: new Float32Array([1, 1, 0]) });
+        const matrix = Matrix.Scaling(2, 1, 1);
+        const before = Array.from(matrix.m);
+
+        (mesh as unknown as { _bakeMatrix(m: Matrix): boolean })._bakeMatrix(matrix);
+
+        expect(Array.from(matrix.m)).toEqual(before);
     });
 
     it("transforms normals by the inverse-transpose (correct under non-uniform scale)", () => {

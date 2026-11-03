@@ -130,10 +130,9 @@ export class Matrix {
         return determinant(this.m);
     }
 
+    /** Babylon.js `invert`: inverts this matrix in place and returns it. */
     public invert(): Matrix {
-        const result = new Matrix();
-        this.invertToRef(result);
-        return result;
+        return this.invertToRef(this);
     }
 
     public invertToRef(result: Matrix): Matrix {
@@ -241,6 +240,33 @@ export class Matrix {
         return result;
     }
 
+    /** Babylon.js `Matrix.Invert(source)`: a new matrix holding the inverse of `source`, which is left as it is. */
+    public static Invert(source: Matrix): Matrix {
+        return source.invertToRef(new Matrix());
+    }
+
+    /** Babylon.js `Matrix.FromXYZAxesToRef(xaxis, yaxis, zaxis, result)`: the axes as the first three rows. */
+    public static FromXYZAxesToRef<T extends Matrix>(xaxis: Vector3, yaxis: Vector3, zaxis: Vector3, result: T): T {
+        const m = result.m;
+        m[0] = xaxis.x;
+        m[1] = xaxis.y;
+        m[2] = xaxis.z;
+        m[3] = 0;
+        m[4] = yaxis.x;
+        m[5] = yaxis.y;
+        m[6] = yaxis.z;
+        m[7] = 0;
+        m[8] = zaxis.x;
+        m[9] = zaxis.y;
+        m[10] = zaxis.z;
+        m[11] = 0;
+        m[12] = 0;
+        m[13] = 0;
+        m[14] = 0;
+        m[15] = 1;
+        return result.markAsUpdated();
+    }
+
     public static Identity(): Matrix {
         return Matrix.FromValues(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
     }
@@ -310,7 +336,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionLHToRef(forward, up, result)`. */
     public static LookDirectionLHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 
@@ -321,7 +347,7 @@ export class Matrix {
 
     /** Babylon.js `Matrix.LookDirectionRHToRef(forward, up, result)`. */
     public static LookDirectionRHToRef<T extends Matrix>(forward: Vector3, up: Vector3, result: T): T {
-        writeMat4FromLookDirectionRHIntoBuffer(result.m, forward, up);
+        writeMat4FromLookDirectionLHIntoBuffer(result.m, forward, up);
         return result.markAsUpdated();
     }
 
@@ -465,7 +491,8 @@ function invertValues(m: Float32Array): Mat16 {
 
     const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
     if (det === 0) {
-        return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        // Not invertible: Babylon.js copies the source into the result.
+        return Array.from(m) as Mat16;
     }
     const invDet = 1 / det;
 

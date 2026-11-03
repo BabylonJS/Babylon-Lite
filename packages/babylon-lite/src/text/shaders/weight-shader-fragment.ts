@@ -105,11 +105,11 @@ let xl=rc.x-rad;
 var md=1.0e9;
 for(var b:i32=y0;b<=y1;b=b+1){
 let hr=textureLoad(bt,vec2i(gp.x+b,gp.y),0);
-let hn=i32(hr.x+0.5);
-let hl=bloc(gp,i32(hr.y+0.5));
+let hn=i32(hr.x);
+let hl=bloc(gp,i32(hr.y));
 for(var i:i32=0;i<hn;i=i+1){
 let lr=textureLoad(bt,bloc(hl,i),0);
-let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
+let cv=vec2i(lr.xy);
 let q12=textureLoad(ct,cv,0);
 let q3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy;
 // Curves are sorted by descending max-x: once one's right extent is farther left than

@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { createPbrTemplate } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
+import * as tangentNormalWgsl from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-normal-tangent-wgsl";
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock, _clusteredSpotLightBlock } from "../../../packages/babylon-lite/src/material/pbr/fragments/clustered-light-wgsl";
 import { createStandardTemplate } from "../../../packages/babylon-lite/src/material/standard/standard-template";
 import { createEmissiveColorFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/emissive-fragment";
@@ -46,9 +47,7 @@ import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/sc
 const PBR_HAS_CLEARCOAT = 1 << 20;
 
 const defaultPbrConfig: PbrTemplateConfig = {
-    _normalMode: "none",
     _hasEmissiveTexture: false,
-    _hasSpecGloss: false,
     _hasDoubleSided: false,
     _hasTonemap: false,
     _hasAlphaBlend: false,
@@ -116,8 +115,8 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("only emits derivative roughness when specular AA is enabled", () => {
-        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: false }), []);
-        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasSpecularAA: true }), []);
+        const disabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasSpecularAA: false }), []);
+        const enabled = composeShader(createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasSpecularAA: true }), []);
 
         expect(disabled._fragmentWGSL).toContain("var AA_factor_x=0.0;");
         expect(disabled._fragmentWGSL).not.toContain("nDfdx_AA=dpdx(N)");
@@ -126,14 +125,14 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + emissive color", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, [createEmissiveColorFragment(false)]);
         expect(result._fragmentWGSL).toContain("material.emissiveColor");
         expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(true);
     });
 
     it("composes PBR emissive-color fallback when the emissive fragment is absent", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasEmissiveColor: true });
         const result = composeShader(template, []);
         expect(result._fragmentWGSL).toContain("var emissive:vec3f;");
         expect(result._fragmentWGSL).toContain("directDiffuse+directSpecular+emissive");
@@ -143,7 +142,7 @@ describe("PBR template + fragments integration", () => {
     it("composes PBR + clearcoat", () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
         });
@@ -157,7 +156,7 @@ describe("PBR template + fragments integration", () => {
     it("composes PBR + sheen", () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
         });
@@ -200,7 +199,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + IBL (env)", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasSpecularAA: true, _hasIbl: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasTonemap: true, _hasSpecularAA: true, _hasIbl: true });
         const result = composeShader(template, [createIblFragment(true)]);
         expect(result._fragmentWGSL).toContain("environmentHorizonOcclusion");
         expect(result._fragmentWGSL).toContain("iblTexture");
@@ -213,7 +212,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + skeleton (4-bone)", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const result = composeShader(template, [createSkeletonFragment(false)]);
         expect(result._vertexWGSL).toContain("readMatrixFromRawSampler");
         expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
@@ -224,7 +223,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + skeleton (8-bone) with complete vertex buffer layouts", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const result = composeShader(template, [createSkeletonFragment(true)]);
 
         expect(result._vertexWGSL).toContain("joints1");
@@ -244,7 +243,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + morph + skeleton", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasMorph: true });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl, _hasMorph: true });
         const morph = createMorphFragment();
         const skeleton = createSkeletonFragment(false);
         const result = composeShader(template, [morph, skeleton]);
@@ -269,7 +268,7 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + shadow", async () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
+        const template = createPbrTemplate({ ...defaultPbrConfig, _tangentNormal: tangentNormalWgsl });
         const createPbrShadowFragment = await preparePbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }]);
         const result = composeShader(template, [createPbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }])]);
         expect(result._fragmentWGSL).toContain("computeShadowESM_0");
@@ -281,7 +280,7 @@ describe("PBR template + fragments integration", () => {
     it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", async () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
-            _normalMode: "tangent",
+            _tangentNormal: tangentNormalWgsl,
             _hasEmissiveTexture: true,
             _hasTonemap: true,
             _hasSpecularAA: true,

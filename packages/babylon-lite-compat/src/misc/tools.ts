@@ -1,11 +1,12 @@
 /** Babylon.js-compatible `Tools` helpers (the small, pure subset). */
 
 import { RandomGUID } from "./guid.js";
+import { PrecisionDate } from "./misc-utils.js";
 
 export const Tools = {
-    /** High-resolution timestamp in milliseconds. */
-    Now(): number {
-        return typeof performance !== "undefined" ? performance.now() : Date.now();
+    /** Current high-resolution timestamp in milliseconds, matching Babylon.js's numeric property. */
+    get Now(): number {
+        return PrecisionDate.Now;
     },
 
     ToRadians(degrees: number): number {

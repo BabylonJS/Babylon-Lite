@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { convertCompressedPlyToParsedSplat } from "../../../packages/babylon-lite/src/loader-splat/splat-ply-compressed.js";
-import { convertPlyToSplat, isPly, isPlyCompressedOrSH } from "../../../packages/babylon-lite/src/loader-splat/splat-ply-parser.js";
+import { isPly } from "../../../packages/babylon-lite/src/loader-splat/splat-ply-header.js";
+import { convertPlyToSplat, isPlyCompressedOrSH, parsePlySplat } from "../../../packages/babylon-lite/src/loader-splat/splat-ply-parser.js";
 
 function combine(header: string, body: Uint8Array = new Uint8Array()): ArrayBuffer {
     const headerBytes = new TextEncoder().encode(header);
@@ -83,5 +84,14 @@ describe("PLY parser", () => {
 
     it("allows packed vertices with chunk metadata for every 256 vertices", () => {
         expect(convertCompressedPlyToParsedSplat(makePackedPly(257, 2, "packed_position")).data.byteLength).toBe(257 * 32);
+    });
+
+    it("routes standard and compressed PLY files through parsePlySplat", async () => {
+        expect(Array.from(new Float32Array((await parsePlySplat(makePositionPly("\n"))).data, 0, 3))).toEqual([1, 2, 3]);
+        expect((await parsePlySplat(makePackedPly(257, 2, "packed_position"))).data.byteLength).toBe(257 * 32);
+    });
+
+    it("does not recognise a raw .splat buffer as PLY", () => {
+        expect(isPly(new ArrayBuffer(64))).toBe(false);
     });
 });

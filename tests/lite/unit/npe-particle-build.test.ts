@@ -35,6 +35,13 @@ describe("NPE build reachability", () => {
 
         expect(set.systems).toHaveLength(1);
         expect(set.systems[0]!.buffer.posX).toBeInstanceOf(Float32Array);
+        expect(set.systems[0]!.name).toBe(SCENE262_NPE_JSON.blocks.find((block) => block.customType === "BABYLON.SystemBlock")!.name);
+    });
+
+    it.each(["", undefined])("omits an absent SystemBlock name (%s)", async (name) => {
+        const graph = parseNodeParticleSource({ blocks: [{ customType: "BABYLON.SystemBlock", id: 1, name }] });
+        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
+        expect(Object.hasOwn(set.systems[0]!, "name")).toBe(false);
     });
 
     it("uses the Babylon NPE update-speed default when it is not serialized", async () => {

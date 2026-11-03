@@ -20,7 +20,7 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly twenty-five node-particle functions and twelve node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly twenty-seven node-particle functions and twelve node-particle types.
 
 ### 2.1 Functions
 
@@ -50,12 +50,14 @@ function parseNodeParticleSetFromSnippet(engine: EngineContext, scene: SceneCont
 
 function startParticleSystem(system: ParticleSystem): void;
 function stopParticleSystem(system: ParticleSystem): void;
+function isParticleSystemStarted(system: ParticleSystem): boolean;
 function animateParticleSystem(system: ParticleSystem, scaledRatio: number): void;
 
 function createParticleBillboard(system: ParticleSystem): FacingBillboardSpriteSystem;
 function syncParticleBillboard(system: ParticleSystem, billboard: FacingBillboardSpriteSystem): void;
 
 function registerNodeParticleSet(scene: SceneContext, set: NodeParticleSet, options?: RegisterNodeParticleOptions): void;
+function getParticleSystems(scene: SceneContext): readonly ParticleSystem[];
 
 function createParticleSprite2DBridge(system: ParticleSystem, options?: ParticleSprite2DBridgeOptions): ParticleSprite2DBridge;
 function syncParticleSprite2DBridge(bridge: ParticleSprite2DBridge): void;
@@ -68,7 +70,17 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-All twenty-five functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
+All twenty-seven functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
+
+### Scene discovery
+
+`ParticleSystem.name?: string` retains a non-empty NPE `SystemBlock` name for both inline JSON and snippet builds. Unnamed systems omit the property. `isParticleSystemStarted(system)` returns `_started && !_stopped`: stopped systems can still contain draining particles in `buffer.alive`. Capacity remains available through `buffer.capacity`; start/stop use the existing standalone functions.
+
+`getParticleSystems(scene)` enumerates only systems registered through the 3D `registerNodeParticleSet`, in first-registration order, deduped by identity. It returns the live readonly array; copy it for a snapshot. `SceneContext` declares an optional `@internal _particleSystems?: ParticleSystem[]` with a type-only import; this adds no emitted code, and the field is stripped from published declarations. The particle module owns allocation and cleanup. In the existing per-system registration loop, the first system lazily allocates the list and installs exactly one scene disposer that clears it with `length = 0`; each system is appended only when not already included. The list is add-only until scene disposal, and existing references observe the clear. Without a list, the getter returns a fresh `[]`.
+
+Enumeration dedupe does **not** dedupe rendering: each registration still builds its billboard and pushes its own frame callback. Existing callback order, mid-frame registration, pick registration, and `autoStart` behavior are unchanged. There is no unregister or scheduler consolidation. 2D bindings are not enumerated, and all listed systems are CPU systems. Costs are a lazy array and cleanup closure per particle scene, an identity `includes` check per registration, and a name reference per named system; non-particle scenes create no such storage.
+
+Focused tests cover ordered membership, duplicates with duplicate rendering preserved, `autoStart: false`, callback ordering and mid-frame registration, scene isolation, disposal, retained names, and started/stopped state with draining particles.
 
 ### 2.2 Types
 

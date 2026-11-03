@@ -188,7 +188,7 @@ describe("CSM caster reconcile", () => {
         const keptB = tasks.map((task) => packet(task, meshB));
         const oldView = state._materialViews.get(matA);
 
-        matA._csmGen = 1; // a material swap or rebuild of matA
+        matA._csmGen = 1; // a rebuild of matA
         const next = ensureCsmShadowTaskState(engine, scene, sg, cfg, casters, state);
 
         expect(next).toBe(state);

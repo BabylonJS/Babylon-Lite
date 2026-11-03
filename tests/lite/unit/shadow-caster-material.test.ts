@@ -86,17 +86,18 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             const second = fakeMaterial("second");
             const terminals = new Map<Material, Material>();
             const generations = new Map<Material, number | undefined>();
+            const features = new Map<Material, unknown>();
 
             setShadowCasterMaterial(visible, first);
-            snapshotShadowCasterMaterial(visible, terminals, generations);
-            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(false);
+            snapshotShadowCasterMaterial(visible, terminals, generations, features);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(false);
 
             setShadowCasterMaterial(visible, second);
-            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
-            snapshotShadowCasterMaterial(visible, terminals, generations);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(true);
+            snapshotShadowCasterMaterial(visible, terminals, generations, features);
 
             setShadowCasterMaterial(visible, null);
-            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(true);
         });
 
         it("detects a rebuild of the terminal material in an override chain", () => {
@@ -105,15 +106,16 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             const terminal = fakeMaterial("terminal");
             const terminals = new Map<Material, Material>();
             const generations = new Map<Material, number | undefined>();
+            const features = new Map<Material, unknown>();
 
             setShadowCasterMaterial(visible, intermediate);
             setShadowCasterMaterial(intermediate, terminal);
             terminal._csmGen = 4;
-            snapshotShadowCasterMaterial(visible, terminals, generations);
-            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(false);
+            snapshotShadowCasterMaterial(visible, terminals, generations, features);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(false);
 
             terminal._csmGen++;
-            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(true);
         });
 
         it("treats a material missing from the snapshot as changed", () => {
@@ -121,12 +123,30 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             const unseen = fakeMaterial("unseen");
             const terminals = new Map<Material, Material>();
             const generations = new Map<Material, number | undefined>();
-            snapshotShadowCasterMaterial(seen, terminals, generations);
+            const features = new Map<Material, unknown>();
+            snapshotShadowCasterMaterial(seen, terminals, generations, features);
 
             // No view was ever built for `unseen`: a caster that switched to it would keep casting through the
             // view of its previous material, so the snapshot must not vouch for it.
-            expect(shadowCasterMaterialChanged(unseen, terminals, generations)).toBe(true);
-            expect(shadowCasterMaterialChanged(seen, terminals, generations)).toBe(false);
+            expect(shadowCasterMaterialChanged(unseen, terminals, generations, features)).toBe(true);
+            expect(shadowCasterMaterialChanged(seen, terminals, generations, features)).toBe(false);
+        });
+
+        it("detects invalidated render features of the terminal material even when no generation moves", () => {
+            const visible = fakeMaterial("visible");
+            const terminal = fakeMaterial("terminal");
+            const terminals = new Map<Material, Material>();
+            const generations = new Map<Material, number | undefined>();
+            const features = new Map<Material, unknown>();
+            setShadowCasterMaterial(visible, terminal);
+            terminal._renderFeatures = { features: 1 };
+            snapshotShadowCasterMaterial(visible, terminals, generations, features);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(false);
+
+            // Material plugins drop `_renderFeatures` and rebuild the material's meshes one by one; the recomputed
+            // features are a new object, even with the same bits.
+            terminal._renderFeatures = { features: 1 };
+            expect(shadowCasterMaterialChanged(visible, terminals, generations, features)).toBe(true);
         });
     });
 

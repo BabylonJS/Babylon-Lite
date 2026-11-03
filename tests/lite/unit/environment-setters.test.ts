@@ -10,7 +10,7 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { registerEnvSceneUniforms } from "../../../packages/babylon-lite/src/scene/scene-ubo-extras";
-import { setEnvironmentBlur, setEnvironmentRotation } from "../../../packages/babylon-lite/src";
+import { setEnvironmentBlur, setEnvironmentLightingRotation, setEnvironmentRotation, setEnvironmentSkyboxRotation } from "../../../packages/babylon-lite/src";
 import { SCENE_UBO_WGSL } from "../../../packages/babylon-lite/src/shader/scene-uniforms";
 import ddsSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-dds.fragment.wgsl?raw";
 import hdrSkyboxFragment from "../../../packages/babylon-lite/shaders/skybox-hdr.fragment.wgsl?raw";
@@ -211,5 +211,64 @@ describe("environment setters", () => {
             expect(source).toContain("scene._envPad1");
             expect(source).toContain("scene.envRotationY");
         }
+    });
+
+    it("rotates only the lighting with setEnvironmentLightingRotation", async () => {
+        const { camera, engine, scene, task, writeCount } = makeScene();
+        const secondCache = [1];
+        scene._frameGraph._tasks.push({ ...task, _sceneUboCacheKey: secondCache });
+        _writePassSceneUBO(task, engine, scene, camera);
+        expect(writeCount.n).toBe(1);
+
+        setEnvironmentLightingRotation(scene, 0.75);
+        expect(task._sceneUboCacheKey).toHaveLength(0);
+        expect(secondCache).toHaveLength(0);
+        _writePassSceneUBO(task, engine, scene, camera);
+        expect(writeCount.n).toBe(2);
+        expect(task._suData[36]).toBeCloseTo(0.75);
+
+        setEnvironmentLightingRotation(scene, -0.5);
+        expect(scene._sceneUboContributors).toHaveLength(1);
+        _writePassSceneUBO(task, engine, scene, camera);
+        expect(task._suData[36]).toBeCloseTo(-0.5);
+
+        // The visible skybox keeps its own orientation: no patch, and both skybox kinds compose unchanged.
+        expect(scene._environmentSkyboxShaderPatchLoaders).toBeUndefined();
+        expect(await applyEnvironmentSkyboxPatches(scene, ddsSkyboxFragment, "dds")).toBe(ddsSkyboxFragment);
+        expect(await applyEnvironmentSkyboxPatches(scene, hdrSkyboxFragment, "hdr")).toBe(hdrSkyboxFragment);
+    });
+
+    it("gives the skybox a fixed rotation independent of the lighting with setEnvironmentSkyboxRotation", async () => {
+        const { camera, engine, scene, task } = makeScene();
+        setEnvironmentSkyboxRotation(scene, 0.5);
+        expect(scene._environmentRotation).toBeUndefined();
+        expect(scene._sceneUboContributors ?? []).toHaveLength(0);
+
+        setEnvironmentLightingRotation(scene, 1.25);
+        _writePassSceneUBO(task, engine, scene, camera);
+        expect(task._suData[36]).toBeCloseTo(1.25);
+
+        const uniformDriven = makeScene().scene;
+        setEnvironmentRotation(uniformDriven, 1.25);
+        for (const [fragment, kind] of [
+            [ddsSkyboxFragment, "dds"],
+            [hdrSkyboxFragment, "hdr"],
+        ] as const) {
+            const skybox = await applyEnvironmentSkyboxPatches(scene, fragment, kind);
+            expect(skybox).toContain("let _erc=cos(f32(0.5));let _ers=sin(f32(0.5));");
+            expect(skybox).not.toContain("cos(scene.envRotationY)");
+            // Same rotation as the uniform-driven patch, with the angle compiled in instead of read from the lighting.
+            expect(skybox.replaceAll("f32(0.5)", "scene.envRotationY")).toBe(await applyEnvironmentSkyboxPatches(uniformDriven, fragment, kind));
+        }
+
+        // Both setters share the skybox patch slot: the last call before the build decides it, and blur still composes.
+        setEnvironmentBlur(scene, 0.25);
+        setEnvironmentRotation(scene, 2);
+        expect(await applyEnvironmentSkyboxPatches(scene, ddsSkyboxFragment, "dds")).toContain("cos(scene.envRotationY)");
+        setEnvironmentSkyboxRotation(scene, -1);
+        const fixed = await applyEnvironmentSkyboxPatches(scene, ddsSkyboxFragment, "dds");
+        expect(fixed).toContain("cos(f32(-1))");
+        expect(fixed).toContain("scene._envPad1");
+        expect(fixed).not.toContain("cos(scene.envRotationY)");
     });
 });

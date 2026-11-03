@@ -33,6 +33,7 @@ import {
     setThinInstanceColors,
     createMeshFromData,
     resizeMeshGeometry,
+    updateMeshGeometry,
     updateMeshUvs,
     createGroundFromHeightMap,
     computeAabb,
@@ -169,6 +170,49 @@ function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCo
     return data?.length === vertexCount * components ? data : undefined;
 }
 
+/** @internal Whether an optional attribute keeps the presence and length its GPU buffer was created with. */
+function keepsAttributeLayout(values: Float32Array | undefined, present: boolean | undefined, length: number): boolean {
+    return !!values?.length === !!present && (!present || values!.length === length);
+}
+
+/**
+ * @internal Write new geometry into a Lite mesh. When the vertex and index counts and the attribute layout are
+ * unchanged, `updateMeshGeometry` rewrites the existing GPU buffers, so the buffers, the mesh's renderable and every
+ * recorded bundle stay valid. Anything else goes through `resizeMeshGeometry`, which allocates new buffers and makes
+ * every scene re-record its bundles. The in-place conditions are `updateMeshGeometry`'s own, plus geometry that only
+ * this mesh writes (no clone sharing it, no borrowed vertex slab or shared index buffer) and no active draw range.
+ */
+function writeMeshGeometry(
+    engine: EngineContext,
+    mesh: LiteMesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
+    const gpu = mesh._gpu;
+    const vertexCount = positions.length / 3;
+    const inPlace =
+        !gpu._vbLayout &&
+        gpu._ownsVertexBuffers !== false &&
+        gpu._ownsIndexBuffer !== false &&
+        (gpu._refCount ?? 1) <= 1 &&
+        !gpu._drawRangeSource &&
+        gpu.indexFormat === "uint32" &&
+        mesh._cpuPositions?.length === positions.length &&
+        normals.length === positions.length &&
+        mesh._cpuIndices?.length === indices.length &&
+        indices.length <= (gpu._indexCapacity ?? gpu.indexCount) &&
+        keepsAttributeLayout(uvs, gpu.hasUv, vertexCount * 2) &&
+        keepsAttributeLayout(uvs2, gpu.hasUv2, vertexCount * 2) &&
+        keepsAttributeLayout(tangents, gpu.hasTangent, vertexCount * 4) &&
+        keepsAttributeLayout(colors, gpu.hasColor, vertexCount * 4);
+    (inPlace ? updateMeshGeometry : resizeMeshGeometry)(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+}
+
 /**
  * Babylon.js `TransformNode` — a positioned, rotated, scaled scene-graph node.
  * Wraps a Lite scene node (`_node`): either a standalone Lite transform node, or
@@ -269,6 +313,14 @@ export class TransformNode extends Node {
     }
 
     /**
+     * Babylon.js `getChildTransformNodes(directDescendantsOnly?, predicate?)` — the descendants that are transform nodes
+     * (meshes included). As in Babylon.js, `predicate` is called on every evaluated descendant.
+     */
+    public getChildTransformNodes(directDescendantsOnly?: boolean, predicate?: (node: Node) => boolean): TransformNode[] {
+        return this.getDescendants(directDescendantsOnly, (node) => (!predicate || predicate(node)) && node instanceof TransformNode) as TransformNode[];
+    }
+
+    /**
      * Babylon.js `setParent(node)` — reparent while **preserving world position**
      * (the child's local transform is recomputed). Distinct from the `parent`
      * setter, which keeps the local transform and lets the world move.
@@ -283,7 +335,19 @@ export class TransformNode extends Node {
         // Babylon.js `node.parent = x` keeps the child's LOCAL transform and lets
         // its world position move under the new parent (unlike `setParent`, which
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
-        this._node.parent = liteNodeOf(parent);
+        const node = this._node;
+        const liteParent = liteNodeOf(parent);
+        // Leave the previous Lite parent's `children`, as Lite's `setParent` does: removing that parent walks the
+        // list and would otherwise take this node out of the scene with it.
+        const previous = node.parent as SceneNode | null;
+        if (previous && previous !== liteParent) {
+            const siblings = previous.children;
+            const index = siblings ? siblings.indexOf(node) : -1;
+            if (index !== -1) {
+                siblings.splice(index, 1);
+            }
+        }
+        node.parent = liteParent;
     }
 
     /** @internal Remove this wrapper's node without letting Lite recurse for `dispose(true)`. */
@@ -313,6 +377,12 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    /**
+     * @internal The mesh renders a material that exists only on its Lite node: a natively loaded glTF
+     * material has no compat wrapper, so `material` reads `null`. Clones keep that Lite material, and the
+     * deferred registration does not replace it with `scene.defaultMaterial`. Any `material` assignment clears it.
+     */
+    public _liteOnlyMaterial = false;
     private _meshBlendingTag = 0;
     protected _visible = true;
 
@@ -346,6 +416,7 @@ export class AbstractMesh extends TransformNode {
     }
     public set material(value: CompatMaterial | null) {
         this._material = value;
+        this._liteOnlyMaterial = false;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
         if (renderMaterial && scene) {
@@ -481,8 +552,8 @@ export class AbstractMesh extends TransformNode {
 
     /**
      * Babylon.js `mesh.setVerticesData(kind, data)` — replace a vertex attribute.
-     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry in
-     * place; the last-set `color`/`tangent` buffers are retained so successive calls
+     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry, into the
+     * existing GPU buffers when its layout is unchanged (`writeMeshGeometry`); the last-set `color`/`tangent` buffers are retained so successive calls
      * (e.g. set tangent then set color) keep both. Skinning/morph attributes
      * (`matricesIndices`, etc.) are accepted but not applied (Babylon Lite drives
      * skinning through its own loaded-skeleton path).
@@ -520,7 +591,7 @@ export class AbstractMesh extends TransformNode {
         const uvs2 = kind === "uv2" ? f32 : matchingVertexAttribute(this._lastUv2 ?? lite._cpuUv2s, vertexCount, 2);
         const tangents = matchingVertexAttribute(this._lastTangents ?? lite._cpuTangents, vertexCount, 4);
         const colors = matchingVertexAttribute(this._lastColors ?? lite._cpuColors, vertexCount, 4);
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
+        writeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, uvs2, tangents, colors);
     }
 
     /**
@@ -536,8 +607,8 @@ export class AbstractMesh extends TransformNode {
 
     /**
      * Babylon.js `mesh.setIndices(indices)` — replace the mesh's index (topology)
-     * buffer. Babylon Lite re-uploads the geometry in place via `resizeMeshGeometry`,
-     * keeping the existing position/normal/uv/tangent/color attributes and swapping
+     * buffer. The geometry is re-uploaded through `writeMeshGeometry` (into the existing
+     * buffers when the index count is unchanged), keeping the existing position/normal/uv/tangent/color attributes and swapping
      * only the indices. Returns the mesh for chaining.
      */
     public setIndices(indices: number[] | Uint16Array | Uint32Array | Int32Array, _totalVertices?: number | null, _updatable?: boolean): this {
@@ -552,7 +623,7 @@ export class AbstractMesh extends TransformNode {
         const normals = this._normalsFollowIndices
             ? computeFlatNormals(positions, u32)
             : (matchingVertexAttribute(lite._cpuNormals, vertexCount, 3) ?? computeFlatNormals(positions, u32));
-        resizeMeshGeometry(
+        writeMeshGeometry(
             engine,
             this._lite,
             positions,
@@ -641,7 +712,7 @@ export class AbstractMesh extends TransformNode {
         if (normals) {
             // Transform normals by the inverse-transpose upper 3×3 so they stay
             // correct under non-uniform scale/shear, then renormalize.
-            const nm = matrix.invert().transpose().m;
+            const nm = matrix.invertToRef(new Matrix()).transpose().m;
             newNormals = new Float32Array(normals.length);
             for (let i = 0; i < normals.length; i += 3) {
                 const x = normals[i]!,
@@ -684,7 +755,7 @@ export class AbstractMesh extends TransformNode {
             }
         }
 
-        resizeMeshGeometry(
+        writeMeshGeometry(
             engine,
             this._lite,
             newPositions,
@@ -762,6 +833,7 @@ export class Mesh extends AbstractMesh {
     public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
         const mesh = new Mesh(lite.name ?? "", lite);
         mesh._container = container;
+        mesh._liteOnlyMaterial = !!lite.material;
         mesh._visible = lite.visible !== false;
         if (scene) {
             mesh._bindLoadedScene(scene);
@@ -955,7 +1027,13 @@ export class Mesh extends AbstractMesh {
             wrapper.metadata = source.metadata;
             wrapper.setEnabled(source.isEnabled(false));
             if (wrapper instanceof Mesh && source instanceof Mesh) {
-                wrapper.material = source.material;
+                // The Lite clone already shares a Lite-only material; assigning the source's `null` would
+                // replace it with `scene.defaultMaterial`.
+                if (source._liteOnlyMaterial) {
+                    wrapper._liteOnlyMaterial = true;
+                } else {
+                    wrapper.material = source.material;
+                }
                 wrapper.isVisible = source.isVisible;
                 wrapper.meshBlendingTag = source.meshBlendingTag;
             }
@@ -1263,7 +1341,8 @@ export class VertexData {
     /**
      * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
      * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite
-     * mesh's geometry in place via `resizeMeshGeometry`. Normals are computed flat
+     * mesh's geometry through `writeMeshGeometry` (into the existing buffers when the
+     * layout is unchanged, new ones otherwise). Normals are computed flat
      * if omitted (Babylon Lite requires a normals buffer).
      */
     public applyToMesh(mesh: Mesh): void {
@@ -1280,7 +1359,7 @@ export class VertexData {
         const normals = this.normals ? toF32(this.normals) : computeFlatNormals(positions, indices);
         const uvs = this.uvs ? toF32(this.uvs) : undefined;
         const colors = this.colors ? toF32(this.colors) : undefined;
-        resizeMeshGeometry(engine, mesh._lite, positions, normals, indices, uvs, undefined, undefined, colors);
+        writeMeshGeometry(engine, mesh._lite, positions, normals, indices, uvs, undefined, undefined, colors);
     }
 
     /** Merge another `VertexData` into this one (concatenating attributes + reindexing). */
@@ -1382,7 +1461,7 @@ export function registerMeshAtStart(mesh: Mesh, scene: Scene, afterAdd?: () => v
         if (mesh.isDisposed()) {
             return;
         }
-        const mat = mesh.material ?? scene.defaultMaterial;
+        const mat = mesh.material ?? (mesh._liteOnlyMaterial ? null : scene.defaultMaterial);
         if (mat) {
             attachMaterialToScene(mat, scene);
         }

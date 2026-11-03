@@ -186,6 +186,7 @@ stages:
                       npx playwright test \
                           tests/lite/plumbing/accessibility.spec.ts \
                           tests/lite/plumbing/compute-lifecycle.spec.ts \
+                          tests/lite/plumbing/device-input.spec.ts \
                           tests/lite/plumbing/dispose.spec.ts \
                           tests/lite/plumbing/material-swap.spec.ts \
                           tests/lite/plumbing/mesh-lod-demand.spec.ts \

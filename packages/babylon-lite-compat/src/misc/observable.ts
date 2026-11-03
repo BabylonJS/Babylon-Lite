@@ -29,7 +29,12 @@ export class Observable<T> {
     }
 
     public addOnce(callback: ObserverCallback<T>, mask = -1): ObserverCallback<T> {
+        let consumed = false;
         const wrapper: ObserverCallback<T> = (eventData) => {
+            if (consumed) {
+                return;
+            }
+            consumed = true;
             this.removeCallback(wrapper);
             callback(eventData);
         };

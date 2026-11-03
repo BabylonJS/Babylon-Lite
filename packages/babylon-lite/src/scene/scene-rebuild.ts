@@ -269,8 +269,8 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 transmission?.[0]();
                 builder._rebuildSingle = result.rebuildSingle;
                 meshes.r = ctx._runtimeBuilds?.base(builder, result.rebuildSingle) ?? result.rebuildSingle;
-                if (builder._materialFamily === "pbr" && result._G) {
-                    meshes._w = null;
+                if (result._w !== undefined) {
+                    meshes._w = result._w;
                 }
                 if (hadBuiltGroup) {
                     dedupeGroupCleanup(ctx, cleanupStart);
@@ -332,6 +332,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                         continue;
                     }
                     rebuiltMaterials.add(mesh.material);
+                    // Its per-mesh resources are retired below: the shadow tasks requeue it also when it casts through
+                    // an override, whose terminal generation does not move.
+                    mesh._renderableGen = -~mesh._renderableGen!;
                     ctx._runtimeBuilds?.reset(mesh);
                 }
                 for (const material of rebuiltMaterials) {

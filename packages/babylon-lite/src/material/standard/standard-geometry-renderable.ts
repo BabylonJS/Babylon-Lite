@@ -145,7 +145,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const standardContext = (scene as SceneContext & { _standardGeometryContext?: StandardGeometryContext })._standardGeometryContext;
     // Geometry pass has no receiver path — pass receiveShadows=false.
     const meshFeatures = _computeMeshFeatures(mesh, false);
-    let features = view._renderFeatures.features;
+    let features = view._renderFeatures.features | (standardContext?.sceneShader?._materialFeatures ?? 0);
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
         features |= ext._meshFeatures?.(meshFeatures, source) ?? 0;

@@ -104,7 +104,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        let features = renderFeatures.features;
+        let features = renderFeatures.features | (sceneShader?._materialFeatures ?? 0);
         const shadowOutput = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && rc._hasSomeShadows;
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);

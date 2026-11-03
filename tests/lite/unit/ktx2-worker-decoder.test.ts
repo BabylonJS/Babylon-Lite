@@ -172,6 +172,53 @@ describe("enableKtx2WorkerDecoding", () => {
         vi.restoreAllMocks();
     });
 
+    it.each([
+        ["versioned default", undefined, "https://cdn.babylonjs.com/v9.32.1/babylon.ktx2Decoder.js"],
+        ["self-hosted override", "/assets/decoder.js", "/assets/decoder.js"],
+    ])("lazily loads the %s decoder on the main thread", async (_name, override, expectedUrl) => {
+        const { loader } = await freshModules();
+        const decoder = { decode: vi.fn() };
+        const module = {
+            KTX2Decoder: class {
+                constructor() {
+                    return decoder;
+                }
+            },
+            MSCTranscoder: { UseFromWorkerThread: true, WasmModuleURL: "default.wasm" },
+            WASMMemoryManager: { LoadBinariesFromCurrentThread: false },
+        };
+        const script = { src: "", async: false, onload: null as (() => void) | null };
+        const appendChild = vi.fn(() => {
+            vi.stubGlobal("KTX2DECODER", module);
+            script.onload?.();
+        });
+        vi.stubGlobal("document", { createElement: () => script, head: { appendChild } });
+        if (override) {
+            loader.setKtx2DecoderUrl(override, { MSCTranscoder: { WasmModuleURL: "/assets/msc.wasm" } });
+        }
+        expect(appendChild).not.toHaveBeenCalled();
+
+        expect(await loader.loadKtx2Decoder()).toBe(decoder);
+        expect(await loader.loadKtx2Decoder()).toBe(decoder);
+        expect(appendChild).toHaveBeenCalledExactlyOnceWith(script);
+        expect(script.src).toBe(expectedUrl);
+        expect(script.async).toBe(true);
+        expect(module.MSCTranscoder).toEqual({ UseFromWorkerThread: false, WasmModuleURL: override ? "/assets/msc.wasm" : "default.wasm" });
+        expect(module.WASMMemoryManager.LoadBinariesFromCurrentThread).toBe(true);
+    });
+
+    it("uses the versioned default decoder in a worker without overriding its paired transcoders", async () => {
+        const records = installFakeWorker({});
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+
+        await loader.loadKtx2Decoder();
+
+        expect(records[0]!.importedUrls).toEqual(["https://cdn.babylonjs.com/v9.32.1/babylon.ktx2Decoder.js"]);
+        expect(records[0]!.module!.MSCTranscoder).toEqual({ UseFromWorkerThread: true, JSModuleURL: "", WasmModuleURL: "" });
+        expect(records[0]!.module!.WASMMemoryManager!.LoadBinariesFromCurrentThread).toBe(true);
+    });
+
     it("decodes in a worker with absolute decoder and transcoder URLs, and leaves the caller's bytes intact", async () => {
         const records = installFakeWorker({});
         const { loader, workers } = await freshModules();

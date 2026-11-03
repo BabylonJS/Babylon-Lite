@@ -90,8 +90,8 @@ export interface Renderable {
     _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
-     *  Stamped by whichever builder created the renderable, closing over the arguments it was
-     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  Background thunks are stamped only by enabled recovery capture, closing over the builder
+     *  and its arguments. Recovery restores renderables by traversing `scene._renderables` and calling
      *  this, so it never needs to know what kind of renderable it is holding — the same way
      *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
      *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the
@@ -143,8 +143,9 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
-    /** @internal True when this build result captured gamma-albedo PBR support. */
-    _G?: boolean;
+    /** @internal Widening predicate of this build's rebuild closure: truthy for a mesh it cannot compose
+     *  (installed as the group's `_w` once committed). Omitted by builders whose closure handles every mesh. */
+    _w?: ((mesh: Mesh) => unknown) | null;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The scene stores it on its material group as `r`;

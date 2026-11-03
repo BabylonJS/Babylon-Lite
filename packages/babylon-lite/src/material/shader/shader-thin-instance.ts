@@ -39,7 +39,9 @@ interface ShaderHelpers {
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial) => GPUBuffer;
     getVertexLayout?: (material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh) => ShaderVbLayout | null;
-    registerPipeline?: (mesh: Mesh, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
+    /** Record the async warm-up recipe. `key` is the mesh for the mesh's own material, and the renderable itself for a
+     * material-override build (shadow caster, depth prepass), so an override never replaces the visible recipe. */
+    registerPipeline?: (key: Mesh | Renderable, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -186,8 +188,11 @@ export function buildShaderRenderablesWithInstancing(
                 };
             },
         };
+        // An override (shadow caster, depth prepass) is the same mesh drawn with another material into another pass.
+        // Keyed by the mesh it would replace the mesh's own recipe, and the colour pass would then warm the caster
+        // against a colour target its fragment never writes. Keyed by its renderable, the override pass still finds it.
         registerPipeline?.(
-            mesh,
+            isOverride ? r : mesh,
             material,
             hasColor,
             vertexLayout ?? (mesh._gpu._vbLayout ? { _key: mesh._gpu._vbKey ?? "", _vbs: vertexBuffers.slice(0, baseLocation) } : undefined)
