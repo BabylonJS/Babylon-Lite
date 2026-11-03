@@ -367,15 +367,18 @@ export function ensureCsmShadowCacheState(
         },
     };
     const casterMatGens = new Map<Material, number | undefined>();
+    const casterMatFeatures = new Map<Material, unknown>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
+    const casterGens = new Map<Mesh, number | undefined>();
     // A caster without a material gets no packet, and so no cap entry: it waits in `_held`, and the reconcile queues it
     // once it has one, also when it gets it before the next ensure.
     let held: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
         if (mesh.material) {
             casterMaxCascades.set(mesh, mesh._shadowMaxCascade);
-            snapshotShadowCasterMaterial(mesh.material, casterMaterials, casterMatGens);
+            casterGens.set(mesh, mesh._renderableGen);
+            snapshotShadowCasterMaterial(mesh.material, casterMaterials, casterMatGens, casterMatFeatures);
         } else {
             (held ??= new Set()).add(mesh);
         }
@@ -395,7 +398,9 @@ export function ensureCsmShadowCacheState(
         _materialViews: materialViews,
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
+        _casterMatFeatures: casterMatFeatures,
         _casterMaxCascades: casterMaxCascades,
+        _casterGens: casterGens,
         _held: held,
         _cascadeScratch: _createCascadeScratch(cascadeCount),
         _staticTasks: staticTasks,

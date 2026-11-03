@@ -69,6 +69,12 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
 /** Set environment rotation around the Y axis, in radians. */
 export function setEnvironmentRotation(scene: SceneContext, rotation: number): void;
 
+/** Rotate only the image-based lighting around the Y axis, in radians; the visible skybox keeps its own orientation. */
+export function setEnvironmentLightingRotation(scene: SceneContext, rotation: number): void;
+
+/** Give the visible skybox a fixed Y rotation, in radians, independent of the lighting. Call before the skybox is built. */
+export function setEnvironmentSkyboxRotation(scene: SceneContext, rotation: number): void;
+
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;
 
@@ -246,6 +252,10 @@ covers two distinct cases:
   the group and then joins the PBR group rebuild that has not been dispatched yet, so the meshes of one
   drain or one `rebuildMaterial` call share a single rebuild; requests that arrive while a rebuild runs
   fold into one follow-up, dispatched after it settles.
+
+`rebuildMaterial()` may also drain the queue synchronously for the PBR meshes of one material, when their group
+already composed their variants: it queues only those meshes, drains, and puts the meshes queued for other
+reasons back for the next frame's drain (27-render-pipeline, PBR Material Rebuild Lifecycle).
 
 > **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
 > shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`

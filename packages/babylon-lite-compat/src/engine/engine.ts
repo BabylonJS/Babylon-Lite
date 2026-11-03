@@ -30,6 +30,7 @@ import {
     registerScene,
     registerSceneWithShadowSupport,
     enableMirroredMeshes,
+    enableRectAreaLights,
     onBeforeRender,
     createNullEngine,
     stepScene,
@@ -107,6 +108,7 @@ export abstract class AbstractEngine {
     protected readonly _scenes: Scene[] = [];
     protected readonly _loopCallbacks: Array<() => void> = [];
     protected _initialized = false;
+    private _disposed = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
 
@@ -153,6 +155,14 @@ export abstract class AbstractEngine {
      * not block engine startup.
      */
     private readonly _lateWork: Array<() => Promise<void>> = [];
+    /** @internal Number of scene mutations currently holding the Lite render loop paused. */
+    private _sceneMutationPauseCount = 0;
+    /** @internal Whether the render loop was active when the outermost scene mutation paused it. */
+    private _shouldResumeAfterSceneMutation = false;
+    /** @internal Changes whenever a caller explicitly stops the render loop. */
+    private _renderLoopStopRevision = 0;
+    /** @internal Stop revision captured by the outermost scene mutation pause. */
+    private _sceneMutationPauseRevision = 0;
 
     public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
         this._canvas = canvas;
@@ -193,8 +203,16 @@ export abstract class AbstractEngine {
         if (this._initialized) {
             return;
         }
-        this._lite = await createEngine(this._canvas, this._options);
-        this._unsubscribeDeviceLost = onEngineDeviceLost(this._lite, () => this.onContextLostObservable.notifyObservers(this));
+        if (this._disposed) {
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine has been disposed.");
+        }
+        const lite = await createEngine(this._canvas, this._options);
+        if (this._disposed) {
+            disposeEngine(lite);
+            throw new LiteCompatError(`${this.constructor.name}.initAsync`, "The engine was disposed during initialization.");
+        }
+        this._lite = lite;
+        this._unsubscribeDeviceLost = onEngineDeviceLost(lite, () => this.onContextLostObservable.notifyObservers(this));
         this._initialized = true;
     }
 
@@ -347,6 +365,33 @@ export abstract class AbstractEngine {
         this._lateWork.push(work);
     }
 
+    /** @internal Pause rendering across an asynchronous scene topology/resource mutation. */
+    public _pauseForSceneMutation(): void {
+        if (this._disposed) {
+            return;
+        }
+        if (this._sceneMutationPauseCount++ > 0) {
+            return;
+        }
+        this._sceneMutationPauseRevision = this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = this._initialized && !this._headless && this._lite._animFrameId !== 0;
+        if (this._shouldResumeAfterSceneMutation) {
+            stopEngine(this._lite);
+        }
+    }
+
+    /** @internal Release a scene-mutation pause, resuming only if the caller did not stop rendering. */
+    public async _resumeAfterSceneMutation(): Promise<void> {
+        if (this._sceneMutationPauseCount === 0 || --this._sceneMutationPauseCount > 0) {
+            return;
+        }
+        const shouldResume = !this._disposed && this._shouldResumeAfterSceneMutation && this._sceneMutationPauseRevision === this._renderLoopStopRevision;
+        this._shouldResumeAfterSceneMutation = false;
+        if (shouldResume) {
+            await startEngine(this._lite);
+        }
+    }
+
     /** @internal Scenes register themselves on construction. */
     public _registerScene(scene: Scene): void {
         this._scenes.push(scene);
@@ -382,6 +427,8 @@ export abstract class AbstractEngine {
     }
 
     public stopRenderLoop(): void {
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
@@ -404,6 +451,12 @@ export abstract class AbstractEngine {
     }
 
     public dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+        this._disposed = true;
+        this._renderLoopStopRevision++;
+        this._shouldResumeAfterSceneMutation = false;
         if (this._rafId !== null && typeof cancelAnimationFrame === "function") {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
@@ -501,6 +554,9 @@ export abstract class AbstractEngine {
             scene._buildClusteredContainers();
             await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
+            if (scene._lite.lights.some((light) => light.lightType === "rectArea")) {
+                await enableRectAreaLights(scene._lite);
+            }
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
             // Lite's equivalent opt-in per scene (after all assets are added, before registerScene)

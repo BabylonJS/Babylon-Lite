@@ -3,6 +3,7 @@
  */
 
 import { F32 } from "../engine/typed-arrays.js";
+import { _rightHanded } from "#coordinate-system";
 import type { Camera } from "../camera/camera.js";
 import { _cameraChangeKey } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -58,6 +59,13 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
     const ux = fy * rz - fz * ry;
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
+    if (_rightHanded !== null) {
+        // Right-handed: mirror the light's X axis. The shadow pass then mirrors like the camera pass, so the
+        // camera pass's flipped `frontFace` culls the same faces as Babylon.js's left-handed light pass.
+        rx = -rx;
+        ry = -ry;
+        rz = -rz;
+    }
 
     // Column-major view matrix (stores basis as rows of rotation, plus translation column)
     return new F32([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);

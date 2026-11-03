@@ -28,6 +28,7 @@ import type { ShaderRenderPass, ShaderVbLayout } from "./shader-vb-support.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
@@ -39,7 +40,9 @@ interface ShaderHelpers {
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial) => GPUBuffer;
     getVertexLayout?: (material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh) => ShaderVbLayout | null;
-    registerPipeline?: (mesh: Mesh, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
+    /** Record the async warm-up recipe. `key` is the mesh for the mesh's own material, and the renderable itself for a
+     * material-override build (shadow caster, depth prepass), so an override never replaces the visible recipe. */
+    registerPipeline?: (key: Mesh | Renderable, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -110,7 +113,11 @@ export function buildShaderRenderablesWithInstancing(
         // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
         const hasColor = !!ti.colors && material._tic != 0;
         const baseLocation = material.attributes.length;
-        const variantKey = `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
+        const variantKey =
+            _rightHanded && ((mesh as typeof mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11)
+                ? // Right-handed glTF geometry keeps glTF's own winding (no mirroring root): its own pipeline.
+                  `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}|ccw`
+                : `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
         const vertexBuffers = [...(vertexLayout?._vbs ?? bindings.vertexBuffers)];
         const instanceAttrs = appendInstanceInputs(vertexBuffers, baseLocation, hasColor);
         if (!vertexLayout && mesh._gpu._vbLayout) {
@@ -186,8 +193,11 @@ export function buildShaderRenderablesWithInstancing(
                 };
             },
         };
+        // An override (shadow caster, depth prepass) is the same mesh drawn with another material into another pass.
+        // Keyed by the mesh it would replace the mesh's own recipe, and the colour pass would then warm the caster
+        // against a colour target its fragment never writes. Keyed by its renderable, the override pass still finds it.
         registerPipeline?.(
-            mesh,
+            isOverride ? r : mesh,
             material,
             hasColor,
             vertexLayout ?? (mesh._gpu._vbLayout ? { _key: mesh._gpu._vbKey ?? "", _vbs: vertexBuffers.slice(0, baseLocation) } : undefined)

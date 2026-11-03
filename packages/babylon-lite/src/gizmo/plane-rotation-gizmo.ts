@@ -29,6 +29,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 import { createRotationSectorMaterial } from "./rotation-sector-material.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Options for building a rotation ring constrained to a single plane. */
 export interface PlaneRotationGizmoOptions {
@@ -224,10 +225,10 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
         onRotationChanged.notify(out);
         lastDragPoint = { x: event.dragPlanePoint.x, y: event.dragPlanePoint.y, z: event.dragPlanePoint.z };
 
-        // Accumulate angle for the camembert visual.  BJS uses left-handed
-        // coords by default (`useRightHandedSystem === false`), in which case
-        // `_angles.y += angle` (positive sign).
-        cumulativeAngle += angle;
+        // Accumulate angle for the camembert visual.  BJS adds the angle in a
+        // left-handed scene and subtracts it in a right-handed one
+        // (`_angles.y += useRightHandedSystem ? -angle : angle`).
+        cumulativeAngle += _rightHanded ? -angle : angle;
         anglesUniform[1] = cumulativeAngle;
         setShaderUniform(rotationDisplayMaterial, "angles", anglesUniform);
     });

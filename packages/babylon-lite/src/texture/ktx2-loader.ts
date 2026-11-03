@@ -59,9 +59,9 @@ interface Ktx2DecoderModule {
     WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean };
 }
 
-// Public URL of the KTX2/Basis decoder script (default: the Babylon CDN). Override via
+// Pin the default decoder to a published release with matching transcoder JS/WASM assets. Override via
 // `setKtx2DecoderUrl()` to self-host the decoder (e.g. to avoid the cross-origin CDN dependency).
-let _ktx2DecoderUrl = "https://cdn.babylonjs.com/babylon.ktx2Decoder.js";
+let _ktx2DecoderUrl = "https://cdn.babylonjs.com/v9.32.1/babylon.ktx2Decoder.js";
 // Optional overrides for the WASM/JS modules the decoder pulls after it loads (keyed by the property
 // name on the matching KTX2DECODER transcoder, e.g. MSCTranscoder→{JSModuleURL,WASMModuleURL},
 // ZSTDDecoder→{WASMModuleURL}, LiteTranscoder_*→{WASMModuleURL}). Needed to FULLY self-host — the

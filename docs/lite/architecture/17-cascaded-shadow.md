@@ -429,16 +429,25 @@ with the scene.
 a late subscriber once at least one cascade update has completed. This is required in
 cache mode because the next refit may be far in the future.
 
-Each CSM task state also snapshots every caster's maximum cascade and, per receive
-material, its terminal caster material and that material's `_csmGen`. Every ensure
+Each CSM task state also snapshots every caster's maximum cascade and renderable
+generation (`Mesh._renderableGen`) and, per receive material, its terminal caster
+material, that material's `_csmGen` and its `_renderFeatures` object. Every ensure
 reconciles them with the live casters (`_reconcileCsmCasters`):
 
-- **Requeue.** Casters that left the set or were re-capped, and casters whose no-colour
-  view is stale, are removed from every cascade task in one pass per task, their packets
-  retiring behind the frame fence. The ones still in the set are queued again: a caster
-  with a stale view through a fresh one, a caster that was only re-capped through the
-  cached view of its material. A view is stale when the caster's material was rebuilt
-  (`_csmGen` bump) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when
+- **Requeue.** Casters that left the set or were re-capped, casters whose own renderable
+  was rebuilt, and casters whose no-colour view is stale, are removed from every cascade
+  task in one pass per task, their packets retiring behind the frame fence. The ones
+  still in the set are queued again: a caster with a stale view through a fresh one, a
+  caster that was only re-capped or rebuilt through the cached view of its material. A
+  caster's renderable is rebuilt when its `_renderableGen` moved: every path that rebuilds
+  a mesh's renderable and retires its per-mesh resources moves it (the material-swap
+  drain, a runtime build, a material or group rebuild), and the caster's packets may
+  reference those resources. Only that caster is requeued: adding one mesh with a shared
+  material, or replacing one mesh's geometry, leaves the packets of the material's other
+  casters alone. A view is stale when the caster's material was rebuilt (`_csmGen` bump),
+  has recomputed `_renderFeatures` (material plugins drop them and rebuild the meshes one
+  by one; dropped features not recomputed yet keep the current view) or was re-pointed
+  (`setShadowCasterMaterial`) since the snapshot, or when
   the caster's material is missing from it, because it switched material, got its first
   one, or joins with an unseen material. A joining caster counts too: another caster's
   chain may have cached a view on its chain before the terminal was rebuilt, and that
@@ -458,8 +467,8 @@ reconciles them with the live casters (`_reconcileCsmCasters`):
   without touching any task. It runs again when the array changes, a caster material is
   rebuilt or re-pointed, or the hold changes or lifts, also without a scene version
   bump (a factory import lands, a change is reverted). A renderable version or material
-  epoch move alone changes nothing: a rebuilt caster material moves its `_csmGen`,
-  which the scan reads.
+  epoch move alone changes nothing: a rebuilt caster material moves its `_csmGen` and a
+  rebuilt caster its `_renderableGen`, which the scan reads.
 - **What a held caster draws.** Nothing. It leaves every cascade task (and static-cache
   task), its packets retired once behind the frame fence. Those packets were built
   through its previous material and may reference per-mesh resources retired with it,

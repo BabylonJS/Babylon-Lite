@@ -229,6 +229,7 @@ And just as importantly: we want to **hear from you** — what's missing, what y
 - 📊 **[Feature Comparison](02-feature-comparison.md)** — the full Lite-vs-Babylon.js feature matrix, so you can see exactly what's covered, partial, or missing.
 - 🧱 **[Architecture docs](architecture/00-overview.md)** — deep dives into the engine internals.
 - 🧪 **[Headless (Null Engine)](05-headless-null-engine.md)** — run Lite without a GPU for server-side physics and deterministic simulation.
+- 🫱 **[Right-Handed Coordinate System](07-right-handed-system.md)** — compile Lite right-handed, like Babylon.js's `useRightHandedSystem`, at zero cost.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — explore the code, browse the scene gallery, and follow along with development.
 
 Star the repo, open an issue, and tell us what you'd want before reaching for Lite. **Two engines, one family, moving forward together** — pick the one that fits your project, and switch between them knowing the pixels won't change. 💙

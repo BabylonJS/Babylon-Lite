@@ -18,6 +18,7 @@ import { Vector3 } from "./vector.js";
 import type { Matrix } from "./matrix.js";
 
 let lookDirectionRotationScratch: Float32Array | undefined;
+let axesRotationScratch: Float32Array | undefined;
 
 export class Quaternion {
     public constructor(
@@ -198,7 +199,38 @@ export class Quaternion {
         return Quaternion.RotationYawPitchRoll(y, x, z);
     }
 
+    /** Babylon.js `Quaternion.FromEulerVector(vec)`: `vec` holds pitch (x), yaw (y) and roll (z). */
+    public static FromEulerVector(vec: Vector3): Quaternion {
+        return Quaternion.RotationYawPitchRoll(vec.y, vec.x, vec.z);
+    }
+
+    /** Babylon.js `Quaternion.FromEulerVectorToRef(vec, result)`. */
+    public static FromEulerVectorToRef<T extends Quaternion>(vec: Vector3, result: T): T {
+        return Quaternion.RotationYawPitchRollToRef(vec.y, vec.x, vec.z, result);
+    }
+
+    /** Babylon.js `Quaternion.RotationQuaternionFromAxis(axis1, axis2, axis3)`: the rotation of the XYZ system onto these axes. */
+    public static RotationQuaternionFromAxis(axis1: Vector3, axis2: Vector3, axis3: Vector3): Quaternion {
+        return Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, new Quaternion());
+    }
+
+    /** Babylon.js `Quaternion.RotationQuaternionFromAxisToRef(axis1, axis2, axis3, ref)`. Like Babylon.js, it normalizes
+     *  copies of the axes and uses them as the rows of a rotation matrix (`Matrix.FromXYZAxesToRef`); the axes are left as they are. */
+    public static RotationQuaternionFromAxisToRef<T extends Quaternion>(axis1: Vector3, axis2: Vector3, axis3: Vector3, ref: T): T {
+        // Only the rotation block is read, so the rest of the scratch stays as created.
+        const matrix = (axesRotationScratch ??= new Float32Array(16));
+        writeNormalizedRow(matrix, 0, axis1);
+        writeNormalizedRow(matrix, 1, axis2);
+        writeNormalizedRow(matrix, 2, axis3);
+        return Quaternion._FromRotationStorageToRef(matrix, ref);
+    }
+
     public static RotationYawPitchRoll(yaw: number, pitch: number, roll: number): Quaternion {
+        return Quaternion.RotationYawPitchRollToRef(yaw, pitch, roll, new Quaternion());
+    }
+
+    /** Babylon.js `Quaternion.RotationYawPitchRollToRef(yaw, pitch, roll, result)`. */
+    public static RotationYawPitchRollToRef<T extends Quaternion>(yaw: number, pitch: number, roll: number, result: T): T {
         const halfRoll = roll * 0.5;
         const halfPitch = pitch * 0.5;
         const halfYaw = yaw * 0.5;
@@ -210,7 +242,7 @@ export class Quaternion {
         const sinYaw = Math.sin(halfYaw);
         const cosYaw = Math.cos(halfYaw);
 
-        return new Quaternion(
+        return result.set(
             cosYaw * sinPitch * cosRoll + sinYaw * cosPitch * sinRoll,
             sinYaw * cosPitch * cosRoll - cosYaw * sinPitch * sinRoll,
             cosYaw * cosPitch * sinRoll - sinYaw * sinPitch * cosRoll,
@@ -248,4 +280,12 @@ export class Quaternion {
 
         return new Quaternion(num3 * left.x + num2 * right.x, num3 * left.y + num2 * right.y, num3 * left.z + num2 * right.z, num3 * left.w + num2 * right.w);
     }
+}
+
+/** Write `axis`, normalized as `Vector3.normalize()` does (a zero axis stays zero), as row `row` of a 4×4 storage. */
+function writeNormalizedRow(matrix: Float32Array, row: number, axis: Vector3): void {
+    const len = axis.length() || 1;
+    matrix[row * 4] = axis.x / len;
+    matrix[row * 4 + 1] = axis.y / len;
+    matrix[row * 4 + 2] = axis.z / len;
 }

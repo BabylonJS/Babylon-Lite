@@ -92,6 +92,7 @@ describe("Material.clone", () => {
         mat.diffuseColor = new Color3(0.1, 0.2, 0.3);
         mat.alpha = 0.5;
         mat.alphaCutOff = 0.25;
+        mat.roughness = 0.7;
         mat.disableLighting = true;
         mat.backFaceCulling = false;
         mat.transparencyMode = 2;
@@ -110,6 +111,7 @@ describe("Material.clone", () => {
         expect(clone.diffuseColor.r).toBeCloseTo(0.1);
         expect(clone.alpha).toBe(0.5);
         expect(clone.alphaCutOff).toBe(0.25);
+        expect(clone.roughness).toBe(0.7);
         expect(clone.disableLighting).toBe(true);
         expect(clone.backFaceCulling).toBe(false);
         expect(clone.transparencyMode).toBe(2);
@@ -245,6 +247,23 @@ describe("Material.clone", () => {
 
         await parsePromise!;
         expect(mesh.material).toBe(replacementLite);
+    });
+});
+
+describe("StandardMaterial roughness", () => {
+    it("forwards initial and live values to Lite with uniform dirty tracking", () => {
+        const mat = new StandardMaterial("area-light-receiver");
+        const initialVersion = mat._lite._uboVersion;
+
+        expect(mat.roughness).toBe(0);
+        mat.roughness = 0.2;
+        expect(mat._lite.roughness).toBe(0.2);
+        expect(mat.roughness).toBe(0.2);
+        expect(mat._lite._uboVersion).toBe(initialVersion + 1);
+
+        mat.roughness = 0.9;
+        expect(mat._lite.roughness).toBe(0.9);
+        expect(mat._lite._uboVersion).toBe(initialVersion + 2);
     });
 });
 

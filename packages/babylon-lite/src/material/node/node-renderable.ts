@@ -12,6 +12,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
+import { _rightHanded } from "#coordinate-system";
 import type { MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { NodeMaterial } from "./node-material.js";
@@ -351,7 +352,12 @@ function buildNodeMeshRenderablesImpl(
                     mesh: pkt._mesh,
                     _worldCenter: sortCenter,
                     bind() {
-                        return { renderable: rTrans, pipeline: compile._pipelineForMesh(pkt._mesh._gpu), update, draw };
+                        return {
+                            renderable: rTrans,
+                            pipeline: _rightHanded && isCcwMesh(pkt._mesh) ? compile._pipelineForCcwMesh!(pkt._mesh._gpu) : compile._pipelineForMesh(pkt._mesh._gpu),
+                            update,
+                            draw,
+                        };
                     },
                 };
                 if (!resources) {
@@ -362,7 +368,7 @@ function buildNodeMeshRenderablesImpl(
                 renderables.push(rTrans);
             }
         } else {
-            for (const selectedPackets of groupNodeMeshPackets(packets)) {
+            for (const selectedPackets of _rightHanded ? groupRightHandedNodeMeshPackets(packets) : groupNodeMeshPackets(packets)) {
                 if (selectedPackets.length > 1) {
                     for (const packet of selectedPackets) {
                         packet._owner = selectedPackets;
@@ -402,7 +408,15 @@ function buildNodeMeshRenderablesImpl(
                     isTransparent: false,
                     mesh: selectedPackets.length === 1 ? selectedPackets[0]!._mesh : undefined,
                     bind() {
-                        return { renderable: rOpaque, pipeline: compile._pipelineForMesh(selectedPackets[0]!._mesh._gpu), update, draw };
+                        return {
+                            renderable: rOpaque,
+                            pipeline:
+                                _rightHanded && isCcwMesh(selectedPackets[0]!._mesh)
+                                    ? compile._pipelineForCcwMesh!(selectedPackets[0]!._mesh._gpu)
+                                    : compile._pipelineForMesh(selectedPackets[0]!._mesh._gpu),
+                            update,
+                            draw,
+                        };
                     },
                 };
                 if (!resources) {
@@ -441,6 +455,20 @@ function removeCallback(callbacks: (() => void)[], callback: () => void): void {
     if (index >= 0) {
         callbacks.splice(index, 1);
     }
+}
+
+/** Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural meshes:
+ *  the mesh's `_primitiveFeatures` bit 11 (set by the glTF loader, per mesh, never on shared geometry). */
+function isCcwMesh(mesh: Mesh): number {
+    return ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11);
+}
+
+/** Right-handed builds: one opaque renderable binds ONE pipeline, so glTF ("ccw") and procedural
+ *  ("cw") meshes sharing a material are grouped apart before the vertex-layout grouping. */
+function groupRightHandedNodeMeshPackets(packets: NodePacket[]): NodePacket[][] {
+    const ccw = packets.filter((packet) => isCcwMesh(packet._mesh));
+    const parts = ccw.length && ccw.length < packets.length ? [packets.filter((packet) => !isCcwMesh(packet._mesh)), ccw] : [packets];
+    return parts.flatMap((part) => [...groupNodeMeshPackets(part)]);
 }
 
 function groupNodeMeshPackets(packets: NodePacket[]): Iterable<NodePacket[]> {

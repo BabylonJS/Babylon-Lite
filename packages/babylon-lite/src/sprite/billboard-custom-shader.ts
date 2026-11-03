@@ -40,6 +40,7 @@ import {
 import type { BillboardFxHook } from "./sprite-fx-hook.js";
 import { _registerBillboardFxHook } from "./sprite-fx-hook.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** One extra texture bound after the atlas (group 1, bindings 3, 5, 7, …). */
 export type BillboardCustomTexture = CustomShaderTexture;
@@ -70,9 +71,10 @@ export interface BillboardCustomShader {
     readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx | null;
 }
 
-function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
+/** @internal Exported for tests. */
+export function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
     const fxBinding = 3 + extraTextures.length * 2;
-    return wgsl`${SCENE_UBO_WGSL}
+    const code = wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,
@@ -121,6 +123,11 @@ return out;
 fn fs(in: O) -> @location(0) vec4f {
 ${fragment}
 }`;
+    // A right-handed engine mirrors the texture horizontally, as Babylon.js's sprite renderer does.
+    if (_rightHanded !== null) {
+        return code.replace(/mix\(in\.a,\s*in\.b,\s*q\)/, "mix(in.a,in.b,vec2f(1.0-q.x,q.y))");
+    }
+    return code;
 }
 
 /**

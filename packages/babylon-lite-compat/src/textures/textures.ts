@@ -615,6 +615,11 @@ export class CubeTexture extends BaseTexture {
     public readonly _envLoaderKind: "cube" | "hdr" = "cube";
     /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
     public readonly onLoadObservable = new Observable<CubeTexture>();
+    /**
+     * Babylon.js `CubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. A scene that uses the
+     * texture as its `environmentTexture` turns its image-based lighting with it (see `Scene.environmentTexture`).
+     */
+    public rotationY = 0;
     private _ready = false;
     private readonly _readyPromise: Promise<void>;
 
@@ -691,6 +696,11 @@ export class HDRCubeTexture extends BaseTexture {
     public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
     /** Fires when the HDR environment is "ready" (resolved on a microtask). */
     public readonly onLoadObservable = new Observable<HDRCubeTexture>();
+    /**
+     * Babylon.js `HDRCubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. A scene that uses the
+     * texture as its `environmentTexture` turns its image-based lighting with it (see `Scene.environmentTexture`).
+     */
+    public rotationY = 0;
     private _ready = false;
     private readonly _readyPromise: Promise<void>;
 

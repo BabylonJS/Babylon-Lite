@@ -64,7 +64,7 @@ export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
-export { setEnvironmentRotation } from "./scene/set-environment-rotation.js";
+export { setEnvironmentRotation, setEnvironmentLightingRotation, setEnvironmentSkyboxRotation } from "./scene/set-environment-rotation.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
@@ -828,6 +828,7 @@ export {
     setBoneWorldPoseDeferred,
     bakeSkeleton,
     clearBoneOverride,
+    getMeshSkeleton,
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
@@ -1218,9 +1219,9 @@ export { buildNodeParticleSetWithEmitterProvider, withNodeParticleEmitterProvide
 export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
 export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
 export type { ParticleSystem } from "./particle/particle-system.js";
-export { animateParticleSystem, startParticleSystem, stopParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem, isParticleSystemStarted } from "./particle/particle-system.js";
 export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
-export { registerNodeParticleSet } from "./particle/particle-scene.js";
+export { registerNodeParticleSet, getParticleSystems } from "./particle/particle-scene.js";
 export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
 export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
 export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
@@ -1262,6 +1263,30 @@ export { loadFontWeightOffset } from "./text/load-font-weight-offset.js";
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,
+    getPhysicsWorlds,
+    getPhysicsBodies,
+    getPhysicsConstraints,
+    getPhysicsBodyWorld,
+    getPhysicsBodyPrestepType,
+    getPhysicsBodyShape,
+    getPhysicsBodyMassPropertiesToRef,
+    getPhysicsBodyLinearDamping,
+    setPhysicsBodyLinearDamping,
+    getPhysicsBodyAngularDamping,
+    setPhysicsBodyAngularDamping,
+    getPhysicsBodyGravityFactor,
+    setPhysicsBodyGravityFactor,
+    getPhysicsBodyLinearVelocityToRef,
+    getPhysicsBodyAngularVelocityToRef,
+    getPhysicsShapeType,
+    getPhysicsShapeParameters,
+    getPhysicsShapeMaterialToRef,
+    getPhysicsShapeFilterMembershipMask,
+    getPhysicsShapeFilterCollideMask,
+    getPhysicsShapeDensity,
+    getPhysicsShapeChildCount,
+    isPhysicsConstraintEnabled,
+    setPhysicsConstraintEnabled,
     enableHavokFloatingOrigin,
     enableHavokThinInstancePhysics,
     createPhysicsBody,
@@ -1318,6 +1343,7 @@ export type {
     PhysicsConstraint,
     PhysicsShapeOptions,
     PhysicsShapeParameters,
+    PhysicsShapeMaterial,
     PhysicsAggregateOptions,
     PhysicsMassProperties,
     PhysicsRotationAxis,
@@ -1332,7 +1358,15 @@ export { setPhysicsBodyCollisionEventsEnabled, onPhysicsCollision } from "./phys
 export type { PhysicsCollisionInfo } from "./physics/havok-collision.js";
 export { setPhysicsShapeIsTrigger, onPhysicsTrigger, onPhysicsTriggerBodies } from "./physics/havok-trigger.js";
 export type { PhysicsTriggerBodyInfo, PhysicsTriggerInfo } from "./physics/havok-trigger.js";
-export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
+export {
+    createPhysicsViewer,
+    showPhysicsBody,
+    showPhysicsConstraint,
+    hidePhysicsBody,
+    getPhysicsConstraintDebug,
+    hidePhysicsConstraint,
+    disposePhysicsViewer,
+} from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
 export {
     createPhysicsCharacterController,
@@ -1527,5 +1561,32 @@ export {
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
 export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
 export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+
+// Optional pure-JavaScript navigation, independently loaded alongside Recast.
+export type {
+    NavcatManager,
+    NavcatNode,
+    NavcatFilter,
+    NavcatOptions,
+    NavcatLocation,
+    NavcatNearestResult,
+    NavcatPathPoint,
+    NavcatPathResult,
+    NavcatPathOptions,
+    NavcatRaycastResult,
+    NavcatMoveResult,
+    NavcatConnectionOptions,
+    NavcatConnection,
+    NavcatGeometry,
+    NavcatBuildOptions,
+    NavcatDebugGeometry,
+    NavcatDebugOptions,
+} from "./navigation/navcat-types.js";
+export { createNavcatManager, replaceNavcatMesh, exportNavcatMesh, setNavcatFilter, disposeNavcatManager } from "./navigation/navcat.js";
+export { findNavcatNearestPoly, findNavcatPath, raycastNavcat, moveAlongNavcatSurface } from "./navigation/navcat-queries.js";
+export { extractNavcatGeometry } from "./navigation/navcat-geometry.js";
+export { generateNavcatMesh } from "./navigation/navcat-generation.js";
+export { addNavcatConnection, removeNavcatConnection, isNavcatConnectionConnected } from "./navigation/navcat-connections.js";
+export { createNavcatDebugGeometry } from "./navigation/navcat-debug.js";
 export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
 export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";

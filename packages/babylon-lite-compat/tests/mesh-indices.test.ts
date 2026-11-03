@@ -23,6 +23,8 @@ const resizeMeshGeometryMock = vi.mocked(resizeMeshGeometry);
 /** Build an AbstractMesh with a minimal fake `_lite` + scene/engine handle. */
 function fakeMesh(lite: Record<string, unknown>, withEngine = true): AbstractMesh {
     const mesh = Object.create(AbstractMesh.prototype) as AbstractMesh;
+    // No GPU geometry is modelled, so a write takes the (mocked) resize path.
+    lite._gpu ??= {};
     (mesh as unknown as { _lite: unknown })._lite = lite;
     const engine = { _lite: { id: "engine" } };
     (mesh as unknown as { _scene: unknown })._scene = withEngine ? { getEngine: () => engine } : undefined;
@@ -120,6 +122,8 @@ describe("AbstractMesh.setIndices", () => {
         const lite = {
             name: "shape",
             children: [],
+            // No GPU geometry is modelled, so each write takes the (mocked) resize path.
+            _gpu: {},
             receiveShadows: false,
             _cpuPositions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
             _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),

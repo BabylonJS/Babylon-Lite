@@ -4,8 +4,10 @@ import { VERSION } from "babylon-lite";
 import { AbstractEngine, Engine, NullEngine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
 import { LiteCompatError } from "../src/error";
 import { PointerEventTypes, PointerInfo } from "../src/events/pointer-events";
-import type { TransformNode } from "../src/meshes/meshes";
+import { MeshBuilder, type TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
+import { ArcRotateCamera } from "../src/cameras/cameras";
+import { Vector3 } from "../src/math/vector";
 
 /**
  * The Engine/Scene compat wrappers add Babylon.js-shaped accessors that don't
@@ -277,7 +279,8 @@ describe("Scene pointer observable", () => {
 
         expect(seen.map((info) => info.type)).toEqual([PointerEventTypes.POINTERDOWN, PointerEventTypes.POINTERMOVE, PointerEventTypes.POINTERUP, PointerEventTypes.POINTERWHEEL]);
         expect(seen.map((info) => info.event)).toEqual(events);
-        expect(seen.every((info) => info.pickInfo === null)).toBe(true);
+        // No camera, so each lazy pick is a clean miss, as in Babylon.js.
+        expect(seen.every((info) => info.pickInfo !== null && !info.pickInfo.hit)).toBe(true);
         expect(seen.every((info) => info instanceof PointerInfo)).toBe(true);
         scene.dispose();
     });
@@ -296,6 +299,78 @@ describe("Scene pointer observable", () => {
         expect(downOnly).toHaveBeenCalledOnce();
         expect(downOnly.mock.calls[0]?.[0].type).toBe(PointerEventTypes.POINTERDOWN);
         expect(allEvents).toHaveBeenCalledTimes(2);
+        scene.dispose();
+    });
+
+    /** An 800×600 canvas at (10, 20) on the page, a camera looking at the origin, and a box there. */
+    function pickableScene(): { canvas: EventTarget; scene: Scene; box: ReturnType<typeof MeshBuilder.CreateBox> } {
+        const canvas = Object.assign(new EventTarget(), { width: 800, height: 600, getBoundingClientRect: () => ({ x: 10, y: 20, width: 800, height: 600 }) });
+        const engine = new NullEngine();
+        (engine as unknown as { _canvas: EventTarget })._canvas = canvas;
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                return { getMappedRange: () => mapped, unmap: () => undefined, destroy: () => undefined } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const scene = new Scene(engine);
+        new ArcRotateCamera("camera", 0, Math.PI / 2, 10, Vector3.Zero(), scene);
+        const box = MeshBuilder.CreateBox("box", { size: 2 }, scene);
+        return { canvas, scene, box };
+    }
+
+    const pointer = (type: string, clientX: number, clientY: number): Event => Object.assign(new Event(type), { clientX, clientY });
+
+    it.each(["pointerdown", "pointermove", "pointerup", "wheel"])("fills pickInfo for %s with a pick at the event position", (type) => {
+        const { canvas, scene, box } = pickableScene();
+        const pick = vi.spyOn(scene, "pick");
+        const seen: PointerInfo[] = [];
+        scene.onPointerObservable.add((info) => seen.push(info));
+
+        canvas.dispatchEvent(pointer(type, 410, 320));
+
+        expect([scene.pointerX, scene.pointerY]).toEqual([400, 300]);
+        expect(pick).not.toHaveBeenCalled();
+        const info = seen[0]!.pickInfo!;
+        expect(info.hit).toBe(true);
+        expect(info.pickedMesh).toBe(box);
+        expect(seen[0]!.pickInfo).toBe(info);
+        expect(pick).toHaveBeenCalledOnce();
+        expect(pick).toHaveBeenCalledWith(400, 300, undefined, false, null);
+        scene.dispose();
+    });
+
+    it("picks through cameraToUseForPointers when it differs from the active camera", () => {
+        const { canvas, scene, box } = pickableScene();
+        const facingBox = scene.activeCamera!;
+        const facingAway = new ArcRotateCamera("away", 0, Math.PI / 2, 10, new Vector3(0, 100, 0), scene);
+        const seen: PointerInfo[] = [];
+        scene.onPointerObservable.add((info) => seen.push(info));
+
+        // The active camera sees the box at the pointer; the pointer camera does not.
+        scene.cameraToUseForPointers = facingAway;
+        canvas.dispatchEvent(pointer("pointerdown", 410, 320));
+        expect(scene.activeCamera).toBe(facingBox);
+        expect(seen[0]!.pickInfo!.hit).toBe(false);
+
+        // And the other way around.
+        scene.activeCamera = facingAway;
+        scene.cameraToUseForPointers = facingBox;
+        canvas.dispatchEvent(pointer("pointerdown", 410, 320));
+        expect(seen[1]!.pickInfo!.pickedMesh).toBe(box);
+        scene.dispose();
+    });
+
+    it("picks at the event's own position when pickInfo is read after later events", () => {
+        const { canvas, scene, box } = pickableScene();
+        const seen: PointerInfo[] = [];
+        scene.onPointerObservable.add((info) => seen.push(info));
+
+        canvas.dispatchEvent(pointer("pointermove", 410, 320));
+        canvas.dispatchEvent(pointer("pointermove", 10, 20));
+
+        expect(seen[1]!.pickInfo!.hit).toBe(false);
+        expect(seen[0]!.pickInfo!.pickedMesh).toBe(box);
         scene.dispose();
     });
 

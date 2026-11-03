@@ -29,6 +29,7 @@ function createFlowScene(
         surface: { canvas: { width, height } },
         _beforeRender: [],
         _deferredBuilders: [],
+        _disposables: [],
     } as unknown as SceneContext;
 }
 

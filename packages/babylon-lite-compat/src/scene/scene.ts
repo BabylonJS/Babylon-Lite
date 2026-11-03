@@ -18,6 +18,8 @@ import {
     createDefaultCamera as liteCreateDefaultCamera,
     setFog,
     setClipPlane,
+    setEnvironmentLightingRotation,
+    setEnvironmentSkyboxRotation,
     loadEnvironment,
     loadDdsEnvironment,
     loadHdrEnvironment,
@@ -173,6 +175,9 @@ export class Scene extends AbstractScene {
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
     public cameraToUseForPointers: Camera | null = null;
+    /** Babylon.js `scene.pointerX` / `pointerY`: the last pointer position in CSS pixels relative to the canvas. */
+    public pointerX = 0;
+    public pointerY = 0;
     private _defaultMaterial: StandardMaterial | null = null;
     private _fogMode = 0;
     private _fogStart = 0;
@@ -189,6 +194,8 @@ export class Scene extends AbstractScene {
     private readonly _pendingAdds: Array<() => void> = [];
     private _started = false;
     private _envTexture: CubeTexture | HDRCubeTexture | null = null;
+    /** Environment lighting rotation last forwarded to Lite. */
+    private _envRotation = 0;
     private _brdfTexture: BaseTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: CompatShadowGenerator[] = [];
@@ -269,7 +276,18 @@ export class Scene extends AbstractScene {
                 default:
                     return;
             }
-            this.onPointerObservable.notifyObservers(new PointerInfo(type, event as PointerEvent | WheelEvent, null), type);
+            const pointerEvent = event as PointerEvent | WheelEvent;
+            const rect = this._engine.getRenderingCanvasClientRect();
+            if (rect && typeof pointerEvent.clientX === "number") {
+                this.pointerX = pointerEvent.clientX - rect.x;
+                this.pointerY = pointerEvent.clientY - rect.y;
+            }
+            // As in Babylon.js, the pick at this event's position runs only if an observer reads `pickInfo`, through the
+            // pointer camera when one is set (`scene.pick` alone prefers the active camera).
+            const x = this.pointerX;
+            const y = this.pointerY;
+            const camera = this.cameraToUseForPointers;
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, pointerEvent, null, () => this.pick(x, y, undefined, false, camera)), type);
         };
 
         for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
@@ -298,14 +316,37 @@ export class Scene extends AbstractScene {
         // observers) reflects the current frame.
         this._engine._lastDeltaMs = deltaMs;
         this.onBeforeAnimationsObservable.notifyObservers(this);
+        // Which animatables play this frame is settled here, before Lite's manager update: that update only advances the
+        // native groups attached now, and it already runs user code (easing functions of native tracks, setters of
+        // natively bound properties).
+        const running = this._runningAnimatables;
+        const count = running.length;
+        for (let i = 0; i < count; i++) {
+            running[i]!._beginFrame();
+        }
         if (this._blendManager) {
             updateAnimationManager(this._blendManager, deltaMs);
         }
         if (this._propertyAnimationManager) {
             updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
-        for (const a of this._runningAnimatables) {
-            a._tick(deltaMs);
+        // Lite stepped the native groups above, in one manager update. The fallback tracks of the same animatables follow
+        // in three passes: `_advance` steps them all in time and notes their ends, running no user code; `_applyFrame`
+        // writes their values (easing functions, property setters); `_completeFrame` reports the ends, in order. A stop,
+        // pause, seek, restart or new animation that user code asks for during the frame therefore changes playback from
+        // the next frame on both evaluators. An animatable that is stopped or paused after its tracks were stepped keeps
+        // this frame's advance (Babylon.js, which steps animatables one at a time, would not advance it); `stop()` and
+        // `pause()` write that pose at once, so what the code writes after them stays. A chain of animations shorter than a
+        // frame cannot spin within one tick.
+        // The manager update and the passes run user code; a `dispose()` there empties the list.
+        for (let i = 0; i < count; i++) {
+            running[i]?._advance(deltaMs);
+        }
+        for (let i = 0; i < count; i++) {
+            running[i]?._applyFrame();
+        }
+        for (let i = 0; i < count; i++) {
+            running[i]?._completeFrame();
         }
         if (this._structuralGroups.length > 0) {
             for (const g of this._structuralGroups) {
@@ -321,6 +362,7 @@ export class Scene extends AbstractScene {
         for (const callback of this._beforeRenderFlushCallbacks) {
             callback();
         }
+        this._syncEnvironmentRotation();
     }
 
     /** @internal Register work that must observe all compat before-render mutations before Lite renders. */
@@ -789,6 +831,21 @@ export class Scene extends AbstractScene {
     }
     public set environmentTexture(value: CubeTexture | HDRCubeTexture | null) {
         this._envTexture = value;
+        this._syncEnvironmentRotation();
+    }
+
+    /**
+     * Forward the environment texture's `rotationY` to the image-based lighting only. As in Babylon.js, a skybox keeps the
+     * orientation it was created with (see {@link createDefaultSkybox}) and the `createDefaultEnvironment` background never
+     * turns. Also runs every frame, so the texture needs no link back to the scenes that use it. A scene whose
+     * environment is never rotated never calls Lite.
+     */
+    private _syncEnvironmentRotation(): void {
+        const rotation = this._envTexture?.rotationY ?? 0;
+        if (rotation !== this._envRotation) {
+            this._envRotation = rotation;
+            setEnvironmentLightingRotation(this._lite, rotation);
+        }
     }
 
     /**
@@ -868,7 +925,13 @@ export class Scene extends AbstractScene {
      */
     public createDefaultSkybox(texture?: CubeTexture | HDRCubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
         if (texture) {
-            this._envTexture = texture;
+            this.environmentTexture = texture;
+        }
+        // Babylon.js builds the skybox from a clone of the texture, so the skybox keeps the rotation of this moment while
+        // later `rotationY` changes only turn the lighting.
+        const skyboxRotation = (texture ?? this._envTexture)?.rotationY ?? 0;
+        if (skyboxRotation) {
+            setEnvironmentSkyboxRotation(this._lite, skyboxRotation);
         }
         this._defaultEnvOptions = {
             ...(this._defaultEnvOptions ?? {}),
@@ -1123,12 +1186,12 @@ export class Scene extends AbstractScene {
     }
 
     /**
-     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
+     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?, onAnimationEnd?)`.
      * Delegates supported tracks to Babylon Lite property animation and retains
      * explicit compat evaluation only for unsupported tracks. Returns one facade
      * coordinating both subsets.
      */
-    public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
+    public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1, onAnimationEnd?: () => void): Animatable {
         if (speedRatio < 0) {
             [from, to] = [to, from];
             speedRatio = -speedRatio;
@@ -1147,6 +1210,7 @@ export class Scene extends AbstractScene {
             speedRatio,
             blockedNativeBindings
         );
+        animatable.onAnimationEnd = onAnimationEnd ?? null;
         this._runningAnimatables.push(animatable);
         return animatable;
     }
@@ -1192,11 +1256,43 @@ export class Scene extends AbstractScene {
     }
 
     /**
-     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?)`. Runs
-     * the animations already attached to `target.animations`.
+     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?, onAnimationEnd?, animatable?, stopCurrent?)`.
+     * Runs the animations already attached to `target.animations`. As in Babylon.js, the target's running animatables
+     * are stopped first unless `stopCurrent` is false. Appending to an existing `animatable` is not supported.
      */
-    public beginAnimation(target: { animations?: Animation[] }, from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        return this.beginDirectAnimation(target, target.animations ?? [], from, to, loop, speedRatio);
+    public beginAnimation(
+        target: { animations?: Animation[] },
+        from: number,
+        to: number,
+        loop = false,
+        speedRatio = 1,
+        onAnimationEnd?: () => void,
+        animatable?: Animatable | null,
+        stopCurrent = true
+    ): Animatable {
+        if (animatable) {
+            unsupported("Scene.beginAnimation(…, animatable)", "Appending animations to an existing Animatable is not supported: start a new one.");
+        }
+        if (stopCurrent) {
+            this.stopAnimation(target);
+        }
+        return this.beginDirectAnimation(target, target.animations ?? [], from, to, loop, speedRatio, onAnimationEnd);
+    }
+
+    /**
+     * Babylon.js `scene.stopAnimation(target)`: stops every running animatable of `target`, which raises their
+     * `onAnimationEnd`. Stopping only the tracks matching `animationName` or `targetMask` is not supported.
+     */
+    public stopAnimation(target: unknown, animationName?: string, targetMask?: (target: unknown) => boolean): void {
+        if (animationName !== undefined || targetMask) {
+            unsupported("Scene.stopAnimation(…, animationName | targetMask)", "Only whole animatables can be stopped: call `stopAnimation(target)`.");
+        }
+        // A snapshot: an `onAnimationEnd` raised here may start a new animation on the same target, which must keep running.
+        for (const running of this._runningAnimatables.slice()) {
+            if (running._animates(target)) {
+                running.stop();
+            }
+        }
     }
 
     public dispose(): void {

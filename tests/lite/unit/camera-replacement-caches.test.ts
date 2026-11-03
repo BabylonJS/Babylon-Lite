@@ -85,6 +85,8 @@ describe("camera replacement after the first frame", () => {
             _casterMeshes: [],
             _casterMaterials: [],
             _casterMatGens: [],
+            _casterMeshGens: [],
+            _casterMatFeatures: [],
             _scene: scene,
         } satisfies PcfTaskState;
         const sg = {
