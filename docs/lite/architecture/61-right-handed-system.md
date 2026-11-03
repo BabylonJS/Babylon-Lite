@@ -124,7 +124,9 @@ With `Sz = diag(1, 1, -1)`:
 - **Geometry-buffer depth** — `VIEW_DEPTH` is signed like Babylon.js's right-handed view z (negative in
   front of the camera), but `NORMALIZED_VIEW_DEPTH` stays in [0, 1] in both builds: the engine's view z
   is the positive distance, like the positive near/far bounds it is normalized against. (Babylon.js
-  right-handed returns negative normalized depths; consumers expect [0, 1].)
+  right-handed returns negative normalized depths; consumers expect [0, 1].) The library's own
+  `VIEW_DEPTH` consumers turn the signed depth back into a distance: mesh blending through its
+  projection, and the circle of confusion behind depth of field (`depthNotNormalized`) by negating it.
 - **Not ported: `EXT_lights_image_based`** — `envYawFromQuaternion` returns the left-handed yaw −A in
   both builds, so a right-handed build samples the environment along `Sz·Ry(−A)·d`. Babylon.js's loader
   inverts the extension's rotation only when left-handed, i.e. samples `Sz·Ry(A)·d` when right-handed:

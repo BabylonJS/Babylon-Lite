@@ -364,6 +364,12 @@ exports[`right-handed drift guard > picking/billboard-pick-pipeline.ts: right-ha
 }
 `;
 
+exports[`right-handed drift guard > post-process/circle-of-confusion.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "pixelDistance ?:": "\` «» → «-» depth *",
+}
+`;
+
 exports[`right-handed drift guard > post-process/mesh-blending.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "writeUniforms use": "«» → «if ( _rightHanded ) { data [ 8 ] = - data [ 8 ] ! ; data [ 9 ] = - data [ 9 ] ! ; data [ 10 ] = - data [ 10 ] ! ; data [ 11 ] = - data [ 11 ] ! ; }»",

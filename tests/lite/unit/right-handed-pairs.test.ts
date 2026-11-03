@@ -378,6 +378,51 @@ describe("right-handed feature pairs: derivative tangent frames and reflections"
             expect(at(rh[3 + i]!)).toEqual([0, 0.5, 1]);
         }
     });
+
+    it("circle of confusion reads a right-handed view depth as a distance: a focused surface stays sharp in both builds", async () => {
+        // A surface two units ahead with the default lens (focusDistance 2000 = 2 units): VIEW_DEPTH is 2 left-handed
+        // and -2 right-handed; normalized depth is 0.1 with near 1, far 11 in both.
+        const [lh, rh] = await bothBuilds(async () => {
+            const shaders: { fragmentWGSL: unknown; writeUniforms(data: Float32Array): void }[] = [];
+            vi.doMock(`${SRC}frame-graph/post-process-task`, () => ({
+                createPostProcessTask: (config: { _shader: (typeof shaders)[number] }) => (shaders.push(config._shader), {}),
+            }));
+            try {
+                const { createCircleOfConfusionPostProcessTask } = await import(`${SRC}post-process/circle-of-confusion`);
+                const camera = { nearPlane: 1, farPlane: 11 };
+                for (const depthNotNormalized of [true, false]) {
+                    createCircleOfConfusionPostProcessTask({ depthTexture: {}, camera, depthNotNormalized } as never, {} as never);
+                }
+            } finally {
+                vi.doUnmock(`${SRC}frame-graph/post-process-task`);
+            }
+            return shaders.map((shader) => {
+                const params = new Float32Array(4);
+                shader.writeUniforms(params);
+                return { code: String(shader.fragmentWGSL), params };
+            });
+        });
+        const coc = ({ code, params }: { code: string; params: Float32Array }, depth: number): number => {
+            const body = code
+                .slice(code.indexOf("{") + 1, code.lastIndexOf("return"))
+                .replace(/textureSample\([^()]*\)\.r/, String(depth))
+                .replace(/\b(let|var) /g, "let ")
+                .replace(/cocParams\.(\w+)/g, (_, name: string) => String(params[["focusDistance", "cocPrecalculation", "minZ", "maxZRange"].indexOf(name)]))
+                .replace(/\babs\(/g, "Math.abs(");
+            return new Function("clamp", `${body}return coc;`)((x: number, lo: number, hi: number) => Math.min(Math.max(x, lo), hi)) as number;
+        };
+        const [lhView, lhNormalized] = lh;
+        const [rhView, rhNormalized] = rh;
+        expect(rhView!.code).toBe(lhView!.code.replace("pixelDistance=depth*1000.0", "pixelDistance=-depth*1000.0"));
+        expect(rhNormalized!.code).toBe(lhNormalized!.code);
+        expect(coc(lhView!, 2)).toBeCloseTo(0, 6);
+        expect(coc(rhView!, -2)).toBeCloseTo(0, 6);
+        expect(coc(lhNormalized!, 0.1)).toBeCloseTo(0, 6);
+        expect(coc(rhNormalized!, 0.1)).toBeCloseTo(0, 6);
+        // Out of focus stays out of focus, at the same strength in both builds.
+        expect(coc(rhView!, -8)).toBeCloseTo(coc(lhView!, 8), 6);
+        expect(coc(lhView!, 8)).toBeGreaterThan(0);
+    });
 });
 
 // glTF geometry keeps glTF's own winding in a right-handed build (no mirroring root), while procedural geometry is
