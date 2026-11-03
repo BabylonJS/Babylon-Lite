@@ -112,7 +112,10 @@ packages are imported together (as NeonBrush does).
     `renderSprites(renderer, …)` — matching lite's `disposeEffectWrapper(wrapper)`
     and Babylon's receiver methods, and making a mismatched-engine call
     unrepresentable. The back-pointer adds no lifetime edge: the engine already
-    strongly references every live resource for context-restore replay.
+    strongly references every live resource for context-restore replay. The
+    reverse does hold: a resource kept after `disposeGLEngine` keeps the
+    disposed engine object (and its `gl` context) reachable until the resource
+    is dropped; every call on it is a no-op.
 
 3. **Documented divergences (backend-driven, not inconsistencies).**
     - `createGLEngine` is **synchronous** — WebGL2 context acquisition is sync,
@@ -397,7 +400,8 @@ export const GLSamplingMode = { NEAREST: 1, BILINEAR: 2, TRILINEAR: 3 } as const
 export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
 
 /** Pure preset → filters helper (≙ Babylon `_getSamplingParameters`). Spread
- *  into any texture options or pass to `updateTextureSamplingMode`; tree-shaken
+ *  into any texture options or pass to `updateTextureSamplingMode` (or use
+ *  `updateTextureSamplingPreset`); tree-shaken
  *  unless imported. `useMipMaps` (default false) selects the mipmapped min filter. */
 export interface GLSamplingFilters {
     minFilter: GLenum;
@@ -481,14 +485,16 @@ export function disposeTexture(tex: GLTexture): void;
  *  rebuilds the chain. No-op when `tex._disposed` or `engine._isLost`. */
 export function generateTextureMipMaps(tex: GLTexture): void;
 
+/** Raw GL min/mag filters (≙ Babylon `_setTextureParameterInteger` pair). */
+export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+
 /** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
  *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
  *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained)
  *  unless the texture already has one (it is rebuilt on every upload; call
- *  `generateTextureMipMaps` to force a regeneration). */
-export function updateTextureSamplingMode(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
-/** Raw GL min/mag filters overload. */
-export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+ *  `generateTextureMipMaps` to force a regeneration). A separate function so
+ *  raw-filter callers don't bundle the preset / mipmap code. */
+export function updateTextureSamplingPreset(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
 
 /** ≙ Babylon `texture.isReady()`: `tex.isReady` and not disposed and the
  *  context is not lost (the function form, mirroring `isEffectReady`). */
@@ -511,8 +517,8 @@ export interface GLTextureUpdateOptions {
 | `BILINEAR`  | LINEAR        | LINEAR               | LINEAR  |
 | `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR | LINEAR  |
 
-Like Babylon, only `TRILINEAR` samples mips, and the preset
-`updateTextureSamplingMode` overload generates the chain only for it. Babylon's
+Like Babylon, only `TRILINEAR` samples mips, and
+`updateTextureSamplingPreset` generates the chain only for it. Babylon's
 mipmapped nearest/bilinear variants are separate modes — pass raw filters.
 
 Without a preset, filters default to LINEAR/LINEAR even when mips are
@@ -1782,7 +1788,7 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                            |
 | `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                                    |
 | `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                                 |
-| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingMode(tex, mode, mips)`                                                         |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingPreset(tex, mode, mips)`                                                       |
 | `effectWrapper.effect = existingEffect`                          | `useEffect(existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)                     |
 | `texture.isReady()`                                              | `isTextureReady(tex)`                                                                                |
 | `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(tex, src, { invertY, premultiplyAlpha })`                                      |

@@ -190,7 +190,8 @@ export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLe
 }
 
 /** GL min/mag filters resolved from a {@link GLSamplingMode} preset. Spread
- *  into any {@link GLTextureOptions}, or pass to {@link updateTextureSamplingMode}. */
+ *  into any {@link GLTextureOptions}, or pass to {@link updateTextureSamplingMode}
+ *  (or use {@link updateTextureSamplingPreset} directly). */
 export interface GLSamplingFilters {
     /** `TEXTURE_MIN_FILTER` value. */
     minFilter: GLenum;
@@ -455,6 +456,30 @@ export function updateRawTexture(
 }
 
 /**
+ * Update a texture's raw GL min/mag sampling filters (e.g. `gl.NEAREST`,
+ * `gl.LINEAR_MIPMAP_LINEAR`). A mipmapped min filter needs
+ * {@link generateTextureMipMaps}; for Babylon-style presets use
+ * {@link updateTextureSamplingPreset}. Binds for upload (unit 0) so the
+ * `texParameteri` lands on this texture. The change is not replayed on
+ * `webglcontextrestored` (creation options are). No-op on a lost/disposed
+ * context or a disposed texture.
+ *
+ * @param tex - The texture to update.
+ * @param minFilter - `TEXTURE_MIN_FILTER` value.
+ * @param magFilter - `TEXTURE_MAG_FILTER` value.
+ */
+export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void {
+    const engine = tex._engine;
+    if (engine._isLost || engine._disposed || tex._disposed) {
+        return;
+    }
+    const gl = engine.gl;
+    bindTextureForUpload(engine, tex.handle);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+}
+
+/**
  * Update a texture's sampling mode from a Babylon-style preset — the lite-gl
  * equivalent of Babylon's
  * `updateTextureSamplingMode(samplingMode, texture, generateMipMaps)`. The
@@ -466,52 +491,22 @@ export function updateRawTexture(
  * Unlike Babylon, an existing chain is not regenerated (lite-gl already
  * rebuilds it on every upload); call {@link generateTextureMipMaps} to force it.
  *
- * Binds for upload (unit 0) so the `texParameteri` lands on this texture. The
- * change is not replayed on `webglcontextrestored` (creation options are).
- * No-op on a lost/disposed context or a disposed texture.
+ * Kept separate from the raw {@link updateTextureSamplingMode} so raw-filter
+ * callers don't bundle the preset and mipmap code. Same binding, replay and
+ * lost/disposed behavior.
  *
  * @param tex - The texture to update.
  * @param samplingMode - The {@link GLSamplingMode} preset.
  * @param generateMipMaps - Generate the mip chain now (`TRILINEAR` only). Default false.
  */
-export function updateTextureSamplingMode(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
-/**
- * Update a texture's raw GL min/mag sampling filters (e.g. `gl.NEAREST`,
- * `gl.LINEAR_MIPMAP_LINEAR`). A mipmapped min filter needs
- * {@link generateTextureMipMaps}. Binds for upload (unit 0); not replayed on
- * `webglcontextrestored`. No-op on a lost/disposed context or a disposed
- * texture.
- *
- * @param tex - The texture to update.
- * @param minFilter - `TEXTURE_MIN_FILTER` value.
- * @param magFilter - `TEXTURE_MAG_FILTER` value.
- */
-export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
-export function updateTextureSamplingMode(tex: GLTexture, modeOrMinFilter: number, magFilterOrGenerateMipMaps?: number | boolean): void {
-    const engine = tex._engine;
-    if (engine._isLost || engine._disposed || tex._disposed) {
-        return;
-    }
-    let minFilter = modeOrMinFilter;
-    let magFilter: GLenum;
-    let generateMipMaps = false;
-    // The raw overload passes a GL enum as 4th argument; the preset one a boolean or nothing.
-    if (typeof magFilterOrGenerateMipMaps === "number") {
-        magFilter = magFilterOrGenerateMipMaps;
-    } else {
-        // ≙ Babylon: mips are generated only for a mipmapped preset (`TRILINEAR`).
-        generateMipMaps = magFilterOrGenerateMipMaps === true && modeOrMinFilter === GLSamplingMode.TRILINEAR;
-        const filters = getSamplingModeFilters(modeOrMinFilter as GLSamplingMode, generateMipMaps || tex._hasMipMaps === true);
-        minFilter = filters.minFilter;
-        magFilter = filters.magFilter;
-    }
-    const gl = engine.gl;
-    bindTextureForUpload(engine, tex.handle);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+export function updateTextureSamplingPreset(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void {
+    // ≙ Babylon: mips are generated only for a mipmapped preset (`TRILINEAR`).
+    const generate = generateMipMaps === true && samplingMode === GLSamplingMode.TRILINEAR;
+    const filters = getSamplingModeFilters(samplingMode, generate || tex._hasMipMaps === true);
+    updateTextureSamplingMode(tex, filters.minFilter, filters.magFilter);
     // An existing chain is already rebuilt on every upload; call
     // `generateTextureMipMaps` directly to force a regeneration.
-    if (generateMipMaps && !tex._hasMipMaps) {
+    if (generate && !tex._hasMipMaps) {
         generateTextureMipMaps(tex);
     }
 }

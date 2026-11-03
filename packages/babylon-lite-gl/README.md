@@ -100,6 +100,24 @@ use manual polling ship none of the helper's scheduling code.
 For wrappers, pass `wrapper.effect` to these readiness/error APIs.
 Shader/program allocation failures still throw synchronously.
 
+### Upgrading: changes the type checker won't catch
+
+Most of the receiver-first reshape surfaces as compile errors. These changes
+still compile but alter behavior, so check them by hand:
+
+- **`applyEffectWrapper(wrapper)` returns `boolean`.** On `false` (still
+  compiling, failed, disposed, or context lost) nothing is bound; skip the
+  setters and `drawEffect`, or they target whichever program was current
+  before. lite-gl deliberately does not clear the program for you, so hosts
+  sharing the context keep their GL state.
+- **`createHtmlElementTexture` defaults to linear filtering without mips**
+  (previously TRILINEAR + mips). Restore the old sampling with
+  `{ ...getSamplingModeFilters(GLSamplingMode.TRILINEAR, true) }` and call
+  `generateTextureMipMaps(tex)`.
+- **`updateHtmlElementTexture`'s `invertY` is the raw `UNPACK_FLIP_Y`, video
+  included.** Babylon flips video with `!invertY`; port those calls as
+  `{ invertY: !invertY }`.
+
 ## Entry points
 
 The entire public API is available from the single `@babylonjs/lite-gl` entry:
@@ -140,8 +158,8 @@ use.
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
   `disposeTexture`, `isTextureReady`, plus `updateRawTexture`,
-  `updateTextureSamplingMode` (Babylon preset + `generateMipMaps`, or raw
-  filters), `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
+  `updateTextureSamplingMode` (raw filters), `updateTextureSamplingPreset`
+  (Babylon preset + `generateMipMaps`), `updateTextureWrapMode`, `createTextureFromHandle`. Every texture creator
   takes the same `GLTextureOptions` (`invertY`, `premultiplyAlpha`, filters /
   wraps). Babylon-style `GLSamplingMode` presets resolve to filters via the
   opt-in `getSamplingModeFilters`; `generateTextureMipMaps` builds the chain

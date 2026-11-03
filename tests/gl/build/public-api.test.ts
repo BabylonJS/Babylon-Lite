@@ -147,6 +147,7 @@ describe("babylon-lite-gl build output", () => {
             "loadTexture2D",
             "updateRawTexture",
             "updateTextureSamplingMode",
+            "updateTextureSamplingPreset",
             "updateTextureWrapMode",
             "createTextureFromHandle",
             "getSamplingModeFilters",

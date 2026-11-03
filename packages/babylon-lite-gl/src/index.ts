@@ -83,6 +83,7 @@ export {
     disposeTexture,
     updateRawTexture,
     updateTextureSamplingMode,
+    updateTextureSamplingPreset,
     updateTextureWrapMode,
     createTextureFromHandle,
     getSamplingModeFilters,
