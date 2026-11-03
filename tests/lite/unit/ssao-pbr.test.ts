@@ -13,8 +13,8 @@ import { isPbrIblColorPass, selectPbrPlugins } from "../../../packages/babylon-l
 import { registerPbrPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-bridge.js";
 import type { PbrExt, _PbrFragCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
-import { enablePbrSsao } from "../../../packages/babylon-lite/src/post-process/ssao-pbr.js";
-import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao-gpu.js";
+import { enablePbrSsao } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-pbr.js";
+import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
 import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable.js";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import { getTextureReferenceStore } from "../../../packages/babylon-lite/src/resource/texture-reference-store.js";

@@ -1,4 +1,4 @@
-import { wgsl, type WgslSource } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL, ssaoDepthNormalWGSL } from "./ssao-wgsl.js";
 
 /** @internal Shared tap compatibility; `other` and `n` are unit view-space normals. */

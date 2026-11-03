@@ -1,5 +1,5 @@
 /** Temporal filtering for XeGTAO, adapted from the DiligentFX reconstruction stages. */
-import { wgsl, type WgslSource } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL, ssaoNormalWGSL } from "./ssao-wgsl.js";
 
 export const XEGTAO_FULLSCREEN_WGSL = wgsl`@vertex fn fullscreen(@builtin(vertex_index) index:u32)->@builtin(position) vec4f{

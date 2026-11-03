@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
-import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao-gpu.js";
+import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
 
 const gpuCalls = vi.hoisted(() => ({
     create: vi.fn(),
@@ -12,7 +12,7 @@ const gpuCalls = vi.hoisted(() => ({
     clear: vi.fn(),
     dispose: vi.fn(),
 }));
-vi.mock("../../../packages/babylon-lite/src/post-process/ssao-gpu.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js", () => ({
     createSsaoGpu: gpuCalls.create,
     bindSsaoGpuSources: gpuCalls.bind,
     writeSsaoGpuParameters: gpuCalls.write,

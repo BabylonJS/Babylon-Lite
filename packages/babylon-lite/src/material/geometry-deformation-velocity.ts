@@ -3,9 +3,10 @@ import type { Mesh } from "../mesh/mesh.js";
 import { BU, TU } from "../engine/gpu-flags.js";
 import { F32 } from "../engine/typed-arrays.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
-import type { BindingDecl, ComposedShader } from "../shader/fragment-types.js";
+import type { BindingDecl } from "../shader/fragment-types.js";
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 import { makeBoneInfluenceCode } from "../shader/fragments/skeleton-fragment.js";
+import { createReadOnlyStorageBinding } from "../shader/read-only-storage-binding.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_HAS_SKELETON, MSH_HAS_SKELETON_8, MSH_HAS_THIN_INSTANCES, MSH_VAT } from "./mesh-features.js";
 
 /** @internal Previous-pose state owned by one geometry renderable, not the mesh/material. */
@@ -18,24 +19,8 @@ export interface GeometryDeformationVelocity {
     _dispose(): void;
 }
 
-// This producer owns one additional storage binding. Keep its rewrite out of ordinary morph shaders.
-function patchPreviousMorphStorage(composed: ComposedShader): ComposedShader {
-    let binding = 0;
-    let count = 0;
-    const vertex = composed._vertexWGSL.replace(/@group\(1\)@binding\((\d+)\)\s*var<uniform>\s*previousMorph\s*:/g, (_match, index: string) => {
-        binding = Number(index);
-        count++;
-        return wgsl`@group(1)@binding(${index}) var<storage, read> previousMorph:`;
-    });
-    if (count !== 1) {
-        throw new Error(`Geometry velocity expected one previous-morph storage declaration, found ${count}.`);
-    }
-    const entries = Array.from(composed._meshBGLDescriptor.entries, (entry) => (entry.binding === binding ? { ...entry, buffer: { type: "read-only-storage" as const } } : entry));
-    return { ...composed, _vertexWGSL: wgsl`${vertex}`, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
-}
-
 /** @internal Geometry-only previous deformation, applied before previous mesh world. */
-export function geometryPreviousDeformation(meshFeatures: number): { bindings: BindingDecl[]; code: WgslSource; patch?: (composed: ComposedShader) => ComposedShader } | null {
+export function geometryPreviousDeformation(meshFeatures: number): { bindings: BindingDecl[]; code: WgslSource } | null {
     if (meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT) || !(meshFeatures & (MSH_HAS_SKELETON | MSH_HAS_MORPH_TARGETS))) {
         return null;
     }
@@ -46,7 +31,7 @@ export function geometryPreviousDeformation(meshFeatures: number): { bindings: B
     }
     const morph = (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0;
     if (morph) {
-        bindings.push({ _name: "previousMorph", _type: { _kind: "uniform-buffer" }, _visibility: 1 });
+        bindings.push(createReadOnlyStorageBinding("previousMorph", 1));
         code = wgsl`${code}
 for(var i=0u;i<morph.count;i++){
 let b=(i*morph.vertexCount+vertexIndex)*6u;
@@ -61,7 +46,6 @@ previousDeformedPosition=(previousInfluence*vec4f(previousDeformedPosition,1)).x
     return {
         bindings,
         code,
-        patch: morph ? patchPreviousMorphStorage : undefined,
     };
 }
 

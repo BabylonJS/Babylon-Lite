@@ -9,11 +9,8 @@ import type { Mesh } from "../../mesh/mesh.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import type { BindingDecl, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
-import { createIdentityMat4 } from "../../math/create-identity-mat4.js";
-import { invertMat4ToRefOrIdentity } from "../../math/invert-mat4-to-ref-or-identity.js";
+import { tryInvertMat4ToRef } from "../../math/invert-mat4-to-ref.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
-import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
-import type { Mat4, Mat4Storage } from "../../math/types.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_HAS_SKELETON, MSH_HAS_THIN_INSTANCES, MSH_VAT } from "../mesh-features.js";
 import { getGeometryDeformationVelocity } from "../geometry-deformation-hooks.js";
 import type { GeometryDeformationVelocity } from "../geometry-deformation-velocity.js";
@@ -52,7 +49,6 @@ export function extendPbrGeometryParams(fragment: ShaderFragment, meshFeatures: 
         _helperFunctions: helpers,
         _vertexHelperFunctions: helpers,
         _vertexSlots: { VB: wgsl`${velocity.vertex}\n${localPosition ? "out.vLocalPos = position;" : ""}` },
-        _pc: velocity.patch,
     };
 }
 
@@ -70,7 +66,6 @@ export interface PbrGeometryVelocityShader {
     readonly helpers: WgslSource;
     readonly varyings: Varying[];
     readonly vertex: string;
-    readonly patch: ShaderFragment["_pc"];
 }
 
 /** Build the velocity bindings, helpers, varyings and vertex code for one mesh variant. */
@@ -103,7 +98,6 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, gm.enabled > 0
             { _name: "vPreviousClip", _type: "vec4<f32>" },
         ],
         vertex: vertex.join("\n"),
-        patch: deformation?.patch,
     };
 }
 
@@ -122,7 +116,8 @@ export interface PbrGeometryVelocity {
 /** Create one mesh's velocity state. `currentWorld` aliases the packed world in the mesh UBO data. */
 export function createPbrGeometryVelocity(engine: EngineContext, mesh: Mesh, currentWorld: Float32Array, exclusions: ReadonlySet<Mesh> | undefined): PbrGeometryVelocity {
     const tracked = (): boolean => mesh.visible !== false && !exclusions?.has(mesh);
-    let singularWorld = Math.abs(mat4Determinant3(currentWorld)) < 1e-10;
+    const inverseWorld = new F32(16);
+    let singularWorld = !tryInvertMat4ToRef(currentWorld, inverseWorld);
     if (singularWorld && tracked()) {
         throw new Error("PBR geometry velocity cannot reproject a singular world transform.");
     }
@@ -133,7 +128,6 @@ export function createPbrGeometryVelocity(engine: EngineContext, mesh: Mesh, cur
     }
     const device = engine._device;
     const previousWorld = new F32(currentWorld);
-    const inverseWorld = createIdentityMat4();
     const data = new F32(20);
     data[0] = data[5] = data[10] = data[15] = 1;
     const previousWorldUBO = createUniformBuffer(engine, data);
@@ -151,7 +145,7 @@ export function createPbrGeometryVelocity(engine: EngineContext, mesh: Mesh, cur
         _deformationVelocity: deformationVelocity,
         _update(worldChanged: boolean): void {
             if (worldChanged) {
-                singularWorld = Math.abs(mat4Determinant3(currentWorld)) < 1e-10;
+                singularWorld = !tryInvertMat4ToRef(currentWorld, inverseWorld);
             }
             const isTracked = tracked();
             if (isTracked && singularWorld) {
@@ -161,8 +155,7 @@ export function createPbrGeometryVelocity(engine: EngineContext, mesh: Mesh, cur
             deformationVelocity?._update(!enabled);
             if (worldChanged || previousMotion || data[16] !== (enabled ? 1 : 0)) {
                 if (worldChanged && enabled) {
-                    invertMat4ToRefOrIdentity(currentWorld as unknown as Mat4, inverseWorld);
-                    multiplyMat4IntoBuffer(data, 0, previousWorld, 0, inverseWorld as unknown as Mat4Storage, 0);
+                    multiplyMat4IntoBuffer(data, 0, previousWorld, 0, inverseWorld, 0);
                 } else {
                     data.fill(0);
                     data[0] = data[5] = data[10] = data[15] = 1;

@@ -1,6 +1,6 @@
-import { BU, SS, TU } from "../engine/gpu-flags.js";
-import { wgsl } from "../shader/wgsl.js";
-import type { SsaoTask } from "./ssao.js";
+import { BU, SS, TU } from "../../engine/gpu-flags.js";
+import { wgsl } from "../../shader/wgsl.js";
+import type { SsaoTask } from "../ssao.js";
 import { bindSsaoGpuSources, createSsaoGpu, executeSsaoGpu, writeSsaoGpuParameters } from "./ssao-gpu.js";
 import type { SsaoGpu } from "./ssao-gpu.js";
 import { ssaoHalfUpsampleWGSL } from "./ssao-half-wgsl.js";

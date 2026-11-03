@@ -5,13 +5,13 @@ import type { RenderTarget } from "../engine/render-target.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "../frame-graph/task.js";
-import { bindSsaoGpuSources, clearSsaoGpu, createSsaoGpu, disposeSsaoGpu, executeSsaoGpu, validateSsaoQuality, writeSsaoGpuParameters } from "./ssao-gpu.js";
-import type { SsaoGpu, SsaoGpuParameters, SsaoQuality } from "./ssao-gpu.js";
-import { initializeSsaoTemporal } from "./ssao-temporal.js";
-import type { SsaoTemporalOptions, SsaoTemporalSettings } from "./ssao-temporal.js";
+import { bindSsaoGpuSources, clearSsaoGpu, createSsaoGpu, disposeSsaoGpu, executeSsaoGpu, validateSsaoQuality, writeSsaoGpuParameters } from "./ssao/ssao-gpu.js";
+import type { SsaoGpu, SsaoGpuParameters, SsaoQuality } from "./ssao/ssao-gpu.js";
+import { initializeSsaoTemporal } from "./ssao/ssao-temporal.js";
+import type { SsaoTemporalOptions, SsaoTemporalSettings } from "./ssao/ssao-temporal.js";
 import { _rightHanded } from "#coordinate-system";
 
-export type { SsaoQuality } from "./ssao-gpu.js";
+export type { SsaoQuality } from "./ssao/ssao-gpu.js";
 
 /** @internal Default AO reconstruction owns all filtering semantics. */
 export interface SsaoFilter {

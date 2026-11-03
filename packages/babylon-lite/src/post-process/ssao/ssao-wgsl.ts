@@ -1,4 +1,4 @@
-import { wgsl, type WgslSource } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 /** @internal Explicit 176-byte layout; the first 96 bytes follow the pinned XeGTAO oracle. */
 export const SSAO_PARAMS_WGSL = wgsl`struct AoParams {

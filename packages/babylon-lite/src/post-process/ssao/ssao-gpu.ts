@@ -1,6 +1,6 @@
-import { BU, SS, TU } from "../engine/gpu-flags.js";
+import { BU, SS, TU } from "../../engine/gpu-flags.js";
 import { ssaoDepthCopyWGSL, ssaoDepthReduceWGSL, ssaoResolveWGSL, ssaoXeEstimatorWGSL } from "./ssao-wgsl.js";
-import type { Mat4 } from "../math/types.js";
+import type { Mat4 } from "../../math/types.js";
 
 /** Fixed spatial sampling presets, independent of temporal history and resolution. */
 export type SsaoQuality = "low" | "medium" | "high" | "ultra";

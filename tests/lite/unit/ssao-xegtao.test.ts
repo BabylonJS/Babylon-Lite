@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao-gpu.js";
+import type { SsaoGpu } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
-import { createSsaoMotionPruningGpu, enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao-motion-pruning.js";
-import { ssaoMotionMaskCellCount } from "../../../packages/babylon-lite/src/post-process/ssao-motion-mask-wgsl.js";
+import { createSsaoMotionPruningGpu, enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-pruning.js";
+import { ssaoMotionMaskCellCount } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";
 import {
     bindXegtaoTemporalGpu,
     createXegtaoTemporalGpu,
     disposeXegtaoTemporalGpu,
     executeXegtaoTemporalGpu,
-} from "../../../packages/babylon-lite/src/post-process/ssao-xegtao-gpu.js";
+} from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";
 
 function fixture(filterable = true) {
     const allocations: { descriptor: GPUTextureDescriptor; texture: GPUTexture }[] = [];

@@ -192,7 +192,6 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
         _vertexHelperFunctions: helpers,
         _varyings: varyings,
         _vertexSlots: slots,
-        _pc: deformation?.patch,
     };
 }
 
@@ -227,11 +226,8 @@ export function composeStandardGeometryShader(
     const wantsLocalPos = attachments.includes(GeometryTextureType.LOCAL_POSITION);
     const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const params = wantsGp || wantsLocalPos ? createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures) : null;
-    const fragments = params ? [...extFragments, params._pc ? { ...params, _pc: undefined } : params] : extFragments;
-    let base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
-    if (params?._pc) {
-        base = params._pc(base);
-    }
+    const fragments = params ? [...extFragments, params] : extFragments;
+    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
 
     const hasSpecular = !!(features & HAS_SPECULAR_TEXTURE);
     const specularUv = features & STD_HAS_UV_TRANSFORM ? "input.vs" : features & SPECULAR_USES_UV2 ? "input.vv" : "input.vu";

@@ -555,7 +555,10 @@ export function enumerateLibEntries(): Record<string, string> {
                 key === "material/pbr/pbr-diffuse-occlusion" ||
                 key === "material/plugin/dynamic-pbr-bindings" ||
                 key === "material/plugin/pbr-plugin-decorator" ||
-                key === "material/plugin/pbr-plugin-passes"
+                key === "material/plugin/pbr-plugin-passes" ||
+                key === "shader/binding-extension" ||
+                key === "shader/read-only-storage-binding" ||
+                key === "math/invert-mat4-to-ref"
             ) {
                 extensionEntries[key] = full;
             } else {

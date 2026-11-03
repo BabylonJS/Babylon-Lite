@@ -3,7 +3,8 @@ import { createGeometryDeformationVelocity, geometryPreviousDeformation } from "
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_HAS_SKELETON, MSH_HAS_SKELETON_8, MSH_HAS_THIN_INSTANCES } from "../../../packages/babylon-lite/src/material/mesh-features.js";
-import type { ComposedShader } from "../../../packages/babylon-lite/src/shader/fragment-types.js";
+import type { ShaderTemplate } from "../../../packages/babylon-lite/src/shader/fragment-types.js";
+import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
 function fixture() {
@@ -103,20 +104,30 @@ describe("shared geometry deformation velocity", () => {
         expect(state._bind(entries, 0)).toBe(1);
         state._dispose();
     });
-    it.each([false, true])("patches the extra previous-weight storage binding without altering current bindings (minified=%s)", (minified) => {
-        let code = "@group(1)@binding(8) var<uniform> previousMorph:previousMorphUniforms;";
-        if (minified) code = code.replaceAll(" ", "");
-        const composed = {
-            _vertexWGSL: wgsl`${code}`,
-            _meshBGLDescriptor: {
-                entries: [
-                    { binding: 7, visibility: 1, buffer: { type: "read-only-storage" } },
-                    { binding: 8, visibility: 1, buffer: { type: "uniform" } },
-                ],
-            },
-        } as ComposedShader;
-        const patched = geometryPreviousDeformation(MSH_HAS_MORPH_TARGETS)!.patch!(composed);
-        expect(patched._vertexWGSL).toContain("var<storage, read> previousMorph:");
-        expect(Array.from(patched._meshBGLDescriptor.entries).map((entry) => entry.buffer?.type)).toEqual(["read-only-storage", "read-only-storage"]);
+    it.each([0, 5])("generates storage WGSL and layout from metadata after %i unrelated bindings", (count) => {
+        const template: ShaderTemplate = {
+            _vertexTemplate: wgsl`/*VD*/`,
+            _fragmentTemplate: wgsl`/*FB*/`,
+            _baseMeshUboFields: [],
+            _baseVertexAttributes: [],
+            _baseVaryings: [],
+            _baseVertexBindings: Array.from({ length: count }, (_, index) => ({
+                _name: `unrelated${index}`,
+                _type: { _kind: "uniform-buffer" },
+                _visibility: 1,
+            })),
+        };
+        const deformation = geometryPreviousDeformation(MSH_HAS_SKELETON | MSH_HAS_MORPH_TARGETS)!;
+        expect(deformation.bindings[1]!._type._kind).toBe("read-only-storage-buffer");
+        const composed = composeShader(template, [{ _id: "velocity", _bindings: deformation.bindings }]);
+        const entries = Array.from(composed._meshBGLDescriptor.entries);
+        const previousMorph = entries.at(-1)!;
+        expect(previousMorph.binding).toBe(count + 2);
+        expect(previousMorph.buffer?.type).toBe("read-only-storage");
+        expect(entries.slice(1, count + 1).every((entry) => entry.buffer?.type === "uniform")).toBe(true);
+        expect(entries.at(-2)!.texture?.sampleType).toBe("unfilterable-float");
+        expect(composed._vertexWGSL).toContain(`@group(1)@binding(${previousMorph.binding}) var<storage, read> previousMorph:previousMorphUniforms;`);
+        expect(composed._vertexWGSL).not.toContain("var<uniform> previousMorph");
+        expect(composed._fragmentWGSL).not.toContain("previousMorph");
     });
 });

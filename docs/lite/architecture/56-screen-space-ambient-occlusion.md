@@ -1,6 +1,7 @@
 # Module: Screen-Space Ambient Occlusion
 
-> Package path: `packages/babylon-lite/src/post-process/ssao*`.
+> Entry point: `packages/babylon-lite/src/post-process/ssao.ts`.
+> Support modules: `packages/babylon-lite/src/post-process/ssao/`.
 
 ## Purpose
 
@@ -539,8 +540,14 @@ apply it to the already transformed current world position before the previous
 view-projection. Reset the delta to identity on the following static frame.
 First-frame and excluded meshes select current clip coordinates. Per-mesh
 uniforms are disposed with the geometry generation; shared material views
-never retain another mesh's previous-world buffer. Singular world transforms
-fail explicitly. For deforming meshes, previous morph weights and previous
+never retain another mesh's previous-world buffer. Registration and world-version
+changes use one allocation-free inverse attempt, cached until the next change.
+Its singularity threshold is relative to the sum of absolute determinant terms,
+not an absolute mesh-scale cutoff; small invertible scales (including `0.0001`)
+are valid. Singular, non-finite or GPU-unrepresentable inverses fail explicitly
+for tracked meshes, without substituting identity. Excluded/hidden meshes remain
+neutral and must have an invertible transform when tracking resumes.
+For deforming meshes, previous morph weights and previous
 four/eight-influence bone matrices reconstruct the previous local position
 before applying previous world/view-projection. Both deformations can change
 together; first-frame, hidden and excluded histories initialize neutrally.
@@ -1249,16 +1256,16 @@ separately and are not dependencies of the public build or CI.
 ## File Manifest
 
 - `post-process/ssao.ts`: public frame-graph AO task.
-- `post-process/ssao-gpu.ts`: internal WebGPU owner and bindings.
-- `post-process/ssao-half-resolution.ts`: sole Half enabler, reduced geometry inputs, estimation/history ownership, quality floor and full-size output.
-- `post-process/ssao-half-wgsl.ts`: full-size joint bilateral upsampling after reduced-resolution reconstruction.
-- `post-process/ssao-wgsl.ts`: depth, XeGTAO, and output shader factories.
-- `post-process/ssao-temporal.ts`: default reconstruction initialization, settings, phases, camera matrices, and history lifecycle.
-- `post-process/ssao-xegtao-gpu.ts`: shipped native-format temporal/history owner and cached render passes.
-- `post-process/ssao-xegtao-wgsl.ts`: shipped temporal accumulation, transport, convolution, repair, and reconstruction shaders.
-- `post-process/ssao-motion-pruning.ts`: separate opt-in transport-pruning resources and lifecycle.
-- `post-process/ssao-motion-mask-wgsl.ts`: camera-relative motion bounds, hierarchy union, and conservative transport queries.
-- `post-process/ssao-pbr.ts`: opt-in diffuse-IBL composition and sampled-output ownership.
+- `post-process/ssao/ssao-gpu.ts`: internal WebGPU owner and bindings.
+- `post-process/ssao/ssao-half-resolution.ts`: sole Half enabler, reduced geometry inputs, estimation/history ownership, quality floor and full-size output.
+- `post-process/ssao/ssao-half-wgsl.ts`: full-size joint bilateral upsampling after reduced-resolution reconstruction.
+- `post-process/ssao/ssao-wgsl.ts`: depth, XeGTAO, and output shader factories.
+- `post-process/ssao/ssao-temporal.ts`: default reconstruction initialization, settings, phases, camera matrices, and history lifecycle.
+- `post-process/ssao/ssao-xegtao-gpu.ts`: shipped native-format temporal/history owner and cached render passes.
+- `post-process/ssao/ssao-xegtao-wgsl.ts`: shipped temporal accumulation, transport, convolution, repair, and reconstruction shaders.
+- `post-process/ssao/ssao-motion-pruning.ts`: separate opt-in transport-pruning resources and lifecycle.
+- `post-process/ssao/ssao-motion-mask-wgsl.ts`: camera-relative motion bounds, hierarchy union, and conservative transport queries.
+- `post-process/ssao/ssao-pbr.ts`: opt-in diffuse-IBL composition and sampled-output ownership.
 - `material/plugin/dynamic-pbr-bindings.ts`: resource-versioned material bindings and fenced generation leases.
 - `material/plugin/pbr-plugin-passes.ts`: IBL-only plugin pass policy, signatures and binding selection, installed by `enableDynamicPbrBindings`.
 - `material/plugin/pbr-plugin-decorator.ts`: nullable plugin-bridge decoration seam with a separately tree-shakable installer.

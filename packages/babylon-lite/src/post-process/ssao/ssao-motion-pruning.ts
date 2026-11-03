@@ -1,6 +1,6 @@
-import { BU, SS } from "../engine/gpu-flags.js";
-import { wgsl } from "../shader/wgsl.js";
-import type { SsaoTask } from "./ssao.js";
+import { BU, SS } from "../../engine/gpu-flags.js";
+import { wgsl } from "../../shader/wgsl.js";
+import type { SsaoTask } from "../ssao.js";
 import type { XegtaoTemporalGpu, XegtaoTransportExtension } from "./ssao-xegtao-gpu.js";
 import { xegtaoTransportWGSL } from "./ssao-xegtao-wgsl.js";
 import { ssaoMotionMaskCellCount, ssaoMotionMaskQueryWGSL, ssaoMotionMaskWGSL } from "./ssao-motion-mask-wgsl.js";

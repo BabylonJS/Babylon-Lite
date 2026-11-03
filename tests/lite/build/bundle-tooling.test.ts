@@ -21,6 +21,8 @@ afterEach(() => {
 describe("bundle tooling correctness", () => {
     it("appends optional SSAO library entries without reordering established module traversal", () => {
         const keys = Object.keys(enumerateLibEntries());
+        expect(keys.filter((key) => key.startsWith("post-process/ssao") && !key.startsWith("post-process/ssao/"))).toEqual(["post-process/ssao"]);
+        expect(keys.filter((key) => key.startsWith("post-process/ssao/"))).toHaveLength(10);
         const established = ["material/standard/standard-renderable", "material/standard/standard-pipeline", "shader/fragments/skeleton-fragment", "xr/xr-teleport"];
         for (const key of established) expect(keys).toContain(key);
         const lastEstablished = Math.max(...established.map((key) => keys.indexOf(key)));
@@ -35,6 +37,9 @@ describe("bundle tooling correctness", () => {
             "material/plugin/dynamic-pbr-bindings",
             "material/plugin/pbr-plugin-decorator",
             "material/plugin/pbr-plugin-passes",
+            "shader/binding-extension",
+            "shader/read-only-storage-binding",
+            "math/invert-mat4-to-ref",
             ...keys.filter((key) => key.startsWith("post-process/ssao")),
         ];
         expect(optional.length).toBeGreaterThan(10);

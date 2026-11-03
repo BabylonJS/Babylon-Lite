@@ -1,4 +1,4 @@
-import { wgsl, type WgslSource } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL } from "./ssao-wgsl.js";
 import { SSAO_TEMPORAL_PARAMS_WGSL } from "./ssao-xegtao-wgsl.js";
 

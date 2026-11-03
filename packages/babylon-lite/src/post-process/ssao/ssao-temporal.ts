@@ -1,13 +1,13 @@
-import type { RenderTarget } from "../engine/render-target.js";
-import type { SsaoTask } from "./ssao.js";
+import type { RenderTarget } from "../../engine/render-target.js";
+import type { SsaoTask } from "../ssao.js";
 import type { XegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
 import { bindXegtaoTemporalGpu, createXegtaoTemporalGpu, disposeXegtaoTemporalGpu, executeXegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
-import { getEffectiveAspectRatio, getViewProjectionMatrix } from "../camera/camera.js";
-import { createIdentityMat4 } from "../math/create-identity-mat4.js";
-import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
-import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
-import { mat4Determinant3 } from "../math/mat4-determinant3.js";
-import type { Mat4, Mat4Storage } from "../math/types.js";
+import { getEffectiveAspectRatio, getViewProjectionMatrix } from "../../camera/camera.js";
+import { createIdentityMat4 } from "../../math/create-identity-mat4.js";
+import { invertMat4ToRefOrIdentity } from "../../math/invert-mat4-to-ref-or-identity.js";
+import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+import { mat4Determinant3 } from "../../math/mat4-determinant3.js";
+import type { Mat4, Mat4Storage } from "../../math/types.js";
 
 export interface SsaoTemporalOptions {
     /** Initial reconstruction state. Default true; change task.temporal.enabled for live toggles. */

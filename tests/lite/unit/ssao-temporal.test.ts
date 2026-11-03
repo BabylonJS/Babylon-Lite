@@ -5,13 +5,13 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
 import type { SsaoTaskConfig } from "../../../packages/babylon-lite/src/post-process/ssao.js";
-import type { SsaoGpu, SsaoGpuParameters } from "../../../packages/babylon-lite/src/post-process/ssao-gpu.js";
-import { getSsaoTemporalEntry, resetSsaoTemporal, validateSsaoTemporalSettings } from "../../../packages/babylon-lite/src/post-process/ssao-temporal.js";
-import type { XegtaoTemporalGpu as SsaoTemporalGpu } from "../../../packages/babylon-lite/src/post-process/ssao-xegtao-gpu.js";
-import { enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao-motion-pruning.js";
+import type { SsaoGpu, SsaoGpuParameters } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-gpu.js";
+import { getSsaoTemporalEntry, resetSsaoTemporal, validateSsaoTemporalSettings } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-temporal.js";
+import type { XegtaoTemporalGpu as SsaoTemporalGpu } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";
+import { enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-pruning.js";
 
 const calls = vi.hoisted(() => ({ create: vi.fn(), bind: vi.fn(), execute: vi.fn(), dispose: vi.fn() }));
-vi.mock("../../../packages/babylon-lite/src/post-process/ssao-xegtao-gpu.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js", () => ({
     createXegtaoTemporalGpu: calls.create,
     bindXegtaoTemporalGpu: calls.bind,
     executeXegtaoTemporalGpu: calls.execute,

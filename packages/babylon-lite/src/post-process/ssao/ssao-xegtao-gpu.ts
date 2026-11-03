@@ -1,7 +1,7 @@
 /** XeGTAO temporal reconstruction adapted from DiligentFX; provenance is documented in the SSAO architecture specification. */
-import { BU, SS, TU } from "../engine/gpu-flags.js";
+import { BU, SS, TU } from "../../engine/gpu-flags.js";
 import type { SsaoGpu } from "./ssao-gpu.js";
-import type { WgslSource } from "../shader/wgsl.js";
+import type { WgslSource } from "../../shader/wgsl.js";
 import { xegtaoClosestMotionWGSL, xegtaoTemporalWGSL, xegtaoTransportWGSL, xegtaoReduceWGSL, xegtaoRepairWGSL, xegtaoOutputWGSL } from "./ssao-xegtao-wgsl.js";
 
 interface ReconstructionStage {

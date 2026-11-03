@@ -246,10 +246,13 @@ Retirement disposes previous resources with the existing generation's fenced
 lifetime. Device rebuild starts neutral.
 
 The shared skeleton influence generator is reused for previous-bone blending.
-The velocity feature rewrites its one named previous-weight storage binding,
-including minified WGSL, and requires exactly one match. Ordinary morph rendering
-keeps its existing two-binding rewrite unchanged; the composer gains no
-storage-buffer semantics and morph-only bundles retain no previous-pose policy.
+The velocity feature describes previous weights as a typed read-only-storage
+binding. Its resource producer installs a binding emitter that generates both
+the storage WGSL declaration and GPU layout entry from that metadata, at the
+binding index assigned by composition. No emitted shader text is parsed or
+rewritten for previous weights. The optional emitter is isolated behind a nullable
+composition seam, so ordinary shaders retain no storage-buffer policy. Ordinary
+morph rendering keeps its existing two-binding rewrite unchanged.
 Current position/normal deformation and normal/material shading are unchanged.
 After drawing, camera history copies the current matrix directly from the task's
 own scene-UBO scratch. No second current-view-projection array or intermediate

@@ -4,10 +4,10 @@ import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/re
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
 import type { SsaoTaskConfig } from "../../../packages/babylon-lite/src/post-process/ssao.js";
-import type { SsaoTemporalOptions } from "../../../packages/babylon-lite/src/post-process/ssao-temporal.js";
+import type { SsaoTemporalOptions } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-temporal.js";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
-import { enableSsaoHalfResolution } from "../../../packages/babylon-lite/src/post-process/ssao-half-resolution.js";
-import { enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao-motion-pruning.js";
+import { enableSsaoHalfResolution } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-half-resolution.js";
+import { enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-pruning.js";
 
 type TemporalSetup = (input: (format: GPUTextureFormat) => RenderTarget) => SsaoTemporalOptions;
 
