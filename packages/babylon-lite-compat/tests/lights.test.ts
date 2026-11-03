@@ -771,6 +771,51 @@ describe("Light.excludedMeshes / includedOnlyMeshes", () => {
         expect(excluded(old)).toBeUndefined();
     });
 
+    it("prunes a disposed mesh out of the lists so an inclusion stops restricting the light", async () => {
+        const scene = sceneStub(true);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+        const box = mesh("box");
+        // The stub's `_registerLight`/`_registerMesh` are mocked, so wire up what mesh dispose reads.
+        (scene as unknown as { lights: Light[] }).lights = [led];
+        (box as unknown as { _scene: Scene })._scene = scene;
+
+        led.includedOnlyMeshes = [box];
+        await flush();
+        expect(includedOnly(led)).toEqual([box._lite]);
+        rebuildMock.mockClear();
+
+        box.dispose();
+        await flush();
+
+        // Babylon.js splices a disposed mesh out of both lists, which makes the inclusion unrestricted
+        // again. Left in place it would keep every surviving mesh unlit by this light.
+        expect(led.includedOnlyMeshes).toEqual([]);
+        expect(includedOnly(led)).toBeUndefined();
+        expect(rebuildMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("prunes a disposed mesh out of an exclusion list shared between lights", async () => {
+        const scene = sceneStub(true);
+        const rim = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const led = new SpotLight("led", new Vector3(0, 1, 0), new Vector3(0, -1, 0), Math.PI / 4, 2, scene);
+        const box = mesh("box");
+        const floor = mesh("floor");
+        (scene as unknown as { lights: Light[] }).lights = [rim, led];
+        (box as unknown as { _scene: Scene })._scene = scene;
+
+        const shared = [box, floor];
+        rim.excludedMeshes = shared;
+        led.excludedMeshes = shared;
+        await flush();
+
+        box.dispose();
+        await flush();
+
+        // One splice through the hook, so both subscribers of the shared array republish.
+        expect(excluded(rim)).toEqual([floor._lite]);
+        expect(excluded(led)).toEqual([floor._lite]);
+    });
+
     it("survives repeated create, dispose and reuse against one retained list", async () => {
         const scene = sceneStub(true);
         const moduleMeshes = [mesh("floor")];

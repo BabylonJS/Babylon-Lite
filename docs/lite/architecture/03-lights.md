@@ -371,7 +371,11 @@ matrix changes, so an edit under a stable light count needs a renderable rebuild
    out of one light into another scene's light does not keep the first light's scene reachable. A list
    touched when the scene is already disposed releases immediately, since a disposal callback registered
    then would never run.
-5. The rebuild is skipped for a light held by a clustered container, which is outside the per-mesh light
+5. Disposing a mesh splices it out of every scene light's two lists, as Babylon.js does in its own
+   `AbstractMesh.dispose`. A disposed mesh left in an inclusion would keep that restriction alive and
+   leave every surviving mesh unlit by the light. The splice goes through the hook, so the republish and
+   the rebuild follow the ordinary edit path and a list shared between lights notifies all of them.
+6. The rebuild is skipped for a light held by a clustered container, which is outside the per-mesh light
    path. Babylon.js skips its own resync for the same reason.
 
 ### PBR Light Shader Paths

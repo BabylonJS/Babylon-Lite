@@ -315,6 +315,22 @@ export abstract class Light extends Node {
         });
     }
 
+    /** @internal Splice a disposed mesh out of both of this light's lists. */
+    public _pruneDisposedMesh(mesh: AbstractMesh): void {
+        this._spliceMeshOut(this._excludedMeshes, mesh);
+        // One array can back both lists; the first splice already notified every subscriber.
+        if (this._includedOnlyMeshes !== this._excludedMeshes) {
+            this._spliceMeshOut(this._includedOnlyMeshes, mesh);
+        }
+    }
+
+    private _spliceMeshOut(list: AbstractMesh[], mesh: AbstractMesh): void {
+        const index = list.indexOf(mesh);
+        if (index !== -1) {
+            list.splice(index, 1);
+        }
+    }
+
     /** @internal Drop this light from both of its lists' subscriber sets. */
     private _releaseMeshLists(): void {
         meshListSubscribers?.get(this._excludedMeshes)?.delete(this);

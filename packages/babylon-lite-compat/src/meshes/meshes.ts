@@ -359,6 +359,17 @@ export class AbstractMesh extends TransformNode {
         return true;
     }
 
+    /**
+     * @internal Take this mesh out of every light's filter lists before it goes, as Babylon.js
+     * `AbstractMesh.dispose` does in its own `Lights` loop.
+     */
+    protected override _disposeSelf(doNotRecurse: boolean): void {
+        for (const light of this._scene?.lights ?? []) {
+            light._pruneDisposedMesh(this);
+        }
+        super._disposeSelf(doNotRecurse);
+    }
+
     public get material(): CompatMaterial | null {
         return this._material;
     }
