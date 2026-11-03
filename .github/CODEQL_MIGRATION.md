@@ -17,7 +17,7 @@ Do not describe the local workflow as a successful fork scan or a verified merge
 
 Path: `.github/workflows/codeql.yml`
 
-- Events: pushes and pull requests targeting `master`, a weekly schedule, and `merge_group` for future queue compatibility.
+- Events: manual `workflow_dispatch`, pushes and pull requests targeting `master`, a weekly schedule, and `merge_group` for future queue compatibility.
 - Languages: `javascript-typescript` and `actions`, matching the two categories in current CodeQL analyses. The default-setup API also reports the aliases `javascript` and `typescript`; CodeQL combines those into the `javascript-typescript` database.
 - Query suite: `security-extended`, which includes the default security queries plus lower-precision security queries.
 - Build mode: `none` for every matrix entry.
@@ -63,7 +63,7 @@ Observed on 2026-11-03 through GitHub REST/GraphQL APIs:
 
 ### Coverage and trusted configuration
 
-The prepared workflow keeps the current JavaScript/TypeScript and Actions coverage and moves from the current `default` suite to `security-extended`. Its trusted configuration is inline and contains no `config-file`, `packs`, registries, external repository token, or repository-supplied query path. Consequently, it does not download or execute pull-request-supplied custom queries or query packs.
+The prepared workflow keeps the current JavaScript/TypeScript and Actions coverage and moves from the current `default` suite to `security-extended`. The trusted CodeQL choices are expressed directly as source-reviewed inputs to the pinned `init` action. The workflow contains no `config`, `config-file`, `packs`, registries, external repository token, or repository-supplied query path. Consequently, it does not download or execute pull-request-supplied custom queries or query packs.
 
 The default-setup REST response does not expose selected UI model packs. Before switching, an administrator must inspect the current CodeQL default-setup UI for model packs or organization-applied configuration. If anything is configured there, stop and inventory it. Do not silently drop it, and do not copy it into advanced setup until its source, version, and trust are reviewed.
 
@@ -77,6 +77,7 @@ These are manual steps for a repository administrator. They intentionally preser
 | --- | --- | --- | --- |
 | Review and merge files | `BabylonJS/Babylon-Lite`; normal write/merge permission plus all currently required reviews and checks | Both prepared files are present on `master` with no unrelated diff | Revert only the prepared commit through the normal reviewed process |
 | Inventory and switch CodeQL setup | `BabylonJS/Babylon-Lite`; repository administrator | Inventory is recorded; after switching, the advanced workflow is the only active CodeQL configuration | Re-enable default setup with the recorded inventory if advanced coverage is not restored promptly |
+| Start the first advanced baseline | `BabylonJS/Babylon-Lite`; repository write permission or higher | A new `workflow_dispatch` run starts on `master` after default setup is disabled | Cancel an incorrectly targeted run; do not treat the pre-cutover push run as a successful baseline |
 | Inspect runs and analyses | `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning | Both language jobs and uploaded analysis origins match the expected ref and commit | Do not advance status; fix or revert the workflow, then rerun |
 | Approve the authorized benign fork run | `BabylonJS/Babylon-Lite`; repository write permission or higher | Only reviewed workflows are released; both CodeQL jobs run with no privileged resources | Cancel unexpected runs and do not approve further workflow revisions |
 | Change rulesets | `BabylonJS/Babylon-Lite`; repository administrator | Existing rules remain intact and only the reviewed CodeQL rule or exact status contexts are added | Remove only the new CodeQL rule or exact new contexts |
@@ -106,17 +107,20 @@ These are manual steps for a repository administrator. They intentionally preser
    - In the confirmation dialog, choose **Disable CodeQL**.
    - Consequence: this disables only GitHub's managed default setup. It does not activate the replacement by itself. Perform this immediately after the workflow is present on `master`; do not leave the repository without a working CodeQL configuration.
    - Do not try to upload advanced results while default setup is still active; GitHub rejects the competing configuration.
-   - Verification: the default-setup API no longer reports `state: configured`, and the committed advanced workflow starts for `master`.
+   - The push that originally placed the workflow on `master` may already have run while default setup was active and may have failed to upload. That earlier run does not retry automatically and is not activation evidence.
+   - Verification: the default-setup API no longer reports `state: configured`.
    - Recovery: before a successful advanced run, re-enable default setup with the inventory from step 2.
 
-4. **Verify the first advanced `master` run**
-   - Repository and permission: `BabylonJS/Babylon-Lite`; repository read access to Actions and code scanning.
-   - Open **Actions → CodeQL** and select the `push` run for the activation commit.
+4. **Start and verify the first advanced `master` baseline**
+   - Repository and permission: `BabylonJS/Babylon-Lite`; repository write permission or higher to start the run, then read access to Actions and code scanning.
+   - After default setup is disabled, open **Actions → CodeQL → Run workflow**.
+   - Select branch **master** and choose **Run workflow**. This creates a new `workflow_dispatch` run against the current trusted `master`; do not rely on the earlier pre-cutover push run.
+   - Open the new manual run and record its URL, event, branch, and commit SHA.
    - Require both `Analyze (javascript-typescript)` and `Analyze (actions)` to complete successfully.
    - In **Security and quality → Code scanning**, confirm two CodeQL analyses exist for `refs/heads/master` at the activation commit SHA with categories `/language:javascript-typescript` and `/language:actions`.
    - Confirm the logs contain no install, build, test, project script, custom query, self-hosted runner, secret, PAT, or OIDC use.
-   - Verification: both analyses report the exact explicit categories and the activation commit.
-   - Recovery: if either analysis fails, do not add a merge requirement. Fix or revert the workflow; if coverage cannot be restored promptly, re-enable default setup.
+   - Verification: the run event is `workflow_dispatch`, the branch is `master`, and both analyses report the exact explicit categories and the run's commit SHA.
+   - Recovery: cancel a run targeted at any branch other than `master`. If either analysis fails, do not add a merge requirement. Fix or revert the workflow; if coverage cannot be restored promptly, re-enable default setup.
 
 5. **Authorize the already pending benign fork validation only after workflow review**
    - Repository and permission: `BabylonJS/Babylon-Lite`; repository write permission or higher.
