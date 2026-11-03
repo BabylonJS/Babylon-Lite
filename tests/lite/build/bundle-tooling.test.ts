@@ -8,6 +8,7 @@ import { build, normalizePath, type Plugin } from "vite";
 import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
 import { createLiteCodeSplitting, litePackageResolverPlugin, resolveLitePackageSpecifier, terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
 import { compareLiteErrorFiles, isDeferredLiteErrorFile } from "../../../scripts/lite-error-plugin";
+import { enumerateLibEntries } from "../../../packages/babylon-lite/vite.config";
 
 const tempDirs: string[] = [];
 
@@ -18,6 +19,30 @@ afterEach(() => {
 });
 
 describe("bundle tooling correctness", () => {
+    it("appends optional SSAO library entries without reordering established module traversal", () => {
+        const keys = Object.keys(enumerateLibEntries());
+        const established = ["material/standard/standard-renderable", "material/standard/standard-pipeline", "shader/fragments/skeleton-fragment", "xr/xr-teleport"];
+        for (const key of established) expect(keys).toContain(key);
+        const lastEstablished = Math.max(...established.map((key) => keys.indexOf(key)));
+        const optional = [
+            "frame-graph/enable-geometry-velocity",
+            "material/geometry-deformation-hooks",
+            "material/geometry-deformation-velocity",
+            "material/pbr/pbr-binding-decorator",
+            "material/pbr/pbr-diffuse-occlusion",
+            "material/pbr/pbr-geometry-velocity",
+            "material/pbr/pbr-geometry-velocity-hooks",
+            "material/plugin/dynamic-pbr-bindings",
+            "material/plugin/pbr-plugin-decorator",
+            "material/plugin/pbr-plugin-passes",
+            ...keys.filter((key) => key.startsWith("post-process/ssao")),
+        ];
+        expect(optional.length).toBeGreaterThan(10);
+        for (const key of optional) {
+            expect(keys.indexOf(key), `${key} must not change the traversal/import order of ordinary modules`).toBeGreaterThan(lastEstablished);
+        }
+    });
+
     it("assigns optional accessibility error codes after core errors", () => {
         const root = join(tmpdir(), "lite-error-order");
         const core = join(root, "scene/scene-core.ts");

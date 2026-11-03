@@ -523,8 +523,9 @@ function exposeWgslSourceAsString(content: string): string {
  * module-granular output, but with clean paths and while still allowing
  * `manualChunks` (the two are mutually exclusive in Rollup). `*-worker.ts` Web
  * Worker entry modules are excluded; Vite handles them via `?worker` imports.
+ * @internal Exported to check opt-in entry ordering without rebuilding the package.
  */
-function enumerateLibEntries(): Record<string, string> {
+export function enumerateLibEntries(): Record<string, string> {
     const entries: Record<string, string> = {};
     // Entry traversal also determines the emitted root barrel's import order.
     // Append opt-in modules so their dependencies cannot reorder established output
@@ -544,7 +545,18 @@ function enumerateLibEntries(): Record<string, string> {
                 .slice(SRC_DIR.length + 1)
                 .replace(/\\/g, "/")
                 .replace(/\.ts$/, "");
-            if (key.startsWith("accessibility/")) {
+            if (
+                key.startsWith("accessibility/") ||
+                key.startsWith("post-process/ssao") ||
+                key === "frame-graph/enable-geometry-velocity" ||
+                key.startsWith("material/geometry-deformation") ||
+                key.startsWith("material/pbr/pbr-geometry-velocity") ||
+                key === "material/pbr/pbr-binding-decorator" ||
+                key === "material/pbr/pbr-diffuse-occlusion" ||
+                key === "material/plugin/dynamic-pbr-bindings" ||
+                key === "material/plugin/pbr-plugin-decorator" ||
+                key === "material/plugin/pbr-plugin-passes"
+            ) {
                 extensionEntries[key] = full;
             } else {
                 entries[key] = full;

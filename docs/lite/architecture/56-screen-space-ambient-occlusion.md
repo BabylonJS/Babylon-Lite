@@ -554,6 +554,10 @@ The AO producers opt in before scene registration; the temporal consumer still
 uses its separate `velocityHasPreviousDepth` option. Error codes for these
 optional modules are assigned after established core/compute/accessibility
 errors so unused features do not renumber and grow ordinary scenes.
+The library build also appends SSAO/velocity modules and their binding seams to
+its entry traversal, following the existing opt-in accessibility rule. Otherwise
+new entries can reorder ordinary emitted imports and perturb minifier names,
+growing unrelated scene bundles even when no SSAO code survives tree-shaking.
 
 The estimator phase cycles through 64 frames. XeGTAO uses its existing Hilbert/R2
 temporal offset, with phase zero identical to the upstream adapter.
