@@ -1,30 +1,19 @@
-import type { EngineContext } from "../engine/engine.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTaskBase as RenderTask } from "../frame-graph/render-task-base.js";
 import type { SceneContext } from "./scene-core.js";
 
-interface OverlayState {
-    callback?: () => void;
-    cleanup: () => void;
-    task: RenderTask;
-    enabled: boolean | undefined;
-    clear: boolean | undefined;
-}
-
-let overlayStates: WeakMap<SceneContext, OverlayState> | undefined;
-
-let _sceneOverlayHookLookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"] = () => undefined;
-
-function removeCallback<T>(callbacks: T[], callback: T): void {
-    const index = callbacks.indexOf(callback);
-    if (index >= 0) {
-        callbacks.splice(index, 1);
-    }
-}
-
-/** @internal Install the lookup for optional engine-owned overlay-selection hooks. */
-export function _installSwapchainOverlayHookLookup(lookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"]): void {
-    _sceneOverlayHookLookup = lookup;
+/** @internal A scene's swapchain-composition record. `_task` is set only while compositing onto `_base`. */
+export interface SwapchainOverlayState {
+    /** @internal The scene composited onto, or `null` for a normal clearing scene. */
+    _base: SceneContext | null;
+    /** @internal The scene's swapchain task while compositing. */
+    _task?: RenderTask;
+    /** @internal The task's original enabled state. */
+    _enabled?: boolean;
+    /** @internal The task's original clear flag. */
+    _clear?: boolean;
+    /** @internal The MSAA before-render callback that shares the base's attachment. */
+    _callback?: () => void;
 }
 
 /** Find a scene's default render task that targets the surface swapchain — either
@@ -38,63 +27,37 @@ function getDefaultSwapchainTask(scene: SceneContext, surface: SurfaceContext): 
     }
 }
 
-/** @internal Configure a scene to preserve pixels already rendered into the same surface.
- *  `afterRegistration` permits configuring the first context after registration. */
-export function configureSwapchainOverlayScene(surface: SurfaceContext, overlay: SceneContext, afterRegistration = false): void {
-    if (overlay._z || (!afterRegistration && surface._renderingContexts.includes(overlay))) {
+/** @internal Configure an unconfigured scene to preserve its selected base scene's pixels and
+ *  record the result in `_swapchainOverlay`. A `null` base records the scene with its task untouched.
+ *  Reconfiguring an already-configured scene requires `retargetSwapchainOverlay`. */
+export function configureSwapchainOverlayScene(surface: SurfaceContext, overlay: SceneContext, baseScene: SceneContext | null): void {
+    const state: SwapchainOverlayState = (overlay._swapchainOverlay = { _base: baseScene });
+    const task = baseScene && getDefaultSwapchainTask(overlay, surface);
+    if (!task) {
         return;
     }
-    const selected = _sceneOverlayHookLookup(surface.engine)?.selectBase(overlay);
-    const baseScene = (selected === undefined ? surface._renderingContexts[surface._renderingContexts.length - 1] : selected) as Partial<SceneContext> | null | undefined;
-    if (selected === undefined && !baseScene?._frameGraph) {
-        return;
-    }
-
-    const previous = overlayStates?.get(overlay);
-    if (previous) {
-        if (previous.callback) {
-            removeCallback(overlay._beforeRender, previous.callback);
-            previous.task.enabled = previous.enabled;
-        }
-        previous.task._config.clr = previous.clear;
-        removeCallback(overlay._disposables, previous.cleanup);
-        overlayStates?.delete(overlay);
-    }
-
-    if (!baseScene?._frameGraph) {
-        return;
-    }
-
-    const overlayTask = getDefaultSwapchainTask(overlay, surface);
-    if (!overlayTask) {
-        return;
-    }
-    const enabled = overlayTask.enabled;
-    const clear = overlayTask._config.clr;
-    const cleanup = (): void => {
-        overlayStates?.delete(overlay);
-    };
-    const state: OverlayState = { task: overlayTask, enabled, clear, cleanup };
-    (overlayStates ??= new WeakMap()).set(overlay, state);
-    overlay._disposables.push(cleanup);
+    state._task = task;
+    state._enabled = task.enabled;
+    state._clear = task._config.clr;
     if (surface.msaaSamples === 1) {
         // Load (don't clear) the swapchain so the overlay composites onto the base scene.
-        overlayTask._config.clr = false;
+        task._config.clr = false;
         return;
     }
-    overlayTask._config.clr = true;
-    overlayTask.enabled = false;
-    const callback = (): void => {
-        const baseTask = getDefaultSwapchainTask(baseScene as SceneContext, surface);
+    task._config.clr = true;
+    task.enabled = false;
+    state._callback = (): void => {
+        // `_base` may be retargeted or unregistered; never share an absent scene's attachment.
+        const base = state._base;
+        const baseTask = base && surface._renderingContexts.includes(base) ? getDefaultSwapchainTask(base, surface) : undefined;
         const view = baseTask?._config.rst === surface.scRT && baseTask._colorAttachment.view;
-        overlayTask.enabled = view ? enabled : false;
-        overlayTask._config.clr = !view;
+        task.enabled = view ? state._enabled : false;
+        task._config.clr = !view;
         if (view) {
             // Both scenes must use the base task's MSAA colour texture before the overlay
             // can load its pixels and resolve the composited result into the swapchain.
-            overlayTask._colorAttachment.view = view;
+            task._colorAttachment.view = view;
         }
     };
-    overlay._beforeRender.unshift(callback);
-    state.callback = callback;
+    overlay._beforeRender.unshift(state._callback);
 }

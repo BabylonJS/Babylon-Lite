@@ -1,9 +1,9 @@
-import type { EngineContext, RenderingContext } from "../engine/engine.js";
+import type { RenderingContext } from "../engine/engine.js";
 import { isRenderingContextRegistered } from "../engine/engine.js";
 import { moveRenderingContext } from "../engine/rendering-context-order.js";
 import type { SceneContext } from "./scene-core.js";
-import { _installSceneOverlayHookLookup, createSceneContext } from "./scene-core.js";
-import { _installSwapchainOverlayHookLookup, configureSwapchainOverlayScene } from "./swapchain-overlay.js";
+import { _installOverlayRegistration, createSceneContext } from "./scene-core.js";
+import { retargetSwapchainOverlay } from "./overlay-lifecycle.js";
 
 function isOverlayDescendant(context: RenderingContext, base: SceneContext): boolean {
     let parent = (context as Partial<SceneContext>)._overlayBase;
@@ -49,37 +49,27 @@ export function moveSwapchainOverlaysAfterBase(base: SceneContext): void {
     moveOverlayDescendants(base, baseIndex);
 }
 
-function selectBase(scene: SceneContext): RenderingContext | null | undefined {
-    if (scene._overlayBase) {
-        return scene._overlayBase;
+/** Whether any scene in `scene`'s explicit overlay chain is unregistered. */
+function isSuspended(scene: SceneContext): boolean {
+    let base = scene._overlayBase;
+    while (base && isRenderingContextRegistered(scene.surface, base)) {
+        base = base._overlayBase;
     }
-    const contexts = scene.surface._renderingContexts;
-    if (contexts.length === 1 && contexts[0] === scene) {
-        return null;
-    }
-    const firstDescendant = contexts.findIndex((context) => isOverlayDescendant(context, scene));
-    return firstDescendant < 0 ? undefined : (contexts[firstDescendant - 1] ?? null);
+    return !!base;
 }
 
-function sceneRegistered(scene: SceneContext): void {
-    if (scene.surface._renderingContexts.length === 1) {
-        configureSwapchainOverlayScene(scene.surface, scene, true);
+/** Prepare any scene for registration once explicit overlay scenes exist. */
+function prepareRegistration(scene: SceneContext, orderOrdinary: (() => void) | undefined): () => void {
+    const base = scene._overlayBase;
+    if (base && !scene._z && !isRenderingContextRegistered(scene.surface, scene)) {
+        retargetSwapchainOverlay(scene.surface, scene, base);
     }
-    moveSwapchainOverlaysAfterBase(scene._overlayBase ?? scene);
-}
-
-function getSceneOverlayHooks(engine: EngineContext): EngineContext["_sceneOverlayHooks"] {
-    return engine._sceneOverlayHooks;
-}
-
-/** @internal Install explicit overlay-scene composition hooks on the owning engine. */
-export function enableOverlayScenes(engine: EngineContext): void {
-    if (engine._sceneOverlayHooks) {
-        return;
-    }
-    engine._sceneOverlayHooks = { selectBase, registered: sceneRegistered };
-    _installSceneOverlayHookLookup(getSceneOverlayHooks);
-    _installSwapchainOverlayHookLookup(getSceneOverlayHooks);
+    return () => {
+        orderOrdinary?.();
+        moveSwapchainOverlaysAfterBase(base ?? scene);
+        // Ordinary scenes may now have a different nearest active base.
+        scene.surface.engine._sceneOverlayChanged?.(scene, false);
+    };
 }
 
 /**
@@ -98,25 +88,17 @@ export function createOverlayScene(baseScene: SceneContext): SceneContext {
     const scene = createSceneContext(baseScene.surface);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 0 };
     scene._overlayBase = baseScene;
-    enableOverlayScenes(baseScene.surface.engine);
+    _installOverlayRegistration(prepareRegistration);
 
-    const isActive = (): boolean => {
-        for (let base: SceneContext | undefined = baseScene; base; base = base._overlayBase) {
-            if (!isRenderingContextRegistered(scene.surface, base)) {
-                return false;
-            }
-        }
-        return true;
-    };
     const update = scene._update;
     const record = scene._record;
     scene._update = () => {
-        if (isActive()) {
-            update();
-        } else {
+        if (isSuspended(scene)) {
             scene._drawCallsPre = 0;
+        } else {
+            update();
         }
     };
-    scene._record = () => (isActive() ? record() : 0);
+    scene._record = () => (isSuspended(scene) ? 0 : record());
     return scene;
 }

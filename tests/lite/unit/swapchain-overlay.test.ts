@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { enableOverlayScenes } from "../../../packages/babylon-lite/src/scene/overlay-scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { _selectImplicitBase } from "../../../packages/babylon-lite/src/scene/implicit-overlay-base";
+import { retargetSwapchainOverlay } from "../../../packages/babylon-lite/src/scene/overlay-lifecycle";
 import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/src/scene/swapchain-overlay";
 
 function makeSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView?: GPUTextureView): RenderTask {
@@ -25,18 +26,88 @@ function makeSurface(swapchain: SurfaceContext["scRT"], samples: number, context
 }
 
 describe("configureSwapchainOverlayScene", () => {
+    it("uses the selected previous scene rather than a later frame-graph context", () => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const previousView = {} as GPUTextureView;
+        const latestView = {} as GPUTextureView;
+        const unrelatedView = {} as GPUTextureView;
+        const previous = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, previousView)] } };
+        const latest = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, latestView)] } };
+        const unrelated = { _kind: "frame-graph-context", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, unrelatedView)] } };
+        const task = makeSwapchainTask(swapchain, {} as GPUTextureView);
+        const overlay = { _frameGraph: { _tasks: [task] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
+        const surface = makeSurface(swapchain, 4, [previous, latest, unrelated]);
+
+        Object.assign(overlay, { surface });
+        const base = _selectImplicitBase(overlay);
+        expect(base).toBe(latest);
+        configureSwapchainOverlayScene(surface, overlay, base);
+        overlay._beforeRender.forEach((callback) => callback(0));
+
+        expect(task._config.clr).toBe(false);
+        expect(task._colorAttachment.view).toBe(latestView);
+    });
+
+    it.each([1, 4])("does not overlay a non-scene frame-graph context when there is no previous scene at MSAA %i", (samples) => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const task = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
+        const overlay = { _frameGraph: { _tasks: [task] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
+        const unrelated = { _kind: "frame-graph-context", _frameGraph: { _tasks: [makeSwapchainTask(swapchain)] } };
+        const surface = makeSurface(swapchain, samples, [unrelated]);
+
+        Object.assign(overlay, { surface });
+        const base = _selectImplicitBase(overlay);
+        expect(base).toBeNull();
+        configureSwapchainOverlayScene(surface, overlay, base);
+
+        expect(task._config.clr).toBe(true);
+        expect(overlay._beforeRender).toHaveLength(0);
+    });
+
+    it.each([1, 4])("does not infer a base when explicitly given null at MSAA %i", (samples) => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const task = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
+        const overlay = { _frameGraph: { _tasks: [task] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
+        const previous = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain)] } };
+        const surface = makeSurface(swapchain, samples, [previous]);
+
+        configureSwapchainOverlayScene(surface, overlay, null);
+
+        expect(task._config.clr).toBe(true);
+        expect(overlay._beforeRender).toHaveLength(0);
+    });
+
+    it.each([1, 4])("uses the supplied base even when a different scene was registered later at MSAA %i", (samples) => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const view = {} as GPUTextureView;
+        const base = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, samples > 1 ? view : undefined)] } } as unknown as SceneContext;
+        const later = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined)] } };
+        const task = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
+        const overlay = { _frameGraph: { _tasks: [task] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
+        const surface = makeSurface(swapchain, samples, [base, later]);
+
+        configureSwapchainOverlayScene(surface, overlay, base);
+        overlay._beforeRender.forEach((callback) => callback(0));
+
+        expect(task._config.clr).toBe(false);
+        if (samples > 1) {
+            expect(task._colorAttachment.view).toBe(view);
+        }
+    });
+
     it.each([1, 4])("uses the explicit main scene even when the last context is text at MSAA %i", (samples) => {
         const swapchain = {} as SurfaceContext["scRT"];
         const view = {} as GPUTextureView;
         const baseTask = makeSwapchainTask(swapchain, samples > 1 ? view : undefined);
         const overlayTask = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
-        const base = { _frameGraph: { _tasks: [baseTask] } } as unknown as SceneContext;
+        const base = { _kind: "scene", _frameGraph: { _tasks: [baseTask] } } as unknown as SceneContext;
         const overlay = { _frameGraph: { _tasks: [overlayTask] }, _beforeRender: [], _disposables: [], _overlayBase: base } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [base, { _kind: "text-renderer" }]);
         Object.assign(overlay, { surface });
-        enableOverlayScenes(surface.engine);
 
-        configureSwapchainOverlayScene(surface, overlay);
+        const selected = overlay._overlayBase;
+        expect(selected).toBe(base);
+        configureSwapchainOverlayScene(surface, overlay, selected ?? null);
         overlay._beforeRender.forEach((cb) => cb(0));
         expect(overlayTask._config.clr).toBe(false);
         if (samples > 1) {
@@ -51,16 +122,18 @@ describe("configureSwapchainOverlayScene", () => {
     it.each([1, 4])("does not choose a later unrelated scene as the base of its own overlay group at MSAA %i", (samples) => {
         const swapchain = {} as SurfaceContext["scRT"];
         const mainTask = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
-        const main = { _frameGraph: { _tasks: [mainTask] }, _beforeRender: [] } as unknown as SceneContext;
-        const layer = { _overlayBase: main } as unknown as SceneContext;
+        const main = { _kind: "scene", _frameGraph: { _tasks: [mainTask] }, _beforeRender: [] } as unknown as SceneContext;
+        const layer = { _kind: "scene", _overlayBase: main } as unknown as SceneContext;
         const unrelated = {
+            _kind: "scene",
             _frameGraph: { _tasks: [makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined)] },
         } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [layer, unrelated]);
         Object.assign(main, { surface });
-        enableOverlayScenes(surface.engine);
 
-        configureSwapchainOverlayScene(surface, main);
+        const selected = _selectImplicitBase(main);
+        expect(selected).toBeNull();
+        configureSwapchainOverlayScene(surface, main, selected);
         expect(mainTask._config.clr).toBe(true);
         expect(main._beforeRender).toHaveLength(0);
     });
@@ -69,17 +142,19 @@ describe("configureSwapchainOverlayScene", () => {
         const swapchain = {} as SurfaceContext["scRT"];
         const view = {} as GPUTextureView;
         const previous = {
+            _kind: "scene",
             _frameGraph: { _tasks: [makeSwapchainTask(swapchain, samples > 1 ? view : undefined)] },
         } as unknown as SceneContext;
         const mainTask = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
         const main = { _frameGraph: { _tasks: [mainTask] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
-        const layer = { _overlayBase: main } as unknown as SceneContext;
-        const child = { _overlayBase: layer } as unknown as SceneContext;
+        const layer = { _kind: "scene", _overlayBase: main } as unknown as SceneContext;
+        const child = { _kind: "scene", _overlayBase: layer } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [previous, child, layer, { _kind: "text-renderer" }]);
         Object.assign(main, { surface });
-        enableOverlayScenes(surface.engine);
 
-        configureSwapchainOverlayScene(surface, main);
+        const selected = _selectImplicitBase(main);
+        expect(selected).toBe(previous);
+        configureSwapchainOverlayScene(surface, main, selected);
         main._beforeRender.forEach((cb) => cb(0));
         expect(mainTask._config.clr).toBe(false);
         if (samples > 1) {
@@ -93,6 +168,7 @@ describe("configureSwapchainOverlayScene", () => {
         const baseTasks: RenderTask[] = [];
         let baseLookups = 0;
         const base = {
+            _kind: "scene",
             _frameGraph: {
                 get _tasks(): RenderTask[] {
                     baseLookups++;
@@ -108,7 +184,7 @@ describe("configureSwapchainOverlayScene", () => {
         } as unknown as SceneContext;
         const surface = makeSurface(swapchain, 1, [base]);
 
-        configureSwapchainOverlayScene(surface, overlay);
+        configureSwapchainOverlayScene(surface, overlay, base);
 
         expect(overlayTask._config.clr).toBe(false);
         expect(overlay._beforeRender).toHaveLength(0);
@@ -123,6 +199,7 @@ describe("configureSwapchainOverlayScene", () => {
         const baseTasks: RenderTask[] = [];
         let baseLookups = 0;
         const base = {
+            _kind: "scene",
             _frameGraph: {
                 get _tasks(): RenderTask[] {
                     baseLookups++;
@@ -137,7 +214,7 @@ describe("configureSwapchainOverlayScene", () => {
         } as unknown as SceneContext;
         const surface = makeSurface(swapchain, 4, [base]);
 
-        configureSwapchainOverlayScene(surface, overlay);
+        configureSwapchainOverlayScene(surface, overlay, base);
 
         expect(overlayTask._config.clr).toBe(true);
         expect(overlayTask.enabled).toBe(false);
@@ -163,20 +240,20 @@ describe("configureSwapchainOverlayScene", () => {
         const firstTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
         const secondView = {} as GPUTextureView;
         const secondTask = makeSwapchainTask(swapchain, secondView);
-        const first = { _frameGraph: { _tasks: [firstTask] } } as unknown as SceneContext;
-        const second = { _frameGraph: { _tasks: [secondTask] } } as unknown as SceneContext;
+        const first = { _kind: "scene", _frameGraph: { _tasks: [firstTask] } } as unknown as SceneContext;
+        const second = { _kind: "scene", _frameGraph: { _tasks: [secondTask] } } as unknown as SceneContext;
         const overlayTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
         overlayTask.enabled = true;
         const overlay = { _frameGraph: { _tasks: [overlayTask] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
         const surface = makeSurface(swapchain, 4, [first]);
 
-        configureSwapchainOverlayScene(surface, overlay);
+        configureSwapchainOverlayScene(surface, overlay, first);
         firstTask._config.rst = undefined;
         overlay._beforeRender[0]!(0);
         expect(overlayTask.enabled).toBe(false);
 
         surface._renderingContexts[0] = second;
-        configureSwapchainOverlayScene(surface, overlay);
+        retargetSwapchainOverlay(surface, overlay, second);
         expect(overlay._beforeRender).toHaveLength(1);
         overlay._beforeRender[0]!(0);
         expect(overlayTask.enabled).toBe(true);
@@ -187,24 +264,23 @@ describe("configureSwapchainOverlayScene", () => {
     it.each([1, 4])("restores an earlier overlay's clear state after utility support is enabled at MSAA %i", (samples) => {
         const swapchain = {} as SurfaceContext["scRT"];
         const firstTask = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
-        const first = { _frameGraph: { _tasks: [firstTask] } } as unknown as SceneContext;
+        const first = { _kind: "scene", _frameGraph: { _tasks: [firstTask] } } as unknown as SceneContext;
         const mainTask = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
         mainTask.enabled = true;
         const main = { _frameGraph: { _tasks: [mainTask] }, _beforeRender: [], _disposables: [] } as unknown as SceneContext;
-        const utility = { _overlayBase: main } as unknown as SceneContext;
+        const utility = { _kind: "scene", _overlayBase: main } as unknown as SceneContext;
         const surface = makeSurface(swapchain, samples, [first]);
         Object.assign(main, { surface });
 
-        configureSwapchainOverlayScene(surface, main);
+        configureSwapchainOverlayScene(surface, main, first);
         main._beforeRender.forEach((callback) => callback(0));
         expect(mainTask._config.clr).toBe(false);
         if (samples === 1) {
             mainTask.enabled = false;
         }
 
-        enableOverlayScenes(surface.engine);
         surface._renderingContexts.splice(0, 1, utility);
-        configureSwapchainOverlayScene(surface, main);
+        retargetSwapchainOverlay(surface, main, _selectImplicitBase(main));
         expect(mainTask._config.clr).toBe(true);
         expect(mainTask.enabled).toBe(samples === 1 ? false : true);
         expect(main._beforeRender).toHaveLength(0);
@@ -215,6 +291,7 @@ describe("configureSwapchainOverlayScene", () => {
         const overlayView = {} as GPUTextureView;
         const overlayTask = makeSwapchainTask(swapchain, overlayView);
         const base = {
+            _kind: "scene",
             _frameGraph: {
                 _tasks: [
                     { targetTexture: swapchain, _colorAttachment: {} },
@@ -229,7 +306,7 @@ describe("configureSwapchainOverlayScene", () => {
         } as unknown as SceneContext;
         const surface = makeSurface(swapchain, 4, [base]);
 
-        configureSwapchainOverlayScene(surface, overlay);
+        configureSwapchainOverlayScene(surface, overlay, base);
         overlay._beforeRender[0]!(0);
         overlay._beforeRender[0]!(0);
 

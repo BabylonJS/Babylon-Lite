@@ -28,6 +28,7 @@ import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
 import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
+import type { SwapchainOverlayState } from "./swapchain-overlay.js";
 import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
@@ -219,8 +220,10 @@ export interface SceneContext extends RenderingContext {
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
     /** @internal Scene whose swapchain output this scene composites onto. When unset,
-     *  registration uses the context before any existing overlays, or the last context. */
+     *  registration infers the nearest active preceding scene. */
     _overlayBase?: SceneContext;
+    /** @internal Swapchain-composition record for a scene registered after another context. */
+    _swapchainOverlay?: SwapchainOverlayState;
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
     /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
@@ -605,7 +608,9 @@ export function disposeScene(scene: SceneContext): void {
     ctx._z = true;
     const lateCleanup = (_lateCleanup ??= new WeakMap());
     lateCleanup.set(ctx, () => 1);
-    unregisterRenderingContext(ctx.surface, ctx);
+    if (unregisterRenderingContext(ctx.surface, ctx)) {
+        ctx.surface.engine._sceneOverlayChanged?.(ctx, true);
+    }
     const cleanup = (): void => {
         lateCleanup.set(ctx, () => {
             for (const fns of ctx._meshDisposables.values()) {
@@ -693,18 +698,18 @@ export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneCon
     _prepareShaderPipelines = prepare;
 }
 
-let _sceneOverlayHookLookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"] = () => undefined;
-
-/** @internal Install the lookup for optional engine-owned scene-registration hooks. */
-export function _installSceneOverlayHookLookup(lookup: (engine: EngineContext) => EngineContext["_sceneOverlayHooks"]): void {
-    _sceneOverlayHookLookup = lookup;
+let _prepareOverlayRegistration: ((scene: SceneContext, orderOrdinary: (() => void) | undefined) => () => void) | undefined;
+/** @internal Install explicit overlay-scene registration, which wraps ordinary ordering with overlay regrouping. */
+export function _installOverlayRegistration(prepare: (scene: SceneContext, orderOrdinary: (() => void) | undefined) => () => void): void {
+    _prepareOverlayRegistration = prepare;
 }
 
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to its bound surface's render list in overlay order. The scene is
- * always attached to `scene.surface` (which equals the engine itself in the
- * single-canvas case).
+ * and adds the scene to its bound surface's render list in overlay order. An ordinary
+ * scene composites over the last preceding scene on that surface and is placed after it,
+ * before intervening non-scene contexts. The scene is always attached to `scene.surface`
+ * (which equals the engine itself in the single-canvas case).
  */
 export async function registerScene(scene: SceneContext): Promise<void> {
     const ctx = scene;
@@ -721,11 +726,15 @@ export async function registerScene(scene: SceneContext): Promise<void> {
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
+    let orderOverlay: (() => void) | undefined;
+    if (surface._renderingContexts[0] && !ctx._overlayBase) {
+        const overlay = await import("./auto-overlay.js");
+        orderOverlay = overlay.prepareSceneOverlay(ctx);
     }
-    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _sceneOverlayHookLookup(surface.engine)?.registered(ctx));
+    orderOverlay = _prepareOverlayRegistration?.(ctx, orderOverlay) ?? orderOverlay;
+    if (!_lateCleanup?.get(ctx)?.() && registerRenderingContext(surface, ctx)) {
+        orderOverlay?.();
+    }
 }
 
 /**
@@ -749,11 +758,15 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
+    let orderOverlay: (() => void) | undefined;
+    if (surface._renderingContexts[0] && !ctx._overlayBase) {
+        const overlay = await import("./auto-overlay.js");
+        orderOverlay = overlay.prepareSceneOverlay(ctx);
     }
-    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _sceneOverlayHookLookup(surface.engine)?.registered(ctx));
+    orderOverlay = _prepareOverlayRegistration?.(ctx, orderOverlay) ?? orderOverlay;
+    if (!_lateCleanup?.get(ctx)?.() && registerRenderingContext(surface, ctx)) {
+        orderOverlay?.();
+    }
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
@@ -772,5 +785,7 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
  *  The scene is always removed from `scene.surface`. */
 export function unregisterScene(scene: SceneContext): void {
-    unregisterRenderingContext(scene.surface, scene as SceneContext);
+    if (unregisterRenderingContext(scene.surface, scene)) {
+        scene.surface.engine._sceneOverlayChanged?.(scene, true);
+    }
 }

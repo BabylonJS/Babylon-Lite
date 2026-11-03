@@ -1,16 +1,27 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { resolve } from "node:path";
 import type * as Lite from "../../../packages/babylon-lite/src/index.js";
 
 const moduleUrl = `/@fs/${resolve("packages", "babylon-lite", "src", "index.ts").replace(/\\/g, "/")}`;
+
+async function openCanvas(page: Page, width: number, height: number): Promise<void> {
+    const url = `http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/overlay-test`;
+    await page.route(url, (route) =>
+        route.fulfill({
+            status: 200,
+            contentType: "text/html",
+            body: `<canvas width="${width}" height="${height}" style="width:${width}px;height:${height}px"></canvas>`,
+        })
+    );
+    await page.goto(url);
+}
 
 for (const samples of [1, 4] as const) {
     for (const utilityFirst of [false, true]) {
         test(`utility layers preserve scene and text pixels at MSAA ${samples}, utility-first=${utilityFirst}`, async ({ page }) => {
             const errors: string[] = [];
             page.on("pageerror", (error) => errors.push(error.message));
-            await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
-            await page.setContent('<canvas width="400" height="300" style="width:400px;height:300px"></canvas>');
+            await openCanvas(page, 400, 300);
             const result = await page.evaluate(
                 async ({ moduleUrl, samples, utilityFirst }) => {
                     const lite = (await import(moduleUrl)) as typeof Lite;
@@ -167,8 +178,7 @@ for (const samples of [1, 4] as const) {
     test(`overlay scenes composite with their own camera before text at MSAA ${samples}`, async ({ page }) => {
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
-        await page.setContent('<canvas width="400" height="300" style="width:400px;height:300px"></canvas>');
+        await openCanvas(page, 400, 300);
         const result = await page.evaluate(
             async ({ moduleUrl, samples }) => {
                 const lite = (await import(moduleUrl)) as typeof Lite;
@@ -268,8 +278,7 @@ for (const samples of [1, 4] as const) {
     test(`a former overlay clears when it becomes the base scene at MSAA ${samples}`, async ({ page }) => {
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
-        await page.setContent('<canvas width="64" height="64" style="width:64px;height:64px"></canvas>');
+        await openCanvas(page, 64, 64);
         const result = await page.evaluate(
             async ({ moduleUrl, samples }) => {
                 const lite = (await import(moduleUrl)) as typeof Lite;
@@ -334,8 +343,7 @@ for (const samples of [1, 4] as const) {
     test(`ordinary overlays retarget after their base scene changes at MSAA ${samples}`, async ({ page }) => {
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
-        await page.setContent('<canvas width="64" height="64" style="width:64px;height:64px"></canvas>');
+        await openCanvas(page, 64, 64);
         const result = await page.evaluate(
             async ({ moduleUrl, samples }) => {
                 const lite = (await import(moduleUrl)) as typeof Lite;
@@ -396,4 +404,154 @@ for (const samples of [1, 4] as const) {
         expect(result.gpuErrors).toEqual([]);
         expect(errors).toEqual([]);
     });
+
+    for (const withUtility of [false, true]) {
+        test(`ordinary scenes preserve text and earlier scenes at MSAA ${samples}, utility=${withUtility}`, async ({ page }) => {
+            const errors: string[] = [];
+            page.on("pageerror", (error) => errors.push(error.message));
+            await openCanvas(page, 400, 300);
+            const result = await page.evaluate(
+                async ({ moduleUrl, samples, withUtility }) => {
+                    const lite = (await import(moduleUrl)) as typeof Lite;
+                    const canvas = document.querySelector("canvas")!;
+                    const engine = await lite.createEngine(canvas, { msaaSamples: samples, maxDevicePixelRatio: 1 });
+                    const gpuErrors: string[] = [];
+                    engine._device.addEventListener("uncapturederror", (event) => gpuErrors.push(event.error.message));
+                    const main = lite.createSceneContext(engine);
+                    main.clearColor = { r: 0.2, g: 0.3, b: 0.4, a: 1 };
+                    main.camera = lite.createFreeCamera({ x: 0, y: 0, z: -8 }, { x: 0, y: 0, z: 0 });
+                    const ordinary = lite.createSceneContext(engine);
+                    ordinary.clearColor = { r: 0.6, g: 0.1, b: 0.1, a: 1 };
+                    ordinary.camera = main.camera;
+                    const utility = withUtility ? lite.createUtilityLayer(main, { addDefaultLight: false }) : undefined;
+                    const box = (scene: Lite.SceneContext, x: number, color: [number, number, number], size: number): void => {
+                        const mesh = lite.createBox(engine, size);
+                        mesh.position.set(x, 0, 0);
+                        const material = lite.createStandardMaterial();
+                        material.diffuseColor = [0, 0, 0];
+                        material.emissiveColor = color;
+                        mesh.material = material;
+                        lite.addToScene(scene, mesh);
+                    };
+                    box(main, 0, [0, 0, 1], 3);
+                    box(ordinary, -1.1, [1, 0, 0], 1.4);
+                    if (utility) {
+                        box(utility.scene, 1.1, [0, 1, 0], 1.4);
+                    }
+                    const font = await lite.loadFont("/fonts/Inter.ttf");
+                    const text = lite.createTextRenderer(engine, {
+                        clear: false,
+                        layers: [
+                            lite.createTextLayer(lite.createDefaultTextData(font, 40, "OVERLAY TEXT", [1, 1, 1, 1]), {
+                                positionPx: { x: 24, y: 130 },
+                            }),
+                        ],
+                    });
+                    try {
+                        await lite.registerScene(main);
+                        if (utility) {
+                            await lite.registerUtilityLayer(utility);
+                        }
+                        lite.registerTextRenderer(text);
+                        await lite.startEngine(engine);
+                        const baseline = await lite.captureScreenshot(engine);
+                        await lite.registerScene(ordinary);
+                        const composed = await lite.captureScreenshot(engine);
+                        const order = lite.getRenderingContexts(engine).map((context) => {
+                            if (context === main) {
+                                return "main";
+                            }
+                            if (context === utility?.scene) {
+                                return "utility";
+                            }
+                            if (context === ordinary) {
+                                return "ordinary";
+                            }
+                            return lite.getRenderingContextKind(context);
+                        });
+                        lite.unregisterScene(main);
+                        const withoutMain = await lite.captureScreenshot(engine);
+                        let restored: Lite.Screenshot | undefined;
+                        if (utility) {
+                            await lite.registerScene(main);
+                            restored = await lite.captureScreenshot(engine);
+                        }
+                        const summarize = (shot: Lite.Screenshot) => {
+                            let textPixels = 0;
+                            let preservedTextPixels = 0;
+                            let redPixels = 0;
+                            let greenPixels = 0;
+                            let bluePixels = 0;
+                            for (let i = 0; i < shot.data.length; i += 4) {
+                                const [r, g, b] = [shot.data[i]!, shot.data[i + 1]!, shot.data[i + 2]!];
+                                if (baseline.data[i] === 255 && baseline.data[i + 1] === 255 && baseline.data[i + 2] === 255) {
+                                    textPixels++;
+                                    if (r === 255 && g === 255 && b === 255) {
+                                        preservedTextPixels++;
+                                    }
+                                }
+                                if (r > 200 && g < 30 && b < 30) {
+                                    redPixels++;
+                                }
+                                if (g > 200 && r < 30 && b < 30) {
+                                    greenPixels++;
+                                }
+                                if (b > 200 && r < 30 && g < 30) {
+                                    bluePixels++;
+                                }
+                            }
+                            const corner = (8 * shot.width + 8) * 4;
+                            return {
+                                textPixels,
+                                preservedTextPixels,
+                                redPixels,
+                                greenPixels,
+                                bluePixels,
+                                background: Array.from(shot.data.slice(corner, corner + 4)),
+                                baselineBackground: Array.from(baseline.data.slice(corner, corner + 4)),
+                            };
+                        };
+                        await engine._device.queue.onSubmittedWorkDone();
+                        return {
+                            composed: summarize(composed),
+                            withoutMain: summarize(withoutMain),
+                            restored: restored ? summarize(restored) : undefined,
+                            order,
+                            gpuErrors,
+                        };
+                    } finally {
+                        lite.disposeTextRenderer(text);
+                        if (utility) {
+                            lite.disposeUtilityLayer(utility);
+                        }
+                        lite.disposeScene(ordinary);
+                        lite.disposeScene(main);
+                        lite.disposeEngine(engine);
+                    }
+                },
+                { moduleUrl, samples, withUtility }
+            );
+            expect(result.order).toEqual(withUtility ? ["main", "utility", "ordinary", "text-renderer"] : ["main", "ordinary", "text-renderer"]);
+            if (withUtility) {
+                expect(result.restored).toBeDefined();
+            }
+            for (const shot of [result.composed, ...(result.restored ? [result.restored] : [])]) {
+                expect(shot.textPixels).toBeGreaterThan(200);
+                expect(shot.preservedTextPixels).toBe(shot.textPixels);
+                expect(shot.background).toEqual(shot.baselineBackground);
+                expect(shot.redPixels).toBeGreaterThan(200);
+                expect(shot.bluePixels).toBeGreaterThan(200);
+                if (withUtility) {
+                    expect(shot.greenPixels).toBeGreaterThan(200);
+                }
+            }
+            expect(result.withoutMain.preservedTextPixels).toBe(result.withoutMain.textPixels);
+            expect(result.withoutMain.background[0]).toBeGreaterThan(result.withoutMain.background[1]!);
+            expect(result.withoutMain.redPixels).toBeGreaterThan(200);
+            expect(result.withoutMain.greenPixels).toBe(0);
+            expect(result.withoutMain.bluePixels).toBe(0);
+            expect(result.gpuErrors).toEqual([]);
+            expect(errors).toEqual([]);
+        });
+    }
 }

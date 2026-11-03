@@ -141,11 +141,8 @@ export interface EngineContext extends SurfaceContext {
     _attachGpuEvents?: (engine: EngineContext) => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
-    /** @internal Optional scene-composition hooks installed by an opt-in feature. */
-    _sceneOverlayHooks?: {
-        selectBase(scene: SceneContext): RenderingContext | null | undefined;
-        registered(scene: SceneContext): void;
-    };
+    /** @internal Reconciles ordinary scene overlays when the scene registry changes. */
+    _sceneOverlayChanged?: (scene: SceneContext, removed: boolean) => void;
     /** @internal Installed only by recovery opt-in; keeps already-captured dynamic sources current across disable/re-enable. */
     _updateCapturedDynamicTexture?: (tex: Texture2D, source: GPUCopyExternalImageSource, flipY: boolean, premultipliedAlpha: boolean) => void;
     /** @internal */
