@@ -90,8 +90,8 @@ export interface Renderable {
     _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
-     *  Stamped by whichever builder created the renderable, closing over the arguments it was
-     *  built from. Recovery restores renderables by traversing `scene._renderables` and calling
+     *  Background thunks are stamped only by enabled recovery capture, closing over the builder
+     *  and its arguments. Recovery restores renderables by traversing `scene._renderables` and calling
      *  this, so it never needs to know what kind of renderable it is holding — the same way
      *  material textures already recover through `Texture2D._recoverySource`. Keeping the thunk
      *  here rather than a per-subsystem descriptor keeps `render/` free of any dependency on the

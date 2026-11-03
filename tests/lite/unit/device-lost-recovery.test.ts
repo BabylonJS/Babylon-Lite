@@ -19,6 +19,12 @@ import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/tex
 import { createTexture2DFromPixels } from "../../../packages/babylon-lite/src/texture/pixels-texture.js";
 import { updateTextureRegion } from "../../../packages/babylon-lite/src/texture/texture-region.js";
 import { createStorageBuffer, type StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { buildGroundRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-ground.js";
+import { buildSolidSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-solid-skybox.js";
+import { buildHdrSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-hdr-skybox.js";
+import { buildDdsSkyboxRenderable } from "../../../packages/babylon-lite/src/material/pbr/background-dds-skybox.js";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
+import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env.js";
 
 function context(kind: string): RenderingContext {
     return {
@@ -39,6 +45,100 @@ function engineWith(...contexts: RenderingContext[]): EngineContext {
         surfaces: [{ _renderingContexts: contexts } as unknown as SurfaceContext],
     } as unknown as EngineContext;
 }
+
+describe("device-lost background capture opt-in", () => {
+    function backgroundEngine(): EngineContext {
+        return {
+            _device: {
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createBuffer: (descriptor: GPUBufferDescriptor) => ({
+                    getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                    unmap: vi.fn(),
+                }),
+                createTexture: () => ({ createView: () => ({}) }),
+                createSampler: () => ({}),
+                createBindGroupLayout: () => ({}),
+                createBindGroup: () => ({}),
+                queue: { writeTexture: vi.fn(), writeBuffer: vi.fn() },
+            },
+        } as unknown as EngineContext;
+    }
+
+    const backgrounds = ["ground", "solid", "hdr", "dds"] as const;
+    async function buildBackground(kind: (typeof backgrounds)[number], engine: EngineContext) {
+        const origin: [number, number, number] = [1, 2, 3];
+        const color: [number, number, number] = [0.2, 0.3, 0.4];
+        const scene = {
+            surface: { engine },
+            clearColor: { r: 0, g: 0, b: 0, a: 1 },
+            imageProcessing: { exposure: 0.8, contrast: 1.2 },
+        } as unknown as SceneContext;
+        const env = { specularCubeView: {}, cubeSampler: {} } as EnvironmentTextures;
+        switch (kind) {
+            case "ground":
+                return buildGroundRenderable(engine, 10, origin, color, undefined, undefined, false);
+            case "solid":
+                return buildSolidSkyboxRenderable(scene, env, 10, origin, color);
+            case "hdr":
+                return buildHdrSkyboxRenderable(scene, env, 10, origin, color);
+            case "dds":
+                return buildDdsSkyboxRenderable(scene, 10, origin, color, "background.dds", false);
+        }
+    }
+
+    async function withBackgroundFetch(run: () => Promise<void>): Promise<void> {
+        const dds = new ArrayBuffer(128 + 6 * 8);
+        const header = new Int32Array(dds, 0, 32);
+        header[4] = header[3] = header[7] = 1;
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => ({ arrayBuffer: async () => dds }))
+        );
+        try {
+            await run();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    }
+
+    it.each(backgrounds)("does not allocate a %s rebuild closure without recovery", async (kind) => {
+        await withBackgroundFetch(async () => {
+            expect(await buildBackground(kind, backgroundEngine())).not.toHaveProperty("_rebuild");
+        });
+    });
+
+    it.each(backgrounds)("does not capture %s for sprite-only recovery", async (kind) => {
+        await withBackgroundFetch(async () => {
+            const engine = backgroundEngine();
+            const recovery = enableDeviceLostSpriteRecovery(engine);
+            try {
+                expect(await buildBackground(kind, engine)).not.toHaveProperty("_rebuild");
+            } finally {
+                recovery.disable();
+            }
+        });
+    });
+
+    it.each(backgrounds)("captures %s only while Scene recovery is enabled and supports repeated rebuilds", async (kind) => {
+        await withBackgroundFetch(async () => {
+            const engine = backgroundEngine();
+            const recovery = enableDeviceLostSceneRecovery(engine);
+            try {
+                const renderable = await buildBackground(kind, engine);
+                expect(renderable._rebuild).toBeTypeOf("function");
+                const rebuilt = await renderable._rebuild!();
+                expect(rebuilt).not.toBe(renderable);
+                expect(rebuilt?._rebuild).toBeTypeOf("function");
+                expect(await rebuilt!._rebuild!()).not.toBe(rebuilt);
+                recovery.disable();
+                expect(await buildBackground(kind, engine)).not.toHaveProperty("_rebuild");
+            } finally {
+                recovery.disable();
+            }
+        });
+    });
+});
 
 describe("device-lost recovery context dispatch", () => {
     it("captures texture-compression-unaligned and requests it from the replacement device", async () => {

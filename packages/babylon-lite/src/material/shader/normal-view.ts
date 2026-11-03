@@ -26,6 +26,7 @@ import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Configuration for {@link createShaderNormalMaterialView}. */
 export interface ShaderNormalViewConfig {
@@ -42,10 +43,20 @@ export interface ShaderNormalViewConfig {
     readonly distanceEncodeRange?: number;
 }
 
-/** WGSL `mainFragment` that emits the encoded geometric normal (+ optional distance in alpha). */
-function buildNormalFragment(varying: string, location: number, space: "view" | "world", distRange: number | undefined): string {
+/** @internal WGSL `mainFragment` that emits the encoded geometric normal (+ optional distance in alpha). Exported for tests. */
+export function buildNormalFragment(varying: string, location: number, space: "view" | "world", distRange: number | undefined): string {
     const nExpr = space === "world" ? "nW" : "normalize((scene.view * vec4<f32>(nW, 0.0)).xyz)";
     const aExpr = distRange != null ? wgsl`clamp((scene.view * vec4<f32>(input.${varying}, 1.0)).z / ${distRange.toFixed(1)}, 0.0, 1.0)` : "1.0";
+    // In a right-handed world the screen-space derivative cross product points away from the viewer, so a
+    // right-handed build swaps its operands, like Babylon.js's `vEyePosition.w` sign on derivative normals.
+    if (_rightHanded !== null) {
+        return wgsl`struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
+@fragment fn mainFragment(input: CavityNormalIn) -> @location(0) vec4<f32> {
+  let nW = normalize(cross(dpdy(input.${varying}), dpdx(input.${varying})));
+  let n = ${nExpr};
+  return vec4<f32>(n * 0.5 + vec3<f32>(0.5), ${aExpr});
+}`;
+    }
     return wgsl`struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
 @fragment fn mainFragment(input: CavityNormalIn) -> @location(0) vec4<f32> {
   let nW = normalize(cross(dpdx(input.${varying}), dpdy(input.${varying})));

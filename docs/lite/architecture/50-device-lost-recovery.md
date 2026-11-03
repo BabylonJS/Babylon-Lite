@@ -114,15 +114,21 @@ rebuild — lives in `device-lost-recovery-capture.ts` and
 `enableDeviceLostSceneRecovery`. Applications that never enable recovery pull in
 none of those chunks.
 
-Backgrounds are discovered, not captured. Each background builder stamps a plain
-rebuild thunk onto the `Renderable` it returns — `Renderable._rebuild`, a
-`() => Renderable | Promise<Renderable>` closing over the arguments the builder
-already received. Recovery snapshots those thunks while traversing
-`scene._renderables` and replays them in order, the same way material textures
-already recover through `Texture2D._recoverySource`. The always-bundled
-`loadEnvironment` / `loadHdr` path therefore carries no per-background recovery
-code at all, and the residual cost lands only in `background-*.js`, which a scene
-already pays for whenever it builds that background.
+Background builders notify `engine._dlr?.c(renderable, builder, ...args)` with
+their existing builder function and scalar/reference arguments. Only the enabled
+capture implementation allocates the rebuild closure and stamps
+`Renderable._rebuild`, and only while Scene recovery is enabled. The ground
+builder passes `undefined` instead of its consumed image promise so recovery
+refetches the texture URL. No builder constructs a closure, descriptor, or
+argument array for recovery when capture is absent; the cubemap renderable shell
+has no recovery parameter or assignment.
+
+Recovery snapshots the captured thunks while traversing `scene._renderables` and
+replays them in order, the same way material textures already recover through
+`Texture2D._recoverySource`. The `loadEnvironment` / `loadHdr` paths carry no
+per-background recovery code, and background modules retain only the optional
+capture call. Replayed builders pass through that same seam so subsequent losses
+remain recoverable.
 
 The thunk is deliberately opaque. An earlier revision stamped a descriptor tuple
 — `[kind, size, rootPosition, url?]` — that recovery interpreted through a
@@ -134,7 +140,7 @@ the descriptor type, the switch, and its four `await import()` calls: each
 builder is already its own module, so replay needs no dispatch. It is also more
 correct — the tuple silently dropped `enableNoise` for the ground and DDS
 skybox, which a closure captures for free — and it composes across repeated
-losses, because each rebuilt renderable stamps a fresh thunk.
+losses, because enabled capture stamps a fresh thunk on each rebuilt background.
 
 `_rebuild` is only for renderables that no retained structure owns. Mesh-backed
 renderables keep recovering through `scene._groups`, and must not also carry a
@@ -149,33 +155,38 @@ on one renderable would rebuild it twice and leave a duplicate in
 orphans — not mesh-backed, pushed straight into `scene._renderables` by a loader
 that then discards the locals they were built from.
 
-Two capture-based designs were measured first and rejected. Describing
+Historical measurements (before the Scene-only capture contract above): two
+capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
 re-deriving the rules during recovery — cost ~65 B for _every_ environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
-Discovery removes the loader seam entirely. Against the pre-feature baseline the
-feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
+Discovery removed the loader seam entirely. Against the pre-feature baseline the
+then-current feature measured +1,707 B across 73 scenes, of which scene164 — the recovery
 parity scene, and the only one that enables recovery — carries +1,554 B; 56
-scenes are _smaller_ than before because the loader capture seam is gone. The 11
-background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
-unconditionally rather than gated on capture being enabled; one closure per
-background is cheaper than the branch that would guard it. Choosing thunks over
+scenes were _smaller_ than before because the loader capture seam was gone. The 11
+background-building scenes paid 16–56 B each for an unconditional thunk. That
+revision favored the thunk's byte cost over a capture guard, but still allocated
+and retained recovery-only closures without opt-in. The current design supersedes
+that tradeoff: only Scene-enabled capture constructs background thunks; builders
+retain only the optional seam call. These historical figures are not measurements
+of the current design. Choosing thunks over
 descriptors also lowered scene164's ceiling requirement by ~1.6 KB, since the
 recovery chunk no longer carries the switch or its dynamic imports.
 
 Property names beginning with `_` are mangled in release builds, so `_rebuild`
 costs no more than an abbreviated name would; internal fields are spelled out.
 
-Capture arguments must stay primitive. Rollup tracks the property values of
+Capture must not receive branch-gating objects. Rollup tracks the property values of
 object literals and uses them to prove branches dead. Passing an object whose
 properties gate tree-shakeable code — such as `bgOptions`, whose `skipSkybox` /
 `skipGround` guard the loader's `await import()` of the background modules —
 forces Rollup to deoptimize it, because the unknown callee could mutate it. It
 then loses the known property values and retains `background-ground.js`
 (+4,968 B) and `background-solid-skybox.js` (+1,882 B) in scenes that had
-tree-shaken them. This is why the remaining seams (`_dlr.e` / `_dlr.h`) pass
-already-computed scalars.
+tree-shaken them. This is why the loader seams (`_dlr.e` / `_dlr.h`) pass
+already-computed scalars. Background capture passes existing builders and their
+arguments, never the loader's branch-gating options object.
 
 Shadow generators are recovered in place before material groups are rebuilt.
 Recovery deduplicates generators referenced by `scene.lights` and
@@ -247,6 +258,19 @@ are unchanged, and disabled recovery adds no byte-view allocation or retention.
 Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
+
+Dynamic texture creation and uploads use `engine._dlr?.dt(...)` and
+`engine._updateCapturedDynamicTexture?.(...)` respectively. The creation seam receives the texture,
+dimensions, format, mip count, and existing sampler descriptor; capture alone
+constructs the `dynamic` recovery source. The update seam receives the external
+image and already-computed flip/premultiplication flags after a successful GPU
+copy; capture alone checks and updates the retained source. Without recovery,
+neither API reads `_recoverySource`, encodes a source kind, or retains the image.
+The update seam is installed only by recovery opt-in and remains installed after
+capture is disabled. It updates only existing `dynamic` records, preserving the
+latest successful upload and flags if recovery is later re-enabled; it never
+creates records for textures created while capture is disabled. Engines that
+never opt in retain only the optional call and never inspect recovery metadata.
 
 ### Captured textures
 
@@ -460,6 +484,12 @@ module-level side effects; mutable caches remain null until an explicit call.
   mutation. Replacement-device uploads must reproduce the complete updated
   image; rejected uploads must not alter the snapshot, and disabled recovery
   must not capture a source.
+- Background unit tests cover all four builders with no recovery, Sprite-only
+  recovery, enabled Scene recovery, repeated rebuilds, and disabled capture.
+  Dynamic texture updates must not even read recovery metadata without capture.
+- Build tests verify that non-opted-in dynamic texture and background consumers
+  retain neither source encoding nor rebuild closure construction, while an
+  explicitly imported recovery enabler retains the capture implementation.
 - Text unit tests replace a fake device and assert new layer buffers and Slug
   atlas textures, invalidated/rebuilt bindings and bundles, preserved
   `TextData`/layer state, and exact-kind enumeration.

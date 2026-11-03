@@ -35,6 +35,95 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes physics discovery and allocation-free inspection without internal state", () => {
+        const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getPhysicsWorlds, getPhysicsBodies, getPhysicsConstraints, getPhysicsBodyWorld,
+    getPhysicsBodyPrestepType, getPhysicsBodyShape, getPhysicsBodyMassPropertiesToRef,
+    getPhysicsBodyLinearDamping, setPhysicsBodyLinearDamping,
+    getPhysicsBodyAngularDamping, setPhysicsBodyAngularDamping,
+    getPhysicsBodyGravityFactor, setPhysicsBodyGravityFactor,
+    getPhysicsBodyLinearVelocityToRef, getPhysicsBodyAngularVelocityToRef,
+    getPhysicsShapeType, getPhysicsShapeParameters, getPhysicsShapeMaterialToRef,
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask,
+    getPhysicsShapeDensity, getPhysicsShapeChildCount,
+    isPhysicsConstraintEnabled, setPhysicsConstraintEnabled,
+    getPhysicsConstraintDebug, hidePhysicsConstraint,
+    type SceneContext, type PhysicsWorld, type PhysicsBody, type PhysicsConstraint,
+    type PhysicsShape, type PhysicsShapeMaterial, type PhysicsMassProperties,
+    type PhysicsShapeParameters, type PhysicsShapeType, type PhysicsPrestepType,
+    type PhysicsConstraintDebug, type PhysicsViewer, type Vec3,
+} from "./index.js";
+declare const scene: SceneContext;
+declare const world: PhysicsWorld;
+declare const body: PhysicsBody;
+declare const shape: PhysicsShape;
+declare const constraint: PhysicsConstraint;
+declare const viewer: PhysicsViewer;
+declare const vector: Vec3;
+declare const massOut: Required<PhysicsMassProperties>;
+declare const materialOut: PhysicsShapeMaterial;
+const worlds: readonly PhysicsWorld[] = getPhysicsWorlds(scene);
+const bodies: readonly PhysicsBody[] = getPhysicsBodies(world);
+const constraints: readonly PhysicsConstraint[] = getPhysicsConstraints(world);
+const owner: PhysicsWorld = getPhysicsBodyWorld(body);
+const prestep: PhysicsPrestepType = getPhysicsBodyPrestepType(body);
+const baseShape: PhysicsShape | null = getPhysicsBodyShape(body);
+const mass: Required<PhysicsMassProperties> = getPhysicsBodyMassPropertiesToRef(world, body, massOut);
+getPhysicsBodyMassPropertiesToRef(world, body, massOut, 1);
+const linear: Vec3 = getPhysicsBodyLinearVelocityToRef(world, body, vector);
+getPhysicsBodyLinearVelocityToRef(world, body, vector, 1);
+const angular: Vec3 = getPhysicsBodyAngularVelocityToRef(world, body, vector);
+getPhysicsBodyAngularVelocityToRef(world, body, vector, 1);
+const dampingGetters: ((world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number) => number)[] =
+    [getPhysicsBodyLinearDamping, getPhysicsBodyAngularDamping, getPhysicsBodyGravityFactor];
+const dampingSetters: ((world: PhysicsWorld, body: PhysicsBody, value: number) => void)[] =
+    [setPhysicsBodyLinearDamping, setPhysicsBodyAngularDamping, setPhysicsBodyGravityFactor];
+const type: PhysicsShapeType = getPhysicsShapeType(shape);
+const parameters: Readonly<PhysicsShapeParameters> | null = getPhysicsShapeParameters(shape);
+const material: PhysicsShapeMaterial = getPhysicsShapeMaterialToRef(world, shape, materialOut);
+const scalarGetters: ((world: PhysicsWorld, shape: PhysicsShape) => number)[] = [
+    getPhysicsShapeFilterMembershipMask, getPhysicsShapeFilterCollideMask, getPhysicsShapeDensity, getPhysicsShapeChildCount,
+];
+const enabled: boolean = isPhysicsConstraintEnabled(world, constraint);
+setPhysicsConstraintEnabled(world, constraint, false);
+const debug: PhysicsConstraintDebug = getPhysicsConstraintDebug(constraint);
+const hidden: boolean = hidePhysicsConstraint(viewer, debug);
+// @ts-expect-error World discovery registry is internal.
+scene._physicsWorlds;
+// @ts-expect-error Constraint registry is internal.
+world._constraints;
+// @ts-expect-error Cached shape parameters are internal.
+shape._parameters;
+// @ts-expect-error Cached viewer mapping is internal.
+constraint._debug;
+// @ts-expect-error Owning world field is internal.
+body._world;
+// @ts-expect-error Discovery arrays are readonly.
+worlds.push(world);
+// @ts-expect-error Discovery arrays are readonly.
+bodies.push(body);
+// @ts-expect-error Discovery arrays are readonly.
+constraints.push(constraint);
+// @ts-expect-error Cached parameters are readonly.
+if (parameters) { parameters.radius = 1; }
+void [owner, prestep, baseShape, mass, linear, angular, dampingGetters, dampingSetters, type, material, scalarGetters, enabled, hidden];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes read-mostly skeleton, morph, and particle discovery without internal registries", () => {
         const probePath = resolve(BUILD_DIR, "p9-discovery.probe.ts");
         try {
@@ -1546,6 +1635,90 @@ describe("build/package.json", () => {
         // errors or auto-installs when the corresponding feature is unused.
         for (const name of ALLOWED_OPTIONAL_PEERS) {
             expect(peerMeta[name]?.optional, `peer dependency '${name}' must be marked optional in peerDependenciesMeta`).toBe(true);
+        }
+    });
+});
+
+describe("Navcat published root contract", () => {
+    it("keeps SDK internals out of the root declaration and exposes the full optional API", () => {
+        const probe = resolve(BUILD_DIR, "navcat-root.probe.ts");
+        try {
+            writeFileSync(
+                probe,
+                `import {
+    createNavcatManager, findNavcatNearestPoly, findNavcatPath, raycastNavcat, moveAlongNavcatSurface,
+    replaceNavcatMesh, exportNavcatMesh, setNavcatFilter, disposeNavcatManager,
+    extractNavcatGeometry, generateNavcatMesh, addNavcatConnection, removeNavcatConnection,
+    isNavcatConnectionConnected, createNavcatDebugGeometry,
+    type Mesh, type NavcatManager, type NavcatOptions, type NavcatGeometry, type NavcatConnection,
+} from "./index.js";
+declare const json: string;
+declare const meshes: readonly Mesh[];
+const options: NavcatOptions = { filter: { pass: n => n.flags !== 0, cost: (a,b,n,prev,next) => Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z) } };
+const manager: NavcatManager = await createNavcatManager(json, options);
+const point = {x: 1,y: 0,z: 2};
+const near = findNavcatNearestPoly(manager, point);
+if (near.success) {
+    raycastNavcat(manager, near.location, point);
+    moveAlongNavcatSurface(manager, near.location, point);
+}
+const path = findNavcatPath(manager, point, point);
+const complete: boolean = path.complete;
+const geometry: NavcatGeometry = extractNavcatGeometry(meshes);
+await generateNavcatMesh(geometry, { agentRadius: .3 });
+const link: NavcatConnection = await addNavcatConnection(manager, { start: point,end: point,radius: .5 });
+await isNavcatConnectionConnected(manager, link);
+await removeNavcatConnection(manager, link);
+await createNavcatDebugGeometry(manager, { search: path });
+setNavcatFilter(manager, null);
+replaceNavcatMesh(manager, exportNavcatMesh(manager));
+disposeNavcatManager(manager);
+// @ts-expect-error manager internals are not part of the published interface
+manager._mesh;
+// @ts-expect-error behavior is standalone, never attached to a public state handle
+manager.findPath(point, point);
+void complete;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probe,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+            const dts = readFileSync(DTS_PATH, "utf8");
+            expect(dts).not.toMatch(/from ["'](?:navcat|mathcat)(?:\/[^"']*)?["']/);
+        } finally {
+            rmSync(probe, { force: true });
+        }
+    });
+
+    it("ships both bundled MIT license texts", () => {
+        const notice = readFileSync(resolve(BUILD_DIR, "NOTICE.txt"), "utf8");
+        for (const [name, version] of [
+            ["navcat", "0.4.1"],
+            ["mathcat", "0.0.12"],
+        ]) {
+            const start = notice.indexOf(`${name} ${version}`);
+            expect(start).toBeGreaterThanOrEqual(0);
+            expect(notice.slice(start)).toContain("Copyright © 2025 Isaac Mason");
+            expect(notice.slice(start)).toContain("Permission is hereby granted");
         }
     });
 });

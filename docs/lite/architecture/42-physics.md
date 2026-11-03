@@ -16,8 +16,8 @@
 
 The Physics module drives rigid-body simulation by wrapping the Havok V2 WASM
 solver. It owns **no scene graph**: it reads transforms from Lite `SceneNode`s to
-seed bodies and writes integrated transforms back each step, but the scene never
-holds a reference to the physics world (Pillar 4b — one-way ownership). The
+seed bodies and writes integrated transforms back each step. The scene owns a
+lazy discovery list of worlds created for it. The
 per-frame step is driven by the scene's before-render loop; the world is the
 data owner and the scene is the clock source.
 
@@ -28,6 +28,122 @@ the caller and only referenced once `createHavokWorld` runs.
 ---
 
 ## Design: pure-state handle + functions
+
+### Discovery and inspection
+
+All functions below are standalone root exports from `@babylonjs/lite`.
+
+```ts
+getPhysicsWorlds(scene: SceneContext): readonly PhysicsWorld[];
+getPhysicsBodies(world: PhysicsWorld): readonly PhysicsBody[];
+getPhysicsConstraints(world: PhysicsWorld): readonly PhysicsConstraint[];
+getPhysicsBodyWorld(body: PhysicsBody): PhysicsWorld;
+getPhysicsBodyPrestepType(body: PhysicsBody): PhysicsPrestepType;
+getPhysicsBodyShape(body: PhysicsBody): PhysicsShape | null;
+getPhysicsBodyMassPropertiesToRef(world: PhysicsWorld, body: PhysicsBody, out: Required<PhysicsMassProperties>, instanceIndex?: number): Required<PhysicsMassProperties>;
+getPhysicsBodyLinearVelocityToRef(world: PhysicsWorld, body: PhysicsBody, out: Vec3, instanceIndex?: number): Vec3;
+getPhysicsBodyAngularVelocityToRef(world: PhysicsWorld, body: PhysicsBody, out: Vec3, instanceIndex?: number): Vec3;
+getPhysicsBodyLinearDamping(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyLinearDamping(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsBodyAngularDamping(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyAngularDamping(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsBodyGravityFactor(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyGravityFactor(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsShapeType(shape: PhysicsShape): PhysicsShapeType;
+getPhysicsShapeParameters(shape: PhysicsShape): Readonly<PhysicsShapeParameters> | null;
+getPhysicsShapeMaterialToRef(world: PhysicsWorld, shape: PhysicsShape, out: PhysicsShapeMaterial): PhysicsShapeMaterial;
+getPhysicsShapeFilterMembershipMask(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeFilterCollideMask(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeDensity(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeChildCount(world: PhysicsWorld, shape: PhysicsShape): number;
+isPhysicsConstraintEnabled(world: PhysicsWorld, constraint: PhysicsConstraint): boolean;
+setPhysicsConstraintEnabled(world: PhysicsWorld, constraint: PhysicsConstraint, enabled: boolean): void;
+getPhysicsConstraintDebug(constraint: PhysicsConstraint): PhysicsConstraintDebug;
+hidePhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): boolean;
+```
+
+`PhysicsShapeMaterial` is `{ friction: number; staticFriction: number; restitution: number }`.
+The existing allocating velocity getters and all existing setters remain compatible.
+
+- **World lifecycle (G1–G7):** `createHavokWorld` appends to lazy
+  `scene._physicsWorlds`, registering exactly one scene disposable to clear that
+  same list. Readonly lists are live, stable, insertion-ordered and duplicate-free;
+  copy for snapshots. Empty queries do not install registries. `disposePhysics`
+  removes only its world, is idempotent, and empties its body/constraint lists,
+  including floating-origin worlds. Scene disposal clears discovery and stops
+  stepping but does not release native worlds or clear their bodies: callers
+  still own world disposal. Creating worlds after scene disposal is unsupported.
+- **R1 — liveness:** native inspection requires current world/body/constraint
+  membership; there are no defensive liveness checks. Shapes have no registry:
+  re-read them through a live body every refresh and do not retain them across
+  refreshes. User-released shapes cannot safely be read. `getPhysicsBodyWorld`
+  retains the original association even after removal/disposal, not a liveness
+  signal. There is no `isPhysicsWorldDisposed`.
+- **R2 — polling:** ToRef getters update caller-owned vectors/structs and return
+  the identical output object (including its existing nested vectors).
+  Mass readback maps `[centerOfMass, mass, inertia, inertiaOrientation]`;
+  a non-OK result throws `Failed to read physics body mass properties.`.
+  Rotation locks read back native post-lock zero inertia axes. Partial mass
+  edits preserve existing shape-derived defaults and reapply locks.
+- **R3 — thin instances:** indexed getters default to instance 0, resolving
+  `world._thin?.instance(body, instanceIndex) ?? body._hkBody`; out-of-range
+  indices are undefined behavior. Setters fan out to all instances. Damping and
+  gravity-factor setters loop explicitly, outside the hot facade method list.
+  A thin body is listed once; use `getPhysicsBodyInstanceCount`. Shape readback
+  reports the base shape, not advanced per-instance shapes. Constraints bind
+  instance 0 only.
+- **R4 — floating origin:** damping, gravity factor, velocities, mass, shape
+  material and filters are region-independent. Center of mass, inertia and
+  inertia orientation are body-local; apply no origin offset. Thin bodies and
+  floating origin remain mutually exclusive.
+- **R5/R6 — packaging:** only root exports; unused getters tree-shake. The scene
+  registry field uses a type-only physics import, so non-physics scenes pay zero
+  bytes. Shape parameter caching costs only shape creators; constraint discovery
+  costs constraint creators and world disposal.
+
+| Readback                                                | Thin instances                                | Floating origin                      |
+| ------------------------------------------------------- | --------------------------------------------- | ------------------------------------ |
+| Motion/prestep/base shape                               | One cached body value; motion setters fan out | Independent                          |
+| Mass, damping, gravity factor, velocities               | Indexed reads, all-instance writes            | Body-local/region-independent        |
+| Shape type/parameters/material/filters/density/children | Shared shape                                  | Body-local/region-independent        |
+| Constraints                                             | Instance 0 only                               | Cross-region constraints unsupported |
+
+Primitive shape parameters retain the creation parameter object by reference;
+caller mutation changes the cached readback but not native geometry. Aggregate
+parameters retain the computed auto-sized geometry. MESH, CONVEX_HULL,
+HEIGHTFIELD and CONTAINER return null parameters. Material readback maps native
+`[staticFriction, dynamicFriction, restitution, ...]` to the named fields.
+Editing material or filter masks on a shared shape affects all its bodies.
+Child count is meaningful for containers (zero otherwise).
+
+Constraints are appended lazily to `world._constraints`. Release disables,
+releases, marks disposed, and splices once. Removing a body deliberately does
+not delist its constraints. World disposal releases every remaining constraint
+before releasing bodies/worlds (including the floating-origin early return),
+marks each disposed and clears the live list. Inspector must hide a constraint
+if it is unlisted or either body is unlisted.
+
+`getPhysicsConstraintDebug` lazily caches `constraint._debug` with body links,
+type and creation axes/pivots (missing pivots become zero vectors); options are
+immutable after creation. Viewer keys are these stable debug objects. Parallel
+`_constraintKeys`/`_constraintGroups` map each key to its meshes; duplicate show
+returns `[]`. Hide removes that group's meshes from the scene/flat mesh list and
+its line/disk/arrowhead update entries, returns true once (false if absent),
+and unregisters the update when empty. Disposal clears all arrays. Hide/dispose
+make no native calls and remain safe after constraint/body/world release.
+
+Inspector refreshes world, body and constraint lists, checks both bodies,
+re-reads shapes, reconciles viewer visuals and polls with reusable ToRef storage.
+Only showing a body needs a live native body; viewer updates use JS transforms.
+There is no scene-level physics-enabled switch (world presence only), native
+constraint pivot readback, material combine-mode API, sleep-state or
+applied-impulse getter, motor/limit editing, shape/aggregate/controller discovery,
+or floating-origin cross-region constraint support.
+
+Inspection regression coverage: `physics-discovery.test.ts`,
+`physics-inspection.test.ts`, `physics-viewer.test.ts`, and
+`tests/lite/build/public-api-types.test.ts`, plus existing dispose, constraint,
+rotation-lock, thin-instance, event and timestep tests.
 
 | Concept                    | Babylon Lite                                                   |
 | -------------------------- | -------------------------------------------------------------- |
@@ -237,6 +353,19 @@ calls that remover and clears `world._afterStep` **before** releasing the native
 world — otherwise a still-registered callback would step (and read collision
 events from) a freed Havok world, which is both a leak and a use-after-free in the
 WASM heap. See `tests/lite/unit/physics-dispose.test.ts`.
+
+### Discovery
+
+`getPhysicsWorlds(scene)`, `getPhysicsBodies(world)` and
+`getPhysicsConstraints(world)` expose live readonly lists in creation order.
+World creation registers one lazy scene cleanup; scene disposal clears only the
+world list, not native worlds or their bodies. World disposal unregisters itself,
+releases remaining constraints before releasing native worlds, and clears both
+body and constraint lists on ordinary and floating-origin paths. Empty discovery
+queries install nothing. Copy lists for snapshots and recheck membership before
+native reads. Shapes, aggregates and character controllers are not separately
+discoverable. See **Discovery and inspection** above for G1–G7, R1–R6, signatures,
+thin-instance rules and the Inspector refresh contract.
 
 ---
 

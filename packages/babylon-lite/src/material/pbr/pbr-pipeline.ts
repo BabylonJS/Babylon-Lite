@@ -24,6 +24,7 @@ import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+import { _rightHanded } from "#coordinate-system";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
@@ -211,7 +212,12 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
         multisample: useAlphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
         // `topology` and `frontFace` remain omitted from the ordinary state so WebGPU supplies its defaults;
         // non-default topology, strip index format, or mirrored winding arrives through `composed._prim`.
-        primitive: { cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", ...composed._prim },
+        // A right-handed engine reverses whatever winding results (its view matrix mirrors Z).
+        primitive: {
+            cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back",
+            ...composed._prim,
+            ...(_rightHanded && { frontFace: composed._prim?.frontFace === "cw" ? "ccw" : "cw" }),
+        },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

@@ -35,6 +35,7 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { getContainerMeshes } from "../asset-container.js";
 import { setSubtreeVisible } from "../scene/visibility.js";
 import { markMaterialUboDirty } from "../material/material-dirty.js";
+import { _rightHanded } from "#coordinate-system";
 
 // `@types/webxr` names the DOM source interface `XRInputSource`; alias it so the
 // unit map can key on the stable DOM object rather than our per-frame wrapper.
@@ -321,9 +322,9 @@ export function updateXrControllerModels(models: XrControllerModels, input: XrIn
         const m = src.gripMatrix as unknown as Mat4;
         const rot = decomposeMat4(m).rotation;
         unit.active.position.set(m[12]!, m[13]!, m[14]!);
-        if (unit.model) {
-            // Babylon's LH profile-model path parents the glTF root under a π Y rotation.
-            // Compose gripRotation * yawY(π) without allocating a second quaternion.
+        if (unit.model && _rightHanded === null) {
+            // Babylon's LH profile-model path parents the glTF root under a π Y rotation (its right-handed
+            // path does not). Compose gripRotation * yawY(π) without allocating a second quaternion.
             unit.active.rotationQuaternion.set(-rot.z, rot.w, rot.x, -rot.y);
         } else {
             unit.active.rotationQuaternion.set(rot.x, rot.y, rot.z, rot.w);

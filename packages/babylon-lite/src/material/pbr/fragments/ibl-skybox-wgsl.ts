@@ -10,8 +10,11 @@
  */
 
 import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
-export const IBL_SKYBOX_CALCULATION = wgsl`let R = input.worldPos - scene.vEyePosition.xyz;
+// A right-handed build negates the lookup Z, like Babylon.js's REFLECTIONMAP_OPPOSITEZ on its skybox coordinates.
+// The `wgsl` tag minifies only the template's static text, so both interpolated variants are written minified.
+export const IBL_SKYBOX_CALCULATION = wgsl`let R=${_rightHanded ? "(input.worldPos-scene.vEyePosition.xyz)*vec3<f32>(1.0,1.0,-1.0)" : "input.worldPos-scene.vEyePosition.xyz"};
 let maxLod = f32(textureNumLevels(iblTexture) - 1);
 let cubemapDim = f32(textureDimensions(iblTexture).x);
 let skyboxAlphaG = max(roughness * roughness, 0.000001);
