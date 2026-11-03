@@ -13,6 +13,8 @@ import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material
 import { _registerPbrSceneHook } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
 import type { PbrLightMode } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose.js";
 import type { MeshGroupBuildResult } from "../../../packages/babylon-lite/src/render/renderable.js";
+import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap.js";
+import type { SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 
 function fixture() {
     const device = {
@@ -138,6 +140,38 @@ describe("PBR build light selection", () => {
             editDuringBuild = null;
         }
         expect(composedFragment(res)).toContain("let spotC = dot(");
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it("routes a material swap away from a live closure whose light WGSL no longer covers the mesh", async () => {
+        const { scene } = fixture();
+        const near = createPointLight([0, 2, 0]);
+        const far = createPointLight([2, 0, 0]);
+        scene.lights.push(near, far);
+        const material = createPbrMaterial();
+        const receiver = mesh(material, "receiver");
+        const group: SceneMeshGroup = [receiver];
+        scene._groups.set(material._buildGroup, group);
+        const res = await buildPbrRenderables(scene, [receiver], undefined);
+        // The committed closure is what later swaps run, so stand it up the way a built group does.
+        group.r = res.rebuildSingle;
+        group.o = res.renderables.slice();
+        group._w = res._w;
+        scene._renderables.push(...res.renderables);
+        expect(composedFragment(res)).toContain("fn computePbrLight(");
+
+        // The filter is published first, which is what a coalesced compat edit does, and only then does the
+        // same-family material swap drain. The live closure loaded the multi-light loop alone, so composing
+        // this mesh's new single-light permutation synchronously would emit an empty light contribution.
+        far.excludedMeshes = new Set([receiver]);
+        receiver.material = createPbrMaterial();
+        scene._materialSwapQueue.push(receiver);
+        const drained = processMaterialSwaps(scene);
+
+        // Handed to the asynchronous group rebuild rather than rebuilt in place against the stale closure.
+        expect(drained).toBeInstanceOf(Promise);
+        expect(scene._renderables).toEqual(res.renderables);
+        await drained;
         scene._disposables.forEach((dispose) => dispose());
     });
 });
