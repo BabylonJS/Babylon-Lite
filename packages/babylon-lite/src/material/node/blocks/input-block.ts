@@ -13,6 +13,7 @@ import type { BlockEmitter, NodeBuildState, NodeEmitContext, NodeExpr, NodeValue
 import { WGSL } from "../node-types.js";
 import { nodeUniformName } from "../node-parser.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 type BjsType = number; // NodeMaterialBlockConnectionPointTypes
 
@@ -91,6 +92,9 @@ function emitAttribute(block: NodeBlock, stage: Stage, state: NodeBuildState): N
 // We map the commonly used ones to WGSL expressions sourced from scene/mesh UBOs.
 // For matrices not present in Lite's scene UBO (`projection` alone), we fall
 // back to the closest valid expression (or throw — caller decides).
+// A right-handed build's scene view is Babylon.js's right-handed view mirrored in Z (see doc 61), and its
+// projection is Babylon.js's right-handed one times that mirror. The View, Projection and WorldView system
+// values undo the mirror so a graph sees Babylon.js's matrices; the products the graph forms stay unchanged.
 function emitSystemValue(block: NodeBlock, stage: Stage, state: NodeBuildState): NodeExpr {
     const sv = block.serialized["systemValue"] as number | undefined;
     // Only sensible in the vertex stage for matrix types; for CameraPosition/FogColor either stage is fine.
@@ -98,13 +102,13 @@ function emitSystemValue(block: NodeBlock, stage: Stage, state: NodeBuildState):
         case 1: // World
             return { expr: "meshU.world", type: "mat4f" };
         case 2: // View
-            return { expr: "sceneU.view", type: "mat4f" };
+            return { expr: _rightHanded ? "(mat4x4f(1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,-1.,0.,0.,0.,0.,1.)*sceneU.view)" : "sceneU.view", type: "mat4f" };
         case 3: // Projection
-            return { expr: "sceneU.projection", type: "mat4f" };
+            return { expr: _rightHanded ? "(sceneU.projection*mat4x4f(1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,-1.,0.,0.,0.,0.,1.))" : "sceneU.projection", type: "mat4f" };
         case 4: // ViewProjection
             return { expr: "sceneU.viewProjection", type: "mat4f" };
         case 5: // WorldView
-            return { expr: "(sceneU.view * meshU.world)", type: "mat4f" };
+            return { expr: _rightHanded ? "(mat4x4f(1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,-1.,0.,0.,0.,0.,1.)*sceneU.view*meshU.world)" : "(sceneU.view * meshU.world)", type: "mat4f" };
         case 6: // WorldViewProjection
             return { expr: "(sceneU.viewProjection * meshU.world)", type: "mat4f" };
         case 7: // CameraPosition

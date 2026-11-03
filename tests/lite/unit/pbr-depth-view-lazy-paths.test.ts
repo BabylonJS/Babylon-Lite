@@ -4,17 +4,23 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { MaterialView } from "../../../packages/babylon-lite/src/material/material";
 import { createPbrEsmShadowMaterialView } from "../../../packages/babylon-lite/src/material/pbr/esm-shadow-view";
 import { createPbrNoColorMaterialView } from "../../../packages/babylon-lite/src/material/pbr/no-color-view";
-import { PBR_HAS_ALPHA_TEST, PBR_HAS_NORMAL_MAP, PBR_HAS_SPEC_GLOSS } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
+import { PBR_HAS_ALPHA_TEST, PBR_HAS_NORMAL_MAP, PBR_HAS_SPEC_GLOSS, PBR2_HAS_REFRACTION } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
 import { _computePbrMaterialFeatures, createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { clearPbrPipelineCache } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
 import { setPbrAlphaCutoff } from "../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff";
+import { setPbrTransmission } from "../../../packages/babylon-lite/src/material/pbr/set-transmission";
+import { buildPbrGeometryRenderable } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-renderable";
+import { createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env";
 
 /**
  * A PBR group build loads the normal-map and spec-gloss WGSL only when one of its meshes needs it. The shadow tasks
@@ -143,5 +149,70 @@ describe("PBR depth views of a material that gained a shading map after its grou
             expect(features & (PBR_HAS_NORMAL_MAP | PBR_HAS_SPEC_GLOSS)).toBe(0);
             expect(features & PBR_HAS_ALPHA_TEST).toBe(PBR_HAS_ALPHA_TEST);
         }
+    });
+});
+
+/** Refraction composes after the IBL fragment, so a transmissive forward build needs an environment. */
+const environment = {
+    specularCube: {} as GPUTexture,
+    specularCubeView: {} as GPUTextureView,
+    brdfLut: {} as GPUTexture,
+    brdfLutView: {} as GPUTextureView,
+    cubeSampler: {} as GPUSampler,
+    brdfSampler: {} as GPUSampler,
+    irradianceSH: new Float32Array(27),
+    sphericalHarmonics: new Float32Array(36),
+    lodGenerationScale: 0.8,
+} as EnvironmentTextures;
+
+/** A transmissive material's forward group, built as the scene build leaves it: the refraction extension registered
+ *  and the material's features carrying `PBR2_HAS_REFRACTION`. */
+async function builtTransmissiveGroup() {
+    const { engine, createBindGroup } = makeEngine();
+    const scene = createSceneContext(engine, { defaultRenderTask: false });
+    const material = createPbrMaterial();
+    setPbrTransmission(material, { intensity: 1, indexOfRefraction: 1.5 });
+    const mesh = makeMesh(material, true);
+    scene._groups.set(material._buildGroup, [mesh]);
+    const result = await buildPbrRenderables(scene, [mesh], environment);
+    return { engine, scene, material, mesh, rebuild: result.rebuildSingle, createBindGroup };
+}
+
+/**
+ * Only the main colour pass grabs the scene colour that refraction samples. A shadow or geometry task offers no
+ * refraction texture, so a view that kept `PBR2_HAS_REFRACTION` deferred its bind group to the draw, which then threw
+ * "PBR transmission requires a frame-graph refraction texture" on every record, for as long as the mesh was there.
+ */
+describe("PBR depth and geometry views of a transmissive material", () => {
+    beforeEach(() => {
+        clearPbrPipelineCache();
+        clearSceneBGLCache();
+    });
+
+    it.each([
+        ["no-colour", (material: PbrMaterialProps): MaterialView => createPbrNoColorMaterialView(material)],
+        ["ESM", (material: PbrMaterialProps): MaterialView => createPbrEsmShadowMaterialView(material, {} as GPUBuffer)],
+    ] as const)("builds the %s view with its bind group up front, matching its layout", async (_name, makeView) => {
+        const { scene, material, mesh, rebuild, createBindGroup } = await builtTransmissiveGroup();
+        expect((material._renderFeatures?.features2 ?? 0) & PBR2_HAS_REFRACTION).toBe(PBR2_HAS_REFRACTION);
+
+        const view = makeView(material);
+        expect((view._renderFeatures?.features2 ?? 0) & PBR2_HAS_REFRACTION).toBe(0);
+        const groups = bindingsOf(scene, rebuild, mesh, view, createBindGroup);
+
+        expect(groups.length).toBeGreaterThan(0);
+        for (const { supplied, declared } of groups) {
+            expect(supplied).toEqual(declared);
+        }
+    });
+
+    it("binds the geometry view without a refraction texture", async () => {
+        const { engine, scene, material, mesh } = await builtTransmissiveGroup();
+        const view = createPbrGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_NORMAL], emitColor: false });
+        expect((view._renderFeatures?.features2 ?? 0) & PBR2_HAS_REFRACTION).toBe(0);
+
+        const signature = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus", _sampleCount: 1 } as RenderTargetSignature;
+        const owner = { _lifetimeDisposers: [] as (() => void)[] };
+        expect(() => buildPbrGeometryRenderable(scene, mesh, view, owner).bind(engine, signature)).not.toThrow();
     });
 });

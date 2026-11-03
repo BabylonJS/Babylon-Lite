@@ -154,6 +154,9 @@ Zero remains neutral, and no negative visibility enters history. No direct light
 specular, emissive, or material base-color adjustment is introduced.
 
 Perspective projection and full-target viewports are supported initially.
+The initial SSAO pipeline supports left-handed builds only. The right-handed
+geometry normal attachment has a different Z convention; construction in a
+`babylon-lite-rh` build fails explicitly rather than feeding it to this estimator.
 Orthographic and partial-viewport cameras fail explicitly instead of applying
 perspective mathematics to unsupported input. MSAA depth must first pass through
 the existing `createDepthResolveTask`. Normal input must match source dimensions;

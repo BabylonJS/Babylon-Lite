@@ -23,6 +23,7 @@ import type { StandardMaterialProps } from "../material/standard/standard-materi
 import { attachFollowTarget } from "./gizmo-core.js";
 import { quatFromBjsEuler, rotationQuatFromMatrix } from "./gizmo-math.js";
 import type { UtilityLayer } from "./utility-layer.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** BJS `CameraGizmo._Scale` — applied to the camera body so it keeps a
  *  constant on-screen size (combined with per-frame distance scaling). */
@@ -166,7 +167,7 @@ function buildFrustumEdge(
 }
 
 /** Build the 12 frustum-wireframe edges parented to `root`.  Geometry is
- *  computed in camera-local space (LH: camera looks down +Z, +Y up) to exactly
+ *  computed in camera-local space (+Y up, looking down +Z, or -Z in a right-handed build) to exactly
  *  reproduce BJS `_CreateCameraFrustum` + `setPivotMatrix(inv(projection))`.
  *
  *  BJS builds an NDC cube with z ∈ [-1, 1] and transforms it by the inverse
@@ -205,6 +206,12 @@ function buildFrustumWireframe(
         { x: +fw, y: +fh, z: +far },
         { x: -fw, y: +fh, z: +far },
     ];
+    if (_rightHanded !== null) {
+        // A right-handed camera looks down its local -Z, where Babylon.js's right-handed inverse projection puts the frustum.
+        for (const corner of corners) {
+            corner.z = -corner.z;
+        }
+    }
     const edgePairs: [number, number][] = [
         [0, 1],
         [1, 2],
@@ -289,7 +296,8 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
     // would make the lens stick out in front.  So: bodyOuter ≡ outer root
     // (−90° Y + distance×0.05 scale); bodyMesh ≡ inner mesh (−0.9 X, no rot).
     if (displayBody) {
-        const outerRot = quatFromBjsEuler(0, -Math.PI * 0.5, 0);
+        // A right-handed camera looks down its local -Z, so Babylon.js turns the body the other way.
+        const outerRot = quatFromBjsEuler(0, _rightHanded ? Math.PI * 0.5 : -Math.PI * 0.5, 0);
         const bodyOuter = createTransformNode("cameraBodyOuter", 0, 0, 0, outerRot[0], outerRot[1], outerRot[2], outerRot[3]);
         bodyOuter.parent = root as unknown as SceneNode;
         const bodyMesh = createTransformNode("cameraBodyMesh", -0.9, 0, 0, 0, 0, 0, 1);

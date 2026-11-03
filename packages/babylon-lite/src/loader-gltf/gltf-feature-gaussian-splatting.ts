@@ -29,6 +29,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { TYPE_SIZES } from "./gltf-parser.js";
 import { attachParsedSplat } from "../loader-splat/load-splat.js";
+import { _rightHanded } from "#coordinate-system";
 
 const NAME = "KHR_gaussian_splatting";
 
@@ -262,9 +263,15 @@ const feature: GltfFeature = {
                 // buildSplatGeometry negates Y (the .ply/.splat convention) giving (x,-y,z); BJS' glTF
                 // loader instead keeps Y and applies its __root__ RH->LH flip (net negate-X). Rotating
                 // 180° about Z here (negate X and Y) turns (x,-y,z) into (-x,y,z) == BJS' net result.
+                // A right-handed BJS has no root flip (net (x,y,z)), so only Y is negated back there; the
+                // SH direction stays consistent because the shader re-derives it from this world matrix.
                 ready.push(
                     attachParsedSplat(scene, item.name, { data: item.buffer }).then((mesh) => {
-                        mesh.rotation.z = Math.PI;
+                        if (_rightHanded) {
+                            mesh.scaling.y = -1;
+                        } else {
+                            mesh.rotation.z = Math.PI;
+                        }
                         return mesh;
                     })
                 );

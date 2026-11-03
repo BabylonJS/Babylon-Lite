@@ -22,6 +22,7 @@ import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 const PBR_HAS_CLEARCOAT = 1 << 20;
 
@@ -59,6 +60,10 @@ const CC_ROUGH_PLAIN = `material.ccParams.y`;
 
 // WGSL fragment: coat-layer normal. Computes ccN (coat world-space normal)
 // using a locally-derived cotangent frame from world-position and UV derivatives.
+// A right-handed build reverses both frame axes, like the base normal map in
+// pbr-normal-cotangent-wgsl.ts (Babylon.js's glTF loader flips invertNormalMapX/Y with
+// the handedness, and the coat frame follows them). The `wgsl` tag minifies only the
+// static text, so both interpolated variants are written minified.
 // Emitted in /*AC*/ so ccN is in scope for direct + IBL blocks.
 const CC_NORMAL_COMPUTE = (uv: string): string => wgsl`
 let cc_dp1 = dpdx(input.worldPos);
@@ -67,8 +72,8 @@ let cc_duv1 = dpdx(input.uv);
 let cc_duv2 = dpdy(input.uv);
 let cc_dp2perp = cross(cc_dp2, N_geom);
 let cc_dp1perp = cross(N_geom, cc_dp1);
-let cc_tFrame = cc_dp2perp * cc_duv1.x + cc_dp1perp * cc_duv2.x;
-let cc_bFrame = -(cc_dp2perp * cc_duv1.y + cc_dp1perp * cc_duv2.y);
+let cc_tFrame=${_rightHanded ? "-(cc_dp2perp*cc_duv1.x+cc_dp1perp*cc_duv2.x)" : "cc_dp2perp*cc_duv1.x+cc_dp1perp*cc_duv2.x"};
+let cc_bFrame=${_rightHanded ? "cc_dp2perp*cc_duv1.y+cc_dp1perp*cc_duv2.y" : "-(cc_dp2perp*cc_duv1.y+cc_dp1perp*cc_duv2.y)"};
 let cc_det = max(dot(cc_tFrame, cc_tFrame), dot(cc_bFrame, cc_bFrame));
 let cc_invmax = select(inverseSqrt(cc_det), 0.0, cc_det == 0.0);
 let cc_frame = mat3x3<f32>(cc_tFrame * cc_invmax, cc_bFrame * cc_invmax, N_geom);

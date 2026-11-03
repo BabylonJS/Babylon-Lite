@@ -31,6 +31,7 @@ import { createTransformNode } from "../scene/transform-node.js";
 import { createSceneNodeFromMatrix } from "../scene/scene-node.js";
 import { computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import { _registerEnabledGltfFeature } from "./gltf-feature-hooks.js";
+import { _rightHanded } from "#coordinate-system";
 
 interface GltfCameraDef {
     type?: "perspective" | "orthographic";
@@ -106,7 +107,9 @@ const feature: GltfFeature = {
 
             const inverseScale = 1 / worldScale;
             const name = def.name ?? `camera${camIdx}`;
-            const fixupNode = createTransformNode(`${name}_fixup`, 0, 0, 0, 0, 0, 0, 1, -inverseScale, inverseScale, inverseScale);
+            // Left-handed: the X mirror undoes the loader's root RH→LH mirror for the camera frame.
+            // Right-handed: the root has no mirror and the free camera below is already glTF-oriented.
+            const fixupNode = createTransformNode(`${name}_fixup`, 0, 0, 0, 0, 0, 0, 1, _rightHanded ? inverseScale : -inverseScale, inverseScale, inverseScale);
             // Unreachable nodes are baked once; reachable nodes retain live translation/rotation animation.
             fixupNode.parent = ctx._nodeMap?.[nodeIdx] ?? createSceneNodeFromMatrix(`${name}_bakedNode`, restWorld);
 

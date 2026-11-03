@@ -9,6 +9,7 @@ import { bindSsaoGpuSources, clearSsaoGpu, createSsaoGpu, disposeSsaoGpu, execut
 import type { SsaoGpu, SsaoGpuParameters, SsaoQuality } from "./ssao-gpu.js";
 import { initializeSsaoTemporal } from "./ssao-temporal.js";
 import type { SsaoTemporalOptions, SsaoTemporalSettings } from "./ssao-temporal.js";
+import { _rightHanded } from "#coordinate-system";
 
 export type { SsaoQuality } from "./ssao-gpu.js";
 
@@ -95,6 +96,9 @@ function validateNormalInput(normal: RenderTarget | null): void {
  * This does not multiply the final scene color or implicitly enable material shading.
  */
 export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, scene?: SceneContext): SsaoTask {
+    if (_rightHanded) {
+        throw new Error("SSAO currently supports only left-handed builds.");
+    }
     const depth = config.depthTexture;
     const normal = config.normalTexture ?? null;
     if (!depth._descriptor.dFormat || depth._descriptor.samples !== 1) {

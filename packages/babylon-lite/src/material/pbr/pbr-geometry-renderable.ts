@@ -58,6 +58,7 @@ import { composePbrGeometryShader, _ensurePbrGeometryExt } from "./pbr-geometry-
 import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
 import { pbrGeometryVelocity } from "./pbr-geometry-velocity-hooks.js";
 import type { PbrGeometryVelocity } from "./pbr-geometry-velocity.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -629,6 +630,7 @@ function _getOrCreateGeometryPipeline(
     const primitive: GPUPrimitiveState = {
         cullMode: hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back",
         ...res._composed._prim,
+        ...(_rightHanded && { frontFace: res._composed._prim?.frontFace === "cw" ? "ccw" : "cw" }),
     };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,

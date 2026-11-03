@@ -1,3 +1,4 @@
+import { _rightHanded } from "#coordinate-system";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
@@ -125,7 +126,12 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
                             candidate._targetSignature,
                             recipe.material,
                             bindings,
-                            resolvedLayout.variantKey,
+                            // Right-handed glTF geometry binds its own "|ccw" pipeline (`createShaderBinding`, shader-thin-instance.ts).
+                            _rightHanded &&
+                                ((renderable as Renderable & { _ccw?: 1 })._ccw ||
+                                    ((renderable.mesh as (Mesh & { _primitiveFeatures?: number }) | undefined)?._primitiveFeatures ?? 0) & (1 << 11))
+                                ? `${resolvedLayout.variantKey}|ccw`
+                                : resolvedLayout.variantKey,
                             resolvedLayout.vertexBuffers,
                             resolvedLayout.instanceAttrs
                         )
@@ -164,7 +170,17 @@ export async function prepareShaderMaterialPipeline(
         _resolveShaderMeshVertexLayout(material, bindings, mesh) ??
         (mesh?._gpu._vbLayout ? { _vbs: applyMeshVertexBufferLayout(bindings.vertexBuffers, material.attributes, mesh._gpu._vbLayout), _key: mesh._gpu._vbKey ?? "" } : undefined);
     const resolvedLayout = resolveLayout(material, bindings, layout, vertexLayout);
-    await prepareShaderPipeline(engine, signature, material, bindings, resolvedLayout.variantKey, resolvedLayout.vertexBuffers, resolvedLayout.instanceAttrs);
+    await prepareShaderPipeline(
+        engine,
+        signature,
+        material,
+        bindings,
+        _rightHanded && ((mesh as (Mesh & { _primitiveFeatures?: number }) | undefined)?._primitiveFeatures ?? 0) & (1 << 11)
+            ? `${resolvedLayout.variantKey}|ccw`
+            : resolvedLayout.variantKey,
+        resolvedLayout.vertexBuffers,
+        resolvedLayout.instanceAttrs
+    );
 }
 
 /** Prepare one ShaderMaterial pipeline for a RenderTask using the task's exact attachment signature. */
