@@ -1,8 +1,8 @@
 import { BU, SS } from "../engine/gpu-flags.js";
 import { wgsl } from "../shader/wgsl.js";
 import type { SsaoTask } from "./ssao.js";
-import type { DiligentTemporalGpu, DiligentTransportExtension } from "./ssao-diligent-gpu.js";
-import { diligentTransportWGSL } from "./ssao-diligent-wgsl.js";
+import type { XegtaoTemporalGpu, XegtaoTransportExtension } from "./ssao-xegtao-gpu.js";
+import { xegtaoTransportWGSL } from "./ssao-xegtao-wgsl.js";
 import { ssaoMotionMaskCellCount, ssaoMotionMaskQueryWGSL, ssaoMotionMaskWGSL } from "./ssao-motion-mask-wgsl.js";
 import { getSsaoTemporalEntry } from "./ssao-temporal.js";
 
@@ -19,15 +19,15 @@ interface MaskStage {
 }
 
 /** @internal Optional resources; temporal history remains owned by the unmodified resolver. */
-export interface SsaoMotionPruningGpu extends DiligentTransportExtension {
+export interface SsaoMotionPruningGpu extends XegtaoTransportExtension {
     /** Every tile-bounds level, cleared and filled by one dispatch per frame. */
     motionCells: GPUBuffer;
     stages: MaskStage[];
-    bind(state: DiligentTemporalGpu, velocity: GPUTextureView | null): void;
+    bind(state: XegtaoTemporalGpu, velocity: GPUTextureView | null): void;
 }
 
 /** @internal Create the masked transport variant without replacing temporal history. */
-export function createSsaoMotionPruningGpu(state: DiligentTemporalGpu, velocity = state.velocity): SsaoMotionPruningGpu {
+export function createSsaoMotionPruningGpu(state: XegtaoTemporalGpu, velocity = state.velocity): SsaoMotionPruningGpu {
     if (!state.transport || !velocity) {
         throw new Error("SSAO motion pruning requires temporal occlusion-history transport with object velocity.");
     }
@@ -48,7 +48,7 @@ export function createSsaoMotionPruningGpu(state: DiligentTemporalGpu, velocity 
     });
     const module = device.createShaderModule({
         label: "ssao-occlusion-history-transport-pruned",
-        code: diligentTransportWGSL(o.kind, ssaoMotionMaskQueryWGSL(), wgsl`if(!movingCaster(pixel.xy,projected)){return vec4f(0);}`),
+        code: xegtaoTransportWGSL(o.kind, ssaoMotionMaskQueryWGSL(), wgsl`if(!movingCaster(pixel.xy,projected)){return vec4f(0);}`),
     });
     const layout = device.createBindGroupLayout({
         entries: Array.from({ length: 9 }, (_, binding): GPUBindGroupLayoutEntry => {
@@ -136,7 +136,7 @@ export function enableSsaoMotionPruning(task: SsaoTask): SsaoMotionPruningSettin
     }
     const entry = getSsaoTemporalEntry(task);
     if (!entry?.velocity) {
-        throw new Error("SSAO motion pruning requires enableSsaoTemporal with object velocity first.");
+        throw new Error("SSAO motion pruning requires an object velocity texture in createSsaoTask.");
     }
     const states = (_states ??= new WeakMap());
     const existing = states.get(task);
@@ -147,7 +147,7 @@ export function enableSsaoMotionPruning(task: SsaoTask): SsaoMotionPruningSettin
         throw new Error("An SSAO temporal GPU extension is already installed.");
     }
     const settings: SsaoMotionPruningSettings = { enabled: true };
-    let owner: DiligentTemporalGpu | null = null;
+    let owner: XegtaoTemporalGpu | null = null;
     let pruning: SsaoMotionPruningGpu | null = null;
     entry.settings._prepareGpu = (current, velocity) => {
         if (owner !== current) {

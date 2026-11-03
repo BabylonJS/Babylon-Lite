@@ -4,17 +4,18 @@ import { getViewMatrix } from "../../../packages/babylon-lite/src/camera/camera.
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
 import { createSsaoTask } from "../../../packages/babylon-lite/src/post-process/ssao.js";
+import type { SsaoTaskConfig } from "../../../packages/babylon-lite/src/post-process/ssao.js";
 import type { SsaoGpu, SsaoGpuParameters } from "../../../packages/babylon-lite/src/post-process/ssao-gpu.js";
-import { enableSsaoTemporal, resetSsaoTemporal, validateSsaoTemporalSettings } from "../../../packages/babylon-lite/src/post-process/ssao-temporal.js";
-import type { DiligentTemporalGpu as SsaoTemporalGpu } from "../../../packages/babylon-lite/src/post-process/ssao-diligent-gpu.js";
+import { getSsaoTemporalEntry, resetSsaoTemporal, validateSsaoTemporalSettings } from "../../../packages/babylon-lite/src/post-process/ssao-temporal.js";
+import type { XegtaoTemporalGpu as SsaoTemporalGpu } from "../../../packages/babylon-lite/src/post-process/ssao-xegtao-gpu.js";
 import { enableSsaoMotionPruning } from "../../../packages/babylon-lite/src/post-process/ssao-motion-pruning.js";
 
 const calls = vi.hoisted(() => ({ create: vi.fn(), bind: vi.fn(), execute: vi.fn(), dispose: vi.fn() }));
-vi.mock("../../../packages/babylon-lite/src/post-process/ssao-diligent-gpu.js", () => ({
-    createDiligentTemporalGpu: calls.create,
-    bindDiligentTemporalGpu: calls.bind,
-    executeDiligentTemporalGpu: calls.execute,
-    disposeDiligentTemporalGpu: calls.dispose,
+vi.mock("../../../packages/babylon-lite/src/post-process/ssao-xegtao-gpu.js", () => ({
+    createXegtaoTemporalGpu: calls.create,
+    bindXegtaoTemporalGpu: calls.bind,
+    executeXegtaoTemporalGpu: calls.execute,
+    disposeXegtaoTemporalGpu: calls.dispose,
 }));
 beforeEach(() => {
     vi.clearAllMocks();
@@ -36,18 +37,25 @@ beforeEach(() => {
         state.velocity = velocity;
     });
 });
-function fixture() {
-    const engine = { _device: {} } as EngineContext;
+function velocityTarget(format: GPUTextureFormat = "rgba32float", built = true) {
+    const velocity = createRenderTarget({ format, samples: 1, size: { width: 16, height: 16 } });
+    if (built) {
+        velocity._colorView = {} as GPUTextureView;
+        velocity._width = velocity._height = 16;
+    }
+    return velocity;
+}
+function fixture(temporal?: SsaoTaskConfig["temporal"], floatingOrigin = false) {
+    const engine = { _device: {}, useFloatingOrigin: floatingOrigin } as EngineContext;
     const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
     const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
-    const task = createSsaoTask({ camera, depthTexture: depth }, engine);
+    const task = createSsaoTask({ camera, depthTexture: depth, temporal }, engine);
     const gpu = { width: 16, height: 16, device: engine._device, sourceDepth: {}, sourceNormal: null, resolveGroup: {} } as SsaoGpu;
     const params: SsaoGpuParameters = {
         depthMultiply: -0.1,
         depthAdd: 0,
         tanX: 1,
         tanY: 1,
-        far: camera.farPlane,
         radius: task.radius,
         intensity: task.intensity,
         view: getViewMatrix(camera),
@@ -61,22 +69,50 @@ function fixture() {
     const history = (): SsaoTemporalGpu => calls.create.mock.results.at(-1)!.value as SsaoTemporalGpu;
     return { engine, camera, task, gpu, params, frame, history };
 }
-describe("temporal SSAO API and history lifecycle", () => {
-    it("requires explicit pruning opt-in after temporal filtering with velocity", () => {
+describe("default SSAO reconstruction and history lifecycle", () => {
+    it("creates the complete pipeline without a separate enabler and allocates history lazily", () => {
         const f = fixture();
-        expect(() => enableSsaoMotionPruning(f.task)).toThrow("object velocity first");
-        const settings = enableSsaoTemporal(f.task);
-        expect(settings._prepareGpu).toBeUndefined();
-        expect(() => enableSsaoMotionPruning(f.task)).toThrow("object velocity first");
+        expect(f.task.temporal).toEqual({ enabled: true, historySamples: 16, resetVersion: 0 });
+        expect(getSsaoTemporalEntry(f.task)!.settings).toBe(f.task.temporal);
+        expect(calls.create).not.toHaveBeenCalled();
+        expect(f.frame()).toBe(0);
+        expect(f.frame()).toBe(1);
+        expect(calls.create).toHaveBeenCalledOnce();
+        expect(calls.execute).toHaveBeenCalledTimes(2);
+    });
+    it.each([false, { enabled: false }])("keeps explicit spatial-only construction history-free (%j)", (temporal) => {
+        const f = fixture(temporal);
+        const settings = f.task.temporal;
+        expect(settings.enabled).toBe(false);
+        expect(f.frame()).toBe(0);
+        expect(f.frame()).toBe(0);
+        expect(calls.create).not.toHaveBeenCalled();
+        expect(calls.execute).not.toHaveBeenCalled();
+        settings.enabled = true;
+        expect(f.frame()).toBe(0);
+        expect(f.task.temporal).toBe(settings);
+        expect(calls.create).toHaveBeenCalledOnce();
+    });
+    it("configures object velocity while starting reconstruction disabled", () => {
+        const velocity = velocityTarget();
+        const f = fixture({ enabled: false, velocityTexture: velocity, velocityHasPreviousDepth: true, historySamples: 8 });
+        f.frame();
+        expect(calls.create).not.toHaveBeenCalled();
+        f.task.temporal.enabled = true;
+        f.frame();
+        expect(calls.create).toHaveBeenCalledWith(f.gpu, velocity._colorView, true, true);
+        expect(f.history().data[49]).toBe(8);
+    });
+    it("requires object velocity for the separate pruning opt-in", () => {
+        const f = fixture();
+        expect(f.task.temporal._prepareGpu).toBeUndefined();
+        expect(() => enableSsaoMotionPruning(f.task)).toThrow("object velocity texture");
         f.task.dispose();
         expect(() => enableSsaoMotionPruning(f.task)).toThrow("disposed");
     });
     it("keeps disabled pruning allocation-free and preserves the temporal phase", () => {
-        const f = fixture();
-        const velocity = createRenderTarget({ format: "rgba32float", samples: 1, size: { width: 16, height: 16 } });
-        velocity._colorView = {} as GPUTextureView;
-        velocity._width = velocity._height = 16;
-        enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: true });
+        const velocity = velocityTarget();
+        const f = fixture({ velocityTexture: velocity, velocityHasPreviousDepth: true });
         const settings = enableSsaoMotionPruning(f.task);
         settings.enabled = false;
         expect(enableSsaoMotionPruning(f.task)).toBe(settings);
@@ -89,11 +125,9 @@ describe("temporal SSAO API and history lifecycle", () => {
         expect(calls.create).toHaveBeenCalledWith(f.gpu, velocity._colorView, true, true);
     });
     it("passes current velocity through the optional preparation seam without resetting history", () => {
-        const f = fixture();
-        const velocity = createRenderTarget({ format: "rgba32float", samples: 1, size: { width: 16, height: 16 } });
-        velocity._colorView = {} as GPUTextureView;
-        velocity._width = velocity._height = 16;
-        const settings = enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: true });
+        const velocity = velocityTarget();
+        const f = fixture({ velocityTexture: velocity, velocityHasPreviousDepth: true });
+        const settings = f.task.temporal;
         settings._prepareGpu = vi.fn();
         f.frame();
         expect(settings._prepareGpu).toHaveBeenLastCalledWith(f.history(), velocity._colorView);
@@ -106,23 +140,25 @@ describe("temporal SSAO API and history lifecycle", () => {
         f.frame();
         expect(settings._prepareGpu).toHaveBeenCalledTimes(4);
     });
-    it.each([1, 8, 32, 64])("preserves the configured upper bound %s within native history length", (historySamples) => {
-        const f = fixture();
-        enableSsaoTemporal(f.task, { historySamples });
+    it.each([1, 8, 16])("uploads the configured native history limit %s", (historySamples) => {
+        const f = fixture({ historySamples });
         f.frame();
-        expect(f.history().data[49]).toBe(Math.min(historySamples, 16));
-        expect(f.history().data[50]).toBe(1);
+        expect(f.history().data[49]).toBe(historySamples);
     });
-    it.each([0, 65, 1.5, NaN])("rejects an invalid sample limit %s", (historySamples) => {
-        expect(() => validateSsaoTemporalSettings({ enabled: true, historySamples, resetVersion: 0 })).toThrow("historySamples");
+    it.each([0, 17, 1.5, NaN])("rejects an invalid constructor sample limit %s", (historySamples) => {
+        expect(() => fixture({ historySamples })).toThrow("historySamples");
+        expect(calls.create).not.toHaveBeenCalled();
     });
-    it("rejects invalid reset versions and detects overflow", () => {
-        expect(() => resetSsaoTemporal({ enabled: true, historySamples: 32, resetVersion: -1 })).toThrow("resetVersion");
-        expect(() => resetSsaoTemporal({ enabled: true, historySamples: 32, resetVersion: Number.MAX_SAFE_INTEGER })).toThrow("incremented");
+    it("validates mutable reconstruction settings and reset overflow", () => {
+        expect(() => validateSsaoTemporalSettings({ enabled: 1 as never, historySamples: 16, resetVersion: 0 })).toThrow("enabled");
+        expect(() => validateSsaoTemporalSettings({ enabled: true, historySamples: 0, resetVersion: 0 })).toThrow("historySamples");
+        expect(() => validateSsaoTemporalSettings({ enabled: true, historySamples: 17, resetVersion: 0 })).toThrow("[1, 16]");
+        expect(() => resetSsaoTemporal({ enabled: true, historySamples: 16, resetVersion: -1 })).toThrow("resetVersion");
+        expect(() => resetSsaoTemporal({ enabled: true, historySamples: 16, resetVersion: Number.MAX_SAFE_INTEGER })).toThrow("incremented");
     });
     it("rotates phases, reuses allocations, and keeps ordinary camera motion", () => {
         const f = fixture();
-        expect(enableSsaoTemporal(f.task)).toBe(enableSsaoTemporal(f.task));
+        const settings = f.task.temporal;
         expect(f.frame()).toBe(0);
         expect(f.history().data[48]).toBe(1);
         expect(f.frame()).toBe(1);
@@ -130,11 +166,12 @@ describe("temporal SSAO API and history lifecycle", () => {
         f.camera.position.x = 0.05;
         expect(f.frame()).toBe(2);
         expect(f.history().data[48]).toBe(0);
+        expect(f.task.temporal).toBe(settings);
         expect(calls.create).toHaveBeenCalledOnce();
     });
     it("keeps spatial quality and temporal history limits independent", () => {
-        const f = fixture();
-        const temporal = enableSsaoTemporal(f.task, { historySamples: 8 });
+        const f = fixture({ historySamples: 8 });
+        const temporal = f.task.temporal;
         f.frame();
         f.frame();
         const owner = f.history();
@@ -151,21 +188,20 @@ describe("temporal SSAO API and history lifecycle", () => {
         expect(calls.create).toHaveBeenCalledOnce();
     });
     it("restores static phase/base output on disable and restarts on re-enable", () => {
-        const f = fixture(),
-            settings = enableSsaoTemporal(f.task);
+        const f = fixture();
         f.frame();
         f.frame();
-        settings.enabled = false;
+        f.task.temporal.enabled = false;
         expect(f.frame()).toBe(0);
         expect(f.gpu.resolveGroup).toBe(f.history().baseResolve);
         expect(calls.execute).toHaveBeenCalledTimes(2);
-        settings.enabled = true;
+        f.task.temporal.enabled = true;
         expect(f.frame()).toBe(0);
         expect(f.history().data[48]).toBe(1);
     });
     it("resets on cuts, explicit resets, source replacement, and changed settings", () => {
-        const f = fixture(),
-            settings = enableSsaoTemporal(f.task);
+        const f = fixture();
+        const settings = f.task.temporal;
         f.frame();
         f.frame();
         f.camera.position.x = 100;
@@ -174,7 +210,7 @@ describe("temporal SSAO API and history lifecycle", () => {
         resetSsaoTemporal(settings);
         expect(f.frame()).toBe(0);
         f.frame();
-        settings.historySamples = 16;
+        settings.historySamples = 8;
         expect(f.frame()).toBe(0);
         f.frame();
         f.task.quality = "low";
@@ -189,48 +225,40 @@ describe("temporal SSAO API and history lifecycle", () => {
         f.task._filter!.reset();
         expect(f.frame()).toBe(0);
     });
-    it("rejects velocity formats and dimension mismatch, without destroying sources", () => {
-        const f = fixture();
-        const invalid = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
-        expect(() => enableSsaoTemporal(f.task, { velocityTexture: invalid })).toThrow("floating-point");
-        const velocity = createRenderTarget({ format: "rg16float", samples: 1, size: { width: 16, height: 16 } });
-        enableSsaoTemporal(f.task, { velocityTexture: velocity });
+    it("rejects invalid velocity formats before GPU work and unbuilt dimensions at execution", () => {
+        expect(() => fixture({ velocityTexture: velocityTarget("rgba8unorm") })).toThrow("floating-point");
+        const velocity = velocityTarget("rg16float", false);
+        const f = fixture({ velocityTexture: velocity });
         expect(() => f.frame()).toThrow("identical dimensions");
+        expect(calls.create).not.toHaveBeenCalled();
         velocity._colorView = {} as GPUTextureView;
         velocity._width = velocity._height = 16;
         expect(f.frame()).toBe(0);
-        const other = createRenderTarget({ format: "rg16float", samples: 1, size: { width: 16, height: 16 } });
-        expect(() => enableSsaoTemporal(f.task, { velocityTexture: other })).toThrow("different velocity");
+        expect(getSsaoTemporalEntry(f.task)!.velocity).toBe(velocity);
     });
     it("requires RGBA floating velocity for the previous-depth contract", () => {
-        const f = fixture();
-        expect(() => enableSsaoTemporal(f.task, { velocityHasPreviousDepth: true })).toThrow("floating-point RGBA");
+        expect(() => fixture({ velocityHasPreviousDepth: true })).toThrow("floating-point RGBA");
         for (const format of ["rg16float", "rg32float"] as const) {
-            const velocity = createRenderTarget({ format, samples: 1, size: { width: 16, height: 16 } });
-            expect(() => enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: true })).toThrow("floating-point RGBA");
+            expect(() => fixture({ velocityTexture: velocityTarget(format), velocityHasPreviousDepth: true })).toThrow("floating-point RGBA");
         }
         for (const format of ["rgba16float", "rgba32float"] as const) {
-            const other = fixture();
-            const velocity = createRenderTarget({ format, samples: 1, size: { width: 16, height: 16 } });
-            velocity._colorView = {} as GPUTextureView;
-            velocity._width = velocity._height = 16;
-            enableSsaoTemporal(other.task, { velocityTexture: velocity, velocityHasPreviousDepth: true });
-            other.frame();
-            const data = other.history().data;
+            const f = fixture({ velocityTexture: velocityTarget(format), velocityHasPreviousDepth: true });
+            f.frame();
+            const data = f.history().data;
             expect(data[51]).toBe(1);
-            // Half-float velocity is compared against its own rounding, never the FP32 tolerance.
             expect(data[84]).toBe(format === "rgba16float" ? Math.fround(2 ** -10) : Math.fround(1e-5));
             expect(data[85]).toBe(format === "rgba16float" ? Math.fround(2 ** -10) : 0);
         }
+        expect(() => fixture({ velocityTexture: velocityTarget(), velocityHasPreviousDepth: 1 as never })).toThrow("must be a boolean");
+        expect(() => fixture({ velocityTexture: velocityTarget(), velocityHasPreviousDepth: null as never })).toThrow("must be a boolean");
     });
     it("uploads the static previous-depth reprojection rows", () => {
         const f = fixture();
-        enableSsaoTemporal(f.task);
         f.frame();
         f.frame();
         const data = f.history().data;
-        const inverseVP = data.subarray(52, 68),
-            previousVP = data.subarray(32, 48);
+        const inverseVP = data.subarray(52, 68);
+        const previousVP = data.subarray(32, 48);
         for (let column = 0; column < 4; column++) {
             let w = 0;
             for (let k = 0; k < 4; k++) w += previousVP[k * 4 + 3]! * inverseVP[column * 4 + k]!;
@@ -238,20 +266,28 @@ describe("temporal SSAO API and history lifecycle", () => {
             expect(data[92 + column]).toBe(inverseVP[column * 4 + 3]);
         }
     });
-    it("preserves the previous-depth contract on repeated enabling", () => {
-        const f = fixture();
-        const velocity = createRenderTarget({ format: "rgba32float", samples: 1, size: { width: 16, height: 16 } });
-        const settings = enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: true });
-        expect(enableSsaoTemporal(f.task)).toBe(settings);
-        expect(enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: true })).toBe(settings);
-        expect(() => enableSsaoTemporal(f.task, { velocityTexture: velocity, velocityHasPreviousDepth: false })).toThrow("different velocity depth contract");
-        const other = fixture();
-        enableSsaoTemporal(other.task, { velocityTexture: velocity });
-        expect(() => enableSsaoTemporal(other.task, { velocityTexture: velocity, velocityHasPreviousDepth: true })).toThrow("different velocity depth contract");
+    it("captures the velocity/depth contract and keeps it through live toggles", () => {
+        const velocity = velocityTarget();
+        const options = { velocityTexture: velocity, velocityHasPreviousDepth: true, historySamples: 8 };
+        const f = fixture(options);
+        options.velocityTexture = velocityTarget("rg16float");
+        options.velocityHasPreviousDepth = false;
+        options.historySamples = 16;
+        f.frame();
+        expect(f.history().data[51]).toBe(1);
+        expect(f.task.temporal.historySamples).toBe(8);
+        expect(getSsaoTemporalEntry(f.task)!.velocity).toBe(velocity);
+        f.task.temporal.enabled = false;
+        f.frame();
+        f.task.temporal.enabled = true;
+        f.frame();
+        expect(f.history().data[51]).toBe(1);
+        const other = fixture({ velocityTexture: velocity });
+        other.frame();
+        expect(other.history().data[51]).toBe(0);
     });
     it("releases previous owners on resize/device replacement and disposes once", () => {
         const f = fixture();
-        enableSsaoTemporal(f.task);
         f.frame();
         const old = f.history();
         const next = { ...f.gpu, width: 17, resolveGroup: {} } as SsaoGpu;
@@ -261,11 +297,19 @@ describe("temporal SSAO API and history lifecycle", () => {
         f.task.dispose();
         f.task.dispose();
         expect(calls.dispose).toHaveBeenCalledTimes(2);
-        expect(() => enableSsaoTemporal(f.task)).toThrow("disposed");
+        expect(getSsaoTemporalEntry(f.task)).toBeUndefined();
+        expect(() => f.frame()).toThrow("disposed");
     });
-    it("rejects unsupported floating-origin reprojection explicitly", () => {
-        const f = fixture();
-        Object.assign(f.engine, { useFloatingOrigin: true });
-        expect(() => enableSsaoTemporal(f.task)).toThrow("floating-origin");
+    it("rejects unsupported floating-origin reconstruction, including live re-enable", () => {
+        expect(() => fixture(undefined, true)).toThrow("floating-origin");
+        const f = fixture(false, true);
+        expect(f.frame()).toBe(0);
+        expect(calls.create).not.toHaveBeenCalled();
+        f.task.temporal.enabled = true;
+        expect(() => f.frame()).toThrow("floating-origin");
+        expect(calls.create).not.toHaveBeenCalled();
+        const active = fixture();
+        Object.assign(active.engine, { useFloatingOrigin: true });
+        expect(() => active.frame()).toThrow("floating-origin");
     });
 });

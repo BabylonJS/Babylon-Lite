@@ -2,6 +2,7 @@ import {
     addTask,
     addToScene,
     attachControl,
+    buildFrameGraphTask,
     createArcRotateCamera,
     createBox,
     createCopyToTextureTask,
@@ -17,10 +18,10 @@ import {
     createSphere,
     createSsaoTask,
     enablePbrSsao,
-    enableSsaoTemporal,
     enableSsaoHalfResolution,
     enableSsaoMotionPruning,
     GeometryTextureType,
+    getFrameGraph,
     getRenderTaskGpuTimings,
     loadEnvironment,
     onBeforeRender,
@@ -123,22 +124,23 @@ async function main(): Promise<void> {
     );
     enableGeometryVelocity(geometry, { previousDepth: true });
     const useNormalTexture = document.getElementById("useNormalTexture") as HTMLInputElement;
+    const historySamples = document.getElementById("historySamples") as HTMLInputElement;
     const ao = createSsaoTask(
         {
             depthTexture: geometry.geometryDepthTexture,
             normalTexture: useNormalTexture.checked ? geometry.geometryViewNormalTexture! : undefined,
             camera,
             radius: 0.6,
+            temporal: {
+                velocityTexture: geometry.geometryLinearVelocityTexture!,
+                velocityHasPreviousDepth: true,
+                historySamples: Number(historySamples.value),
+            },
         },
         engine,
         scene
     );
-    const historySamples = document.getElementById("historySamples") as HTMLInputElement;
-    const temporal = enableSsaoTemporal(ao, {
-        velocityTexture: geometry.geometryLinearVelocityTexture!,
-        velocityHasPreviousDepth: true,
-        historySamples: Number(historySamples.value),
-    });
+    const temporal = ao.temporal;
     const resolution = enableSsaoHalfResolution(ao);
     const pruningToggle = document.getElementById("motionPruning") as HTMLInputElement;
     const pruning = enableSsaoMotionPruning(ao);
@@ -165,6 +167,12 @@ async function main(): Promise<void> {
     addTask(scene, color);
     addTask(scene, present);
     addTask(scene, visibility);
+    const refreshAoOutput = (): void => {
+        const graph = getFrameGraph(scene);
+        buildFrameGraphTask(graph, ao);
+        // Full/Half and normal-mode changes can replace the texture sampled by this copy.
+        buildFrameGraphTask(graph, visibility);
+    };
 
     const quality = document.getElementById("quality") as HTMLSelectElement;
     ao.quality = quality.value as SsaoQuality;
@@ -197,14 +205,16 @@ async function main(): Promise<void> {
     };
     selectResolution();
     const updateStatus = (): void => {
-        status.textContent = `${resolution.active ? "Half-resolution AO estimation" : resolution.enabled ? "Full-resolution AO (half-mode viewport safeguard)" : "Full-resolution AO"} · Normals: ${ao.normalTexture ? "texture" : "reconstructed from depth"} · Full-resolution temporal reconstruction and scene · Drag to orbit, wheel to zoom`;
+        status.textContent = `${resolution.active ? "Half-resolution AO estimation and temporal reconstruction" : resolution.enabled ? "Full-resolution AO (half-mode viewport safeguard)" : "Full-resolution AO"} · Normals: ${ao.normalTexture ? "texture" : "reconstructed from depth"} · Full-resolution scene and AO output · Drag to orbit, wheel to zoom`;
     };
     useNormalTexture.addEventListener("change", () => {
         ao.normalTexture = useNormalTexture.checked ? geometry.geometryViewNormalTexture! : null;
+        refreshAoOutput();
         updateStatus();
     });
     resolutionSelect.addEventListener("change", () => {
         selectResolution();
+        refreshAoOutput();
         updateStatus();
     });
     const moving = document.getElementById("moving") as HTMLInputElement;

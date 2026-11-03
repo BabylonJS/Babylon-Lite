@@ -130,7 +130,9 @@ function createGeometryParamsFragment(
         (meshFeatures & ~(MSH_HAS_SKELETON | MSH_HAS_SKELETON_8)) | (features & HAS_SKELETON ? MSH_HAS_SKELETON : 0) | (features & HAS_SKELETON_8 ? MSH_HAS_SKELETON_8 : 0);
     const hasDeformation = needsVelocityVaryings && !(meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT)) && (deformationFlags & (MSH_HAS_SKELETON | MSH_HAS_MORPH_TARGETS)) !== 0;
     const feature = hasDeformation ? getGeometryDeformationVelocity() : null;
-    if (hasDeformation && !feature) {
+    // Skinning requires the preloaded feature. A morph-only mesh bound before it loads (e.g. added after
+    // registration) keeps the historical current-morph velocity rather than failing the pass.
+    if (hasDeformation && !feature && deformationFlags & MSH_HAS_SKELETON) {
         throw new Error("Standard geometry deformation velocity was not preloaded.");
     }
     const deformation = feature?.geometryPreviousDeformation(deformationFlags);
@@ -157,7 +159,7 @@ function createGeometryParamsFragment(
             if (deformation) {
                 vbParts.push(deformation.code);
             }
-            const localPosition = deformation ? "previousDeformedPosition" : "position";
+            const localPosition = deformation ? "previousDeformedPosition" : meshFeatures & MSH_HAS_MORPH_TARGETS ? "morphedPos" : "position";
             vbParts.push(wgsl`let previousWorldPos = mesh.previousWorld * vec4<f32>(${localPosition}, 1.0);
 let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
 out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);

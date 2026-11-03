@@ -13,7 +13,6 @@ import { spawnSync } from "child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { extname, resolve } from "path";
 import { fetchFlightHelmet } from "./fetch-flight-helmet";
-import { fetchSsaoKitchen } from "./fetch-ssao-kitchen";
 
 const ROOT = resolve(__dirname, "..");
 const LAB_DIR = resolve(ROOT, "lab");
@@ -252,7 +251,6 @@ function rewriteFilesForBasePath(dir: string, basePath: string): void {
 async function main(): Promise<void> {
     const basePath = normalizeBasePath(process.env.LAB_BASE_PATH);
     await fetchFlightHelmet();
-    await fetchSsaoKitchen();
     runViteBuild(basePath);
     copyStaticRuntimeData();
 

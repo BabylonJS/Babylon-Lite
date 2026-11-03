@@ -78,8 +78,6 @@ browserstack.err
 local.log
 .perf-baseline-worktree/
 .ao-reference-cache/
-lab/public/ao-temporal-reference/
-lab/public/ssao-comparison/kitchen.glb
 
 _diag.mjs
 _lite72*.wgsl

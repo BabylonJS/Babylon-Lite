@@ -9,7 +9,6 @@ samplePower:f32,thinCompensation:f32,mipOffset:f32,phase:u32,
 extra:vec4f,view:mat4x4f
 }
 @group(0) @binding(0) var<uniform> ao:AoParams;
-override PIXEL_STRIDE:u32=1u;
 fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*z,z);}
 fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
 `;
@@ -83,8 +82,7 @@ return textureLoad(viewDepth,c,0).r;
 ${ssaoNormalWGSL()}
 fn aoPackedEdges(p:vec2i)->u32{
 let z=aoDepth(p);
-let stride=i32(PIXEL_STRIDE);
-var e=vec4f(aoDepth(p+vec2i(-stride,0)),aoDepth(p+vec2i(stride,0)),aoDepth(p+vec2i(0,-stride)),aoDepth(p+vec2i(0,stride)))-z;
+var e=vec4f(aoDepth(p+vec2i(-1,0)),aoDepth(p+vec2i(1,0)),aoDepth(p+vec2i(0,-1)),aoDepth(p+vec2i(0,1)))-z;
 let slope=vec2f((e.y-e.x)*0.5,(e.w-e.z)*0.5);
 e=min(abs(e),abs(e+vec4f(slope.x,-slope.x,slope.y,-slope.y)));
 let packed=vec4u(round(clamp(1.25-e/(z*0.011),vec4f(0),vec4f(1))*2.9));
@@ -245,8 +243,8 @@ return index;
 @group(0) @binding(6) var depthSampler:sampler;
 fn sampleViewDepth(uv:vec2f,level:f32)->f32{return textureSampleLevel(viewDepth,depthSampler,uv,level).r;}
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
-if(any(id.xy>=(ao.size+PIXEL_STRIDE-1u)/PIXEL_STRIDE)){return;}
-let p=vec2i(min(id.xy*PIXEL_STRIDE+PIXEL_STRIDE/2u,ao.size-1u));
+if(any(id.xy>=ao.size)){return;}
+let p=vec2i(id.xy);
 let outputPixel=vec2i(id.xy);
 // View depth and a supplied normal are fetched with the background test so their latency overlaps it.
 let raw=aoRawDepth(p);let viewZ=aoDepth(p);let suppliedNormal=aoSuppliedNormal(p);
@@ -358,15 +356,13 @@ return clamp(floor(sum/weights*1.5*255.0+0.5),0.0,255.0)/255.0;
     return wgsl`${bindings}
 ${filter}
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
-// The working texture and every resolve target have the stride-reduced AoParams size.
-let dims=(ao.size+PIXEL_STRIDE-1u)/PIXEL_STRIDE;
+let dims=ao.size;
 if(any(id.xy>=dims)){return;}
 let p=vec2i(id.xy);
 var visibility=1.0;
-let source=min(id.xy*PIXEL_STRIDE+PIXEL_STRIDE/2u,ao.size-1u);
 // The filter's loads are issued with the background test rather than after it.
 let filtered=resolve(p,dims);
-if(aoRawDepth(vec2i(source))!=0.0){visibility=clamp(mix(1.0,filtered,ao.extra.y),0.0,1.0);}
+if(aoRawDepth(p)!=0.0){visibility=clamp(mix(1.0,filtered,ao.extra.y),0.0,1.0);}
 textureStore(result,p,vec4f(vec3f(aoHalf(visibility)),1));
 }`;
 }

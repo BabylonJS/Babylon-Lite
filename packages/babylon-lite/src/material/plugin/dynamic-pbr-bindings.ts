@@ -1,5 +1,5 @@
 import type { EngineContext } from "../../engine/engine.js";
-import type { Renderable } from "../../render/renderable.js";
+import type { DrawUpdateContext, Renderable } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
@@ -10,10 +10,9 @@ import { enablePbrPluginPasses, isPbrIblColorPass, selectPbrPlugins } from "./pb
 import type { MaterialPlugin } from "./material-plugin.js";
 
 interface BindingState {
-    version: number;
+    versions: number[];
     group: GPUBindGroup;
     leases: Texture2D[];
-    makeGroup: () => GPUBindGroup;
     disposed: boolean;
 }
 
@@ -26,7 +25,7 @@ export function enableDynamicPbrBindings(): void {
     }
     _installed = true;
     enablePbrPluginPasses();
-    const cache = new WeakMap<Renderable, Map<GPURenderPipeline, BindingState>>();
+    const cache = new WeakMap<Renderable, Map<GPURenderPipeline, WeakMap<DrawUpdateContext, BindingState>>>();
     const lease = (plugins: readonly MaterialPlugin[]): Texture2D[] => {
         const textures: Texture2D[] = [];
         for (const plugin of plugins) {
@@ -46,21 +45,6 @@ export function enableDynamicPbrBindings(): void {
             });
         }
     };
-    const version = (plugins: readonly MaterialPlugin[]): number => {
-        let value = 0;
-        for (const plugin of plugins) {
-            const next = plugin._bindingVersion!();
-            if (!Number.isSafeInteger(next) || next < 0) {
-                throw new Error("Dynamic material binding versions must be nonnegative safe integers.");
-            }
-            value += next;
-        }
-        if (!Number.isSafeInteger(value)) {
-            throw new Error("Combined dynamic material binding version exceeds safe integer range.");
-        }
-        return value;
-    };
-
     const prepare = (plugins: readonly MaterialPlugin[] | undefined, scope: object): void => {
         if (!plugins) {
             return;
@@ -86,31 +70,13 @@ export function enableDynamicPbrBindings(): void {
             entries = new Map();
             cache.set(binding.renderable, entries);
         }
-        let state = entries.get(binding.pipeline);
-        if (!state) {
-            const leases = lease(watched);
-            let group: GPUBindGroup;
-            try {
-                group = makeGroup();
-            } catch (error) {
-                release(engine, leases);
-                throw error;
-            }
-            state = { version: version(watched), group, leases, makeGroup, disposed: false };
-            entries.set(binding.pipeline, state);
-            const owned = state;
-            disposers.push(() => {
-                if (owned.disposed) {
-                    return;
-                }
-                owned.disposed = true;
-                release(engine, owned.leases);
-                owned.leases = [];
-                entries!.delete(binding.pipeline);
-            });
+        let contexts = entries.get(binding.pipeline);
+        if (!contexts) {
+            contexts = new WeakMap();
+            entries.set(binding.pipeline, contexts);
         }
-        state.makeGroup = makeGroup;
-        const owned = state;
+        const passStates = contexts;
+        let owned: BindingState | undefined;
         const previousUpdate = binding.update;
         return {
             ...binding,
@@ -119,31 +85,64 @@ export function enableDynamicPbrBindings(): void {
                     prepare(plugins, scope);
                 }
                 for (const plugin of watched) {
-                    plugin._validateDraw?.(context);
+                    plugin._prepareDraw?.(context);
                 }
                 previousUpdate?.(context);
-                const next = version(watched);
-                if (next === owned.version || owned.disposed) {
+                let state = passStates.get(context);
+                if (!state) {
+                    const leases = lease(watched);
+                    let group: GPUBindGroup;
+                    try {
+                        group = makeGroup();
+                    } catch (error) {
+                        release(engine, leases);
+                        throw error;
+                    }
+                    state = { versions: watched.map((plugin) => plugin._bindingVersion!()), group, leases, disposed: false };
+                    passStates.set(context, state);
+                    const held = state;
+                    disposers.push(() => {
+                        if (held.disposed) {
+                            return;
+                        }
+                        held.disposed = true;
+                        release(engine, held.leases);
+                        held.leases = [];
+                        passStates.delete(context);
+                    });
+                    invalidateRenderBundles(engine);
+                }
+                owned = state;
+                let changed = false;
+                for (let i = 0; i < watched.length; i++) {
+                    if (state.versions[i] !== watched[i]!._bindingVersion!()) {
+                        changed = true;
+                        break;
+                    }
+                }
+                if (!changed || state.disposed) {
                     return;
                 }
                 const replacementLeases = lease(watched);
                 let replacement: GPUBindGroup;
                 try {
-                    replacement = owned.makeGroup();
+                    replacement = makeGroup();
                 } catch (error) {
                     release(engine, replacementLeases);
                     throw error;
                 }
-                const old = owned.leases;
-                owned.leases = replacementLeases;
-                owned.group = replacement;
-                owned.version = next;
+                const old = state.leases;
+                state.leases = replacementLeases;
+                state.group = replacement;
+                for (let i = 0; i < watched.length; i++) {
+                    state.versions[i] = watched[i]!._bindingVersion!();
+                }
                 release(engine, old);
                 invalidateRenderBundles(engine);
             },
             draw(pass) {
-                if (owned.disposed) {
-                    throw new Error("Dynamic material binding has been disposed.");
+                if (!owned || owned.disposed) {
+                    throw new Error("Dynamic material binding must be updated before drawing and must not be disposed.");
                 }
                 return drawGroup(pass, owned.group);
             },

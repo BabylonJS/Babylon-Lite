@@ -59,6 +59,32 @@ beforeEach(() => {
 });
 
 describe("SSAO task boundary and lifecycle", () => {
+    it("constructs default reconstruction without allocating GPU resources", () => {
+        const f = fixture();
+        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        expect(task.temporal).toEqual({ enabled: true, historySamples: 16, resetVersion: 0 });
+        expect(task._filter).toBeDefined();
+        expect(gpuCalls.create).not.toHaveBeenCalled();
+        task.dispose();
+    });
+    it.each([false, true, { enabled: false, historySamples: 8 }])("accepts explicit reconstruction configuration (%j)", (temporal) => {
+        const f = fixture();
+        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera, temporal }, f.engine);
+        expect(task.temporal.enabled).toBe(typeof temporal === "boolean" ? temporal : temporal.enabled);
+        expect(task.temporal.historySamples).toBe(typeof temporal === "boolean" ? 16 : 8);
+        task.dispose();
+    });
+    it.each([null, "false", 0, []])("rejects invalid reconstruction configuration (%j)", (temporal) => {
+        const f = fixture();
+        expect(() => createSsaoTask({ depthTexture: f.depth, camera: f.camera, temporal: temporal as never }, f.engine)).toThrow("reconstruction options");
+        expect(gpuCalls.create).not.toHaveBeenCalled();
+    });
+    it("does not silently default invalid reconstruction settings", () => {
+        const f = fixture();
+        expect(() => createSsaoTask({ depthTexture: f.depth, camera: f.camera, temporal: { enabled: null as never } }, f.engine)).toThrow("enabled");
+        expect(() => createSsaoTask({ depthTexture: f.depth, camera: f.camera, temporal: { historySamples: null as never } }, f.engine)).toThrow("historySamples");
+        expect(gpuCalls.create).not.toHaveBeenCalled();
+    });
     it("switches normal sources without destroying borrowed inputs or replacing the managed output", () => {
         const f = fixture();
         const normal = createRenderTarget({ format: "rgba16float", samples: 1, size: { width: 128, height: 96 } });
@@ -66,7 +92,7 @@ describe("SSAO task boundary and lifecycle", () => {
         normal._colorTexture = { destroy: vi.fn() } as unknown as GPUTexture;
         normal._width = 128;
         normal._height = 96;
-        const task = createSsaoTask({ depthTexture: f.depth, normalTexture: normal, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, normalTexture: normal, camera: f.camera }, f.engine);
         const managed = task.outputTexture;
         task._onOutputChanged = vi.fn();
         task.execute!();
@@ -99,7 +125,7 @@ describe("SSAO task boundary and lifecycle", () => {
     });
     it("validates a replacement normal attachment before selecting it", () => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         task.execute!();
         for (const normal of [
             createRenderTarget({ format: "rgba16float", samples: 4, size: { width: 128, height: 96 } }),
@@ -116,7 +142,7 @@ describe("SSAO task boundary and lifecycle", () => {
     });
     it("passes normalized intensity to XeGTAO without an algorithm-specific gain", () => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera, intensity: 1 }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera, intensity: 1 }, f.engine);
         task.execute!();
         expect(task.intensity).toBe(1);
         expect(gpuCalls.write.mock.calls.at(-1)![1].intensity).toBe(1);
@@ -143,16 +169,16 @@ describe("SSAO task boundary and lifecycle", () => {
     });
     it("requires a resolved depth attachment and built producer before recording", () => {
         const f = fixture();
-        expect(() => createSsaoTask({ ...f, depthTexture: createRenderTarget({ dFormat: "depth32float", samples: 4, size: { width: 128, height: 96 } }) }, f.engine)).toThrow(
-            "single-sample"
-        );
+        expect(() =>
+            createSsaoTask({ temporal: false, ...f, depthTexture: createRenderTarget({ dFormat: "depth32float", samples: 4, size: { width: 128, height: 96 } }) }, f.engine)
+        ).toThrow("single-sample");
         const target = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 128, height: 96 } });
-        const task = createSsaoTask({ camera: f.camera, depthTexture: target }, f.engine);
+        const task = createSsaoTask({ temporal: false, camera: f.camera, depthTexture: target }, f.engine);
         expect(() => task.record()).toThrow("not built");
     });
     it("reuses resources per frame for XeGTAO", () => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         task.record();
         task.execute!();
         task.execute!();
@@ -168,7 +194,7 @@ describe("SSAO task boundary and lifecycle", () => {
     });
     it.each(["low", "medium", "high", "ultra"] as const)("passes spatial quality %s without reallocating public output", (quality) => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera, quality }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera, quality }, f.engine);
         task.execute!();
         const output = task.outputTexture._colorTexture;
         expect(task.quality).toBe(quality);
@@ -182,14 +208,14 @@ describe("SSAO task boundary and lifecycle", () => {
     it("rejects unsupported spatial quality instead of silently selecting a preset", () => {
         const f = fixture();
         expect(() => validateSsaoSettings(0.5, 1, "invalid" as never)).toThrow("quality");
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         Object.assign(task, { quality: "invalid" });
         expect(() => task.record()).toThrow("quality");
         expect(() => task.execute!()).toThrow("quality");
     });
     it("neutralizes a disabled output once and resumes current-frame computation", () => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         task.record();
         task.enabled = false;
         task.execute!();
@@ -202,7 +228,7 @@ describe("SSAO task boundary and lifecycle", () => {
     });
     it("replaces owned state on resize and disposal never destroys borrowed sources", () => {
         const f = fixture();
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         task.record();
         const first = task._gpu;
         f.depth._width = 63;
@@ -219,8 +245,8 @@ describe("SSAO task boundary and lifecycle", () => {
     it("rejects mismatched normals and unsupported camera projections explicitly", () => {
         const f = fixture();
         const normal = createRenderTarget({ format: "rgba16float", samples: 1, size: { width: 128, height: 96 } });
-        expect(() => createSsaoTask({ depthTexture: f.depth, normalTexture: normal, camera: f.camera }, f.engine).record()).toThrow("identical dimensions");
-        const task = createSsaoTask({ depthTexture: f.depth, camera: f.camera }, f.engine);
+        expect(() => createSsaoTask({ temporal: false, depthTexture: f.depth, normalTexture: normal, camera: f.camera }, f.engine).record()).toThrow("identical dimensions");
+        const task = createSsaoTask({ temporal: false, depthTexture: f.depth, camera: f.camera }, f.engine);
         task.record();
         f.camera.viewport = { x: 0, y: 0, width: 0.5, height: 1 };
         expect(() => task.execute!()).toThrow("full-target");

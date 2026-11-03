@@ -8,11 +8,5 @@
             "babylon-lite/shader/wgsl.js": ["../../packages/babylon-lite/src/shader/wgsl.ts"]
         }
     },
-    "include": [
-        "**/*.ts",
-        "../../scripts/**/*.ts",
-        "../../lab/lite/src/demos/ssao-comparison-baseline.d.ts",
-        "../../packages/babylon-lite/src/vite-env.d.ts",
-        "../../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"
-    ]
+    "include": ["**/*.ts", "../../scripts/**/*.ts", "../../packages/babylon-lite/src/vite-env.d.ts", "../../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"]
 }

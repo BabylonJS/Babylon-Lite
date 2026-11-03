@@ -213,10 +213,14 @@ A material-agnostic deformation-velocity feature owns the previous-pose shader
 code and per-renderable resources. The explicit enabler installs it and the
 PBR geometry-velocity implementation behind nullable typed seams; ordinary
 PBR geometry retains its historical camera-only velocity without importing
-matrix inversion or previous-pose code. Existing Standard skeletal-velocity
-preloading remains available independently.
+matrix inversion or previous-pose code. Standard velocity passes preload the
+shared feature when a skinned or morph mesh is present at task preload. Skinned
+Standard velocity requires it, as before; a morph-only Standard mesh bound before
+it has loaded (for example, one added after registration) keeps the historical
+current-morph previous position instead of failing the pass.
 Implementation installation alone does not activate another task: the enabler
-decorates only its task's PBR view factory after preload, tags those views, and
+decorates only its task's PBR view factory after preload, tags those views (with
+the task's velocity exclusions), and
 uses the task-local tag for previous-pose allocation and shader selection.
 The shared composer cache key includes the enabled velocity variant. Active
 feature-view scope is restored after synchronous composition/binding, including
@@ -255,22 +259,18 @@ that UBO was uploaded.
 Arbitrary NodeMaterial graph deformations, baked VAT and independently animated
 thin-instance transforms remain separate contracts; this does not invent a
 previous transform for them. Existing explicit custom graph velocity remains
-available. Numerical regressions cover PBR and Standard, skin/morph/combined
-deformation, four/eight influences, simultaneous world/camera motion, previous
-depth, first frame, stopping/reversal, exclusions, shared source state and
-disposal. The AO demo includes separate animated skinned and morphed examples
-and an animation toggle; diagnostic/contact runners explicitly pause them to
-keep their existing trajectories deterministic.
+available. The AO demo includes separate animated skinned and morphed examples
+and an animation toggle. Production unit coverage in
+`geometry-deformation-velocity.test.ts`, `geometry-renderer-task.test.ts` and
+`standard-geometry-features.test.ts` checks previous-pose ownership, first-frame
+initialization, source replacement, task-local opt-in, previous-depth
+configuration, exclusions, the morph-only fallback, and disposal.
 
-`pnpm test:geometry:velocity` checks actual PBR/Standard MRT values against
-analytic previous material-point reconstruction; `--software` explicitly uses
-SwiftShader and is wired into the existing PR unit-test job. It covers four
-and eight influences, five morph weights, combined deformation, first frame,
-pause/reversal, world/camera motion, exclusion/re-inclusion and hiding. A second
-geometry task verifies histories are independent and default velocity Z remains
-zero while the opt-in task writes previous depth. SSAO consumes the resulting
-RGBA velocity in the same scene. This is numerical readback, not visual parity
-or a performance test.
+Files: `frame-graph/enable-geometry-velocity.ts` (public enabler),
+`material/geometry-deformation-hooks.ts` / `material/geometry-deformation-velocity.ts`
+(shared previous-pose seam and state), and
+`material/pbr/pbr-geometry-velocity-hooks.ts` / `material/pbr/pbr-geometry-velocity.ts`
+(PBR seam and per-mesh previous-world state).
 
 ### Two-phase task: `record()` plus `execute()`
 
@@ -693,11 +693,6 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
   batches into the same MRT attachments. The flag plumbing already exists
   (`GEOMETRY_OUTPUT` for Standard); the work is per-renderer pipeline
   composition.
-- **Previous morph weights for velocity** — current Standard/PBR morph
-  positions are applied to depth/normals/current clip. A future shared
-  previous-weight buffer can extend motion vectors for independently animated
-  morph weights in the same way Standard skeleton velocity retains prior bone
-  matrices.
 
 ## Related
 

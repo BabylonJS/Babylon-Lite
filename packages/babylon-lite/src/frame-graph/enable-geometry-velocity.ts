@@ -53,6 +53,7 @@ export function enableGeometryVelocity(task: GeometryRendererTask, options: Geom
             task._createPbrGeometryView = (source, config) => {
                 const view = create(source, config);
                 view._geometryVelocity = true;
+                view._velocityExclusions = config.velocityExclusions;
                 return view;
             };
         }

@@ -185,12 +185,11 @@ export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIll
 export { createSsaoTask } from "./post-process/ssao.js";
 export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
 export { enablePbrSsao } from "./post-process/ssao-pbr.js";
-export { enableSsaoTemporal, resetSsaoTemporal } from "./post-process/ssao-temporal.js";
+export { resetSsaoTemporal } from "./post-process/ssao-temporal.js";
 export type { SsaoTemporalOptions, SsaoTemporalSettings } from "./post-process/ssao-temporal.js";
 export { enableSsaoMotionPruning } from "./post-process/ssao-motion-pruning.js";
 export type { SsaoMotionPruningSettings } from "./post-process/ssao-motion-pruning.js";
 export { enableSsaoHalfResolution } from "./post-process/ssao-half-resolution.js";
-export { enableSsaoHalfPipeline } from "./post-process/ssao-half-pipeline.js";
 export type { SsaoHalfResolutionSettings } from "./post-process/ssao-half-resolution.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────

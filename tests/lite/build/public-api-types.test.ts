@@ -35,6 +35,60 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes complete SSAO construction and stable mutable reconstruction controls", () => {
+        const probePath = resolve(BUILD_DIR, "ssao-reconstruction.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createSsaoTask, resetSsaoTemporal, enableSsaoHalfResolution, enablePbrSsao,
+    type EngineContext, type SceneContext, type Camera, type RenderTarget, type SsaoTemporalSettings,
+} from "./index.js";
+// @ts-expect-error The reconstruction initializer is internal.
+import { initializeSsaoTemporal } from "./index.js";
+// @ts-expect-error Half estimation and reconstruction have one public enabler.
+import { enableSsaoHalfPipeline } from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+declare const camera: Camera;
+declare const depth: RenderTarget;
+declare const velocity: RenderTarget;
+const ao = createSsaoTask({ depthTexture: depth, camera }, engine, scene);
+const settings: SsaoTemporalSettings = ao.temporal;
+settings.enabled = false;
+settings.historySamples = 8;
+resetSsaoTemporal(settings);
+const half = enableSsaoHalfResolution(ao);
+half.enabled = false;
+const active: boolean = half.active;
+// @ts-expect-error The effective mode is readonly.
+half.active = active;
+void enablePbrSsao(scene, ao);
+createSsaoTask({ depthTexture: depth, camera, temporal: false }, engine);
+createSsaoTask({ depthTexture: depth, camera, temporal: true }, engine);
+createSsaoTask({
+    depthTexture: depth, camera,
+    temporal: { enabled: false, velocityTexture: velocity, velocityHasPreviousDepth: true, historySamples: 16 },
+}, engine);
+// @ts-expect-error The settings reference itself is readonly.
+ao.temporal = settings;
+// @ts-expect-error Reconstruction configuration has a typed boolean state.
+createSsaoTask({ depthTexture: depth, camera, temporal: { enabled: "yes" } }, engine);
+// @ts-expect-error GPU preparation hooks are internal.
+settings._prepareGpu;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes physics discovery and allocation-free inspection without internal state", () => {
         const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
         try {

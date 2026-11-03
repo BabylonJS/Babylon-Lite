@@ -7,10 +7,12 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "../frame-graph/task.js";
 import { bindSsaoGpuSources, clearSsaoGpu, createSsaoGpu, disposeSsaoGpu, executeSsaoGpu, validateSsaoQuality, writeSsaoGpuParameters } from "./ssao-gpu.js";
 import type { SsaoGpu, SsaoGpuParameters, SsaoQuality } from "./ssao-gpu.js";
+import { initializeSsaoTemporal } from "./ssao-temporal.js";
+import type { SsaoTemporalOptions, SsaoTemporalSettings } from "./ssao-temporal.js";
 
 export type { SsaoQuality } from "./ssao-gpu.js";
 
-/** @internal An optional AO-buffer consumer owns all filtering semantics. */
+/** @internal Default AO reconstruction owns all filtering semantics. */
 export interface SsaoFilter {
     prepare(gpu: SsaoGpu, params: SsaoGpuParameters): void;
     execute(gpu: SsaoGpu, encoder: GPUCommandEncoder): void;
@@ -39,6 +41,8 @@ export interface SsaoTaskConfig {
     radius?: number;
     /** Normalized strength, 0..1. */
     intensity?: number;
+    /** Reconstruction is enabled by default. False selects spatial-only output; options configure history and object velocity. */
+    temporal?: boolean | SsaoTemporalOptions;
 }
 
 /** Plain state and the standard frame-graph lifecycle; output is AO visibility, not scene color. */
@@ -48,6 +52,8 @@ export interface SsaoTask extends Task {
     normalTexture: RenderTarget | null;
     readonly camera: Camera;
     readonly outputTexture: RenderTarget;
+    /** Stable reconstruction settings. Disable explicitly for spatial-only output; reset history with resetSsaoTemporal. */
+    readonly temporal: SsaoTemporalSettings;
     enabled: boolean;
     /** Spatial sampling preset, independent of temporal history and working resolution. */
     quality: SsaoQuality;
@@ -60,7 +66,7 @@ export interface SsaoTask extends Task {
     _onOutputChanged?: (gpu: SsaoGpu, target: RenderTarget) => void;
     /** @internal Restores sampled-output consumers to a neutral fallback. */
     _onDispose?: () => void;
-    /** @internal Installed only by an explicit filtering enabler. */
+    /** @internal Reconstruction initialized by the task factory. */
     _filter?: SsaoFilter;
     /** @internal Installed only by an explicit working-resolution enabler. */
     _resolution?: SsaoResolution;
@@ -84,7 +90,7 @@ function validateNormalInput(normal: RenderTarget | null): void {
 }
 
 /**
- * Create a native WebGPU ambient-occlusion task.
+ * Create a native WebGPU ambient-occlusion task with spatial/temporal reconstruction enabled by default.
  * Add after the depth/normal producer and before an AO-buffer consumer.
  * This does not multiply the final scene color or implicitly enable material shading.
  */
@@ -98,6 +104,13 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
     if (config.normalSpace !== undefined && config.normalSpace !== "view" && config.normalSpace !== "world") {
         throw new Error("SSAO normalSpace must be 'view' or 'world'.");
     }
+    const temporalConfig = config.temporal;
+    if (temporalConfig !== undefined && typeof temporalConfig !== "boolean" && (temporalConfig === null || typeof temporalConfig !== "object" || Array.isArray(temporalConfig))) {
+        throw new Error("SSAO temporal must be a boolean or reconstruction options.");
+    }
+    const temporalOptions: SsaoTemporalOptions = typeof temporalConfig === "object" ? temporalConfig : {};
+    const { enabled = true, historySamples = 16 } = temporalOptions;
+    const temporal: SsaoTemporalSettings = { enabled: typeof temporalConfig === "boolean" ? temporalConfig : enabled, historySamples, resetVersion: 0 };
     const name = config.name ?? "ssao";
     const output = createRenderTarget({ lbl: `${name}-visibility`, format: "rgba16float", samples: 1, size: depth._descriptor.size });
     let depthIdentity: GPUTexture | null = null;
@@ -106,7 +119,7 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
     let wasEnabled = false;
     let neutral = false;
     let disposed = false;
-    const params: SsaoGpuParameters = { depthMultiply: 0, depthAdd: 0, tanX: 0, tanY: 0, far: 0, radius: 0, intensity: 0 };
+    const params: SsaoGpuParameters = { depthMultiply: 0, depthAdd: 0, tanX: 0, tanY: 0, radius: 0, intensity: 0 };
 
     function publish(gpu: SsaoGpu): void {
         const texture = gpu.outputTexture ?? gpu.visibility;
@@ -169,6 +182,7 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
         normalTexture: normal,
         camera: config.camera,
         outputTexture: output,
+        temporal,
         enabled: true,
         quality: config.quality ?? "high",
         radius: config.radius ?? 0.5,
@@ -206,7 +220,6 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
             params.depthAdd = projection[10]!;
             params.tanX = 1 / projection[0]!;
             params.tanY = 1 / projection[5]!;
-            params.far = camera.farPlane;
             params.radius = task.radius;
             params.intensity = task.intensity;
             params.view = getViewMatrix(camera);
@@ -240,5 +253,6 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
         },
     };
     validateSsaoSettings(task.radius, task.intensity, task.quality);
+    initializeSsaoTemporal(task, temporalOptions);
     return task;
 }

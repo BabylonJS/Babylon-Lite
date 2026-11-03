@@ -95,10 +95,10 @@ export interface MaterialPlugin {
     dynamic?: boolean;
     /** @internal Exclude this plugin, including its bindings, outside opaque PBR IBL color passes. */
     _pbrIblOnly?: boolean;
-    /** @internal Increment when texture backing identities change, not when texture contents change. */
+    /** @internal Stable token for the selected texture backing/variant, not its contents. */
     _bindingVersion?(): number;
-    /** @internal Validate the consuming pass before using screen-dependent resources. */
-    _validateDraw?(context: DrawUpdateContext): void;
+    /** @internal Select and validate pass-dependent resources before collecting/binding them. */
+    _prepareDraw?(context: DrawUpdateContext): void;
     /** @internal Select opaque consuming-scene state before resource collection/binding. */
     _selectBindingScope?(scope: object): void;
     /** Static defines folded into the pipeline cache key (and available to the

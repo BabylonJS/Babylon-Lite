@@ -77,9 +77,9 @@ function scopedSampling(scene: SceneContext, sampling: SamplingState): ScopedSam
             engine = (scope as SceneContext).surface.engine;
             scoped.active = scoped.scenes.get(scope) ?? null;
         },
-        _bindingVersion: () => scoped.active?.version ?? 0,
-        _validateDraw(context) {
-            scoped.active?.plugin._validateDraw?.(context);
+        _bindingVersion: () => scoped.active?.plugin._bindingVersion?.() ?? 0,
+        _prepareDraw(context) {
+            scoped.active?.plugin._prepareDraw?.(context);
         },
         bindTextures(out) {
             if (scoped.active) {
@@ -103,6 +103,7 @@ function scopedSampling(scene: SceneContext, sampling: SamplingState): ScopedSam
  * Apply an AO task to selected PBR materials' diffuse environment illumination.
  * Call before registerScene. Existing plugins and baked AO are preserved.
  * Direct lights, emissive, transparent/unlit/refractive materials and non-color passes are unaffected.
+ * Passes using another camera sample neutral visibility instead of this camera's AO.
  */
 export async function enablePbrSsao(scene: SceneContext, task: SsaoTask, materials?: readonly PbrMaterialProps[]): Promise<void> {
     const engine = scene.surface.engine;
@@ -187,15 +188,16 @@ export async function enablePbrSsao(scene: SceneContext, task: SsaoTask, materia
         };
         // Independent leases for the stable neutral fallback and current sampled generation.
         acquireTexture(neutral);
+        let useAo = true;
         sampling.plugin = {
             name: PLUGIN_NAME,
             _pbrIblOnly: true,
-            _bindingVersion: () => sampling.version,
-            _validateDraw(context) {
-                if (context._camera !== camera) {
-                    throw new Error("PBR SSAO cannot be sampled by a pass using a different camera.");
-                }
+            _bindingVersion: () => sampling.version * 2 + (useAo ? 0 : 1),
+            _prepareDraw(context) {
+                ensureNeutral();
+                useAo = context._camera === camera;
                 if (
+                    useAo &&
                     sampling.width &&
                     getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight) !== getEffectiveAspectRatio(camera, sampling.width, sampling.height)
                 ) {
@@ -218,11 +220,11 @@ let ssaoDiffuseVisibility=textureSampleLevel(ssaoVisibilityTexture,ssaoVisibilit
                     throw new Error("PBR SSAO sampling state has been disposed.");
                 }
                 ensureNeutral();
-                out.push({ texture: sampling.texture });
+                out.push({ texture: useAo ? sampling.texture : sampling.neutral });
             },
             getActiveTextures(out) {
                 ensureNeutral();
-                out.push(sampling.texture);
+                out.push(useAo ? sampling.texture : sampling.neutral);
             },
         };
         const publish = (gpu: SsaoGpu, target: RenderTarget): void => {

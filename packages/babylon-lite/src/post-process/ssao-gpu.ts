@@ -32,8 +32,6 @@ export interface SsaoGpu {
     kind: "depth" | "float";
     providedNormals: boolean;
     worldNormals: boolean;
-    pixelStride: 1 | 2;
-    borrowedDepth: boolean;
     /** Mip 0 of `depth` is written by an input adapter; skip the linearizing copy. */
     depthPrepared?: boolean;
     /** Source half-span supplied by an optional working-resolution adapter. */
@@ -46,8 +44,6 @@ export interface SsaoGpu {
     outputTexture?: GPUTexture;
     /** Resolution-matched velocity prepared by an optional input adapter. */
     sourceVelocity?: GPUTextureView;
-    spatialTarget?: GPUTexture;
-    borrowedOutput?: boolean;
     releaseVisibility?: () => void;
     dummyNormal: GPUTexture;
     dummyNormalView: GPUTextureView;
@@ -63,7 +59,6 @@ export interface SsaoGpu {
     estimators: Partial<Record<SsaoQuality, GPUComputePipeline>>;
     resolve: GPUComputePipeline | null;
     reductions: { group: GPUBindGroup; width: number; height: number }[];
-    modules: GPUShaderModule[];
     sourceDepth: GPUTextureView | null;
     sourceNormal: GPUTextureView | null;
     copyGroup: GPUBindGroup | null;
@@ -78,7 +73,6 @@ export interface SsaoGpuParameters {
     depthAdd: number;
     tanX: number;
     tanY: number;
-    far: number;
     radius: number;
     intensity: number;
     view?: Mat4;
@@ -92,19 +86,7 @@ const UINT_TEXTURE = { sampleType: "uint" } as const;
 const uniformEntry = (buffer: GPUBuffer): GPUBindGroupEntry => ({ binding: 0, resource: { buffer } });
 
 /** @internal Create owner resources; no module-level cache or allocation. */
-export function createSsaoGpu(
-    device: GPUDevice,
-    width: number,
-    height: number,
-    kind: "depth" | "float",
-    providedNormals: boolean,
-    worldNormals = false,
-    pixelStride: 1 | 2 = 1,
-    depthPyramid?: GPUTexture
-): SsaoGpu {
-    if (pixelStride !== 1 && pixelStride !== 2) {
-        throw new Error("SSAO pixel stride must be 1 or 2.");
-    }
+export function createSsaoGpu(device: GPUDevice, width: number, height: number, kind: "depth" | "float", providedNormals: boolean, worldNormals = false): SsaoGpu {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
         throw new Error("SSAO requires positive integer dimensions.");
     }
@@ -118,16 +100,12 @@ export function createSsaoGpu(
         storageTexture: { access: "write-only", format },
     });
     const layout = (entries: GPUBindGroupLayoutEntry[]): GPUBindGroupLayout => device.createBindGroupLayout({ label: "ssao-layout", entries });
-    const modules: GPUShaderModule[] = [];
-    const makePipeline = (code: string, bgl: GPUBindGroupLayout, constants?: Record<string, number>): GPUComputePipeline => {
-        const module = device.createShaderModule({ label: "ssao-shader", code });
-        modules.push(module);
-        return device.createComputePipeline({
+    const makePipeline = (code: string, bgl: GPUBindGroupLayout): GPUComputePipeline =>
+        device.createComputePipeline({
             label: "ssao-compute",
             layout: device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
-            compute: { module, entryPoint: "main", constants },
+            compute: { module: device.createShaderModule({ label: "ssao-shader", code }), entryPoint: "main" },
         });
-    };
     const copyLayout = layout([UNIFORM, sourceLayout, storage(2, "r32float")]);
     const reduceLayout = layout([UNIFORM, { binding: 1, visibility: SS.COMPUTE, texture: FLOAT_TEXTURE }, storage(2, "r32float")]);
     const estimatorLayout = layout([
@@ -140,15 +118,15 @@ export function createSsaoGpu(
     ]);
     const resolveLayout = layout([UNIFORM, sourceLayout, { binding: 2, visibility: SS.COMPUTE, texture: UINT_TEXTURE }, storage(4, "rgba16float")]);
     const mips = Math.min(5, Math.floor(Math.log2(Math.max(width, height))) + 1);
-    const texture = (label: string, format: GPUTextureFormat, mipLevelCount = 1, stride = pixelStride): GPUTexture =>
+    const texture = (label: string, format: GPUTextureFormat, mipLevelCount = 1): GPUTexture =>
         device.createTexture({
             label,
-            size: { width: Math.ceil(width / stride), height: Math.ceil(height / stride) },
+            size: { width, height },
             format,
             mipLevelCount,
             usage: TU.STORAGE_BINDING | TU.TEXTURE_BINDING | TU.COPY_SRC | (format === "rgba16float" ? TU.RENDER_ATTACHMENT : 0),
         });
-    const depth = depthPyramid ?? texture("ssao-depth", "r32float", mips, 1);
+    const depth = texture("ssao-depth", "r32float", mips);
     const visibility = texture("ssao-visibility", "rgba16float");
     const dummyNormal = device.createTexture({ label: "ssao-unused-normal", size: [1, 1], format: "rgba32float", usage: TU.TEXTURE_BINDING });
     const uniform = device.createBuffer({ label: "ssao-params", size: 176, usage: BU.UNIFORM | BU.COPY_DST });
@@ -160,8 +138,6 @@ export function createSsaoGpu(
         kind,
         providedNormals,
         worldNormals,
-        pixelStride,
-        borrowedDepth: depthPyramid !== undefined,
         depth,
         working: null,
         visibility,
@@ -178,7 +154,6 @@ export function createSsaoGpu(
         estimators: {},
         resolve: null,
         reductions: [],
-        modules,
         sourceDepth: null,
         sourceNormal: null,
         copyGroup: null,
@@ -231,7 +206,6 @@ export function writeSsaoGpuParameters(gpu: Pick<SsaoGpu, "device" | "width" | "
     data[20] = 2;
     data[22] = 3.3;
     gpu.integers[23] = params.phase ?? 0;
-    data[24] = params.far;
     data[25] = params.intensity;
     if (params.view) {
         for (let i = 0; i < 16; i++) {
@@ -243,27 +217,23 @@ export function writeSsaoGpuParameters(gpu: Pick<SsaoGpu, "device" | "width" | "
     gpu.device.queue.writeBuffer(gpu.uniform, 0, data);
 }
 
-/** @internal Rebind changed sources or activate/release estimation working textures. */
-export function bindSsaoGpuSources(gpu: SsaoGpu, depth: GPUTextureView, normal: GPUTextureView | null, estimation = true): void {
-    if (gpu.sourceDepth === depth && gpu.sourceNormal === normal && estimation === (gpu.working !== null)) {
+/** @internal Rebind changed sources and lazily allocate estimation working textures. */
+export function bindSsaoGpuSources(gpu: SsaoGpu, depth: GPUTextureView, normal: GPUTextureView | null): void {
+    if (gpu.sourceDepth === depth && gpu.sourceNormal === normal && gpu.working) {
         return;
     }
     if (gpu.providedNormals !== (normal !== null)) {
         gpu.providedNormals = normal !== null;
         gpu.estimators = {};
-        gpu.modules.length = 0;
     }
     const device = gpu.device;
-    if (estimation && !gpu.working) {
+    if (!gpu.working) {
         gpu.working = device.createTexture({
             label: "ssao-working-ao-edges",
-            size: [Math.ceil(gpu.width / gpu.pixelStride), Math.ceil(gpu.height / gpu.pixelStride)],
+            size: [gpu.width, gpu.height],
             format: "r32uint",
             usage: TU.STORAGE_BINDING | TU.TEXTURE_BINDING | TU.COPY_SRC,
         });
-    } else if (!estimation && gpu.working) {
-        gpu.working.destroy();
-        gpu.working = null;
     }
     gpu.copyGroup = device.createBindGroup({
         layout: gpu.copy.layout,
@@ -303,39 +273,32 @@ export function executeSsaoGpu(gpu: SsaoGpu, encoder: GPUCommandEncoder, quality
     if (gpu.disposed || !gpu.copyGroup || !gpu.estimatorGroup || !gpu.resolveGroup || !working) {
         throw new Error("SSAO GPU owner is disposed or has no bound estimation resources.");
     }
-    validateSsaoQuality(quality);
     let estimator = gpu.estimators[quality];
     let resolve = gpu.resolve;
     if (!estimator || !resolve) {
-        const make = (code: string, layout: GPUBindGroupLayout, constants?: Record<string, number>): GPUComputePipeline => {
-            const module = gpu.device.createShaderModule({ label: "ssao-xegtao", code });
-            gpu.modules.push(module);
-            return gpu.device.createComputePipeline({
+        const make = (code: string, layout: GPUBindGroupLayout, constants?: Record<string, number>): GPUComputePipeline =>
+            gpu.device.createComputePipeline({
                 label: "ssao-xegtao",
                 layout: gpu.device.createPipelineLayout({ bindGroupLayouts: [layout] }),
-                compute: { module, entryPoint: "main", constants },
+                compute: { module: gpu.device.createShaderModule({ label: "ssao-xegtao", code }), entryPoint: "main", constants },
             });
-        };
         if (!estimator) {
             const sampling = QUALITY_SAMPLING[quality];
             estimator = make(ssaoXeEstimatorWGSL(gpu.kind), gpu.estimatorLayout, {
                 PROVIDED_NORMALS: gpu.providedNormals ? 1 : 0,
                 WORLD_NORMALS: gpu.worldNormals ? 1 : 0,
-                PIXEL_STRIDE: gpu.pixelStride,
                 SLICE_COUNT: sampling.slices,
                 STEP_COUNT: sampling.steps,
             });
             gpu.estimators[quality] = estimator;
         }
         if (!resolve) {
-            resolve = make(ssaoResolveWGSL(gpu.kind), gpu.resolveLayout, { PIXEL_STRIDE: gpu.pixelStride });
+            resolve = make(ssaoResolveWGSL(gpu.kind), gpu.resolveLayout);
             gpu.resolve = resolve;
         }
     }
     const pass = encoder.beginComputePass({ label: "ssao" });
-    if (!gpu.borrowedDepth) {
-        recordSsaoDepth(gpu, pass);
-    }
+    recordSsaoDepth(gpu, pass);
     pass.setPipeline(estimator);
     pass.setBindGroup(0, gpu.estimatorGroup);
     pass.dispatchWorkgroups(Math.ceil(working.width / 8), Math.ceil(working.height / 8));
@@ -345,8 +308,7 @@ export function executeSsaoGpu(gpu: SsaoGpu, encoder: GPUCommandEncoder, quality
     pass.end();
 }
 
-/** @internal Share full-size geometry sampling with sparse receiver estimation. */
-export function recordSsaoDepth(gpu: SsaoGpu, pass: GPUComputePassEncoder): void {
+function recordSsaoDepth(gpu: SsaoGpu, pass: GPUComputePassEncoder): void {
     if (!gpu.depthPrepared) {
         pass.setPipeline(gpu.copy.pipeline);
         pass.setBindGroup(0, gpu.copyGroup);
@@ -377,9 +339,7 @@ export function disposeSsaoGpu(gpu: SsaoGpu): void {
     }
     gpu.disposed = true;
     gpu.uniform.destroy();
-    if (!gpu.borrowedDepth) {
-        gpu.depth.destroy();
-    }
+    gpu.depth.destroy();
     gpu.working?.destroy();
     gpu.dummyNormal.destroy();
     gpu.working = null;
@@ -389,10 +349,9 @@ export function disposeSsaoGpu(gpu: SsaoGpu): void {
     }
     if (gpu.releaseVisibility) {
         gpu.releaseVisibility();
-    } else if (!gpu.borrowedOutput) {
+    } else {
         (gpu.outputTexture ?? gpu.visibility).destroy();
     }
     gpu.estimators = {};
     gpu.resolve = null;
-    gpu.modules.length = 0;
 }

@@ -563,8 +563,11 @@ function _ensureViewResources(
         _extFragments: usedExts,
         _vertexBufferBinders: vertexBufferBinders,
         _needsVelocity: needsVelocity,
+        // Mirrors composition: morph-only previous weights apply only once the shared feature is loaded.
         _hasDeformationVelocity:
-            needsVelocity && !(meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT)) && ((features & HAS_SKELETON) !== 0 || (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0),
+            needsVelocity &&
+            !(meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT)) &&
+            ((features & HAS_SKELETON) !== 0 || ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 && getGeometryDeformationVelocity() !== null)),
         _alphaBlend: alphaBlend,
         _matUBO: matUBO,
         _matData: matData,

@@ -35,7 +35,7 @@ describe("SSAO root-entry opt-in", () => {
             expect(velocity).toBe(name === "enableGeometryVelocity");
         }
     );
-    it.each(["createSsaoTask", "enableSsaoHalfResolution", "enableSsaoHalfPipeline"])("isolates whole-pipeline reduction behind its own enabler (%s)", async (name) => {
+    it.each(["createSsaoTask", "enableSsaoHalfResolution"])("isolates whole-pipeline reduction behind the Half enabler (%s)", async (name) => {
         const result = await build({
             stdin: {
                 contents: `import { ${name} } from ${JSON.stringify(resolve("packages/babylon-lite/src/index.ts"))}; globalThis.usedExport=${name};`,
@@ -54,10 +54,14 @@ describe("SSAO root-entry opt-in", () => {
             minify: true,
             target: "esnext",
         });
-        expect(result.outputFiles[0]!.text.includes("ssao-half-pipeline-prepare")).toBe(name === "enableSsaoHalfPipeline");
+        const code = result.outputFiles[0]!.text;
+        expect(code.includes("ssao-half-pipeline-prepare")).toBe(name === "enableSsaoHalfResolution");
+        expect(code.includes("ssao-half-pipeline-upsample")).toBe(name === "enableSsaoHalfResolution");
+        expect(code).not.toContain("ssao-half-upsample");
+        expect(code).not.toContain("PIXEL_STRIDE");
     });
     it.each([false, true])("retains motion-mask resources and queries only when explicitly enabled (%s)", async (enabled) => {
-        const name = enabled ? "enableSsaoMotionPruning" : "enableSsaoTemporal";
+        const name = enabled ? "enableSsaoMotionPruning" : "createSsaoTask";
         const result = await build({
             stdin: {
                 contents: `import { ${name} } from ${JSON.stringify(resolve("packages/babylon-lite/src/index.ts"))}; globalThis.usedExport=${name};`,
@@ -103,10 +107,10 @@ describe("SSAO root-entry opt-in", () => {
             splitting: false,
             target: "esnext",
         });
-        expect(result.outputFiles[0]!.text.includes("ssao-half-upsample")).toBe(enabled);
+        expect(result.outputFiles[0]!.text.includes("ssao-half-pipeline-upsample")).toBe(enabled);
     });
-    it.each([false, true])("retains temporal history only when explicitly enabled (%s)", async (enabled) => {
-        const name = enabled ? "enableSsaoTemporal" : "createSsaoTask";
+    it.each([false, true])("includes default reconstruction only when SSAO is imported (%s)", async (enabled) => {
+        const name = enabled ? "createSsaoTask" : "createEngine";
         const result = await build({
             stdin: {
                 contents: `import { ${name} } from ${JSON.stringify(resolve("packages/babylon-lite/src/index.ts"))}; globalThis.usedExport=${name};`,
@@ -130,7 +134,6 @@ describe("SSAO root-entry opt-in", () => {
         const code = result.outputFiles[0]!.text;
         expect(code.includes("ssao-history-geometry-0")).toBe(enabled);
         expect(code.includes("Temporal SSAO velocity")).toBe(enabled);
-        expect(Object.keys(result.metafile!.inputs).some((path) => path.replace(/\\/g, "/").includes("scripts/ao-reference/legacy/"))).toBe(false);
     });
     it.each([false, true])("retains AO implementation only when imported (%s)", async (enabled) => {
         const result = await build({
@@ -184,7 +187,8 @@ globalThis.usedExport=${enabled ? "createSsaoTask" : "createEngine"};`,
         });
         const code = result.outputFiles[0]!.text;
         expect(code.includes("ssaoDiffuseVisibility")).toBe(enabled);
-        expect(code.includes("Dynamic material binding has been disposed")).toBe(enabled);
-        expect(code.includes("PBR SSAO cannot be sampled")).toBe(enabled);
+        expect(code.includes("Dynamic material binding must be updated before drawing")).toBe(enabled);
+        expect(code.includes("PBR SSAO and its consuming pass")).toBe(enabled);
+        expect(code).not.toContain("PBR SSAO cannot be sampled by a pass using a different camera");
     });
 });

@@ -1,7 +1,7 @@
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SsaoTask } from "./ssao.js";
-import type { DiligentTemporalGpu } from "./ssao-diligent-gpu.js";
-import { bindDiligentTemporalGpu, createDiligentTemporalGpu, disposeDiligentTemporalGpu, executeDiligentTemporalGpu } from "./ssao-diligent-gpu.js";
+import type { XegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
+import { bindXegtaoTemporalGpu, createXegtaoTemporalGpu, disposeXegtaoTemporalGpu, executeXegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
 import { getEffectiveAspectRatio, getViewProjectionMatrix } from "../camera/camera.js";
 import { createIdentityMat4 } from "../math/create-identity-mat4.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
@@ -10,11 +10,13 @@ import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 
 export interface SsaoTemporalOptions {
+    /** Initial reconstruction state. Default true; change task.temporal.enabled for live toggles. */
+    enabled?: boolean;
     /** Previous-minus-current NDC XY / 2, Y up. Omit only for static geometry. */
     velocityTexture?: RenderTarget;
     /** RGBA velocity Z contains previous positive view depth. Default false. */
     velocityHasPreviousDepth?: boolean;
-    /** Upper bound on accumulated samples, 1..64; native reconstruction caps history at 16. Default 32. */
+    /** Maximum accumulated history samples, 1..16 (the native reconstruction length). Default 16. */
     historySamples?: number;
 }
 
@@ -24,7 +26,7 @@ export interface SsaoTemporalSettings {
     historySamples: number;
     resetVersion: number;
     /** @internal Installed only by an explicit GPU-extension enabler. */
-    _prepareGpu?: (state: DiligentTemporalGpu, velocity: GPUTextureView | null) => void;
+    _prepareGpu?: (state: XegtaoTemporalGpu, velocity: GPUTextureView | null) => void;
 }
 
 interface Entry {
@@ -47,8 +49,11 @@ function copyMatrix(target: Mat4, source: Mat4): void {
 }
 /** @internal Reject invalid mutable history settings rather than silently clamping. */
 export function validateSsaoTemporalSettings(settings: SsaoTemporalSettings): void {
-    if (!Number.isInteger(settings.historySamples) || settings.historySamples < 1 || settings.historySamples > 64) {
-        throw new Error("SSAO temporal historySamples must be an integer in [1, 64].");
+    if (typeof settings.enabled !== "boolean") {
+        throw new Error("SSAO temporal enabled must be a boolean.");
+    }
+    if (!Number.isInteger(settings.historySamples) || settings.historySamples < 1 || settings.historySamples > 16) {
+        throw new Error("SSAO temporal historySamples must be an integer in [1, 16].");
     }
     if (!Number.isSafeInteger(settings.resetVersion) || settings.resetVersion < 0) {
         throw new Error("SSAO temporal resetVersion must be a nonnegative safe integer.");
@@ -64,16 +69,18 @@ export function resetSsaoTemporal(settings: SsaoTemporalSettings): void {
     settings.resetVersion++;
 }
 
-/** Enable AO-only spatial/temporal filtering, independent of full-scene TAA. */
-export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions = {}): SsaoTemporalSettings {
-    if (task.outputTexture._disposed) {
-        throw new Error("Cannot enable temporal filtering on a disposed SSAO task.");
-    }
-    if (task.engine.useFloatingOrigin) {
+/** @internal Initialize a new task's reconstruction from the factory, independent of full-scene TAA. */
+export function initializeSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions): void {
+    const settings = task.temporal;
+    validateSsaoTemporalSettings(settings);
+    if (settings.enabled && task.engine.useFloatingOrigin) {
         throw new Error("Temporal SSAO currently does not support floating-origin reprojection.");
     }
     const velocity = options.velocityTexture ?? null;
-    const previousDepth = options.velocityHasPreviousDepth ?? false;
+    const previousDepth = options.velocityHasPreviousDepth === undefined ? false : options.velocityHasPreviousDepth;
+    if (typeof previousDepth !== "boolean") {
+        throw new Error("SSAO temporal velocityHasPreviousDepth must be a boolean.");
+    }
     if (velocity && (velocity._descriptor.samples !== 1 || !["rg16float", "rg32float", "rgba16float", "rgba32float"].includes(velocity._descriptor.format ?? ""))) {
         throw new Error("Temporal SSAO velocity must be a single-sample signed floating-point RG/RGBA target.");
     }
@@ -81,21 +88,6 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
         throw new Error("Temporal SSAO previous-depth velocity requires a floating-point RGBA target.");
     }
     const states = (_states ??= new WeakMap());
-    const existing = states.get(task);
-    if (existing) {
-        if (options.velocityTexture && existing.velocity !== velocity) {
-            throw new Error("Temporal SSAO is already enabled with a different velocity source.");
-        }
-        if (options.velocityHasPreviousDepth !== undefined && previousDepth !== existing.previousDepth) {
-            throw new Error("Temporal SSAO is already enabled with a different velocity depth contract.");
-        }
-        return existing.settings;
-    }
-    if (task._filter) {
-        throw new Error("An SSAO buffer filter is already installed.");
-    }
-    const settings: SsaoTemporalSettings = { enabled: true, historySamples: options.historySamples ?? 32, resetVersion: 0 };
-    validateSsaoTemporalSettings(settings);
     const halfVelocity = velocity?._descriptor.format === "rg16float" || velocity?._descriptor.format === "rgba16float";
     const inverse = createIdentityMat4();
     const currentView = createIdentityMat4();
@@ -104,7 +96,7 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
     const previousInverse = createIdentityMat4();
     const inverseProjection = createIdentityMat4();
     const previousInverseProjection = createIdentityMat4();
-    let owner: DiligentTemporalGpu | null = null;
+    let owner: XegtaoTemporalGpu | null = null;
     let valid = false;
     let phase = 0;
     let resetVersion = -1;
@@ -130,19 +122,21 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
             validateSsaoTemporalSettings(settings);
             params.phase = 0;
             if (owner && (owner.owner !== gpu || !!owner.sourceNormal !== !!gpu.sourceNormal)) {
-                disposeDiligentTemporalGpu(owner);
+                disposeXegtaoTemporalGpu(owner);
                 owner = null;
                 reset();
             }
             if (!settings.enabled) {
                 if (owner?.owner === gpu) {
                     settings._prepareGpu?.(owner, owner.velocity);
-                    bindDiligentTemporalGpu(owner, owner.velocity);
+                    bindXegtaoTemporalGpu(owner, owner.velocity);
                     gpu.resolveGroup = owner.baseResolve;
                 }
-                gpu.spatialTarget = gpu.visibility;
                 reset();
                 return;
+            }
+            if (task.engine.useFloatingOrigin) {
+                throw new Error("Temporal SSAO currently does not support floating-origin reprojection.");
             }
             const width = gpu.outputTexture?.width ?? gpu.width;
             const height = gpu.outputTexture?.height ?? gpu.height;
@@ -151,16 +145,15 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
                 throw new Error("Temporal SSAO velocity and depth must be built with identical dimensions.");
             }
             if (!owner) {
-                owner = createDiligentTemporalGpu(gpu, velocityView, !!velocity, previousDepth);
+                owner = createXegtaoTemporalGpu(gpu, velocityView, !!velocity, previousDepth);
                 reset();
             }
             if (owner.sourceDepth !== gpu.sourceDepth || owner.sourceNormal !== gpu.sourceNormal || owner.velocity !== velocityView) {
                 reset();
             }
             settings._prepareGpu?.(owner, velocityView);
-            bindDiligentTemporalGpu(owner, velocityView);
+            bindXegtaoTemporalGpu(owner, velocityView);
             gpu.resolveGroup = owner.scratchResolve;
-            gpu.spatialTarget = owner.scratch;
             if (
                 resetVersion !== settings.resetVersion ||
                 historySamples !== settings.historySamples ||
@@ -211,9 +204,9 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
             packMat4IntoF32(data, inverse, 0);
             packMat4IntoF32(data, previousView, 16);
             packMat4IntoF32(data, previousProjection, 32);
+            // Control: x = reset, y = history limit, z = reserved, w = previous-depth velocity contract.
             data[48] = valid ? 0 : 1;
-            data[49] = Math.min(settings.historySamples, 16);
-            data[50] = 1;
+            data[49] = settings.historySamples;
             data[51] = previousDepth ? 1 : 0;
             if (!valid || viewChanged) {
                 invertMat4ToRefOrIdentity(getViewProjectionMatrix(task.camera, getEffectiveAspectRatio(task.camera, width, height)), inverseProjection);
@@ -238,7 +231,7 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
             if (!settings.enabled) {
                 return;
             }
-            executeDiligentTemporalGpu(owner!, encoder);
+            executeXegtaoTemporalGpu(owner!, encoder);
             copyMatrix(previousView, currentView);
             copyMatrix(previousInverse, inverse);
             copyMatrix(
@@ -256,11 +249,10 @@ export function enableSsaoTemporal(task: SsaoTask, options: SsaoTemporalOptions 
             }
             disposed = true;
             if (owner) {
-                disposeDiligentTemporalGpu(owner);
+                disposeXegtaoTemporalGpu(owner);
             }
             states.delete(task);
         },
     };
     states.set(task, { settings, velocity, previousDepth });
-    return settings;
 }

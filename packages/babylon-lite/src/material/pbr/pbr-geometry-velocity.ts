@@ -1,8 +1,7 @@
 /** Optional PBR geometry-pass velocity: per-mesh previous-world reprojection and its vertex WGSL.
  *
- *  Loaded by `preloadPbrGeometryVelocity` only when a geometry task requests a LINEAR_VELOCITY
- *  attachment, so PBR geometry passes without velocity never fetch the matrix inversion,
- *  deformation hooks or velocity shader code. */
+ *  Installed only by the explicit `enableGeometryVelocity` enabler, so ordinary PBR geometry passes
+ *  never retain the matrix inversion, deformation hooks or velocity shader code. */
 
 import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";

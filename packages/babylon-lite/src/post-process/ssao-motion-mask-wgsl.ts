@@ -1,6 +1,6 @@
 import { wgsl, type WgslSource } from "../shader/wgsl.js";
 import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL } from "./ssao-wgsl.js";
-import { SSAO_TEMPORAL_PARAMS_WGSL } from "./ssao-diligent-wgsl.js";
+import { SSAO_TEMPORAL_PARAMS_WGSL } from "./ssao-xegtao-wgsl.js";
 
 /**
  * @internal Geometry of the conservative tile-bounds pyramid. Level 0 has one cell per 8x8

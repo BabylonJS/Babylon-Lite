@@ -78,8 +78,8 @@ export interface PbrGeometryMaterialView extends MaterialView {
     readonly _previousWorldUBO?: GPUBuffer | null;
     /** @internal Per-renderable previous skeletal/morph state, never on a shared view. */
     readonly _deformationVelocity?: GeometryDeformationVelocity | null;
-    /** @internal */
-    readonly _velocityExclusions?: ReadonlySet<Mesh>;
+    /** @internal Velocity exclusions, installed with `_geometryVelocity` by the explicit velocity enabler. */
+    _velocityExclusions?: ReadonlySet<Mesh>;
     /** @internal Shared per-view resources cache populated lazily by the renderable
      *  factory. Opaque to callers. PBR's cached per-variant resources are composed
      *  WGSL, bind-group layouts, pipeline layouts and pipelines, one set per forward
@@ -158,7 +158,6 @@ export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: 
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
     Object.defineProperty(view, "_camera", { value: config.camera ?? null, enumerable: false });
-    Object.defineProperty(view, "_velocityExclusions", { value: config.velocityExclusions, enumerable: false });
     Object.defineProperty(view, "_buildGroup", { value: getPbrGeometryGroupBuilder(), enumerable: false });
     return view;
 }

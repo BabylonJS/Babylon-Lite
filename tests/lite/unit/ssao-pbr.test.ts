@@ -48,7 +48,7 @@ function fixture() {
     const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
     scene.camera = camera;
     const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 128, height: 96 } });
-    const task = createSsaoTask({ depthTexture: depth, camera }, engine, scene);
+    const task = createSsaoTask({ temporal: false, depthTexture: depth, camera }, engine, scene);
     const material = createPbrMaterial();
     return { device, engine, scene, camera, task, material };
 }
@@ -112,14 +112,14 @@ describe("PBR SSAO scope and ownership", () => {
         second.task._onOutputChanged!(gpuB, second.task.outputTexture);
         plugin._selectBindingScope!(first.scene);
         expect(sampled(plugin).texture).toBe(outputA.texture);
-        expect(() => plugin._validateDraw!({ _camera: first.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
+        expect(() => plugin._prepareDraw!({ _camera: first.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
         plugin._selectBindingScope!(second.scene);
         expect(sampled(plugin).texture).toBe(outputB.texture);
-        expect(() => plugin._validateDraw!({ _camera: second.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
+        expect(() => plugin._prepareDraw!({ _camera: second.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
         plugin._selectBindingScope!(plain.scene);
         expect(sampled(plugin).texture).not.toBe(outputA.texture);
         expect(sampled(plugin).texture).not.toBe(outputB.texture);
-        expect(() => plugin._validateDraw!({ _camera: plain.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
+        expect(() => plugin._prepareDraw!({ _camera: plain.camera, targetWidth: 128, targetHeight: 96 })).not.toThrow();
         for (const dispose of first.scene._disposables) dispose();
         expect(first.material.plugins).toEqual([plugin]);
         plugin._selectBindingScope!(second.scene);
@@ -203,7 +203,7 @@ describe("PBR SSAO scope and ownership", () => {
         await expect(enablePbrSsao(f.scene, f.task, [f.material])).rejects.toThrow("disposed");
     });
 
-    it("publishes output generations, rejects other pass views, and returns to neutral on disposal", async () => {
+    it("publishes output generations, neutralizes other cameras, and returns to neutral on disposal", async () => {
         const f = fixture();
         await enablePbrSsao(f.scene, f.task, [f.material]);
         const ao = f.material.plugins![0]!;
@@ -213,10 +213,17 @@ describe("PBR SSAO scope and ownership", () => {
         f.task.outputTexture._colorView = output.view;
         f.task._onOutputChanged!(gpu, f.task.outputTexture);
         expect(sampled(ao).texture).toBe(output.texture);
-        expect(ao._bindingVersion!()).toBe(1);
-        expect(() => ao._validateDraw!({ _camera: f.camera, targetWidth: 256, targetHeight: 192 })).not.toThrow();
-        expect(() => ao._validateDraw!({ _camera: null, targetWidth: 128, targetHeight: 96 })).toThrow("different camera");
-        expect(() => ao._validateDraw!({ _camera: f.camera, targetWidth: 128, targetHeight: 128 })).toThrow("aspect ratio");
+        expect(ao._bindingVersion!()).toBe(2);
+        expect(() => ao._prepareDraw!({ _camera: f.camera, targetWidth: 256, targetHeight: 192 })).not.toThrow();
+        expect(sampled(ao).texture).toBe(output.texture);
+        for (const camera of [null, createFreeCamera({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 1 })]) {
+            expect(() => ao._prepareDraw!({ _camera: camera, targetWidth: 128, targetHeight: 128 })).not.toThrow();
+            expect(sampled(ao)).toBe(neutral);
+            expect(ao._bindingVersion!()).toBe(3);
+        }
+        expect(() => ao._prepareDraw!({ _camera: f.camera, targetWidth: 128, targetHeight: 128 })).toThrow("aspect ratio");
+        ao._prepareDraw!({ _camera: f.camera, targetWidth: 128, targetHeight: 96 });
+        expect(sampled(ao).texture).toBe(output.texture);
         f.task.dispose();
         expect(sampled(ao)).toBe(neutral);
         gpu.releaseVisibility!();
@@ -236,7 +243,7 @@ describe("PBR SSAO scope and ownership", () => {
         f.engine._device = next.device;
         const replacement = sampled(ao);
         expect(replacement.texture).not.toBe(old.texture);
-        expect(ao._bindingVersion!()).toBe(1);
+        expect(ao._bindingVersion!()).toBe(2);
         for (const dispose of f.scene._disposables) dispose();
         disposeGpuResourceRetirements(f.engine);
         expect(old.texture.destroy).toHaveBeenCalledOnce();
@@ -245,6 +252,108 @@ describe("PBR SSAO scope and ownership", () => {
 });
 
 describe("dynamic PBR binding generations", () => {
+    it("keeps AO and neutral generations isolated for passes sharing one renderable and pipeline", async () => {
+        const f = fixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const ao = f.material.plugins![0]!;
+        const neutral = sampled(ao);
+        const output = texture();
+        const gpu = { visibility: output.texture, width: 128, height: 96 } as SsaoGpu;
+        f.task.outputTexture._colorView = output.view;
+        f.task._onOutputChanged!(gpu, f.task.outputTexture);
+        const makeGroup = vi.fn(() => ({ texture: sampled(ao).texture }) as unknown as GPUBindGroup);
+        const draw = vi.fn(() => 1);
+        const binding: DrawBinding = {
+            renderable: { order: 0, isTransparent: false, bind: () => binding },
+            pipeline: {} as GPURenderPipeline,
+            draw: () => 1,
+        };
+        const disposers: (() => void)[] = [];
+        const args = [binding, f.engine, [ao], "ibl", 0, 0, makeGroup, draw, disposers, f.scene] as const;
+        const main = decorate(...args);
+        const secondary = decorate(...args);
+        const mainContext = { _camera: f.camera, targetWidth: 128, targetHeight: 96 };
+        const otherCamera = createFreeCamera({ x: 1, y: 1, z: 1 }, { x: 0, y: 0, z: 0 });
+        const secondaryContext = { _camera: otherCamera, targetWidth: 64, targetHeight: 64 };
+        const pass = {} as GPURenderPassEncoder;
+        for (let frame = 0; frame < 3; frame++) {
+            // Both updates may precede either draw; the last camera must not select both groups.
+            main.update!(mainContext);
+            secondary.update!(secondaryContext);
+            main.draw(pass, f.engine);
+            expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: output.texture }));
+            secondary.draw(pass, f.engine);
+            expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: neutral.texture }));
+        }
+        expect(makeGroup).toHaveBeenCalledTimes(2);
+        secondaryContext._camera = f.camera;
+        secondaryContext.targetWidth = 128;
+        secondaryContext.targetHeight = 96;
+        secondary.update!(secondaryContext);
+        secondary.draw(pass, f.engine);
+        expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: output.texture }));
+        expect(makeGroup).toHaveBeenCalledTimes(3);
+        secondaryContext._camera = otherCamera;
+        secondary.update!(secondaryContext);
+        main.update!(mainContext);
+        secondary.draw(pass, f.engine);
+        expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: neutral.texture }));
+        expect(makeGroup).toHaveBeenCalledTimes(4);
+        const replacement = texture();
+        const nextGpu = { visibility: replacement.texture, width: 128, height: 96 } as SsaoGpu;
+        f.task.outputTexture._colorView = replacement.view;
+        f.task._onOutputChanged!(nextGpu, f.task.outputTexture);
+        gpu.releaseVisibility!();
+        disposeGpuResourceRetirements(f.engine);
+        expect(output.texture.destroy).not.toHaveBeenCalled();
+        main.update!(mainContext);
+        secondary.update!(secondaryContext);
+        main.draw(pass, f.engine);
+        expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: replacement.texture }));
+        secondary.draw(pass, f.engine);
+        expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: neutral.texture }));
+        disposeGpuResourceRetirements(f.engine);
+        expect(output.texture.destroy).toHaveBeenCalledOnce();
+        f.task.dispose();
+        secondary.update!(secondaryContext);
+        main.update!(mainContext);
+        main.draw(pass, f.engine);
+        expect(draw).toHaveBeenLastCalledWith(pass, expect.objectContaining({ texture: neutral.texture }));
+        nextGpu.releaseVisibility!();
+        disposers.forEach((dispose) => dispose());
+        for (const dispose of f.scene._disposables) dispose();
+        disposeGpuResourceRetirements(f.engine);
+        expect(neutral.texture.destroy).toHaveBeenCalledOnce();
+        expect(output.texture.destroy).toHaveBeenCalledOnce();
+        expect(replacement.texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("compares plugin generations independently when pass selection changes in opposite directions", () => {
+        const f = fixture();
+        let first = 0,
+            second = 1;
+        const plugins: MaterialPlugin[] = [
+            { name: "first", _bindingVersion: () => first },
+            { name: "second", _bindingVersion: () => second },
+        ];
+        const makeGroup = vi.fn(() => ({}) as GPUBindGroup);
+        const binding: DrawBinding = {
+            renderable: { order: 0, isTransparent: false, bind: () => binding },
+            pipeline: {} as GPURenderPipeline,
+            draw: () => 1,
+        };
+        const disposers: (() => void)[] = [];
+        const decorated = decorate(binding, f.engine, plugins, "ibl", 0, 0, makeGroup, () => 1, disposers);
+        const context = { _camera: f.camera, targetWidth: 128, targetHeight: 96 };
+        decorated.update!(context);
+        first = 1;
+        second = 0;
+        decorated.update!(context);
+        decorated.update!(context);
+        expect(makeGroup).toHaveBeenCalledTimes(2);
+        disposers.forEach((dispose) => dispose());
+    });
+
     it("leases each renderable/pipeline once, refreshes before drawing, and retires old resources", () => {
         const f = fixture();
         const first = texture(),
@@ -263,11 +372,13 @@ describe("dynamic PBR binding generations", () => {
         const args = [binding, f.engine, [plugin], "ibl", 0, 0, makeGroup, draw, disposers] as const;
         const a = decorate(...args),
             b = decorate(...args);
+        expect(makeGroup).not.toHaveBeenCalled();
+        const context = { targetWidth: 128, targetHeight: 96, _camera: f.camera };
+        expect(() => a.draw({} as GPURenderPassEncoder, f.engine)).toThrow("updated before drawing");
+        a.update!(context);
+        b.update!(context);
         expect(makeGroup).toHaveBeenCalledOnce();
         expect(getTextureReferenceStore().get(first.texture)).toBe(1);
-        const context = { targetWidth: 128, targetHeight: 96, _camera: f.camera };
-        a.update!(context);
-        expect(makeGroup).toHaveBeenCalledOnce();
         current = second;
         version++;
         a.update!(context);

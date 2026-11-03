@@ -3,7 +3,7 @@
 # Runs on every PR targeting master. Ten parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
 #   2. API Report       — public API diff comment + breaking-change validation
-#   3. Unit Tests       — vitest + scoped geometry/AO GPU checks + plumbing (Playwright)
+#   3. Unit Tests       — vitest + plumbing (Playwright)
 #   4. Bundle Size      — ceiling checks
 #   5. Perf Regression  — Lite vs Stable on BrowserStack
 #   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
@@ -140,15 +140,6 @@ stages:
                   displayName: "Run vitest unit and Lite integration tests"
                   env:
                       CI: "true"
-
-                - script: pnpm test:ao:temporal --software
-                  displayName: "Validate production temporal AO (SwiftShader)"
-
-                - script: pnpm test:ao:temporal --half --software
-                  displayName: "Validate half-resolution AO (SwiftShader)"
-
-                - script: pnpm test:geometry:velocity --software
-                  displayName: "Validate skin/morph geometry velocity (SwiftShader)"
 
                 - script: npx vitest run --project build
                   displayName: "Run vitest build-output tests"

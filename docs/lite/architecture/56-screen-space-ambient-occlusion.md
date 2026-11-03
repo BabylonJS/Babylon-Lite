@@ -1,14 +1,18 @@
 # Module: Screen-Space Ambient Occlusion
 
 > Package path: `packages/babylon-lite/src/post-process/ssao*`.
-> Independent native oracle: `55-ao-reference.md`.
 
 ## Purpose
 
 Provide an opt-in WebGPU AO buffer computed from a perspective camera's depth
-attachment and optional signed surface normals. XeGTAO is the sole estimator;
-the original and slope-safe VBAO implementations have been removed.
+attachment and optional signed surface normals, with spatial/temporal
+reconstruction enabled by default. XeGTAO is the sole estimator.
 No existing Babylon scene, golden, or ceiling changes.
+
+`createSsaoTask` constructs the complete production pipeline. Reconstruction is
+not a second feature that callers must enable: low/medium spatial sampling and
+Half rendering depend on it for usable noise levels. Explicit spatial-only
+operation remains available for diagnostics or an alternative consumer filter.
 
 `depthTexture` directly borrows a single-sample **depth attachment**, including
 `geometry.geometryDepthTexture` from `createGeometryRendererTask` or an existing
@@ -28,6 +32,26 @@ doing so would incorrectly darken direct light and emissive materials.
 The AO-buffer task is independently validated. PBR lighting is enabled separately;
 importing or adding the task alone does not change a material's lighting.
 
+## Algorithm identity and provenance
+
+Babylon Lite ships one AO estimator: XeGTAO, based on
+[Intel's implementation](https://github.com/GameTechDev/XeGTAO/tree/a5b1686c7ea37788eeb3576b5be47f7c03db532c).
+The default temporal accumulation, convolution, history repair, and spatial
+reconstruction described here are adapted from
+[DiligentFX's AO reconstruction](https://github.com/DiligentGraphics/DiligentFX/tree/eaf6ab785968bdee2393210c5a67033a4d9140cc).
+They filter the XeGTAO output; there is no separate runtime "Diligent" AO
+implementation or algorithm selector. This combination is not presented as
+Intel's unmodified whole pipeline.
+
+The runtime modules, internal symbols, and GPU labels use `xegtao`.
+The upstream license retains the DiligentFX name to identify the
+actual source implementation.
+XeGTAO's MIT license and DiligentFX's Apache-2.0 license (which has no
+accompanying NOTICE file at the pinned commit) are preserved under
+`packages/babylon-lite/third-party-notices/` and included in the published
+package's generated `NOTICE.txt`. The adapted reconstruction modules
+(`ssao-xegtao-wgsl.ts`, `ssao-xegtao-gpu.ts`) state that they are adapted from DiligentFX.
+
 ## Public API Surface
 
 ```ts
@@ -42,6 +66,7 @@ interface SsaoTaskConfig {
     quality?: SsaoQuality;
     radius?: number;
     intensity?: number;
+    temporal?: boolean | SsaoTemporalOptions;
 }
 
 interface SsaoTask extends Task {
@@ -53,6 +78,7 @@ interface SsaoTask extends Task {
     quality: SsaoQuality;
     radius: number;
     intensity: number;
+    readonly temporal: SsaoTemporalSettings;
 }
 
 function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, scene?: SceneContext): SsaoTask;
@@ -65,9 +91,22 @@ Call after creating depth/geometry targets, add after their producing task, and
 before a consumer of the AO target. The output uses visibility: white is
 unoccluded; black is occluded. It is a filterable `rgba16float` render target.
 
-Defaults: radius 0.5 view units, intensity 1, enabled.
-There is no algorithm selector or constant-backface-thickness setting:
-both belonged to the removed VBAO path. These experimental APIs were unpublished.
+Defaults: radius 0.5 view units, intensity 1, enabled, and temporal reconstruction
+enabled. `temporal: false` explicitly selects spatial-only output;
+`temporal: { enabled: false, ...options }` can also configure its future velocity
+input before starting disabled. `ao.temporal` is one stable readonly reference
+to mutable plain settings. Change `ao.temporal.enabled` or
+`ao.temporal.historySamples` at runtime; use `resetSsaoTemporal(ao.temporal)` for
+cuts. Configured velocity source/depth contracts are captured at construction,
+not changed by mutating the original config object.
+
+No temporal GPU history or temporal-owner passes are allocated/executed while
+initially disabled. The controller and its small CPU state remain available
+for an explicit live re-enable. Floating-origin reprojection is unsupported:
+default enabled construction fails explicitly there, and enabling a previously
+disabled controller also fails before allocating temporal GPU resources.
+Spatial-only operation requires an explicit opt-out in that environment.
+There is no algorithm selector.
 Spatial quality defaults to `"high"`, preserving the original three slices
 and three steps per side. Presets select fixed GPU-specialized sampling:
 
@@ -95,17 +134,17 @@ it only replaces final scene shading/presentation with a visibility copy.
 Motion pruning can remove that wasted transport work in static regions, but
 remains a separate scene-dependent opt-in. Do not silently enable it or loosen
 AO/transport thresholds to force total preset timings into sample-count order.
-The showcase and comparison demos now visibly enable the existing pruning
-option by default; their checkboxes allow an unpruned comparison. The runtime
+The standalone showcase demo visibly enables the existing pruning
+option by default; its checkbox allows an unpruned comparison. The runtime
 API itself remains opt-in. This avoids spending most of the static-scene budget
 searching noisy, stationary AO pixels, without changing sampling or history math.
 
 Estimator pipelines are cached in a quality-keyed record, with one spatial resolve
 pipeline per owner. An unchanged frame allocates no new
-pipeline/cache key/container. Full and sparse owners receive the same preset;
-half mode still evaluates its selected source pixels against full-size geometry.
+pipeline/cache key/container. Full and Half owners receive the same preset;
+Half evaluates the reduced geometry grid with the original camera projection.
 Changing quality resets temporal history without reallocating the public output.
-Unsupported preset strings fail explicitly at the task boundary and GPU entry.
+Unsupported preset strings fail explicitly at the task boundary, before any dispatch.
 Mutable
 settings are validated at the API boundary and sampled before each dispatch.
 Intensity is in [0,1]; radius is positive and finite.
@@ -176,17 +215,18 @@ retain 0.25 within one half-float step (1/4096), not fall back to white. Where t
 full planar stencil is available, normal agreement must be at least 0.999;
 silhouette fallback normals must remain compatible with their face (dot 0.9).
 `task.normalTexture` is mutable: assign a compatible signed-normal target to
-sample it, or `null` to reconstruct normals from depth. A change between these
-two shader variants invalidates cached estimator pipelines and recreates the
-temporal owner on the next record/execute, resetting history. The full-size
-owner, public GPU texture, and managed output target stay unchanged, so PBR leases
-and pre-recorded AO-only consumers remain valid. The half adapter recreates its
-sparse owner and specialized upsampler, not the full-size output. Replacing one supplied
-normal target with another of the same contract only rebinds sources and resets
-history. Invalid formats, multisampling, or mismatched/unbuilt dimensions fail
-explicitly. The task never owns or destroys either normal source. The same
-selection propagates to half-resolution estimation and bilateral reconstruction;
-unchanged frames retain cached resources.
+sample it, or `null` to reconstruct normals from depth. In Full, changing between
+these variants invalidates estimator pipelines and recreates the temporal owner,
+resetting history without replacing public visibility. In Half, it recreates the
+reduced-input/estimation/reconstruction owner and full-size output because input
+preparation and final upsampling have different shader variants. The managed
+output target stays the same; PBR bindings follow backing-texture replacements,
+and other pre-recorded consumers must re-record their graph. Replacing a normal
+target with another of the same format only rebinds sources and resets history.
+Invalid formats, multisampling, or mismatched/unbuilt dimensions fail explicitly.
+The task never owns or destroys either normal source. The same selection
+propagates to input preparation and bilateral reconstruction; unchanged frames
+retain cached resources.
 
 ## Internal Architecture
 
@@ -209,8 +249,10 @@ destroy source depth/normal attachments.
 3. XeGTAO estimator: one `r32uint` working texture holding the packed visibility
    byte (bits 0-7) and the packed edge byte (bits 8-15), preserving upstream byte
    values. The resolve reads one word per tap instead of two textures.
-4. XeGTAO edge-aware denoising into
-   `rgba16float` visibility.
+4. XeGTAO edge-aware denoising into the reconstruction scratch target.
+5. Default temporal accumulation, AO/depth convolution, history repair, and
+   spatial reconstruction into stable `rgba16float` visibility. An explicit
+   temporal opt-out sends step 4 directly to visibility and skips step 5.
 
 Each reduction dispatch reads only its preceding mip view and writes one
 destination mip view. This avoids the five simultaneous storage bindings used
@@ -221,8 +263,8 @@ final source row/column; one-dimensional and small targets remain valid.
 Uniform layout: 176 bytes. The first 96 bytes match the native GTAO constants:
 size(u32x2), reciprocal size, depth unpack, tan half-FOV, NDC multiply/add,
 per-pixel view scale, radius/falloff, radius multiplier/padding/final power/blur
-beta, sample power/thin compensation/mip offset/noise index. Next: far depth,
-intensity, two reserved zero padding values (four f32); then view matrix. Supplied/world normal
+beta, sample power/thin compensation/mip offset/noise index. Next: one reserved
+zero, intensity, two reserved zero padding values (four f32); then view matrix. Supplied/world normal
 selection is specialized with pipeline overrides, not branched per frame.
 Offsets are explicit typed data, never parsed from generated WGSL.
 
@@ -256,7 +298,7 @@ These passes are bound by fetch latency and bandwidth rather than arithmetic, so
 - `aoRawDepth` clamps with `ao.size`, never `textureDimensions`: raw depth
   always has the AoParams size, and a size query would serialize ahead of every
   depth fetch. Uniform-derived sizes likewise replace queries in the resolve
-  (`ceil(size / stride)`) and the Half prepare (`ceil(size / 2)`).
+  (`ao.size`) and the Half prepare (`ceil(size / 2)`).
 - Independent per-pixel inputs (supplied normal via `aoSuppliedNormal`, view
   depth, velocity, transport, current/history AO and counts, resolve words) are
   fetched before background or convergence tests and before dependent rejection
@@ -291,7 +333,7 @@ multisample inputs, and invalid mutable settings are explicit errors.
 
 Not SSAO2 parity. This is an independent XeGTAO implementation.
 An unused feature leaves Babylon parity and unrelated bundles unchanged.
-Scene 321 nevertheless compares the shipped integration against Babylon.js
+Scene 348 nevertheless compares the shipped integration against Babylon.js
 `SSAO2RenderingPipeline` on the same environment-lit Kitchen, as a coarse
 regression bound rather than an equivalence claim (see Test Specification).
 
@@ -308,14 +350,18 @@ called before `registerScene`. It attaches a material plugin only to selected PB
 materials (all PBR scene materials by default), preserving pre-existing plugins.
 The plugin applies to opaque and alpha-tested PBR diffuse IBL, not direct light,
 emissive, unlit, transparent, refractive, shadow, or geometry-output passes.
-The consuming pass must use the AO camera and matching effective aspect ratio;
-camera overrides fail explicitly instead of sampling another view's occlusion.
+Only a consuming pass using the AO camera samples its visibility. A pass using
+another camera (including a secondary view or reflection/probe camera), or no
+camera, samples the existing neutral white texture instead: it renders normally
+without borrowing another view's occlusion. A pass using the AO camera must still
+have the same effective aspect ratio; a mismatched projection remains an explicit
+configuration error.
 The task is bound to one owning scene. New material attachment happens before
 scene registration; repeated enabling for already attached materials is idempotent.
 Shared source materials retain one dispatcher plugin. Its weak consuming-scene
 mapping selects each scene's own sampling state before bind-group creation and
 before dynamic updates; nonparticipating scenes sample engine-owned neutral white.
-Camera/aspect validation applies only to the selected participating scene.
+Camera selection and aspect validation apply only to the selected participating scene.
 Disposal removes only that scene's membership and detaches the dispatcher after
 the last member. First attachment and last removal invalidate cached PBR feature
 selection, including materials already composed in another scene.
@@ -364,6 +410,19 @@ once. Unchanged frames keep the normal cached-bundle path, with no GPU-object
 creation. Geometry/shadow passes exclude the AO plugin and cannot feed back from
 the AO output while producing its depth/normals.
 
+Dynamic groups and their texture leases are cached by renderable, pipeline, and
+the render task's stable `DrawUpdateContext` identity. Groups are created lazily
+on the first update, after the plugin's internal `_prepareDraw` hook selects
+the correct resources for the pass camera. Each binding retains its own selected
+group, so updating two passes before either draws cannot cross-contaminate them,
+even when both use the same material/renderable and GPU pipeline. The selected
+AO/neutral variant is part of the binding token. Changing a pass camera refreshes
+that pass's group; alternating unchanged cameras across passes does not recreate
+groups or invalidate render bundles every frame. Each watched plugin's token is
+compared independently, rather than summed, so opposite selection changes cannot
+cancel each other. Scene selection still runs before camera selection. Disposal,
+output replacement and device replacement retain fenced texture-generation leases.
+
 The feature owns sampled-texture leases, neutral fallback, and old-generation
 retirement. Materials capture only a sampled-texture state object, never the
 scene or AO task. Disposal restores neutral sampling and respects queued GPU
@@ -375,10 +434,11 @@ before the AO task has published its replacement output.
 
 ## Temporal AO
 
-Temporal filtering is a separate opt-in, before PBR composition:
+Reconstruction is initialized by `createSsaoTask`, before PBR composition:
 
 ```ts
 interface SsaoTemporalOptions {
+    enabled?: boolean;
     velocityTexture?: RenderTarget;
     velocityHasPreviousDepth?: boolean;
     historySamples?: number;
@@ -388,14 +448,13 @@ interface SsaoTemporalSettings {
     historySamples: number;
     resetVersion: number;
 }
-function enableSsaoTemporal(task: SsaoTask, options?: SsaoTemporalOptions): SsaoTemporalSettings;
 function resetSsaoTemporal(settings: SsaoTemporalSettings): void;
 ```
 
 For example, `ao.quality = "medium"` selects eight spatial depth samples per
 evaluated pixel. Independently,
-`enableSsaoTemporal(ao, { velocityTexture, historySamples: 8 })` bounds mature
-temporal history at eight observations. Changing either does not change the
+`createSsaoTask({ depthTexture, camera, temporal: { velocityTexture, historySamples: 8 } }, engine, scene)`
+bounds mature temporal history at eight observations. Changing either does not change the
 other setting or implicitly enable/disable half resolution.
 
 Motion-mask pruning is a separate, disabled-by-default optimization:
@@ -406,13 +465,14 @@ interface SsaoMotionPruningSettings {
 }
 function enableSsaoMotionPruning(task: SsaoTask): SsaoMotionPruningSettings;
 
-const temporal = enableSsaoTemporal(ao, { velocityTexture, velocityHasPreviousDepth: true });
+const ao = createSsaoTask({ depthTexture, camera, temporal: { velocityTexture, velocityHasPreviousDepth: true } }, engine, scene);
+const temporal = ao.temporal;
 const pruning = enableSsaoMotionPruning(ao);
 pruning.enabled = false; // Restore unpruned transport for a highly dynamic scene.
 ```
 
-Call the pruning enabler only after temporal filtering has been enabled with
-object velocity. Missing temporal filtering, missing velocity, and disposed
+Call the pruning enabler on an AO task constructed with object velocity.
+Missing velocity and disposed
 tasks are explicit errors. Repeated calls return the same plain settings.
 Calling the enabler opts in (`enabled: true`); omitting it retains the original
 transport search, with no mask shader, mask allocations, classification or
@@ -430,9 +490,9 @@ on an unchanged frame. This changes work selection, not AO quality; gains
 depend on motion coverage and AO radius, and dense motion can make its extra
 classification/query overhead unprofitable.
 
-Temporal defaults: enabled, configured upper bound 32 accumulated samples; the native-style
-reconstruction uses at most 16. `historySamples` is an integer in
-`[1,64]`. `resetVersion` is a nonnegative safe integer; the reset function
+Temporal defaults: enabled, with 16 accumulated history samples (the native
+reconstruction length). `historySamples` is an integer in
+`[1,16]`. `resetVersion` is a nonnegative safe integer; the reset function
 increments it for explicit camera cuts or externally changed scene content.
 Disabling temporal filtering restores static phase zero and the original
 spatial-only output. All existing native goldens remain unchanged.
@@ -442,7 +502,7 @@ accumulation, but lacks object velocity, normal rejection, and per-pixel
 history confidence. Reuse its running-mean/phase conventions, not its GPU
 resolver. AO owns a dedicated native-format fullscreen reconstruction pipeline;
 no full-scene TAA is required. The active implementation and exact native/production
-contracts are specified in [58-diligent-denoiser.md](58-diligent-denoiser.md).
+contracts are specified in [#reconstruction-pipeline-and-ownership](#reconstruction-pipeline-and-ownership).
 
 The optional velocity target is a same-size, single-sample signed floating-point
 RG/RGBA texture. XY equals half the previous-minus-current NDC position,
@@ -457,8 +517,8 @@ this value as previous clip W for perspective projection when
 `enableGeometryVelocity(geometry, { previousDepth: true })` is called on a floating-point
 RGBA target. Float32 velocity keeps a `1e-5` relative previous-depth tolerance;
 half-float velocity uses `2^-10` for depth and motion, and static receivers
-substitute the exact camera-only previous depth (module 58). The AO and
-comparison demos use `rgba16float`; pruning remains byte-equivalent.
+substitute the exact camera-only previous depth (see temporal reconstruction below). The standalone
+demo uses `rgba16float`; pruning remains byte-equivalent.
 History acceptance and occluder material-point reconstruction use that previous surface
 depth, not the old-camera projection of the current surface position.
 An independently moving receiver with valid 3D motion is not blindly capped
@@ -498,18 +558,13 @@ Temporal-off estimation always uses phase zero.
 
 ### Production reconstruction
 
-`enableSsaoTemporal` selects the complete native-format owner specified in
-[module 58](58-diligent-denoiser.md): R8 AO feedback, R16 observation counts,
+The default reconstruction controller selects the complete native-format owner:
+R8 AO feedback, R16 observation counts,
 one full-resolution RG32Uint geometry history, AO/depth convolution, history repair, and spatial
 reconstruction. Supplied velocity additionally enables geometry-driven
 occlusion-history transport. Optional motion pruning changes work selection,
 not the reconstruction or history policy. There is no independent guide
 history, confidence-finishing blur, or mandatory motion-activity hierarchy.
-
-The superseded guide-only specification is preserved in the
-[historical reconstruction archive](history/ssao-guide-only.md). Its owner and
-shaders live only under `scripts/ao-reference/legacy/` and are selected explicitly
-with `--legacy`; they are not part of the runtime package.
 
 ### Temporal lifecycle and regression scope
 
@@ -523,32 +578,518 @@ Disable clears neutral output and invalidates history; disposal releases
 private textures/buffers once. Matrix storage and parameter scratch are reused;
 no per-frame pipeline, bind-group, or temporary-matrix allocations.
 
-Focused numerical GPU checks must establish decreasing noise against a
-multi-phase mean, unchanged background, phase diversity, camera and supplied
-object-velocity reprojection, depth/normal disocclusion rejection, history
-clipping, resets, odd/small dimensions, and stable public texture identity.
-Temporal-off mode must still pass every frozen native-buffer comparison.
-The moving-occluder harness also has a `--close-up` profile at 668x536, matching
-the supplied recording's resolution, with slow object motion and a closer camera.
-It must report absolute floor flicker RMS as well as the relative spatial-only
-ratio; passing the relative check alone is not evidence of visually stable AO.
-Earlier prototypes exhibited user-visible shimmer despite passing the scoped
-budgets. Supplement them with the independent same-input native comparison in
-[57-ao-temporal-reference.md](57-ao-temporal-reference.md); a numerical score alone
-does not establish production-ready visual quality.
-This close-up profile targets the floor; the original profile continues to enforce
-the existing moving-surface history and flicker bounds. Close-up floor residual
-flicker RMS must not exceed 0.01, and discrepancy from the current 64-phase AO
-mean must not exceed 0.02, so blurring away the shadow cannot satisfy the test.
-The `--close-up-reversal` profile advances for eight frames, pauses for eight,
-then reverses to its starting position. It retains the same floor noise,
-signal-error, and ghosting limits, exercising transitions into and out of the
-short-history footprint. Material-point matching uses each frame's actual
-displacement, including zero and negative displacement.
-The shipped path retains long native-format history and transports the changing
-occlusion field using nearby occluders' actual motion. Rejected guide-only and
-low-history-resolution experiments are historical comparisons, not alternate
-production modes. Unused feature code must remain absent from unrelated bundles.
+### Reconstruction pipeline and ownership
+
+The default temporal owner retains the stable public AO target and redirects
+spatial estimation to private scratch. It owns two feedback histories, one
+geometry history, a temporal intermediate, a five-mip AO/depth convolution
+texture, and a resampled intermediate. No allocations or bind-group creation
+occur on an unchanged frame.
+
+AO feedback, temporal AO, convolution AO, and repaired AO use **R8_UNORM render
+attachments**, matching native sampling and render-target conversion. Counts
+use separate R16_FLOAT attachments; convolution depth uses R32_FLOAT.
+Geometry is RG32_UINT: the exact bits of raw device depth, then the signed world
+normal in octahedral form as two snorm16 values (about 5e-5 rad). Device depth is
+never quantized, and the normal error is far below the 0.9 agreement cosine and
+the 1e-4 plane allowance, so the normal-rejection contract is unchanged.
+Only one geometry texture is necessary: transport and temporal accumulation
+read previous geometry, then the existing final-output pass overwrites it with
+current depth/world normals for the next frame. Geometry is never sampled by
+that final pass, and later reconstruction stages use current source geometry
+directly. This eliminates geometry ping-pong without adding a pass. At
+1920x1080 the single history is 15.82 MiB (two RGBA32F lanes were 63.28 MiB);
+AO/count/geometry persistent histories together total 27.69 MiB.
+Working resolution and every feedback format remain unchanged.
+The earlier single RGBA32_FLOAT history (43.51 MiB of histories) was bandwidth
+bound: at 1920x1080 Full/High it cost about 0.020 ms more in the output pass
+(16-byte write) and 0.013 ms more in temporal accumulation (four 16-byte
+bilinear fetches) than RG32_UINT, net of decoding.
+A byte-valued RGBA16F compute prototype did not match native
+UNORM sampling/conversion and is not retained. Each stage renders a fullscreen
+triangle, with separate cached attachment views per mip and history lane.
+Spatial reconstruction and output are one fullscreen pass with three MRT
+targets: R8 feedback, the stable normalized RGBA16F public output (quantized
+exactly like the R8 value, `floor(clamp(ao,0,1)*255+0.5)/255`) and geometry
+history.
+Native history length is 16, which is also the largest accepted
+`historySamples` value.
+
+Omitting the current normal input reconstructs normals from depth; those normals
+are still stored in geometry history. In Half, preparation reconstructs reduced
+normals once from full-size source depth, and the final upsampler reconstructs
+full-size receiver normals. Every estimation and history resource matches the
+active working resolution. Full/Half transitions replace the GPU and temporal
+owners, reset history and republish full-size output. Bindings are recreated
+even when temporal filtering is disabled, so re-enabling cannot restore groups
+referencing destroyed resources.
+
+An isolated R32_FLOAT history trial retained production radiometric, dither,
+and transport controls, replacing normal/curvature rejection with native 1%
+view-depth acceptance. It would reduce geometry history to 7.91 MiB and total
+AO/count/geometry history to 19.78 MiB at 1080p. It passed the close-up half-mode
+pause/reversal case, but failed the default moving-sphere surface-flicker budget:
+temporal/spatial RMS ratio 0.589 versus 0.477 with normal-aware history (limit
+0.5). Occluded-surface long-history retention fell from 94.97% to 60.33%.
+It also retained stale AO after a same-depth normal discontinuity. This trial
+is not a shipped mode; normal-aware history with exact depth remains the default.
+
+Geometry history stores exact current device depth. Temporal reprojection
+uses current world position in previous camera space and closest-object motion
+from a 3x3 reverse-Z depth search. Reference mode uses exactly native depth-only
+acceptance and motion precision. Per-tap previous depth agreement is relative
+view-depth error below 1%; bilinear coordinates clamp to screen bounds.
+Compute each bilinear tap's weight before loading prior geometry/AO/counts.
+Exactly zero-weight taps cannot affect these finite history accumulations;
+skip their geometry reconstruction, normalization, and texture loads.
+When a tap's stored normal word equals the encoding of the current world
+normal, its previous-view normal is the already computed `previousNormal`;
+curvature is exactly zero. Reuse that fact instead of transforming/normalizing the same
+normal again. Nonidentical normals retain the original curvature calculation;
+normal rejection, plane tolerance, locality, and confidence are unchanged.
+Production mode additionally checks world-normal agreement (dot at least 0.9),
+rejects invalid/background prior geometry, honors positive previous view depth
+from RGBA velocity, and restarts a pixel on visibility jumps exceeding 0.5.
+With exact previous surface depth, use the receiver's own XY motion rather than
+dilated neighboring-object motion. Production per-tap acceptance uses the
+previous-view tangent plane, with base tolerance
+`max(1e-4,min(previousZ*0.005,radius*0.025))` plus curvature allowance
+`0.5*length(deltaPosition)*length(deltaNormal)` and locality at most two AO radii.
+The native 1% Z-only check would reject valid low-resolution curved surface
+taps, so it is not used.
+The RGBA previous-depth path initializes previous pixel, motion, and previous
+depth directly from the supplied material-point payload. Do not first compute
+camera-only world reconstruction/projection whose results would be overwritten.
+When the supplied previous depth agrees with the static camera-only previous
+view depth within `max(1e-4, abs(cameraZ) * tolerance.x)`, substitute that exact
+`cameraZ = dot(reprojectW, v) / dot(inverseW, v)` for current NDC `v`. Both rows
+are row 3 of `previousVP * invVP` and of `invVP`, composed on the CPU in double
+precision. Static receivers then reproject identically for RGBA32F and
+RGBA16F velocity; only genuinely moving receivers see the source precision.
+XY-only velocity and camera-only paths retain their original reprojection math.
+They do not introduce a broad clipping guide or a moving-floor history cap.
+Production feedback also avoids the R8 accumulation deadband. When a mature
+pixel's blended update is below half an R8 level, apply bounded unbiased
+quantization dither using a spatially rotated bit-reversed frame sequence.
+Include the exact half-level boundary with one float32 ULP of arithmetic
+allowance (`0.5/255 + 1/8388608`); excluding that boundary leaves an eight-level
+shadow stuck forever at the native sixteen-frame blend.
+Otherwise an old shadow can remain permanently two levels dark with a four-frame
+blend, or eight levels dark with a sixteen-frame blend, even when current AO is
+white. Fresh/reset pixels do not dither.
+The dither lies strictly within half a level, so already-white background and
+stable white receivers remain exactly white.
+Do not dither an unchanged observation (`abs(current-old) <= 1/8388608`);
+render-target conversion near the white endpoint can otherwise occasionally
+move an already-cleared pixel down one byte.
+Do not reduce production confidence for motion when current/history AO differ
+by no more than one UNORM8 level plus half an input half-float ULP
+(`1/255 + 1/4096`). Native strict inequalities otherwise treat unchanged white AO
+as outside a zero-variance envelope and unnecessarily discard moving-surface
+history.
+When that unchanged-observation condition holds, the variance envelope cannot
+reduce confidence and the large-change condition cannot apply. Skip the unused
+3x3 AO statistics, motion factor, square root, and gamma calculation entirely.
+Otherwise retain the original neighborhood summation order, strict envelope,
+and confidence update. This is work elimination, not looser clipping or a
+change to history limits, R8 quantization, dither, or reconstruction.
+Uniform control is reset, maximum samples, a reserved lane, and the previous-depth
+contract. Inverse view-projection recomputation is cached on ordinary unchanged
+frames; cuts/projection changes invalidate it.
+
+The quarter-resolution history experiment was removed with the unsupported
+mode. Its lower-only clipping suppressed trailing but amplified localized
+contact-shadow fluctuation, including at Ultra quality. The runtime retains
+the accepted full/half temporal response without that clipping heuristic.
+
+### Reconstruction stages
+
+Production history transport runs the original unmasked search by default.
+`enableSsaoMotionPruning(task)` separately opts into a conservative object-motion
+tile hierarchy. Its plain `enabled` setting supports live scene-specific toggles.
+An 8x8 workgroup compares supplied material motion against
+camera-only reprojection and ORs qualifying pixels within one tile through a
+workgroup atomic. The whole hierarchy lives in one `STORAGE | COPY_DST` buffer
+(`ssao-object-motion-mask`, `ssaoMotionMaskCellCount(w, h)` cells of four u32,
+levels laid out consecutively). Each cell stores an inclusive pixel-space
+bounding rectangle of its active base tiles as `(~minX, ~minY, maxX, maxY)`,
+not an occupancy flag for its entire mip cell. A nonempty base tile contributes
+its clipped 8x8 pixel extent. Clearing the buffer to zero therefore encodes the
+empty rectangle `(0xffffffff, 0xffffffff, 0, 0)`.
+The mask XY threshold is `0.025 + |suppliedMotion| * tolerance.y * 0.5` working
+pixels, conservatively below the transport search's
+`0.05 + |suppliedMotion| * tolerance.y`; its previous-depth test equals the
+transport's. Background/reset pixels contribute zero.
+Each moving tile's first lane updates every level in the same dispatch with
+`atomicMax` on the four components: the level-m cell is
+`min(tile >> m, levelSize_m - 1)`, which reproduces exactly the union of the
+former stretched odd-edge mip reductions. Per frame the module clears the cell
+buffer and the four-word indirect draw buffer, then records one dispatch.
+A moving tile writes three vertices and one instance; otherwise the cleared
+draw stays empty. A skipped transport draw clears its field to
+zero and does not search an entirely static scene.
+
+For a drawn transport pass, each receiver reads the hierarchy from the
+read-only storage buffer at transport binding 8 over a
+conservative square covering its exact clamped search circle. A mip whose
+tile span covers the square needs at most four reads. Test the stored active
+bounds against the receiver's clipped pixel-space search square. Thus one
+moving object in a 512-pixel mip cell does not activate that whole cell.
+If none of the bounds intersects, return the existing zero-transport result before the 36-tap
+search. Otherwise execute the original search unchanged, in the same order.
+The hierarchy changes work selection, not displacement, history confidence,
+or AO arithmetic. The separate `ssao-motion-pruning.ts` module owns all mask
+allocation, pipelines, bindings, dispatches, shader guard, and disposal.
+The temporal controller exposes only an internal optional GPU-preparation
+callback. The native-format owner exposes an optional transport extension:
+its pipeline replaces the original transport pipeline, its cached resources
+append to transport bindings, and it supplies the indirect draw buffer and
+execution/disposal hooks. The owner compares the bound extension identity so
+toggling rebuilds pass bindings without destroying any history.
+
+The enabler installs the preparation callback only on temporal tasks with
+velocity. It creates/rebinds the extension while both temporal filtering and
+pruning are enabled; otherwise it releases the mask and removes the extension.
+Source identity changes refresh mask bindings without replacing textures.
+Size/device changes create a new owner; disposing an owner disposes its
+extension exactly once. The default path imports no pruning module or mask
+shader and records no mask work. The masked shader uses generic declaration
+and pre-search injection arguments to the shared transport shader generator,
+not string parsing or replacement. Both paths retain the original 36-tap
+search and accumulation order, and mode changes preserve the history index,
+counts, AO phase, feedback textures, and stable public output.
+
+1. Temporal accumulation: current local unweighted 3x3 mean/variance, native
+   motion-dependent variance gamma 0.5..2.5, and native observation-count update.
+   Preserve the original unclipped-history behaviour for baseline validation.
+   Let the R8_UNORM render attachment perform native AO conversion.
+2. Convolution mip 0: temporal AO plus current device depth, written directly
+   by temporal accumulation's MRT outputs. The temporal intermediate aliases
+   convolution AO mip zero; no copy shader/pass or separate R8 texture exists.
+   Four reductions
+   reproduce the native 4/6/9-sample odd-dimension rule and summation order.
+   AO is converted to R8 at each mip; depth remains float32.
+3. History repair: for count below five, select mip
+   `int(4*(1-saturate((count-1)/4)))`, descending until geometry-weighted bilinear
+   coverage is at least 0.995. Use the native fractional virtual mip resolution,
+   nearest AO lookup, bilinear device depth, and tangent-plane weighting
+   `saturate(1-abs(dot(delta,normal))*10/(1+viewDepth))`.
+4. Spatial reconstruction and output (one pass): native eight-point Poisson
+   disk and frame-stable Bayer rotation; radius
+   `4*(1-saturate(pow(abs((count-1)/8),0.2)))`. Gaussian weight is
+   `exp(-distanceSquared/(2*0.9*0.9))`, multiplied by geometry weight. Counts
+   at least nine bypass the filter and keep the repaired value.
+5. The same pass writes final AO to R8 and feeds that reconstructed value back
+   into history, matching the native pipeline, and writes normalized public
+   visibility and current geometry as two further MRT attachments. It reads the
+   exact current depth attachment and computes the same signed normalized world
+   normal used by temporal accumulation, including zero normal for background.
+   Both geometry consumers have already completed.
+
+### Temporal GPU interfaces and binding layout
+
+```ts
+function createXegtaoTemporalGpu(
+    owner: SsaoGpu,
+    velocity: GPUTextureView | null,
+    transport?: boolean, // default false
+    previousDepth?: boolean // default false
+): XegtaoTemporalGpu;
+function bindXegtaoTemporalGpu(state: XegtaoTemporalGpu, velocity: GPUTextureView | null): void;
+function executeXegtaoTemporalGpu(state: XegtaoTemporalGpu, encoder: GPUCommandEncoder): void;
+function disposeXegtaoTemporalGpu(state: XegtaoTemporalGpu): void;
+```
+
+The owner retains `scratch`, two `history`, two `counts`, one `geometry`,
+`convolution`, `convolutionDepth`, `repaired`, and optional
+`closestMotion`/`transport` textures; the 384-byte `uniform` and 96-float `data`;
+the borrowed source identities; original/scratch spatial resolve bind groups;
+`index`, `disposed`, pipelines, and two arrays of cached
+`{ pipeline, group, pass: GPURenderPassDescriptor }` stages. It owns no scene.
+An internal `XegtaoTransportExtension` optionally supplies `pipeline`,
+`resources`, `indirect`, `execute(encoder)`, and `dispose()`.
+The last bound extension identity is cached separately. There is no default
+motion-pruning flag on the factory.
+The convolution AO texture uses the
+`ssao-xegtao-temporal` label, also matched by the capture observer.
+Every owned texture supports sampling, rendering, and readback; only RGBA16F
+scratch additionally supports storage writes for the estimator. Convolution
+mip count is `min(5,floor(log2(max(width,height)))+1)`.
+
+All shaders share the estimator's 176-byte AO parameters at binding zero except
+reductions. The temporal uniform consists of inverse current
+view at byte 0, previous view at 64, previous VP at 128, four control floats at
+192, inverse current VP at 208, inverse previous VP at 272, `tolerance` at 336
+(x: relative previous-depth tolerance, y: relative motion tolerance; `1e-5`/0
+for float32 velocity, `2^-10` for both with `rg16float`/`rgba16float`),
+`reprojectW` at 352 and `inverseW` at 368 (384 bytes). Temporal binding
+order is AO parameters, raw depth, current scratch AO, closest motion, prior R8
+AO, prior geometry, prior count, temporal parameters, current transport,
+current normal, original supplied velocity. Targets are convolution mip-zero
+R8 AO, next R16 count, and convolution mip-zero R32 depth.
+Three attachments use 7 logical bytes per sample, within the baseline WebGPU 32-byte
+limit. AO still goes through native R8 render-target conversion exactly once;
+depth remains exact float32. Subsequent reductions use separate single-mip
+views and separate passes, so sampled/attachment usage never overlaps.
+
+Transport bindings are AO parameters, current depth/normal/velocity, current
+scratch AO, prior R8 AO, prior geometry, temporal parameters. It writes RGBA32:
+previous normalized UV, previous device depth, and positive projected physical
+AO radius (zero radius means no transport). Search three radial rings and
+twelve directions; offset angle is `direction*pi/6`. Ignore background, points
+outside physical/search radius or below 0.005 receiver-plane height, and
+camera-subtracted motion below 0.05 pixels. Weight by squared distance falloff
+and positive elevation cosine. Reject recovered motion beyond the smaller of
+0.1 search radius and twice its projected displacement, or predominantly
+normal rather than tangential displacement. Static competition uses the
+physical radius even during an expanded departing-shadow search.
+Ring radius is invariant within its direction loop. Keep the original
+f32 sine/cosine expressions and ring/direction order; there is no angular
+approximation, sample-count reduction, or change to the search footprint.
+Reject samples below the receiver plane before calculating their Euclidean
+distance. Reuse that same plane dot product for the elevation cosine. This
+preserves tap order and all acceptance thresholds while avoiding square roots
+for coplanar/below-plane samples.
+
+Reduction bindings are preceding AO/depth mip views; targets are R8 AO plus
+R32 depth. There is no mip-zero pipeline or bind group.
+History repair bindings are AO parameters, current depth/normal/count, all AO
+mips, all depth mips, linear-clamp depth sampler, point-clamp AO sampler.
+Use hardware linear depth only with `float32-filterable`; otherwise emit manual
+bilinear texture loads. Repair targets R8.
+The spatial/output pass binds AO parameters, raw current depth, current normal
+(or the existing dummy normal), current count, repaired AO, and the temporal
+uniform buffer (for its leading inverse-current-view matrix), at bindings 0..5.
+It targets next R8 feedback, the original managed RGBA16F visibility
+allocation and the single RG32_UINT geometry history: 20 bytes per sample
+under WebGPU attachment alignment, within the baseline 32-byte limit. The
+geometry target is not also bound as an input. Ping-pong applies only to
+AO/count feedback, not geometry; both cached history lanes sample the same
+geometry texture.
+
+Without velocity, omit motion and transport passes. With exact previous-depth
+velocity, omit both allocation and dispatch of the closest-motion pass: material
+point reprojection reads the original RGBA payload. XY-only input retains
+native closest-motion preparation. On source/size/device changes recreate
+bindings/owners; unchanged frames create no GPU objects or pass descriptors.
+After execution flip the history index. Disposal restores the original spatial
+resolve group if installed, destroys only owned resources, and is idempotent.
+
+Native inputs are signed world normals. Engine inputs can be signed view
+normals or signed world normals; convert explicitly. Do not mistake encoded
+geometry WORLD_NORMAL for a signed texture.
+
+### Occlusion-history transport
+
+The reconstruction controller uses this transport whenever a velocity source is
+supplied. An additional pass searches dynamic occluders in the receiver's physical AO
+radius. Reconstruct their previous world positions from actual receiver motion
+and previous depth, subtract camera-only motion, and average their displacement.
+When the velocity contract supplies previous positive view depth, use it
+directly to reconstruct the occluder's material-point position. Sampling old
+visible depth is a fallback for XY-only sources, not a substitute for the
+exact payload; its curvature error is especially large on small projected
+objects.
+Static and moving receivers use the same receiver-relative transport. Reconstruct
+the receiver's previous material-point position from its velocity and previous
+depth, with the same normal-validated old-geometry fallback for XY-only sources.
+Receiver motion below 0.05 pixels may skip this reconstruction as numerical
+stationary motion, but must never disable the occluder search: that former gate
+made a visible line between pinned and bending vertices on the skinned beam.
+For exact-depth velocity, also compare previous material depth with the previous
+camera-only clip W; a difference exceeding `max(1e-4, abs(clipW)*tolerance.x)` is
+receiver motion even when screen-space XY is zero. This prevents depth-only movement from
+placing transported history on the current rather than previous receiver plane.
+The optional motion mask uses the same previous-depth discrepancy test as
+transport, in addition to its conservative 0.025-pixel XY threshold. Otherwise
+a receiver moving along the view ray can be incorrectly excluded from transport.
+
+Let `receiverShift = receiver - previousReceiver`,
+`meanDynamicShift = sum(weight * occluderShift) / dynamicWeight`, and
+`support = dynamicWeight + staticWeight`. Use zero mean dynamic shift when only
+stationary occluders contribute. The effective motion relative to the receiver is
+`relative = meanDynamicShift * (dynamicWeight / support) - receiverShift`.
+Project it onto the current receiver tangent plane and sample previous AO at
+`previousReceiver - tangentialRelative`. This preserves the stationary-receiver
+result, keeps moving-occluder history continuous across skin-weight transitions,
+and handles a moving receiver beneath stationary occluders. Validate normal
+motion against `meanDynamicShift - receiverShift`, retaining the conservative
+relation to the effective tangential displacement and all existing depth,
+normal, curvature, and locality checks.
+
+Project that virtually displaced previous receiver into the previous camera.
+Preserve native
+long accumulation and reconstruction, instead of tight noisy color clipping.
+The current observation is never replaced or spatially broadened.
+Static fully lit regions and reset frames bypass the search.
+For newly lit receivers retaining old occlusion, search up to twice the physical
+radius to retain the departing occluder's transport direction. Its current
+influence can be gone while old history still needs to move out of the pixel.
+Bound transported receivers' effective temporal blend to
+`min(configuredLimit,clamp(projectedAoRadius/4,2,16))`. This resolution-aware
+response preserves the established four-observation maximum for tiny
+footprints, reaches the full native limit above 64 pixels, and avoids a hard
+quality-mode transition during zoom. Their subpixel
+estimator field is not invariant under world-space translation. Preserve their
+geometrically valid history age for reconstruction: permanently capping that
+age at four repeatedly blurred and fed back the shadow every frame, causing
+additional trailing. New/disoccluded pixels still receive native repair and
+spatial reconstruction. Uninfluenced regions and the large-footprint close-up
+path retain the full native blend limit. Both static and moving receivers retain
+their geometrically valid native history age. No broad clipping guide is restored.
+Interpolate previous occluder depth only from taps whose stored world normals
+agree with the current occluder (dot at least 0.9), renormalizing bilinear
+weights and requiring at least half coverage. A fixed absolute depth-spread
+guard failed at low resolution by discarding nearly every valid curved-surface
+sample; it is not used. This prevents foreground/background mixing without
+mistaking a steep but continuous surface for a silhouette.
+Reject occluder motion reconstructed across previous-depth discontinuities;
+also bound recovered 3D displacement by its actual projected motion. Without
+these guards, silhouette/background interpolation corrupts inferred movement.
+Weight physical occluder support by distance falloff and elevation angle.
+Measure stationary competing occluders in that same support. Scale the moving
+occluders' mean tangential displacement continuously by
+`dynamicWeight/(dynamicWeight+staticWeight)`: stationary occluders contribute
+zero displacement, not a threshold that switches the entire history field off.
+The former `smoothstep(0.9,1,...)` gate left angular, blocky history boundaries
+when a sphere approached a stationary beam. Full, unconditional translation
+instead drags the stationary contact shadow, so retain the static contribution
+in the denominator. Preserve the existing normal-motion and geometry guards.
+Keep bilinear history reprojection: a trial bicubic variant increased shimmer
+and signal error and was removed.
+Camera uniforms append current and previous inverse view-projection, velocity
+tolerances and the two static-depth reprojection rows after the existing
+matrices and control vector (384 bytes total).
+
+## Half-resolution pipeline
+
+### Half API
+
+`enableSsaoHalfResolution(task: SsaoTask): SsaoHalfResolutionSettings` is the sole
+Half enabler. It reduces geometry inputs,
+depth preparation, estimation, denoising, motion pruning and temporal histories
+to `ceil(width/2) x ceil(height/2)`, then reconstructs a full-size visibility
+texture. It deliberately trades thin/contact detail and temporal resolution for
+lower cost and memory. It does not promise a 4x total
+speedup: the source producer and final upsample remain full-resolution.
+
+```ts
+interface SsaoHalfResolutionSettings {
+    enabled: boolean;
+    readonly active: boolean;
+}
+function enableSsaoHalfResolution(task: SsaoTask): SsaoHalfResolutionSettings;
+const resolution = enableSsaoHalfResolution(ao);
+resolution.enabled = false; // Full estimation and reconstruction.
+```
+
+The returned plain settings start at `{ enabled: true, active: false }`.
+Mutable `enabled` requests Half; readonly `active` reports the effective mode.
+Repeated calls return the same settings. A disposed task or another installed
+resolution adapter is an error. Disabled settings, width below 320, or height
+below 224 use the normal Full pipeline. No new scene ownership or raw GPU API
+is exposed. There is no estimation-only Half mode or separate reconstruction
+resolution control.
+
+### Half-pipeline data flow and shaders
+
+The source camera projection/aspect remains derived from the original full-size
+depth target, including odd dimensions. One 8x8 compute prepare pass samples
+every input at `min(2 * smallPixel + 1, fullSize - 1)`, including exact previous
+positive view depth in velocity Z, and writes:
+
+- raw device depth (R32F);
+- linear view depth directly into reduced pyramid mip 0, so the reduced owner
+  sets `depthPrepared` and skips its own copy dispatch;
+- supplied signed normals, or, when the producer has none, a view normal
+  reconstructed once with the shared `aoDepthNormal` from full-size depth
+  (better than reconstructing from the decimated grid, and it removes every
+  later per-stage depth-normal reconstruction);
+- optional normalized velocity.
+
+Copies preserve the source precision instead of widening it: normals are
+RGBA32F only for an RGBA32F source and RGBA16F otherwise (including
+reconstructed normals); velocity is RGBA16F for `rg16float`/`rgba16float`
+sources and RGBA32F otherwise. The temporal tolerances in
+[Temporal GPU binding layout](#temporal-gpu-interfaces-and-binding-layout) follow the reduced velocity
+format. Source attachments are borrowed and never destroyed.
+
+The reduced `SsaoGpu` uses kind `float`, always-provided view-space
+normals (world-space only when the producer supplied world normals) and its
+own half-size depth pyramid, AO and edge buffers. Its public `outputTexture` is full-size RGBA16F.
+`sourceVelocity` points to the reduced velocity view; temporal validation still
+checks the original producer's full-size target, while the actual filter samples
+the reduced view. All temporal textures derive their dimensions from the reduced
+GPU owner. Sampling footprint is marked sparse for the existing response guards.
+
+The standard task order becomes prepare filter -> upload parameters -> resolution
+before -> filter execute -> optional resolution after. The before callback copies
+geometry and executes the ordinary reduced estimator/spatial resolve. The after
+callback runs the dedicated Half-pipeline joint bilateral upsampler
+(`ssaoHalfUpsampleWGSL`) on the filtered half-size visibility, using a
+separate full-size 176-byte parameter buffer. This avoids upsampling before
+expensive temporal work. With temporal filtering disabled, the same after
+callback upsamples the reduced spatial result.
+
+Preparation group bindings: 0 = full-size AO parameter uniform, 1 = full depth,
+2/5 = optional normal input / reduced normal output, 3/6 = optional velocity
+input/output, 4 = reduced raw depth output (R32F), 7 = reduced linear depth mip
+0 (R32F). Workgroups are 8x8; odd last samples clamp to the real source edge.
+
+Upsample bindings: 0 = full-size parameters, 1 = full depth, 2 = supplied full
+normals (absent when reconstructed), 3 = sparse visibility, 4 = RGBA16F output,
+5 = reduced raw depth, 6 = reduced normals; override `SOURCE_WORLD` selects
+world-to-view rotation of the sparse normals. The reduced inputs already hold
+exactly the full-size samples of each sparse tap, so taps never re-read or
+re-derive full-size data. Each 8x8 group first fills a 6x6 workgroup cache
+(origin `group * 4 - 1`, indexed by the unclamped tap coordinate, holding the
+data of the clamped one) with tap position, visibility and normal; receivers
+then read their four bilinear taps from that cache. Receiver normals come from
+the supplied texture or from a 12x12 full-depth workgroup tile (origin
+`group * 8 - 2`) feeding `aoDepthNormal`. Normal agreement normally must reach
+0.9; tangent-plane weight uses `max(1e-4,min(z*0.005,radius*0.025))` plus
+`0.5*length(deltaPosition)*length(deltaNormal)` curvature allowance.
+The normal weight uses repeated squaring instead of `pow(x,8)`. If the four
+bilinear taps have total weight below `1e-6`, search a nearest-centered 3x3
+neighborhood, weighted by compatibility divided by `1+distanceSquared`.
+No compatible support yields neutral visibility; background stays white.
+Odd trailing pixels use their actual clamped source positions.
+The workgroup barrier precedes bounds/background
+returns, so partial groups and odd image edges remain valid.
+
+At concave contacts, the scalar AO field can remain continuous across a sharp
+normal crease. The upsampler must not reject an adjacent wall/floor tap solely
+because normal agreement falls below 0.9: alternating Half-grid coverage then
+changes the accepted support abruptly during camera rotation.
+Allow that tap only when normals are not opposing (dot greater than -0.9),
+the source point lies in front of the receiver plane and the receiver lies in
+front of the source plane (signed-plane tolerance `max(1e-4, viewZ*1e-5)`),
+and their world-distance separation is within both one quarter of AO radius
+and 2.5 projected pixels adjusted for surface foreshortening (incidence floor
+0.1). This recovers the existing bilinear support at a connected concave crease,
+not an extra blur pass. Convex silhouettes, opposing faces and separated depth
+layers retain rejection; coplanar reconstruction and its plane weights are unchanged.
+
+### Half-pipeline lifecycle and isolation
+
+The task owns the reduced GPU and public full-size output. The resolution
+adapter owns only reduced input textures, its full-size parameter buffer and cached
+preparation/upsample bindings. Device, dimensions, supplied normal format or
+availability, and velocity format or availability changes replace these
+resources and reset temporal history.
+Replacement source views rebind preparation and reset history. Unchanged frames
+create no textures, views, groups or pipelines. Disposal is idempotent and keeps
+borrowed producer attachments alive.
+
+The new module is imported only by its enabler; unused scenes retain no shader,
+input texture or pipeline. The generic task pays only an optional `after` call.
+The uniform writer accepts its exact parameter-buffer state, allowing reuse
+without a fake GPU owner.
+
+The public render-target object stays stable; device/size/mode/input-availability
+changes can replace its backing texture, as with other AO resource replacements.
+Sampled consumers must follow output-change notifications or re-record their
+graph.
 
 ## Lit Demonstration
 
@@ -570,8 +1111,8 @@ normal attachment available for switching back. It does not disable normal
 history or the production anti-ghosting safeguards.
 An **AO quality** selector exposes Low/Medium/High/Ultra spatial sampling
 independently of the resolution selector. It defaults to High (18 samples
-per evaluated pixel). Temporal filtering is enabled by default with a 16-sample limit, equivalent to
-the API default of 32 after its native cap. An **Advanced temporal settings**
+per evaluated pixel). Temporal filtering is enabled by default with the API's
+16-sample history limit. An **Advanced temporal settings**
 section contains a **History sample limit** slider that sets
 `SsaoTemporalSettings.historySamples` from 1 to 16 and displays
 the limit and `1 - 1 / historySamples` as the maximum history weight. Thus the initial maximum
@@ -579,12 +1120,10 @@ history weight is 0.9375 (93.75% history, 6.25% current AO); one sample means
 zero temporal history weight. This is a maximum, not a fixed blend factor:
 history age/validity, rejection, and transported-footprint limits can increase
 the current-frame contribution. The shader uses current weight
-`max(1 / count, 1 / blendLimit)`. Existing sample-limit changes reset temporal
+`max(1 / count, 1 / blendLimit)`. Sample-limit changes reset temporal
 history before reconverging. The slider is disabled while temporal filtering
-is off and preserves its value for re-enabling. No new runtime setting or
-history-cap change is introduced.
-The name `historySamples` replaces the ambiguous `samples` in the new temporal
-API and its callers; it is never the per-frame spatial sampling count.
+is off and preserves its value for re-enabling.
+`historySamples` is never the per-frame spatial sampling count.
 Separate temporal and moving-sphere toggles demonstrate convergence and rigid motion handling.
 A checked **Motion-mask pruning** checkbox opts into the optional transport
 optimization and allows live comparison without resetting temporal history.
@@ -600,148 +1139,25 @@ counter-clockwise triangles; its outward normals and the shared source geometry
 remain unchanged. Back-face culling stays enabled for both examples.
 **Skin/morph animation** starts checked and pauses/resumes both examples. Geometry velocity
 contains previous deformation and optional previous view depth, so the same
-data can serve other temporal algorithms. The contact/profiling drivers pause
-these animations explicitly; the regular live demo keeps them enabled.
+data can serve other temporal algorithms. The regular live demo keeps these animations enabled.
 
 ### Opt-in reduced-resolution rendering
 
-`enableSsaoHalfResolution(task): SsaoHalfResolutionSettings` returns shared
-plain state `{ enabled: true, active: false }`. `enabled = false` selects full
-resolution. `active` is readonly and indicates whether half-resolution
-estimation is actually running. Repeated calls are idempotent.
+The demo's Full/Half selector controls the single
+[`enableSsaoHalfResolution`](#half-resolution-pipeline) mode. Half reduces both
+estimation and temporal reconstruction, including geometry inputs and motion
+pruning, and is selected by default. The scene and public AO output remain
+full-size. Its status distinguishes active Half from the small-viewport Full
+safeguard. Toggling Full/Half replaces the private owner and resets history;
+PBR bindings follow the new output generation.
+The demo re-records the AO task and its AO-only copy when the resolution or
+normal-input mode changes, so that pre-recorded copy never samples a retired
+output generation.
 
-```ts
-interface SsaoHalfResolutionSettings {
-    enabled: boolean;
-    readonly active: boolean;
-}
-function enableSsaoHalfResolution(task: SsaoTask): SsaoHalfResolutionSettings;
-const resolution = enableSsaoHalfResolution(ao);
-resolution.enabled = false;
-```
-
-Changing `enabled` selects full- or half-resolution **estimation**. Geometry,
-the depth pyramid, temporal reconstruction/history, material sampling and final
-scene rendering remain full resolution. The enabler stays inactive below a
-320x224 source viewport, retaining at least a 160x112 working grid.
-Smaller grids failed the existing motion-quality
-budgets. This quality floor is explicit in `active` and in the demo's status,
-not a CPU-timing or image fallback disguised as reduced rendering. An inactive
-request uses full resolution.
-
-Working AO/edge/visibility dimensions are `ceil(sourceDimension / 2)`.
-The estimator executes once per working texel at the full-size source pixel
-`min(2 * workingPixel + 1, sourceSize - 1)`. Projection, radius, phase noise,
-normals and depth sampling remain in full-size source coordinates.
-Full-resolution depth mip sampling retains fine occluder geometry instead of
-expanding a nearest-depth corner across a whole 2x2 block. The original
-full-resolution shaders use `PIXEL_STRIDE = 1`; sparse estimation uses `2`.
-Edge packing compares source neighbors at that stride, and the spatial resolve
-operates on the actual working texture dimensions.
-
-Four-tap joint bilateral upsampling reconstructs the spatial signal into the
-existing full-size temporal scratch target (or directly into visibility when
-temporal filtering is disabled). Tap geometry comes from each actual sampled
-full-size source pixel. Normal agreement normally must reach 0.9, and tangent-plane
-weight uses `max(1e-4, min(z * 0.005, radius * 0.025))` plus the existing
-curvature allowance. A nearest-centered 3x3 search recovers rejected four-tap
-coverage; absent compatible geometry yields neutral visibility. Background
-remains exactly white. Odd-edge texels use their actual clamped sample location.
-Connected concave contacts are an exception to normal-only rejection: retain
-bilinear support across a wall/floor crease only when the two signed-plane
-tests and a projected pixel/radius bound prove a nearby contact. Opposing
-normals, convex silhouettes and separated layers remain rejected. The exact
-conditions are specified in [module 60](60-ssao-half-pipeline.md). This avoids
-camera-dependent support switches without adding an AO blur pass.
-
-When current normals are reconstructed, the existing 8x8 upsampling dispatch
-cooperatively caches raw depth and the reconstructed normals in workgroup
-storage. For a workgroup with full-size origin `B`, the normal footprint is
-`B-3 .. B+9` in each axis: this includes both bilinear taps and every possible
-rounded-nearest 3x3 fallback tap. The reconstruction's two-pixel stencil expands
-the depth footprint to `B-5 .. B+11`, a 17x17 float tile. A 13x13 vec3 normal
-array and shared origin keep total workgroup storage below 4 KiB.
-
-Load all 289 clamped raw depths, then synchronize. Reconstruct the 64 receiver
-normals and the sparse halo, not all 169 normal slots: a 7x7 odd-source grid
-has 16 samples inside the 8x8 receiver tile, leaving 33 additional halo normals.
-Those 97 writes are disjoint; a second barrier makes them visible to all
-threads. Background entries use a defined neutral normal without running the
-reconstruction. Both barriers precede output bounds/background returns, so
-partial workgroups and single-pixel dimensions remain valid.
-
-Normal-cache slots correspond to **unclamped** tile coordinates; their values
-are reconstructed at clamped image coordinates. Receiver lookups use their own
-full-size pixel; sparse compatibility lookups use `2*q+1` before image clamping.
-This distinction preserves odd trailing edges without reading an unpopulated
-cache slot. The existing plane-selection helper accepts a depth-load function
-name, letting it read the shared tile without changing its arithmetic.
-Bilateral order, acceptance, fallback search, and output conversion are unchanged.
-Supplied-normal variants do not declare or initialize any workgroup cache.
-No new dispatch, global texture, buffer, or public setting is introduced.
-The numerical GPU regression compares cached and uncached RGBA16 output bytes
-for patterned sparse AO, discontinuous/background geometry, odd/multi-workgroup
-targets, and one-dimensional/single-pixel targets.
-For constant-depth geometry, an independent CPU reference brackets each pixel
-between the actual clamped receiver positions and verifies patterned AO
-interpolation within one maximum-range half-float step, rather than checking
-only normalized bounds or comparing two shaders with the same coordinate formula.
-
-The original full-resolution temporal geometry and RGBA previous-depth motion
-contracts are retained. A sparse-signal marker in the reserved AO parameter
-slot bounds transported history to two observations only for projected
-footprints below 16 pixels; resolved footprints retain the accepted native
-history response. Full-resolution mode keeps the marker zero.
-The marker is `0` for full resolution and `1` for half resolution.
-
-The sparse owner borrows the primary owner's depth pyramid and the selected
-full-size resolve destination. It owns only its reduced-area AO/edge/visibility
-buffers and its own uniforms/dummy input; it never destroys the borrowed
-pyramid or destination. The primary task's public visibility allocation and
-PBR leases remain stable when toggling full/half estimation. Mode/source changes
-reset temporal history; resize/device changes rebuild the sparse owner.
-Unchanged frames allocate nothing. Disabling AO still clears the existing
-full-size public output. This mode intentionally trades estimation detail
-for fewer receiver evaluations, not for lower-resolution temporal history.
-
-AO and edge working textures are allocated lazily when estimation bindings are
-requested. `bindSsaoGpuSources` accepts an internal `estimation = true` argument;
-the half adapter passes false for its primary full-size owner while Half is
-active. The primary owner still owns its full-size depth pyramid, visibility,
-uniforms and depth-copy bindings, but its `working`, `estimatorGroup` and
-`resolveGroup` are null. No dummy working texture is substituted. The sparse
-owner alone allocates its packed working texture at `ceil(sourceSize/2)`. Thus
-active Half removes the unused full-size R32 working texture: exactly 8,294,400
-bytes (7.91 MiB) at 1920x1080. With the sparse owner's own reduced textures, the
-measured owned total goes from 124.56 to 122.58 MiB; history formats, sizes,
-geometry and shader arithmetic do not change.
-
-When Full is selected, or the viewport safeguard selects it, source binding
-allocates the two working textures and rebuilds estimator/resolve bindings
-before dispatch. Returning to Half releases those textures and clears bindings
-that reference them, without replacing the primary owner or public output.
-Source identity and working-texture presence jointly govern the binding cache;
-unchanged Half and Full frames allocate nothing. Cached pipeline variants
-remain reusable across allocation changes.
-
-The temporal owner permits nullable base/scratch resolve bindings. It creates
-the scratch resolve group only when its spatial owner has working textures;
-Half writes scratch through the upsampler instead. Working-allocation changes
-invalidate these bindings, not temporal textures. Synchronize the temporal
-bindings even while temporal filtering is disabled, so a Full/Half transition
-cannot restore a stale group referring to destroyed working textures. Existing
-mode-change history reset behavior is retained. Temporal disable/re-enable,
-same-presence normal replacement, supplied/reconstructed normal changes,
-resize, small-viewport fallback, device replacement and disposal must retain
-correct ownership and never dispatch a destroyed texture.
-
-The quarter-width/quarter-height experiment was removed. Its moving-shadow
-history correction caused visible sphere-contact flicker even at Ultra quality,
-despite passing aggregate numerical limits. Removing or weakening that correction
-reintroduced trailing. Local contact-region measurements, not only broad floor
-averages, must inform any future reduced-resolution reconstruction experiment.
-The small end-to-end gain did not justify retaining the quality tradeoff.
-The runtime and demo support only Full/Half, with Half selected by default.
+A reduced-signal marker in AO parameter slot 17 bounds transported history to
+two observations for projected footprints below 16 working pixels. Full mode
+keeps that marker zero. The same RGBA previous-depth velocity contract applies
+in both modes.
 
 The GPU-timings toggle starts enabled in this diagnostic demo. It uses the
 existing root APIs `setRenderTaskGpuTimingEnabled` and
@@ -778,15 +1194,15 @@ clocks high, or hide the slower measurements.
 
 ## Test Specification
 
-### Scene 321 Babylon.js comparison
+### Scene 348 Babylon.js comparison
 
-`scene321` renders the Diligent Kitchen (see [module 61](61-diligent-kitchen-comparison.md);
-the GLB is restored by `pnpm fetch:ssao-kitchen`, which lab dev/build and scene
-bundle builds run automatically) with original vertex colors on a white, rough,
+`scene348` renders the
+[Diligent Kitchen hosted in BabylonJS/Assets](https://github.com/BabylonJS/Assets/tree/master/meshes/DiligentKitchen)
+with original vertex colors on a white, rough,
 non-metallic PBR base. It is lit by `environment.env` only, because
 `enablePbrSsao` occludes environment lighting rather than direct lights. Lite runs a
 non-MSAA geometry pass, XeGTAO (`radius` 0.3, `quality` "medium") with default
-temporal filtering, `enableSsaoHalfPipeline` and `enablePbrSsao`. The Babylon.js reference uses `SSAO2RenderingPipeline`
+temporal filtering, `enableSsaoHalfResolution` and `enablePbrSsao`. The Babylon.js reference uses `SSAO2RenderingPipeline`
 (`radius` 0.25, `totalStrength` 1.5, 16 samples), which multiplies the final
 color; those values minimize the difference to Lite. Both clear to black because
 SSAO2 multiplies the clear color by zero background visibility.
@@ -807,268 +1223,48 @@ high-quality AO) and the ceiling is
 7: a coarse bound on lighting, geometry and occlusion placement, not an
 equivalence claim.
 
-### Test-only pass and texture-memory audit
+### Final implementation coverage
 
-`pnpm diagnose:ao` profiles the actual ambient-occlusion demo at 1920x1080,
-High quality, radius 0.35, AO-only, temporal history 16 and motion pruning off.
-The bounded matrix is Full/Half estimation, supplied/reconstructed normals,
-and static/moving sphere. `--samples=N` selects 16..512 measured frames
-(default 120); `--quality=low|medium|high|ultra` selects the spatial preset.
-Unknown/invalid options fail before starting any server/browser. This is an
-explicit diagnostic, not a CI performance gate or the repository perf suite.
+The production unit suites cover task configuration, resource lifetime,
+PBR diffuse-lighting scope, temporal history/reset state, reduced-resolution
+ownership, motion-pruning dispatch, and root-entry tree-shaking. Geometry
+velocity has its own task and deformation-history unit coverage.
+Scene 348 remains the gallery/parity example with its existing immutable
+Babylon.js golden and error ceiling.
 
-The Node runner bundles the unchanged demo through a test-only, exact-source
-adapter. Each hook must occur exactly once. It installs allocation/pipeline
-observers immediately after engine creation and exposes manual 16-ms stepping
-in place of `startEngine`. The ordinary demo, public API and runtime package
-contain no profiling hook, new import, timestamp branch or texture accounting.
-The isolated page disables the ordinary task timer to avoid nested profiling.
-
-Require GPU timestamp queries and device adapter information identifying a
-non-fallback adapter; no software/CPU fallback. Record the reported GPU identity.
-Warm 64 frames
-after every history/motion reset. Compare all RGBA16 AO output bytes at identical
-frame/geometry states before and after diagnostic pass splitting. An output
-change fails the run, rather than presenting performance for a changed image.
-Collect timestamps in batches of eight frames. Resolve/map only between batches;
-never include query readback or CPU wall-clock time in GPU durations. Zero
-pass samples remain valid quantized measurements, not missing data.
-
-Baseline measurements bracket the unmodified AO task with standard empty
-timestamp passes. Detailed measurements split its compute pass at pipeline
-changes, retaining dispatch/binding order, to expose depth copy, depth mips,
-XeGTAO estimation and spatial denoising independently. Upsampling and the
-existing labeled transport, temporal, convolution, repair, spatial and output
-passes are timed directly. Sum repeated labels within each frame before
-calculating mean/median/p95; do not sum independently calculated medians.
-Report baseline and detailed-pass totals separately: diagnostic splitting and
-timestamp instrumentation can change scheduling/cost, so their sum is not
-claimed to equal the uninstrumented task time.
-
-Observe real `createTexture`/`destroy` calls. Count live AO textures by object
-identity, including every mip and sample; aliases and borrowed pyramids count
-only once. Separate persistent AO/count/geometry histories, other owned AO
-textures, and borrowed geometry depth/normal/velocity inputs. The demo still
-allocates its normal attachment when AO reconstructs normals; report that
-retained allocation explicitly. Values are nominal texel payloads, not driver
-allocation/residency, transient compression, buffers or texture traffic.
-Unsupported formats/dimensions fail explicitly. Save configuration, raw samples,
-summary statistics, texture inventory, output-equivalence evidence and browser
-identity in `.ao-reference-cache/ssao-profile/profile.json`. No reference image,
-golden, ceiling or live user control is changed.
-
-`pnpm diagnose:ao --compare-pruning` selects a paired comparison instead of the
-original eight-case audit. It covers Full/Half, both normal sources, and four
-deterministic trajectories: static, moving sphere, moving camera, and combined
-motion. Camera motion is a smooth bounded orbit, not a camera cut. The demo's
-ordinary sphere animation and camera/geometry motion producers remain active.
-Every replay resets the trajectory and temporal history, then warms 64 frames.
-Default demo/runtime pruning settings stay unchanged.
-
-For each configuration, independently replay 32 consecutive post-warmup frames
-with pruning off and on. SHA-256 covers every byte of the full-size RGBA16 AO
-output and active R16 history count texture at every frame; dimensions, formats,
-frame indices and byte counts must also match. Reject the comparison at the
-first mismatch and report its configuration/frame instead of silently accepting
-a tolerance. This verifies temporal evolution, not only a final converged image.
-Read the masked path's indirect draw during these replays, record active-mask
-frame counts, and require nonempty masks for moving-object configurations.
-Separately verify diagnostic pass splitting against unsplit output in both modes.
-Readbacks and hashing run only in correctness replays, never timed frames.
-
-For whole-task and detailed timings, divide the requested samples among four
-paired blocks, with off/on, on/off, on/off, off/on order. Both variants replay
-the same post-warmup trajectory in every block, reducing systematic order bias.
-Record block order, individual samples and block means; report dispersion rather
-than a machine-independent performance guarantee. Whole-task comparison includes
-mask construction/reduction, indirect draw and transport. Detailed results retain
-the mask/reduction stages, transport, other reconstruction passes and extra live
-mask texture bytes. Do not subtract mask costs or compare unrelated trajectories.
-The masked path may still issue a zero-vertex transport render pass to clear its
-output; its measured time is not proof that any transport fragments executed.
-
-Save the paired results and evidence to
-`.ao-reference-cache/ssao-profile/pruning-comparison.json`, separate from the
-original `profile.json`. On failure, preserve a clearly failed report with the
-error and completed configurations; it must not be mistaken for a successful
-full comparison. No default changes follow automatically from a speedup.
-
-### Numerical rendering regressions
-
-`pnpm test:ao:contact` is a focused numerical contact-shadow regression, separate
-from screenshot/parity and performance suites. It bundles the unchanged demo
-through an exact, unique replacement of `startEngine` with a test-only manual
-frame driver. The adapter also omits the lighting-only environment download:
-AO-only numerical checks retain all demo meshes/material geometry but require
-no network asset or BRDF LUT. No test hooks enter the runtime package or ordinary demo.
-Use the historical probe's 1146x1308 viewport, radius 0.35, Ultra, intensity 1,
-history 16, pruning off, and Full/Half with both normal sources. `--software`
-explicitly selects SwiftShader; other options fail before browser allocation.
-This intentionally checks a high-sample stability floor, not every quality preset.
-
-Warm 64 stationary frames, then capture 64 stationary, 96 moving, 32 paused,
-64 reversed-motion and 64 smoothly orbiting-camera frames at 16 ms. Project a
-32x24 world-space floor grid immediately in front of the sphere: lateral
--0.4..0.4 and camera-facing distance 0.1..0.65, at floor height zero.
-For stationary/moving probes the grid follows the sphere, matching the original
-localized investigation. Camera motion samples a fixed world-space grid, not
-fixed screen pixels. Bilinearly sample temporal output and current spatial AO;
-accept a sample only if all four previous-geometry-history normals identify
-floor (world Y > 0.98). Require at least half the grid consistently visible
-throughout each segment; background, occlusion, NaNs, and insufficient coverage
-must not manufacture a passing result.
-
-Measure each point's temporal second difference, its p95 point RMS, and the
-second-difference RMS of the coherent patch average. Segment boundaries are
-excluded from second differences. Limits are one R8 level RMS (`1/255`),
-1.5 R8 levels for p95 (`1.5/255`), and 0.1 R8 level for coherent patch RMS
-(`0.1/255`). These absolute limits supplement, not replace, spatial-relative
-diagnostics: comparing only to very noisy spatial AO can hide visible shimmer.
-The same metric must accept the retained Half/Ultra traces and reject the
-recorded quarter/Ultra contact flicker; the old mode is not reintroduced.
-
-Check trailing independently on two fixed floor grids at the initial and
-paused sphere positions. At initial/moving-24/moving-48/end-motion/mid-pause/early-reversal/end-
-reversal/end-camera checkpoints, average 64 independently dispatched spatial
-phases against the current unchanged geometry, projection and normal source.
-Reference owners never render the scene or update production temporal history.
-Verify their same-phase samples equal the production spatial signal before
-using their mean. Newly lit receivers must have previous mean visibility below
-0.94 and brighten by over 0.04; require at least 16 per measured checkpoint
-and 64 in total. Mean positive temporal trailing minus same-phase spatial
-trailing must stay within the existing 0.015 visibility budget. Report current
-signal error and spatial noise separately. A frozen dark history must not pass
-merely because its second differences are zero.
-
-Keep all segment metrics, localized traces, checkpoint errors, coverage,
-source/bundle fingerprints, browser identity and explicit success/failure in
-`.ao-reference-cache/ssao-contact/`. Evaluate all four supported configurations
-and report all metric failures together. Never loosen existing scene thresholds,
-change goldens, or infer general visual correctness from these bounded checks.
-
-Run numerical WebGPU readback against frozen native buffers for all nine
-fixtures. Compare every depth mip, working AO/edges, and final visibility.
-Assert dimensions and finite values before comparisons.
-Never regenerate goldens from the WGSL implementation.
-
-Account separately for GPU arithmetic rounding, eight-bit working/output
-quantization, and the half-float public target. Establish actual tolerances from
-stage errors; preserve all existing scene and bundle ceilings.
-
-`pnpm test:ao:gpu` runs the focused numeric checks in an actual WebGPU browser,
-not a mock or a screenshot diff. Enforced budgets:
-
-- Depth mips: maximum relative error `1e-6`.
-- Packed edges: exact byte values.
-- Raw XeGTAO: maximum one byte; mean below 0.001 byte.
-- Final XeGTAO: maximum one `1/255` quantum plus half-float rounding;
-  mean below 0.0001 visibility.
-
-These are new algorithm-port budgets, not increases to any existing scene
-threshold. The independent native fixtures and their lock remain untouched.
-The output explicitly rounds its normalized AO value to half precision before
-storage instead of relying on backend-dependent texture-format truncation.
-The scalar Hilbert walk is retained: replacing its scalar swap with a vector
-swizzle changed the sampling sequence on the validation backend and was caught
-by raw-buffer parity.
-
-Add scoped configuration/lifecycle tests, missing-normal tests, odd/small-size
-dispatch checks, disabled identity, resize/source replacement, double disposal,
-and root-entry opt-in tree-shaking. Do not run all scenes, performance tests, or
-unrequested screenshot parity.
-Each preset must select its documented specialization constants and reuse
-cached estimator pipelines when revisited; changing only quality must not
-recreate resolve pipelines or public textures. Check XeGTAO in
-full and sparse modes. Non-high presets must produce finite normalized results
-and genuinely alter an occluded fixture; returning to High must reproduce the
-original default output exactly. Compare each sparse preset's raw receivers
-against that same full-resolution preset, including odd and one-pixel targets.
-History-limit and quality changes must reset temporal accumulation independently
-while leaving the other control unchanged.
-
-`pnpm test:ao:pbr` uses a controlled PBR environment and GPU color readback.
-Injected constant AO isolates composition from the separately validated estimator.
-Assert diffuse-IBL attenuation, unchanged direct/emissive contributions,
-`min` with baked AO, same-frame bind-group/bundle refresh after reallocation,
-unchanged specular IBL, complete old-generation lease retirement,
-and neutral sampling after disposal. CPU tests cover pass exclusion, signature
-identity, camera/aspect guards, device fallback, idempotence, and fenced leases.
-
-`pnpm test:ao:temporal` defaults to the shipped Diligent-based temporal owner.
-It checks native feedback formats, production rejection and R8 convergence,
-motion-pruning bounds and toggles, small/odd targets, and actual PBR geometry
-world-motion/exclusions/resize. `--diligent` remains an explicit alias for that
-same production suite. `--half` selects sparse-estimation numerical checks,
-including cache/scalar byte equality and independently calculated interpolation
-at clamped trailing edges;
-`--moving` selects the moving-occluder regression, with optional `--half`,
-`--close-up`, or `--close-up-reversal`. Profile flags also imply `--moving`.
-`--legacy` explicitly selects the archived guide-only prototype instead;
-it cannot be combined with production/reduced-resolution/moving selectors.
-The retired `--quarter` selector and other unknown flags
-and conflicting profiles fail before creating a server or browser.
-
-Local Windows validation uses installed Edge and the hardware GPU by default;
-other platforms use Playwright Chromium. Explicit `--software` selects
-Playwright Chromium with `--enable-unsafe-webgpu` and explicit
-`--use-webgpu-adapter=swiftshader` selection for Dawn. Do not force ANGLE or
-the compositor's Vulkan backend: those unrelated overrides can prevent Dawn's
-software adapter from initializing. There is no automatic hardware-to-software fallback, successful
-skip, or CPU timing substitute when WebGPU is unavailable. The PR Unit Tests
-job installs Chromium and runs the production and half suites with `--software`.
-These are scoped numerical GPU checks, not screenshot/parity or performance
-tests, and they never regenerate reference data.
-
-For XeGTAO it compares a 32-frame accumulated image with an
-independently CPU-averaged 64-phase spatial-output mean and requires lower
-noise error than one spatial-only frame. This is a temporal-convergence check,
-not a ray-traced quality oracle or a replacement for the native phase-zero goldens.
-Moving-shadow regression cases keep receiver depth, normals, and velocity
-unchanged, warm history, and move the AO shadow. A separate real moving-sphere
-test compares newly lit floor receivers with current-frame 64-phase AO and
-the same-phase spatial-only output; excess mean trailing error must stay below
-0.015 visibility. This distinguishes temporal lag from current-frame sampling
-noise and fails the original ghosting implementation.
-The moving-scene test also samples an unrelated stationary box and limits
-per-pixel temporal residual RMS to 0.003 visibility. On changing floor
-receivers, residual frame-to-frame flicker must be below 60% of the same-phase
-spatial-only result, while the 0.015 trailing-error budget remains unchanged.
-The static convergence oracle averages the base spatial estimates from fresh
-history, not the confidence-dependent final display pass.
+The Kitchen URL is shared by the Lite and Babylon.js scenes through
+`lab/lite/src/shared/kitchen-asset.ts`. It loads directly from Assets; no local
+model copy or asset-preparation command is required. The asset's Apache-2.0
+license and conversion provenance are maintained in its Assets directory.
+Native generators, prototype comparisons, and research datasets are archived
+separately and are not dependencies of the public build or CI.
 
 ## File Manifest
 
 - `post-process/ssao.ts`: public frame-graph AO task.
 - `post-process/ssao-gpu.ts`: internal WebGPU owner and bindings.
-- `post-process/ssao-half-resolution.ts`: opt-in sparse receiver estimation, quality floor, borrowed-pyramid ownership and lifecycle.
-- `post-process/ssao-half-wgsl.ts`: full-geometry joint bilateral upsampling into the full-size spatial signal.
+- `post-process/ssao-half-resolution.ts`: sole Half enabler, reduced geometry inputs, estimation/history ownership, quality floor and full-size output.
+- `post-process/ssao-half-wgsl.ts`: full-size joint bilateral upsampling after reduced-resolution reconstruction.
 - `post-process/ssao-wgsl.ts`: depth, XeGTAO, and output shader factories.
-- `post-process/ssao-temporal.ts`: opt-in temporal settings, phases, camera matrices, and history lifecycle.
-- `post-process/ssao-diligent-gpu.ts`: shipped native-format temporal/history owner and cached render passes.
-- `post-process/ssao-diligent-wgsl.ts`: shipped temporal accumulation, transport, convolution, repair, and reconstruction shaders.
+- `post-process/ssao-temporal.ts`: default reconstruction initialization, settings, phases, camera matrices, and history lifecycle.
+- `post-process/ssao-xegtao-gpu.ts`: shipped native-format temporal/history owner and cached render passes.
+- `post-process/ssao-xegtao-wgsl.ts`: shipped temporal accumulation, transport, convolution, repair, and reconstruction shaders.
 - `post-process/ssao-motion-pruning.ts`: separate opt-in transport-pruning resources and lifecycle.
 - `post-process/ssao-motion-mask-wgsl.ts`: camera-relative motion bounds, hierarchy union, and conservative transport queries.
 - `post-process/ssao-pbr.ts`: opt-in diffuse-IBL composition and sampled-output ownership.
 - `material/plugin/dynamic-pbr-bindings.ts`: resource-versioned material bindings and fenced generation leases.
+- `material/plugin/pbr-plugin-passes.ts`: IBL-only plugin pass policy, signatures and binding selection, installed by `enableDynamicPbrBindings`.
+- `material/plugin/pbr-plugin-decorator.ts`: nullable plugin-bridge decoration seam with a separately tree-shakable installer.
 - `material/pbr/pbr-diffuse-occlusion.ts`: nullable generic shader-expression seam, isolated from lazy namespace exports.
 - `material/pbr/pbr-binding-decorator.ts`: nullable generic binding seam with a separately tree-shakable installer.
+- Geometry velocity producer files (`frame-graph/enable-geometry-velocity.ts`, `material/geometry-deformation-*.ts`, `material/pbr/pbr-geometry-velocity*.ts`) are listed in [module 31](31-geometry-renderer.md).
 - `tests/lite/unit/ssao.test.ts`: scoped CPU contract/lifecycle tests.
 - `tests/lite/unit/ssao-pbr.test.ts`: lighting scope and texture/binding ownership contracts.
 - `tests/lite/unit/ssao-temporal.test.ts`: temporal settings, phase/reset, input validation, and lifetime contracts.
-- `scripts/ao-reference/validate-webgpu.ts`: numerical GPU oracle comparisons.
-- `scripts/ao-reference/profile-ssao.ts`: bounded isolated-demo pass/memory audit runner.
-- `scripts/ao-reference/ssao-profile-client.ts`: test-only timestamp and live-allocation observer, output-equivalence check and manual frame driver.
-- `scripts/ao-reference/ssao-profile-contract.ts`: diagnostic options, exact source adapter, texture-byte accounting and timing statistics.
-- `tests/lite/unit/ssao-profile.test.ts`: diagnostic validation, accounting, timestamp, adapter and source-hook contracts.
-- `scripts/ao-reference/contact-contract.ts`: localized shimmer, coverage and separate trailing metrics.
-- `scripts/ao-reference/validate-contact-client.ts`: deterministic actual-demo floor probes and independent 64-phase spatial oracle.
-- `scripts/ao-reference/validate-contact.ts`: bounded Full/Half and normal-source numerical runner and failure reports.
-- `tests/lite/unit/ssao-contact.test.ts`: localized metric sensitivity, stale-shadow and invalid-data regressions.
-- `scripts/ao-reference/validate-webgpu-client.ts`: real browser GPU execution/readback, odd/small-size and missing-normal checks.
-- `scripts/ao-reference/validate-pbr.ts`, `validate-pbr-client.ts`: focused real-GPU PBR composition checks.
-- `scripts/ao-reference/validate-temporal.ts`, `temporal-validation-options.ts`: production-first validation routing and explicit browser/backend selection.
-- `scripts/ao-reference/validate-diligent-client.ts`, `validate-temporal-scene-client.ts`: production convergence, rejection/reprojection, small dimensions, and actual PBR geometry velocity/resize checks.
-- `scripts/ao-reference/legacy/`: archived guide-only owner, shaders, and explicit legacy validation; excluded from the runtime package.
+- `tests/lite/unit/ssao-xegtao.test.ts`: final temporal GPU resource and dispatch contracts.
+- `tests/lite/unit/ssao-half-resolution.test.ts`: reduced-resolution input and history ownership.
 - `lab/lite/src/demos/ambient-occlusion.ts`, `lab/lite/demo-ambient-occlusion.html`: lit procedural demonstration.
+- `lab/lite/src/lite/scene348.ts`, `lab/lite/src/bjs/scene348.ts`: final Kitchen comparison against Babylon.js SSAO2.
+- `lab/lite/src/shared/kitchen-asset.ts`: common Assets-hosted model URL.
 - `tests/lite/unit/ssao-treeshake.test.ts`: root-entry opt-in proof.
 - `packages/babylon-lite/third-party-notices/*`: verified upstream licenses included by the existing package notice generator.
