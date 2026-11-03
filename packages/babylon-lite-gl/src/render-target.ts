@@ -73,7 +73,10 @@ export interface GLRenderTargetOptions {
      *  one. When supplied the render target does NOT own or restore it — the
      *  texture is engine-managed (restored by the standard texture-restore path
      *  first) and the RT re-attaches its swapped handle afterwards. The caller is
-     *  responsible for sizing it to `width`×`height` and for disposing it. */
+     *  responsible for sizing it to `width`×`height` and for disposing it.
+     *  Readbacks use the creator's texel type, so a float / half-float texture
+     *  must be attached via `createFloatRenderTarget` with a matching `type`
+     *  (`createRenderTarget` reads as `UNSIGNED_BYTE`). */
     colorTexture?: GLTexture;
 }
 

@@ -978,7 +978,7 @@ export interface GLRenderTargetOptions {
     magFilter?: GLenum; // default gl.LINEAR
     wrapS?: GLenum; // default gl.CLAMP_TO_EDGE
     wrapT?: GLenum; // default gl.CLAMP_TO_EDGE
-    colorTexture?: GLTexture; // BYO color attachment (e.g. a createFloatTexture HDR target); else owned 8-bit
+    colorTexture?: GLTexture; // BYO color attachment, else owned 8-bit; float BYO → createFloatRenderTarget + matching type
     format?: GLenum; // owned color format: gl.RGBA (default, RGBA8) | gl.RG (RG8) | gl.RED (R8); else throws
     // No generateStencilBuffer/generateMipMaps here: stencil is the opt-in
     // generateRenderTargetStencil (depth-stencil module) helper; mipmaps are the
@@ -1054,7 +1054,9 @@ export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGL
       reattaches the fresh handle — the same per-target hook pattern the sprite
       renderer uses (§3.6).
 - **Scope.** Color is RGBA8 by default, `R8` / `RG8` via `format`, or any `GLTexture` passed via `colorTexture`
-  (e.g. a `createFloatTexture` half-float HDR target). Optional core depth16
+  (e.g. a `createFloatTexture` half-float HDR target — attach it with
+  `createFloatRenderTarget(engine, w, h, { colorTexture, type })` so readbacks use
+  the matching texel type; `createRenderTarget` reads as `UNSIGNED_BYTE`). Optional core depth16
   (`generateDepthBuffer`); a packed depth-stencil / stencil-only attachment via the
   opt-in `generateRenderTargetStencil`; `createFloatRenderTarget`,
   the `generateRenderTargetMipMaps` function (mipmaps are NOT a create-option) and
