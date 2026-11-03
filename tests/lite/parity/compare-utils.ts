@@ -38,11 +38,20 @@ export function getSceneConfig(sceneId: number): SceneConfig {
 }
 
 /** Capture (or reuse) the Babylon golden reference for a scene. */
-export function captureGolden(browser: Browser, opts: CaptureGoldenOptions): Promise<string> {
-    return captureGoldenCore(browser, opts, {
+export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions): Promise<string> {
+    const goldenPath = await captureGoldenCore(browser, opts, {
         refBaseDir: path.resolve(__dirname, "../../../reference/lite"),
         slugForScene: (id) => getSceneConfig(id).slug,
         refUrl: (id, query) => `/babylon-ref-scene${id}.html${query}`,
         waitForBabylonLoadingScreen: true,
     });
+    // TEMPORARY (PR #871): one CI run prints the CI-browser captures of twins 343-347 so they can be committed as goldens.
+    if (opts.force && process.env.CI && opts.sceneId >= 343 && opts.sceneId <= 347) {
+        const b64 = fs.readFileSync(goldenPath).toString("base64");
+        for (let i = 0; i < b64.length; i += 8000) {
+            console.log(`RHGOLDEN ${opts.sceneId} ${i / 8000} ${b64.slice(i, i + 8000)}`);
+        }
+        console.log(`RHGOLDEN ${opts.sceneId} END ${b64.length}`);
+    }
+    return goldenPath;
 }

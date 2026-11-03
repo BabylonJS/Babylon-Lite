@@ -11,7 +11,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 336 skipped via skipParity in scene-c
 
 test("Scene 336 - ShaderMaterial basic color matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    // No `force`, as in scene 159: the reference shader writes 0.10 (25.5/255), which some GPUs round to 26 and
+    // Scene 159's golden, not a CI-browser capture: the reference shader writes 0.10 (25.5/255), which some GPUs round to 26 and
     // others to 25, while Lite writes 25/255. The committed golden pins the source scene's rounding; a flat
     // colour carries nothing handedness- or GPU-specific worth recapturing.
     await captureGolden(browser, { sceneId: 336, settleMs: 500 });

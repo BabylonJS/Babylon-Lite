@@ -12,7 +12,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 333 skipped via skipParity in scene-c
 test("Scene 333 - Cascaded shadow maps match Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     // Regenerate the BJS CSM oracle on the same machine so cascade fits match exactly.
-    await captureGolden(browser, { sceneId: 333, force: true });
+    await captureGolden(browser, { sceneId: 333 });
 
     await page.goto("/scene333.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

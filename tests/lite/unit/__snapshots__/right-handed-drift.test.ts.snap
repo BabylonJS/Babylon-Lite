@@ -286,7 +286,7 @@ exports[`right-handed drift guard > material/shader/shader-pipeline.ts: right-ha
 
 exports[`right-handed drift guard > material/shader/shader-renderable.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
-  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const ccw = packets.filter ( ( packet ) = > ( ( packet.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ) ; if ( ccw.length & & ccw.length < packets.length ) { return [ packets.filter ( ( packet ) = > ! ccw.includes ( packet ) ) , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
+  "buildMaterialRenderables use": "«» → «if ( _rightHanded ) { const cw : ShaderPacket [ ] = [ ] ; const ccw : ShaderPacket [ ] = [ ] ; for ( const packet of packets ) { ( ( ( packet.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 ) ? ccw : cw ) .push ( packet ) ; } if ( ccw.length & & cw.length ) { return [ cw , ccw ] .flatMap ( ( part ) = > { const groups = vbRender ? ._group ( part ) ; return groups ? Array.from ( groups , ( group ) = > build ( group ) ) : [ build ( part ) ] ; } ) ; } }»",
   "createPacket if-rh": "«» → «_toRightHandedShaderSystemUniforms ( systemData , systemSpec._offsets ) ;»",
   "createShaderRenderable &&": "«» → «( ( first.mesh as Mesh & { _primitiveFeatures ? : number } ) ._primitiveFeatures ? ? 0 ) & ( 1 < < 11 )»",
   "pipeline &&": "«» → «( renderable as Renderable & { _ccw ? : 1 } ) ._ccw»",

@@ -12,7 +12,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 340 skipped via skipParity in scene-c
 test("Scene 340 - Geospatial camera matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     // Regenerate the BJS GeospatialCamera oracle on the same machine so the view matrix matches exactly.
-    await captureGolden(browser, { sceneId: 340, force: true });
+    await captureGolden(browser, { sceneId: 340 });
 
     await page.goto("/scene340.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

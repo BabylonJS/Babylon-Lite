@@ -285,9 +285,13 @@ function buildMaterialRenderables(
     if (_rightHanded) {
         // Right-handed glTF geometry keeps glTF's own winding (no mirroring root), unlike procedural
         // meshes, so the two cannot share one opaque pipeline.
-        const ccw = packets.filter((packet) => ((packet.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11));
-        if (ccw.length && ccw.length < packets.length) {
-            return [packets.filter((packet) => !ccw.includes(packet)), ccw].flatMap((part) => {
+        const cw: ShaderPacket[] = [];
+        const ccw: ShaderPacket[] = [];
+        for (const packet of packets) {
+            (((packet.mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0) & (1 << 11) ? ccw : cw).push(packet);
+        }
+        if (ccw.length && cw.length) {
+            return [cw, ccw].flatMap((part) => {
                 const groups = vbRender?._group(part);
                 return groups ? Array.from(groups, (group) => build(group)) : [build(part)];
             });
