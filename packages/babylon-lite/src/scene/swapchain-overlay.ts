@@ -31,7 +31,9 @@ export function configureSwapchainOverlayScene(overlay: SceneContext): void {
     task.enabled = false;
     overlay._beforeRender.unshift(() => {
         const baseTask = getDefaultSwapchainTask(overlay._overlayBase!, surface);
-        const view = baseTask?._config.rst === surface.scRT && baseTask._colorAttachment.view;
+        // A disabled base (e.g. a nested overlay whose own base has no shareable attachment)
+        // renders nothing this frame, so its colour view must not be loaded and resolved.
+        const view = baseTask?.enabled !== false && baseTask?._config.rst === surface.scRT && baseTask._colorAttachment.view;
         task.enabled = view ? enabled : false;
         task._config.clr = !view;
         if (view) {

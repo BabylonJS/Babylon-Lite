@@ -30,8 +30,13 @@ function moveOverlayDescendants(base: SceneContext, baseIndex: number): number {
     return baseIndex;
 }
 
-/** @internal Keep a scene and its explicitly associated overlay scenes together, depth-first. */
-export function moveSwapchainOverlaysAfterBase(base: SceneContext): void {
+/** @internal Keep the overlay tree containing `scene` together, depth-first. Grouping starts at
+ *  the tree's root and waits until that root is registered, so siblings keep registration order. */
+export function moveSwapchainOverlaysAfterBase(scene: SceneContext): void {
+    let base = scene;
+    while (base._overlayBase) {
+        base = base._overlayBase;
+    }
     const surface = base.surface;
     const contexts = surface._renderingContexts;
     let baseIndex = contexts.indexOf(base);
@@ -65,7 +70,7 @@ function sceneRegistered(scene: SceneContext): void {
         scene._overlayConfigured = true;
         configureSwapchainOverlayScene(scene);
     }
-    moveSwapchainOverlaysAfterBase(base ?? scene);
+    moveSwapchainOverlaysAfterBase(scene);
 }
 
 /**

@@ -391,6 +391,25 @@ describe("registerScene / unregisterScene", () => {
             expect(order()).toEqual([0, 3, 1, 2, 4]);
         });
 
+        it.each([1, 4])("preserves sibling order when nested layers register before their absent root at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const root = createSceneContext(engine);
+            const p1 = createOverlayScene(root);
+            const p2 = createOverlayScene(root);
+            const c1 = createUtilityLayer(p1, { addDefaultLight: false });
+            const c2 = createUtilityLayer(p1, { addDefaultLight: false });
+
+            await registerUtilityLayer(c1);
+            await registerScene(p2);
+            await registerScene(p1);
+            await registerUtilityLayer(c2);
+            await registerUtilityLayer(c2);
+            expect(getRenderingContexts(engine)).toEqual([c1.scene, p2, p1, c2.scene]);
+
+            await registerScene(root);
+            expect(getRenderingContexts(engine)).toEqual([root, p2, p1, c1.scene, c2.scene]);
+        });
+
         it.each([1, 4])("restores child-first registration without using a descendant as the root base at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);

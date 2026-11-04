@@ -134,4 +134,39 @@ describe("configureSwapchainOverlayScene", () => {
         expect(overlayTask.enabled).toBe(false);
         expect(overlayTask._colorAttachment.view).toBe(overlayView);
     });
+
+    it("propagates an unavailable MSAA attachment through a nested overlay chain", () => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const parentView = {} as GPUTextureView;
+        const childView = {} as GPUTextureView;
+        const base = {
+            _kind: "scene",
+            _frameGraph: { _tasks: [{ targetTexture: swapchain, _colorAttachment: {} }] },
+        } as unknown as SceneContext;
+        const surface = makeSurface(swapchain, 4, [base]);
+        const parentTask = makeSwapchainTask(swapchain, parentView);
+        const parent = makeOverlay(surface, parentTask, base);
+        const childTask = makeSwapchainTask(swapchain, childView);
+        const child = makeOverlay(surface, childTask, parent);
+
+        configureSwapchainOverlayScene(parent);
+        configureSwapchainOverlayScene(child);
+        parent._beforeRender[0]!(0);
+        child._beforeRender[0]!(0);
+
+        expect(parentTask.enabled).toBe(false);
+        expect(childTask.enabled).toBe(false);
+        expect(childTask._config.clr).toBe(true);
+        expect(childTask._colorAttachment.view).toBe(childView);
+
+        const baseView = {} as GPUTextureView;
+        (base._frameGraph._tasks as RenderTask[]).unshift(makeSwapchainTask(swapchain, baseView));
+        parent._beforeRender[0]!(0);
+        child._beforeRender[0]!(0);
+
+        expect(parentTask._colorAttachment.view).toBe(baseView);
+        expect(childTask.enabled).toBeUndefined();
+        expect(childTask._config.clr).toBe(false);
+        expect(childTask._colorAttachment.view).toBe(baseView);
+    });
 });
