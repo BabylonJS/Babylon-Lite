@@ -10,26 +10,26 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import {
-    readScene348Settings,
-    SCENE348_CAMERAS,
-    SCENE348_ASSETS,
-    SCENE348_CLEAR_COLOR,
-    SCENE348_LIGHT_DIRECTION,
-    SCENE348_PANEL_SIZE,
-    SCENE348_PANELS,
-} from "../shared/scene348-parallax.js";
-import type { Scene348Settings } from "../shared/scene348-parallax.js";
-import { installScene348CameraSync, installScene348LiveUpdates, reportScene348Error } from "../shared/scene348-parallax-ui.js";
+    readScene349Settings,
+    SCENE349_CAMERAS,
+    SCENE349_ASSETS,
+    SCENE349_CLEAR_COLOR,
+    SCENE349_LIGHT_DIRECTION,
+    SCENE349_PANEL_SIZE,
+    SCENE349_PANELS,
+} from "../shared/scene349-parallax.js";
+import type { Scene349Settings } from "../shared/scene349-parallax.js";
+import { installScene349CameraSync, installScene349LiveUpdates, reportScene349Error } from "../shared/scene349-parallax-ui.js";
 
 async function main(): Promise<void> {
-    const settings = readScene348Settings(location.search);
+    const settings = readScene349Settings(location.search);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
     engine.displayLoadingUI = () => {};
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(...SCENE348_CLEAR_COLOR);
-    const pose = SCENE348_CAMERAS[settings.view];
+    scene.clearColor = new Color4(...SCENE349_CLEAR_COLOR);
+    const pose = SCENE349_CAMERAS[settings.view];
     const camera = new ArcRotateCamera("camera", pose.alpha, pose.beta, pose.radius, Vector3.Zero(), scene);
     camera.fov = 0.8;
     camera.minZ = 0.1;
@@ -43,8 +43,8 @@ async function main(): Promise<void> {
     camera.lowerRadiusLimit = 5.5;
     camera.upperRadiusLimit = 25;
     camera.attachControl(canvas, true);
-    scene.onBeforeRenderObservable.add(installScene348CameraSync(camera, canvas));
-    const key = new DirectionalLight("key", new Vector3(...SCENE348_LIGHT_DIRECTION), scene);
+    scene.onBeforeRenderObservable.add(installScene349CameraSync(camera, canvas));
+    const key = new DirectionalLight("key", new Vector3(...SCENE349_LIGHT_DIRECTION), scene);
     key.intensity = 0.85;
     const fill = new HemisphericLight("fill", new Vector3(0, 0.5, -1), scene);
     fill.intensity = 0.25;
@@ -60,18 +60,18 @@ async function main(): Promise<void> {
                 true,
                 Texture.TRILINEAR_SAMPLINGMODE,
                 () => resolve(texture),
-                (message, cause) => reject(new Error(`Scene 348 failed to load ${url}: ${message ?? "texture loading error"}`, { cause }))
+                (message, cause) => reject(new Error(`Scene 349 failed to load ${url}: ${message ?? "texture loading error"}`, { cause }))
             );
             texture.wrapU = Texture.WRAP_ADDRESSMODE;
             texture.wrapV = Texture.WRAP_ADDRESSMODE;
             texture.gammaSpace = gammaSpace;
             texture.anisotropicFilteringLevel = 4;
         });
-    const textures: Partial<Record<Scene348Settings["asset"], Promise<[Texture, Texture]>>> = {};
-    const loadTextures = (asset: Scene348Settings["asset"]): Promise<[Texture, Texture]> => {
+    const textures: Partial<Record<Scene349Settings["asset"], Promise<[Texture, Texture]>>> = {};
+    const loadTextures = (asset: Scene349Settings["asset"]): Promise<[Texture, Texture]> => {
         let pair = textures[asset];
         if (!pair) {
-            const urls = SCENE348_ASSETS[asset];
+            const urls = SCENE349_ASSETS[asset];
             pair = Promise.all([loadTexture(urls.color, true), loadTexture(urls.normalHeight, false)]);
             textures[asset] = pair;
             void pair.catch(() => {
@@ -82,8 +82,8 @@ async function main(): Promise<void> {
     };
     let [color, normalHeight] = await loadTextures(settings.asset);
     const materials: { material: StandardMaterial | PBRMaterial; pom: boolean }[] = [];
-    for (const panel of SCENE348_PANELS) {
-        const mesh = MeshBuilder.CreatePlane(panel.name, { size: SCENE348_PANEL_SIZE }, scene);
+    for (const panel of SCENE349_PANELS) {
+        const mesh = MeshBuilder.CreatePlane(panel.name, { size: SCENE349_PANEL_SIZE }, scene);
         mesh.position.set(panel.x, panel.y, 0);
         const material = panel.family === "standard" ? new StandardMaterial(panel.name, scene) : new PBRMaterial(panel.name, scene);
         material.bumpTexture = normalHeight;
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     canvas.dataset.implementation = "babylon";
     canvas.dataset.parallaxScaleBias = String(settings.depth);
     canvas.dataset.drawCalls = String(scene.meshes.length);
-    installScene348LiveUpdates(settings, canvas, async (next, previous) => {
+    installScene349LiveUpdates(settings, canvas, async (next, previous) => {
         const texturesChanged = next.asset !== previous.asset;
         if (texturesChanged) {
             [color, normalHeight] = await loadTextures(next.asset);
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
             entry.material.parallaxScaleBias = next.depth;
         }
         if (next.view !== previous.view) {
-            const nextPose = SCENE348_CAMERAS[next.view];
+            const nextPose = SCENE349_CAMERAS[next.view];
             camera.alpha = nextPose.alpha;
             camera.beta = nextPose.beta;
             camera.radius = nextPose.radius;
@@ -145,4 +145,4 @@ async function main(): Promise<void> {
     canvas.dataset.ready = "true";
 }
 
-main().catch(reportScene348Error);
+main().catch(reportScene349Error);

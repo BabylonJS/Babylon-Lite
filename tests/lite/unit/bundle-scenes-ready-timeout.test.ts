@@ -65,14 +65,14 @@ describe("bundle scene readiness timeout", () => {
             const closeServer = vi.spyOn(Server.prototype, "close");
             const failed = measurementBrowser("simulated failed initialization");
             const recovered = measurementBrowser();
-            const nextScene = measurementBrowser(undefined, "scene348");
+            const nextScene = measurementBrowser(undefined, "scene349");
             recovered.newPage.mockResolvedValueOnce(recovered.page).mockResolvedValueOnce(nextScene.page);
             owned.launch.mockResolvedValueOnce(failed).mockResolvedValueOnce(recovered);
 
-            const result = await measureLiveSizes(["scene8", "scene348"], [], false);
+            const result = await measureLiveSizes(["scene8", "scene349"], [], false);
 
             expect(result.scene8).toMatchObject({ rawBytes: recovered.runtime.byteLength, runtimeChunks: ["scene8.js"] });
-            expect(result.scene348).toMatchObject({ rawBytes: nextScene.runtime.byteLength, runtimeChunks: ["scene348.js"] });
+            expect(result.scene349).toMatchObject({ rawBytes: nextScene.runtime.byteLength, runtimeChunks: ["scene349.js"] });
             expect(owned.launch).toHaveBeenCalledTimes(2);
             expect(owned.launch.mock.calls[0]).toEqual(owned.launch.mock.calls[1]);
             expect(failed.newPage).toHaveBeenCalledOnce();

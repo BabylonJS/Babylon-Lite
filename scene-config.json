@@ -3144,16 +3144,16 @@
         "skipPerf": true
     },
     {
-        "id": 348,
-        "slug": "scene348-parallax-occlusion",
-        "name": "Scene 348 - Parallax Occlusion Mapping",
+        "id": 349,
+        "slug": "scene349-parallax-occlusion",
+        "name": "Scene 349 - Parallax Occlusion Mapping",
         "maxMad": 0,
         "maxRawKB": 100,
         "description": "Standard and PBR panels use the original stone and brick-wall diffuse/normal-height assets from Playground 10I31V revision 408. Includes synchronized native Babylon.js / Lite views, normal-map-only controls, texture selection, depth calibration, and Lite-quality controls.",
         "note": "Visual/behavior comparison: Babylon.js native marching and Lite contact refinement are intentionally not pixel-identical.",
         "tags": ["material", "parallax", "pom", "standard", "pbr", "texture", "comparison"],
         "skipParity": true,
-        "skipParityReason": "The user selected comparison of the existing algorithms, not pixel parity. Scene348's browser spec validates POM behavior and synchronized native reference rendering without a permissive MAD gate.",
+        "skipParityReason": "The user selected comparison of the existing algorithms, not pixel parity. Scene349's browser spec validates POM behavior and synchronized native reference rendering without a permissive MAD gate.",
         "skipPerf": true
     }
 ]

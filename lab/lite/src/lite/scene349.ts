@@ -24,26 +24,26 @@ import {
 } from "babylon-lite";
 import type { PbrMaterialProps, StandardMaterialProps } from "babylon-lite";
 import {
-    readScene348Settings,
-    SCENE348_CAMERAS,
-    SCENE348_ASSETS,
-    SCENE348_CLEAR_COLOR,
-    SCENE348_LIGHT_DIRECTION,
-    SCENE348_PANEL_SIZE,
-    SCENE348_PANELS,
-    SCENE348_QUALITY,
-} from "../shared/scene348-parallax.js";
-import type { Scene348Settings } from "../shared/scene348-parallax.js";
-import { installScene348CameraSync, installScene348LiveUpdates, reportScene348Error } from "../shared/scene348-parallax-ui.js";
+    readScene349Settings,
+    SCENE349_CAMERAS,
+    SCENE349_ASSETS,
+    SCENE349_CLEAR_COLOR,
+    SCENE349_LIGHT_DIRECTION,
+    SCENE349_PANEL_SIZE,
+    SCENE349_PANELS,
+    SCENE349_QUALITY,
+} from "../shared/scene349-parallax.js";
+import type { Scene349Settings } from "../shared/scene349-parallax.js";
+import { installScene349CameraSync, installScene349LiveUpdates, reportScene349Error } from "../shared/scene349-parallax-ui.js";
 
 async function main(): Promise<void> {
-    const settings = readScene348Settings(location.search);
+    const settings = readScene349Settings(location.search);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    const [r, g, b, a] = SCENE348_CLEAR_COLOR;
+    const [r, g, b, a] = SCENE349_CLEAR_COLOR;
     scene.clearColor = { r, g, b, a };
-    const pose = SCENE348_CAMERAS[settings.view];
+    const pose = SCENE349_CAMERAS[settings.view];
     const camera = createArcRotateCamera(pose.alpha, pose.beta, pose.radius, { x: 0, y: 0, z: 0 });
     camera.fov = 0.8;
     camera.nearPlane = 0.1;
@@ -59,30 +59,30 @@ async function main(): Promise<void> {
         upperRadiusLimit: 25,
     });
     attachControl(camera, canvas, scene, { shouldHandlePointerDown: (event) => event.button === 0 });
-    onBeforeRender(scene, installScene348CameraSync(camera, canvas));
+    onBeforeRender(scene, installScene349CameraSync(camera, canvas));
 
-    addToScene(scene, createDirectionalLight([...SCENE348_LIGHT_DIRECTION], 0.85));
+    addToScene(scene, createDirectionalLight([...SCENE349_LIGHT_DIRECTION], 0.85));
     const fill = createHemisphericLight([0, 0.5, -1], 0.25);
     fill.diffuseColor = [0.65, 0.7, 0.8];
     fill.groundColor = [0, 0, 0];
     addToScene(scene, fill);
 
-    const loadTextures = (asset: Scene348Settings["asset"]) => {
-        const urls = SCENE348_ASSETS[asset];
+    const loadTextures = (asset: Scene349Settings["asset"]) => {
+        const urls = SCENE349_ASSETS[asset];
         return Promise.all([loadTexture2D(engine, urls.color, { srgb: false }), loadTexture2D(engine, urls.normalHeight, { srgb: false, premultiplyAlpha: false })]);
     };
     let [color, normalHeight] = await loadTextures(settings.asset);
-    const parallaxFor = (next: Scene348Settings) => ({
+    const parallaxFor = (next: Scene349Settings) => ({
         heightTexture: normalHeight,
         heightChannel: "a" as const,
-        heightScale: SCENE348_PANEL_SIZE * next.depth,
+        heightScale: SCENE349_PANEL_SIZE * next.depth,
         heightCenter: 0,
-        ...SCENE348_QUALITY[next.quality],
+        ...SCENE349_QUALITY[next.quality],
     });
     const standardMaterials: { material: StandardMaterialProps; pom: boolean }[] = [];
     const pbrMaterials: { material: PbrMaterialProps; pom: boolean }[] = [];
-    for (const panel of SCENE348_PANELS) {
-        const mesh = createPlane(engine, { width: SCENE348_PANEL_SIZE, height: SCENE348_PANEL_SIZE });
+    for (const panel of SCENE349_PANELS) {
+        const mesh = createPlane(engine, { width: SCENE349_PANEL_SIZE, height: SCENE349_PANEL_SIZE });
         mesh.name = panel.name;
         mesh.position.set(panel.x, panel.y, 0);
         if (panel.family === "standard") {
@@ -119,9 +119,9 @@ async function main(): Promise<void> {
     await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.implementation = "lite";
-    canvas.dataset.heightScale = String(SCENE348_PANEL_SIZE * settings.depth);
+    canvas.dataset.heightScale = String(SCENE349_PANEL_SIZE * settings.depth);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
-    installScene348LiveUpdates(settings, canvas, async (next, previous) => {
+    installScene349LiveUpdates(settings, canvas, async (next, previous) => {
         const texturesChanged = next.asset !== previous.asset;
         if (texturesChanged) {
             [color, normalHeight] = await loadTextures(next.asset);
@@ -161,16 +161,16 @@ async function main(): Promise<void> {
             }
         }
         if (next.view !== previous.view) {
-            const nextPose = SCENE348_CAMERAS[next.view];
+            const nextPose = SCENE349_CAMERAS[next.view];
             camera.alpha = nextPose.alpha;
             camera.beta = nextPose.beta;
             camera.radius = nextPose.radius;
         }
-        canvas.dataset.heightScale = String(SCENE348_PANEL_SIZE * next.depth);
+        canvas.dataset.heightScale = String(SCENE349_PANEL_SIZE * next.depth);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     resizeEngine(engine);
     canvas.dataset.ready = "true";
 }
 
-main().catch(reportScene348Error);
+main().catch(reportScene349Error);

@@ -3,14 +3,14 @@ import { PNG } from "pngjs";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { SCENE348_ASSETS, SCENE348_CAMERAS, SCENE348_PANEL_SIZE, SCENE348_PANELS } from "../../../lab/lite/src/shared/scene348-parallax.js";
+import { SCENE349_ASSETS, SCENE349_CAMERAS, SCENE349_PANEL_SIZE, SCENE349_PANELS } from "../../../lab/lite/src/shared/scene349-parallax.js";
 import { waitForCanvasReady } from "../parity/compare-utils";
 
 test.use({ baseURL: `http://127.0.0.1:${process.env.LAB_TEST_PORT ?? 5179}` });
 
 const bundleDirectory = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
 
-interface Scene348GpuState {
+interface Scene349GpuState {
     devices: number;
     writes: { bufferSize: number; heightScale: number; min: number; max: number; refinement: number }[];
     errors: string[];
@@ -19,14 +19,14 @@ interface Scene348GpuState {
 declare global {
     interface Window {
         /** @internal Test-only GPU submission tracing. */
-        _scene348Gpu?: Scene348GpuState;
+        _scene349Gpu?: Scene349GpuState;
     }
 }
 
-async function traceScene348Gpu(page: Page): Promise<void> {
+async function traceScene349Gpu(page: Page): Promise<void> {
     await page.addInitScript(() => {
-        const state: Scene348GpuState = { devices: 0, writes: [], errors: [] };
-        window._scene348Gpu = state;
+        const state: Scene349GpuState = { devices: 0, writes: [], errors: [] };
+        window._scene349Gpu = state;
         const requestDevice = GPUAdapter.prototype.requestDevice;
         GPUAdapter.prototype.requestDevice = async function (descriptor): Promise<GPUDevice> {
             const device = await requestDevice.call(this, descriptor);
@@ -73,7 +73,7 @@ async function traceScene348Gpu(page: Page): Promise<void> {
     });
 }
 
-async function setLiveScene348Depth(page: Page, depth: string): Promise<void> {
+async function setLiveScene349Depth(page: Page, depth: string): Promise<void> {
     await page.locator('input[name="depth"]').evaluate((element, value) => {
         const input = element as HTMLInputElement;
         input.value = value;
@@ -81,7 +81,7 @@ async function setLiveScene348Depth(page: Page, depth: string): Promise<void> {
     }, depth);
 }
 
-async function scene348Pose(canvas: Locator): Promise<[number, number, number]> {
+async function scene349Pose(canvas: Locator): Promise<[number, number, number]> {
     return canvas.evaluate((element) => {
         const data = (element as HTMLCanvasElement).dataset;
         return [Number(data.cameraAlpha), Number(data.cameraBeta), Number(data.cameraRadius)];
@@ -97,13 +97,13 @@ async function captureScene(page: Page, url: string): Promise<PNG> {
     return PNG.sync.read(await page.locator("canvas").screenshot());
 }
 
-function panelDifference(actual: PNG, reference: PNG, panel: (typeof SCENE348_PANELS)[number]): number {
+function panelDifference(actual: PNG, reference: PNG, panel: (typeof SCENE349_PANELS)[number]): number {
     expect(actual.width).toBe(reference.width);
     expect(actual.height).toBe(reference.height);
-    const pixelsPerUnit = actual.height / (2 * SCENE348_CAMERAS.front.radius * Math.tan(0.4));
+    const pixelsPerUnit = actual.height / (2 * SCENE349_CAMERAS.front.radius * Math.tan(0.4));
     const centerX = actual.width / 2 + panel.x * pixelsPerUnit;
     const centerY = actual.height / 2 - panel.y * pixelsPerUnit;
-    const halfSize = (SCENE348_PANEL_SIZE * pixelsPerUnit) / 2 - 8;
+    const halfSize = (SCENE349_PANEL_SIZE * pixelsPerUnit) / 2 - 8;
     const x0 = Math.max(0, Math.ceil(centerX - halfSize));
     const x1 = Math.min(actual.width, Math.floor(centerX + halfSize));
     const y0 = Math.max(0, Math.ceil(centerY - halfSize));
@@ -122,7 +122,7 @@ function panelDifference(actual: PNG, reference: PNG, panel: (typeof SCENE348_PA
 
 for (const implementation of ["lite", "babylon"] as const) {
     for (const asset of ["stone", "wall"] as const) {
-        test(`Scene 348 - ${implementation} ${asset} displaces both POM panels but neither control`, async ({ page }) => {
+        test(`Scene 349 - ${implementation} ${asset} displaces both POM panels but neither control`, async ({ page }) => {
             await page.addInitScript(() => {
                 const original = GPUDevice.prototype.createShaderModule;
                 GPUDevice.prototype.createShaderModule = function (descriptor: GPUShaderModuleDescriptor): GPUShaderModule {
@@ -139,14 +139,14 @@ for (const implementation of ["lite", "babylon"] as const) {
                     return original.call(this, descriptor);
                 };
             });
-            const path = implementation === "lite" ? "/scene348.html" : "/babylon-ref-scene348.html";
+            const path = implementation === "lite" ? "/scene349.html" : "/babylon-ref-scene349.html";
             const off = await captureScene(page, `${path}?embed=1&view=front&pom=off&asset=${asset}`);
             const on = await captureScene(page, `${path}?embed=1&view=front&pom=on&asset=${asset}`);
             await expect(page.locator("html")).toHaveAttribute("data-pom-shader", "true");
-            await expect(page.locator("canvas")).toHaveAttribute("data-color-texture", SCENE348_ASSETS[asset].color);
-            await expect(page.locator("canvas")).toHaveAttribute("data-height-texture", SCENE348_ASSETS[asset].normalHeight);
+            await expect(page.locator("canvas")).toHaveAttribute("data-color-texture", SCENE349_ASSETS[asset].color);
+            await expect(page.locator("canvas")).toHaveAttribute("data-height-texture", SCENE349_ASSETS[asset].normalHeight);
             const zeroDepth = await captureScene(page, `${path}?embed=1&view=front&pom=on&depth=0&asset=${asset}`);
-            for (const panel of SCENE348_PANELS) {
+            for (const panel of SCENE349_PANELS) {
                 const effect = panelDifference(on, off, panel);
                 expect(effect, `${implementation}: ${panel.name}`).toBeGreaterThanOrEqual(0);
                 if (panel.pom) {
@@ -160,7 +160,7 @@ for (const implementation of ["lite", "babylon"] as const) {
     }
 }
 
-test("Scene 348 - both native POM variants move inset samples in the same UV direction", async ({ page }) => {
+test("Scene 349 - both native POM variants move inset samples in the same UV direction", async ({ page }) => {
     const size = 256;
     const color = new PNG({ width: size, height: size });
     const normalHeight = new PNG({ width: size, height: size });
@@ -173,13 +173,13 @@ test("Scene 348 - both native POM variants move inset samples in the same UV dir
     }
     // A UV ramp and constant height expose signed ray displacement independently
     // of the authored textures' relief, lighting detail, and sampling differences.
-    await page.route(SCENE348_ASSETS.stone.color, (route) => route.fulfill({ status: 200, contentType: "image/png", body: PNG.sync.write(color) }));
-    await page.route(SCENE348_ASSETS.stone.normalHeight, (route) => route.fulfill({ status: 200, contentType: "image/png", body: PNG.sync.write(normalHeight) }));
-    for (const path of ["/scene348.html", "/babylon-ref-scene348.html"]) {
+    await page.route(SCENE349_ASSETS.stone.color, (route) => route.fulfill({ status: 200, contentType: "image/png", body: PNG.sync.write(color) }));
+    await page.route(SCENE349_ASSETS.stone.normalHeight, (route) => route.fulfill({ status: 200, contentType: "image/png", body: PNG.sync.write(normalHeight) }));
+    for (const path of ["/scene349.html", "/babylon-ref-scene349.html"]) {
         const off = await captureScene(page, `${path}?embed=1&view=front&depth=0.16&pom=off`);
         const on = await captureScene(page, `${path}?embed=1&view=front&depth=0.16&pom=on`);
-        const pixelsPerUnit = on.height / (2 * SCENE348_CAMERAS.front.radius * Math.tan(0.4));
-        for (const panel of SCENE348_PANELS) {
+        const pixelsPerUnit = on.height / (2 * SCENE349_CAMERAS.front.radius * Math.tan(0.4));
+        for (const panel of SCENE349_PANELS) {
             if (!panel.pom) {
                 continue;
             }
@@ -200,8 +200,8 @@ test("Scene 348 - both native POM variants move inset samples in the same UV dir
     }
 });
 
-test("Scene 348 - comparison settings and orbit state stay synchronized", async ({ page }) => {
-    await page.goto("/lite/compare-scene348.html");
+test("Scene 349 - comparison settings and orbit state stay synchronized", async ({ page }) => {
+    await page.goto("/lite/compare-scene349.html");
     const liteCanvas = page.frameLocator("#lite-frame").locator("canvas");
     const babylonCanvas = page.frameLocator("#babylon-frame").locator("canvas");
     await expect(liteCanvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
@@ -212,11 +212,11 @@ test("Scene 348 - comparison settings and orbit state stay synchronized", async 
     await expect(liteCanvas).toHaveAttribute("data-asset", "wall", { timeout: 30_000 });
     await expect(babylonCanvas).toHaveAttribute("data-asset", "wall", { timeout: 30_000 });
     await page.locator('select[name="view"]').selectOption("front");
-    await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.front.alpha));
-    await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.front.alpha));
+    await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE349_CAMERAS.front.alpha));
+    await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE349_CAMERAS.front.alpha));
     await page.locator('select[name="view"]').selectOption("grazing");
-    await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.grazing.alpha));
-    await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.grazing.alpha));
+    await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE349_CAMERAS.grazing.alpha));
+    await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE349_CAMERAS.grazing.alpha));
     await page.locator('input[name="depth"]').evaluate((element) => {
         const input = element as HTMLInputElement;
         input.value = "0.10";
@@ -226,7 +226,7 @@ test("Scene 348 - comparison settings and orbit state stay synchronized", async 
 
     await expect(liteCanvas).toHaveAttribute("data-depth", "0.1", { timeout: 30_000 });
     await expect(babylonCanvas).toHaveAttribute("data-depth", "0.1", { timeout: 30_000 });
-    await expect(liteCanvas).toHaveAttribute("data-height-scale", String(SCENE348_PANEL_SIZE * 0.1));
+    await expect(liteCanvas).toHaveAttribute("data-height-scale", String(SCENE349_PANEL_SIZE * 0.1));
     await expect(babylonCanvas).toHaveAttribute("data-parallax-scale-bias", "0.1");
     await expect(liteCanvas).toHaveAttribute("data-ready", "true");
     await expect(babylonCanvas).toHaveAttribute("data-ready", "true");
@@ -246,15 +246,15 @@ test("Scene 348 - comparison settings and orbit state stay synchronized", async 
     }
 });
 
-test("Scene 348 - live comparison controls preserve documents, devices, canvases, and the custom camera", async ({ page }) => {
-    await traceScene348Gpu(page);
+test("Scene 349 - live comparison controls preserve documents, devices, canvases, and the custom camera", async ({ page }) => {
+    await traceScene349Gpu(page);
     let documents = 0;
     page.on("request", (request) => {
         if (request.resourceType() === "document") {
             documents++;
         }
     });
-    await page.goto("/lite/compare-scene348.html");
+    await page.goto("/lite/compare-scene349.html");
     const canvases = [page.frameLocator("#lite-frame").locator("canvas"), page.frameLocator("#babylon-frame").locator("canvas")];
     for (const canvas of canvases) {
         await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
@@ -269,11 +269,11 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
     await page.mouse.down();
     await page.mouse.move(bounds.x + bounds.width / 2 - 90, bounds.y + bounds.height / 2 + 30, { steps: 8 });
     await page.mouse.up();
-    await expect.poll(async () => Math.abs((await scene348Pose(canvases[0]!))[0] - SCENE348_CAMERAS.grazing.alpha)).toBeGreaterThan(0.02);
-    await expect.poll(async () => Math.abs((await scene348Pose(canvases[0]!))[0] - (await scene348Pose(canvases[1]!))[0])).toBeLessThan(0.0001);
-    const customPose = await scene348Pose(canvases[0]!);
+    await expect.poll(async () => Math.abs((await scene349Pose(canvases[0]!))[0] - SCENE349_CAMERAS.grazing.alpha)).toBeGreaterThan(0.02);
+    await expect.poll(async () => Math.abs((await scene349Pose(canvases[0]!))[0] - (await scene349Pose(canvases[1]!))[0])).toBeLessThan(0.0001);
+    const customPose = await scene349Pose(canvases[0]!);
 
-    await setLiveScene348Depth(page, "0.10");
+    await setLiveScene349Depth(page, "0.10");
     for (const canvas of canvases) {
         await expect(canvas).toHaveAttribute("data-depth", "0.1");
         await expect(canvas).toHaveAttribute("data-updating", "false");
@@ -288,9 +288,9 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
     await expect
         .poll(async () =>
             canvases[0]!.evaluate(() => {
-                const state = window._scene348Gpu;
+                const state = window._scene349Gpu;
                 if (!state) {
-                    throw new Error("Scene348 GPU tracing was not installed.");
+                    throw new Error("Scene349 GPU tracing was not installed.");
                 }
                 const writes = state.writes.filter((write) => Math.abs(write.heightScale - 0.24) < 0.00001 && write.min === 16 && write.max === 64 && write.refinement === 16);
                 return writes.some((write) => write.bufferSize === 64) && writes.some((write) => write.bufferSize > 64);
@@ -319,7 +319,7 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
         await expect(canvas).toHaveAttribute("data-updating", "false");
     }
     await page.locator('select[name="pom"]').selectOption("on");
-    await setLiveScene348Depth(page, "0.10");
+    await setLiveScene349Depth(page, "0.10");
     for (let i = 0; i < canvases.length; i++) {
         const canvas = canvases[i]!;
         await expect(canvas).toHaveAttribute("data-pom", "on");
@@ -327,15 +327,15 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
         await expect(canvas).toHaveAttribute("data-updating", "false");
         await expect(canvas).toHaveAttribute("data-test-identity", "persistent");
         expect(await canvas.evaluate(() => performance.timeOrigin)).toBe(initialTimeOrigins[i]);
-        const pose = await scene348Pose(canvas);
+        const pose = await scene349Pose(canvas);
         for (let component = 0; component < 3; component++) {
             expect(pose[component]).toBeCloseTo(customPose[component]!, 6);
         }
         const gpu = await canvas.evaluate(() => {
-            if (!window._scene348Gpu) {
-                throw new Error("Scene348 GPU tracing was not installed.");
+            if (!window._scene349Gpu) {
+                throw new Error("Scene349 GPU tracing was not installed.");
             }
-            return window._scene348Gpu;
+            return window._scene349Gpu;
         });
         expect(gpu.devices).toBe(1);
         expect(gpu.errors).toEqual([]);
@@ -345,11 +345,11 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
     expect(new URL(page.url()).searchParams.get("quality")).toBe("high");
 });
 
-for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-scene348.html", "/bundle-bjs-scene348.html"]) {
-    test(`Scene 348 - standalone live controls do not reload ${route}`, async ({ page }) => {
+for (const route of ["/scene349.html", "/babylon-ref-scene349.html", "/bundle-scene349.html", "/bundle-bjs-scene349.html"]) {
+    test(`Scene 349 - standalone live controls do not reload ${route}`, async ({ page }) => {
         if (route.startsWith("/bundle-")) {
-            const file = route.includes("bjs") ? "bjs-scene348.js" : "scene348.js";
-            test.skip(!existsSync(resolve(bundleDirectory, file)), "Build the scene348 production bundles before checking their controls.");
+            const file = route.includes("bjs") ? "bjs-scene349.js" : "scene349.js";
+            test.skip(!existsSync(resolve(bundleDirectory, file)), "Build the scene349 production bundles before checking their controls.");
         }
         await page.goto(route);
         const canvas = page.locator("canvas");
@@ -360,7 +360,7 @@ for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-sc
         });
         const timeOrigin = await page.evaluate(() => performance.timeOrigin);
         await page.locator('select[name="quality"]').selectOption("low");
-        await setLiveScene348Depth(page, "0.12");
+        await setLiveScene349Depth(page, "0.12");
         await expect(canvas).toHaveAttribute("data-quality", "low");
         await expect(canvas).toHaveAttribute("data-depth", "0.12");
         await expect(canvas).toHaveAttribute("data-updating", "false");
@@ -369,14 +369,14 @@ for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-sc
     });
 }
 
-test("Scene 348 - live controls chosen before renderer readiness are retained", async ({ page }) => {
-    await page.route(SCENE348_ASSETS.stone.normalHeight, async (route) => {
+test("Scene 349 - live controls chosen before renderer readiness are retained", async ({ page }) => {
+    await page.route(SCENE349_ASSETS.stone.normalHeight, async (route) => {
         await new Promise<void>((resolve) => setTimeout(resolve, 300));
         await route.continue();
     });
-    await page.goto("/lite/compare-scene348.html", { waitUntil: "domcontentloaded" });
+    await page.goto("/lite/compare-scene349.html", { waitUntil: "domcontentloaded" });
     await page.locator('select[name="quality"]').selectOption("low");
-    await setLiveScene348Depth(page, "0.10");
+    await setLiveScene349Depth(page, "0.10");
     for (const frame of ["#lite-frame", "#babylon-frame"]) {
         const canvas = page.frameLocator(frame).locator("canvas");
         await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
@@ -386,14 +386,14 @@ test("Scene 348 - live controls chosen before renderer readiness are retained", 
     }
 });
 
-test("Scene 348 - production bundles preserve both native source renders", async ({ page }) => {
+test("Scene 349 - production bundles preserve both native source renders", async ({ page }) => {
     test.skip(
-        !existsSync(resolve(bundleDirectory, "scene348.js")) || !existsSync(resolve(bundleDirectory, "bjs-scene348.js")),
-        "Build scene348,bjs-scene348 before checking their production render output."
+        !existsSync(resolve(bundleDirectory, "scene349.js")) || !existsSync(resolve(bundleDirectory, "bjs-scene349.js")),
+        "Build scene349,bjs-scene349 before checking their production render output."
     );
     for (const [source, bundle] of [
-        ["/scene348.html", "/bundle-scene348.html"],
-        ["/babylon-ref-scene348.html", "/bundle-bjs-scene348.html"],
+        ["/scene349.html", "/bundle-scene349.html"],
+        ["/babylon-ref-scene349.html", "/bundle-bjs-scene349.html"],
     ]) {
         const reference = await captureScene(page, `${source}?embed=1`);
         const actual = await captureScene(page, `${bundle}?embed=1`);

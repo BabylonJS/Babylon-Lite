@@ -272,7 +272,7 @@ filtered heightfield, not a conservative visibility hierarchy.
 The solver was selected with a relative WebGPU timestamp-query A/B
 micro-benchmark of the actual WGSL helpers, not with frame captures: four
 full-screen 2560x1440 draws per pass on an NVIDIA RTX 5070 Ti, median of seven
-passes, both Scene 348 Playground assets, front/45°/70° views, depths
+passes, both Scene 349 Playground assets, front/45°/70° views, depths
 0.03/0.06/0.16, and the Low/Medium/High budgets (54 configurations). The
 previous design (4x-anisotropic gradient reads, a fixed angle-based coarse
 count, and linear refinement) cost 9.39 ms of summed POM overhead above a
@@ -387,15 +387,15 @@ references or ceilings are changed.
 - Existing material type modules and root `index.ts`: typed state and exports.
 - Focused unit/build specs: API, composition, lifecycle, GPU oracle, tree-shaking.
 
-## Lab comparison: Scene 348
+## Lab comparison: Scene 349
 
-Scene 348 compares the existing, independently implemented Lite solver with
+Scene 349 compares the existing, independently implemented Lite solver with
 Babylon.js's **native** `useParallax` + `useParallaxOcclusion`, rather than
 substituting a custom Babylon.js shader or changing Lite's solver to match it.
 The user explicitly selected visual/behavioral comparison, not pixel parity.
 
-The matching pages are `/scene348.html` and `/babylon-ref-scene348.html`.
-`/lite/compare-scene348.html` embeds both with the same settings and relays
+The matching pages are `/scene349.html` and `/babylon-ref-scene349.html`.
+`/lite/compare-scene349.html` embeds both with the same settings and relays
 orbit/zoom state between the two canvases. Same-origin messages are accepted
 only from the known counterpart/parent frame; camera values must be finite and
 within the scene's front-facing orbit limits. Neither renderer exposes GPU
@@ -414,7 +414,7 @@ when a frame finishes initial loading. Applied/error replies make update state
 observable and surface failures rather than silently resetting a scene.
 Standalone pages use the same updater directly.
 
-Startup and live failures use the same `reportScene348Error` reporter: it records
+Startup and live failures use the same `reportScene349Error` reporter: it records
 the canvas error, displays an accessible status, logs the cause, and notifies the
 comparison parent. The lab loader accepts a `scene-load-error` custom event with
 a string message, stops its readiness polling/observer, and replaces its spinner
@@ -518,7 +518,7 @@ pages automatically. The gallery and parameterized bundle-size test pick up
 the scene card/ceiling from `scene-config.json`; they require no hardcoded
 scene registration. The BJS bundle discovery uses the existing `bjsSceneEntry`
 resolver rather than assuming the pre-migration `lab/src/bjs` directory, so the
-new bundled reference works from `lab/lite/src/bjs` too. Only scene 348's Lite
+new bundled reference works from `lab/lite/src/bjs` too. Only scene 349's Lite
 and BJS bundles are built/measured. BJS bundling respects the upstream
 package's `sideEffects` metadata: overriding every module as side-effect-free
 removed required raw-texture prototypes, shader/include registration, and
@@ -529,16 +529,16 @@ enough to avoid compositing a partially visible overlay.
 
 Additional files:
 
-- `lab/lite/src/shared/scene348-parallax.ts`: constants, settings, and original Playground asset URLs.
-- `lab/lite/src/shared/scene348-parallax-ui.ts`: standalone controls and bounded camera synchronization.
-- `lab/lite/src/lite/scene348.ts`: Lite PBR/Standard opt-in setup.
-- `lab/lite/src/bjs/scene348.ts`: native Babylon.js PBR/Standard POM setup.
-- `lab/lite/src/scene348-comparison.ts`: synchronized side-by-side page.
-- `lab/lite/scene348.html`, `lab/lite/babylon-ref-scene348.html`, `lab/lite/compare-scene348.html`, `lab/lite/bundle-scene348.html`, `lab/lite/bundle-bjs-scene348.html`, `lab/lite/scene348.css`: source/reference/comparison/production entry pages and shared UI presentation.
-- `tests/lite/parity/scenes/scene348-parallax-occlusion.spec.ts`: scoped behavioral/render comparison.
-- `tests/lite/integration/scene348-comparison.spec.ts`: both native algorithms' POM/depth behavior, original asset selection, and bidirectional camera synchronization.
-- `tests/lite/integration/scene348-errors.spec.ts`: visible source/production/comparison startup errors, combined renderer-failure reporting, and recovery that clears only the successful renderer's error, without screenshots.
-- `tests/lite/unit/scene348-parallax.test.ts`: deterministic input/settings tests.
+- `lab/lite/src/shared/scene349-parallax.ts`: constants, settings, and original Playground asset URLs.
+- `lab/lite/src/shared/scene349-parallax-ui.ts`: standalone controls and bounded camera synchronization.
+- `lab/lite/src/lite/scene349.ts`: Lite PBR/Standard opt-in setup.
+- `lab/lite/src/bjs/scene349.ts`: native Babylon.js PBR/Standard POM setup.
+- `lab/lite/src/scene349-comparison.ts`: synchronized side-by-side page.
+- `lab/lite/scene349.html`, `lab/lite/babylon-ref-scene349.html`, `lab/lite/compare-scene349.html`, `lab/lite/bundle-scene349.html`, `lab/lite/bundle-bjs-scene349.html`, `lab/lite/scene349.css`: source/reference/comparison/production entry pages and shared UI presentation.
+- `tests/lite/parity/scenes/scene349-parallax-occlusion.spec.ts`: scoped behavioral/render comparison.
+- `tests/lite/integration/scene349-comparison.spec.ts`: both native algorithms' POM/depth behavior, original asset selection, and bidirectional camera synchronization.
+- `tests/lite/integration/scene349-errors.spec.ts`: visible source/production/comparison startup errors, combined renderer-failure reporting, and recovery that clears only the successful renderer's error, without screenshots.
+- `tests/lite/unit/scene349-parallax.test.ts`: deterministic input/settings tests.
 
 Live-control regressions retain document/canvas identities, count document
 requests and device creation, and inspect actual rendered changes while moving
