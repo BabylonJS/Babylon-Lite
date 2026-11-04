@@ -1248,6 +1248,9 @@ additional runtime modules. The ordinary `ready` signal still waits for frame 14
 and remains the parity/capture contract. Measurement keeps its normal 50-second
 budget and rejects reported errors or missing readiness. This changes neither the
 177 KiB ceiling nor the rendering or reference pixels.
+Scene-bundle measurement selects Dawn's software adapter explicitly under CI or
+`--software`, and checks that its architecture is `swiftshader` before measuring.
+It does not force the browser's ANGLE/Vulkan compositor and assume WebGPU follows it.
 
 Without AO the two renders differ by a full-image MAD of 1.1. The AO algorithms
 and compositing differ (Lite occludes diffuse IBL before tone mapping; SSAO2

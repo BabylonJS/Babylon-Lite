@@ -98,16 +98,21 @@ describe("bundle scene readiness timeout", () => {
         await expect(measurePage(f.browser, 4173, "scene348", "lite/bundle-scene348.html", "/bundle/", true)).rejects.toThrow("uncaught page errors: render failed");
     });
 
-    it("selects an available software adapter without forcing Windows' Vulkan compositor", () => {
+    it("keeps caught scene-startup errors in readiness failure diagnostics", async () => {
+        const f = readinessBrowser({});
+        f.page.goto.mockImplementation(async () => {
+            f.handlers.console?.(Object.assign(new Error("HDR failed"), { type: () => "error", text: () => "HDR failed" }));
+        });
+        await expect(measurePage(f.browser, 4173, "scene8", "lite/bundle-scene8.html", "/bundle/", true)).rejects.toThrow("console errors: HDR failed");
+    });
+
+    it("selects Dawn's software adapter without forcing the browser compositor on any platform", () => {
         vi.stubEnv("CI", "");
         vi.stubEnv("BUNDLE_SOFTWARE_RENDER", "true");
         const args = measurementBrowserArgs();
         expect(args).toContain("--enable-unsafe-webgpu");
-        if (process.platform === "win32") {
-            expect(args).toContain("--use-webgpu-adapter=swiftshader");
-            expect(args).not.toContain("--enable-features=Vulkan");
-        } else {
-            expect(args).toContain("--use-vulkan=swiftshader");
-        }
+        expect(args).toContain("--use-webgpu-adapter=swiftshader");
+        expect(args).not.toContain("--enable-features=Vulkan");
+        expect(args).not.toContain("--use-angle=swiftshader");
     });
 });

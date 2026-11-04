@@ -15,6 +15,7 @@ import { createHash } from "crypto";
 import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
+import type { Browser } from "@playwright/test";
 import {
     bytesToRoundedKB,
     ignoredScenePayloadCompatibilityBytes,
@@ -1379,16 +1380,11 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
 }
 
 /** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
- *  `--software` flag is passed; otherwise the real GPU. Windows uses Dawn's explicit
- *  software-adapter selector: forcing Chromium's Vulkan compositor there hides all adapters.
+ *  `--software` flag is passed; otherwise the real GPU. Select Dawn's adapter directly,
+ *  rather than changing Chromium's ANGLE/Vulkan compositor and assuming WebGPU follows it.
  *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
-    const swiftShaderArgs =
-        process.env.CI || softwareRenderRequested()
-            ? process.platform === "win32"
-                ? ["--use-webgpu-adapter=swiftshader"]
-                : ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
-            : [];
+    const swiftShaderArgs = process.env.CI || softwareRenderRequested() ? ["--use-webgpu-adapter=swiftshader"] : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
 
@@ -1409,15 +1405,13 @@ function softwareRenderRequested(): boolean {
  *  CI-measured baseline for scenes it never touched. That delta is noise, not a
  *  regression; the run logs this note so it is not mistaken for one.
  *
- *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
- *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
- *  scenes is the canonical way to reproduce CI's numbers for them:
+ *  Native GPU rendering remains the local default. To reproduce CI's numbers, restrict
+ *  the explicit software run to the flagged scenes:
  *
  *      pnpm build:bundle-manifest:device
  *
- *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
- *  flaky-to-unusable on Windows, where these scenes also time out. On Windows, treat CI's
- *  measurement as the authoritative one for these three. */
+ *  Software runs select Dawn's SwiftShader adapter directly and verify it before measuring;
+ *  they do not depend on the browser's compositor selecting the same backend. */
 const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
 export async function buildBundleScenes(): Promise<void> {
@@ -1793,11 +1787,34 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
 
     const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
 
+    let browser: Browser | undefined;
     try {
         const tBrowser = performance.now();
         console.log("Launching measurement browser...");
-        const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+        browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
+        if (process.env.CI || softwareRenderRequested()) {
+            const probe = await browser.newPage();
+            try {
+                await probe.route("**/__bundle-adapter-check__", (route) =>
+                    route.fulfill({ contentType: "text/html", body: '<!doctype html><link rel="icon" href="data:,"><title>WebGPU adapter check</title>' })
+                );
+                await probe.goto(`http://localhost:${port}/__bundle-adapter-check__`);
+                const architecture = await probe.evaluate(async () => {
+                    if (!navigator.gpu) return null;
+                    return Promise.race([
+                        navigator.gpu.requestAdapter().then((adapter) => adapter?.info.architecture ?? null),
+                        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+                    ]);
+                });
+                if (architecture !== "swiftshader") {
+                    throw new Error(`Software bundle measurement requires the SwiftShader WebGPU adapter, got ${architecture ?? "no adapter"}.`);
+                }
+                console.log(`Measurement WebGPU adapter: ${architecture}`);
+            } finally {
+                await probe.close();
+            }
+        }
 
         // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
@@ -1833,10 +1850,12 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
-
-        await browser.close();
     } finally {
-        server.close();
+        try {
+            await browser?.close();
+        } finally {
+            server.close();
+        }
     }
 
     if (pruneManifest) {
@@ -1991,7 +2010,13 @@ export async function measurePage(
     const responseReads: Promise<void>[] = [];
     const responseReadErrors: unknown[] = [];
     const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
     page.on("pageerror", (error: Error) => pageErrors.push(error.message));
+    page.on("console", (message: { type(): string; text(): string }) => {
+        if (message.type() === "error") {
+            consoleErrors.push(message.text());
+        }
+    });
 
     page.on("response", (resp: any) => {
         const url = resp.url();
@@ -2041,6 +2066,9 @@ export async function measurePage(
         notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
         if (pageErrors.length) {
             notReadyReason += `; uncaught page errors: ${pageErrors.join("; ")}`;
+        }
+        if (consoleErrors.length) {
+            notReadyReason += `; console errors: ${consoleErrors.join("; ")}`;
         }
     }
 
