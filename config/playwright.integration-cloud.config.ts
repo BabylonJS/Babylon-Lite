@@ -43,7 +43,8 @@ export default defineConfig({
               }),
     },
     webServer: {
-        command: "pnpm --filter @babylon-lite/lab dev",
+        // These synthetic readback fixtures do not need the lab's model-download preflight.
+        command: "pnpm --filter @babylon-lite/lab exec vite",
         port: labTestPort,
         env: { LAB_DEV_PORT: String(labTestPort) },
         reuseExistingServer: !isCI,
