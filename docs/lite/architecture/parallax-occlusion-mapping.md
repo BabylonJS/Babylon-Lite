@@ -497,9 +497,9 @@ texture assets/filtering. Orbit/zoom is interactive; panning is disabled so
 synchronization has a fixed target. Resize behavior remains engine-native.
 
 The new BJS golden and its 1280x720 JPG thumbnail are captured once from the
-original oblique embedded view (`?embed=1&view=oblique`), which the saved-reference
-comparison selects explicitly. Interactive pages default to Grazing to make the
-relief easier to see. These are visual comparison assets, not a claim of
+Grazing embedded view (`?embed=1&view=grazing`), matching the interactive default
+so the relief is easier to see. The saved-reference comparison selects Grazing
+explicitly and verifies its actual camera pose. These are visual comparison assets, not a claim of
 POM pixel equivalence. `scene-config.json` marks strict pixel parity skipped
 with an explicit reason, while the scene-specific browser spec still verifies
 that both pages render, both material families react to POM/depth, controls
