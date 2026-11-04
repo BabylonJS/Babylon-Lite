@@ -1,19 +1,15 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Ten parallel jobs:
-#   1. Release Markers  — breaking-change marker validation
-#   2. API Report       — public API diff comment + breaking-change validation
-#   3. Unit Tests       — vitest + plumbing (Playwright)
-#   4. Bundle Size      — ceiling checks
-#   5. Perf Regression  — Lite vs Stable on BrowserStack
-#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   7. Lint             — ESLint + TypeScript type-check
-#   8. Playground Snapshot — per-PR playground deploy + PR comment
-#   9. Compat           — compatibility-layer build + unit tests
-#  10. WebGPU Integration — nonvisual shader/readback checks on BrowserStack
-#
+# Runs ten parallel jobs on PRs targeting master. Pushes to master run only
+# UnitTests, Lint, and Compat to catch interactions between merged PRs.
+# The other seven jobs are excluded on master: PR reporting and deployment need
+# PR context, cloud-browser tests stay on PRs, and the bundle-manifest pipeline
+# already enforces bundle ceilings after master pushes.
 
-trigger: none
+trigger:
+    branches:
+        include:
+            - master
 
 pr:
     branches:
@@ -38,13 +34,14 @@ variables:
 
 stages:
     - stage: CI
-      displayName: "PR Validation"
+      displayName: "Validation"
       jobs:
           # ──────────────────────────────────────────────────────────────
           # Job 0: Release Marker Validation
           # ──────────────────────────────────────────────────────────────
           - job: ReleaseMarkers
             displayName: "Release Markers"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -75,6 +72,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: ApiReport
             displayName: "API Report"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -221,6 +219,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: WebGPUIntegration
             displayName: "WebGPU Integration (Cloud Browser)"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 30
             pool:
                 vmImage: "ubuntu-latest"
@@ -279,6 +278,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: BundleSize
             displayName: "Bundle Size"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
@@ -405,6 +405,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
@@ -549,6 +550,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
@@ -775,6 +777,7 @@ stages:
           # deploy token to fork-authored code, a security trade-off to weigh.
           - job: PlaygroundSnapshot
             displayName: "PR Playground Snapshot"
+            condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:

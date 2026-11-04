@@ -43,7 +43,7 @@ export interface DepthOfFieldPostProcessTaskConfig extends PostProcessTaskSettin
     focalLength?: number;
     /** Blur quality. Default {@link DepthOfFieldBlurLevel.Low}. */
     blurLevel?: DepthOfFieldBlurLevel;
-    /** When true the depth texture stores camera-space depth (0..maxZ). */
+    /** When true the depth texture stores camera-space depth (0..maxZ, or 0..-maxZ in a right-handed build). */
     depthNotNormalized?: boolean;
 }
 

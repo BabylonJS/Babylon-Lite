@@ -10,10 +10,14 @@
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
 
+// `rotateY` maps a world direction to environment-cube space. A right-handed build also negates Z afterwards,
+// like Babylon.js's REFLECTIONMAP_OPPOSITEZ, so every IBL lookup sees the cube in its right-handed orientation.
+// The `wgsl` tag minifies only the template's static text, so both interpolated variants are written minified.
 const IBL_HELPERS = wgsl`
 fn environmentHorizonOcclusion(V: vec3<f32>, N: vec3<f32>, geoN: vec3<f32>) -> f32 {
 let R = reflect(V, N);
@@ -26,7 +30,7 @@ return 1.0 + F0 * (1.0 / brdfY - 1.0);
 fn rotateY(v: vec3<f32>, angle: f32) -> vec3<f32> {
 let c = cos(angle);
 let s = sin(angle);
-return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
+return vec3<f32>(v.x * c + v.z * s, v.y, ${_rightHanded ? "v.x*s-v.z*c" : "-v.x*s+v.z*c"});
 }
 `;
 

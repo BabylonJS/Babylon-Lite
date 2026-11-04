@@ -82,6 +82,9 @@ const PACKAGE_ROOT = resolve(__dirname, "build");
 const DIST_OUT_DIR = "build/dist";
 const LIB_OUT_DIR = "build/lib";
 
+/** Package `imports` specifier whose target the consumer's bundler picks by resolve condition. */
+const COORDINATE_SYSTEM_IMPORT = "#coordinate-system";
+
 /**
  * Emit a publish-ready package.json into the build root and copy the README and
  * LICENSE alongside it so the published package is complete. `exports`/`main`/
@@ -114,6 +117,16 @@ function emitPackageJson(): Plugin {
                     ".": {
                         types: "./index.d.ts",
                         import: "./lib/index.js",
+                    },
+                },
+                // Handedness is a build-time choice of the consumer's bundler (resolve
+                // condition), so lib/ keeps the `#coordinate-system` specifier unresolved
+                // (see the lib pass's `external`) and src/engine/coordinate-system.ts. The
+                // prebundled dist/ is resolved with the default (left-handed) variant.
+                imports: {
+                    [COORDINATE_SYSTEM_IMPORT]: {
+                        "babylon-lite-rh": "./lib/engine/coordinate-system-rh.js",
+                        default: "./lib/engine/coordinate-system.js",
                     },
                 },
                 jsdelivr: "./dist/index.js",
@@ -165,7 +178,7 @@ function emitPackageJson(): Plugin {
  * license text must be propagated per its MIT/Apache-2.0 attribution terms.
  * Keep this list in sync with the `dependencies` field of package.json.
  */
-const BUNDLED_DEPENDENCIES = ["manifold-3d", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm", "text-shaper"];
+const BUNDLED_DEPENDENCIES = ["manifold-3d", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm", "text-shaper", "navcat", "mathcat"];
 
 /**
  * Resolve a bundled dependency's installed directory. These are declared
@@ -538,6 +551,11 @@ function enumerateLibEntries(): Record<string, string> {
  * defeating module-granular elimination of the default-layout text path.
  */
 const VENDOR_CHUNKS: ReadonlyArray<readonly [RegExp, string]> = [
+    // Keep the SDK's query/generation entry points separate. Unlike the WASM runtimes,
+    // Navcat/mathcat bytes remain included in the scene/demo runtime size accounting.
+    [/[\\/]node_modules[\\/]navcat[\\/]dist[\\/]blocks\.js$/, "vendor/navcat-generation"],
+    [/[\\/]node_modules[\\/]navcat[\\/]/, "vendor/navcat"],
+    [/[\\/]node_modules[\\/]mathcat[\\/]/, "vendor/navcat-math"],
     [/[\\/]node_modules[\\/]text-shaper[\\/]/, "vendor/text-shaper"],
     [/[\\/]node_modules[\\/]@?recast-navigation/, "vendor/recast-navigation"],
     [/[\\/]node_modules[\\/]manifold-3d[\\/]/, "vendor/manifold"],
@@ -661,6 +679,9 @@ export default defineConfig(({ mode }) => {
                 formats: ["es" as const],
             },
             rollupOptions: {
+                // Left as a bare specifier so the published `imports` map resolves it in the
+                // consumer's bundler, under the consumer's resolve conditions.
+                external: [COORDINATE_SYSTEM_IMPORT],
                 output: {
                     entryFileNames: "[name].js",
                     chunkFileNames: "_chunks/[name]-[hash].js",

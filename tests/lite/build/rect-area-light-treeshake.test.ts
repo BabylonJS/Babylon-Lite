@@ -4,6 +4,7 @@ import { rollup } from "rollup";
 import type { OutputChunk } from "rollup";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
+import { packageImportsPlugin } from "./bundler-harness";
 
 const root = resolve(__dirname, "../../..");
 const entry = resolve(root, "packages/babylon-lite/build/lib/index.js");
@@ -22,6 +23,7 @@ async function bundleChunks(imports: string, expression: string, inlineDynamicIm
         treeshake: { moduleSideEffects: false },
         external: (id) => /[/\\]_chunks[/\\]vendor[/\\]|\.wasm(?:\?|$)|\?url|^(?:node:)?(?:module|fs|path|url|os|crypto)$/.test(id),
         plugins: [
+            packageImportsPlugin(),
             {
                 name: "in-memory-area-light-probe",
                 resolveId(id) {

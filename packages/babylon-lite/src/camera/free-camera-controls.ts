@@ -1,5 +1,6 @@
 import type { FreeCamera } from "./free-camera.js";
 import type { SceneContext } from "../scene/scene.js";
+import { _rightHanded } from "#coordinate-system";
 
 /**
  * Attach keyboard + mouse controls to a FreeCamera.
@@ -100,7 +101,9 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
         const hasRotation = crX !== 0 || crY !== 0;
 
         if (hasRotation) {
-            camera._yaw += crY;
+            // Right-handed: yaw turns the other way on screen, so the same drag turns the same way (Babylon.js
+            // flips its pointer offsets and the local strafe axis too).
+            camera._yaw += _rightHanded ? -crY : crY;
             camera._pitch -= crX;
             const maxPitch = Math.PI / 2 - 0.01;
             camera._pitch = Math.max(-maxPitch, Math.min(maxPitch, camera._pitch));
@@ -113,9 +116,9 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
             const cosP = Math.cos(camera._pitch);
             const sinP = Math.sin(camera._pitch);
             // Forward/back moves in the camera's look direction (includes pitch)
-            camera.position.x += sinY * cosP * cdZ + cosY * cdX;
+            camera.position.x += sinY * cosP * cdZ + cosY * (_rightHanded ? -cdX : cdX);
             camera.position.y += sinP * cdZ + cdY;
-            camera.position.z += cosY * cosP * cdZ - sinY * cdX;
+            camera.position.z += cosY * cosP * cdZ - sinY * (_rightHanded ? -cdX : cdX);
         }
 
         // Update target from yaw/pitch only when camera moved or rotated
