@@ -9,21 +9,19 @@
  *  deltas — see morph/create-morph-targets.ts). If a graph consumes
  *  tangentOutput/uvOutput we simply return the base input.
  *
- *  The block sets `state.usesMorphTargets`; node-pipeline.ts adds the
- *  `morphTargets` texture + `morph` UBO bindings, emits the struct +
- *  helper functions at module scope, and wires `@builtin(vertex_index)`
- *  through as `vertexIndex` so the helpers can locate this vertex's row.
+ *  The block installs the morph vertex-feature seam, which owns compiler
+ *  bindings/WGSL and per-mesh fallback resource binding.
  */
 
 import type { BlockEmitter, NodeExpr, NodeValueType } from "../node-types.js";
-
-const PASSTHROUGH_KINDS = new Set(["tangent", "uv", "uv2"]);
+import { createNodeMorphFeature } from "../node-morph.js";
 
 export const emitter: BlockEmitter = {
     className: "MorphTargetsBlock",
     stage: "vertex",
     emit(block, outputName, stage, state, ctx) {
         state.usesMorphTargets = true;
+        state._vertexFeature = createNodeMorphFeature;
         const kind = outputName.replace(/Output$/, ""); // position | normal | tangent | uv
         const input = block.inputs.get(kind);
         if (!input?.source) {
@@ -39,7 +37,7 @@ export const emitter: BlockEmitter = {
             return { expr: `nme_morphNormal(${base}, vertexIndex)`, type: "vec3f" };
         }
         // Tangent/uv/uv2 — no delta bands stored; pass through.
-        if (PASSTHROUGH_KINDS.has(kind)) {
+        if (kind === "tangent" || kind === "uv" || kind === "uv2") {
             return v;
         }
         return v;

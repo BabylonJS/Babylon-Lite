@@ -14,7 +14,7 @@
 // offset) and draws the same grid via SpriteRenderer. With nearest sampling and
 // 1-texel-per-pixel sprites the two are pixel-identical.
 
-import { addSprite2DIndex, createEngine, createSprite2DLayer, createSpriteRenderer, loadSpriteAtlas, registerSpriteRenderer, startEngine } from "babylon-lite";
+import { addSprite2DIndex, createEngine, createSprite2DLayer, createSpriteRenderer, loadSpriteAtlas, registerSpriteRenderer, setSprite2DUvOffset, startEngine } from "babylon-lite";
 import { getScrollTileDataUrl, SCENE96_BAND_OFFSETS, SCENE96_COLS, SCENE96_ROWS, scene96BandForRow, SCROLL_TILE_SIZE } from "../_shared/scroll-tile-image";
 
 async function main(): Promise<void> {
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
         textureOptions: { addressModeU: "repeat", addressModeV: "repeat" },
     });
 
-    const layer = createSprite2DLayer(atlas, { capacity: SCENE96_COLS * SCENE96_ROWS, depth: "none", uvScroll: true });
+    const layer = createSprite2DLayer(atlas, { capacity: SCENE96_COLS * SCENE96_ROWS, depth: "none" });
 
     const gridWidthPx = SCENE96_COLS * SCROLL_TILE_SIZE;
     const gridHeightPx = SCENE96_ROWS * SCROLL_TILE_SIZE;
@@ -39,14 +39,21 @@ async function main(): Promise<void> {
     const originY = (canvas.height - gridHeightPx) / 2 + SCROLL_TILE_SIZE / 2;
 
     for (let row = 0; row < SCENE96_ROWS; row++) {
-        const offset = SCENE96_BAND_OFFSETS[scene96BandForRow(row)]!;
         for (let col = 0; col < SCENE96_COLS; col++) {
             addSprite2DIndex(layer, {
                 positionPx: [originX + col * SCROLL_TILE_SIZE, originY + row * SCROLL_TILE_SIZE],
                 sizePx: [SCROLL_TILE_SIZE, SCROLL_TILE_SIZE],
                 frame: 0,
-                uvOffset: [offset[0], offset[1]],
             });
+        }
+    }
+
+    // Enable per-sprite UV scroll (opt-in): the first call widens the layer to the uvOffset layout.
+    // Each band gets a different fixed offset, shifting the same tile by a band-specific amount.
+    for (let row = 0; row < SCENE96_ROWS; row++) {
+        const offset = SCENE96_BAND_OFFSETS[scene96BandForRow(row)]!;
+        for (let col = 0; col < SCENE96_COLS; col++) {
+            setSprite2DUvOffset(layer, row * SCENE96_COLS + col, [offset[0], offset[1]]);
         }
     }
 

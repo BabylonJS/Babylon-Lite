@@ -4,7 +4,7 @@
  * Exercises the scene-wide lights UBO and mesh-level light selection across
  * StandardMaterial, PBRMaterial, NodeMaterial, and mixed ESM/PCF shadows.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 

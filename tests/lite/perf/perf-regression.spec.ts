@@ -26,7 +26,7 @@
  *
  * Run:  npx playwright test --config playwright.perf.config.ts tests/lite/perf/perf-regression.spec.ts
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, acquireContext } from "../parity/parity-fixtures";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -291,14 +291,14 @@ if (!hasBaseline) {
         });
         for (const scene of SCENES) {
             const testName = `${scene.name} — current ≤ ${REGRESSION_PCT}% slower than baseline`;
-            test(testName, async ({ browser }) => {
+            test(testName, async ({ browser }, testInfo) => {
                 // New scenes added in a PR won't have a baseline bundle — skip gracefully
                 const baselineHtml = resolve(__dirname, `../../../lab/lite/bundle-baseline-scene${scene.id}.html`);
                 if (!existsSync(baselineHtml)) {
                     skipWithWarning(`[NOT A PERFORMANCE ISSUE] Baseline bundle missing for scene ${scene.id} (${scene.name}) — likely a newly added scene`, testName);
                 }
 
-                const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+                const { context, release } = await acquireContext(browser);
 
                 const currentUrl = `/lite/bundle-scene${scene.id}.html`;
                 const baselineUrl = `/lite/bundle-baseline-scene${scene.id}.html`;
@@ -306,22 +306,26 @@ if (!hasBaseline) {
                 let baseline: PerfResult;
                 let current: PerfResult;
 
-                try {
-                    // Measure baseline first (conservative: gives baseline more warm-up)
-                    baseline = await measurePage(context, baselineUrl, RUNS_PER_SCENE);
-                } catch (e) {
-                    await context.close();
-                    skipWithWarning(`[NOT A PERFORMANCE ISSUE] Baseline scene failed to load/render: ${(e as Error).message}`, testName);
+                const measure = async (label: "Baseline" | "Current", url: string): Promise<PerfResult> => {
+                    try {
+                        return await measurePage(context, url, RUNS_PER_SCENE);
+                    } catch (e) {
+                        await release();
+                        skipWithWarning(`[NOT A PERFORMANCE ISSUE] ${label} scene failed to load/render: ${(e as Error).message}`, testName);
+                    }
+                };
+
+                // Keep the first attempt conservative, then reverse the order on odd retries
+                // so thermal or browser-lifetime drift cannot repeatedly favor one build.
+                if (testInfo.retry % 2 === 0) {
+                    baseline = await measure("Baseline", baselineUrl);
+                    current = await measure("Current", currentUrl);
+                } else {
+                    current = await measure("Current", currentUrl);
+                    baseline = await measure("Baseline", baselineUrl);
                 }
 
-                try {
-                    current = await measurePage(context, currentUrl, RUNS_PER_SCENE);
-                } catch (e) {
-                    await context.close();
-                    skipWithWarning(`[NOT A PERFORMANCE ISSUE] Current scene failed to load/render: ${(e as Error).message}`, testName);
-                }
-
-                await context.close();
+                await release();
 
                 const avgDeltaPct = baseline.avgMs > 0 ? ((current.avgMs - baseline.avgMs) / baseline.avgMs) * 100 : 0;
                 const p95DeltaPct = baseline.p95Ms > 0 ? ((current.p95Ms - baseline.p95Ms) / baseline.p95Ms) * 100 : 0;

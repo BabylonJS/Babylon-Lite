@@ -12,6 +12,7 @@
 import { spawnSync } from "child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { extname, resolve } from "path";
+import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 const ROOT = resolve(__dirname, "..");
 const LAB_DIR = resolve(ROOT, "lab");
@@ -23,6 +24,7 @@ const PAGES_SRC = resolve(ROOT, "pages");
 const SCENE_CONFIG_WEBGL = resolve(ROOT, "scene-config-webgl.json");
 const DEMOS_CONFIG_WEBGL = resolve(ROOT, "demos-config-webgl.json");
 const REFERENCE_DIR = resolve(ROOT, "reference");
+const DEMO_SOURCE_BASE_URL = "https://github.com/BabylonJS/Babylon-Lite/blob/master/lab/lite/src/demos/";
 
 const ROOT_RELATIVE_PREFIXES = [
     "HavokPhysics.wasm",
@@ -51,6 +53,7 @@ const ROOT_RELATIVE_PREFIXES = [
     "scene",
     "scene-config.json",
     "scene-config-webgl.json",
+    "splats",
     "textures",
     "thumbnails",
     "vendor",
@@ -80,9 +83,13 @@ function escapeHtml(value: string): string {
 function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
     const tagList = demo.tags ?? [];
     const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    const sizeRow = size
+        ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
+        : "";
+    const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
     return [
-        `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<a class="card-main" href="/demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
         `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
@@ -93,6 +100,8 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
         sizeRow,
         `<span class="card-disabled-badge">Requires WebGPU</span>`,
         `</div></a>`,
+        `<div class="card-links"><a class="source-link" href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">Source code</a></div>`,
+        `</article>`,
     ].join("");
 }
 
@@ -239,12 +248,20 @@ function rewriteFilesForBasePath(dir: string, basePath: string): void {
     }
 }
 
-const basePath = normalizeBasePath(process.env.LAB_BASE_PATH);
-runViteBuild(basePath);
-copyStaticRuntimeData();
+async function main(): Promise<void> {
+    const basePath = normalizeBasePath(process.env.LAB_BASE_PATH);
+    await fetchFlightHelmet();
+    runViteBuild(basePath);
+    copyStaticRuntimeData();
 
-if (basePath !== "/") {
-    rewriteFilesForBasePath(DIST_DIR, basePath);
+    if (basePath !== "/") {
+        rewriteFilesForBasePath(DIST_DIR, basePath);
+    }
+
+    console.log(`Lab static site built to ${DIST_DIR}`);
 }
 
-console.log(`Lab static site built to ${DIST_DIR}`);
+main().catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+});

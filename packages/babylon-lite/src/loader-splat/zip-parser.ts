@@ -17,7 +17,9 @@ const SIG_EOCD = 0x06054b50;
 const SIG_CDIR = 0x02014b50;
 const SIG_LFH = 0x04034b50;
 
-const utf8 = new TextDecoder("utf-8");
+// Lazily created on first use. A module-level `new TextDecoder()` is a module-init
+// side effect that defeats the package's `sideEffects: false` contract.
+let _utf8: TextDecoder | null = null;
 
 export interface ZipEntry {
     /** Filename as stored in the archive. */
@@ -74,7 +76,7 @@ export async function unzipBuffer(buffer: ArrayBuffer): Promise<ZipEntry[]> {
         if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
             throw new Error("zip: ZIP64 archives are not supported");
         }
-        const name = utf8.decode(new U8(buffer, p + 46, nameLen));
+        const name = (_utf8 ??= new TextDecoder("utf-8")).decode(new U8(buffer, p + 46, nameLen));
         p += 46 + nameLen + extraLen + commentLen;
 
         // Re-read filename/extra lengths from the local file header since the

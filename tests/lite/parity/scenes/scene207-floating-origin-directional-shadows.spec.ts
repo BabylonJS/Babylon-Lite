@@ -10,7 +10,7 @@
  * position and caster AABBs) so the shadow matches the eye-relative mesh world
  * matrices used by both the caster pass and the receiver shader.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

@@ -1,8 +1,8 @@
 // Chromatic-dispersion refracted-environment sample (KHR_materials_dispersion).
 //
-// A pure data module: the per-RGB 3-ray WGSL is dynamically imported only by
-// scenes that actually use dispersion (see pbr-refraction.ts), so it ships in
-// no other transmission scene's bundle. The string is injected into the
+// A pure data module: the per-RGB 3-ray WGSL is statically imported only by
+// `set-dispersion.ts`, so it ships in no other transmission scene's bundle. The
+// string is injected into the
 // refraction fragment factory (makeRefractionRttExt) rather than mutating any
 // shared module state, keeping shader generation scene-isolated.
 //
@@ -12,7 +12,9 @@
 
 /** Per-RGB chromatic-dispersion refracted-environment sample WGSL, injected into
  *  the refraction fragment when a scene contains a dispersive transmissive material. */
-export const DISPERSION_SAMPLE_WGSL = `let eta=material.refractionParams.y;
+import { wgsl } from "../../../shader/wgsl.js";
+
+export const DISPERSION_SAMPLE_WGSL = wgsl`let eta=material.refractionParams.y;
 let realIOR=1.0/eta;
 let spread=0.04*material.volumeParams.w*(realIOR-1.0);
 let etaR=1.0/(realIOR-spread);

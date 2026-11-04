@@ -1,0 +1,48 @@
+name: Compat API request
+description: Request a Babylon.js API that the @babylonjs/lite-compat layer is missing or that throws LiteCompatError.
+title: "[compat] "
+labels: ["compat"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for helping grow the compatibility layer! Issues with the `compat`
+              label feed directly into the layer's maintenance workflow.
+
+              Before filing, please skim the **Supported APIs** table in the
+              [`@babylonjs/lite-compat` README](https://github.com/BabylonJS/Babylon-Lite/tree/master/packages/babylon-lite-compat#readme)
+              to confirm the API isn't already covered.
+    - type: input
+      id: api
+      attributes:
+          label: Missing API
+          description: The Babylon.js symbol(s) you need (class, method, property, or import path).
+          placeholder: e.g. `HighlightLayer`, `mesh.clone()`, `import { Sound } from "@babylonjs/core"`
+      validations:
+          required: true
+    - type: dropdown
+      id: behavior
+      attributes:
+          label: Current behavior
+          options:
+              - The export is missing entirely
+              - It exists but throws LiteCompatError
+              - It exists but renders/behaves differently than Babylon.js
+              - Other (describe below)
+      validations:
+          required: true
+    - type: textarea
+      id: use-case
+      attributes:
+          label: Use case
+          description: What are you trying to do, and how does this API block your migration to Babylon Lite?
+      validations:
+          required: true
+    - type: textarea
+      id: repro
+      attributes:
+          label: Minimal example
+          description: A small code snippet showing how you use the API (and any error you see). Will be formatted as code.
+          render: ts
+      validations:
+          required: false

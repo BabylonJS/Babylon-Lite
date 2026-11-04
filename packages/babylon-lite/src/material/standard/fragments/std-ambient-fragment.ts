@@ -4,6 +4,7 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -16,7 +17,7 @@ export function createStdAmbientFragment(usesUV2: boolean): ShaderFragment {
             { _name: "aS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            AD: `baseAmbientColor = textureSample(aT, aS, ${uv}).rgb * mat.ambTexLvl;`,
+            AD: wgsl`baseAmbientColor = textureSample(aT, aS, ${uv}).rgb * mat.ambTexLvl;`,
         },
     };
 }
@@ -25,16 +26,17 @@ export const stdAmbientExt: StdExt = {
     _id: "std-ambient",
     _phase: "mesh",
     _feature: HAS_AMBIENT_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._ambientTexture ? HAS_AMBIENT_TEXTURE | (mat.ambientCoordIndex === 1 ? AMBIENT_USES_UV2 : 0) : 0),
     _frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0),
     _bind(mat, entries, b) {
-        const tex = mat.ambientTexture!;
+        const tex = mat._ambientTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.ambientTexture) {
-            out.push(mat.ambientTexture);
+        if (mat._ambientTexture) {
+            out.push(mat._ambientTexture);
         }
     },
 };

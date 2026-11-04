@@ -9,6 +9,7 @@
  */
 
 import type { ShaderFragment } from "../fragment-types.js";
+import { wgsl } from "../wgsl.js";
 
 /**
  * Create a thin-instance fragment.
@@ -68,19 +69,20 @@ export function createThinInstanceFragment(hasInstanceColor: boolean): ShaderFra
 
     return {
         _id: "thin-instance",
+        _alphaBlend: hasInstanceColor,
 
         _vertexAttributes: attrs,
 
         _varyings: hasInstanceColor ? [{ _name: "vInstanceColor", _type: "vec4<f32>" }] : [],
 
         _vertexSlots: {
-            VW: `let instanceWorld = mat4x4<f32>(world0, world1, world2, world3);\nfinalWorld = mesh.world * instanceWorld;`,
-            VB: hasInstanceColor ? `out.vInstanceColor = instanceColor;` : "",
+            VW: wgsl`let instanceWorld = mat4x4<f32>(world0, world1, world2, world3);\nfinalWorld = mesh.world * instanceWorld;`,
+            VB: hasInstanceColor ? wgsl`out.vInstanceColor = instanceColor;` : wgsl``,
         },
 
         _fragmentSlots: hasInstanceColor
             ? {
-                  AT: `baseColor *= input.vInstanceColor.rgb;\nalpha *= input.vInstanceColor.a;`,
+                  AT: wgsl`baseColor *= input.vInstanceColor.rgb;\nalpha *= input.vInstanceColor.a;`,
               }
             : {},
     };

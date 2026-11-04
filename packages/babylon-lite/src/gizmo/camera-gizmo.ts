@@ -13,7 +13,6 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Camera } from "../camera/camera.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import type { Mat4 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -22,8 +21,9 @@ import { createTransformNode } from "../scene/transform-node.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { attachFollowTarget } from "./gizmo-core.js";
-import { quatFromBjsEuler } from "./gizmo-math.js";
+import { quatFromBjsEuler, rotationQuatFromMatrix } from "./gizmo-math.js";
 import type { UtilityLayer } from "./utility-layer.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** BJS `CameraGizmo._Scale` — applied to the camera body so it keeps a
  *  constant on-screen size (combined with per-frame distance scaling). */
@@ -36,6 +36,7 @@ const CAMERA_BODY_SCALE = 0.05;
  *  this minimises the scene-223 parity MAD (0.39 → 0.07 at this value). */
 const FRUSTUM_EDGE_THICKNESS = 0.036;
 
+/** Options for the display-only camera gizmo. */
 export interface CameraGizmoOptions {
     /** RGB color for the camera body + frustum material.  Defaults to grey. */
     color?: [number, number, number];
@@ -48,6 +49,7 @@ export interface CameraGizmoOptions {
     displayBody?: boolean;
 }
 
+/** Display-only gizmo that visualizes an attached camera body and optional frustum. */
 export interface CameraGizmo {
     /** Root node — the gizmo follows the attached camera's world translation
      *  and orientation each frame. */
@@ -165,7 +167,7 @@ function buildFrustumEdge(
 }
 
 /** Build the 12 frustum-wireframe edges parented to `root`.  Geometry is
- *  computed in camera-local space (LH: camera looks down +Z, +Y up) to exactly
+ *  computed in camera-local space (+Y up, looking down +Z, or -Z in a right-handed build) to exactly
  *  reproduce BJS `_CreateCameraFrustum` + `setPivotMatrix(inv(projection))`.
  *
  *  BJS builds an NDC cube with z ∈ [-1, 1] and transforms it by the inverse
@@ -204,6 +206,12 @@ function buildFrustumWireframe(
         { x: +fw, y: +fh, z: +far },
         { x: -fw, y: +fh, z: +far },
     ];
+    if (_rightHanded !== null) {
+        // A right-handed camera looks down its local -Z, where Babylon.js's right-handed inverse projection puts the frustum.
+        for (const corner of corners) {
+            corner.z = -corner.z;
+        }
+    }
     const edgePairs: [number, number][] = [
         [0, 1],
         [1, 2],
@@ -288,7 +296,8 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
     // would make the lens stick out in front.  So: bodyOuter ≡ outer root
     // (−90° Y + distance×0.05 scale); bodyMesh ≡ inner mesh (−0.9 X, no rot).
     if (displayBody) {
-        const outerRot = quatFromBjsEuler(0, -Math.PI * 0.5, 0);
+        // A right-handed camera looks down its local -Z, so Babylon.js turns the body the other way.
+        const outerRot = quatFromBjsEuler(0, _rightHanded ? Math.PI * 0.5 : -Math.PI * 0.5, 0);
         const bodyOuter = createTransformNode("cameraBodyOuter", 0, 0, 0, outerRot[0], outerRot[1], outerRot[2], outerRot[3]);
         bodyOuter.parent = root as unknown as SceneNode;
         const bodyMesh = createTransformNode("cameraBodyMesh", -0.9, 0, 0, 0, 0, 0, 1);
@@ -327,7 +336,7 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
         () => (gizmo.attachedCamera ? cameraAsSceneNode(gizmo.attachedCamera) : null),
         null,
         (_target, wm) => {
-            const [qx, qy, qz, qw] = quatFromMat4Upper3x3(wm);
+            const [qx, qy, qz, qw] = rotationQuatFromMatrix(wm);
             root.rotationQuaternion.set(qx, qy, qz, qw);
             // Distance-scale the camera body (BJS Gizmo distance scaling ×
             // CameraGizmo._Scale).
@@ -346,6 +355,9 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
     return gizmo;
 }
 
+/** Attach the camera gizmo to a camera, or detach it with `null`.
+ * The frustum wireframe is built lazily the first time a camera is attached.
+ */
 export function attachCameraGizmoToCamera(gizmo: CameraGizmo, camera: Camera | null): void {
     gizmo.attachedCamera = camera;
     if (camera) {
@@ -356,6 +368,7 @@ export function attachCameraGizmoToCamera(gizmo: CameraGizmo, camera: Camera | n
     }
 }
 
+/** Dispose all meshes and follow callbacks owned by the camera gizmo. */
 export function disposeCameraGizmo(gizmo: CameraGizmo, layer: UtilityLayer): void {
     gizmo._disposeFollow();
     for (const m of gizmo._meshes) {
@@ -375,37 +388,4 @@ export function disposeCameraGizmo(gizmo: CameraGizmo, layer: UtilityLayer): voi
  *  observable vec3s, but `attachFollowTarget` only reads `.worldMatrix`. */
 function cameraAsSceneNode(cam: Camera): SceneNode {
     return cam as unknown as SceneNode;
-}
-
-/** Extract the rotation quaternion from the upper-left 3×3 of a 4×4 world
- *  matrix.  Removes per-axis scale by normalizing each column. */
-function quatFromMat4Upper3x3(m: Mat4): [number, number, number, number] {
-    const sx = Math.hypot(m[0]!, m[1]!, m[2]!) || 1;
-    const sy = Math.hypot(m[4]!, m[5]!, m[6]!) || 1;
-    const sz = Math.hypot(m[8]!, m[9]!, m[10]!) || 1;
-    const m00 = m[0]! / sx,
-        m01 = m[4]! / sy,
-        m02 = m[8]! / sz;
-    const m10 = m[1]! / sx,
-        m11 = m[5]! / sy,
-        m12 = m[9]! / sz;
-    const m20 = m[2]! / sx,
-        m21 = m[6]! / sy,
-        m22 = m[10]! / sz;
-    // Standard Shoemake quaternion-from-matrix.
-    const trace = m00 + m11 + m22;
-    if (trace > 0) {
-        const s = 0.5 / Math.sqrt(trace + 1);
-        return [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s];
-    }
-    if (m00 > m11 && m00 > m22) {
-        const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
-        return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s];
-    }
-    if (m11 > m22) {
-        const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
-        return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s];
-    }
-    const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
-    return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
 }

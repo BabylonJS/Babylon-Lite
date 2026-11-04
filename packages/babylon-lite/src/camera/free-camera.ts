@@ -1,6 +1,6 @@
 import type { Camera } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
-import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
+import { writeLookAtWorldMat4LHIntoBuffer } from "../math/write-look-at-world-mat4-lh-into-buffer.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
@@ -8,6 +8,7 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
@@ -16,8 +17,8 @@ import { allocateMat4 } from "../math/_matrix-allocator.js";
  *  Push-based dirty tracking: position and target use ObservableVec3,
  *  _yaw/_pitch use Object.defineProperty. */
 export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
-    position: ObservableVec3;
-    target: ObservableVec3;
+    readonly position: ObservableVec3;
+    readonly target: ObservableVec3;
     /** Movement speed. Default 2.0 (matches BJS). */
     speed: number;
     /** Mouse rotation sensitivity (higher = less sensitive). Default 2000 (matches BJS). */
@@ -35,6 +36,15 @@ export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
 
 /** Create a FreeCamera at the given position looking at target. Pure data, no scene knowledge. */
 export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
+    return _createFreeCamera(position, target, Vec3Up);
+}
+
+/** @internal Shared FreeCamera factory. `up` is read fresh every time the local matrix is rebuilt, so
+ *  it accepts either the shared immutable `Vec3Up` constant (plain {@link createFreeCamera}) or a
+ *  mutable vector owned by a caller (`createBankedFreeCamera`, whose `ObservableVec3` up vector rolls
+ *  the camera when written). This module has no notion of "banked" — it just reads `up.x/y/z` — so the
+ *  banked opt-in adds zero branches and zero extra allocations here. */
+export function _createFreeCamera(position: Vec3, target: Vec3, up: Vec3): FreeCamera {
     // Compute initial yaw/pitch from position→target direction
     const dx = target.x - position.x;
     const dy = target.y - position.y;
@@ -44,25 +54,14 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        const view = mat4LookAtLH(cam.position, cam.target, Vec3Up);
-        const m = _localMat as unknown as Mat4Storage;
-        // Camera-to-world = transpose upper 3×3 of view + eye position
-        m[0] = view[0]!;
-        m[1] = view[4]!;
-        m[2] = view[8]!;
-        m[3] = 0;
-        m[4] = view[1]!;
-        m[5] = view[5]!;
-        m[6] = view[9]!;
-        m[7] = 0;
-        m[8] = view[2]!;
-        m[9] = view[6]!;
-        m[10] = view[10]!;
-        m[11] = 0;
-        m[12] = cam.position.x;
-        m[13] = cam.position.y;
-        m[14] = cam.position.z;
-        m[15] = 1;
+        writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, cam.position, cam.target, up);
+        if (_rightHanded !== null) {
+            // Right-handed cameras look down their local -Z with +X to the right: W_RH = W_LH·diag(-1, 1, -1).
+            const s = _localMat as unknown as Mat4Storage;
+            for (const i of [0, 1, 2, 8, 9, 10]) {
+                s[i] = -s[i]!;
+            }
+        }
         return _localMat;
     }
 

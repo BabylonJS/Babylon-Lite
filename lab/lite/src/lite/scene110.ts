@@ -5,11 +5,12 @@
 // green material, into an offscreen 512x512 color texture. That texture is wired as
 // mesh B's diffuseTexture, so the box on screen displays whatever R1 rendered.
 //
-// Demonstrates: addMesh, addTaskAtStart, createRenderTargetTexture,
+// Demonstrates: addMeshToTask, addTaskAtStart, createRenderTargetTexture,
 // per-pass material override, and that one Renderable per (mesh, material) is shared
 // across multiple passes.
 
 import {
+    addMeshToTask,
     addTaskAtStart,
     addToScene,
     attachControl,
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     // Override material for A in R1: green sphere on a blue background.
     const matA_R1 = createStandardMaterial();
     matA_R1.diffuseColor = [0.2, 1, 0.2];
-    r1Task.addMesh(meshA, { material: matA_R1 });
+    addMeshToTask(r1Task, meshA, { material: matA_R1 });
 
     await registerScene(scene);
     await startEngine(engine);

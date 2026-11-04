@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type EngineContext, type RenderingContext, registerRenderingContext, unregisterRenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createSurface, disposeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
+import { enableSurfaceResizeObserver } from "../../../packages/babylon-lite/src/engine/enable-surface-resize-observer";
+import { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
+import { VERSION } from "../../../packages/babylon-lite/src/engine/version";
 
 function setDevicePixelRatio(value: number): void {
     Object.defineProperty(globalThis, "devicePixelRatio", { value, configurable: true });
@@ -32,13 +34,27 @@ function makeMockGpuContext(): GPUCanvasContext {
 
 function makeMockCanvas(initial?: { clientWidth?: number; clientHeight?: number }): HTMLCanvasElement {
     const ctx = makeMockGpuContext();
+    const attributes = new Map<string, string>();
     return {
         width: 0,
         height: 0,
         clientWidth: initial?.clientWidth ?? 0,
         clientHeight: initial?.clientHeight ?? 0,
         getContext: (kind: string) => (kind === "webgpu" ? ctx : null),
+        setAttribute: (name: string, value: string) => void attributes.set(name, value),
+        getAttribute: (name: string) => attributes.get(name) ?? null,
     } as unknown as HTMLCanvasElement;
+}
+
+/** `OffscreenCanvas` stand-in: a WebGPU-capable canvas with no layout box and no
+ *  attributes, so `isDomCanvas` rejects it. */
+function makeMockOffscreenCanvas(): OffscreenCanvas {
+    const ctx = makeMockGpuContext();
+    return {
+        width: 0,
+        height: 0,
+        getContext: (kind: string) => (kind === "webgpu" ? ctx : null),
+    } as unknown as OffscreenCanvas;
 }
 
 function makeMockEngine(): EngineContext {
@@ -89,6 +105,7 @@ function makeMockEngine(): EngineContext {
 
 function makeRenderingContext(onResize?: () => void): RenderingContext {
     return {
+        _kind: "test",
         _drawCallsPre: 0,
         clearColor: { r: 0, g: 0, b: 0, a: 1 },
         _update(): void {
@@ -102,6 +119,40 @@ function makeRenderingContext(onResize?: () => void): RenderingContext {
 }
 
 describe("createSurface / disposeSurface", () => {
+    it("uses ResizeObserver dimensions and disconnects it on disposal", () => {
+        const callbacks: ResizeObserverCallback[] = [];
+        const observe = vi.fn();
+        const disconnect = vi.fn();
+        const previous = globalThis.ResizeObserver;
+        globalThis.ResizeObserver = class {
+            constructor(callback: ResizeObserverCallback) {
+                callbacks.push(callback);
+            }
+            observe = observe;
+            unobserve(): void {
+                return;
+            }
+            disconnect = disconnect;
+        };
+        try {
+            const engine = makeMockEngine();
+            const canvas = makeMockCanvas({ clientWidth: 10, clientHeight: 10 });
+            const aux = createSurface(engine, canvas);
+            enableSurfaceResizeObserver(aux);
+            callbacks[0]!([{ contentRect: { width: 123.6, height: 45.2 } } as ResizeObserverEntry], {} as ResizeObserver);
+
+            resizeSurface(aux);
+
+            expect(observe).toHaveBeenCalledWith(canvas);
+            expect(canvas.width).toBe(124);
+            expect(canvas.height).toBe(45);
+            disposeSurface(aux);
+            expect(disconnect).toHaveBeenCalledOnce();
+        } finally {
+            globalThis.ResizeObserver = previous;
+        }
+    });
+
     it("appends an auxiliary surface and shares the engine's device", () => {
         const engine = makeMockEngine();
         const auxCanvas = makeMockCanvas({ clientWidth: 200, clientHeight: 100 });
@@ -124,6 +175,22 @@ describe("createSurface / disposeSurface", () => {
         expect(aux.scRT._colorView).not.toBeNull();
         expect(aux.scRT._width).toBe(16);
         expect(aux.scRT._height).toBe(16);
+    });
+
+    it("tags the canvas with the engine version, like the engine's primary surface", () => {
+        const engine = makeMockEngine();
+        const auxCanvas = makeMockCanvas();
+
+        createSurface(engine, auxCanvas);
+
+        expect(auxCanvas.getAttribute("data-engine")).toBe(`Babylon Lite v${VERSION}`);
+    });
+
+    it("skips the canvas tag for an OffscreenCanvas, which has no attributes", () => {
+        const engine = makeMockEngine();
+        const offscreen = makeMockOffscreenCanvas();
+
+        expect(() => createSurface(engine, offscreen)).not.toThrow();
     });
 
     it("honors per-surface options independently", () => {

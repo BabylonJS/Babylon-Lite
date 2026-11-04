@@ -1,22 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attachControl, setCameraLimits } from "../../../packages/babylon-lite/src/camera/arc-rotate-controls";
+import { enableArcRotateKeyboardControls } from "../../../packages/babylon-lite/src/camera/arc-rotate-keyboard-controls";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import type { ArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 interface FakeCanvas {
     listeners: Map<string, EventListener[]>;
+    capturedPointers: number[];
+    releasedPointers: number[];
+    tabIndex: number;
     addEventListener(type: string, h: EventListener): void;
     removeEventListener(type: string, h: EventListener): void;
-    setPointerCapture(): void;
-    releasePointerCapture(): void;
+    hasAttribute(name: string): boolean;
+    setPointerCapture(pointerId: number): void;
+    releasePointerCapture(pointerId: number): void;
 }
 
 function makeCanvas(): FakeCanvas {
     const listeners = new Map<string, EventListener[]>();
+    const capturedPointers: number[] = [];
+    const releasedPointers: number[] = [];
     return {
         listeners,
+        capturedPointers,
+        releasedPointers,
+        tabIndex: -1,
         addEventListener(type, h): void {
             const arr = listeners.get(type) ?? [];
             arr.push(h);
@@ -31,11 +41,14 @@ function makeCanvas(): FakeCanvas {
                 }
             }
         },
-        setPointerCapture(): void {
-            return;
+        hasAttribute(): boolean {
+            return false;
         },
-        releasePointerCapture(): void {
-            return;
+        setPointerCapture(pointerId): void {
+            capturedPointers.push(pointerId);
+        },
+        releasePointerCapture(pointerId): void {
+            releasedPointers.push(pointerId);
         },
     };
 }
@@ -67,8 +80,36 @@ function touchEvent(changedTouches: Array<{ identifier: number; clientX: number;
     return { changedTouches, preventDefault: vi.fn() };
 }
 
-function pointerEvent(props: Partial<{ button: number; clientX: number; clientY: number; pointerId: number }>): unknown {
-    return { button: 0, clientX: 0, clientY: 0, pointerId: 1, ...props, preventDefault: vi.fn() };
+function pointerEvent(props: Partial<{ button: number; clientX: number; clientY: number; pointerId: number; pointerType: string }>): unknown {
+    return { button: 0, clientX: 0, clientY: 0, pointerId: 1, pointerType: "mouse", ...props, preventDefault: vi.fn() };
+}
+
+function keyboardEvent(
+    code: string,
+    modifiers: Partial<{ altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }> = {}
+): {
+    code: string;
+    altKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+    preventDefault: ReturnType<typeof vi.fn>;
+} {
+    return {
+        code,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        ...modifiers,
+        preventDefault: vi.fn(),
+    };
+}
+
+function beforeRender(scene: SceneContext): void {
+    for (const cb of [...(scene as unknown as { _beforeRender: Array<() => void> })._beforeRender]) {
+        cb();
+    }
 }
 
 describe("attachControl — pinch / touch handling", () => {
@@ -146,6 +187,39 @@ describe("attachControl — pinch / touch handling", () => {
         expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
     });
 
+    it("reads wheelPrecision LIVE, so a value set after attachControl takes effect", () => {
+        // Babylon.js allows setting wheelPrecision after attachControl; the wheel
+        // handler must read it live rather than snapshotting it at attach time.
+        // Default wheelPrecision = 3: deltaY 120, radius 10 → -=(120*10)/(3*1000)=-0.4.
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.4, 5);
+
+        camera.inertialRadiusOffset = 0;
+        // Raise wheelPrecision to 30 (10× slower zoom) AFTER attach.
+        camera.wheelPrecision = 30;
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        // Now -=(120*10)/(30*1000) = -0.04, i.e. 10× smaller — the late value was honored.
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.04, 5);
+    });
+
+    it("reads angularSensibility LIVE, so a value set after attachControl takes effect", () => {
+        // Raise angularSensibility to 2000 (2× slower orbit) AFTER attach.
+        camera.angularSensibility = 2000;
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, clientX: 0, clientY: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, clientY: 0, pointerId: 1 }));
+        // dx = 10 / 2000 = 0.005 (half of the default-sensibility 0.01).
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.005, 5);
+    });
+
+    it("reads panningSensibility LIVE, so a value set after attachControl takes effect", () => {
+        // Lower panningSensibility to 25 (2× faster pan) AFTER attach.
+        camera.panningSensibility = 25;
+        fire(canvas, "pointerdown", pointerEvent({ button: 2, clientX: 0, clientY: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, clientY: 0, pointerId: 1 }));
+        // dx = 10 → inertialPanningX += -10/25 = -0.4 (default 50 would give -0.2).
+        expect(camera.inertialPanningX).toBeCloseTo(-0.4, 5);
+    });
+
     it("registers touch/gesture listeners as non-passive so preventDefault is honored", () => {
         // Re-attach with a spy canvas to inspect the options passed to addEventListener.
         const seen: Record<string, AddEventListenerOptions | undefined> = {};
@@ -174,13 +248,540 @@ describe("attachControl — pinch / touch handling", () => {
     });
 });
 
-describe("setCameraLimits + clamping", () => {
-    function beforeRender(scene: SceneContext): void {
-        for (const cb of [...(scene as unknown as { _beforeRender: Array<() => void> })._beforeRender]) {
-            cb();
-        }
+describe("attachControl — panning direction", () => {
+    type V3 = [number, number, number];
+    const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+    /** One frame of inertial panning on a radius-10 camera; returns the target delta and the camera's own axes before the
+     *  pan, read from its world matrix (columns right, up, forward). */
+    function pan(alpha: number, beta: number, panningX: number, panningY: number): { delta: V3; right: V3; up: V3; forward: V3; scale: number } {
+        const camera = createArcRotateCamera(alpha, beta, 10, { x: 1, y: 2, z: 3 });
+        const scene = makeScene();
+        attachControl(camera, makeCanvas() as unknown as HTMLCanvasElement, scene);
+        const m = camera.worldMatrix;
+        const right: V3 = [m[0]!, m[1]!, m[2]!];
+        const up: V3 = [m[4]!, m[5]!, m[6]!];
+        const forward: V3 = [m[8]!, m[9]!, m[10]!];
+        // No decay: the frame applies the whole offset, and nothing is left for later frames.
+        camera.panningInertia = 0;
+        camera.inertialPanningX = panningX;
+        camera.inertialPanningY = panningY;
+        beforeRender(scene);
+        return { delta: [camera.target.x - 1, camera.target.y - 2, camera.target.z - 3], right, up, forward, scale: camera.radius * 0.001 };
     }
 
+    it.each([
+        [0.3, 1],
+        [2.1, 0.4],
+        [-1.2, 2.6],
+    ])("moves the target along the camera's up vector on a vertical pan (alpha %s, beta %s)", (alpha, beta) => {
+        const { delta, up, forward, scale } = pan(alpha, beta, 0, 1);
+
+        for (let i = 0; i < 3; i++) {
+            expect(delta[i]).toBeCloseTo(up[i]! * scale, 9);
+        }
+        // In the view plane: the target neither approaches nor leaves the eye.
+        expect(dot(delta, forward)).toBeCloseTo(0, 9);
+    });
+
+    it("moves the target across the ground, away from the eye, on a vertical pan of a camera looking down", () => {
+        const alpha = 0.7;
+        const { delta } = pan(alpha, 0.2, 0, 1);
+        // The eye sits on the +(cos α, sin α) side of the target, so screen-up on the ground points the other way.
+        const away = -(Math.cos(alpha) * delta[0] + Math.sin(alpha) * delta[2]);
+
+        expect(away).toBeGreaterThan(0.9 * 0.01);
+        expect(Math.abs(delta[1])).toBeLessThan(0.25 * 0.01);
+    });
+
+    it("keeps panning along the camera's right vector, and along world Y for a horizontal camera", () => {
+        const horizontal = pan(0.3, 1, 1, 0);
+        for (let i = 0; i < 3; i++) {
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+
+        const level = pan(0.3, Math.PI / 2, 0, 1);
+        expect(level.delta[0]).toBeCloseTo(0, 9);
+        expect(level.delta[1]).toBeCloseTo(level.scale, 9);
+        expect(level.delta[2]).toBeCloseTo(0, 9);
+    });
+
+    it("keeps a diagonal pan in the view plane", () => {
+        const { delta, right, up, forward, scale } = pan(-0.4, 0.5, 0.6, -0.8);
+
+        expect(dot(delta, forward)).toBeCloseTo(0, 9);
+        expect(dot(delta, right)).toBeCloseTo(0.6 * scale, 9);
+        expect(dot(delta, up)).toBeCloseTo(-0.8 * scale, 9);
+    });
+
+    // Beta is not clamped by the factory, the beta setter or panning. For sin(beta) < 0 the camera, which looks at its target
+    // with world up, has its right and up vectors flipped; panning must follow the camera rather than the beta formula.
+    it.each([
+        [0, -Math.PI / 2],
+        [0.8, -0.6],
+        [2.1, 4],
+        [-0.5, 3.6],
+    ])("follows the camera's right and up vectors when sin(beta) < 0 (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a level camera with a negative beta up along world Y", () => {
+        const { delta, up, scale } = pan(0, -Math.PI / 2, 0, 1);
+
+        expect(up[1]).toBeCloseTo(1, 9);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
+
+    // With the eye straight below or above the target (sin(beta) rounds to about 1e-16 at beta = π or 2π) the camera's
+    // look-at falls back to the identity basis. An exact sin(beta) = 0 (beta = 0) places the eye at sin(beta) = 0.0001
+    // instead, which keeps a regular basis.
+    it.each([
+        [Math.PI / 2, Math.PI],
+        [0.3, Math.PI],
+        [-1.1, 2 * Math.PI],
+        [0.4, 0],
+    ])("follows the camera's look-at basis when the eye is straight below or above the target (alpha %s, beta %s)", (alpha, beta) => {
+        const vertical = pan(alpha, beta, 0, 1);
+        const horizontal = pan(alpha, beta, 1, 0);
+        const diagonal = pan(alpha, beta, 0.6, -0.8);
+
+        for (let i = 0; i < 3; i++) {
+            expect(vertical.delta[i]).toBeCloseTo(vertical.up[i]! * vertical.scale, 9);
+            expect(horizontal.delta[i]).toBeCloseTo(horizontal.right[i]! * horizontal.scale, 9);
+        }
+        expect(dot(diagonal.delta, diagonal.forward)).toBeCloseTo(0, 9);
+        expect(dot(diagonal.delta, diagonal.right)).toBeCloseTo(0.6 * diagonal.scale, 9);
+        expect(dot(diagonal.delta, diagonal.up)).toBeCloseTo(-0.8 * diagonal.scale, 9);
+    });
+
+    it("pans a camera at beta = π up along world Y, its look-at fallback up axis", () => {
+        const { delta, up, forward, scale } = pan(Math.PI / 2, Math.PI, 0, 1);
+
+        expect(up[1]).toBe(1);
+        expect(forward[2]).toBe(1);
+        expect(delta[0]).toBeCloseTo(0, 9);
+        expect(delta[1]).toBeCloseTo(scale, 9);
+        expect(delta[2]).toBeCloseTo(0, 9);
+    });
+});
+
+describe("attachControl — pointer mappings", () => {
+    it("preserves primary rotate and secondary pan as the defaults", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, makeScene());
+
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerId: 1 }));
+        fire(canvas, "pointerup", pointerEvent({ button: 0, clientX: 10, pointerId: 1 }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(camera.inertialPanningX).toBe(0);
+
+        fire(canvas, "pointerdown", pointerEvent({ button: 2, pointerId: 2 }));
+        fire(canvas, "pointermove", pointerEvent({ button: 2, clientX: 10, pointerId: 2 }));
+        fire(canvas, "pointerup", pointerEvent({ button: 2, clientX: 10, pointerId: 2 }));
+        expect(camera.inertialPanningX).toBeCloseTo(-0.2, 5);
+        expect(canvas.capturedPointers).toEqual([1, 2]);
+        expect(canvas.releasedPointers).toEqual([1, 2]);
+    });
+
+    it("configures primary and secondary actions independently", () => {
+        const primaryCanvas = makeCanvas();
+        const primaryCamera = makeCamera();
+        attachControl(primaryCamera, primaryCanvas as unknown as HTMLCanvasElement, makeScene(), {
+            pointerMappings: { primaryButton: "pan" },
+        });
+
+        fire(primaryCanvas, "pointerdown", pointerEvent({ button: 0 }));
+        fire(primaryCanvas, "pointermove", pointerEvent({ clientX: 10 }));
+        expect(primaryCamera.inertialAlphaOffset).toBe(0);
+        expect(primaryCamera.inertialPanningX).toBeCloseTo(-0.2, 5);
+
+        const secondaryCanvas = makeCanvas();
+        const secondaryCamera = makeCamera();
+        attachControl(secondaryCamera, secondaryCanvas as unknown as HTMLCanvasElement, makeScene(), {
+            pointerMappings: { secondaryButton: "rotate" },
+        });
+
+        fire(secondaryCanvas, "pointerdown", pointerEvent({ button: 0 }));
+        fire(secondaryCanvas, "pointermove", pointerEvent({ clientX: 10 }));
+        expect(secondaryCamera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+
+        fire(secondaryCanvas, "pointerup", pointerEvent({ button: 0 }));
+        secondaryCamera.inertialAlphaOffset = 0;
+        fire(secondaryCanvas, "pointerdown", pointerEvent({ button: 2 }));
+        fire(secondaryCanvas, "pointermove", pointerEvent({ button: 2, clientX: 10 }));
+        expect(secondaryCamera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(secondaryCamera.inertialPanningX).toBe(0);
+    });
+
+    it("keeps touch, wheel, cleanup, and reattachment behavior unchanged", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        const detach = attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            pointerMappings: { primaryButton: "pan", secondaryButton: "rotate" },
+        });
+
+        fire(canvas, "pointerdown", pointerEvent({ pointerType: "touch" }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerType: "touch" }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(camera.inertialPanningX).toBe(0);
+
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.4, 5);
+
+        detach();
+        expect(canvas.listeners.get("pointerdown")?.length).toBe(0);
+        expect((scene as unknown as { _beforeRender: unknown[] })._beforeRender).toHaveLength(0);
+
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene);
+        camera.inertialAlphaOffset = 0;
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, pointerId: 2 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerId: 2 }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(canvas.listeners.get("pointerdown")?.length).toBe(1);
+    });
+});
+
+describe("attachControl — keyboard controls", () => {
+    beforeEach(() => {
+        enableArcRotateKeyboardControls();
+    });
+
+    it.each([
+        ["ArrowLeft", "inertialAlphaOffset", -0.01],
+        ["ArrowRight", "inertialAlphaOffset", 0.01],
+        ["ArrowUp", "inertialBetaOffset", -0.01],
+        ["ArrowDown", "inertialBetaOffset", 0.01],
+    ] as const)("maps %s to rotation", (code, field, expected) => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent(code));
+        beforeRender(scene);
+
+        expect(camera[field]).toBeCloseTo(expected, 5);
+    });
+
+    it("normalizes diagonal rotation to the single-axis speed", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        fire(canvas, "keydown", keyboardEvent("ArrowUp"));
+        beforeRender(scene);
+
+        const component = Math.SQRT1_2 / 100;
+        expect(camera.inertialAlphaOffset).toBeCloseTo(component, 7);
+        expect(camera.inertialBetaOffset).toBeCloseTo(-component, 7);
+        expect(Math.hypot(camera.inertialAlphaOffset, camera.inertialBetaOffset)).toBeCloseTo(1 / 100, 7);
+    });
+
+    it.each([
+        ["ArrowLeft", "inertialPanningX", -0.02],
+        ["ArrowRight", "inertialPanningX", 0.02],
+        ["ArrowUp", "inertialPanningY", 0.02],
+        ["ArrowDown", "inertialPanningY", -0.02],
+    ] as const)("maps Ctrl+%s to panning", (code, field, expected) => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent(code, { ctrlKey: true }));
+        beforeRender(scene);
+
+        expect(camera[field]).toBeCloseTo(expected, 5);
+    });
+
+    it("normalizes diagonal Ctrl-panning to the single-axis speed", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight", { ctrlKey: true }));
+        fire(canvas, "keydown", keyboardEvent("ArrowUp", { ctrlKey: true }));
+        beforeRender(scene);
+
+        const component = Math.SQRT1_2 / 50;
+        expect(camera.inertialPanningX).toBeCloseTo(component, 7);
+        expect(camera.inertialPanningY).toBeCloseTo(component, 7);
+        expect(Math.hypot(camera.inertialPanningX, camera.inertialPanningY)).toBeCloseTo(1 / 50, 7);
+    });
+
+    it.each([
+        ["ArrowUp", 0.04],
+        ["ArrowDown", -0.04],
+    ] as const)("maps Alt+%s to zoom", (code, expected) => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent(code, { altKey: true }));
+        beforeRender(scene);
+
+        expect(camera.inertialRadiusOffset).toBeCloseTo(expected, 5);
+    });
+
+    it("applies held input on every frame without browser key-repeat", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 0;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+        beforeRender(scene);
+
+        expect(camera.alpha).toBeCloseTo(0.02, 5);
+    });
+
+    it("stops adding input on keyup while preserving existing inertia", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 0;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+        fire(canvas, "keyup", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+
+        expect(camera.alpha).toBeCloseTo(0.01, 5);
+    });
+
+    it.each([
+        [undefined, true],
+        [true, true],
+        [false, false],
+    ] as const)("uses preventDefault=%s for mapped keydown and keyup events", (preventDefault, expected) => {
+        const canvas = makeCanvas();
+        attachControl(makeCamera(), canvas as unknown as HTMLCanvasElement, makeScene(), {
+            keyboard: preventDefault === undefined ? {} : { preventDefault },
+        });
+        const keydown = keyboardEvent("ArrowLeft");
+        const keyup = keyboardEvent("ArrowLeft");
+
+        fire(canvas, "keydown", keydown);
+        fire(canvas, "keyup", keyup);
+
+        expect(keydown.preventDefault).toHaveBeenCalledTimes(expected ? 1 : 0);
+        expect(keyup.preventDefault).toHaveBeenCalledTimes(expected ? 1 : 0);
+    });
+
+    it("clears held input when the canvas loses focus", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 0;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+        fire(canvas, "blur", {});
+        beforeRender(scene);
+
+        expect(camera.alpha).toBeCloseTo(0.01, 5);
+    });
+
+    it("removes keyboard listeners and clears held input on cleanup", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 0;
+        const detach = attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+        const update = (scene as unknown as { _beforeRender: Array<() => void> })._beforeRender[0]!;
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        detach();
+        update();
+
+        expect(camera.alpha).toBe(0);
+        expect(canvas.listeners.get("keydown")).toHaveLength(0);
+        expect(canvas.listeners.get("keyup")).toHaveLength(0);
+        expect(canvas.listeners.get("blur")).toHaveLength(0);
+        expect((scene as unknown as { _beforeRender: unknown[] })._beforeRender).toHaveLength(0);
+    });
+
+    it("gives Ctrl precedence over Alt and ignores Shift", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowUp", { altKey: true, ctrlKey: true, shiftKey: true }));
+        beforeRender(scene);
+
+        expect(camera.inertialPanningY).toBeCloseTo(0.02, 5);
+        expect(camera.inertialBetaOffset).toBe(0);
+        expect(camera.inertialRadiusOffset).toBe(0);
+    });
+
+    it("ignores Meta-modified mapped keys", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight", { metaKey: true }));
+        beforeRender(scene);
+
+        expect(camera.alpha).toBe(0);
+        expect(camera.inertialAlphaOffset).toBe(0);
+    });
+
+    it("supports custom key mappings and all sensitivity divisors", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            keyboard: {
+                keys: { left: ["KeyA"], right: ["KeyD"], up: ["KeyW"], down: ["KeyS"] },
+                angularSensitivity: 20,
+                panningSensitivity: 10,
+                zoomingSensitivity: 5,
+            },
+        });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowLeft"));
+        beforeRender(scene);
+        expect(camera.inertialAlphaOffset).toBe(0);
+
+        fire(canvas, "keydown", keyboardEvent("KeyA"));
+        beforeRender(scene);
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.05, 5);
+        fire(canvas, "keyup", keyboardEvent("KeyA"));
+        camera.inertialAlphaOffset = 0;
+
+        fire(canvas, "keydown", keyboardEvent("KeyW", { ctrlKey: true }));
+        beforeRender(scene);
+        expect(camera.inertialPanningY).toBeCloseTo(0.1, 5);
+        fire(canvas, "keyup", keyboardEvent("KeyW"));
+        camera.inertialPanningY = 0;
+
+        fire(canvas, "keydown", keyboardEvent("KeyS", { altKey: true }));
+        beforeRender(scene);
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.2, 5);
+    });
+
+    it("normalizes custom-mapped rotation and Ctrl-panning diagonals", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            keyboard: {
+                keys: { left: ["KeyA"], right: ["KeyD"], up: ["KeyW"], down: ["KeyS"] },
+                angularSensitivity: 20,
+                panningSensitivity: 10,
+            },
+        });
+
+        fire(canvas, "keydown", keyboardEvent("KeyD"));
+        fire(canvas, "keydown", keyboardEvent("KeyW"));
+        beforeRender(scene);
+
+        expect(Math.hypot(camera.inertialAlphaOffset, camera.inertialBetaOffset)).toBeCloseTo(1 / 20, 7);
+
+        fire(canvas, "keyup", keyboardEvent("KeyD"));
+        fire(canvas, "keyup", keyboardEvent("KeyW"));
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        fire(canvas, "keydown", keyboardEvent("KeyA", { ctrlKey: true }));
+        fire(canvas, "keydown", keyboardEvent("KeyS", { ctrlKey: true }));
+        beforeRender(scene);
+
+        expect(Math.hypot(camera.inertialPanningX, camera.inertialPanningY)).toBeCloseTo(1 / 10, 7);
+    });
+
+    it("cancels opposing rotation and Ctrl-panning directions", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        for (const code of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+            fire(canvas, "keydown", keyboardEvent(code));
+        }
+        beforeRender(scene);
+
+        expect(camera.inertialAlphaOffset).toBe(0);
+        expect(camera.inertialBetaOffset).toBe(0);
+
+        for (const code of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+            fire(canvas, "keyup", keyboardEvent(code));
+            fire(canvas, "keydown", keyboardEvent(code, { ctrlKey: true }));
+        }
+        beforeRender(scene);
+
+        expect(camera.inertialPanningX).toBe(0);
+        expect(camera.inertialPanningY).toBe(0);
+    });
+
+    it("does not register or apply keyboard controls unless requested", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene);
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+
+        expect(canvas.listeners.has("keydown")).toBe(false);
+        expect(canvas.listeners.has("keyup")).toBe(false);
+        expect(canvas.listeners.has("blur")).toBe(false);
+        expect(canvas.tabIndex).toBe(-1);
+        expect(camera.alpha).toBe(0);
+    });
+
+    it("allows keyboard controls to be explicitly disabled", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: false });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        beforeRender(scene);
+
+        expect(canvas.listeners.has("keydown")).toBe(false);
+        expect(camera.alpha).toBe(0);
+    });
+});
+
+describe("setCameraLimits + clamping", () => {
     it("clamps the current radius into range immediately (no jump on the next frame)", () => {
         const cam = makeCamera(10);
         setCameraLimits(cam, { lowerRadiusLimit: 4, upperRadiusLimit: 6 });

@@ -21,6 +21,9 @@
  * existing scenes never import it.
  */
 
+import type { Mesh } from "../mesh/mesh.js";
+import type { WgslSource } from "../shader/wgsl.js";
+
 /** Identifies a single geometry texture supported by `createGeometryRendererTask`. */
 export enum GeometryTextureType {
     /** Half-float RGBA — diffuse irradiance accumulated at the surface. */
@@ -45,6 +48,8 @@ export enum GeometryTextureType {
     ALBEDO = 9,
     /** Half-float RGBA — per-pixel linear world-space velocity in units / frame. */
     LINEAR_VELOCITY = 10,
+    /** Unsigned byte R — packed mesh-blending group/radius tag. */
+    MESH_BLEND_TAG = 11,
 }
 
 /** Clear behaviour applied to a geometry attachment at the start of a geometry pass. */
@@ -57,6 +62,8 @@ export interface GeometryTextureDescription {
     /** Default WebGPU color format for the attachment. Callers may override per attachment. */
     readonly defaultFormat: GPUTextureFormat;
     readonly clearValue: GeometryClearValue;
+    /** @internal Optional attachment validation installed by typed output support. */
+    _validate?(format: GPUTextureFormat, clearValue: GPUColor, samples: number): void;
 }
 
 const ZERO: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
@@ -80,4 +87,32 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "WorldNormal", defaultFormat: "rgba16float", clearValue: ZERO },
     { name: "Albedo", defaultFormat: "rgba8unorm", clearValue: ZERO },
     { name: "LinearVelocity", defaultFormat: "rgba16float", clearValue: ZERO },
+    {
+        name: "MeshBlendTag",
+        defaultFormat: "r8uint",
+        clearValue: ZERO,
+        _validate: () => {
+            throw new Error("GeometryRendererTask: MESH_BLEND_TAG is not enabled.");
+        },
+    },
 ];
+
+/** Optional typed geometry-output support installed only by an opt-in attachment. */
+export interface GeometryOutputExtension {
+    readonly type: GeometryTextureType;
+    field(index: number): WgslSource;
+    standardWrite(index: number, features: number): WgslSource;
+    pbrWrite(index: number, features: number): WgslSource;
+    nodeWrite(index: number): WgslSource;
+    value(mesh: Mesh): number;
+    colorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState;
+    validateNode(material: { readonly _needsAlphaBlending: boolean }): void;
+}
+
+/** @internal Optional typed geometry-output extension. */
+export let _geometryOutputExtension: GeometryOutputExtension | null = null;
+
+/** @internal Install typed geometry output without retaining its implementation in ordinary geometry bundles. */
+export function _installGeometryOutputExtension(extension: GeometryOutputExtension): void {
+    _geometryOutputExtension = extension;
+}

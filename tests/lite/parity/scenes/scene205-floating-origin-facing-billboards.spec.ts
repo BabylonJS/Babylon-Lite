@@ -9,7 +9,7 @@
  * eye-relative positions that match the eye-relative view-projection — crisp,
  * jitter-free cards. Exercises the sorted/transparent billboard upload path.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

@@ -5,7 +5,9 @@
 
 /** Cotangent-frame bump mapping.
  *  Requires: `bT` (texture_2d) and `bS` (sampler) in scope. */
-export const WGSL_PERTURB_NORMAL = `
+import { wgsl } from "./wgsl.js";
+
+export const WGSL_PERTURB_NORMAL = wgsl`
 fn perturbNormal(vNormalW: vec3<f32>, positionW: vec3<f32>, uv: vec2<f32>, bumpScale: f32) -> vec3<f32> {
 let normalSample = textureSample(bT, bS, uv).rgb * 2.0 - 1.0;
 let N = normalize(vNormalW) * bumpScale;
@@ -26,7 +28,7 @@ return normalize(cotangentFrame * normalSample);
 
 /** ESM shadow helper functions.
  *  Requires: `shadowTex` (texture_2d), `shadowSampler` (sampler) in scope. */
-export const WGSL_SHADOW_ESM = `
+export const WGSL_SHADOW_ESM = wgsl`
 fn computeFallOff(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
 let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
 return mix(value, 1.0, mask);
@@ -42,27 +44,9 @@ return computeFallOff(esm, clipSpace.xy, frustumEdgeFalloff);
 }
 `;
 
-/** Fog calculation helper.
- *  Requires: `scene.vFogInfos` (vec4) in scope. */
-export const WGSL_FOG = `
-const E_FOG: f32 = 2.71828;
-fn calcFogFactor(fogDistance: vec3<f32>) -> f32 {
-var fogCoeff: f32 = 1.0;
-let fogMode = scene.vFogInfos.x;
-let fogStart = scene.vFogInfos.y;
-let fogEnd = scene.vFogInfos.z;
-let fogDensity = scene.vFogInfos.w;
-let dist = length(fogDistance);
-if (fogMode == 3.0) { fogCoeff = (fogEnd - dist) / (fogEnd - fogStart); }
-else if (fogMode == 1.0) { fogCoeff = 1.0 / pow(E_FOG, dist * fogDensity); }
-else if (fogMode == 2.0) { fogCoeff = 1.0 / pow(E_FOG, dist * dist * fogDensity * fogDensity); }
-return clamp(fogCoeff, 0.0, 1.0);
-}
-`;
-
 /** Dither noise function.
  *  Pure math — no UBO dependency. */
-export const WGSL_DITHER = `
+export const WGSL_DITHER = wgsl`
 fn dither(seed: vec2<f32>, varianceAmount: f32) -> f32 {
 let rand = fract(sin(dot(seed, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 let normVariance = varianceAmount / 255.0;

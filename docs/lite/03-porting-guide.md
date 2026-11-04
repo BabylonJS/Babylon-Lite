@@ -1,0 +1,642 @@
+# Porting from Babylon.js to Babylon Lite
+
+This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side by side. Babylon Lite uses **factory functions** instead of constructors, **plain data** instead of class instances, and explicit `addToScene()` instead of auto-registration.
+
+> **Not ready for a full rewrite? Start with `@babylonjs/lite-compat`.** The
+> [`@babylonjs/lite-compat`](https://www.npmjs.com/package/@babylonjs/lite-compat)
+> package is an opt-in, **Babylon.js-shaped** compatibility layer built on top of
+> the native Lite API described below. It keeps the familiar class-based surface
+> (`new WebGPUEngine`, `new Scene`, `new ArcRotateCamera`, `MeshBuilder`,
+> `StandardMaterial`, …), so an existing BJS scene runs on Lite's WebGPU renderer
+> with little or no code change — and its bundler plugins (Vite / Rollup /
+> Webpack / esbuild) can even **rewrite your existing `@babylonjs/core`,
+> `@babylonjs/loaders`, `@babylonjs/addons`, and `@babylonjs/materials` imports
+> at build time**, so you don't touch a single import. Unsupported APIs throw
+> `LiteCompatError` rather than mis-rendering. The intended path is:
+>
+> ```
+> @babylonjs/core  →  @babylonjs/lite-compat  →  @babylonjs/lite (native)
+> ```
+>
+> Use lite-compat to get running fast, then port to the native factory-function
+> API in this guide (smaller bundles, full tree-shaking) at your own pace.
+
+---
+
+## Quick Reference
+
+| Babylon.js                                                          | Babylon Lite                                                                                                |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `new WebGPUEngine(canvas); await engine.initAsync()`                | `const engine = await createEngine(canvas)`                                                                 |
+| `new Scene(engine)`                                                 | `createSceneContext(engine)`                                                                                |
+| `engine.runRenderLoop(() => scene.render())`                        | `await startEngine(engine)`                                                                                 |
+| `new ArcRotateCamera("cam", α, β, r, target, scene)`                | `createArcRotateCamera(α, β, r, target)`                                                                    |
+| `new FreeCamera("cam", position, scene)`                            | `createFreeCamera(position, target)`                                                                        |
+| `scene.createDefaultCamera(true, true, true)`                       | `createDefaultCamera(scene)`                                                                                |
+| `camera.attachControl(canvas, true)`                                | `attachControl(camera, canvas, scene)` _(arc-rotate)_ / `attachFreeControl(camera, canvas, scene)` _(free)_ |
+| `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                          | `enableOrthographicCamera(camera, { halfHeight })`                                                          |
+| `Vector3.Project(point, world, scene.getTransformMatrix(), viewport)` | `projectWorldToScreen(point, view, viewProjection, options)`                                              |
+| `new HemisphericLight("h", new Vector3(0,1,0), scene)`              | `createHemisphericLight([0,1,0], 1.0)`                                                                      |
+| `new DirectionalLight("d", new Vector3(0,-1,0), scene)`             | `createDirectionalLight([0,-1,0])`                                                                          |
+| `new SpotLight("s", pos, dir, angle, exp, scene)`                   | `createSpotLight(pos, dir, angle, exp)`                                                                     |
+| `MeshBuilder.CreateSphere("s", {}, scene)`                          | `createSphere(engine)`                                                                                      |
+| `MeshBuilder.CreateBox("b", {}, scene)`                             | `createBox(engine)`                                                                                         |
+| `MeshBuilder.CreateGround("g", {}, scene)`                          | `createGround(engine, opts)`                                                                                |
+| `new StandardMaterial("mat", scene)`                                | `createStandardMaterial()`                                                                                  |
+| `new PBRMaterial("pbr", scene)`                                     | `createPbrMaterial()`                                                                                       |
+| `new GridMaterial("grid", scene)` _(@babylonjs/materials)_          | `createGridMaterial(opts)`                                                                                  |
+| `SceneLoader.ImportMeshAsync("", url, file, scene)`                 | `addToScene(scene, await loadGltf(engine, url))`                                                            |
+| `new CubeTexture(url, scene)` + `createDefaultEnvironment()`        | `await loadEnvironment(scene, url, opts)`                                                                   |
+| `new Texture(url, scene)`                                           | `await loadTexture2D(engine, url)`                                                                          |
+| Fresh texture from an already-decoded image                         | `await createTexture2DFromExternalImage(engine, source, options)`                                           |
+| KTX1 compressed 2D texture                                          | `await loadKtxTexture2D(engine, baseUrl, suffixes)`                                                         |
+| glTF KTX2 / `KHR_texture_basisu` texture source                     | `addToScene(scene, await loadGltf(engine, ktx2GltfUrl))` _(auto-detected)_                                  |
+| Basis Universal (.basis) 2D texture                                 | `await loadBasisTexture2D(engine, url)`                                                                     |
+| `new ShadowGenerator(size, light)` with a directional light and ESM | `createEsmDirectionalShadowGenerator(engine, light, opts)`                                                  |
+| `sg.usePercentageCloserFiltering = true` with a spotlight           | `createPcfSpotlightShadowGenerator(engine, light, opts)`                                                    |
+| `sg.usePercentageCloserFiltering = true` with a directional light   | `createPcfDirectionalShadowGenerator(engine, light, opts)`                                                  |
+| `mesh.thinInstanceSetBuffer("matrix", data, 16)`                    | `setThinInstances(mesh, data, count)`                                                                       |
+| `mesh.thinInstanceSetBuffer("color", data, 4)`                      | `setThinInstanceColors(mesh, data)`                                                                         |
+| `new Vector3(x, y, z)`                                              | `{ x, y, z }` or `[x, y, z]`                                                                                |
+| `new Color3(r, g, b)`                                               | `[r, g, b]`                                                                                                 |
+| `Matrix.Identity()`                                                 | `createIdentityMat4()`                                                                                            |
+| `mesh.dispose()`                                                    | `removeFromScene(scene, mesh)`                                                                              |
+| `scene.onBeforeRenderObservable.add(fn)`                            | `onBeforeRender(scene, fn)`                                                                                 |
+
+---
+
+## Key Differences
+
+For rectangular emitters, see [Rectangular Area Lights](06-area-lights.md).
+Create the light with `createRectAreaLight(position, width, height)`, add it to
+the scene, and await `enableRectAreaLights(scene)` before `registerScene(scene)`.
+Dimensions are local-space full extents; emission points along local **-Z**.
+
+### 1. No Scene in Constructors
+
+BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `addToScene()` them explicitly.
+
+```typescript
+// ❌ Babylon.js
+const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+
+// ✅ Babylon Lite
+const light = createHemisphericLight([0, 1, 0], 1.0);
+addToScene(scene, light);
+```
+
+### 2. Engine & Render Loop
+
+BJS uses `runRenderLoop` with a callback. Lite uses a single `startEngine(engine)` that returns a promise resolving after the first frame.
+
+```typescript
+// ❌ Babylon.js
+const engine = new WebGPUEngine(canvas);
+await engine.initAsync();
+const scene = new Scene(engine);
+// ... setup ...
+engine.runRenderLoop(() => scene.render());
+
+// ✅ Babylon Lite
+const engine = await createEngine(canvas);
+const scene = createSceneContext(engine);
+// ... setup ...
+await startEngine(engine);
+```
+
+### 3. Plain Data, Not Classes
+
+Lite uses plain objects, arrays, and `Float32Array` instead of BJS classes like `Vector3`, `Color3`, `Matrix`.
+
+```typescript
+// ❌ Babylon.js
+light.direction = new Vector3(0, -1, 0);
+light.diffuse = new Color3(1, 0, 0);
+
+// ✅ Babylon Lite
+const light = createDirectionalLight([0, -1, 0]);
+light.diffuse = [1, 0, 0];
+```
+
+### 4. Camera Controls Are Separate
+
+BJS cameras have `attachControl` as a method. Lite separates camera data from input handling.
+
+```typescript
+// ❌ Babylon.js
+const camera = new ArcRotateCamera("cam", -Math.PI / 2, Math.PI / 2, 5, Vector3.Zero(), scene);
+camera.attachControl(canvas, true);
+
+// ✅ Babylon Lite
+const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+scene.camera = camera;
+attachControl(camera, canvas, scene);
+```
+
+#### Projecting a world point to canvas or CSS pixels
+
+Babylon.js `Vector3.Project` returns render pixels and leaves visibility checks and CSS scaling to the caller. Lite's generic helper returns backing pixels, CSS pixels, reverse-Z NDC depth, and explicit behind/clipped/offscreen flags:
+
+```typescript
+import {
+    getFloatingOriginOffset,
+    getEffectiveAspectRatio,
+    getViewMatrix,
+    getViewProjectionMatrix,
+    projectWorldToScreen,
+    resolveCameraViewport,
+} from "@babylonjs/lite";
+
+const backingWidth = canvas.width;
+const backingHeight = canvas.height;
+const projection = projectWorldToScreen(
+    worldPoint,
+    getViewMatrix(camera),
+    getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, backingWidth, backingHeight)),
+    {
+        viewport: resolveCameraViewport(camera, backingWidth, backingHeight),
+        backingWidth,
+        backingHeight,
+        worldOrigin: engine.useFloatingOrigin ? getFloatingOriginOffset(scene) : undefined,
+        cssWidth: canvas.clientWidth,
+        cssHeight: canvas.clientHeight,
+    }
+);
+
+if (!projection.clipped) {
+    overlay.style.transform = `translate(${projection.cssX}px, ${projection.cssY}px)`;
+}
+```
+
+The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. With Large World Rendering, `worldOrigin` rebases absolute CPU positions into the eye-relative frame used by the camera matrices. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
+
+Pointer-button behavior can be migrated without adding application-owned orbit
+or pan math. The defaults stay primary-button rotate and secondary-button pan;
+set either mapping independently when the application uses a different
+interaction convention:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "pan",
+        secondaryButton: "rotate",
+    },
+});
+```
+
+This mapping applies to mouse and pen buttons. Touch remains one-finger rotate
+and two-finger pinch zoom, and wheel input remains zoom.
+
+### 5. Loaders and Scene Registration
+
+`loadEnvironment()` adds its environment data/renderables to the scene internally. `loadGltf()` returns an asset container; pass it to `addToScene()` so transform-node hierarchies, meshes, and animation groups are registered explicitly.
+
+```typescript
+// ❌ Babylon.js
+await SceneLoader.ImportMeshAsync("", baseUrl, "model.glb", scene);
+scene.environmentTexture = new CubeTexture(envUrl, scene);
+scene.createDefaultEnvironment({ createSkybox: true, skyboxSize: 1000 });
+
+// ✅ Babylon Lite
+addToScene(scene, await loadGltf(engine, "model.glb"));
+await loadEnvironment(scene, envUrl, {
+    skyboxUrl: "skybox.dds",
+    skyboxSize: 1000,
+    groundTextureUrl: "ground.png",
+    brdfUrl: "/brdf-lut.png",
+});
+```
+
+The asset container keeps the glTF node hierarchy: each glTF node is a transform node and each primitive is a mesh under it,
+where Babylon.js returns one `Mesh` for a single-primitive node. Through `@babylonjs/lite-compat`, `ImportMeshAsync(...).meshes`
+is a flattened view of that hierarchy, so reparent loaded meshes with `setParent()` rather than assigning `.parent` to every
+entry, or transforms inherited from glTF nodes are lost. See
+[glTF import hierarchy and reparenting](https://github.com/BabylonJS/Babylon-Lite/blob/master/packages/babylon-lite-compat/README.md#gltf-import-hierarchy-and-reparenting).
+
+### 6. Shadows Attach to Lights
+
+BJS creates a `ShadowGenerator` separately. Lite assigns it directly to the light.
+
+```typescript
+// ❌ Babylon.js
+const sg = new ShadowGenerator(1024, light);
+sg.addShadowCaster(mesh);
+sg.useBlurExponentialShadowMap = true;
+ground.receiveShadows = true;
+
+// ✅ Babylon Lite
+light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
+    mapSize: 1024,
+    depthScale: 50,
+    blurScale: 2,
+});
+setShadowTaskCasterMeshes(light.shadowGenerator, [mesh]);
+ground.receiveShadows = true;
+await registerSceneWithShadowSupport(scene);
+```
+
+For PCF shadows:
+
+```typescript
+// ❌ Babylon.js
+const sg = new ShadowGenerator(1024, spotLight);
+sg.usePercentageCloserFiltering = true;
+
+// ✅ Babylon Lite
+spotLight.shadowGenerator = createPcfSpotlightShadowGenerator(engine, spotLight, {
+    mapSize: 1024,
+});
+setShadowTaskCasterMeshes(spotLight.shadowGenerator, [mesh]);
+await registerSceneWithShadowSupport(scene);
+```
+
+### 7. Thin Instances Use Raw Arrays
+
+No `Matrix` class needed. Pass raw `Float32Array` with 16 floats per instance.
+
+```typescript
+// ❌ Babylon.js
+const matrices = new Float32Array(count * 16);
+// ... fill with Matrix values ...
+mesh.thinInstanceSetBuffer("matrix", matrices, 16);
+mesh.thinInstanceSetBuffer("color", colors, 4);
+
+// ✅ Babylon Lite
+const matrices = new Float32Array(count * 16);
+// ... fill directly (column-major 4x4) ...
+setThinInstances(mesh, matrices, count);
+setThinInstanceColors(mesh, colors);
+addToScene(scene, mesh);
+```
+
+### 8. Mesh Factories Take Engine, Not Scene
+
+BJS mesh builders take `scene`. Lite mesh factories take `engine` (for GPU buffer creation) and return plain mesh data.
+
+```typescript
+// ❌ Babylon.js
+const sphere = MeshBuilder.CreateSphere("sphere", { diameter: 2 }, scene);
+sphere.material = new StandardMaterial("mat", scene);
+
+// ✅ Babylon Lite
+const sphere = createSphere(engine);
+sphere.material = createStandardMaterial();
+addToScene(scene, sphere);
+```
+
+### 9. StandardMaterial Vertex Colors Are Opt-In
+
+PBR materials consume mesh vertex colors automatically. Standard materials use an explicit opt-in so scenes without vertex colors retain no feature code. Supply a tightly packed RGBA buffer (four floats per vertex), call `enableStandardVertexColors()` once, then register the scene.
+
+```typescript
+import { enableStandardVertexColors } from "babylon-lite";
+
+const vertexCount = positions.length / 3;
+const colors = new Float32Array(vertexCount * 4);
+for (let i = 0; i < vertexCount; i++) {
+    const offset = i * 4;
+    colors[offset] = 1;
+    colors[offset + 3] = 1;
+}
+
+const mesh = createMeshFromData(engine, "colored", positions, normals, indices, undefined, undefined, undefined, colors);
+mesh.material = createStandardMaterial();
+addToScene(scene, mesh);
+
+enableStandardVertexColors();
+await registerScene(scene);
+```
+
+### 10. StandardMaterial Optional Textures Are Opt-In
+
+Only `diffuseTexture` is built into `StandardMaterialProps`. The other eight texture slots live behind `setStandardXTexture()` functions so scenes that don't use them retain none of the corresponding shader code. Assigning the backing property directly is a compile error — the fields are `@internal` (underscore-prefixed) precisely because a direct write would skip extension registration and silently render nothing.
+
+```typescript
+// ❌ Babylon.js
+const mat = new StandardMaterial("mat", scene);
+mat.bumpTexture = new Texture("normal.png", scene);
+mat.emissiveTexture = new Texture("glow.png", scene);
+
+// ✅ Babylon Lite
+import { createStandardMaterial, setStandardBumpTexture, setStandardEmissiveTexture } from "@babylonjs/lite";
+
+const mat = createStandardMaterial();
+setStandardBumpTexture(mat, await loadTexture2D(engine, "normal.png"));
+setStandardEmissiveTexture(mat, await loadTexture2D(engine, "glow.png"));
+```
+
+| Babylon.js property                 | Babylon Lite setter                           |
+| ----------------------------------- | --------------------------------------------- |
+| `material.bumpTexture`              | `setStandardBumpTexture(mat, tex)`            |
+| `material.emissiveTexture`          | `setStandardEmissiveTexture(mat, tex)`        |
+| `material.specularTexture`          | `setStandardSpecularTexture(mat, tex)`        |
+| `material.ambientTexture`           | `setStandardAmbientTexture(mat, tex)`         |
+| `material.lightmapTexture`          | `setStandardLightmapTexture(mat, tex)`        |
+| `material.opacityTexture`           | `setStandardOpacityTexture(mat, tex)`         |
+| `material.reflectionTexture` (2D)   | `setStandardReflectionTexture(mat, tex)`      |
+| `material.reflectionTexture` (cube) | `setStandardReflectionCubeTexture(mat, cube)` |
+
+Companion scalars (`bumpLevel`, `lightmapCoordIndex`, `opacityFromRGB`, `reflectionLevel`, …) remain plain assignable properties and may be set in any order relative to the setter — feature detection runs when the renderable is built, not when the setter is called. Setting a texture _after_ the material has already been built still requires `rebuildMaterial()`, exactly as before.
+
+Cube reflection takes a `CubeTexture`, which only `loadCubeTexture()` produces:
+
+```typescript
+import { loadCubeTexture, setStandardReflectionCubeTexture } from "@babylonjs/lite";
+
+setStandardReflectionCubeTexture(mat, await loadCubeTexture(engine, "textures/skybox", ".jpg"));
+```
+
+`.babylon` files loaded through `loadBabylon()` wire all of these up automatically — the loader imports only the setters a given file actually needs.
+
+### 11. Mirrored (Negatively Scaled) Meshes Are Opt-In
+
+Babylon flips `sideOrientation` automatically whenever a mesh's world-matrix determinant turns
+negative. Lite's glTF loader already reverses winding for negative-scale nodes it finds at load
+time, but the remaining cases go through an explicit opt-in so scenes that never mirror anything
+carry no winding code. Call `await enableMirroredMeshes(scene)` once — after your assets are added
+and before `registerScene()` — when you mirror a Standard-material mesh, a procedural mesh, or
+change a mesh's mirroring after load.
+
+```typescript
+import { enableMirroredMeshes } from "babylon-lite";
+
+const box = createBox(engine, 2);
+box.scaling.set(-1, 1, 1); // mirrored — winding is reversed for you
+addToScene(scene, box);
+
+await enableMirroredMeshes(scene);
+await registerScene(scene);
+```
+
+It also keeps working when the mirroring changes at runtime: each frame the watcher only looks at
+meshes whose world matrix actually changed (an integer version compare), computes a determinant for
+those alone, and rebuilds a pipeline only when the sign really flipped.
+
+Only that runtime watcher is scoped to the scene you pass — the pipeline-side winding resolution is
+installed process-wide on the first call, so in a multi-scene app the other scenes also stop
+rendering mirrored meshes inside-out, but they will not track a mirroring that changes after their
+renderables are built unless you call it for them too.
+
+### 12. Removing & Disposing Entities
+
+BJS uses `mesh.dispose()` on individual objects. Lite uses `removeFromScene()` which removes the mesh from the scene and destroys all its GPU resources (buffers, textures, skeleton data).
+
+```typescript
+// ❌ Babylon.js
+sphere.dispose();
+
+// ✅ Babylon Lite
+removeFromScene(scene, sphere);
+```
+
+For full teardown:
+
+```typescript
+// ✅ Babylon Lite — tear down everything
+disposeScene(scene); // releases all meshes, renderables, disposables
+disposeEngine(engine); // destroys GPU device, render targets, swapchain
+```
+
+---
+
+## Full Example: Porting a PBR Scene
+
+### Babylon.js
+
+```typescript
+const engine = new WebGPUEngine(canvas);
+await engine.initAsync();
+const scene = new Scene(engine);
+scene.clearColor = new Color4(0.2, 0.2, 0.3, 1);
+
+const light = new HemisphericLight("h", new Vector3(0, 1, 0), scene);
+light.intensity = 1.0;
+
+await SceneLoader.ImportMeshAsync("", baseUrl, "BoomBox.glb", scene);
+const envTex = new CubeTexture(envUrl, scene);
+scene.environmentTexture = envTex;
+scene.createDefaultCamera(true, true, true);
+scene.createDefaultEnvironment({ skyboxSize: 1000 });
+
+engine.runRenderLoop(() => scene.render());
+```
+
+### Babylon Lite
+
+```typescript
+const engine = await createEngine(canvas);
+const scene = createSceneContext(engine);
+
+addToScene(scene, await loadGltf(engine, "BoomBox.glb"));
+await loadEnvironment(scene, envUrl, {
+    skyboxUrl: "skybox.dds",
+    skyboxSize: 1000,
+    groundTextureUrl: "ground.png",
+    brdfUrl: "/brdf-lut.png",
+});
+
+const cam = createDefaultCamera(scene);
+attachControl(cam, canvas, scene);
+addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+
+await startEngine(engine);
+```
+
+---
+
+## Gotchas
+
+| Gotcha                          | Details                                                                                                                                                                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No auto-add**                 | Meshes, lights, transform nodes, and `loadGltf()` asset containers must be explicitly added with `addToScene()`. `loadEnvironment()` adds its environment data/renderables internally.                                     |
+| **No `new` keyword**            | Everything is created via factory functions, not constructors.                                                                                                                                                             |
+| **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                                                          |
+| **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                                                        |
+| **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                                                 |
+| **Mirrored meshes**             | Call `await enableMirroredMeshes(scene)` before `registerScene()` when you give a mesh (or an ancestor) a negative scale, so its triangle winding is reversed. glTF negative-scale nodes are already handled at load time. |
+| **Right-handed scenes**         | `scene.useRightHandedSystem = true` becomes a build option: add the `babylon-lite-rh` resolve condition to your bundler. See [Right-Handed Coordinate System](07-right-handed-system.md).                                  |
+| **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                                                       |
+| **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                                                     |
+| **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                                                    |
+| **KTX2 is glTF-scoped**         | KTX1 has a direct `loadKtxTexture2D()` helper. KTX2/BasisU texture sources are handled through glTF `KHR_texture_basisu` during `loadGltf()` so non-KTX2 scenes pay zero runtime bundle cost.                              |
+| **Material property animation** | Mutating material props at runtime requires marking the material dirty. See Material Animation section below.                                                                                                              |
+
+---
+
+## Material Animation
+
+Babylon Lite supports animating material properties at runtime (e.g. changing colors, alpha, anisotropy intensity per frame). Two approaches are available:
+
+### Manual (default — zero overhead)
+
+Mutate the property, then call `markMaterialUboDirty()`:
+
+```typescript
+import { markMaterialUboDirty } from "@babylonjs/lite";
+
+onBeforeRender(scene, () => {
+    material.alpha = Math.sin(time) * 0.5 + 0.5;
+    markMaterialUboDirty(material);
+});
+```
+
+This works for both PBR and Standard materials. Zero runtime cost when nothing changes.
+
+### Automatic tracking (opt-in)
+
+Call `enableMaterialTracking()` once on a material to install property setters that auto-detect changes — including in-place array mutations like `material.diffuseColor[0] = 0.5`:
+
+```typescript
+import { enableMaterialTracking, setPbrAnisotropy, setPbrEmissive } from "@babylonjs/lite";
+
+const mat = createPbrMaterial({});
+setPbrAnisotropy(mat, { isEnabled: true, intensity: 1.0 });
+setPbrEmissive(mat, [0, 0, 0]);
+enableMaterialTracking(mat);
+
+// Now mutations auto-mark the material UBO dirty — no manual call needed:
+onBeforeRender(scene, () => {
+    mat._anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5; // auto-dirty
+    mat._emissiveColor![0] = 0.5; // auto-dirty (index write)
+});
+```
+
+Opt-in features live behind `setPbrX()` functions so unused shader code tree-shakes away; the
+properties they stamp are `@internal` (underscore-prefixed) precisely so that assigning them
+directly — which would skip extension registration and silently render nothing — is a compile
+error. Once the setter has run, in-place mutation of the stamped value is supported.
+
+`enableMaterialTracking` is fully tree-shakable — scenes that don't import it pay zero bundle cost.
+
+| Feature                 | `markMaterialUboDirty`  | `enableMaterialTracking`           |
+| ----------------------- | ----------------------- | ---------------------------------- |
+| Bundle cost             | ~50 bytes               | ~1.5 KB (only if imported)         |
+| Per-frame cost          | Zero (manual call)      | Zero (setter fires only on change) |
+| Catches `color[0] = x`  | ❌ (must call manually) | ✅                                 |
+| Catches `mat.alpha = x` | ❌ (must call manually) | ✅                                 |
+
+---
+
+## Material Stencil (opt-in)
+
+Babylon Lite supports a per-material stencil test baked into the main color pass — for masking effects
+like portals and decals (one material **writes** the stencil buffer where it draws, another **discards**
+fragments where the stencil was written). It is an explicit opt-in so stencil-free scenes stay
+byte-near-identical:
+
+```typescript
+import { createStandardMaterial, enableMaterialStencil, registerScene } from "@babylonjs/lite";
+
+// Writer: stamp the stencil buffer (0 → 1) everywhere it draws.
+const mask = createStandardMaterial();
+mask.stencil = { passOp: "increment-clamp" };
+
+// Tester: draw only where the stencil is still the pass's default reference of 0
+// (i.e. where the writer did NOT draw). No dynamic stencil reference needed.
+const masked = createStandardMaterial();
+masked.stencil = { compare: "equal" };
+
+enableMaterialStencil(); // ← opt-in, BEFORE registerScene
+await registerScene(scene);
+```
+
+`StencilState` accepts `compare`, `passOp`, `failOp`, `depthFailOp`, `readMask`, and `writeMask` (all
+optional; defaults `"always"` / `"keep"` / `0xff`). Stencil is applied only on a stencil-capable target (the
+main color pass) and ignored on depth-only/shadow passes. Without calling `enableMaterialStencil`, a
+material's `stencil` field is inert and the pipeline builders carry no stencil code — `enableMaterialStencil`
+is fully tree-shakable, so scenes that don't import it pay no bundle cost.
+
+---
+
+## glTF / PBR Extensions
+
+Babylon Lite's glTF loader + PBR material understand the following extensions. Each
+feature is tree-shakable: scenes that don't use it pay no bundle cost.
+
+| Extension / Feature                           | Support | Notes                                                                                                                                                                                                                  |
+| --------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KHR_materials_pbrSpecularGlossiness`         | ✅      | Auto-detected by `loadGltf()`                                                                                                                                                                                          |
+| `KHR_materials_clearcoat`                     | ✅      | Auto-detected; or `createPbrMaterial({ clearCoat: { ... } })`                                                                                                                                                          |
+| `KHR_materials_sheen`                         | ✅      | Auto-detected (BJS-spec albedo scaling for glTF); or `createPbrMaterial({ sheen: { ... } })`                                                                                                                           |
+| `KHR_materials_anisotropy`                    | ✅      | Auto-detected; or `createPbrMaterial({ anisotropy: { ... } })`                                                                                                                                                         |
+| `KHR_materials_variants`                      | ✅      | `selectVariant(scene, name)`, `getVariantNames(scene)`, `resetVariant(scene)`                                                                                                                                          |
+| `KHR_materials_ior`                           | ✅      | Auto-detected; index of refraction for dielectrics (Scene 30)                                                                                                                                                          |
+| `KHR_materials_specular`                      | ✅      | Auto-detected; dielectric specular intensity + color (Scene 30)                                                                                                                                                        |
+| `KHR_materials_volume`                        | ✅      | Auto-detected; attenuation color/distance + thickness (Scene 30)                                                                                                                                                       |
+| `KHR_materials_transmission`                  | ✅      | Frame-graph scene-texture transmission for transmissive glTF materials (Scenes 30/33/112). Screen-space scene-texture refraction; parity is within-5 = 100% of pixels.                                                 |
+| `KHR_texture_transform`                       | ✅      | Auto-resolved at load (material-wide UV transform)                                                                                                                                                                     |
+| `KHR_texture_basisu`                          | ✅      | Auto-detected; dynamically loads KTX2 decoder/upload path only for glTF assets that declare the extension (Scene 112)                                                                                                  |
+| `EXT_texture_webp`                            | ✅      | Auto-detected through texture source selection; image decode is browser-native (Scene 37)                                                                                                                              |
+| `KHR_draco_mesh_compression`                  | ✅      | Auto-detected; loads `draco_decoder.js` + `.wasm` on demand from site root (override via `setDracoBaseUrl()`)                                                                                                          |
+| `KHR_materials_emissive_strength`             | ✅      | Auto-detected; multiplies emissive output (Scene 31)                                                                                                                                                                   |
+| `KHR_materials_unlit`                         | ✅      | Auto-detected; emits base color directly with no lighting (Scene 32)                                                                                                                                                   |
+| `KHR_lights_punctual`                         | ✅      | Auto-detected; point / spot / directional lights baked from glTF nodes (Scene 33)                                                                                                                                      |
+| `KHR_node_visibility`                         | ✅      | Auto-detected; per-node visibility flag honoured at render time (Scene 34)                                                                                                                                             |
+| `KHR_animation_pointer`                       | ✅      | Auto-detected; animates arbitrary JSON pointers (e.g. node visibility, material UBO fields) (Scene 34)                                                                                                                 |
+| `EXT_mesh_gpu_instancing`                     | ✅      | Auto-detected; per-node TRS accessors expanded into thin instances (Scene 35)                                                                                                                                          |
+| `EXT_meshopt_compression`                     | ✅      | Auto-detected; meshopt-decodes vertex/index buffers via a dynamically-imported decoder (Scene 211)                                                                                                                     |
+| `KHR_mesh_quantization`                       | ✅      | Auto-detected; normalized/quantized vertex attributes uploaded with native typed formats (Scene 211)                                                                                                                   |
+| `KHR_xmp_json_ld`                             | ✅      | Auto-detected; JSON-LD metadata packets surfaced on `AssetContainer.xmpMetadata` with zero render impact (Scene 210)                                                                                                   |
+| `ExtrasAsMetadata`                            | ✅      | Promotes glTF node, mesh, primitive, and material `extras` to `metadata.gltf.extras`                                                                                                                                   |
+| Interleaved vertex buffers                    | ✅      | Genuine GPU-level interleave: a strided `bufferView` is uploaded once and bound to each attribute slot via `arrayStride`/offset — no CPU de-interleave or asset rewrite (Scene 210)                                    |
+| Subsurface translucency + thickness           | ✅      | `createPbrMaterial({ subsurface: { translucency, thickness } })`                                                                                                                                                       |
+| Specular anti-aliasing                        | ✅      | Auto-on for glTF; manual: `createPbrMaterial({ enableSpecularAA: true })`                                                                                                                                              |
+| Morph targets                                 | ✅      | PBR meshes only (not `StandardMaterial`)                                                                                                                                                                               |
+| Skeletal animation (4 or 8 bones)             | ✅      | Driven by `createAnimationController(scene)`                                                                                                                                                                           |
+| Animation blending / weights / additive clips | ✅      | `AnimationManager` with `setAnimationWeight()`, `crossFadeAnimationGroups()`, and `setAnimationAdditive()` (Scenes 155-158)                                                                                            |
+| ShaderMaterial                                | ✅      | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test; opt-in `enableShaderMaterialInstanceWorld()` and `enableShaderMaterialFinalColor()` enable shared regular/thin-instance vertex shaders (Scenes 159-163)       |
+| GridMaterial                                  | ✅      | Procedural unlit object-space grid via `createGridMaterial()`: mainColor/lineColor, gridRatio, gridOffset, major/minor units, opacity, antialias, useMaxLine, preMultiplyAlpha, opacityTexture, visibility (Scene 213) |
+| Node Material                                 | ✅      | NME snippet parser covering core, PBR, math, texture, procedural, normal, screen/depth, matrix, loop, and storage blocks (Scenes 60-89)                                                                                |
+| Sprites / billboards                          | ⚡      | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards; not the full BJS SpriteManager API (Scenes 50-57)                                                                                               |
+| Gaussian splatting                            | ✅      | `.ply`, `.splat`, `.sog`, `.spz`, bake transforms, material plugin fragments (Scenes 120-126)                                                                                                                          |
+| CSG / CSG2                                    | ✅      | Mesh boolean subtract/intersect/union/add APIs (Scenes 90-91)                                                                                                                                                          |
+| Physics                                       | ⚡      | Havok Physics V2 subset (Scene 40)                                                                                                                                                                                     |
+| Navigation / Recast                           | ⚡      | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, raycast (Scenes 170-175)                                                                                                                       |
+| Device-lost recovery                          | ✅      | Opt-in SceneContext, SpriteRenderer, and TextRenderer recovery via the corresponding `enableDeviceLost*Recovery` API (Scene 164 covers SceneContext)                                                                   |
+| Screen-space SSS (PrePass)                    | ❌      | Not implemented — only BRDF-layer translucency                                                                                                                                                                         |
+
+For ShaderMaterial scenes with hidden meshes, call
+`enableShaderMaterialVisiblePacketUpdates(material)` to defer hidden packet system-uniform
+and resource updates, including members of grouped opaque bindings. Shared custom uniforms
+and transparent sorting remain active. Always hide and restore with `setMeshVisible(mesh, visible)`
+so cached bundles are invalidated; pending packet changes refresh before the restored draw.
+The default update policy is unchanged.
+
+See `lab/lite/src/lite/scene*.ts` for end-to-end examples of each extension in action.
+
+## Raw gameplay input
+
+`DeviceSourceManager` gameplay polling can use independent native input helpers.
+Camera `attachControl` remains separate. Use physical key codes instead of
+Babylon.js numeric key constants, DOM button masks instead of pointer enums,
+and check a gamepad's mapping before interpreting its axes/buttons.
+
+```ts
+import { createKeyboardInput, createPointerInput, isKeyboardKeyDown, readGamepad, resetPointerInput, disposeKeyboardInput, disposePointerInput } from "@babylonjs/lite";
+
+canvas.tabIndex = 0; // The application decides when the canvas receives focus.
+const keyboard = createKeyboardInput(canvas);
+const pointer = createPointerInput(canvas);
+// In your frame callback:
+const forward = isKeyboardKeyDown(keyboard, "KeyW");
+const lookX = pointer.deltaX;
+const gamepad = readGamepad(0);
+const stickX = gamepad?.mapping === "standard" ? (gamepad.axes[0] ?? 0) : 0;
+resetPointerInput(pointer); // Clear accumulated deltas after reading the frame.
+// During application teardown:
+disposeKeyboardInput(keyboard);
+disposePointerInput(pointer);
+```
+
+Wheel deltas keep their DOM units in `wheelDeltaMode`; normalize pixels, lines,
+or pages in your application. If modes change before a frame reads the state,
+only the latest contiguous mode batch is retained. No input helper captures pointers, prevents
+browser defaults, or installs scene callbacks. Dispose input explicitly, or
+register a disposer through `onSceneDispose`. Gamepads are copied snapshots;
+null means the slot is unavailable, disconnected, or access is denied.
+
+The Playground's **Input — Keyboard, pointer and gamepad** example combines
+WASD movement, pointer look and a standard gamepad. See the
+[device input specification](architecture/60-device-input.md) for focus,
+iframe, primary-touch, reset, and cleanup contracts. This native API does not
+add a `DeviceSourceManager` class to lite-compat or promise Babylon Native support.

@@ -8,7 +8,7 @@
  * The body settles to a deterministic resting pose, so the screenshot is
  * stable regardless of exact stepping — mirroring the scene40 settle pattern.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

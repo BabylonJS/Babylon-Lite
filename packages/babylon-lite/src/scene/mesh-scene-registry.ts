@@ -15,22 +15,42 @@ import type { SceneContext } from "./scene-core.js";
  *  `scene-remove` reaching back into `scene-core`. (This is organizational only — the package
  *  is side-effect-free, so symbol-level tree-shaking applies regardless of file boundaries.) */
 let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
+let _materialValidator: ((mesh: Mesh, material: Mesh["material"]) => void) | null = null;
+
+/** @internal Install optional validation of material transitions for a borrowed consumer. */
+export function _installMeshMaterialValidator(validate: (mesh: Mesh, material: Mesh["material"]) => void): void {
+    _materialValidator = validate;
+}
 
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
  *  Dedup is per-(scene, mesh) via swap-queue membership — a single shared mesh may be queued
- *  in several scenes at once. Lazily loads the swap processor so scenes that never mutate at
- *  runtime don't pull it into their bundle. */
+ *  in several scenes at once. The queue is drained synchronously each frame by the render loop
+ *  (`processMaterialSwaps`), so the rebuilt renderable is present the SAME frame the old one is
+ *  removed — no one-frame missing-mesh flash on the first swap (e.g. re-tinting a wall). */
 export function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
-    if (scene._materialSwapQueue.indexOf(mesh) >= 0) {
+    if (scene._materialSwapQueue.includes(mesh)) {
         return;
     }
     scene._materialSwapQueue.push(mesh);
-    if (!scene._processSwaps) {
-        void import("./scene-material-swap.js").then((m) => {
-            scene._processSwaps = m.processMaterialSwaps;
-        });
+}
+
+/** Queue a mesh's renderable for rebuild in every scene that owns it.
+ *  Use after changing renderable-affecting mesh state that is not observable through
+ *  the material setter, such as primitive topology or replaced GPU geometry buffers. */
+export function markMeshRenderableDirty(mesh: Mesh): void {
+    const scenes = _meshScenes?.get(mesh);
+    if (!scenes) {
+        return;
     }
+    for (const scene of scenes) {
+        enqueueMaterialSwap(scene, mesh);
+    }
+}
+
+/** @internal Read subscriptions without storing scene references on a mesh. */
+export function _getMeshScenes(mesh: Mesh): ReadonlySet<SceneContext> | undefined {
+    return _meshScenes?.get(mesh);
 }
 
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
@@ -46,11 +66,13 @@ function installMaterialSetter(mesh: Mesh): void {
         },
         set(v) {
             if (v !== _mat) {
+                _materialValidator?.(mesh, v);
                 _mat = v;
                 const scenes = _meshScenes?.get(mesh);
                 if (scenes) {
                     for (const scene of scenes) {
                         enqueueMaterialSwap(scene, mesh);
+                        scene._meshMaterialChange?.(mesh, v);
                     }
                 }
             }
@@ -61,8 +83,18 @@ function installMaterialSetter(mesh: Mesh): void {
 }
 
 /** @internal Register `scene` as an owner of `mesh`. Installs the material setter on the mesh's
- *  first registration only (re-adds just grow the subscriber set, reusing the one setter). */
+ *  first registration only (re-adds just grow the subscriber set, reusing the one setter).
+ *
+ *  Throws when the mesh was already disposed — leaving its last scene (or disposing that scene)
+ *  releases every claim it held on its shared GPU resources, destroying the ones it was the last
+ *  owner of. Lite never resurrects them, so a re-add would draw with dead handles (sole owner) or
+ *  release a claim it no longer holds and free buffers a sibling still uses (shared owner). Both
+ *  are silent corruption, so the failure is made loud here. */
 export function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
+    if (mesh._disposed) {
+        throw new Error(`Mesh "${mesh.name}" cannot be added: it was disposed when it left its last scene. Create a new mesh instead.`);
+    }
+    _materialValidator?.(mesh, mesh.material);
     const map = (_meshScenes ??= new WeakMap());
     let scenes = map.get(mesh);
     if (!scenes) {

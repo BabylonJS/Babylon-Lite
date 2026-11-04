@@ -1,7 +1,19 @@
-import { defineConfig, type Plugin } from "vite";
-import { resolve } from "path";
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { defineConfig, normalizePath, type Plugin } from "vite";
+import { extname, isAbsolute, relative, resolve, sep } from "path";
+import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { spawn } from "child_process";
+import basicSsl from "@vitejs/plugin-basic-ssl";
+import { mapBabylonImport, type CompatTarget } from "../packages/babylon-lite-compat/src/bundler-resolve.js";
+
+/**
+ * On-device WebXR testing (e.g. Quest 3) requires a secure context, which for any
+ * non-localhost origin means HTTPS. Use `pnpm dev:lab:https` to serve the lab over HTTPS
+ * with a self-signed cert (via @vitejs/plugin-basic-ssl) and bind to all network
+ * interfaces so the headset can reach `https://<this-machine-ip>:5174` over the
+ * LAN — accept the one-time cert warning in the Quest Browser. Left off by
+ * default so the normal `pnpm dev:lab` flow stays plain HTTP on localhost.
+ */
+const LAB_HTTPS = process.argv.some((arg, index) => arg === "--mode=https" || (arg === "--mode" && process.argv[index + 1] === "https"));
 
 interface DemoConfigEntry {
     slug: string;
@@ -15,6 +27,8 @@ interface DemoSize {
     rawKB: number;
     gzipKB: number;
 }
+
+const DEMO_SOURCE_BASE_URL = "https://github.com/BabylonJS/Babylon-Lite/blob/master/lab/lite/src/demos/";
 
 function readJson<T>(path: string, fallback: T): T {
     if (!existsSync(path)) {
@@ -52,8 +66,10 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
     const sizeRow = size
         ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
         : "";
+    const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
     return [
-        `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<a class="card-main" href="/demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
         `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
@@ -64,6 +80,8 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
         sizeRow,
         `<span class="card-disabled-badge">Requires WebGPU</span>`,
         `</div></a>`,
+        `<div class="card-links"><a class="source-link" href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">Source code</a></div>`,
+        `</article>`,
     ].join("");
 }
 
@@ -113,12 +131,16 @@ function getHtmlInputs(): Record<string, string> {
     const liteHtml = readdirSync(resolve(__dirname, "lite"))
         .filter((f) => f.endsWith(".html") && hasBuildableRootScripts(`lite/${f}`))
         .map((f) => [`lite/${f.replace(".html", "")}`, resolve(__dirname, "lite", f)] as const);
+    const glHtml = readdirSync(resolve(__dirname, "gl"))
+        .filter((f) => f.endsWith(".html") && hasBuildableRootScripts(`gl/${f}`))
+        .map((f) => [`gl/${f.replace(".html", "")}`, resolve(__dirname, "gl", f)] as const);
     return Object.fromEntries([
         ["main", resolve(__dirname, "index.html")],
         ...readdirSync(__dirname)
             .filter((f) => f.endsWith(".html") && f !== "index.html" && hasBuildableRootScripts(f))
             .map((f) => [f.replace(".html", ""), resolve(__dirname, f)]),
         ...liteHtml,
+        ...glHtml,
     ]);
 }
 
@@ -150,6 +172,112 @@ function pagesDemoPlugin(): Plugin {
     };
 }
 
+const TROGIR_MOUNT = "/local-gs/trogir/";
+const TROGIR_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
+
+/** Opt-in, read-only mount for the loose Trogir SOG dataset used by the streaming demo. */
+function gaussianSplatAssetPlugin(): Plugin {
+    const configuredRoot = process.env.GS_STREAM_ASSET_ROOT;
+    let realRoot: string | null = null;
+    if (configuredRoot) {
+        try {
+            const candidate = realpathSync(configuredRoot);
+            if (statSync(candidate).isDirectory()) {
+                realRoot = candidate;
+            }
+        } catch {
+            // Requests return a path-free setup error below.
+        }
+    }
+
+    return {
+        name: "local-gaussian-splat-assets",
+        enforce: "pre",
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const rawPath = (req.url ?? "").split("?")[0];
+                if (rawPath !== TROGIR_MOUNT.slice(0, -1) && !rawPath.startsWith(TROGIR_MOUNT)) {
+                    next();
+                    return;
+                }
+                if (req.method !== "GET" && req.method !== "HEAD") {
+                    res.statusCode = 405;
+                    res.setHeader("Allow", "GET, HEAD");
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Method Not Allowed: the local Gaussian splat mount is read-only.");
+                    return;
+                }
+                res.setHeader("Cache-Control", "no-cache");
+                if (!realRoot) {
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end(`Local Trogir dataset is unavailable. Start the lab with:\n${TROGIR_SETUP}`);
+                    return;
+                }
+
+                let requested: string;
+                try {
+                    requested = decodeURIComponent(rawPath.slice(TROGIR_MOUNT.length));
+                } catch {
+                    res.statusCode = 400;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Bad Request: malformed asset URL.");
+                    return;
+                }
+                const segments = requested.split("/");
+                if (
+                    !requested ||
+                    requested.includes("\0") ||
+                    requested.includes("\\") ||
+                    isAbsolute(requested) ||
+                    segments.some((segment) => segment === ".." || segment === "." || !segment)
+                ) {
+                    res.statusCode = 400;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Bad Request: unsafe asset path.");
+                    return;
+                }
+
+                let realFile: string;
+                try {
+                    realFile = realpathSync(resolve(realRoot, ...segments));
+                    const fromRoot = relative(realRoot, realFile);
+                    if (!fromRoot || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot) || !statSync(realFile).isFile()) {
+                        throw new Error("outside mount");
+                    }
+                } catch {
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    res.end("Local Trogir asset not found.");
+                    return;
+                }
+
+                const mime =
+                    extname(realFile).toLowerCase() === ".json"
+                        ? "application/json; charset=utf-8"
+                        : extname(realFile).toLowerCase() === ".webp"
+                          ? "image/webp"
+                          : "application/octet-stream";
+                res.statusCode = 200;
+                res.setHeader("Content-Type", mime);
+                res.setHeader("Content-Length", String(statSync(realFile).size));
+                if (req.method === "HEAD") {
+                    res.end();
+                    return;
+                }
+                const source = createReadStream(realFile);
+                source.on("error", () => {
+                    if (!res.headersSent) {
+                        res.statusCode = 404;
+                    }
+                    res.destroy();
+                });
+                source.pipe(res);
+            });
+        },
+    };
+}
+
 /** Serve reference images from the repo-root reference/lite/ directory */
 function serveReferenceImages(): Plugin {
     return {
@@ -159,7 +287,7 @@ function serveReferenceImages(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const url = (req.url ?? "").split("?")[0]; // strip query string
                 const liteHtmlCompat = url.match(
-                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test)\.html$/
+                    /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|html-texture-test|form3d-test|picking-test|vat-picking-test|billboard-pick-test)\.html$/
                 );
                 if (liteHtmlCompat) {
                     const name = liteHtmlCompat[1];
@@ -178,8 +306,12 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
-                if (url.startsWith("/reference/lite/") || url.startsWith("/lite/reference/")) {
-                    const refPath = url.startsWith("/lite/reference/") ? `reference/lite/${url.slice("/lite/reference/".length)}` : url.slice(1);
+                // Reference/golden images for either experience:
+                //   /lite/reference/<slug>/<file>  or  /reference/lite/<slug>/<file>  → reference/lite/...
+                //   /gl/reference/<slug>/<file>     or  /reference/gl/<slug>/<file>     → reference/gl/...
+                const refMatch = url.match(/^\/(lite|gl)\/reference\/(.+)$/) ?? url.match(/^\/reference\/(lite|gl)\/(.+)$/);
+                if (refMatch) {
+                    const refPath = `reference/${refMatch[1]}/${refMatch[2]}`;
                     const filePath = resolve(__dirname, "..", refPath);
                     if (existsSync(filePath)) {
                         res.setHeader("Content-Type", "image/png");
@@ -213,12 +345,44 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
-                if (url === "/perf-manifest.json" || url === "/perf-regression-manifest.json") {
+                if (url === "/perf-manifest.json" || url === "/perf-regression-manifest.json" || url === "/gl/perf-manifest.json" || url === "/gl/perf-regression-manifest.json") {
                     const filePath = resolve(__dirname, "public", url.slice(1));
                     if (existsSync(filePath) && statSync(filePath).isFile()) {
                         res.setHeader("Content-Type", "application/json");
                         res.setHeader("Cache-Control", "no-cache");
                         createReadStream(filePath).pipe(res);
+                        return;
+                    }
+                }
+                // Serve the generated aggregate bundle manifest. It is built from one
+                // file per scene under public/bundle/manifest/; the single aggregate
+                // manifest.json is a (gitignored) build output. On a fresh
+                // checkout it hasn't been built yet, so synthesize it on the fly from the
+                // per-scene files so the Bundle tab is populated without a full build.
+                if (url === "/bundle/manifest.json") {
+                    const aggregatePath = resolve(__dirname, "public/bundle/manifest.json");
+                    if (existsSync(aggregatePath) && statSync(aggregatePath).isFile()) {
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(aggregatePath).pipe(res);
+                        return;
+                    }
+                    const perSceneDir = resolve(__dirname, "public/bundle/manifest");
+                    if (existsSync(perSceneDir)) {
+                        const files = readdirSync(perSceneDir)
+                            .filter((f) => f.endsWith(".json"))
+                            .sort((a, b) => (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0));
+                        const manifest: Record<string, unknown> = {};
+                        for (const file of files) {
+                            try {
+                                manifest[file.slice(0, -".json".length)] = JSON.parse(readFileSync(resolve(perSceneDir, file), "utf-8"));
+                            } catch {
+                                /* skip malformed per-scene file */
+                            }
+                        }
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        res.end(JSON.stringify(manifest));
                         return;
                     }
                 }
@@ -249,7 +413,7 @@ function serveReferenceImages(): Plugin {
                     );
                     return;
                 }
-                if ((url.startsWith("/bundle/") || url.startsWith("/lite/bundle/")) && url.endsWith(".json")) {
+                if ((url.startsWith("/bundle/") || url.startsWith("/lite/bundle/") || url.startsWith("/gl/bundle/")) && url.endsWith(".json")) {
                     const bundlePath = url.startsWith("/lite/bundle/") ? url.slice("/lite/".length) : url.slice(1);
                     const filePath = resolve(__dirname, "public", bundlePath);
                     if (existsSync(filePath) && statSync(filePath).isFile()) {
@@ -277,9 +441,15 @@ function serveReferenceImages(): Plugin {
                         ".bin": "application/octet-stream",
                         ".glb": "model/gltf-binary",
                         ".env": "application/octet-stream",
+                        ".mp3": "audio/mpeg",
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",
                         ".md": "text/markdown; charset=utf-8",
+                        // Freeciv tileset grids are plain-text `.spec` / `.tilespec` files read
+                        // via fetch().text(); without an entry here they fall through to the SPA
+                        // HTML fallback and parseSpec chokes on `<!doctype html>`.
+                        ".spec": "text/plain; charset=utf-8",
+                        ".tilespec": "text/plain; charset=utf-8",
                     };
                     const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
                     const assetType = ASSET_TYPES[ext];
@@ -310,7 +480,23 @@ function serveReferenceImages(): Plugin {
                             return null;
                         }
                     };
-                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json"));
+                    // Newest mtime across the per-scene manifest files, used as a
+                    // fallback when the generated aggregate manifest.json isn't built yet.
+                    const dirNewestMtime = (dir: string): number | null => {
+                        try {
+                            if (!existsSync(dir)) return null;
+                            let newest: number | null = null;
+                            for (const file of readdirSync(dir)) {
+                                if (!file.endsWith(".json")) continue;
+                                const m = mtime(resolve(dir, file));
+                                if (m != null && (newest == null || m > newest)) newest = m;
+                            }
+                            return newest;
+                        } catch {
+                            return null;
+                        }
+                    };
+                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json")) ?? dirNewestMtime(resolve(__dirname, "public/bundle/manifest"));
                     sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/master-manifest.json"));
                     sig.perf = mtime(resolve(__dirname, "public/perf-manifest.json"));
                     try {
@@ -485,7 +671,31 @@ function tabContentPlugin(): Plugin {
         return { generated: present > 0, mtime, present, total };
     };
 
-    const TARGETS: Record<string, TargetDef> = {
+    const detectParityGl = () => {
+        let present = 0;
+        let total = 0;
+        let mtime: number | null = null;
+        try {
+            const cfgPath = resolve(repoRoot, "scene-config-webgl.json");
+            if (existsSync(cfgPath)) {
+                const cfg = JSON.parse(readFileSync(cfgPath, "utf-8")) as Array<{ slug: string; skipParity?: boolean }>;
+                for (const s of cfg) {
+                    if (s.skipParity) continue;
+                    total++;
+                    const m = mtimeOf(resolve(repoRoot, "reference/gl", s.slug, "test-actual.png"));
+                    if (m != null) {
+                        present++;
+                        mtime = mtime == null ? m : Math.max(mtime, m);
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { generated: present > 0, mtime, present, total };
+    };
+
+    const LITE_TARGETS: Record<string, TargetDef> = {
         parity: { command: "pnpm test:parity", detect: detectParity },
         bundle: { command: "pnpm build:bundle-scenes", detect: fileTarget(resolve(publicDir, "bundle/manifest.json")) },
         demos: { command: "pnpm build:bundle-demos", detect: fileTarget(resolve(publicDir, "bundle/demos-manifest.json")) },
@@ -497,6 +707,44 @@ function tabContentPlugin(): Plugin {
             detect: fileTarget(resolve(publicDir, "perf-regression-manifest.json")),
         },
     };
+
+    // Detect predicate for the GL "Demos" tab. GL demos are static, config-driven
+    // (demos-config-webgl.json) with no build step, so "generated" simply means the
+    // config lists at least one demo. Its Regenerate command runs the cheap GL bundle
+    // build (there is no GL demos-bundle pipeline); the demo cards render from the
+    // static config regardless.
+    const detectDemosGl = () => {
+        try {
+            const cfgPath = resolve(repoRoot, "demos-config-webgl.json");
+            if (existsSync(cfgPath)) {
+                const cfg = JSON.parse(readFileSync(cfgPath, "utf-8")) as unknown[];
+                if (Array.isArray(cfg) && cfg.length > 0) {
+                    return { generated: true, mtime: mtimeOf(cfgPath), present: cfg.length, total: cfg.length };
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { generated: false, mtime: null, present: 0, total: 0 };
+    };
+
+    // Lite GL experience: parity + perf + bundle + demos + perf-regression all have
+    // GL tooling now. Each target writes under reference/gl/* or lab/public/gl/*:
+    //   parity  → test:parity:gl              → reference/gl/<slug>/test-actual.png
+    //   bundle  → build:bundle-scenes:gl       → lab/public/gl/bundle/manifest.json
+    //   demos   → (static demos-config-webgl)  → cheap GL bundle rebuild on Regenerate
+    //   perf    → test:perf:gl                 → lab/public/gl/perf-manifest.json
+    //   perfreg → test:perf-regression:gl      → lab/public/gl/perf-regression-manifest.json
+    // (perfreg baseline = the Babylon ThinEngine reference, not a prior Lite build.)
+    const GL_TARGETS: Record<string, TargetDef> = {
+        parity: { command: "pnpm test:parity:gl", detect: detectParityGl },
+        bundle: { command: "pnpm build:bundle-scenes:gl", detect: fileTarget(resolve(publicDir, "gl/bundle/manifest.json")) },
+        demos: { command: "pnpm build:bundle-scenes:gl", detect: detectDemosGl },
+        perf: { command: "pnpm test:perf:gl", detect: fileTarget(resolve(publicDir, "gl/perf-manifest.json")) },
+        perfreg: { command: "pnpm test:perf-regression:gl", detect: fileTarget(resolve(publicDir, "gl/perf-regression-manifest.json")) },
+    };
+
+    const targetsFor = (experience: string): Record<string, TargetDef> => (experience === "gl" ? GL_TARGETS : LITE_TARGETS);
 
     type Job = { running: boolean; log: string; done: boolean; ok: boolean; code: number | null; error?: string };
     const jobs: Record<string, Job> = {};
@@ -515,15 +763,21 @@ function tabContentPlugin(): Plugin {
             server.middlewares.use((req, res, next) => {
                 const [path, qs] = (req.url ?? "").split("?");
                 const target = new URLSearchParams(qs ?? "").get("target") ?? "";
+                const experience = new URLSearchParams(qs ?? "").get("experience") === "gl" ? "gl" : "lite";
+                const TARGETS = targetsFor(experience);
+                // Namespace job/lock state per experience so a GL run and a lite run of
+                // the same target (e.g. "perf") never collide. Lite keeps the bare
+                // target key for backwards compatibility.
+                const jobKey = experience === "gl" ? "gl:" + target : target;
 
                 if (path === "/lab-api/gen-status") {
                     const def = TARGETS[target];
                     if (!def) {
-                        json(res, { error: "Unknown target" }, 400);
+                        json(res, { error: experience === "gl" ? `"${target}" is not available for the Lite GL experience.` : "Unknown target" }, 400);
                         return;
                     }
                     const det = def.detect();
-                    const job = jobs[target];
+                    const job = jobs[jobKey];
                     json(res, {
                         generated: det.generated,
                         generating: !!(job && job.running),
@@ -545,16 +799,16 @@ function tabContentPlugin(): Plugin {
                     }
                     const def = TARGETS[target];
                     if (!def) {
-                        json(res, { error: "Unknown target" }, 400);
+                        json(res, { error: experience === "gl" ? `"${target}" is not available for the Lite GL experience.` : "Unknown target" }, 400);
                         return;
                     }
                     if (busy) {
                         json(res, { started: false, error: "A generation is already in progress (" + busy + ")." }, 409);
                         return;
                     }
-                    busy = target;
+                    busy = jobKey;
                     const job: Job = { running: true, log: "", done: false, ok: false, code: null };
-                    jobs[target] = job;
+                    jobs[jobKey] = job;
                     const shellCmd = process.platform === "win32" ? "cmd" : "sh";
                     const shellArgs = process.platform === "win32" ? ["/c", def.command] : ["-c", def.command];
                     const child = spawn(shellCmd, shellArgs, { cwd: repoRoot });
@@ -594,13 +848,170 @@ function tabContentPlugin(): Plugin {
     };
 }
 
+/**
+ * Single-server compatibility-layer harness.
+ *
+ * The existing Babylon.js oracle scenes under `lab/lite/src/bjs/sceneN.ts` import
+ * deep `@babylonjs/core` / `@babylonjs/loaders` subpaths. This plugin lets the
+ * *same* source render on the `@babylonjs/lite-compat` layer **without a second
+ * dev server**, by serving a parallel `/compat/sceneN.html` route whose module
+ * graph is tagged with a `?compat` query. Within that tagged subtree (and only
+ * there) every `@babylonjs/core`/`@babylonjs/loaders` specifier is redirected to
+ * the compat barrel; everywhere else (the `babylon-ref-*` golden pages) the real
+ * Babylon.js package resolves untouched. This is what makes a true side-by-side —
+ * real BJS vs compat — possible on one port.
+ *
+ * Mechanism:
+ *  - A distinct module id (`scene2.ts?compat`) means Vite caches a *separate*
+ *    transform from the real `scene2.ts`, so the two can resolve `@babylonjs/core`
+ *    differently without colliding.
+ *  - `resolveId` redirects bare `@babylonjs/(core|loaders)` imports to the compat
+ *    barrel only when the importer carries the `compat` query marker, and
+ *    propagates the marker across relative imports so transitive BJS usage in any
+ *    shared helper is redirected too.
+ */
+function compatScenesPlugin(): Plugin {
+    const compatTargets: Record<CompatTarget, string> = {
+        core: resolve(__dirname, "../packages/babylon-lite-compat/src/index.ts"),
+        addons: resolve(__dirname, "../packages/babylon-lite-compat/src/navigation/navigation.ts"),
+        recast: resolve(__dirname, "../packages/babylon-lite-compat/src/navigation/recast-shim.ts"),
+        // GridMaterial is re-exported from the barrel, so materials folds into core.
+        materials: resolve(__dirname, "../packages/babylon-lite-compat/src/index.ts"),
+    };
+    const hasCompatMarker = (id: string) => {
+        const q = id.split("?")[1];
+        return !!q && q.split("&").includes("compat");
+    };
+
+    return {
+        name: "lab-compat-scenes",
+        enforce: "pre",
+        async resolveId(source, importer) {
+            if (!importer || !hasCompatMarker(importer)) {
+                return null;
+            }
+            // Redirect Babylon.js core/loaders/navigation/grid + raw Recast onto the
+            // matching compat modules. The mapping table is shared with the publishable
+            // `@babylonjs/lite-compat/vite` plugin so the two can never drift.
+            const target = mapBabylonImport(source);
+            if (target) {
+                return compatTargets[target];
+            }
+            // Propagate the marker across relative imports so a helper that itself
+            // imports @babylonjs/core is still redirected within the compat subtree.
+            if (source.startsWith(".")) {
+                const baseImporter = importer.split("?")[0];
+                const resolved = await this.resolve(source, baseImporter, { skipSelf: true });
+                if (resolved && !resolved.external) {
+                    return resolved.id + (resolved.id.includes("?") ? "&compat" : "?compat");
+                }
+            }
+            return null;
+        },
+        configureServer(server) {
+            server.middlewares.use(async (req, res, next) => {
+                const url = (req.url ?? "").split("?")[0];
+                const match = url.match(/^\/compat\/scene(\d+)\.html$/);
+                if (!match) {
+                    next();
+                    return;
+                }
+                const sceneId = match[1];
+                const srcRel = `lite/src/bjs/scene${sceneId}.ts`;
+                if (!existsSync(resolve(__dirname, srcRel))) {
+                    // No Babylon.js oracle source for this scene — it is a Lite-only scene
+                    // (e.g. text rendering, multi-canvas) with nothing to run through the
+                    // compat layer. Report it as intentionally skipped, not as an error.
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/html; charset=utf-8");
+                    res.end(
+                        `<!DOCTYPE html><meta charset="utf-8"><body style="font:14px monospace;color:#8b949e;background:#000">` +
+                            `Scene ${sceneId} is a Lite-only scene (no Babylon.js oracle at ${srcRel}); nothing to run through the compat layer.</body>`
+                    );
+                    return;
+                }
+                const baseHtml = [
+                    "<!DOCTYPE html>",
+                    '<html lang="en">',
+                    "<head>",
+                    '<meta charset="UTF-8" />',
+                    `<title>Babylon Lite Compat — Scene ${sceneId}</title>`,
+                    "<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style>",
+                    "</head>",
+                    "<body>",
+                    '<canvas id="renderCanvas"></canvas>',
+                    // The BJS oracle scenes swallow their own errors via `.catch(console.error)`,
+                    // so intercept console.error / global errors and surface the thrown error onto
+                    // the canvas (`data-error`). The Compat tab — and the coverage-triage harness —
+                    // poll `data-ready` vs `data-error` to tell "renders" from "throws".
+                    "<script>(function(){var c=document.getElementById('renderCanvas');function mark(m){if(c&&!c.dataset.error){c.dataset.error=String(m).slice(0,400);}}function fromArgs(args){for(var i=0;i<args.length;i++){var a=args[i];if(a&&(a instanceof Error||a.message&&a.stack))return a.message;}for(var j=0;j<args.length;j++){if(typeof args[j]==='string')return args[j];}return '';}var o=console.error.bind(console);console.error=function(){try{var m=fromArgs(arguments);if(m)mark(m);}catch(e){}return o.apply(console,arguments);};window.addEventListener('error',function(e){mark((e&&(e.error&&e.error.message||e.message))||'error');});window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;mark((r&&r.message)||r||'unhandledrejection');});})();</script>",
+                    `<script type="module" src="/${srcRel}?compat"></script>`,
+                    "</body>",
+                    "</html>",
+                ].join("\n");
+                const html = await server.transformIndexHtml(req.url ?? url, baseHtml);
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html; charset=utf-8");
+                res.setHeader("Cache-Control", "no-cache");
+                res.end(html);
+            });
+        },
+    };
+}
+
+/**
+ * Right-handed twin scenes (`"rightHanded": true` in scene-config.json) run ordinary Lite code that an
+ * application would build with the `babylon-lite-rh` resolve condition (see
+ * docs/lite/architecture/61-right-handed-system.md). Resolve conditions are global to a Vite server, so
+ * this server tags every first-party module reached from such a scene's entry with `?lite-rh`: the
+ * browser loads the tagged graph as separate module instances, and `#coordinate-system` resolves to
+ * the right-handed variant inside it. Every other page keeps the untagged, left-handed graph.
+ */
+function rightHandedScenesPlugin(): Plugin {
+    const sceneConfig = JSON.parse(readFileSync(resolve(__dirname, "../scene-config.json"), "utf-8")) as Array<{ id: number; rightHanded?: boolean }>;
+    const entries = new Set(sceneConfig.filter((s) => s.rightHanded).map((s) => normalizePath(resolve(__dirname, `lite/src/lite/scene${s.id}.ts`))));
+    const rightHandedVariant = normalizePath(resolve(__dirname, "../packages/babylon-lite/src/engine/coordinate-system-rh.ts"));
+    const tagged = /[?&]lite-rh(?:&|$)/;
+    const scriptModule = /\.[cm]?[jt]sx?$/;
+    return {
+        name: "lab-right-handed-scenes",
+        enforce: "pre",
+        async resolveId(source, importer, options) {
+            if (!importer || !(tagged.test(importer) || entries.has(normalizePath(importer.split("?")[0])))) {
+                return null;
+            }
+            if (source === "#coordinate-system") {
+                return rightHandedVariant;
+            }
+            const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+            const id = resolved?.id;
+            if (!resolved || resolved.external || !id || id.startsWith("\0") || id.includes("/node_modules/") || tagged.test(id) || !scriptModule.test(id.split("?")[0])) {
+                return resolved;
+            }
+            return { ...resolved, id: `${id}${id.includes("?") ? "&" : "?"}lite-rh` };
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
+    plugins: [
+        rightHandedScenesPlugin(),
+        pagesDemoPlugin(),
+        compatScenesPlugin(),
+        gaussianSplatAssetPlugin(),
+        serveReferenceImages(),
+        apiDocsPlugin(),
+        tabContentPlugin(),
+        ...(LAB_HTTPS ? [basicSsl()] : []),
+    ],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
         // Exclude both from Vite's dep optimizer.
-        exclude: ["@babylonjs/core", "@babylonjs/loaders", "@babylonjs/havok"],
+        // @recast-navigation/* ship a wasm binary the esbuild optimizer can't process; serve
+        // them as native ESM so Babylon Lite's navigation (and the compat nav wrapper) can load
+        // Recast on demand without a hung pre-bundle.
+        exclude: ["@babylonjs/core", "@babylonjs/loaders", "@babylonjs/havok", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm"],
     },
     resolve: {
         // Ensure @babylonjs/core resolves to a single instance (loaders registers
@@ -611,6 +1022,10 @@ export default defineConfig({
             // it as first-party code: full HMR + native ?raw WGSL handling.
             // Directory alias so sub-path imports like 'babylon-lite/loader-env/...' work too.
             "babylon-lite": resolve(__dirname, "../packages/babylon-lite/src"),
+            // babylon-lite-gl ships a SINGLE entry (the barrel), so alias the exact
+            // specifier to index.ts — sub-paths are intentionally not resolvable, mirroring
+            // the package's `exports` map and lab/tsconfig.typecheck.json.
+            "babylon-lite-gl": resolve(__dirname, "../packages/babylon-lite-gl/src/index.ts"),
         },
     },
     server: {
@@ -621,6 +1036,9 @@ export default defineConfig({
         // interactive dev server keeps Vite's default auto-increment behavior.
         port: Number(process.env.LAB_DEV_PORT) || 5174,
         strictPort: !!process.env.LAB_DEV_PORT,
+        // With LAB_HTTPS, expose the server on the LAN so an XR headset can reach
+        // it by IP; @vitejs/plugin-basic-ssl supplies the self-signed cert.
+        ...(LAB_HTTPS ? { host: true } : {}),
         watch: {
             // On-demand tab generation writes many files under the Vite root that
             // would otherwise churn the single-threaded dev server (stalling the
@@ -632,12 +1050,15 @@ export default defineConfig({
             //   • perf manifests           → single-file writes that force a reload
             ignored: [
                 "**/public/bundle/**",
+                "**/public/gl/bundle/**",
                 "**/public/bundle-baseline/**",
                 "**/public/api-docs/**",
                 "**/public/lite/api-docs/**",
                 "**/public/gl/api-docs/**",
                 "**/public/perf-manifest.json",
                 "**/public/perf-regression-manifest.json",
+                "**/public/gl/perf-manifest.json",
+                "**/public/gl/perf-regression-manifest.json",
                 "**/bundle-baseline-scene*.html",
                 "**/.perf-baseline-worktree/**",
             ],

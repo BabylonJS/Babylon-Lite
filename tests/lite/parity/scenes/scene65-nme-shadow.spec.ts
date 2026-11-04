@@ -6,7 +6,7 @@
  * BJS uses a classic ShadowGenerator on the DirectionalLight — the LightBlock
  * in the NME graph auto-applies the shadow factor in both engines.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

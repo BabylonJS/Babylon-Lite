@@ -11,10 +11,11 @@
 // distance diminishing — matching the original infinite sky.
 
 import { createMeshFromData, createShaderMaterial, createSphereData, setShaderTexture, type EngineContext, type Mesh, type Texture2D } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const SKY_REPEATS = 4.0;
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) dir: vec3<f32>,
 };
@@ -28,7 +29,7 @@ const vertexSource = `struct VertexOutput {
   return out;
 }`;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) dir: vec3<f32>,
 };

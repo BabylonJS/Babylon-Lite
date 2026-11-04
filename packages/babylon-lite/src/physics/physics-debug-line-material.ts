@@ -1,21 +1,22 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
-import { targetSignatureKey } from "../engine/render-target.js";
+import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "../material/material.js";
-import type { MeshGroupBuildResult, MeshGroupBuilder, Renderable } from "../render/renderable.js";
+import type { MeshGroupBuildResult, MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../render/renderable.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { SS } from "../engine/gpu-flags.js";
+import { wgsl } from "../shader/wgsl.js";
 
 interface PhysicsDebugLineMaterial extends Material {
     color: [number, number, number, number];
 }
 
-const LINE_WGSL = `
+const LINE_WGSL = wgsl`
 struct SceneUniforms { viewProjection: mat4x4<f32>, };
 struct MeshUniforms { world: mat4x4<f32>, };
 struct MaterialUniforms { color: vec4<f32>, };
@@ -116,15 +117,17 @@ function clearPhysicsDebugLinePipelineCache(): void {
     _cachedDevice = null;
 }
 
-function buildLineRenderable(scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable {
+function buildLineRenderable(scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable {
     const engine = scene.surface.engine;
     const material = (materialOverride ?? mesh.material) as PhysicsDebugLineMaterial;
     const meshData = new F32(16);
     packMat4IntoF32(meshData, mesh.worldMatrix);
     const meshUBO = createUniformBuffer(engine, meshData);
+    resources?._lifetimeDisposers.push(() => meshUBO.destroy());
     const materialData = new F32(4);
     materialData.set(material.color);
     const materialUBO = createUniformBuffer(engine, materialData);
+    resources?._lifetimeDisposers.push(() => materialUBO.destroy());
     const bindGroup = engine._device.createBindGroup({
         layout: getMeshBindGroupLayout(engine),
         entries: [
@@ -157,7 +160,7 @@ function buildLineRenderable(scene: SceneContext, mesh: Mesh, materialOverride?:
                     pass.setVertexBuffer(0, gpu.positionBuffer);
                     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
                     pass.setBindGroup(1, bindGroup);
-                    pass.drawIndexed(gpu.indexCount);
+                    pass.drawIndexed(gpu.indexCount, 1, gpu._firstIndex ?? 0, gpu._baseVertex);
                     return 1;
                 },
             };
@@ -168,7 +171,7 @@ function buildLineRenderable(scene: SceneContext, mesh: Mesh, materialOverride?:
 }
 
 export const physicsDebugLineGroupBuilder: MeshGroupBuilder = async (scene, meshes): Promise<MeshGroupBuildResult> => {
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => buildLineRenderable(s, mesh, materialOverride);
+    const rebuildSingle: MeshRebuilder = buildLineRenderable;
     physicsDebugLineGroupBuilder._rebuildSingle = rebuildSingle;
     scene._disposables.push(clearPhysicsDebugLinePipelineCache);
     return {

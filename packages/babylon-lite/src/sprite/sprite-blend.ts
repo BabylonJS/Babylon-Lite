@@ -24,6 +24,15 @@ export interface SpriteBlendDescriptor {
 }
 
 /**
+ * Opaque replacement color. No color blending is configured; every covered sample replaces
+ * the framebuffer value. Use this for depth-writing alpha-to-coverage layers where fragment
+ * alpha controls sample coverage rather than color compositing.
+ */
+export const spriteBlendOpaque: SpriteBlendDescriptor = {
+    _key: "opaque",
+};
+
+/**
  * Straight-alpha "over" blending (the default). RGB is composited by source alpha; this is
  * the standard transparency mode for HUDs, UI, and soft-edged sprites.
  */
@@ -50,6 +59,21 @@ export const spriteBlendAdditive: SpriteBlendDescriptor = {
     _key: "additive",
     _descriptor: {
         color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+};
+
+/**
+ * Pure additive color blending (`src * 1 + dst`) whose color factors match Babylon.js
+ * `BLENDMODE_ONEONE` / `ALPHA_ONEONE`. This generic descriptor uses `one` / `one`
+ * alpha factors; exact particle OneOne instead uses `zero` / `one`. Unlike
+ * {@link spriteBlendAdditive}, source RGB is not weighted by alpha. This is useful
+ * for particle textures that encode their falloff directly in RGB.
+ */
+export const spriteBlendOneOne: SpriteBlendDescriptor = {
+    _key: "oneone",
+    _descriptor: {
+        color: { srcFactor: "one", dstFactor: "one", operation: "add" },
         alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
     },
 };

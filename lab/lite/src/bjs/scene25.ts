@@ -33,7 +33,7 @@ import { Scene } from "@babylonjs/core/scene";
 
     // Pick best KTX format based on GPU caps, fallback to PNG
     const caps = engine.getCaps();
-    const base = "https://raw.githubusercontent.com/Vinc3r/BJS-KTX-textures/master/BJS/UVgrid";
+    const base = "https://cdn.jsdelivr.net/gh/Vinc3r/BJS-KTX-textures@master/BJS/UVgrid";
     let texUrl = base + ".png";
     if (caps.astc) {
         texUrl = base + "-astc.ktx";

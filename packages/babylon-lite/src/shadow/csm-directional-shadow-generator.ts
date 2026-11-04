@@ -16,8 +16,10 @@
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 import { createShadowParamsUBO } from "./shadow-base.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
 import { ensureCsmShadowTaskState, preloadCsmShadowTaskState, renderCsmShadowMap, type CsmConfig, type CsmTaskState } from "./csm-shadow-task-hooks.js";
 import { setCsmStdReceiverFactory, setCsmPbrReceiverFactory } from "./csm-receiver-registry.js";
 import { createStdCsmShadowFragment } from "../material/standard/fragments/std-csm-shadow-fragment.js";
@@ -39,6 +41,8 @@ export interface CsmDirectionalShadowGeneratorConfig {
     shadowMaxZ?: number;
     /** Depth bias added during shadow-map generation. Default 0.00005. */
     bias?: number;
+    /** Caster depth offset in world units. Overrides `bias` when supplied; non-positive or non-finite values disable bias. */
+    worldSpaceBias?: number;
     /** Shadow darkness (0 = black shadow, 1 = no shadow). Default 0. */
     darkness?: number;
     /** Soft fade-out at the edge of each cascade frustum, 0..1. Default 0. */
@@ -71,6 +75,7 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const mapSize = cfg.mapSize ?? 1024;
     const numCascades = Math.min(cfg.numCascades ?? 4, 4);
     const bias = cfg.bias ?? 0.00005;
+    const worldSpaceBias = cfg.worldSpaceBias;
     const darkness = cfg.darkness ?? 0;
     const frustumEdgeFalloff = cfg.frustumEdgeFalloff ?? 0;
 
@@ -79,9 +84,9 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _lambda: cfg.lambda ?? 0.5,
         _cascadeBlendPercentage: cfg.cascadeBlendPercentage ?? 0.1,
         _stabilizeCascades: cfg.stabilizeCascades ?? false,
-        _depthClamp: false,
         _shadowMaxZ: cfg.shadowMaxZ ?? null,
         _bias: bias,
+        _worldSpaceBias: worldSpaceBias === undefined ? null : Number.isFinite(worldSpaceBias) && worldSpaceBias > 0 ? worldSpaceBias : 0,
         _darkness: darkness,
         _frustumEdgeFalloff: frustumEdgeFalloff,
         _mapSize: mapSize,
@@ -106,11 +111,7 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _depthValues: new Float32Array([0, 1]),
         _shadowParamsUBO: createShadowParamsUBO(engine, bias, 1.0 / mapSize),
         _shadowUBO: createUniformBuffer(engine, new Float32Array(80)),
-        _config: {
-            _mapSize: mapSize,
-            _bias: bias,
-            _forceRefreshEveryFrame: csmCfg._forceRefreshEveryFrame,
-        },
+        _config: csmCfg,
         _version: 0,
         _csmCascadeCount: numCascades,
     };
@@ -126,8 +127,44 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
 }
 
 /**
- * Register a callback fired each frame the CSM cascades are recomputed, right after the receiver
- * UBO is updated and uploaded — and before the shadow map and main pass are rendered.
+ * Returns the borrowed depth-array texture wrapper used by a custom CSM receiver.
+ *
+ * The wrapper shares the generator's texture and comparison sampler, is cached per
+ * generator, and remains valid for the generator's lifetime. Callers must not dispose
+ * or release it independently.
+ *
+ * @param sg - A cascaded-shadow generator from {@link createCsmDirectionalShadowGenerator}.
+ * @returns A stable `Texture2D` with a 2d-array depth view.
+ */
+export function getCsmReceiverTexture(sg: ShadowGenerator): Texture2D {
+    if (sg._shadowType !== "csm") {
+        throw new Error("getCsmReceiverTexture requires a CSM shadow generator");
+    }
+    if (sg._csmReceiverTexture) {
+        return sg._csmReceiverTexture;
+    }
+    const texture = sg._depthTexture;
+    const receiverTexture: Texture2D = {
+        texture,
+        view: texture.createView({ dimension: "2d-array" }),
+        sampler: sg._depthSampler,
+        width: texture.width,
+        height: texture.height,
+        _sampleType: "depth",
+    };
+    // ShaderMaterial packets acquire/release every bound Texture2D. Keep the
+    // generator's ownership ref so removing one receiver cannot destroy the map.
+    acquireTexture(receiverTexture);
+    sg._csmReceiverTexture = receiverTexture;
+    return receiverTexture;
+}
+
+/**
+ * Register a callback invoked on every frame the receiver UBO is republished (right after it is
+ * uploaded, before the shadow map renders) and on every frame the active camera's change key moves
+ * while the generator is enabled (`setShadowGeneratorEnabled`), always with the currently published
+ * UBO and before the main pass renders. With the static cache's `cascadeCoveragePadding`, a camera
+ * move that redraws no cascade still invokes it, with unchanged data.
  *
  * Custom `ShaderMaterial` receivers that mirror the cascade transforms into their own uniforms
  * (rather than binding the generator's receiver UBO directly, as the built-in standard/PBR/node
@@ -135,25 +172,26 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
  * reads the *previous* frame's transforms — a one-frame lag that makes those shadows visibly swim
  * while the camera moves (the cascade window can slide many texels per frame during a zoom).
  *
- * Multiple receivers may register on the same generator; every registered callback is invoked each
- * frame. The callback receives the 80-float receiver UBO (layout: four `mat4x4` cascade transforms,
+ * Multiple receivers may register on the same generator; every registered callback is invoked on
+ * each of those frames. The callback receives the 80-float receiver UBO (layout: four `mat4x4` cascade transforms,
  * `viewFrustumZ`, `frustumLengths`, `shadowsInfo`, `csmParams` — see the cascaded-shadow
- * architecture doc). The array is reused each frame; copy what you need.
+ * architecture doc). The array is reused across frames; copy what you need.
  *
  * @param sg - A cascaded-shadow generator from {@link createCsmDirectionalShadowGenerator}.
  * @param cb - Receiver-sync callback.
  * @returns A disposer that unregisters this callback.
  */
 export function onCsmReceiverUpdate(sg: ShadowGenerator, cb: (data: Float32Array) => void): () => void {
-    (sg._onReceiverData ??= []).push(cb);
+    const callbacks = (sg._onReceiverData ??= []);
+    callbacks.push(cb);
+    const state = sg._shadowTaskState as CsmTaskState | undefined;
+    if (state) {
+        cb(state._uboData);
+    }
     return () => {
-        const list = sg._onReceiverData;
-        if (!list) {
-            return;
-        }
-        const i = list.indexOf(cb);
+        const i = callbacks.indexOf(cb);
         if (i >= 0) {
-            list.splice(i, 1);
+            callbacks.splice(i, 1);
         }
     };
 }

@@ -22,6 +22,9 @@ import type { GltfMeshData } from "./load-gltf.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
+import type { BoneOverride } from "../skeleton/bone-control.js";
+
+export type GltfMaterialFeatureRunner = (mat: GltfMaterialData, features: GltfFeature[], ctx: GltfMatExtCtx) => Promise<Partial<PbrMaterialProps> | undefined>;
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
@@ -39,6 +42,8 @@ export interface GltfLoadCtx {
     _worldMatrixCache: Map<number, Mat4>;
     /** @internal All material-layer features active for this load (so e.g. variants can re-use them). */
     _matExts: GltfFeature[];
+    /** @internal Material-feature merger supplied by the optional feature registry. */
+    _runMatExts?: GltfMaterialFeatureRunner;
     /** Composed texture-wrap function aggregating every active feature's
      *  `wrapTexture` hook. Identity when no feature contributes one. */
     /** @internal */
@@ -48,6 +53,13 @@ export interface GltfLoadCtx {
      *  `undefined` for a given index means the node was unreachable from any scene root. */
     /** @internal */
     _nodeMap?: (TransformNode | undefined)[];
+    /** Shared node-index → bone override map. Created by the glTF skeleton feature's
+     *  per-mesh hook ONLY when bone control is enabled (`enableBoneControl()`), so it
+     *  is `undefined` on the default path. Read by the animation feature (handed to
+     *  controllers) and the bone-control builder — both run after the per-mesh hook,
+     *  so it is race-free. */
+    /** @internal */
+    _boneOverrides?: Map<number, BoneOverride>;
 }
 
 /** Pre-decoded primitive data keyed by the primitive object. Features like

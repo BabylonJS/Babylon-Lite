@@ -7,7 +7,20 @@
 // animates through the full PBR pipeline, with ZERO bundle cost for scenes that never bake a VAT
 // (the baker + VAT shader fragment are dynamic-import chunks gated on `mesh.vat`).
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, loadGltf, attachControl, registerScene, bakeVat, attachVat } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createHemisphericLight,
+    loadGltf,
+    attachControl,
+    registerScene,
+    bakeVat,
+    attachVat,
+} from "babylon-lite";
 import type { TransformNode, Mesh, VatHandle } from "babylon-lite";
 
 /** Depth-first search for the first mesh in a node tree that carries a skeleton. */
@@ -50,9 +63,9 @@ async function main(): Promise<void> {
         canvas.dataset.vatClips = Object.keys(baked.clips).join(",");
     }
 
-    const cam = createDefaultCamera(scene);
-    cam.alpha = 0; // side view, matching scene 11
-    cam.beta = Math.PI / 2.2;
+    // Fixed framing avoids pulling the generic world-bounds camera helper into this tightly-budgeted VAT demo.
+    const cam = createArcRotateCamera(0, Math.PI / 2.2, 28.816, { x: 0, y: 2.36936, z: -0.65368 });
+    scene.camera = cam;
     attachControl(cam, canvas, scene);
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 

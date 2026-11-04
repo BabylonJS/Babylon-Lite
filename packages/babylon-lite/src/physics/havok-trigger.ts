@@ -1,0 +1,129 @@
+/**
+ * Havok Physics V2 trigger-volume reporting for Babylon Lite.
+ *
+ * Kept in a standalone module so the trigger path adds bytes only to scenes that actually
+ * import {@link setPhysicsShapeIsTrigger} or {@link onPhysicsTrigger}. The per-frame
+ * `_stepWorld` core in `havok.ts` intentionally does NOT reference this code, so ordinary
+ * physics scenes pay zero for it.
+ *
+ * Unlike collision events (which require a per-body event mask), trigger volumes only need
+ * the shape flagged as a trigger and the trigger body present in the world. Flag the shape,
+ * register a callback, and trigger events are drained via the existing post-step hook once
+ * per event:
+ *
+ * ```ts
+ *   const triggerShape = createPhysicsShape(world, { type: PhysicsShapeType.SPHERE, parameters: { radius: 2 } });
+ *   setPhysicsShapeIsTrigger(world, triggerShape, true);
+ *   const triggerNode = createTransformNode("trigger", 0, 0, 0);
+ *   const triggerBody = createPhysicsBody(world, triggerNode, PhysicsMotionType.STATIC);
+ *   setPhysicsBodyShape(world, triggerBody, triggerShape);
+ *   onPhysicsTrigger(world, (info) => {
+ *       console.log(info.type); // "ENTERED" when a body enters, "EXITED" when it leaves
+ *   });
+ * ```
+ */
+
+import { ensureHavokEventContext } from "./havok-events.js";
+import { onPhysicsAfterStep } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
+
+type PhysicsTriggerType = PhysicsTriggerInfo["type"];
+
+const TRIGGER_ENTERED = 8;
+const TRIGGER_EXITED = 16;
+
+/** A single trigger-volume event reported by Havok after a physics step. */
+export interface PhysicsTriggerInfo {
+    /** `ENTERED` when a body enters the trigger volume, `EXITED` when it leaves. */
+    type: "ENTERED" | "EXITED";
+}
+
+/** Trigger event including the two participating bodies. */
+export interface PhysicsTriggerBodyInfo extends PhysicsTriggerInfo {
+    /** First body reported by Havok, or `null` if it is no longer tracked. */
+    bodyA: PhysicsBody | null;
+    /** Thin-instance index of `bodyA`, or `-1` when the body is no longer tracked. */
+    bodyAIndex: number;
+    /** Second body reported by Havok, or `null` if it is no longer tracked. */
+    bodyB: PhysicsBody | null;
+    /** Thin-instance index of `bodyB`, or `-1` when the body is no longer tracked. */
+    bodyBIndex: number;
+}
+
+/**
+ * Flag a collision shape as a trigger volume (or clear the flag).
+ *
+ * A trigger shape detects overlaps and reports {@link PhysicsTriggerInfo} events but does
+ * not produce a physical collision response — bodies pass through it. Attach the flagged
+ * shape to a body in the world, then listen with {@link onPhysicsTrigger}.
+ * @param world - The physics world owning the shape.
+ * @param shape - The collision shape to flag.
+ * @param isTrigger - `true` to make the shape a trigger volume, `false` for a solid shape.
+ */
+export function setPhysicsShapeIsTrigger(world: PhysicsWorld, shape: PhysicsShape, isTrigger: boolean): void {
+    world._hknp.HP_Shape_SetTrigger(shape._hkShape, isTrigger);
+}
+
+/**
+ * Register a callback invoked once per trigger event after each physics step.
+ *
+ * The events are produced by the Havok world step, so they are drained via the post-step
+ * hook ({@link onPhysicsAfterStep}). Flag the participating shape with
+ * {@link setPhysicsShapeIsTrigger} first, otherwise the stream is empty.
+ * @param world - The physics world to listen on.
+ * @param cb - Callback invoked with each {@link PhysicsTriggerInfo} as it is read.
+ * @returns A disposer that removes the callback.
+ */
+export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerInfo) => void): () => void {
+    return registerTriggerDrain(world, () => drainTriggerEvents(world, (type) => cb({ type })));
+}
+
+/**
+ * Register a trigger callback that also resolves both participating Havok bodies.
+ *
+ * A body is `null` when the native event references a body that has already been removed from
+ * the world's tracked body list.
+ * @param world - The physics world to listen on.
+ * @param cb - Callback invoked with each body-aware trigger event.
+ * @returns A disposer that removes the callback.
+ */
+export function onPhysicsTriggerBodies(world: PhysicsWorld, cb: (info: PhysicsTriggerBodyInfo) => void): () => void {
+    const events = ensureHavokEventContext(world);
+    return registerTriggerDrain(world, () =>
+        drainTriggerEvents(world, (type, bodyAId, bodyBId) => {
+            const bodyA = events.resolve(bodyAId);
+            const bodyB = events.resolve(bodyBId);
+            cb({
+                type,
+                bodyA: bodyA?.[0] ?? null,
+                bodyAIndex: bodyA?.[2] ?? -1,
+                bodyB: bodyB?.[0] ?? null,
+                bodyBIndex: bodyB?.[2] ?? -1,
+            });
+        })
+    );
+}
+
+function drainTriggerEvents(world: PhysicsWorld, cb: (type: PhysicsTriggerType, bodyAId: number, bodyBId: number) => void): void {
+    const hknp = world._hknp;
+    let address = hknp.HP_World_GetTriggerEvents(world._hkWorld)[1];
+    while (address) {
+        const event = new Int32Array(hknp.HEAPU8.buffer, address);
+        const type = event[0] === TRIGGER_ENTERED ? "ENTERED" : event[0] === TRIGGER_EXITED ? "EXITED" : null;
+        if (type) {
+            cb(type, event[2]!, event[6]!);
+        }
+        address = hknp.HP_World_GetNextTriggerEvent(world._hkWorld, address);
+    }
+}
+
+function registerTriggerDrain(world: PhysicsWorld, drain: () => void): () => void {
+    onPhysicsAfterStep(world, drain);
+    return () => {
+        const callbacks = world._afterStep;
+        const index = callbacks?.indexOf(drain) ?? -1;
+        if (index >= 0) {
+            callbacks!.splice(index, 1);
+        }
+    };
+}

@@ -14,7 +14,7 @@
  * Test 2 — GPU culling: /scene165.html?culling vs the SAME golden (culling only
  *   removes off-screen instances, so the visible image must be identical).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

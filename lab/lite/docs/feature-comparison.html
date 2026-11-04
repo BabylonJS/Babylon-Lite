@@ -140,6 +140,12 @@
                             <td>Diffuse, specular, ambient, emissive</td>
                         </tr>
                         <tr>
+                            <td>Mesh Vertex Colors</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>PBR automatic; Standard via enableStandardVertexColors() opt-in (Scene 267)</td>
+                        </tr>
+                        <tr>
                             <td>Background Material</td>
                             <td>✅</td>
                             <td>✅</td>
@@ -203,7 +209,7 @@
                             <td>Lightmap Textures</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Standard material UV2</td>
+                            <td>Standard material UV2; PBR via opt-in <code>enablePbrLightmap()</code> + <code>setPbrLightmap()</code></td>
                         </tr>
                         <tr>
                             <td>Ambient Textures</td>
@@ -239,13 +245,19 @@
                             <td>Shader Material</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)</td>
+                            <td>WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test; opt-in enableShaderMaterialVisiblePacketUpdates() defers hidden packet system/resource work, including grouped opaque members; plain storage meshes can explicitly borrow GPU-produced indexed indirect arguments without count readback (Scenes 159-163)</td>
                         </tr>
                         <tr>
                             <td>Material Plugins</td>
                             <td>✅</td>
                             <td>✅</td>
                             <td>Opt-in enableMaterialPlugins() — custom WGSL injection on PBR/Standard, zero bundle cost when unused (Scene 217)</td>
+                        </tr>
+                        <tr>
+                            <td>Material Stencil</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Opt-in enableMaterialStencil() — per-material stencil write/test (mask &amp; discard) on Standard/PBR/Shader; zero bundle cost when unused</td>
                         </tr>
                         <tr>
                             <td>PBR Clear Coat</td>
@@ -370,6 +382,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)</td>
+                        </tr>
+                        <tr>
+                            <td>Orthographic Projection</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Any camera via enableOrthographicCamera() opt-in; live/animatable bounds, aspect-derived or off-center (Scene 268)</td>
                         </tr>
                         <tr>
                             <td>Follow Camera</td>
@@ -562,6 +580,12 @@
                             <td>Weighted blend, cross-fade, and additive animation groups (Scenes 155-158)</td>
                         </tr>
                         <tr>
+                            <td>Animation Masking</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>AnimationGroupMask include/exclude target-name filtering; opt-in, zero bundle cost when unused (Scene 251)</td>
+                        </tr>
+                        <tr>
                             <td>Animation Events</td>
                             <td>—</td>
                             <td>✅</td>
@@ -649,6 +673,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td></td>
+                        </tr>
+                        <tr>
+                            <td>Environment Skybox Blur</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Continuous fractional cubemap LOD</td>
                         </tr>
                         <tr>
                             <td>Reflection Probes</td>
@@ -985,9 +1015,9 @@
                         </tr>
                         <tr>
                             <td>ExtrasAsMetadata</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>Promote glTF `extras` to runtime metadata</td>
+                            <td>✅</td>
+                            <td>Promote glTF `extras` to `metadata.gltf.extras`</td>
                         </tr>
 
                         <!-- Textures -->
@@ -1209,9 +1239,9 @@
                         </tr>
                         <tr>
                             <td>Post-Processing Pipeline</td>
-                            <td>⚡</td>
                             <td>✅</td>
-                            <td>Frame-graph post-process viewports, pipelined blur/chromatic passes, and Bloom are covered (Scenes 142-144); no built-in DOF/SSAO stack yet</td>
+                            <td>✅</td>
+                            <td>Frame-graph tasks include generic fullscreen passes, Bloom, depth of field, TAA, SMAA, and final image processing/tone mapping. Scene 187 covers SMAA.</td>
                         </tr>
                         <tr>
                             <td>GUI (2D / 3D UI)</td>
@@ -1313,13 +1343,13 @@
                             <td>Navigation Mesh</td>
                             <td>⚡</td>
                             <td>✅</td>
-                            <td>Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)</td>
+                            <td>Recast V2 with crowds, obstacles, links and raycasts (Scenes 170-175); optional pure-JS Navcat queries, solo generation, links and debug (Navcat demo)</td>
                         </tr>
                         <tr>
                             <td>Device Lost Recovery</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
+                            <td>Opt-in per-kind WebGPU device-loss recovery via <code>enableDeviceLost*Recovery</code> APIs (Scene 164: Scene)</td>
                         </tr>
                         <tr>
                             <td>OffscreenCanvas / Worker Rendering</td>

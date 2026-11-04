@@ -1,6 +1,7 @@
 /** Compute scene bounds → ground / skybox size (for the background environment). */
 
 import type { SceneContext } from "../../scene/scene.js";
+import { emptyWorldAabb, expandWorldAabbForMesh } from "../../mesh/mesh-world-bounds.js";
 
 /** Compute ground size and skybox size from scene bounds.
  *  Matches BJS EnvironmentHelper._setupSizes() with sizeAuto=true.
@@ -14,45 +15,18 @@ export function computeSceneSize(
     skyboxSize: number;
     rootPosition: [number, number, number];
 } {
-    let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity;
-    let maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
+    // Object-local bounds through the FULL world matrix (and any thin-instance matrices). This used to add
+    // the world translation only, which silently dropped rotation and scale from the environment sizing.
+    const acc = emptyWorldAabb();
     for (const m of scene.meshes) {
-        if (!m.boundMin || !m.boundMax) {
-            continue;
-        }
-        const w = m.worldMatrix;
-        const tx = w[12]!,
-            ty = w[13]!,
-            tz = w[14]!;
-        const wMinX = m.boundMin[0]! + tx;
-        const wMinY = m.boundMin[1]! + ty;
-        const wMinZ = m.boundMin[2]! + tz;
-        const wMaxX = m.boundMax[0]! + tx;
-        const wMaxY = m.boundMax[1]! + ty;
-        const wMaxZ = m.boundMax[2]! + tz;
-        if (wMinX < minX) {
-            minX = wMinX;
-        }
-        if (wMinY < minY) {
-            minY = wMinY;
-        }
-        if (wMinZ < minZ) {
-            minZ = wMinZ;
-        }
-        if (wMaxX > maxX) {
-            maxX = wMaxX;
-        }
-        if (wMaxY > maxY) {
-            maxY = wMaxY;
-        }
-        if (wMaxZ > maxZ) {
-            maxZ = wMaxZ;
-        }
+        expandWorldAabbForMesh(acc, m);
     }
+    const minX = acc.minX,
+        minY = acc.minY,
+        minZ = acc.minZ;
+    const maxX = acc.maxX,
+        maxY = acc.maxY,
+        maxZ = acc.maxZ;
 
     if (!isFinite(minX)) {
         return { groundSize: 15, skyboxSize: userSkyboxSize ?? 20, rootPosition: [0, 0, 0] };

@@ -1,32 +1,58 @@
 // Babylon Lite — Public API
 // Tree-shakable: import only what you use.
 
+// ─── Standalone browser input ─────────────────────────────────────────
+export { createKeyboardInput, isKeyboardKeyDown, disposeKeyboardInput } from "./input/keyboard-input.js";
+export type { KeyboardInput } from "./input/keyboard-input.js";
+export { createPointerInput, resetPointerInput, disposePointerInput } from "./input/pointer-input.js";
+export type { PointerInput } from "./input/pointer-input.js";
+export { readGamepad } from "./input/gamepad-input.js";
+export type { GamepadState, GamepadButtonState } from "./input/gamepad-input.js";
+
 // ─── Core ────────────────────────────────────────────────────────────
 export {
     createEngine,
     startEngine,
+    waitForGpuIdle,
     stopEngine,
     renderFrame,
     resizeEngine,
     setEngineSize,
-    disposeEngine,
+    getRenderingContextKind,
+    getRenderingContexts,
     setGpuTimingEnabled,
     isGpuTimingSupported,
-    VERSION,
 } from "./engine/engine.js";
-export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
-export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
-export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
+export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
+export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
+// Device-level signals and capabilities, so applications never need the GPUDevice itself.
+export { onEngineGpuError, onEngineDeviceLost, getEngineLimits, hasEngineFeature } from "./engine/engine-gpu-events.js";
+export type { EngineGpuErrorCallback, EngineDeviceLostCallback } from "./engine/engine-gpu-events.js";
+export { disposeEngine } from "./engine/engine-dispose.js";
+export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
+export { VERSION } from "./engine/version.js";
+export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
+export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
+export type { NullEngineOptions } from "./engine/null-engine.js";
+export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
+export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus, OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
+export { enableSurfaceResizeObserver } from "./engine/enable-surface-resize-observer.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
+export { forceWebGpuDeviceLossForTesting } from "./engine/device-lost-recovery-testing.js";
+export type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./engine/device-lost-recovery-types.js";
+export { enableDeviceLostSceneRecovery } from "./engine/device-lost-scene-recovery.js";
+export { enableDeviceLostSpriteRecovery } from "./engine/device-lost-sprite-recovery.js";
+export { enableDeviceLostTextRecovery } from "./engine/device-lost-text-recovery.js";
 export {
     createSceneContext,
     createDefaultCamera,
     removeFromScene,
     setMeshVisible,
     onBeforeRender,
+    onSceneChange,
     onSceneDispose,
     addToScene,
     disposeScene,
@@ -34,50 +60,92 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
-export type { SceneContextOptions } from "./scene/scene.js";
+export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
+export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
+export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
+export { setEnvironmentRotation, setEnvironmentLightingRotation, setEnvironmentSkyboxRotation } from "./scene/set-environment-rotation.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
+
+// Opt-in full error messages. By default Babylon-Lite throws compact coded errors to keep bundles
+// small; importing either of these pulls in the message table chunk (statically or via a lazy
+// `import()`), so full text is available — `enableErrorDecoding` installs a global decoder and
+// `decodeError` reconstructs a single caught error on demand.
+export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
+export {
+    MeshBlendingRadiusClass,
+    createDefaultMeshBlendRadiusDefinitions,
+    packMeshBlendingTag,
+    resolveMeshBlendingTag,
+    unpackMeshBlendingTag,
+    validatePackedMeshBlendingTag,
+} from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { addRenderPass, addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
-export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
+export { buildFrameGraphTask, getFrameGraphTasks } from "./frame-graph/frame-graph.js";
+export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter, removeTask } from "./frame-graph/frame-graph-actions.js";
+export {
+    createFrameGraphContext,
+    registerFrameGraphContext,
+    registerFrameGraphContextAsync,
+    unregisterFrameGraphContext,
+    disposeFrameGraphContext,
+} from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
 export type { Task } from "./frame-graph/task.js";
 export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
+export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createCustomPostProcessTask } from "./post-process/custom.js";
+export type { CustomPostProcessTaskConfig } from "./post-process/custom.js";
+export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
+export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
 export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
+export { createClearTextureTask } from "./frame-graph/clear-texture-task.js";
+export type { ClearTextureTask, ClearTextureTaskConfig } from "./frame-graph/clear-texture-task.js";
+export { createGenerateMipMapsTask } from "./frame-graph/generate-mipmaps-task.js";
+export type { GenerateMipMapsTask, GenerateMipMapsTaskConfig } from "./frame-graph/generate-mipmaps-task.js";
+export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
+export type { DepthResolveTaskConfig } from "./frame-graph/depth-resolve-task.js";
 export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
-export { createShadowTask } from "./frame-graph/shadow-task.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
-export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
-export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export type { RenderTarget, RenderTargetDescriptor, RenderTargetSurfaceSize } from "./engine/render-target.js";
+export { createRenderTarget, disposeRenderTarget } from "./engine/render-target.js";
+export { createMipMappedRenderTarget } from "./engine/render-target-mipmaps.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
+export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
+export { withSampledDepthTexture } from "./texture/rtt-depth.js";
+export type { RenderTargetDepthSampler, RenderTargetTextureResult } from "./texture/rtt.js";
 // Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
 // sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
-export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
+export { getOrCreateSampler, clearSamplerCache } from "./resource/sampler-pool.js";
 // acquireTexture/releaseTexture let a consumer register the lifetime of its OWN GPU texture in Lite's
 // ref-count pool, so a texture it creates (e.g. a mipped render texture for a Hi-Z pyramid) survives a
 // ShaderMaterial's per-version release/acquire cycle instead of being destroyed at count 0.
-export { acquireTexture, releaseTexture } from "./resource/gpu-pool.js";
+export { acquireTexture } from "./resource/texture-acquire.js";
+export { releaseTexture } from "./resource/texture-release.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
+export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 
 // ─── Fullscreen Effects ─────────────────────────────────────────────
 export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectRenderTask, disposeEffectWrapper } from "./effect/effect-renderer.js";
@@ -104,13 +172,32 @@ export { createBloomPostProcessTask } from "./post-process/bloom.js";
 export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
 export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post-process/depth-of-field.js";
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
+export { createTaaPostProcessTask } from "./post-process/taa.js";
+export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-process/taa.js";
+export { createSmaaPostProcessTask } from "./post-process/smaa.js";
+export type { SmaaPostProcessTask, SmaaPostProcessTaskConfig } from "./post-process/smaa.js";
+export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/screen-space-contact-shadows.js";
+export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
+export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
+export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
+export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
+export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
-export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export type { ArcRotatePointerAction, ArcRotatePointerMappings, AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { enableArcRotateKeyboardControls } from "./camera/arc-rotate-keyboard-controls.js";
+export type { ArcRotateKeyboardMappings, ArcRotateKeyboardOptions } from "./camera/arc-rotate-keyboard-controls.js";
+export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
+export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
+export { createBankedFreeCamera } from "./camera/banked-free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
+export { attachConfigurableFreeControl } from "./camera/configurable-free-camera-controls.js";
+export type { FreeCameraControlOptions } from "./camera/configurable-free-camera-controls.js";
+export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
+export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
 // Geospatial (globe-orbit) camera
 export {
@@ -130,14 +217,61 @@ export type { GeospatialControlOptions } from "./camera/geospatial-camera-contro
 export { flyGeospatialCameraToAsync } from "./camera/geospatial-camera-fly.js";
 export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
 
+// ─── WebXR (WebGPU binding — draft) ──────────────────────────────────
+// Forward-looking support for the immersive-web WebXR/WebGPU binding. The binding
+// (XRGPUBinding) is not yet implemented by any browser; gate UI on isXrSessionSupported.
+export { enterXr, exitXr } from "./xr/xr-session.js";
+export { enableXrCompatibleAdapter } from "./xr/xr-adapter.js";
+export type { XrSessionContext, XrSessionOptions } from "./xr/xr-session.js";
+export type { XrGpuBinding, XrGpuBindingConstructor, XrGpuSubImage, XrGpuProjectionLayerInit } from "./xr/xr-webgpu-binding.js";
+export { isWebXrPresent, isWebGpuXrSupported, isXrSessionSupported } from "./xr/xr-support.js";
+export type { XrSessionMode, XrEye, XrHandedness, XrTargetRayMode, XrReferenceSpaceType } from "./xr/xr-support.js";
+export { createXrCamera, updateXrCameraForView } from "./xr/xr-camera.js";
+export type { XrCamera } from "./xr/xr-camera.js";
+export { createXrInputManager, updateXrInputPoses, disposeXrInputManager } from "./xr/xr-input.js";
+export type { XrInputManager, XrInputSource, XrInputCallbacks } from "./xr/xr-input.js";
+export { attachXrFeature } from "./xr/xr-feature.js";
+export type { XrFeatureSpec, XrFeatureHandle } from "./xr/xr-feature.js";
+export { createXrPointer, updateXrPointer, disposeXrPointer, computePointerVisual, pointerSelection } from "./xr/xr-pointer.js";
+export type { XrPointer, XrPointerOptions, PointerVisual } from "./xr/xr-pointer.js";
+export { readXrController } from "./xr/xr-controller.js";
+export type { XrControllerComponents, XrButtonState } from "./xr/xr-controller.js";
+export { createXrControllerModels, updateXrControllerModels, disposeXrControllerModels, controllerModels } from "./xr/xr-controller-models.js";
+export type { XrControllerModels, XrControllerModelOptions, XrControllerMeshFactory } from "./xr/xr-controller-models.js";
+export { createXrHandTracking, updateXrHandTracking, disposeXrHandTracking, handTracking } from "./xr/xr-hand.js";
+export type { XrHandTracking, XrHandTrackingOptions, XrHandJointMeshFactory } from "./xr/xr-hand.js";
+export { createXrTeleportation, updateXrTeleportation, disposeXrTeleportation, teleportation } from "./xr/xr-teleport.js";
+export type { XrTeleportation, XrTeleportationOptions } from "./xr/xr-teleport.js";
+export { loadMotionController, updateMotionController, DEFAULT_PROFILES_BASE_URL } from "./xr/xr-motion-controller.js";
+export type { MotionController, XrMotionControllerProfileOptions } from "./xr/xr-motion-controller.js";
+
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
+export { createRectAreaLight } from "./light/rect-area-light.js";
+export type { RectAreaLight } from "./light/rect-area-light.js";
+export { enableRectAreaLights } from "./light/enable-rect-area-lights.js";
+export { processAreaLightTexture } from "./light/process-area-light-texture.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
-export type { ClusteredLightContainer, ClusteredLightContainerOptions, ClusteredPointLight, ClusteredPointLightOptions } from "./light/clustered.js";
-export { createClusteredLightContainer, createClusteredPointLight, addClusteredLightContainer, markClusteredLightContainerDirty } from "./light/clustered.js";
+export { setLightIntensity } from "./light/set-light-intensity.js";
+export { setLightDiffuseColor } from "./light/set-light-diffuse-color.js";
+export type {
+    ClusteredLightContainer,
+    ClusteredLightContainerOptions,
+    ClusteredPointLight,
+    ClusteredPointLightOptions,
+    ClusteredSpotLight,
+    ClusteredSpotLightOptions,
+} from "./light/clustered.js";
+export {
+    createClusteredLightContainer,
+    createClusteredPointLight,
+    createClusteredSpotLight,
+    addClusteredLightContainer,
+    markClusteredLightContainerDirty,
+} from "./light/clustered.js";
 export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
@@ -158,6 +292,9 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshGeometry,
+    updateMeshGeometryCapacity,
+    setMeshDrawRange,
     updateMeshPositions,
     updateMeshNormals,
     updateMeshColors,
@@ -165,8 +302,17 @@ export {
     updateMeshUv2,
     updateMeshTangents,
     resizeMeshGeometry,
+    resizeSharedMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges, MeshDrawRange } from "./mesh/mesh-factories.js";
+export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
+export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
+export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
+export type { DashedLinesOptions, DashedLinesUpdateOptions } from "./mesh/create-dashed-lines.js";
+export { getMeshGeometry, getMeshTriangles } from "./mesh/get-mesh-geometry.js";
+export { createBoxData } from "./mesh/create-box.js";
+export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
 export { createCylinderData } from "./mesh/create-cylinder.js";
@@ -180,20 +326,228 @@ export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
 export type { Csg2Solid } from "./mesh/csg2.js";
 
+// ─── Resources ───────────────────────────────────────────────────────
+export { createStorageBuffer, updateStorageBuffer, readStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
+export { clearStorageBuffer, updateStorageBufferRange, readStorageBufferAfterFrame } from "./resource/storage-buffer-operations.js";
+export { createUniformBuffer, updateUniformBuffer, disposeUniformBuffer } from "./compute/compute-uniform-buffer.js";
+export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-uniform-buffer.js";
+// GPU-resident geometry: a mesh sources its vertices straight from a storage
+// allocation and the draw reads them in place, with no readback and no copy.
+// Whoever fills the allocation -- the CPU, or eventually a compute pass -- is the
+// caller's business. Tree-shaken away when unused.
+export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
+export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
+export { setMeshIndexedIndirect, getMeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
+export type { MeshIndexedDrawInfo } from "./mesh/mesh-indexed-indirect-borrow.js";
+// Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
+// data in .w). Opt-in: costs nothing in scenes that never declare one.
+export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
+// User-facing compute: immutable program and binding state, reusable dispatches,
+// and frame-graph scheduling through one compute pass per task.
+export { createComputeShader, prepareComputeShader, disposeComputeShader } from "./compute/compute-shader.js";
+export type { ComputeShader, ComputeShaderOptions } from "./compute/compute-shader.js";
+export type { ComputeBindingDecl } from "./compute/compute-binding.js";
+export { computeStorageBufferBinding } from "./compute/compute-storage-buffer-binding.js";
+export type { ComputeStorageBufferBindingOptions, ComputeStorageBufferRange } from "./compute/compute-storage-buffer-binding.js";
+export { computeUniformBufferBinding } from "./compute/compute-uniform-buffer-binding.js";
+export type { ComputeUniformBufferBindingOptions, ComputeUniformBufferRange } from "./compute/compute-uniform-buffer-binding.js";
+export { createComputeTextureResource, invalidateComputeTextureResource } from "./compute/compute-texture-resource.js";
+export type { ComputeTextureResource, ComputeTextureResourceOptions, ComputeTextureSampleType } from "./compute/compute-texture-resource.js";
+export { createComputeTextureViewResource } from "./compute/compute-texture-view-resource.js";
+export type { ComputeTextureViewResourceOptions } from "./compute/compute-texture-view-resource.js";
+export { createComputeSampler } from "./compute/compute-sampler-resource.js";
+export type { ComputeSampler, ComputeSamplerType } from "./compute/compute-sampler-resource.js";
+export { computeTextureBinding } from "./compute/compute-texture-binding.js";
+export type { ComputeTextureBindingOptions } from "./compute/compute-texture-binding.js";
+export { computeTextureViewBinding } from "./compute/compute-texture-view-binding.js";
+export type { ComputeTextureViewBindingOptions } from "./compute/compute-texture-view-binding.js";
+export { computeSamplerBinding } from "./compute/compute-sampler-binding.js";
+export type { ComputeSamplerBindingOptions } from "./compute/compute-sampler-binding.js";
+export { computeStorageTextureBinding } from "./compute/compute-storage-texture-binding.js";
+export type { ComputeStorageTextureBindingOptions } from "./compute/compute-storage-texture-binding.js";
+export { computeStorageTextureViewBinding } from "./compute/compute-storage-texture-view-binding.js";
+export type { ComputeStorageTextureViewBindingOptions } from "./compute/compute-storage-texture-view-binding.js";
+export { createComputeStorageTexture2D, cloneComputeStorageTexture2D, disposeComputeStorageTexture2D } from "./resource/compute-storage-texture.js";
+export type { ComputeStorageTexture2D, ComputeStorageTexture2DOptions, ComputeStorageTextureFormat } from "./resource/compute-storage-texture.js";
+export { createComputeStorageTexture, disposeComputeStorageTexture } from "./resource/compute-storage-texture-view.js";
+export { createComputeStorageTextureMipmapsTask } from "./compute/compute-storage-texture-mipmaps.js";
+export type { ComputeStorageTexture, ComputeStorageTextureOptions, ComputeStorageTextureViewDimension } from "./resource/compute-storage-texture-view.js";
+export { createComputeBindingSet, disposeComputeBindingSet } from "./compute/compute-bindings.js";
+export type { ComputeBindingSet, ComputeBindingResources } from "./compute/compute-bindings.js";
+export { createComputeDispatch, setComputeDispatchSize } from "./compute/compute-dispatch.js";
+export type { ComputeDispatch, ComputeDispatchOptions, ComputeDirectDispatch, ComputeImmediateData } from "./compute/compute-dispatch.js";
+export { setComputeDispatchDynamicOffset } from "./compute/compute-dynamic-offset.js";
+export { createComputeIndirectDispatch, setComputeIndirectDispatch } from "./compute/compute-indirect-dispatch.js";
+export type { ComputeIndirectDispatchOptions } from "./compute/compute-indirect-dispatch.js";
+export { createComputePipelineVariant, prepareComputePipelineVariant, createComputeVariantDispatch } from "./compute/compute-pipeline-variant.js";
+export type { ComputePipelineVariant, ComputePipelineConstants, ComputeVariantDispatchOptions } from "./compute/compute-pipeline-variant.js";
+export { createComputeTask, addComputeDispatch, removeComputeDispatch, prepareComputeTask, submitComputeTasks } from "./compute/compute-task.js";
+export type { ComputeTask } from "./compute/compute-task.js";
+export { createComputeOneShot, armComputeOneShot, disposeComputeOneShot } from "./compute/compute-one-shot.js";
+export type { ComputeOneShot } from "./compute/compute-one-shot.js";
+export { createComputeImmediateShader, isComputeImmediatesSupported, setComputeDispatchImmediates } from "./compute/compute-immediates.js";
+export type { ComputeImmediateShaderOptions } from "./compute/compute-immediates.js";
+export { createComputeUniformArena, getComputeUniformSlotOffset, updateComputeUniformSlot } from "./compute/compute-uniform-arena.js";
+export type { ComputeUniformArena } from "./compute/compute-uniform-arena.js";
+export {
+    createComputeUniformLayout,
+    createComputeUniformWriter,
+    setComputeUniform,
+    setComputeUniformF16,
+    setComputeUniformF32,
+    setComputeUniformI32,
+    setComputeUniformMatrix,
+    setComputeUniformU32,
+    setComputeUniformVector,
+} from "./compute/compute-uniform-writer.js";
+export { createComputeUniformF16Writer, isComputeF16Supported } from "./compute/compute-uniform-f16.js";
+export type {
+    ComputeUniformField,
+    ComputeUniformLayout,
+    ComputeUniformMatrixType,
+    ComputeUniformScalarType,
+    ComputeUniformType,
+    ComputeUniformVectorType,
+    ComputeUniformWriter,
+} from "./compute/compute-uniform-writer.js";
+// User-facing render programs: the render-pass sibling of compute. Immutable program, reusable
+// draws and frame-graph scheduling through one render pass per task, without WebGPU handles.
+export { createRenderShader, prepareRenderShader, disposeRenderShader, createRenderBindingSet, disposeRenderBindingSet } from "./render-shader/render-shader.js";
+export type { RenderShader, RenderShaderOptions, RenderShaderTargetOptions, RenderShaderDepthOptions, RenderBindingSet } from "./render-shader/render-shader.js";
+export { createRenderDraw, setRenderDrawCount, setRenderDrawDynamicOffset } from "./render-shader/render-draw.js";
+export type { RenderDraw, RenderDrawOptions } from "./render-shader/render-draw.js";
+export { setRenderDrawIndirect } from "./render-shader/render-draw-indirect.js";
+export { createRenderDrawTask, addRenderDraw, removeRenderDraw, setRenderDrawTaskTarget } from "./render-shader/render-draw-task.js";
+export type { RenderDrawTask, RenderDrawTaskConfig } from "./render-shader/render-draw-task.js";
+
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
 export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTexture2D } from "./texture/pixels-texture.js";
+export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
+export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
+// Any-format texture data paths: render into one layer/mip of an existing texture, and upload a box of
+// texels in the texture's own format without allocating per call.
+export { createTextureRenderTarget } from "./texture/texture-render-target.js";
+export type { TextureRenderTargetOptions } from "./texture/texture-render-target.js";
+export { updateTextureRegion } from "./texture/texture-region.js";
+export type { TextureRegion } from "./texture/texture-region.js";
+export {
+    createTexture2DArray,
+    createTexture2DArrayFromPixels,
+    updateTexture2DArrayFromPixels,
+    uploadImageToArrayLayer,
+    loadImageToArrayLayer,
+    createTexture2DArrayFromUrls,
+    uploadKtx2Texture2DArray,
+    loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArrayFromBuffers,
+    loadKtx2Texture2DArrayFromUrls,
+} from "./texture/texture-array.js";
+export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
+export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
+export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
+export { createTexture2DFromExternalImage } from "./texture/external-image-texture.js";
+export type { ExternalImageTexture2DOptions } from "./texture/external-image-texture.js";
+export { createExternalTexture, isExternalTextureReady } from "./texture/external-texture.js";
+export type { ExternalTexture } from "./texture/external-texture.js";
+export { createHtmlTexture, updateHtmlTexture, requestHtmlTextureUpdate, disposeHtmlTexture, isHtmlInCanvasSupported, whenHtmlTextureReady } from "./texture/html-texture.js";
+export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
-export { setKtx2DecoderUrl } from "./texture/ktx2-loader.js";
+export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { enableKtx2WorkerDecoding } from "./texture/ktx2-worker-decoder.js";
+export type { Ktx2WorkerDecodingOptions } from "./texture/ktx2-worker-decoder.js";
+export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
+export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
+export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
+export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
+export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
+export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
+export { setStandardSpecularTexture } from "./material/standard/set-std-specular.js";
+export { setStandardAmbientTexture } from "./material/standard/set-std-ambient.js";
+export { setStandardLightmapTexture } from "./material/standard/set-std-lightmap.js";
+export { setStandardOpacityTexture } from "./material/standard/set-std-opacity.js";
+export { setStandardReflectionTexture } from "./material/standard/set-std-reflection.js";
+export { setStandardReflectionCubeTexture } from "./material/standard/set-std-cube-reflection.js";
+export {
+    getStandardEmissiveTexture,
+    getStandardBumpTexture,
+    getStandardSpecularTexture,
+    getStandardAmbientTexture,
+    getStandardLightmapTexture,
+    getStandardOpacityTexture,
+    getStandardReflectionTexture,
+    getStandardReflectionCubeTexture,
+} from "./material/standard/standard-material-accessors.js";
+export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
+export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
+export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
+export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrSheen } from "./material/pbr/set-sheen.js";
+export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
+export { setPbrUnlit } from "./material/pbr/set-unlit.js";
+export { setPbrSubsurface } from "./material/pbr/set-subsurface.js";
+export { setPbrMetallicReflectance } from "./material/pbr/set-metallic-reflectance.js";
+export { setPbrAnisotropy } from "./material/pbr/set-anisotropy.js";
+export { setPbrGammaAlbedo } from "./material/pbr/set-gamma-albedo.js";
+export { setPbrSkybox } from "./material/pbr/set-skybox.js";
+export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
+export { setPbrTransmission } from "./material/pbr/set-transmission.js";
+export { setPbrDispersion } from "./material/pbr/set-dispersion.js";
+export { setPbrEmissive } from "./material/pbr/set-emissive.js";
+export {
+    getPbrAlphaCutoff,
+    getPbrEmissiveColor,
+    getPbrMetallicReflectance,
+    getPbrClearCoat,
+    getPbrSheen,
+    getPbrIridescence,
+    getPbrAnisotropy,
+    getPbrSubsurface,
+    getPbrTransmission,
+    getPbrDispersion,
+    isPbrGammaAlbedo,
+    getPbrUnlit,
+    isPbrSkybox,
+    getShadowOnly,
+} from "./material/pbr/pbr-material-accessors.js";
+export type { PbrShadowOnly } from "./material/pbr/pbr-material-accessors.js";
+export { enablePbrLightmap, setPbrLightmap } from "./material/pbr/enable-pbr-lightmap.js";
+export { enableBentNormals } from "./material/pbr/fragments/bent-normal-fragment.js";
+export type { PbrLightmapOptions } from "./material/pbr/enable-pbr-lightmap.js";
+export {
+    clearPbrLocalEnvironment,
+    createPbrLocalEnvironmentProbeSet,
+    enablePbrLocalCubemap,
+    getPbrLocalEnvironmentProbeGridCell,
+    MAX_PBR_LOCAL_ENVIRONMENT_CANDIDATES,
+    MAX_PBR_LOCAL_ENVIRONMENT_PROBES,
+    setPbrEnvironment,
+    setPbrLocalEnvironment,
+    setPbrLocalEnvironmentProbeDebug,
+    setPbrLocalEnvironmentProbeSet,
+} from "./material/pbr/enable-pbr-local-cubemap.js";
+export type {
+    PbrLocalCubemapInitOptions,
+    PbrLocalEnvironmentOptions,
+    PbrLocalEnvironmentProbe,
+    PbrLocalEnvironmentProbeGridCell,
+    PbrLocalEnvironmentProbeGridOptions,
+    PbrLocalEnvironmentProbeSet,
+    PbrLocalEnvironmentProbeSetOptions,
+} from "./material/pbr/enable-pbr-local-cubemap.js";
+export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
+    getShaderUniform,
+    getShaderTexture,
     setShaderUniform,
     setShaderTexture,
     setShaderStorageBuffer,
@@ -201,29 +555,197 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { getShaderExternalTexture, setShaderExternalTexture } from "./material/shader/shader-external-texture.js";
+export { wgsl } from "./shader/wgsl.js";
+export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
+export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
+export { enableShaderMaterialVisiblePacketUpdates } from "./material/shader/enable-shader-material-visible-packet-updates.js";
+export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
+export { enableShaderMaterialFinalColor } from "./material/shader/enable-shader-material-final-color.js";
+export { enableShaderMaterialPipelineSharing } from "./material/shader/enable-shader-material-pipeline-sharing.js";
+export {
+    enableAsyncShaderPipelineCompilation,
+    prepareShaderMaterialPipeline,
+    prepareShaderMaterialPipelineForTask,
+} from "./material/shader/enable-async-shader-pipeline-compilation.js";
+export type { ShaderMaterialPipelineLayout } from "./material/shader/enable-async-shader-pipeline-compilation.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
+export { createLineMaterial, setLineMaterialColor } from "./material/line/line-material.js";
+export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { createNodeMaterialBlockLoader } from "./material/node/node-block-loader.js";
+export type { NodeMaterialBlock } from "./material/node/node-block-loader.js";
+// BEGIN GENERATED NODE BLOCK EXPORTS
+export {
+    nodeAddBlock,
+    nodeAmbientOcclusionBlock,
+    nodeAnisotropyBlock,
+    nodeArcTan2Block,
+    nodeBiPlanarBlock,
+    nodeBonesBlock,
+    nodeClampBlock,
+    nodeClearCoatBlock,
+    nodeClipPlanesBlock,
+    nodeCloudBlock,
+    nodeColorConverterBlock,
+    nodeColorMergerBlock,
+    nodeColorSplitterBlock,
+    nodeConditionalBlock,
+    nodeCrossBlock,
+    nodeCurveBlock,
+    nodeDerivativeBlock,
+    nodeDesaturateBlock,
+    nodeDiscardBlock,
+    nodeDistanceBlock,
+    nodeDivideBlock,
+    nodeDotBlock,
+    nodeElbowBlock,
+    nodeFogBlock,
+    nodeFragCoordBlock,
+    nodeFragDepthBlock,
+    nodeFragmentOutputBlock,
+    nodeFresnelBlock,
+    nodeFrontFacingBlock,
+    nodeGeometryTextureOutputBlock,
+    nodeGradientBlock,
+    nodeHeightToNormalBlock,
+    nodeImageProcessingBlock,
+    nodeImageSourceBlock,
+    nodeInputBlock,
+    nodeInstancesBlock,
+    nodeIridescenceBlock,
+    nodeLengthBlock,
+    nodeLerpBlock,
+    nodeLightBlock,
+    nodeLightInformationBlock,
+    nodeLoopBlock,
+    nodeMatrixBuilder,
+    nodeMatrixDeterminantBlock,
+    nodeMatrixSplitterBlock,
+    nodeMatrixTransposeBlock,
+    nodeMaxBlock,
+    nodeMeshAttributeExistsBlock,
+    nodeMinBlock,
+    nodeModBlock,
+    nodeMorphTargetsBlock,
+    nodeMultiplyBlock,
+    nodeNegateBlock,
+    nodeNLerpBlock,
+    nodeDebugBlock,
+    nodeTeleportInBlock,
+    nodeTeleportOutBlock,
+    nodeNormalBlendBlock,
+    nodeNormalizeBlock,
+    nodeOneMinusBlock,
+    nodeOppositeBlock,
+    nodePannerBlock,
+    nodePbrMetallicRoughnessBlock,
+    nodePbrMetallicRoughnessBlockFull,
+    nodePerturbNormalBlock,
+    nodePosterizeBlock,
+    nodePowBlock,
+    nodeRandomNumberBlock,
+    nodeReciprocalBlock,
+    nodeReflectBlock,
+    nodeReflectionBlock,
+    nodeReflectionTextureBaseBlock,
+    nodeReflectionTextureBlock,
+    nodeRefractBlock,
+    nodeRefractionBlock,
+    nodeRemapBlock,
+    nodeReplaceColorBlock,
+    nodeRotate2dBlock,
+    nodeScaleBlock,
+    nodeScreenSizeBlock,
+    nodeScreenSpaceBlock,
+    nodeShadowMapBlock,
+    nodeSheenBlock,
+    nodeSimplexPerlin3DBlock,
+    nodeSmoothStepBlock,
+    nodeStepBlock,
+    nodeStorageReadBlock,
+    nodeStorageWriteBlock,
+    nodeSubSurfaceBlock,
+    nodeSubtractBlock,
+    nodeTBNBlock,
+    nodeTextureBlock,
+    nodeTransformBlock,
+    nodeTrigonometryBlock,
+    nodeTriPlanarBlock,
+    nodeTwirlBlock,
+    nodeVectorMergerBlock,
+    nodeVectorSplitterBlock,
+    nodeVertexOutputBlock,
+    nodeViewDirectionBlock,
+    nodeVoronoiNoiseBlock,
+    nodeWaveBlock,
+    nodeWorleyNoise3DBlock,
+} from "./material/node/node-blocks.js";
+// END GENERATED NODE BLOCK EXPORTS
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
-export { createMaterialView } from "./material/material-view.js";
+export { createMaterialView, getMaterialSource, isMaterialView } from "./material/material-view.js";
+export { releaseMaterialViewGpu } from "./material/shader/shader-material-view-gpu.js";
+export { getMaterialFamily } from "./material/material-family.js";
+export { getMaterialTextures } from "./material/material-textures.js";
+export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
+export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
+export { hasMaterialUvTransform } from "./material/material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
-export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
-export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
-export { enableBentNormals } from "./material/pbr/fragments/bent-normal-fragment.js";
+export type { RebuildMaterialOptions } from "./material/material-rebuild.js";
+export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
+export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
+export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";
+export type { ToneMapping } from "./material/pbr/tone-mapping.js";
+export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
+export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
+export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
+export type {
+    MaterialPlugin,
+    MaterialPluginPoint,
+    PluginUboField,
+    PluginVaryingType,
+    PluginVaryingDecl,
+    PluginSamplerDecl,
+    PluginTextureBinding,
+} from "./material/plugin/material-plugin.js";
+export { enableMaterialPlugins, reconcileMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
+export { enablePbrMaterialPluginVertexData } from "./material/plugin/enable-pbr-material-plugin-vertex-data.js";
+export { bakeStdPluginMaterial } from "./material/plugin/std-plugin-bridge.js";
+export { enableMaterialStencil } from "./material/enable-material-stencil.js";
+export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
+export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
+export { loadUsd, disposeUsd } from "./loader-usd/load-usd.js";
+export type { LoadUsdOptions, UsdAssetContainer, UsdBinaryInput, UsdDiagnostics, UsdProgress, UsdStatistics, UsdTimings } from "./loader-usd/usd-types.js";
+export { enableGltfCameras } from "./loader-gltf/gltf-feature-camera.js";
+export { enableGltfCpuTangents } from "./loader-gltf/gltf-feature-cpu-tangents.js";
 export type { AssetContainer } from "./asset-container.js";
+export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
 export type { MaterialVariantData } from "./loader-gltf/material-variants.js";
+export {
+    hasDefaultInteractivityFlowInput,
+    normalizeInteractivityEventDataConfiguration,
+    normalizeKhrInteractivityRuntimeValue,
+    createKhrInteractivityRuntimeValueSnapshot,
+} from "./loader-gltf/khr-interactivity-helpers.js";
+export type { KhrInteractivityRuntimeValueSnapshot } from "./loader-gltf/khr-interactivity-helpers.js";
+// Decoder base-URL config for KHR_draco_mesh_compression / EXT_meshopt_compression.
+// The heavy decoder glue stays dynamic-imported (zero bytes for assets that don't
+// use it); only these tiny setters are statically reachable from the entry point.
+export { setDracoBaseUrl } from "./loader-gltf/draco-decode.js";
+export { setMeshoptBaseUrl } from "./loader-gltf/meshopt-decode.js";
 // ─── Hierarchy ───────────────────────────────────────────────────────
 export type { IWorldMatrixProvider, IParentable } from "./scene/parentable.js";
 export { setParent } from "./scene/set-parent.js";
@@ -232,14 +754,26 @@ export type { TransformNode } from "./scene/transform-node.js";
 export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
+export { computeProceduralSkySunColor, loadProceduralSkyEnvironment, updateProceduralSkyEnvironment } from "./loader-env/procedural-sky-environment.js";
+export type { ProceduralSkyEnvironment, ProceduralSkyEnvironmentLoadOptions, ProceduralSkyEnvironmentOptions } from "./loader-env/procedural-sky-environment.js";
+export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
+export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
+export { loadCubeTexture } from "./texture/cube-texture.js";
+export type { CubeTexture } from "./texture/cube-texture.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
 export { loadSPZ } from "./loader-splat/load-spz.js";
+export { loadGaussianSplatStream, attachGaussianSplatStream, disposeGaussianSplatStream } from "./loader-splat-stream/load-gaussian-splat-stream.js";
+export { loadSplatVoxelCollision, parseSplatVoxelCollision, moveSplatVoxelCamera } from "./collision/splat-voxel-collision.js";
+export type { SplatVoxelCollision } from "./collision/splat-voxel-collision.js";
+export type { GaussianSplatStream, GaussianSplatStreamOptions, GaussianSplatStreamPhase, GaussianSplatStreamStats } from "./loader-splat-stream/splat-stream-types.js";
 export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";
+export { GAUSSIAN_SPLATTING_MAX_PART_COUNT, getGaussianSplattingPartIndexVaryingDeclaration } from "./material/gaussian-splatting-plugin-helpers.js";
+export { getGaussianSplattingMaxPartCount } from "./material/gaussian-splatting-part-count.js";
 export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { createProceduralGaussianSplattingMesh } from "./mesh/GaussianSplatting/create-gaussian-splatting-mesh.js";
 export { gsLinearDepthFragment, gsAlphaBlendedDepthFragment } from "./mesh/GaussianSplatting/gs-depth-fragments.js";
@@ -253,17 +787,64 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
-export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
-export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
-export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
+export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
+export { enableCsmStaticCache } from "./shadow/enable-csm-static-cache.js";
+export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
+export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
+export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
+export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
+export { setShadowGeneratorEnabled } from "./shadow/shadow-enabled.js";
+export { setShadowCasterMaterial } from "./material/set-shadow-caster-material.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
+export {
+    backEase,
+    bezierCurveEase,
+    bounceEase,
+    circleEase,
+    createBackEase,
+    createBezierCurveEase,
+    createBounceEase,
+    createElasticEase,
+    createExponentialEase,
+    createPowerEase,
+    cubicEase,
+    elasticEase,
+    exponentialEase,
+    powerEase,
+    quadraticEase,
+    quarticEase,
+    quinticEase,
+    sineEase,
+} from "./animation/easing.js";
+export type { AnimationEasing } from "./animation/easing.js";
+// Opt-in bone control for skinned models (near-zero bundle cost unless enableBoneControl is called).
+export {
+    enableBoneControl,
+    getBoneByName,
+    setBonePosition,
+    setBoneRotationQuaternion,
+    setBoneScaling,
+    setBoneVisible,
+    setBonePoseDeferred,
+    setBoneWorldPoseDeferred,
+    bakeSkeleton,
+    clearBoneOverride,
+    getMeshSkeleton,
+} from "./skeleton/bone-control.js";
+export type { Skeleton, Bone } from "./skeleton/bone-control.js";
+export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { runFrameInterpolation } from "./animation/frame-interpolation.js";
+export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
+export { AnimationGroupMaskMode, createAnimationGroupMask, animationGroupMaskRetainsTarget } from "./animation/animation-group-mask.js";
+export type { AnimationGroupMask } from "./animation/animation-group-mask.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
-export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
+export { enablePropertyAnimationBlending } from "./animation/weighted-pointer-mixer.js";
+export { crossFadeAnimationGroups, fadeAnimationWeight } from "./animation/animation-weight-fade.js";
 export { enableAnimationBlending, setAnimationAdditive } from "./animation/weighted-gltf-mixer.js";
-export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/weighted-pointer-mixer.js";
+export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight-fade.js";
 export type { AnimationAdditiveOptions } from "./animation/weighted-gltf-mixer.js";
 export {
     addAnimationTask,
@@ -281,20 +862,84 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
-export { bakeVat, attachVat } from "./vat/vat-baker.js";
-export type { VatBakeResult, VatClip, VatHandle } from "./vat/vat-baker.js";
+export { bakeVat, bakeVatMany, prepareVat, prepareVatMany, createVatBakeResult, createVatBakeResults, attachVat } from "./vat/vat-baker.js";
+export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
+export type { VatBakeResult, PreparedVatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
+export { normalizeVec2ToRef } from "./math/normalize-vec2-to-ref.js";
+export { normalizeVec3TupleOrUp } from "./math/normalize-vec3-tuple-or-up.js";
 export { normalizeVec3 } from "./math/normalize-vec3.js";
-export { mat4Translation } from "./math/mat4-translation.js";
-export { mat4Identity } from "./math/mat4-identity.js";
-export { mat4Scale } from "./math/mat4-scale.js";
-export { mat4Compose } from "./math/mat4-compose.js";
-export { mat4Invert } from "./math/mat4-invert.js";
-export type { Vec3, Vec3Tuple, Mat4 } from "./math/types.js";
+export { vec3 } from "./math/vec3-ctor.js";
+export { Vec3Up } from "./math/vec3-up.js";
+export { addVec3 } from "./math/add-vec3.js";
+export { subtractVec3 } from "./math/subtract-vec3.js";
+export { scaleVec3 } from "./math/scale-vec3.js";
+export { dotVec3 } from "./math/dot-vec3.js";
+export { crossVec3 } from "./math/cross-vec3.js";
+export { lengthVec3 } from "./math/length-vec3.js";
+export { negateVec3 } from "./math/negate-vec3.js";
+export { lerpVec3 } from "./math/lerp-vec3.js";
+export { inverseLerp } from "./math/inverse-lerp.js";
+export { sampleHermiteSpline, sampleCatmullRomSpline } from "./math/curve-splines.js";
+export { expDampFactor, dampScalar, lerpAngleShortest } from "./math/damp.js";
+export {
+    addVec3InPlace,
+    addVec3ToRef,
+    crossVec3InPlace,
+    crossVec3ToRef,
+    lerpVec3InPlace,
+    lerpVec3ToRef,
+    negateVec3InPlace,
+    negateVec3ToRef,
+    normalizeVec3InPlace,
+    normalizeVec3ToRef,
+    scaleVec3InPlace,
+    scaleVec3ToRef,
+    subtractVec3InPlace,
+    subtractVec3ToRef,
+} from "./math/vec3-ref.js";
+export { writeVec3 } from "./math/write-vec3.js";
+export { createTranslationMat4 } from "./math/create-translation-mat4.js";
+export { setMat4Translation } from "./math/set-mat4-translation.js";
+export { createIdentityMat4 } from "./math/create-identity-mat4.js";
+export { createScalingMat4 } from "./math/create-scaling-mat4.js";
+export { composeMat4 } from "./math/compose-mat4.js";
+export { invertMat4 } from "./math/invert-mat4.js";
+export { multiplyMat4 } from "./math/multiply-mat4.js";
+export { createLookAtMat4LH } from "./math/create-look-at-mat4-lh.js";
+export { createPerspectiveMat4LH } from "./math/create-perspective-mat4-lh.js";
+export { createMat4FromQuat, writeMat4FromQuatIntoBuffer } from "./math/create-mat4-from-quat.js";
+export { createQuatFromRotationMat4 } from "./math/create-quat-from-rotation-mat4.js";
+export { writeQuatFromRotationMat4IntoRef } from "./math/write-quat-from-rotation-mat4-into-ref.js";
+export { createQuatFromLookDirectionRH } from "./math/create-quat-from-look-direction-rh.js";
+export { writeMat4FromLookDirectionLHIntoBuffer, writeMat4FromLookDirectionRHIntoBuffer } from "./math/write-mat4-from-look-direction-into-buffer.js";
+export { _getGaussianPointSplattingPackedShBytesPerSplat, _hasGaussianPointSplattingProjectedDepth } from "./math/gaussian-point-splatting-compat-helpers.js";
+export { decomposeMat4 } from "./math/decompose-mat4.js";
+export type { DecomposedTransform } from "./math/decompose-mat4.js";
+export { maximizeMat4InPlace } from "./math/maximize-mat4-in-place.js";
+export { polarFromVec2ToRef, polarToVec2ToRef, addPolarToRef, subtractPolarToRef, multiplyPolarToRef, dividePolarToRef, scalePolarToRef } from "./math/polar.js";
+export type { PolarCoordinates } from "./math/polar.js";
+export {
+    sphericalFromVec3ToRef,
+    sphericalToVec3ToRef,
+    addSphericalToRef,
+    subtractSphericalToRef,
+    multiplySphericalToRef,
+    divideSphericalToRef,
+    scaleSphericalToRef,
+} from "./math/spherical.js";
+export type { SphericalCoordinates } from "./math/spherical.js";
+export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
+export type { Vec2, Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Aabb } from "./math/aabb.js";
+export { computeAabb } from "./math/aabb.js";
+export { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "./math/quat-euler.js";
+export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./math/color.js";
+export { MinTemperatureKelvin, MaxTintMagnitude, temperatureTintToXyz, getWhiteBalanceMatrix } from "./math/color-temperature.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
 export {
@@ -303,12 +948,26 @@ export {
     setThinInstanceMatrix,
     setThinInstances,
     setThinInstanceCount,
+    setThinInstanceDrawCount,
+    enableThinInstanceDynamicDrawCount,
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,
     enableThinInstanceGpuCulling,
+    setThinInstanceCullBoundsPad,
+    setThinInstanceLodPartner,
+    clearThinInstanceLodPartner,
 } from "./mesh/thin-instance.js";
-export type { ThinInstanceData } from "./mesh/thin-instance.js";
+export { enableThinInstanceWorldBounds } from "./mesh/enable-thin-instance-world-bounds.js";
+export {
+    addHierarchyInstance,
+    createHierarchyInstancePool,
+    removeHierarchyInstance,
+    setHierarchyInstanceCount,
+    setHierarchyInstanceMatrix,
+} from "./mesh/hierarchy-instance-pool.js";
+export type { HierarchyInstancePool } from "./mesh/hierarchy-instance-pool.js";
+export type { ThinInstanceData, ThinInstanceLodPartnerOptions } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type { SceneContext, ImageProcessingConfig, ClipPlane } from "./scene/scene.js";
@@ -318,12 +977,18 @@ export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraP
 export { getEffectiveAspectRatio } from "./camera/camera.js";
 export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
+export { projectPointToViewportToRef, projectWorldToScreen, projectWorldToScreenToRef } from "./camera/world-to-screen.js";
+export type { ScreenProjectionOptions, ScreenProjectionResult } from "./camera/world-to-screen.js";
 export type { FreeCamera } from "./camera/free-camera.js";
+export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
+export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { computeMaxExtents } from "./mesh/compute-max-extents.js";
+export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
-export type { Material, MaterialRenderFeatures, MaterialView } from "./material/material.js";
+export type { Material, MaterialRenderFeatures, MaterialView, StencilState } from "./material/material.js";
 export type {
     ShaderMaterial,
     ShaderMaterialOptions,
@@ -338,11 +1003,14 @@ export type {
     ShaderDefineValue,
     ShaderDefineMap,
     ShaderDefine,
+    ShaderAttributeFormats,
 } from "./material/shader/shader-material.js";
 export type {
     PbrMaterialProps,
     ClearCoatProps,
     AnisotropyProps,
+    SheenProps,
+    IridescenceProps,
     SubSurfaceProps,
     TranslucencyProps,
     ThicknessProps,
@@ -353,13 +1021,17 @@ export type { PointLight } from "./light/point-light.js";
 export type { DirectionalLight } from "./light/directional-light.js";
 export type { SpotLight } from "./light/spot-light.js";
 export type { Texture2D, Texture2DOptions } from "./texture/texture-2d.js";
+export { getTextureMetadata, getTextureTransform, setTextureTransform, getTextureCoordinateIndex, hasTextureTransform } from "./texture/texture-metadata.js";
+export type { TextureMetadata, TextureTransform, TextureSamplerMetadata, TextureCapabilities } from "./texture/texture-metadata.js";
 export type { ShadowGenerator } from "./shadow/shadow-generator.js";
 export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-directional-shadow-generator.js";
 export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
+export type { CsmStaticCacheOptions } from "./shadow/enable-csm-static-cache.js";
+export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions, CsmStaticRefitScheduler } from "./shadow/csm-refit-gate.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
-export type { AnimationGroup } from "./animation/animation-group.js";
+export type { AnimationGroup, TargetedAnimation } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
 export type {
     AnimationKeyframe,
@@ -372,6 +1044,7 @@ export type {
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
+export type { BoxOptions } from "./mesh/create-box.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
@@ -387,10 +1060,17 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
-export type { GpuPicker, PickOptions } from "./picking/gpu-picker.js";
+export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDataAttribute } from "./picking/gpu-picker.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
+export { pickWithRay, pickMeshesWithRay } from "./picking/ray-pick.js";
+export type { RayPickOptions } from "./picking/ray-pick.js";
+export { pickWithRayPrecise, pickMeshesWithRayPrecise } from "./picking/precise-ray-pick.js";
+export type { PreciseRayPickOptions, TrianglePickingPredicate } from "./picking/precise-ray-pick.js";
+export { createPickingRay } from "./picking/ray.js";
+export type { Ray } from "./picking/ray.js";
+export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
 export { createUtilityLayer, registerUtilityLayer, disposeUtilityLayer } from "./gizmo/utility-layer.js";
@@ -425,12 +1105,12 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 
 // ─── Sprites (2D) ────────────────────────────────────────────────────
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
-export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
+export { createGridSpriteAtlas, loadSpriteAtlas, disposeSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
+export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendOneOne, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -439,13 +1119,24 @@ export {
     clearSprite2DLayer,
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
-    setSprite2DUvOffset,
 } from "./sprite/sprite-2d.js";
+export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisibleBoundsToRef, centerSprite2DView } from "./sprite/sprite-2d-view.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
+export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
+export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
+export type { Sprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
+export { enableSprite2DInstanceParams, setSprite2DInstanceParamsIndex, setSprite2DInstanceParams } from "./sprite/sprite-2d-instance-params.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
 export { createSprite2DCustomShader } from "./sprite/sprite-custom-shader.js";
 export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
 export { addSprite2D, updateSprite2D, removeSprite2D, setSprite2DFrame, getSprite2DHandleIndex, isSprite2DHandleAlive } from "./sprite/sprite-2d-handle.js";
+export type { Sprite2DYSortOptions, Sprite2DYSortState } from "./sprite/sprite-2d-y-sort.js";
+export { enableSprite2DYSort, disableSprite2DYSort, setSprite2DYSortBias } from "./sprite/sprite-2d-y-sort.js";
+export { setSprite2DYSortHandleBias } from "./sprite/sprite-2d-handle-y-sort.js";
+export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
+export { pickSprite2D } from "./sprite/picking/pick-sprite-2d.js";
+export type { BillboardPickInfo } from "./sprite/picking/pick-billboard.js";
+export { pickBillboardSprite } from "./sprite/picking/pick-billboard.js";
 export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
 // ─── World-space billboards ────────────────────────────────────────
 export type {
@@ -519,6 +1210,32 @@ export {
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
 
+// ─── Node Particles (NPE) ────────────────────────────────────────────
+export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export { normalizeNodeParticleGraph } from "./particle/node/npe-graph-plumbing.js";
+export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
+export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
+export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
+export { buildNodeParticleSetWithBlendModes, enableNodeParticleBlendModes } from "./particle/node/npe-blend-modes.js";
+export type { NodeParticleEmitterProvider } from "./particle/node/npe-emitter-provider.js";
+export { buildNodeParticleSetWithEmitterProvider, withNodeParticleEmitterProvider } from "./particle/node/npe-emitter-provider.js";
+export { buildNodeParticleSetWithNoiseTextures } from "./particle/node/npe-noise.js";
+export { buildNodeParticleSetWithTextureUpdates } from "./particle/node/npe-texture-updates.js";
+export type { ParticleSystem } from "./particle/particle-system.js";
+export { animateParticleSystem, startParticleSystem, stopParticleSystem, isParticleSystemStarted } from "./particle/particle-system.js";
+export type { RegisterNodeParticleOptions } from "./particle/particle-scene.js";
+export { registerNodeParticleSet, getParticleSystems } from "./particle/particle-scene.js";
+export { createParticleBillboard, syncParticleBillboard } from "./particle/particle-billboard.js";
+export type { ParticleSprite2DBridge, ParticleSprite2DBridgeOptions, RegisterNodeParticleSet2DOptions, NodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
+export { createParticleSprite2DBridge, syncParticleSprite2DBridge, registerNodeParticleSet2D, disposeNodeParticleSet2DBinding } from "./particle/particle-sprite-2d.js";
+export type { ParticleSprite2DBlendModesBridge, NodeParticleSet2DBlendModesBinding } from "./particle/particle-sprite-2d-blend-modes.js";
+export {
+    createParticleSprite2DBridgeWithBlendModes,
+    syncParticleSprite2DBridgeWithBlendModes,
+    registerNodeParticleSet2DWithBlendModes,
+    disposeNodeParticleSet2DBlendModesBinding,
+} from "./particle/particle-sprite-2d-blend-modes.js";
+
 // ─── Text ────────────────────────────────────────────────────────────
 export type { Font } from "./text/font.js";
 export { loadFont, createFontFromBuffer } from "./text/font.js";
@@ -543,12 +1260,40 @@ export {
     unregisterTextRenderer,
     disposeTextRenderer,
 } from "./text/text-renderer.js";
+export { setFontWeightOffset } from "./text/set-font-weight-offset.js";
+export { loadFontWeightOffset } from "./text/load-font-weight-offset.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,
+    getPhysicsWorlds,
+    getPhysicsBodies,
+    getPhysicsConstraints,
+    getPhysicsBodyWorld,
+    getPhysicsBodyPrestepType,
+    getPhysicsBodyShape,
+    getPhysicsBodyMassPropertiesToRef,
+    getPhysicsBodyLinearDamping,
+    setPhysicsBodyLinearDamping,
+    getPhysicsBodyAngularDamping,
+    setPhysicsBodyAngularDamping,
+    getPhysicsBodyGravityFactor,
+    setPhysicsBodyGravityFactor,
+    getPhysicsBodyLinearVelocityToRef,
+    getPhysicsBodyAngularVelocityToRef,
+    getPhysicsShapeType,
+    getPhysicsShapeParameters,
+    getPhysicsShapeMaterialToRef,
+    getPhysicsShapeFilterMembershipMask,
+    getPhysicsShapeFilterCollideMask,
+    getPhysicsShapeDensity,
+    getPhysicsShapeChildCount,
+    isPhysicsConstraintEnabled,
+    setPhysicsConstraintEnabled,
     enableHavokFloatingOrigin,
+    enableHavokThinInstancePhysics,
     createPhysicsBody,
+    getPhysicsBodyInstanceCount,
     createPhysicsShape,
     createPhysicsAggregate,
     createPhysicsConstraint,
@@ -556,11 +1301,14 @@ export {
     getPhysicsGravity,
     setPhysicsTimestep,
     getPhysicsTimestep,
+    setPhysicsTimestepMs,
+    getPhysicsTimestepMs,
     onPhysicsAfterStep,
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
     setPhysicsBodyShape,
     setPhysicsBodyPreStep,
+    setPhysicsBodyPrestepType,
     applyPhysicsBodyImpulse,
     applyPhysicsBodyForce,
     addPhysicsShapeChild,
@@ -569,21 +1317,27 @@ export {
     setPhysicsShapeFilterCollideMask,
     setPhysicsShapeMaterial,
     setPhysicsBodyMass,
-    setPhysicsBodyMassProperties,
     applyPhysicsImpulse,
     setPhysicsBodyLinearVelocity,
     getPhysicsBodyLinearVelocity,
+    getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
+    releasePhysicsConstraint,
     releasePhysicsShape,
     disposePhysics,
     PhysicsShapeType,
     PhysicsMotionType,
+    PhysicsPrestepType,
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
+export { setPhysicsBodyMassProperties } from "./physics/havok-body-mass-properties.js";
+export { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "./physics/havok-rotation-locks.js";
+export { enableHavokThinInstancePhysicsSync } from "./physics/enable-havok-thin-instance-physics-sync.js";
+export { enableHavokThinInstanceAdvancedPhysics } from "./physics/havok-thin-instance-advanced.js";
 export type {
     PhysicsWorld,
     PhysicsBody,
@@ -592,25 +1346,51 @@ export type {
     PhysicsConstraint,
     PhysicsShapeOptions,
     PhysicsShapeParameters,
+    PhysicsShapeMaterial,
     PhysicsAggregateOptions,
     PhysicsMassProperties,
+    PhysicsRotationAxis,
     PhysicsConstraintOptions,
     PhysicsConstraintLimit,
 } from "./physics/havok.js";
 export { createHeightFieldShape } from "./physics/havok-heightfield.js";
 export type { HeightFieldShapeOptions } from "./physics/havok-heightfield.js";
-export { shapeProximity, shapeCast } from "./physics/havok-queries.js";
-export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult } from "./physics/havok-queries.js";
-export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
+export { shapeProximity, shapeCast, physicsRaycast } from "./physics/havok-queries.js";
+export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult, RaycastQuery, RaycastResult } from "./physics/havok-queries.js";
+export { setPhysicsBodyCollisionEventsEnabled, onPhysicsCollision } from "./physics/havok-collision.js";
+export type { PhysicsCollisionInfo } from "./physics/havok-collision.js";
+export { setPhysicsShapeIsTrigger, onPhysicsTrigger, onPhysicsTriggerBodies } from "./physics/havok-trigger.js";
+export type { PhysicsTriggerBodyInfo, PhysicsTriggerInfo } from "./physics/havok-trigger.js";
+export {
+    createPhysicsViewer,
+    showPhysicsBody,
+    showPhysicsConstraint,
+    hidePhysicsBody,
+    getPhysicsConstraintDebug,
+    hidePhysicsConstraint,
+    disposePhysicsViewer,
+} from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
+export {
+    createPhysicsCharacterController,
+    getPhysicsCharacterControllerBody,
+    PhysicsCharacterController,
+    CharacterSupportedState,
+    CharacterCollisionObservable,
+} from "./physics/character-controller.js";
+export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
+export { calculatePhysicsCharacterMovementToRef } from "./physics/character-controller-to-ref.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
     createNavigationPluginAsync,
+    disposeNavigationPlugin,
     createNavMesh,
     createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
+    findClosestPointWithin,
+    findClosestPointWithinInto,
     computePath,
     createNavCrowd,
     addAgent,
@@ -623,9 +1403,193 @@ export {
     setNavigationRandomSeed,
     getNavigationRandomSeed,
     raycast,
+    navRayBlocked,
+    navRayBlockedFast,
     addBoxObstacle,
     addCylinderObstacle,
     removeObstacle,
     updateNavMeshObstacles,
 } from "./navigation/navigation.js";
 export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
+
+// ─── Audio (AudioV2 port) ────────────────────────────────────────────
+export { createAudioEngineAsync, disposeAudioEngine, unlockAudioEngineAsync, setMasterVolume, getMasterVolume } from "./audio/audio-engine.js";
+export type { AudioEngine, AudioEngineOptions, AudioEngineState } from "./audio/audio-engine.js";
+export { createAudioEngineMediaStream, disposeAudioEngineMediaStream } from "./audio/media-stream-output.js";
+export type { AudioEngineMediaStream } from "./audio/media-stream-output.js";
+export { createSoundAsync, playSound, pauseSound, resumeSound, stopSound, disposeSound, setSoundVolume, SoundState } from "./audio/static-sound.js";
+export type { StaticSound, StaticSoundOptions, StaticSoundPlayOptions, StaticSoundStopOptions } from "./audio/static-sound.js";
+export {
+    createStreamingSoundAsync,
+    preloadStreamingInstanceAsync,
+    preloadStreamingInstancesAsync,
+    playStreamingSound,
+    pauseStreamingSound,
+    resumeStreamingSound,
+    stopStreamingSound,
+    disposeStreamingSound,
+    setStreamingSoundVolume,
+} from "./audio/streaming-sound.js";
+export type { StreamingSound, StreamingSoundOptions, StreamingSoundPlayOptions, StreamingSoundSource } from "./audio/streaming-sound.js";
+export { createAudioBusAsync, disposeAudioBus, setBusVolume } from "./audio/audio-bus.js";
+export type { AudioBus, AudioBusOptions, PrimaryAudioBus } from "./audio/audio-bus.js";
+export type { MainBus } from "./audio/bus.js";
+export {
+    enableSpatial,
+    setSpatialPosition,
+    setSpatialOrientation,
+    attachSpatialTarget,
+    detachSpatialTarget,
+    setSpatialListener,
+    setSpatialListenerPosition,
+    updateSpatialAudio,
+    setSpatialAutoUpdate,
+} from "./audio/spatial.js";
+export type { SpatialSoundOptions, SpatialListenerOptions, SpatialTarget, SpatialAttachmentType } from "./audio/spatial.js";
+export { enableStereo, setStereoPan } from "./audio/stereo.js";
+export type { StereoSoundOptions } from "./audio/stereo.js";
+export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData, getByteTimeDomainData, getFloatTimeDomainData } from "./audio/analyzer.js";
+export type { AudioAnalyzerOptions } from "./audio/analyzer.js";
+export type { AudioGraphHost } from "./audio/host-types.js";
+export { createSoundSourceAsync, createMicrophoneSoundSourceAsync, setSoundSourceVolume, disposeSoundSource } from "./audio/sound-source.js";
+export type { AudioInputSource, SoundSourceOptions } from "./audio/sound-source.js";
+export { createUnmuteUI, setUnmuteUIEnabled, disposeUnmuteUI } from "./audio/unmute-ui.js";
+export type { UnmuteUI, UnmuteUIOptions } from "./audio/unmute-ui.js";
+export { createAudioVisualizer, renderAudioVisualizerFrame, startAudioVisualizer, stopAudioVisualizer, disposeAudioVisualizer } from "./audio/visualizer.js";
+export type { AudioVisualizer, AudioVisualizerOptions, AudioVisualizerMode } from "./audio/visualizer.js";
+export { createSoundBufferAsync } from "./audio/sound-buffer.js";
+export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./audio/sound-buffer.js";
+export type { AudioSignal } from "./audio/audio-signal.js";
+export type { AudioRampShape, RampOptions } from "./audio/audio-param.js";
+
+// ─── Flow graph (visual scripting / glTF KHR_interactivity runtime) ───
+export type { FgBlock, FgDataSocket, FgGraph, FgSignalSocket, FgValue } from "./flow-graph/index.js";
+export { FgEventType, FgType } from "./flow-graph/index.js";
+export type { FgBlockDef, FgBlockShape } from "./flow-graph/index.js";
+export { FgBlockType } from "./flow-graph/index.js";
+export type { FgAccessor, FgCapabilities, FgContext, FgEnv, FgPendingTask, FgWiring } from "./flow-graph/index.js";
+export type { FgEventBus, FgEventHandler, FgEventPayload } from "./flow-graph/index.js";
+export { clearFgEventBus, createFgEventBus, flushFgEvents, pumpFgEvent, queueFgEvent, stopFgEventPropagation, subscribeFgEvent } from "./flow-graph/index.js";
+export { animationTypeForFgType, coerceValue, defaultForType, FgAnimationValueType } from "./flow-graph/index.js";
+export type { FgInteger, FgMatrix2D, FgMatrix3D } from "./flow-graph/index.js";
+export { fgInt, fgMatrix2D, fgMatrix3D, isFgInt, isFgMatrix2D, isFgMatrix3D } from "./flow-graph/index.js";
+export { getBlockDef } from "./flow-graph/index.js";
+export { attachFlowGraph, detachFlowGraph, runFlowGraphs, addFlowGraph, dispatchFlowGraphEvent, flowGraphBus, flowGraphRuntimes } from "./flow-graph/index.js";
+export { dispatchFlowGraphPointerPick, enableFlowGraphPointerPicking } from "./flow-graph/index.js";
+export type { FgNodeSpec, FgVariableSpec } from "./flow-graph/index.js";
+export { buildFgGraph } from "./flow-graph/index.js";
+export type {
+    EditorValueParseOptions,
+    ParsedEditorFlowGraphs,
+    SerializedEditorBlock,
+    SerializedEditorConnection,
+    SerializedEditorContext,
+    SerializedEditorGraph,
+} from "./flow-graph/index.js";
+export { addFlowGraphEditorJson, parseFlowGraphEditorJson } from "./flow-graph/index.js";
+export type { FgRuntime } from "./flow-graph/index.js";
+export {
+    activateSignal,
+    addPending,
+    cancelPendingForBlock,
+    compactPending,
+    createFgContext,
+    createFgEnv,
+    createFgRuntime,
+    disposeFlowGraph,
+    getDataValue,
+    setDataValue,
+    startFlowGraph,
+    stillPending,
+    tickFlowGraph,
+} from "./flow-graph/index.js";
+
+// ─── MeshLoD (opt-in, tree-shakable) ─────────────────────────────────
+// Clustered level-of-detail streaming for large static meshes. Importing the
+// facade has no side effects and pulls in no runtime/decoder/material chunks;
+// those load only when loadMeshLoD is first called, so non-MeshLoD scenes fetch
+// zero MeshLoD bytes.
+export {
+    loadMeshLoD,
+    createMeshLoDInstance,
+    addMeshLoDToScene,
+    removeMeshLoDFromScene,
+    setMeshLoDScreenSpaceError,
+    setMeshLoDCacheBudget,
+    setMeshLoDStreamingPaused,
+    setMeshLoDDebugView,
+    setMeshLoDSelectionMode,
+    getMeshLoDDiagnostics,
+    disposeMeshLoDAsset,
+    isMeshLoDError,
+} from "./mesh-lod/mesh-lod.js";
+export type {
+    MeshLoDSource,
+    MeshLoDAssetState,
+    MeshLoDSelectionMode,
+    MeshLoDDebugView,
+    MeshLoDRequestOptions,
+    MeshLoDLoadOptions,
+    MeshLoDMetadata,
+    MeshLoDDiagnostics,
+    MeshLoDAsset,
+    MeshLoDInstanceOptions,
+    MeshLoDInstance,
+    MeshLoDError,
+    MeshLoDErrorCode,
+} from "./mesh-lod/mesh-lod.js";
+
+// Accessibility (optional scene descriptions, roles, and ARIA attributes).
+export {
+    createAccessibilityTree,
+    addAccessibilityNode,
+    updateAccessibilityNode,
+    removeAccessibilityNode,
+    disposeAccessibilityTree,
+    onAccessibilityTreeChanged,
+    batchAccessibilityUpdates,
+} from "./accessibility/accessibility-tree.js";
+export type { AccessibilityTag, AccessibilityNode, AccessibilityNodeOptions, AccessibilityTree } from "./accessibility/accessibility-tree.js";
+export { createHtmlTwin, updateHtmlTwin, getHtmlTwinElement, disposeHtmlTwin } from "./accessibility/html-twin.js";
+export type { HtmlTwin, HtmlTwinOptions } from "./accessibility/html-twin.js";
+export {
+    createSceneAccessibility,
+    updateSceneAccessibility,
+    getAccessibilityNode,
+    getAccessibilityTag,
+    setAccessibilityTag,
+    setAccessibilityParent,
+    disposeSceneAccessibility,
+} from "./accessibility/scene-accessibility.js";
+export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
+export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
+export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";
+
+// Optional pure-JavaScript navigation, independently loaded alongside Recast.
+export type {
+    NavcatManager,
+    NavcatNode,
+    NavcatFilter,
+    NavcatOptions,
+    NavcatLocation,
+    NavcatNearestResult,
+    NavcatPathPoint,
+    NavcatPathResult,
+    NavcatPathOptions,
+    NavcatRaycastResult,
+    NavcatMoveResult,
+    NavcatConnectionOptions,
+    NavcatConnection,
+    NavcatGeometry,
+    NavcatBuildOptions,
+    NavcatDebugGeometry,
+    NavcatDebugOptions,
+} from "./navigation/navcat-types.js";
+export { createNavcatManager, replaceNavcatMesh, exportNavcatMesh, setNavcatFilter, disposeNavcatManager } from "./navigation/navcat.js";
+export { findNavcatNearestPoly, findNavcatPath, raycastNavcat, moveAlongNavcatSurface } from "./navigation/navcat-queries.js";
+export { extractNavcatGeometry } from "./navigation/navcat-geometry.js";
+export { generateNavcatMesh } from "./navigation/navcat-generation.js";
+export { addNavcatConnection, removeNavcatConnection, isNavcatConnectionConnected } from "./navigation/navcat-connections.js";
+export { createNavcatDebugGeometry } from "./navigation/navcat-debug.js";
+export { enableGaussianPointSplatting, disableGaussianPointSplatting } from "./gaussian-point-splatting/gaussian-point-splatting.js";
+export type { GaussianPointSplatting, GaussianPointSplattingProgress, GaussianPointSplattingOptions } from "./gaussian-point-splatting/gaussian-point-splatting.js";

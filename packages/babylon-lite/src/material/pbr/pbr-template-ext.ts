@@ -7,6 +7,7 @@
  */
 
 import type { UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -59,8 +60,11 @@ export function createPbrTemplateExt(flags: {
     _hasVertexColor: boolean;
     /** @internal */
     _hasUv2: boolean;
-    /** @internal */
-    _hasOcclusionUv2: boolean;
+    /** @internal Per-channel UV1 selection bitmask (see pbr-material.ts). Decoded locally. */
+    _uv2Mask: number;
+    /** @internal features2 bitfield — read locally for orm-unpack (occlusion split) without
+     *  adding a flag branch to the shared composer. */
+    _features2?: number;
     /** @internal */
     _hasAnyNormal: boolean;
     /** @internal */
@@ -68,17 +72,38 @@ export function createPbrTemplateExt(flags: {
     /** @internal */
     _hasSpecGloss: boolean;
 }): PbrTemplateExt {
-    const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasOcclusionUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
+    const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
+    // Per-channel UV1 (TEXCOORD_1) selection. Bit literals mirror the gltf slow-path encode:
+    // baseColor=1, orm=2, normal=4, emissive=8, specGloss=16, occlusion=32. Bit 64 is claimed by
+    // the opt-in PBR lightmap extension only to signal that the material needs UV2. Only honoured when the
+    // uv2 vertex attribute is actually present (_hasUv2); otherwise every channel falls back to
+    // input.uv so the shader never references a missing uv2 varying.
+    const uv2Mask = _hasUv2 ? flags._uv2Mask : 0;
+    const baseUvFor = (bit: number): string => (uv2Mask & bit ? "input.uv2" : "input.uv");
+    const _hasOcclusionUv2 = !!(uv2Mask & 32);
+    // orm-unpack: occlusion sampled from the ORM texture with its own UV transform.
+    // PBR2_OCCL_UV_SPLIT is defined locally (not in shared pbr-flag-bits.ts) per GUIDANCE
+    // §4c′ — it is set in uv-transform-fragment.detect and read only here, both lazy.
+    const PBR2_OCCL_UV_SPLIT = 1 << 28;
+    // Gated on `_hasUvTransform` as well as the bit: the split arm samples at
+    // `occlUV`, which the prelude below only declares under a UV transform, and
+    // "occlusion carries its OWN transform" is meaningless without one. The bit
+    // alone is reachable without a transform — uv-transform-fragment's `detect`
+    // sets it from `occlusionTexture` presence, independently of `_hasUvTx` —
+    // so the two guards must agree or the emitted reference has no declaration.
+    const _hasOcclusionSplit = _hasUvTransform && ((flags._features2 ?? 0) & PBR2_OCCL_UV_SPLIT) !== 0;
 
     // ── UV transform helpers ────────────────────────────────────
     const uvTransformUboFields = (name: string): UboField[] => [
         { _name: `${name}UVm`, _type: "vec4<f32>" },
         { _name: `${name}UVt`, _type: "vec4<f32>" },
     ];
-    const uvVarName = (name: string) => (_hasUvTransform ? `${name}UV` : "input.uv");
-    const uvTransformDecl = (name: string) => (_hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "");
+    // Each channel's sampled UV: with a UV transform it becomes a `${name}UV` local (built from
+    // the channel's base UV set); without a transform it is the base UV set (input.uv / input.uv2).
+    const uvVarName = (name: string, bit: number) => (_hasUvTransform ? `${name}UV` : baseUvFor(bit));
+    const uvTransformDecl = (name: string, bit: number) => (_hasUvTransform ? wgsl`let ${name}UV = txfUV(${baseUvFor(bit)}, material.${name}UVm, material.${name}UVt.xy);\n` : "");
     const UV_TRANSFORM_HELPER_WGSL = _hasUvTransform
-        ? `fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
+        ? wgsl`fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
 return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
 }
 `
@@ -90,7 +115,7 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
         extraVertexAttributes.push({ _name: "uv2", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
     if (_hasVertexColor) {
-        extraVertexAttributes.push({ _name: "color", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 });
+        extraVertexAttributes.push({ _name: "color", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
     }
 
     // ── Extra varyings ──────────────────────────────────────────
@@ -99,7 +124,7 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
         extraVaryings.push({ _name: "uv2", _type: "vec2<f32>" });
     }
     if (_hasVertexColor) {
-        extraVaryings.push({ _name: "vColor", _type: "vec3<f32>" });
+        extraVaryings.push({ _name: "vColor", _type: "vec4<f32>" });
     }
 
     // ── Extra material UBO fields ────────────────────────────────
@@ -110,6 +135,9 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
             extraMaterialUboFields.push(...uvTransformUboFields("normal"));
         }
         extraMaterialUboFields.push(...uvTransformUboFields("orm"));
+        if (_hasOcclusionSplit) {
+            extraMaterialUboFields.push(...uvTransformUboFields("occl"));
+        }
         if (_hasEmissiveTexture) {
             extraMaterialUboFields.push(...uvTransformUboFields("emissive"));
         }
@@ -140,27 +168,29 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const fragmentHelpers = UV_TRANSFORM_HELPER_WGSL;
 
     // ── Fragment prelude ────────────────────────────────────────
+    // Bit literal per channel (1/2/4/8/16) selects its base UV set inside the transform.
     const fragmentPrelude = _hasUvTransform
-        ? uvTransformDecl("baseColor") +
-          (_hasAnyNormal ? uvTransformDecl("normal") : "") +
-          uvTransformDecl("orm") +
-          (_hasEmissiveTexture ? uvTransformDecl("emissive") : "") +
-          (_hasSpecGloss ? uvTransformDecl("specGloss") : "")
+        ? uvTransformDecl("baseColor", 1) +
+          (_hasAnyNormal ? uvTransformDecl("normal", 4) : "") +
+          uvTransformDecl("orm", 2) +
+          (_hasOcclusionSplit ? uvTransformDecl("occl", 0) : "") +
+          (_hasEmissiveTexture ? uvTransformDecl("emissive", 8) : "") +
+          (_hasSpecGloss ? uvTransformDecl("specGloss", 16) : "")
         : "";
 
     // ── UV expressions ──────────────────────────────────────────
-    const uvForBaseColor = uvVarName("baseColor");
-    const uvForNormal = uvVarName("normal");
-    const uvForOrm = uvVarName("orm");
-    const uvForEmissive = uvVarName("emissive");
-    const uvForSpecGloss = uvVarName("specGloss");
+    const uvForBaseColor = uvVarName("baseColor", 1);
+    const uvForNormal = uvVarName("normal", 4);
+    const uvForOrm = uvVarName("orm", 2);
+    const uvForEmissive = uvVarName("emissive", 8);
+    const uvForSpecGloss = uvVarName("specGloss", 16);
 
     // ── Base color modifier ─────────────────────────────────────
     // NOTE: backtick (not double-quote) so the bundle's WGSL identifier mangler
     // rewrites `baseColor` here to match the mangled `var bc=` declaration in
     // pbr-template.ts. A plain string is skipped by the mangler and produces
     // `unresolved value 'baseColor'` in the bundled shader. See thin-instance-fragment.ts.
-    const baseColorMod = _hasVertexColor ? `\nbaseColor *= input.vColor;` : "";
+    const baseColorMod = _hasVertexColor ? wgsl`\nbaseColor *= input.vColor.rgb;\nalpha *= input.vColor.a;` : "";
 
     // ── Normal scale modifier ───────────────────────────────────
     // When ext is active, emit the scaledNormal line (replaces default normalMapRaw).
@@ -170,7 +200,13 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     // ── Occlusion override ──────────────────────────────────────
     // When hasReflectanceExt=false AND _hasOcclusionUv2=true, override occlusion sampling.
     // When hasReflectanceExt=true, the reflectance fragment handles occlusion.
-    const occlusionOverride = _hasOcclusionUv2 ? "let occlusion = textureSample(occlusionTexture, occlusionSampler_, input.uv2).r;" : null;
+    // orm-unpack: when occlusion has its own UV transform (split), sample the ORM texture
+    // a second time at occlUV so occlusion's animated transform stays independent of MR's.
+    const occlusionOverride = _hasOcclusionUv2
+        ? "let occlusion = textureSample(occlusionTexture, occlusionSampler_, input.uv2).r;"
+        : _hasOcclusionSplit
+          ? "let occlusion = textureSample(ormTexture, ormSampler, occlUV).r;"
+          : null;
 
     return {
         extraVertexAttributes,

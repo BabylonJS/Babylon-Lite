@@ -9,11 +9,222 @@ export interface ResolvedPointer {
     arity: number;
 }
 
-export interface PointerContext {
-    nodes: readonly (SceneNode | undefined)[];
+/** Minimal mutable view of a UV-transform texture slot the pointer writers drive.
+ *  Mirrors the fields `material/pbr/fragments/uv-transform-fragment.ts` reads. */
+export interface PointerUvTexture {
+    uScale?: number;
+    vScale?: number;
+    uOffset?: number;
+    vOffset?: number;
+    /** KHR_texture_transform rotation (radians) — drives the UV matrix's rotation. */
+    uAng?: number;
 }
 
-type PointerFactory = (match: RegExpExecArray, ctx: PointerContext) => ResolvedPointer | null;
+/** Minimal mutable view of a runtime material a pointer can animate. Bumping
+ *  `_uboVersion` makes the renderable re-upload the material UBO next frame. */
+export interface PointerMaterial {
+    /** @internal */
+    _uboVersion: number;
+    baseColorTexture?: PointerUvTexture;
+    emissiveTexture?: PointerUvTexture;
+    normalTexture?: PointerUvTexture;
+    ormTexture?: PointerUvTexture;
+    /** Independent-occlusion UV carrier (orm-unpack); present only when occlusion
+     *  is sampled from the ORM texture with its own transform. */
+    occlusionTexture?: PointerUvTexture;
+    specGlossTexture?: PointerUvTexture;
+    /** @internal Runtime emissive (linear RGB) = emissiveFactor × emissiveStrength. */
+    _emissiveColor?: [number, number, number];
+    /** Runtime base-color factor (linear RGBA). */
+    baseColorFactor?: [number, number, number, number];
+    /** BLEND/MASK factor opacity; absent on an OPAQUE glTF material. */
+    alpha?: number;
+    roughnessFactor?: number;
+    /** @internal Runtime dielectric F0 scale (KHR_materials_ior / _specular). */
+    _metallicF0Factor?: number;
+    /** @internal Runtime grazing specular/F90 weight (KHR_materials_specular). */
+    _specularWeight?: number;
+    /** Runtime glTF normalTexture.scale (drives the lazy normal-scale shader mod). */
+    normalTextureScale?: number;
+    /** Runtime glTF occlusionTexture.strength (applied by the lazy reflectance ext). */
+    occlusionStrength?: number;
+    /** @internal Runtime true-transmissive flag (KHR_materials_transmission). */
+    _transmissive?: boolean;
+    /** @internal Runtime subsurface sub-object (transmission / volume / diffuse-transmission). */
+    _subsurface?: {
+        refraction?: { intensity?: number; indexOfRefraction?: number; useThicknessAsDepth?: boolean };
+        thickness?: { min?: number; max?: number; useGlTFChannel?: boolean };
+        tint?: { color?: [number, number, number]; atDistance?: number };
+    };
+    /** @internal Runtime iridescence sub-object (KHR_materials_iridescence). */
+    _iridescence?: {
+        isEnabled?: boolean;
+        intensity?: number;
+        indexOfRefraction?: number;
+        maximumThickness?: number;
+    };
+    /** @internal Animated glTF emissiveFactor, kept separate so an emissiveStrength
+     *  pointer can recombine without losing the factor (and vice-versa). */
+    _animEmissiveFactor?: [number, number, number];
+    /** @internal Animated KHR_materials_emissive_strength value. */
+    _animEmissiveStrength?: number;
+}
+
+export type BaseColorPointerMaterial = Pick<PointerMaterial, "_uboVersion" | "baseColorFactor" | "alpha">;
+
+/** Apply one base-color sample without sharing or modifying the raw glTF factor. */
+export function _writeBaseColorFactor(mat: BaseColorPointerMaterial, out: Float32Array, off: number): void {
+    mat.baseColorFactor![0] = out[off]!;
+    mat.baseColorFactor![1] = out[off + 1]!;
+    mat.baseColorFactor![2] = out[off + 2]!;
+    mat.baseColorFactor![3] = 1;
+    if (mat.alpha !== undefined) {
+        mat.alpha = out[off + 3]!;
+    }
+    mat._uboVersion++;
+}
+
+/** Recompute the emissive color = factor × strength after either input animates, then
+ *  flag the material UBO for re-upload. */
+function applyEmissive(mat: PointerMaterial): void {
+    if (!mat._emissiveColor) {
+        return;
+    }
+    const f = mat._animEmissiveFactor ?? [0, 0, 0];
+    const s = mat._animEmissiveStrength ?? 1;
+    mat._emissiveColor[0] = f[0]! * s;
+    mat._emissiveColor[1] = f[1]! * s;
+    mat._emissiveColor[2] = f[2]! * s;
+    mat._uboVersion++;
+}
+
+export interface PointerContext {
+    nodes: readonly (SceneNode | undefined)[];
+    /** Runtime materials indexed by glTF material index (built by the pointer feature). */
+    materials?: readonly (PointerMaterial | undefined)[];
+    /** @internal glTF JSON object key used to resolve KHR_lights_punctual definitions. */
+    _json?: object;
+}
+
+export type PointerFactory = (match: RegExpExecArray, ctx: PointerContext) => ResolvedPointer | null;
+
+// Maps a KHR_texture_transform pointer's texture-slot segment to the material field.
+// NOTE: metallicRoughnessTexture is intentionally absent. Babylon.js has a long-standing
+// loader bug — its KHR_animation_pointer registration for the MR texture transform omits the
+// `/extensions/KHR_texture_transform/` path segment (and adds a stray leading slash), so the
+// interpolation is never attached and BJS silently skips animating the MR texture transform
+// (offset/scale/rotation stay frozen at their static load-time values). We match BJS for parity
+// (verified: animating MR regresses scene241 col1 MR rows by ~4.9 MAD vs the immutable golden,
+// which renders these spheres with static roughness/metallic). Do NOT animate the MR transform.
+const TX_SLOT: Record<string, keyof PointerMaterial> = {
+    "pbrMetallicRoughness/baseColorTexture": "baseColorTexture",
+    emissiveTexture: "emissiveTexture",
+    normalTexture: "normalTexture",
+    occlusionTexture: "ormTexture",
+};
+
+/** Resolve a glTF material-extension texture slot to the runtime PBR material's
+ *  mutable texture object, so a KHR_texture_transform pointer on an extension
+ *  texture can drive its UV transform. Only slots whose fragment actually applies
+ *  the per-texture UV transform are listed (others would animate a value the
+ *  shader ignores). */
+function resolveExtTexture(mat: PointerMaterial, ext: string, field: string): PointerUvTexture | undefined {
+    const m = mat as unknown as {
+        _iridescence?: Record<string, unknown>;
+        _sheen?: Record<string, unknown>;
+        _clearCoat?: Record<string, unknown>;
+        _anisotropy?: Record<string, unknown>;
+        _reflectanceTexture?: PointerUvTexture;
+        _metallicReflectanceTexture?: PointerUvTexture;
+        _subsurface?: { translucency?: Record<string, unknown>; refraction?: Record<string, unknown>; thickness?: Record<string, unknown> };
+    };
+    switch (`${ext}/${field}`) {
+        case "KHR_materials_iridescence/iridescenceTexture":
+            return privateTexture(m._iridescence, "texture");
+        case "KHR_materials_iridescence/iridescenceThicknessTexture":
+            return privateTexture(m._iridescence, "thicknessTexture");
+        case "KHR_materials_anisotropy/anisotropyTexture":
+            return privateTexture(m._anisotropy, "texture");
+        case "KHR_materials_sheen/sheenColorTexture":
+            return privateTexture(m._sheen, "texture");
+        case "KHR_materials_sheen/sheenRoughnessTexture":
+            // Drive the separate roughness texture when present; otherwise roughness shares
+            // the colour texture (.a), so fall back to animating that single sheen texture.
+            return privateTexture(m._sheen, (m._sheen as { roughnessTexture?: unknown })?.roughnessTexture ? "roughnessTexture" : "texture");
+        case "KHR_materials_clearcoat/clearcoatTexture":
+            return privateTexture(m._clearCoat, "texture");
+        case "KHR_materials_clearcoat/clearcoatRoughnessTexture":
+            return privateTexture(m._clearCoat, "roughnessTexture");
+        case "KHR_materials_clearcoat/clearcoatNormalTexture":
+            return privateTexture(m._clearCoat, "bumpTexture");
+        case "KHR_materials_specular/specularTexture":
+            return privateTexture(m as unknown as Record<string, unknown>, "_metallicReflectanceTexture");
+        case "KHR_materials_specular/specularColorTexture":
+            return privateTexture(m as unknown as Record<string, unknown>, "_reflectanceTexture");
+        case "KHR_materials_diffuse_transmission/diffuseTransmissionColorTexture":
+            return privateTexture(m._subsurface?.translucency, "colorTexture");
+        case "KHR_materials_diffuse_transmission/diffuseTransmissionTexture":
+            return privateTexture(m._subsurface?.translucency, "intensityTexture");
+        case "KHR_materials_transmission/transmissionTexture":
+            return privateTexture(m._subsurface?.refraction, "texture");
+        case "KHR_materials_volume/thicknessTexture":
+            return privateTexture(m._subsurface?.thickness, "texture");
+        default:
+            return undefined;
+    }
+}
+
+/** Make a material's animated texture wrapper a private copy so that mutating its
+ *  per-texture UV-transform fields (uOffset/uScale/uAng…) never leaks into other
+ *  materials that share the same cached GPU texture wrapper. This happens when one
+ *  image (e.g. a packed ORM/occlusion texture, or a sheen texture) is reused across
+ *  several materials and only some of them animate its KHR_texture_transform — the
+ *  shared wrapper would otherwise be mutated for all of them. The clone shares GPU
+ *  resources (texture/view/sampler) via object spread; only the transform fields
+ *  become independent. Idempotent via `_animPriv` so multiple channels
+ *  (offset/scale/rotation) on the same slot reuse one private wrapper.
+ *  @param parent - The object holding the texture slot (the material, or an extension
+ *  sub-object such as `material._sheen`).
+ *  @param key - The slot field name on `parent`. */
+function privateTexture(parent: Record<string, unknown> | undefined, key: string): PointerUvTexture | undefined {
+    const cur = parent?.[key] as (PointerUvTexture & { _animPriv?: true }) | undefined;
+    if (!cur) {
+        return undefined;
+    }
+    if (cur._animPriv) {
+        return cur;
+    }
+    const clone = { ...(cur as object), _animPriv: true } as PointerUvTexture & { _animPriv: true };
+    parent![key] = clone;
+    return clone;
+}
+
+/** Build an offset/scale/rotation UV-transform writer for a resolved texture. */
+function uvTransformWriter(mat: PointerMaterial, tex: PointerUvTexture, kind: string | undefined): ResolvedPointer {
+    if (kind === "rotation") {
+        return {
+            arity: 1,
+            writer: (out, off) => {
+                tex.uAng = out[off]!;
+                mat._uboVersion++;
+            },
+        };
+    }
+    const isScale = kind === "scale";
+    return {
+        arity: 2,
+        writer: (out, off) => {
+            if (isScale) {
+                tex.uScale = out[off]!;
+                tex.vScale = out[off + 1]!;
+            } else {
+                tex.uOffset = out[off]!;
+                tex.vOffset = out[off + 1]!;
+            }
+            mat._uboVersion++;
+        },
+    };
+}
 
 const _registry: [RegExp, PointerFactory][] = [
     // /nodes/{n}/extensions/KHR_node_visibility/visible — scalar (0 = hidden).
@@ -35,7 +246,105 @@ const _registry: [RegExp, PointerFactory][] = [
             };
         },
     ],
+    // /materials/{m}/.../KHR_texture_transform/{offset|scale|rotation} — animated UV
+    // transform. offset/scale are vec2; rotation is a scalar (radians). Mutates the
+    // slot texture's uOffset/vOffset, uScale/vScale, or uAng and bumps the material's
+    // UBO version so the renderable re-uploads the UV matrix.
+    [
+        /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
+        (m, ctx) => {
+            const mat = ctx.materials?.[+m[1]!];
+            if (!mat) {
+                return null;
+            }
+            const slot = m[2]!;
+            // orm-unpack: when occlusion has its own UV carrier (independent transform), drive
+            // that; otherwise occlusion shares the single ORM transform (TX_SLOT fallback).
+            const field: keyof PointerMaterial = slot === "occlusionTexture" && mat.occlusionTexture ? "occlusionTexture" : TX_SLOT[slot]!;
+            // Isolate the animated slot so mutating its UV transform can't leak into other
+            // materials that share the same cached texture wrapper (e.g. a reused ORM image).
+            const tex = privateTexture(mat as unknown as Record<string, unknown>, field as string);
+            if (!tex) {
+                return null;
+            }
+            return uvTransformWriter(mat, tex, m[3]);
+        },
+    ],
+    // /materials/{m}/extensions/{KHR_materials_*}/{slot}Texture/.../KHR_texture_transform/{offset|scale|rotation}
+    // — animated UV transform on a material-extension texture (iridescence, sheen,
+    // diffuse transmission). Resolves the runtime extension texture and drives its
+    // UV transform exactly like the core slots.
+    [
+        /^\/materials\/(\d+)\/extensions\/(KHR_materials_\w+)\/(\w+Texture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
+        (m, ctx) => {
+            const mat = ctx.materials?.[+m[1]!];
+            const tex = mat && resolveExtTexture(mat, m[2]!, m[3]!);
+            if (!mat || !tex) {
+                return null;
+            }
+            return uvTransformWriter(mat, tex, m[4]);
+        },
+    ],
+    // /materials/{m}/emissiveFactor — vec3. Recombined with emissiveStrength into
+    // the runtime emissive color. Requires the material to carry an emissive slot
+    // (non-zero load-time emissiveFactor) so the UBO field exists.
+    [
+        /^\/materials\/(\d+)\/emissiveFactor$/,
+        (m, ctx) => {
+            const mat = ctx.materials?.[+m[1]!];
+            if (!mat?._emissiveColor) {
+                return null;
+            }
+            return {
+                arity: 3,
+                writer: (out, off) => {
+                    mat._animEmissiveFactor = [out[off]!, out[off + 1]!, out[off + 2]!];
+                    applyEmissive(mat);
+                },
+            };
+        },
+    ],
+    // /materials/{m}/extensions/KHR_materials_emissive_strength/emissiveStrength —
+    // scalar HDR multiplier on emissiveFactor.
+    [
+        /^\/materials\/(\d+)\/extensions\/KHR_materials_emissive_strength\/emissiveStrength$/,
+        (m, ctx) => {
+            const mat = ctx.materials?.[+m[1]!];
+            if (!mat?._emissiveColor) {
+                return null;
+            }
+            return {
+                arity: 1,
+                writer: (out, off) => {
+                    mat._animEmissiveStrength = out[off]!;
+                    applyEmissive(mat);
+                },
+            };
+        },
+    ],
+    // /materials/{m}/pbrMetallicRoughness/baseColorFactor — vec4 linear RGBA factor.
+    // Only animatable when the material already carries a baseColorFactor UBO slot.
+    [
+        /^\/materials\/(\d+)\/pbrMetallicRoughness\/baseColorFactor$/,
+        (m, ctx) => {
+            const mat = ctx.materials?.[+m[1]!];
+            if (!mat?.baseColorFactor) {
+                return null;
+            }
+            return {
+                arity: 4,
+                writer: (out, off) => _writeBaseColorFactor(mat, out, off),
+            };
+        },
+    ],
 ];
+
+/** Append extended (lazily-loaded) pointer handlers to the resolver registry.
+ *  Called once by animation-pointer-ext.ts on import. ES-module caching makes the
+ *  import idempotent, so the handlers are appended exactly once per process. */
+export function _appendPointerHandlers(handlers: [RegExp, PointerFactory][]): void {
+    _registry.push(...handlers);
+}
 
 const _warned = new Set<string>();
 

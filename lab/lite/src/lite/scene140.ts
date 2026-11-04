@@ -22,6 +22,7 @@ import {
     parseNodeMaterialFromSnippet,
     setShadowTaskCasterMeshes,
     setMorphTargetWeights,
+    enableMorphTargetShadows,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
@@ -72,6 +73,7 @@ async function main(): Promise<void> {
               forceRefreshEveryFrame: true,
           });
     if (sg) {
+        enableMorphTargetShadows(sg);
         setShadowTaskCasterMeshes(sg, shadowHoleProbe ? [box] : [sphere, box]);
     }
     light.shadowGenerator = sg ?? undefined;

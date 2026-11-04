@@ -25,7 +25,8 @@ struct FragmentInput {
 
 @fragment
 fn main(input: FragmentInput) -> @location(0) vec4<f32> {
-  let dir = normalize(input.positionUVW);
+  // Environment shader patches may reassign the direction.
+  var dir = normalize(input.positionUVW);
   var color = textureSampleLevel(envCubemap, envSampler, dir, 0.0).rgb;
 
   // Image processing: exposure → gamma → contrast (matches BJS applyImageProcessing)

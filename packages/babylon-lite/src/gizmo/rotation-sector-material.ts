@@ -12,26 +12,26 @@
 
 import type { ShaderMaterial } from "../material/shader/shader-material.js";
 import { createShaderMaterial, setShaderUniform } from "../material/shader/shader-material.js";
+import { wgsl } from "../shader/wgsl.js";
 
-const VERTEX_SOURCE = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
+const VERTEX_SOURCE = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;out.position=shaderSystem.worldViewProjection*vec4<f32>(input.position,1.0);out.uv=input.uv;return out;}`;
 
 // Port of BJS rotation sector GLSL:
 //   uv = vUV - 0.5
 //   angle = atan2(uv.y, uv.x) + π
-//   delta = frontFacing ? angles.y : -angles.y
+//   delta = -angles.y
 //   begin = angles.x - delta * angles.z
 //   start = min(begin, begin + delta)
 //   end   = max(begin, begin + delta)
 //   ... wrap and accumulate intensity over 5 periods
 //   colour = vec4(rotationColor, min(intensity * 0.25, 0.8)) * (1 - step(0.5, len))
-const FRAGMENT_SOURCE = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
-@fragment fn mainFragment(input:VertexOutput,@builtin(front_facing) frontFacing:bool)->@location(0) vec4<f32>{
+const FRAGMENT_SOURCE = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
+@fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{
 let TWO_PI:f32=6.283185307;
 let uv:vec2<f32>=input.uv-vec2<f32>(0.5,0.5);
 var angle:f32=atan2(uv.y,uv.x)+3.141592;
-let yAngle:f32=shaderUniforms.angles.y;
-let delta:f32=select(-yAngle,yAngle,frontFacing);
+let delta:f32=-shaderUniforms.angles.y;
 let begin:f32=shaderUniforms.angles.x-delta*shaderUniforms.angles.z;
 var startA:f32=select(begin+delta,begin,begin<begin+delta);
 var endA:f32=select(begin+delta,begin,begin>begin+delta);

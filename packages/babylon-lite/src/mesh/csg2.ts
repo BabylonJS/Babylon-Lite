@@ -4,9 +4,10 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { normalizeVec3TupleOrUp } from "../math/normalize-vec3-tuple-or-up.js";
 import { createMeshFromData } from "./mesh-factories.js";
+import { _rightHanded } from "#coordinate-system";
 
 declare const csg2SolidBrand: unique symbol;
 
@@ -57,8 +58,18 @@ async function getRuntimeAsync(): Promise<Csg2Runtime> {
 
     csg2RuntimePromise = (async () => {
         const [module, wasm] = await Promise.all([import("manifold-3d"), import("manifold-3d/manifold.wasm?url")]);
+        // Alias `import.meta.url` to a local before the `new URL(...)` below. Webpack's URL parser
+        // only resolves `new URL(<literal>, import.meta.url)` to an emitted asset; with our runtime
+        // first arg (`wasm.default`) it can't, so it emits a "Critical dependency: the request of a
+        // dependency is an expression" warning (fatal for consumers that treat warnings as errors).
+        // The alias hides that literal pattern from the heuristic. Nothing is lost: no bundler can
+        // statically resolve the runtime arg, so none was emitting an asset here — the wasm URL comes
+        // from the `?url` import above. `import.meta.url` is still substituted normally (it's a
+        // meta-property rewrite, not gated on the `new URL` position), so runtime behavior and
+        // relative-URL resolution are identical under webpack, Vite/Rollup, esbuild, and Parcel.
+        const moduleUrl = import.meta.url;
         const manifoldModule: ManifoldToplevel = await module.default({
-            locateFile: () => new URL(wasm.default, import.meta.url).href,
+            locateFile: () => new URL(wasm.default, moduleUrl).href,
         });
         manifoldModule.setup();
         const runtime = {
@@ -69,6 +80,9 @@ async function getRuntimeAsync(): Promise<Csg2Runtime> {
         csg2Runtime = runtime;
         return runtime;
     })();
+    void csg2RuntimePromise.catch(() => {
+        csg2RuntimePromise = null;
+    });
 
     return csg2RuntimePromise;
 }
@@ -98,9 +112,9 @@ function transformPoint(m: Mat4, x: number, y: number, z: number): [number, numb
 
 function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: number): [number, number, number] {
     if (inv) {
-        return normalizeVec3(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
+        return normalizeVec3TupleOrUp(inv[0]! * x + inv[1]! * y + inv[2]! * z, inv[4]! * x + inv[5]! * y + inv[6]! * z, inv[8]! * x + inv[9]! * y + inv[10]! * z, 1e-20);
     }
-    return normalizeVec3(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
+    return normalizeVec3TupleOrUp(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
 }
 
 function requireCpuGeometry(mesh: Mesh): GeometryBuffers {
@@ -138,7 +152,7 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     const numProp = 8;
     const vertProperties = new F32(vertexCount * numProp);
     const world = mesh.worldMatrix;
-    const invWorld = mat4Invert(world);
+    const invWorld = invertMat4(world);
 
     for (let i = 0; i < vertexCount; i++) {
         const p = i * 3;
@@ -162,6 +176,16 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
         triVerts[i + 1] = geometry.indices[i + 1]!;
         triVerts[i + 2] = geometry.indices[i]!;
     }
+    if (_rightHanded !== null) {
+        // Like Babylon.js, a right-handed engine keeps the authored order of a mesh whose world winding is
+        // reflected (a glTF mesh, authored for the left-handed import flip, under an identity root), so
+        // Manifold still receives outward-wound triangles.
+        const w = world as unknown as ArrayLike<number>;
+        const det = w[0]! * (w[5]! * w[10]! - w[9]! * w[6]!) - w[4]! * (w[1]! * w[10]! - w[9]! * w[2]!) + w[8]! * (w[1]! * w[6]! - w[5]! * w[2]!);
+        if (det < 0 !== (mesh._authoredSign ?? 1) < 0) {
+            triVerts.set(geometry.indices);
+        }
+    }
 
     const manifoldMesh = new runtime.Mesh({
         numProp,
@@ -173,7 +197,15 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     manifoldMesh.merge();
 
     try {
-        return solidFromManifold(new runtime.Manifold(manifoldMesh), numProp);
+        // manifold-3d's `setup()` replaces `Manifold` with a factory function,
+        // `function (mesh) { const m = new ManifoldCtor(mesh); …; return m; }`, that has no
+        // `this` reference. A downstream esbuild/terser minifier (the dist build, or any
+        // consumer bundling `build/lib`) rewrites such a function expression into an arrow
+        // function, which is NOT constructable — so `new runtime.Manifold(mesh)` throws
+        // "Manifold is not a constructor". The wrapper returns the solid whether invoked with
+        // or without `new`, so call it as a plain factory to stay robust under minification.
+        const manifoldFactory = runtime.Manifold as unknown as (mesh: ManifoldMesh) => Manifold;
+        return solidFromManifold(manifoldFactory(manifoldMesh), numProp);
     } catch (err) {
         throw new Error(`Error while creating CSG2 from mesh "${mesh.name}".`, { cause: err });
     }

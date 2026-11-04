@@ -1,6 +1,6 @@
 import type { Camera, NormalizedViewport } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
-import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
+import { writeLookAtWorldMat4LHIntoBuffer } from "../math/write-look-at-world-mat4-lh-into-buffer.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
@@ -8,6 +8,7 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
@@ -34,6 +35,13 @@ export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentab
     inertia: number;
     /** Inertia coefficient for panning (0 = instant stop, 0.9 = default). */
     panningInertia: number;
+
+    /** Mouse-drag orbit sensitivity (HIGHER = slower rotation). Babylon default 1000. */
+    angularSensibility: number;
+    /** Right-drag panning sensitivity in pixels-per-unit (LOWER = faster pan). Babylon default 50. */
+    panningSensibility: number;
+    /** Wheel-zoom sensitivity (HIGHER = slower zoom). Babylon default 3. */
+    wheelPrecision: number;
 
     /** Per-frame inertial offsets — accumulated by input, applied & decayed each frame. */
     inertialAlphaOffset: number;
@@ -91,26 +99,14 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        const eye = localEyePosition();
-        const v = mat4LookAtLH(eye, cam.target, Vec3Up);
-        const m = _localMat as unknown as Mat4Storage;
-        // Transpose upper 3×3 of view = camera-to-world rotation; translation = eye.
-        m[0] = v[0]!;
-        m[1] = v[4]!;
-        m[2] = v[8]!;
-        m[3] = 0;
-        m[4] = v[1]!;
-        m[5] = v[5]!;
-        m[6] = v[9]!;
-        m[7] = 0;
-        m[8] = v[2]!;
-        m[9] = v[6]!;
-        m[10] = v[10]!;
-        m[11] = 0;
-        m[12] = eye.x;
-        m[13] = eye.y;
-        m[14] = eye.z;
-        m[15] = 1;
+        writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, localEyePosition(), cam.target, Vec3Up);
+        if (_rightHanded !== null) {
+            // Right-handed cameras look down their local -Z with +X to the right: W_RH = W_LH·diag(-1, 1, -1).
+            const s = _localMat as unknown as Mat4Storage;
+            for (const i of [0, 1, 2, 8, 9, 10]) {
+                s[i] = -s[i]!;
+            }
+        }
         return _localMat;
     }
 
@@ -131,6 +127,9 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 
         inertia: 0.9,
         panningInertia: 0.9,
+        angularSensibility: 1000,
+        panningSensibility: 50,
+        wheelPrecision: 3,
         inertialAlphaOffset: 0,
         inertialBetaOffset: 0,
         inertialRadiusOffset: 0,

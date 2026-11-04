@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     // Load texture with KTX compressed format selection + PNG fallback
     groundMat.diffuseTexture = await loadKtxTexture2D(
         engine,
-        "https://raw.githubusercontent.com/Vinc3r/BJS-KTX-textures/master/BJS/UVgrid.png",
+        "https://cdn.jsdelivr.net/gh/Vinc3r/BJS-KTX-textures@master/BJS/UVgrid.png",
         ["-astc.ktx", "-dxt.ktx", "-etc2.ktx"]
     );
     groundMat.uvScale = [2, 2];

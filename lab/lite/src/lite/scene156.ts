@@ -86,8 +86,8 @@ async function main(): Promise<void> {
     if (Number.isFinite(seekTime)) {
         const seekMs = seekTime * 1000;
         if (seekMs <= FADE_START_MS) {
-            positiveGroup.currentFrame = seekTime;
-            negativeGroup.currentFrame = seekTime;
+            positiveGroup.currentTime = seekTime;
+            negativeGroup.currentTime = seekTime;
             pauseAnimation(positiveGroup);
             pauseAnimation(negativeGroup);
             updateAnimationManager(manager, 0);

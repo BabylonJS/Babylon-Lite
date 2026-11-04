@@ -1,7 +1,27 @@
-import { describe, it, expect } from "vitest";
-import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+    accessorIsStrided,
+    buildInterleavedMesh,
+    buildInterleavedPartial,
+    installLazyCpu,
+    computeAabbStrided,
+} from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { assembleMaterial } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
 const FLOAT = 5126;
+const UNSIGNED_BYTE = 5121;
+
+interface TestAccessor {
+    bufferView?: number;
+    byteOffset?: number;
+    componentType: number;
+    count: number;
+    type: string;
+    normalized?: boolean;
+}
 
 /** Build a minimal glTF JSON + binary chunk with POSITION+NORMAL interleaved in
  *  one stride-24 bufferView (offset 0 and 12), plus a tight TEXCOORD_0 bufferView. */
@@ -16,12 +36,13 @@ function makeInterleavedAsset() {
     new Float32Array(buf, interleaved.byteLength, uvs.length).set(uvs);
     const binChunk = new DataView(buf);
 
+    const accessors: TestAccessor[] = [
+        { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC3" }, // POSITION
+        { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: verts, type: "VEC3" }, // NORMAL
+        { bufferView: 1, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC2" }, // TEXCOORD_0
+    ];
     const json = {
-        accessors: [
-            { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC3" }, // POSITION
-            { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: verts, type: "VEC3" }, // NORMAL
-            { bufferView: 1, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC2" }, // TEXCOORD_0
-        ],
+        accessors,
         bufferViews: [
             { buffer: 0, byteOffset: 0, byteLength: interleaved.byteLength, byteStride: 24 },
             { buffer: 0, byteOffset: interleaved.byteLength, byteLength: uvs.byteLength }, // tight, no stride
@@ -32,6 +53,94 @@ function makeInterleavedAsset() {
 }
 
 describe("gltf-interleave", () => {
+    it("installs ShaderMaterial packing for both plain and thin draws", async () => {
+        vi.resetModules();
+        const [{ buildInterleavedMesh: buildMesh, buildInterleavedPartial: buildPartial }, { createPbrMaterial: createPbr }, { createShaderMaterial }, shaderRender, thin] =
+            await Promise.all([
+                import("../../../packages/babylon-lite/src/loader-gltf/gltf-interleave"),
+                import("../../../packages/babylon-lite/src/material/pbr/pbr-material"),
+                import("../../../packages/babylon-lite/src/material/shader/shader-material"),
+                import("../../../packages/babylon-lite/src/material/shader/shader-renderable"),
+                import("../../../packages/babylon-lite/src/mesh/thin-instance"),
+            ]);
+        const interleaved = new Float32Array([-0.5, -0.5, 0, 1, 0, 0, 1, 0.5, -0.5, 0, 0, 1, 0, 1, 0, 0.5, 0, 0, 0, 1, 1]);
+        const json = {
+            accessors: [
+                { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: 3, type: "VEC3" },
+                { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: 3, type: "VEC4" },
+            ],
+            bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: interleaved.byteLength, byteStride: 28 }],
+        };
+        const primitive = { attributes: { POSITION: 0, COLOR_0: 1 } };
+        const material = createPbr();
+        const source = {
+            ...(await buildPartial(json, new DataView(interleaved.buffer), primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, new DataView(interleaved.buffer), 0, "", []),
+        };
+        const device = {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
+                size: Number(descriptor.size),
+                getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                unmap: vi.fn(),
+                destroy: vi.fn(),
+            })),
+            createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout),
+            createBindGroup: vi.fn((descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup),
+            createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
+            createShaderModule: vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule),
+            createRenderPipeline: vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline),
+            queue: { writeBuffer: vi.fn() },
+        } as unknown as GPUDevice;
+        const engine = { _device: device, canvas: { width: 1, height: 1 } } as unknown as EngineContext;
+        const mesh = buildMesh(engine, source, 0, material);
+        mesh.material = createShaderMaterial({
+            attributes: ["position", "color"],
+            vertexSource: wgsl`@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4f{return vec4f(input.position,1);}`,
+            fragmentSource: wgsl`@fragment fn mainFragment()->@location(0) vec4f{return vec4f(1);}`,
+        });
+        const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() } as never;
+        const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 } as const;
+        const expectPacking = (pipeline: GPURenderPipeline): void => {
+            const layouts = (pipeline as unknown as GPURenderPipelineDescriptor).vertex.buffers!;
+            expect(layouts[0]).toMatchObject({ arrayStride: 28, attributes: [{ offset: 0 }] });
+            // The loader normalizes COLOR_0 into a tight float32x4 buffer. The real asset
+            // catches the noncanonical POSITION stride; synthetic layout tests cover offsets.
+            expect(layouts[1]).toMatchObject({ arrayStride: 16, attributes: [{ offset: 0 }] });
+        };
+
+        expectPacking(shaderRender.buildShaderMaterialRenderables(scene, [mesh]).renderables[0]!.bind(engine, signature).pipeline);
+        thin.setThinInstances(mesh, new Float32Array(16), 1);
+        expectPacking((await shaderRender.buildShaderGroup(scene, [mesh])).renderables[0]!.bind(engine, signature).pipeline);
+    });
+
+    it("publishes GPU packing by attribute name while preserving the CPU accessor records", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const source = {
+            ...(await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, binChunk, 0, "", []),
+        };
+        const engine = {
+            _device: {
+                createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
+                    label: descriptor.label,
+                    size: descriptor.size,
+                    getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                    unmap: vi.fn(),
+                    destroy: vi.fn(),
+                })),
+            },
+        } as unknown as EngineContext;
+        const mesh = buildInterleavedMesh(engine, source, 0, createPbrMaterial());
+        expect(Object.getPrototypeOf(mesh._gpu._vbLayout)).toBeNull();
+        expect(mesh._gpu._vbLayout!.position).toBe(source._vb!._p);
+        expect(mesh._gpu._vbLayout!.normal).toBe(source._vb!._n);
+        expect(mesh._gpu._vbLayout!.uv).toBeUndefined();
+        expect(mesh._gpu.positionBuffer).toBe(mesh._gpu.normalBuffer);
+        expect(mesh._gpu.uvBuffer).not.toBe(mesh._gpu.positionBuffer);
+        expect(source._vb!._p!._stride).toBe(24);
+        expect(source._vb!._n!._offset).toBe(12);
+    });
+
     it("accessorIsStrided detects interleaved vs tight bufferViews", () => {
         const { json } = makeInterleavedAsset();
         expect(accessorIsStrided(json, 0)).toBe(true); // POSITION (stride 24 ≠ 12)
@@ -39,9 +148,21 @@ describe("gltf-interleave", () => {
         expect(accessorIsStrided(json, 2)).toBe(false); // TEXCOORD_0 (no byteStride)
     });
 
-    it("leaves strided POSITION/NORMAL CPU fields null (lazy) but records the GPU layout", () => {
+    it("treats a zero-initialized accessor without a bufferView as tight", () => {
+        expect(
+            accessorIsStrided(
+                {
+                    accessors: [{ componentType: FLOAT, count: 2, type: "VEC3" }],
+                    bufferViews: [],
+                },
+                0
+            )
+        ).toBe(false);
+    });
+
+    it("leaves strided POSITION/NORMAL CPU fields null (lazy) but records the GPU layout", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         expect(m).toBeDefined();
 
         // Strided position/normal are NOT de-strided eagerly — the tight copy is
@@ -52,16 +173,18 @@ describe("gltf-interleave", () => {
         expect(Array.from(m._uvs!)).toEqual([0.1, 0.2, 0.3, 0.4].map((v) => Math.fround(v)));
         expect(m._vertexCount).toBe(2);
 
-        // GPU interleave layout: shared stride 24, position at 0, normal at 12.
+        // GPU interleave layout: shared stride 24, position at byte offset 0, normal at 12.
+        // The byte offset is baked into the pipeline vertex layout (attributes[].offset);
+        // the draw binds the shared buffer at offset 0 (matches Babylon.js WebGPU).
         expect(m._vb!._p).toMatchObject({ _stride: 24, _offset: 0, _bufferView: 0 });
         expect(m._vb!._n).toMatchObject({ _stride: 24, _offset: 12, _bufferView: 0 });
         // The tight UV attribute has no interleave entry.
         expect(m._vb!._u).toBeUndefined();
     });
 
-    it("installLazyCpu de-strides position/normal only on first access", () => {
+    it("installLazyCpu de-strides position/normal only on first access", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         const mesh: Record<string, unknown> = {};
         installLazyCpu(mesh, m as never);
 
@@ -75,17 +198,65 @@ describe("gltf-interleave", () => {
         expect(mesh._cpuPositions).toBe(mesh._cpuPositions);
     });
 
-    it("computeAabbStrided folds the AABB directly from the strided slice", () => {
+    it("shares lazy CPU copies across meshes created from one cached primitive", async () => {
         const { json, binChunk, primitive } = makeInterleavedAsset();
-        const m = buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0)!;
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+        const first: Record<string, unknown> = {};
+        const second: Record<string, unknown> = {};
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        installLazyCpu(first, m as never);
+        installLazyCpu(second, m as never);
+
+        expect(m._vb!._p!._cpu).toBeUndefined();
+        expect(m._vb!._n!._cpu).toBeUndefined();
+        const positions = first._cpuPositions;
+        const normals = first._cpuNormals;
+        expect(m._vb!._p!._cpu).toBe(positions);
+        expect(m._vb!._n!._cpu).toBe(normals);
+        expect(second._cpuPositions).toBe(positions);
+        expect(second._cpuNormals).toBe(normals);
+
+        const replacement = new Float32Array([7, 8, 9]);
+        second._cpuPositions = replacement;
+        expect(second._cpuPositions).toBe(replacement);
+        expect(first._cpuPositions).toBe(positions);
+    });
+
+    it("computeAabbStrided folds the AABB directly from the strided slice", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const m = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
         const [min, max] = computeAabbStrided(m._vb!._p!);
         expect(min).toEqual([1, 2, 3]);
         expect(max).toEqual([4, 5, 6]);
     });
 
-    it("returns undefined for a fully-tight primitive (caller uses the tight path)", () => {
+    it("returns undefined for a fully-tight primitive (caller uses the tight path)", async () => {
         const { json, binChunk } = makeInterleavedAsset();
         const tightOnly = { attributes: { TEXCOORD_0: 2 } };
-        expect(buildInterleavedPartial(json, binChunk, tightOnly, new Float32Array(16) as never, 0)).toBeUndefined();
+        expect(await buildInterleavedPartial(json, binChunk, tightOnly, new Float32Array(16) as never, 0)).toBeUndefined();
+    });
+
+    it("materializes zero-initialized colors when another attribute is interleaved", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const colorIndex = json.accessors.length;
+        json.accessors.push({ componentType: FLOAT, count: 2, type: "VEC3" });
+        (primitive.attributes as Record<string, number>).COLOR_0 = colorIndex;
+
+        const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+
+        expect(Array.from(partial._colors!)).toEqual([0, 0, 0, 1, 0, 0, 0, 1]);
+    });
+
+    it("materializes zero-initialized normalized UVs when another attribute is interleaved", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const uvIndex = json.accessors.length;
+        json.accessors.push({ componentType: UNSIGNED_BYTE, count: 2, type: "VEC2", normalized: true });
+        (primitive.attributes as Record<string, number>).TEXCOORD_0 = uvIndex;
+
+        const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+
+        expect(Array.from(partial._uvs!)).toEqual([0, 0, 0, 0]);
     });
 });

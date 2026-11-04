@@ -30,8 +30,9 @@ import {
     type SceneContext,
     type ShaderMaterial,
 } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
@@ -42,7 +43,7 @@ const vertexSource = `struct VertexOutput {
   return out;
 }`;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
@@ -50,12 +51,8 @@ const fragmentSource = `struct VertexOutput {
   return vec4<f32>(input.color.rgb * shaderUniforms.brightness, 1.0);
 }`;
 
-const CUBE_POS = new Float32Array([
-    -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5,
-]);
-const CUBE_IDX = new Uint32Array([
-    0, 1, 2, 0, 2, 3, 1, 5, 6, 1, 6, 2, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
-]);
+const CUBE_POS = new Float32Array([-0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5]);
+const CUBE_IDX = new Uint32Array([0, 1, 2, 0, 2, 3, 1, 5, 6, 1, 6, 2, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0]);
 const GRAVITY = 22;
 
 interface Particle {
@@ -98,18 +95,8 @@ export class TetrisParticles {
         // enqueueMaterialSwap silently skips the mesh — so particles spawn but
         // never get a renderable. A single hidden dummy mesh added now forces
         // the group to be registered + built before the scene boots.
-        const dummyColors = new Float32Array(CUBE_POS.length / 3 * 4);
-        const dummy = createMeshFromData(
-            engine,
-            "tetris_particle_seed",
-            CUBE_POS,
-            new Float32Array(CUBE_POS.length),
-            CUBE_IDX,
-            undefined,
-            undefined,
-            undefined,
-            dummyColors,
-        );
+        const dummyColors = new Float32Array((CUBE_POS.length / 3) * 4);
+        const dummy = createMeshFromData(engine, "tetris_particle_seed", CUBE_POS, new Float32Array(CUBE_POS.length), CUBE_IDX, undefined, undefined, undefined, dummyColors);
         dummy.material = this.material;
         // Park the dummy just below the floor and shrink it to nothing so it
         // can never be visible. (Renderable still gets built, which is the
@@ -143,7 +130,7 @@ export class TetrisParticles {
                 undefined,
                 undefined,
                 undefined,
-                colors,
+                colors
             );
             mesh.material = this.material;
             mesh.renderOrder = 2000;

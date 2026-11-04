@@ -8,6 +8,7 @@
  * Zero global state. Zero WGSL strings in the composer. All shader
  * text lives in fragment modules for full tree-shaking.
  */
+import type { WgslSource } from "./wgsl.js";
 
 // ── WGSL types ──────────────────────────────────────────────────
 
@@ -65,14 +66,23 @@ export type BindingKind =
           /** @internal */
           readonly _kind: "texture";
           /** @internal */
-          readonly _textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_depth_2d_array" | "texture_2d<u32>";
+          readonly _textureType: "texture_2d<f32>" | "texture_2d_array<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_depth_2d_array" | "texture_2d<u32>";
           /** @internal */
           readonly _sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
       }
     /** @internal */
     | { readonly _kind: "sampler"; readonly _samplerType: "sampler" | "sampler_non_filtering" | "sampler_comparison" }
     /** @internal */
-    | { readonly _kind: "storage-texture"; readonly _access: "read" | "write" | "read_write"; readonly _format: string };
+    | {
+          /** @internal */
+          readonly _kind: "storage-texture";
+          /** @internal WGSL storage access token. */
+          readonly _access: "read" | "write" | "read_write";
+          /** @internal WebGPU bind-group-layout access value. */
+          readonly _gpuAccess: GPUStorageTextureAccess;
+          /** @internal */
+          readonly _format: string;
+      };
 
 export interface BindingDecl {
     /** @internal WGSL variable name (e.g. "normalTex", "brdfSampler_") */
@@ -99,8 +109,17 @@ export interface BindingDecl {
  *   HOOK_NO_LIGHT_VARS  → BL
  *   HOOK_AI      → AI
  *   HOOK_NI  → NI
+ *
+ * Additional slots without a legacy HOOK_ equivalent:
+ *   AT → alpha-test discard (before shading)
+ *   AC → alpha-cutoff clip
+ *   BC → override color/alpha before the alpha-blend block (e.g. shadow-only)
+ *   BA → luminance-over-alpha accumulation inside the alpha-blend block
+ *   FA → final-alpha override, emitted just before the alpha-blend return so a
+ *        fragment can bypass the luminance-into-alpha bleed (e.g. shadow-only).
+ *        Only present when the template's alpha-blend branch is active.
  */
-export type FragmentSlot = "HF" | "SV" | "AT" | "AC" | "MF" | "BL" | "AS" | "AD" | "AI" | "NI" | "BC" | "BA";
+export type FragmentSlot = "HF" | "SV" | "AT" | "AC" | "MF" | "BL" | "AS" | "AD" | "AI" | "NI" | "BC" | "BA" | "FA";
 
 // ── Vertex injection points ─────────────────────────────────────
 
@@ -119,6 +138,9 @@ export interface ShaderFragment {
     /** @internal Unique ID for dedup and dependency resolution (e.g. "clearcoat", "skeleton") */
     readonly _id: string;
 
+    /** @internal Whether this fragment supplies an alpha source that can require blending. */
+    readonly _alphaBlend?: boolean;
+
     /** @internal Fragment IDs that must be composed before this one */
     readonly _dependencies?: readonly string[];
 
@@ -134,7 +156,7 @@ export interface ShaderFragment {
     readonly _vertexBindings?: readonly BindingDecl[];
 
     /** @internal WGSL code injected at named vertex slots */
-    readonly _vertexSlots?: Partial<Record<VertexSlot, string>>;
+    readonly _vertexSlots?: Partial<Record<VertexSlot, WgslSource>>;
 
     /** @internal Extra pipeline vertex buffer layouts (skeleton joints/weights).
      *  Called with next available shader location. Returns layouts + next location. */
@@ -144,21 +166,24 @@ export interface ShaderFragment {
     readonly _vertexBuiltins?: readonly { readonly _name: string; readonly _builtin: string; readonly _type: string }[];
 
     /** @internal WGSL helper functions / struct definitions injected before `@vertex` fn main */
-    readonly _vertexHelperFunctions?: string;
+    readonly _vertexHelperFunctions?: WgslSource;
 
     // ── Fragment stage ──
 
     /** @internal UBO fields appended to MeshUniforms (mesh bind group) */
     readonly _uboFields?: readonly UboField[];
 
-    /** @internal Extra bindings (textures, samplers) in the fragment shader */
+    /** @internal Extra stage-visible bindings (uniform buffers, textures, samplers). */
     readonly _bindings?: readonly BindingDecl[];
 
     /** @internal WGSL helper functions injected before `@fragment` fn main */
-    readonly _helperFunctions?: string;
+    readonly _helperFunctions?: WgslSource;
 
     /** @internal Code injected at named fragment slots */
-    readonly _fragmentSlots?: Partial<Record<FragmentSlot, string>>;
+    readonly _fragmentSlots?: Partial<Record<FragmentSlot, WgslSource>>;
+
+    /** @internal Optional material-owned post-compose patch. */
+    readonly _pc?: (composed: ComposedShader) => ComposedShader;
 }
 
 // ── Shader template ─────────────────────────────────────────────
@@ -173,9 +198,9 @@ export interface ShaderFragment {
  */
 export interface ShaderTemplate {
     /** @internal Base vertex shader WGSL with slot markers */
-    readonly _vertexTemplate: string;
+    readonly _vertexTemplate: WgslSource;
     /** @internal Base fragment shader WGSL with slot markers */
-    readonly _fragmentTemplate: string;
+    readonly _fragmentTemplate: WgslSource;
     /** @internal Base mesh UBO fields (e.g. world matrix for PBR, or mesh+lights+material for Standard) */
     readonly _baseMeshUboFields: readonly UboField[];
     /** @internal Base vertex attributes (e.g. position, normal) */
@@ -207,10 +232,24 @@ export interface UboSpec {
 
 /** The output of composeShader() — everything needed to create a GPU pipeline */
 export interface ComposedShader {
+    /** @internal Primitive state overrides for the mesh this variant was composed for: non-triangle
+     *  topology, a strip's index format, and mirrored geometry's reversed `frontFace`. Absent for
+     *  the ordinary triangle list, which the pipeline path spells out inline.
+     *
+     *  Both the state and the channel exist for bundle size. Resolving these cases on the shared PBR
+     *  pipeline path cost the topology names and a winding branch in every PBR scene — including the
+     *  vast majority that draw neither — which pushed a dozen scenes past their ceilings; as data it
+     *  costs them only the spread that merges it. And it rides on the composed shader rather than
+     *  being threaded as its own parameter because the composed shader already reaches both pipeline
+     *  builders, so a separate channel cost ~54 bytes of extra parameters and fields.
+     *
+     *  The composition key folds in `meshFeatures`, whose topology and mirror bits this mirrors, so
+     *  a cached variant can never be shared between meshes that disagree about it. */
+    _prim?: GPUPrimitiveState;
     /** @internal Final vertex WGSL source */
-    readonly _vertexWGSL: string;
+    readonly _vertexWGSL: WgslSource;
     /** @internal Final fragment WGSL source */
-    readonly _fragmentWGSL: string;
+    readonly _fragmentWGSL: WgslSource;
     /** @internal Mesh bind group layout descriptor (group 1) */
     readonly _meshBGLDescriptor: GPUBindGroupLayoutDescriptor;
     /** @internal Shadow bind group layout descriptor (group 2), or null */

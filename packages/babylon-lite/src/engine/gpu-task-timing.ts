@@ -1,4 +1,8 @@
 import type { EngineContext } from "./engine.js";
+import type { RenderTask } from "../frame-graph/render-task.js";
+import type { OverdrawCostMeasure } from "../frame-graph/overdraw-probe-run.js";
+
+export type { OverdrawCostMeasure };
 
 /** Availability / lifecycle state for per-frame-graph-task GPU timings. */
 export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
@@ -9,7 +13,7 @@ export interface RenderTaskGpuTiming {
     readonly index: number;
     /** The task's existing frame-graph label (`Task.name`, e.g. `"shadow"`, `"scene"`, `"post-process"`). */
     readonly name: string;
-    /** GPU duration for this task in milliseconds. */
+    /** GPU duration for this task in milliseconds. Task intervals can overlap and are not additive. */
     readonly durationMs: number;
 }
 
@@ -23,8 +27,12 @@ export interface RenderTaskGpuTimings {
     readonly enabled: boolean;
     /** Monotonic profiler frame index for the snapshot. `0` means no measured frame has completed yet. */
     readonly frameIndex: number;
-    /** Measured tasks in frame execution order. Empty until `status === "available"`. */
+    /** Measured tasks in frame execution order. Empty until `status === "available"`.
+     * Tasks that issue no render or compute pass are omitted because standard WebGPU timestamps attach to passes. */
     readonly tasks: readonly RenderTaskGpuTiming[];
+    /** Elapsed GPU time from the earliest measured task begin to the latest measured task end.
+     * Task intervals may overlap on the GPU, so summing `tasks[].durationMs` can overcount this total. */
+    readonly totalDurationMs: number;
     /** Number of tasks skipped in that frame because the profiler's query-set capacity was exceeded. */
     readonly droppedTaskCount: number;
     /** Readback failure message when `status === "error"`. */
@@ -39,16 +47,16 @@ export function isRenderTaskGpuTimingSupported(engine: EngineContext): boolean {
 /** Return the latest task GPU timing snapshot without stalling the GPU or CPU. */
 export function getRenderTaskGpuTimings(engine: EngineContext): RenderTaskGpuTimings {
     if (!isRenderTaskGpuTimingSupported(engine)) {
-        return makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+        return makeTimingSnapshot("unsupported", false, false, 0, [], 0, 0);
     }
     const snapshot = engine._gpuTaskTimingResult;
     if (snapshot) {
         return snapshot;
     }
     if (engine._gpuTaskTimerWanted) {
-        return makeTimingSnapshot("pending", true, true, 0, [], 0);
+        return makeTimingSnapshot("pending", true, true, 0, [], 0, 0);
     }
-    return makeTimingSnapshot("disabled", true, false, 0, [], 0);
+    return makeTimingSnapshot("disabled", true, false, 0, [], 0, 0);
 }
 
 /** Enable or disable per-frame-graph-task GPU timing.
@@ -64,14 +72,15 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
         engine._gpuTaskTimerWanted = false;
         engine._gpuTaskTimerDisable?.();
         engine._gpuTaskTimerDisable = undefined;
+        engine._gpuTaskTimer = undefined;
         const supported = isRenderTaskGpuTimingSupported(engine);
-        engine._gpuTaskTimingResult = makeTimingSnapshot(supported ? "disabled" : "unsupported", supported, false, 0, [], 0);
+        engine._gpuTaskTimingResult = makeTimingSnapshot(supported ? "disabled" : "unsupported", supported, false, 0, [], 0, 0);
         return engine._gpuTaskTimingResult;
     }
 
     if (!isRenderTaskGpuTimingSupported(engine)) {
         engine._gpuTaskTimerWanted = false;
-        engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+        engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0, 0);
         return engine._gpuTaskTimingResult;
     }
 
@@ -82,7 +91,7 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
     const epoch = (engine._gpuTaskTimerEpoch ?? 0) + 1;
     engine._gpuTaskTimerEpoch = epoch;
     engine._gpuTaskTimerWanted = true;
-    engine._gpuTaskTimingResult = makeTimingSnapshot("pending", true, true, 0, [], 0);
+    engine._gpuTaskTimingResult = makeTimingSnapshot("pending", true, true, 0, [], 0, 0);
     const { createGpuTaskTimer, installGpuTaskTimer } = await import("./gpu-task-timer.js");
     if (!engine._gpuTaskTimerWanted || engine._gpuTaskTimerEpoch !== epoch) {
         return getRenderTaskGpuTimings(engine);
@@ -94,7 +103,7 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
     const timer = engine._gpuTaskTimer;
     if (!timer) {
         engine._gpuTaskTimerWanted = false;
-        engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0);
+        engine._gpuTaskTimingResult = makeTimingSnapshot("unsupported", false, false, 0, [], 0, 0);
         return engine._gpuTaskTimingResult;
     }
 
@@ -106,6 +115,18 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
     return getRenderTaskGpuTimings(engine);
 }
 
+/**
+ * Measure the GPU cost of `task`'s overdraw. The task must have rendered at
+ * least once (bindings and scene bind group built). `repeats` defaults to 9.
+ *
+ * The diagnostic implementation is loaded only when the probe is called, so
+ * scenes that do not opt in retain no probe runtime code.
+ */
+export async function measureRenderTaskOverdrawCost(engine: EngineContext, task: RenderTask, options?: { repeats?: number }): Promise<OverdrawCostMeasure> {
+    const { _measureRenderTaskOverdrawCost } = await import("../frame-graph/overdraw-probe-run.js");
+    return _measureRenderTaskOverdrawCost(engine, task, options);
+}
+
 /** @internal */
 export function makeTimingSnapshot(
     status: RenderTaskGpuTimingStatus,
@@ -114,7 +135,8 @@ export function makeTimingSnapshot(
     frameIndex: number,
     tasks: readonly RenderTaskGpuTiming[],
     droppedTaskCount: number,
+    totalDurationMs: number,
     error?: string
 ): RenderTaskGpuTimings {
-    return { status, supported, enabled, frameIndex, tasks, droppedTaskCount, error };
+    return { status, supported, enabled, frameIndex, tasks, totalDurationMs, droppedTaskCount, error };
 }

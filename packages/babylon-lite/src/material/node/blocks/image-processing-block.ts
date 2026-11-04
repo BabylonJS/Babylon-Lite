@@ -9,10 +9,11 @@
  */
 
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function imageProcessingHelper(convertInputToLinearSpace: boolean): string {
-    const linearize = convertInputToLinearSpace ? `rgb = pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(2.2));` : ``;
-    return `fn nme_apply_image_processing(inputColor: vec4<f32>) -> vec4<f32> {
+    const linearize = convertInputToLinearSpace ? wgsl`rgb = pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(2.2));` : ``;
+    return wgsl`fn nme_apply_image_processing(inputColor: vec4<f32>) -> vec4<f32> {
     var rgb = inputColor.rgb;
     ${linearize}
     rgb = rgb * sceneU.vImageInfos.x;
@@ -40,7 +41,7 @@ export const emitter: BlockEmitter = {
         state.fragment.helpers.set(helperKey, imageProcessingHelper(convertInput));
         const color = ctx.cast(ctx.resolve(block, "color", stage, state), "vec4f");
         const t = ctx.temp(state, "ip");
-        state.fragment.body.push(`let ${t} = nme_apply_image_processing(${color.expr});`);
+        state.fragment.body.push(wgsl`let ${t} = nme_apply_image_processing(${color.expr});`);
         if (outputName === "rgb") {
             return { expr: `${t}.rgb`, type: "vec3f" };
         }

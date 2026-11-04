@@ -26,6 +26,7 @@ import {
 import type { Mesh } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
+import { createBlockLoader } from "../shared/scene66-block-loader.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
 
     const material = await parseNodeMaterialFromSnippet(engine, "", {
         json,
+        blockLoader: createBlockLoader(),
         textures: textureOverrides,
         shadowGenerators: [sg],
     });

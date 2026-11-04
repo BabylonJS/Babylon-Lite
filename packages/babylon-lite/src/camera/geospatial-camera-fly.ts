@@ -17,6 +17,8 @@ export interface GeospatialFlyOptions {
     durationMs?: number;
     /** Parabolic "hop" height scale for the centre animation (0 = none). */
     centerHopScale?: number;
+    /** Easing applied to the normalized progress `g` ∈ [0,1]. Default cubic ease-in-out. */
+    ease?: (g: number) => number;
 }
 
 /** Cubic ease-in-out (matches Babylon.js `CubicEase` with `EASINGMODE_EASEINOUT`). */
@@ -75,6 +77,7 @@ export function flyGeospatialCameraToAsync(camera: GeospatialCamera, scene: Scen
 
     const duration = Math.max(1, options.durationMs ?? 1000);
     const hopScale = options.centerHopScale ?? 0;
+    const ease = options.ease ?? easeInOut;
 
     const yaw0 = camera.yaw;
     const pitch0 = camera.pitch;
@@ -95,7 +98,9 @@ export function flyGeospatialCameraToAsync(camera: GeospatialCamera, scene: Scen
         const driver = (deltaMs: number): void => {
             elapsed += deltaMs > 0 ? deltaMs : 1000 / 60;
             const g = Math.min(1, elapsed / duration);
-            const e = easeInOut(g);
+            // Force the final frame to land exactly on the target even if the easing curve
+            // does not satisfy ease(1) === 1, so the flight never resolves short of its goal.
+            const e = g >= 1 ? 1 : ease(g);
 
             const yaw = yaw0 + (targetYaw - yaw0) * e;
             const pitch = pitch0 + (targetPitch - pitch0) * e;

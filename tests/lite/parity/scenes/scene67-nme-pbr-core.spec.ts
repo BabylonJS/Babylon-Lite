@@ -5,7 +5,7 @@
  * uses ReflectionBlock/IBL plus direct lights on a saturated matte base.
  * This is the foundation scene for the scene67-72 PBR-NME phase.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

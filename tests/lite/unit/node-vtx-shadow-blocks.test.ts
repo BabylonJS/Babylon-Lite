@@ -11,7 +11,7 @@ async function compile(source: any, vertex = false, meshCaps?: { hasSkeleton?: b
 }
 
 describe("NME vertex-transform & shadow blocks", () => {
-    it("InstancesBlock emits the _NME_WORLD_MATRIX_ sentinel", async () => {
+    it("InstancesBlock emits uniform and thin-instance world transforms", async () => {
         const g = {
             blocks: [
                 { customType: "BABYLON.InstancesBlock", id: 1, name: "inst", inputs: [], outputs: [{ name: "output" }] },
@@ -45,6 +45,54 @@ describe("NME vertex-transform & shadow blocks", () => {
         };
         const r = await compile(g, true);
         expect(r.vertexWgsl).toContain("meshU.world");
+
+        const instanced = await compile(g, true, { hasInstances: true });
+        expect(instanced.vertexWgsl).toContain("meshU.world * mat4x4<f32>(in.world0, in.world1, in.world2, in.world3)");
+        expect(instanced.state.vertexAttributes.slice(-4)).toEqual([
+            expect.objectContaining({ _name: "world0", _offset: 0, _stepMode: "instance" }),
+            expect.objectContaining({ _name: "world1", _offset: 16, _stepMode: "instance" }),
+            expect.objectContaining({ _name: "world2", _offset: 32, _stepMode: "instance" }),
+            expect.objectContaining({ _name: "world3", _offset: 48, _stepMode: "instance" }),
+        ]);
+    });
+
+    it("InstancesBlock exposes the WebGPU instance index", async () => {
+        const g = {
+            blocks: [
+                { customType: "BABYLON.InstancesBlock", id: 1, name: "inst", inputs: [], outputs: [{ name: "instanceID" }] },
+                {
+                    customType: "BABYLON.VectorMergerBlock",
+                    id: 2,
+                    name: "merge",
+                    inputs: [
+                        { name: "x", targetBlockId: 1, targetConnectionName: "instanceID" },
+                        { name: "y", targetBlockId: 1, targetConnectionName: "instanceID" },
+                        { name: "z", targetBlockId: 1, targetConnectionName: "instanceID" },
+                        { name: "w", targetBlockId: 1, targetConnectionName: "instanceID" },
+                    ],
+                    outputs: [{ name: "xyzw" }],
+                },
+                {
+                    customType: "BABYLON.VertexOutputBlock",
+                    id: 3,
+                    name: "vout",
+                    inputs: [{ name: "vector", targetBlockId: 2, targetConnectionName: "xyzw" }],
+                    outputs: [],
+                },
+                { customType: "BABYLON.InputBlock", id: 4, name: "color", mode: 0, type: 0x20, value: { r: 1, g: 0, b: 0 }, inputs: [], outputs: [{ name: "output" }] },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 5,
+                    name: "out",
+                    inputs: [{ name: "rgb", targetBlockId: 4, targetConnectionName: "output" }],
+                    outputs: [],
+                },
+            ],
+            outputNodes: [5],
+        };
+        const result = await compile(g, true, { hasInstances: true });
+        expect(result.vertexWgsl).toContain("f32(instanceIndex)");
+        expect(result.state.usesInstanceIndex).toBe(true);
     });
 
     it("BonesBlock injects skinning helper", async () => {

@@ -9,389 +9,55 @@
  * chunks that are never loaded (e.g. animation for a static model) are
  * correctly excluded from the manifest numbers.
  */
-import { build, type Plugin } from "vite";
+import { build, defaultClientConditions, normalizePath, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
-import { resolve, dirname, join, extname } from "path";
+import { createHash } from "crypto";
+import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
-import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
-import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
-
-/**
- * Vite plugin: minify WGSL shader text using miniray (whitespace removal + identifier mangling).
- * For `?raw` WGSL imports: miniray minifies whitespace AND short-renames module/local identifiers.
- *   - Caveat 1: miniray's mangler does NOT guard against shadowing module-scope vars (e.g. it may
- *     rename a local to the same letter as a uniform binding). We pass `keepNames: ["u", "in",
- *     "finalColor"]` for `gaussian-splatting.wgsl` to reserve (a) the uniform binding name `u`
- *     so locals don't collide with it (otherwise WGSL parsing fails with "cannot index into
- *     mat3x3"), and (b) the fragment-stage identifiers `in` (parameter) / `finalColor` (local)
- *     that runtime fragment-plugin code (`gsLinearDepthFragment` etc.) references.
- *   - Caveat 2: miniray strips block comments. The GS shaders embed `/* GS_FRAGMENT_* *\/`
- *     markers used by `applyGsFragments` to splice in fragment-plugin code at runtime. We
- *     encode each marker as a `const _GS_FRAGMENT_X_:u32=0u;` declaration before miniray
- *     (which survives with `treeShaking: false`), then decode back to a comment marker
- *     after minification — keeping the runtime API and source format unchanged.
- * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
- * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
- */
-export function wgslMinifyPlugin(opts: { mangle?: boolean } = {}): Plugin {
-    // Identifier mangling shortens scene WGSL to satisfy bundle-size ceilings, but it
-    // rewrites bare tokens (e.g. worldPos -> wp) PER CHUNK. That is only safe when a
-    // shader's struct declaration and all its usages land in the same chunk. The demo
-    // bundler splits code far more aggressively, so the declaration and usage can end up
-    // in different chunks (and esbuild may turn no-substitution templates into plain
-    // strings the mangler skips), producing inconsistent names like "struct member wp
-    // not found". Demos have no size ceilings, so they opt out of mangling entirely.
-    const mangle = opts.mangle !== false;
-    return {
-        name: "wgsl-minify",
-        enforce: "pre",
-        async buildStart() {
-            await initMiniray({});
-        },
-        transform(code: string, id: string) {
-            if (!id.includes(".wgsl")) return null;
-            const match = code.match(/^export default "(.*)"$/s);
-            if (!match) return null;
-            const raw = JSON.parse(`"${match[1]}"`);
-            const isGs = id.includes("gaussian-splatting.wgsl");
-            // Encode `/* GS_FRAGMENT_X *\/` comment markers as const declarations so they
-            // survive miniray's comment stripping. Decoded back below.
-            const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
-            const result = minifyWgslMiniray(encoded, isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : {});
-            let minified = typeof result === "string" ? result : result.code;
-            if (isGs) {
-                minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");
-            }
-            const compact = isGs ? mangleGaussianSplattingWgsl(minified) : minified;
-            return { code: `export default ${JSON.stringify(compact)}`, map: null };
-        },
-        renderChunk(code: string) {
-            // NOTE: the NME inline WGSL mangler (mangleInlineWgsl) was removed. It ran
-            // per-chunk only on "pbr-metallic-roughness-block" chunks, but NME PBR helper
-            // functions / shared bindings (nme_pbr_fresSchlick, nmeBrdfLUT, ...) live in
-            // sibling chunks (pbr-mr-helper-*, iridescence-block) that escaped the filter,
-            // so their definitions stayed unmangled while call sites were mangled — the
-            // assembled shader then failed with "unresolved call target". Renaming across
-            // code-split chunks cannot be done safely per-chunk, so we no longer mangle
-            // these identifiers at all (a small bundle-size cost on NME scenes only).
-            const minified = minifyTemplateWgsl(code, mangle);
-            return { code: minified, map: null };
-        },
-    };
-}
-
-function replaceWgslIdentifiers(code: string, replacements: readonly (readonly [string, string])[]): string {
-    let out = code;
-    for (const [from, to] of replacements) {
-        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
-    }
-    return out;
-}
-
-function mangleGaussianSplattingWgsl(code: string): string {
-    // KEEP IN SYNC with `packages/babylon-lite/src/mesh/GaussianSplatting/gaussian-splatting-pipeline.ts:GS_FIELD_MANGLE`.
-    // The runtime version normalises any spliced fragment-plugin code to use these mangled
-    // names so the WebGPU compiler sees a single consistent identifier set.
-    return replaceWgslIdentifiers(code, [
-        ["world", "w"],
-        ["view", "v"],
-        ["projection", "p"],
-        ["viewport", "vp"],
-        ["focal", "f"],
-        ["dataSize", "ds"],
-        ["alpha", "a"],
-        ["_pad", "_p"],
-        ["vColor", "vc"],
-        ["vPos", "vq"],
-        ["dataUv", "du"],
-        ["splatIndex", "si"],
-        ["corner", "co"],
-        ["center", "ce"],
-        ["color", "cl"],
-        ["covA", "ca"],
-        ["covB", "cb"],
-        ["worldPos", "wp"],
-        ["modelView", "mv"],
-        ["camspace", "cs"],
-        ["pos2d", "p2"],
-        ["bounds", "bd"],
-        ["Vrk", "vr"],
-        ["invZ2", "iz2"],
-        ["invZ", "iz"],
-        ["cov2d", "c2"],
-        ["kernelSize", "ks"],
-        ["radius", "ra"],
-        ["epsilon", "ep"],
-        ["lambda1", "l1"],
-        ["lambda2", "l2"],
-        ["diag", "dg"],
-        ["majorAxis", "ma"],
-        ["minorAxis", "mi"],
-        ["vCenter", "vc2"],
-    ]);
-}
-
-/** Strip spaces around WGSL operators inside template literal content.
- *  When `mangle` is true, also shorten known WGSL identifiers (scene size optimization). */
-function minifyTemplateWgsl(code: string, mangle = true): string {
-    const out: string[] = [];
-    let i = 0;
-    const len = code.length;
-
-    while (i < len) {
-        const ch = code[i]!;
-
-        // Skip regular string literals
-        if (ch === '"' || ch === "'") {
-            const q = ch;
-            let j = i + 1;
-            while (j < len && code[j] !== q) {
-                if (code[j] === "\\") j++;
-                j++;
-            }
-            out.push(code.slice(i, j + 1));
-            i = j + 1;
-            continue;
-        }
-
-        // Skip line comments
-        if (ch === "/" && i + 1 < len && code[i + 1] === "/") {
-            let j = i;
-            while (j < len && code[j] !== "\n") j++;
-            out.push(code.slice(i, j));
-            i = j;
-            continue;
-        }
-
-        // Template literal — minify WGSL whitespace
-        if (ch === "`") {
-            out.push("`");
-            i++;
-            i = processTemplateLiteral(code, i, len, out, mangle);
-            continue;
-        }
-
-        out.push(ch);
-        i++;
-    }
-    return out.join("");
-}
-
-function processTemplateLiteral(code: string, i: number, len: number, out: string[], mangle = true): number {
-    const wgsl: string[] = [];
-    const flushWgsl = (): void => {
-        if (wgsl.length > 0) {
-            const joined = wgsl.join("");
-            out.push(mangle ? mangleWgslIdentifiers(joined) : joined);
-            wgsl.length = 0;
-        }
-    };
-    while (i < len) {
-        const ch = code[i]!;
-
-        if (ch === "\\") {
-            wgsl.push(ch, code[i + 1] ?? "");
-            i += 2;
-            continue;
-        }
-        if (ch === "`") {
-            flushWgsl();
-            out.push("`");
-            return i + 1;
-        }
-        if (ch === "$" && i + 1 < len && code[i + 1] === "{") {
-            flushWgsl();
-            out.push("${");
-            i += 2;
-            let depth = 1;
-            while (i < len && depth > 0) {
-                const ec = code[i]!;
-                if (ec === "{") depth++;
-                else if (ec === "}") {
-                    depth--;
-                    if (depth === 0) {
-                        out.push("}");
-                        i++;
-                        break;
-                    }
-                } else if (ec === "`") {
-                    out.push("`");
-                    i++;
-                    i = processTemplateLiteral(code, i, len, out, mangle);
-                    continue;
-                } else if (ec === '"' || ec === "'") {
-                    const q = ec;
-                    let j = i + 1;
-                    while (j < len && code[j] !== q) {
-                        if (code[j] === "\\") j++;
-                        j++;
-                    }
-                    out.push(code.slice(i, j + 1));
-                    i = j + 1;
-                    continue;
-                }
-                out.push(ec);
-                i++;
-            }
-            continue;
-        }
-
-        // Strip WGSL line comments
-        if (ch === "/" && i + 1 < len && code[i + 1] === "/") {
-            i += 2;
-            while (i < len && code[i] !== "\n") i++;
-            continue;
-        }
-
-        // Collapse WGSL whitespace and strip it around punctuation/operators.
-        if (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") {
-            const prev = wgsl.length > 0 ? wgsl[wgsl.length - 1]! : "";
-            const prevCh = prev.length > 0 ? prev[prev.length - 1]! : "";
-            let j = i + 1;
-            while (j < len && (code[j] === " " || code[j] === "\n" || code[j] === "\t" || code[j] === "\r")) j++;
-            const next = j < len ? code[j]! : "";
-            const ops = ":=,+-*/<>(){}[];";
-            if (ops.includes(prevCh) || ops.includes(next)) {
-                i = j;
-                continue;
-            }
-            if (prevCh !== " " && prevCh !== "`" && next !== "`") {
-                wgsl.push(" ");
-            }
-            i = j;
-            continue;
-        }
-
-        wgsl.push(ch);
-        i++;
-    }
-    flushWgsl();
-    return i;
-}
-
-function mangleWgslIdentifiers(code: string): string {
-    const replacements: [string, string][] = [
-        ["computeLighting", "cl"],
-        ["computeSphericalCoords", "csc"],
-        ["computePlanarCoords", "cpc"],
-        ["computePbrLight", "cpl"],
-        ["perturbNormal", "pn"],
-        ["PbrLightResult", "PLR"],
-        ["LightEntry", "LE"],
-        ["lightsUniforms", "LU"],
-        ["vLightData", "d"],
-        ["vLightDiffuse", "c"],
-        ["vLightSpecular", "s"],
-        ["vLightDirection", "r"],
-        ["viewDirectionW", "vdw"],
-        ["normalW", "nw"],
-        ["diffuseBase", "db"],
-        ["specularBase", "sb"],
-        ["baseAmbientColor", "bac"],
-        ["reflectionColor", "rc"],
-        ["finalDiffuse", "fd"],
-        ["finalSpecular", "fs"],
-        ["directDiffuse", "dd"],
-        ["directSpecular", "ds"],
-        ["directRoughness", "dr"],
-        ["directAlphaG", "dag"],
-        ["shadowFactors", "sf"],
-        ["lightIndex0", "li0"],
-        ["lightIndex", "lix"],
-        ["lightColor", "lc"],
-        ["lightAtten", "la"],
-        ["specColor", "sc"],
-        ["isHemi", "ih"],
-        ["viewNormal", "vn"],
-        ["viewDir", "vd"],
-        ["reflCoords", "rcd"],
-        ["finalWorld", "fw"],
-        ["worldPos4", "wp4"],
-        ["normalWorld", "nwm"],
-        ["positionW", "pw"],
-        ["bumpScale", "bs"],
-        ["opSample", "os"],
-        ["diffuseColor", "dc"],
-        ["emissiveContrib", "ec"],
-        ["specularColor", "spc"],
-        ["baseColor", "bc"],
-        ["glossiness", "gl"],
-        ["alpha", "al"],
-        ["surfaceAlbedo", "sa"],
-        ["roughness", "rg"],
-        ["colorF0", "f0"],
-        ["colorF90", "f90"],
-        ["finalIrradiance", "fi"],
-        ["finalRadianceScaled", "fr"],
-        ["finalSpecularScaled", "fss"],
-        ["AA_factor_x", "aax"],
-        ["AA_factor_y", "aay"],
-        ["alphaG", "ag"],
-        ["NdotV", "nv"],
-        ["rangeAtten", "ra"],
-        ["rangeAtt", "rat"],
-        ["spotC", "sc2"],
-        ["lightToFrag", "ltf"],
-        ["lightDist2", "ld2"],
-        ["lightDist", "ld"],
-        ["toLight", "tl"],
-        ["dist", "dst"],
-        ["entry", "e"],
-        ["hemiDiffuse", "hd"],
-        ["coloredFresnel", "cf"],
-        ["BillboardSystem", "BS"],
-        ["BillboardBasis", "BB"],
-        ["getBillboardBasis", "gbb"],
-        ["billboards", "bb"],
-        ["opacityMul", "om"],
-        ["cameraRight", "cr"],
-        ["cameraUp", "cu"],
-        ["lockAxis", "la"],
-        ["projectedRightLen", "prl"],
-        ["safeProjectedRightLen", "sprl"],
-        ["projectedRight", "pr"],
-        ["fallbackSeed", "fsd"],
-        ["fallbackRightRaw", "frr"],
-        ["fallbackRight", "fr"],
-        ["sampleColor", "scol"],
-        ["cosRot", "cr2"],
-        ["sinRot", "sr2"],
-        ["rotated", "rot"],
-        // NOTE: Do NOT add WGSL struct-varying member names (e.g. "worldPos",
-        // "worldNormal", "worldTangent", ...) to this list. Their struct is
-        // assembled at runtime from JS string literals (e.g. {Z:"worldPos"})
-        // which this mangler deliberately never touches (it only rewrites bare
-        // identifiers inside backtick WGSL template literals). Mangling the
-        // hardcoded `out.worldPos`/`input.worldPos` usages while leaving the
-        // string-built struct member as `worldPos` produces invalid WGSL
-        // ("struct member wp not found"), especially when usages and the struct
-        // declaration land in different code-split chunks. Only chunk-local
-        // temporaries like `worldPos4` (mangled to `wp4` above) are safe here.
-        ["iUvMin", "ium"],
-        ["iUvMax", "iux"],
-        ["iPivot", "ip"],
-        ["iColor", "ic"],
-        ["iSize", "isz"],
-        ["iPos", "ipos"],
-        ["iRot", "ir"],
-    ];
-    return replaceWgslIdentifiers(code, replacements);
-}
+import {
+    bytesToRoundedKB,
+    ignoredScenePayloadCompatibilityBytes,
+    IGNORED_BUNDLE_MODULE_PATTERN,
+    isVendorRuntimeChunkFile,
+    summarizeRuntimeBundle,
+    type RuntimeJsPayload,
+} from "./bundle-size-accounting";
+import {
+    computeSceneHeadroom,
+    CRITICAL_HEADROOM_BYTES,
+    formatHeadroomThreshold,
+    HEADROOM_LIST_LIMIT,
+    scenesUnderHeadroom,
+    TIGHT_HEADROOM_BYTES,
+    type SceneHeadroomInput,
+} from "./bundle-ceiling-headroom";
+import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
+import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 /**
  * Vite plugin: mangle underscore-prefixed properties via Terser.
- * Runs in generateBundle (after esbuild minification) with a shared nameCache
- * so cross-chunk property names stay consistent.
+ * Runs in generateBundle (after esbuild minification) with a shared property cache
+ * so cross-chunk property names stay consistent. Identifier caches are chunk-local.
  */
 export function terserPropertyManglePlugin(): Plugin {
     return {
         name: "terser-property-mangle",
         async generateBundle(_options, bundle) {
-            const nameCache: Record<string, unknown> = {};
+            let propertyNameCache: unknown;
+            // ESM export names are fixed, so namespace reads in another chunk must not be mangled.
+            const exportedProperties = [...new Set(Object.values(bundle).flatMap((entry) => (entry.type === "chunk" ? entry.exports.filter((name) => /^_[a-z]/.test(name)) : [])))];
 
             for (const [, chunk] of Object.entries(bundle)) {
                 if (chunk.type !== "chunk") continue;
+
+                // Skip bundled third-party WASM/shaping runtimes (text-shaper, manifold,
+                // recast-navigation). Their pre-built emscripten glue uses many `_`-prefixed
+                // internal names that this first-party mangler would rewrite, corrupting the
+                // runtime (e.g. recast's WASM init throws "… is not a function"). A real
+                // consumer of `build/lib` never runs this mangler, so excluding these chunks
+                // here keeps the measurement build aligned with what consumers actually ship.
+                if (isVendorRuntimeChunkFile(chunk.fileName)) continue;
 
                 // Dynamically extract WASM import binding names from emscripten
                 // glue code.  These are property keys in the env object that the
@@ -406,6 +72,9 @@ export function terserPropertyManglePlugin(): Plugin {
                     if (keys) wasmReserved.push(...keys.map((k) => k.replace(/\s*:/, "")));
                 }
 
+                // ESM chunks have separate lexical scopes. Sharing identifier names lets
+                // an unrelated, unloaded chunk change the minification of a loaded one.
+                const nameCache = { props: propertyNameCache };
                 const result = await terserMinify(chunk.code, {
                     // terser's published ECMA union stops at 2020 but accepts 2022 at runtime
                     ecma: 2022 as unknown as ECMA,
@@ -446,6 +115,7 @@ export function terserPropertyManglePlugin(): Plugin {
                                 "_free",
                                 "_vertexSlots",
                                 "_fragmentSlots",
+                                ...exportedProperties,
                                 ...wasmReserved,
                             ],
                         },
@@ -453,6 +123,7 @@ export function terserPropertyManglePlugin(): Plugin {
                     nameCache,
                     sourceMap: chunk.map ? ({ content: chunk.map as object, asObject: true } as SourceMapOptions) : false,
                 });
+                propertyNameCache = nameCache.props;
 
                 if (result.code) {
                     chunk.code = result.code;
@@ -477,20 +148,186 @@ export const liteLabDir = resolve(labDir, "lite");
 export const outDir = resolve(labDir, "public/bundle");
 export const bundleInfoDir = resolve(outDir, "bundle-info");
 export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
+// The bundle harness measures the bundle size a REAL consumer of the published
+// `@babylonjs/lite` package gets, so scenes are bundled against the built `build/lib`
+// tree (module-granular output that bundlers resolve) rather than the TS source. The
+// package build must run first; `assertLibBuilt()` enforces that with a clear error.
+// (The lab dev app and master-comparison build still resolve to `srcDir` — see notes
+// at their call sites.)
+export const libDir = resolve(ROOT, "packages/babylon-lite/build/lib");
+const LIB_FALLBACK_ENV = "LITE_BUNDLE_ALLOW_SRC_FALLBACK";
+const BUNDLE_SCENES_ENV = "BUNDLE_SCENES";
+
+function parseSceneSelectionArg(): string | null {
+    const argv = process.argv.slice(2);
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i]!;
+        if (arg === "--scene" || arg === "--scenes") {
+            return argv[i + 1] ?? null;
+        }
+        if (arg.startsWith("--scene=")) {
+            return arg.slice("--scene=".length);
+        }
+        if (arg.startsWith("--scenes=")) {
+            return arg.slice("--scenes=".length);
+        }
+    }
+    return process.env[BUNDLE_SCENES_ENV] ?? null;
+}
+
+function normalizeSceneSelection(raw: string | null): Set<string> | null {
+    if (!raw) {
+        return null;
+    }
+
+    const names = raw
+        .split(/[,\s]+/)
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => (/^\d+$/.test(name) ? `scene${name}` : name));
+
+    return names.length > 0 ? new Set(names) : null;
+}
+
+function selectRequestedScenes(allScenes: readonly string[], requested: Set<string> | null): string[] {
+    if (!requested) {
+        return [...allScenes];
+    }
+    return allScenes.filter((scene) => requested.has(scene));
+}
+
+/** Fail fast with an actionable message if the package's `build/lib` output (which the
+ *  scene bundles are measured against) hasn't been built yet. */
+function resolveLiteAliasDir(): string {
+    const libIndex = resolve(libDir, "index.js");
+    if (existsSync(libIndex)) {
+        return libDir;
+    }
+
+    if (process.env[LIB_FALLBACK_ENV] === "true") {
+        console.warn(`Missing ${libIndex}. Falling back to source alias (${srcDir}) because ${LIB_FALLBACK_ENV}=true.`);
+        return srcDir;
+    }
+
+    throw new Error(`Missing ${libIndex}.\n` + "Build the package first: `pnpm --filter babylon-lite build:lib` (or `pnpm build`).");
+}
+
+/** Resolve the exact root or lab-only deep module requested through the bundle harness.
+ * Vite 8 no longer consistently applies a directory alias to both forms, so resolve them
+ * before package exports or prefix aliases participate. */
+export function resolveLitePackageSpecifier(source: string, aliasDir: string): string | null {
+    const queryIndex = source.indexOf("?");
+    const specifier = queryIndex === -1 ? source : source.slice(0, queryIndex);
+    const query = queryIndex === -1 ? "" : source.slice(queryIndex);
+    if (specifier !== "babylon-lite" && !specifier.startsWith("babylon-lite/")) {
+        return null;
+    }
+
+    const request = specifier === "babylon-lite" ? "index" : specifier.slice("babylon-lite/".length);
+    if (!request || request.includes("\\") || isAbsolute(request) || win32.isAbsolute(request) || /^[A-Za-z]:/.test(request) || request.split("/").includes("..")) {
+        return null;
+    }
+
+    const extension = extname(request);
+    const candidates =
+        extension === ".js"
+            ? [request, `${request.slice(0, -3)}.ts`]
+            : extension
+              ? [request]
+              : [`${request}.js`, `${request}.ts`, join(request, "index.js"), join(request, "index.ts")];
+
+    for (const candidate of candidates) {
+        const file = resolve(aliasDir, candidate);
+        if (existsSync(file) && statSync(file).isFile()) {
+            return normalizePath(file) + query;
+        }
+    }
+    return null;
+}
+
+/** Vite pre-resolver for the harness-only `babylon-lite` package name. */
+export function litePackageResolverPlugin(aliasDir: string): Plugin {
+    return {
+        name: "resolve-babylon-lite",
+        enforce: "pre",
+        resolveId: {
+            order: "pre",
+            handler(source) {
+                return resolveLitePackageSpecifier(source, aliasDir);
+            },
+        },
+    };
+}
+// Per-scene manifest files under `lab/public/bundle/manifest/` are build output,
+// not tracked source: a single aggregate `manifest.json` is generated from them
+// for runtime consumers (lab UI, bundle-size test, report script, static lab
+// site). Nothing here is committed — see `DEFAULT_MASTER_MANIFEST_URL` for where
+// the master baseline actually comes from. `MANIFEST_GIT_PATH` /
+// `MANIFEST_DIR_GIT_PATH` are the legacy tracked paths, read only as a fallback
+// for refs that predate the move to a published baseline.
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
+const MANIFEST_DIR_GIT_PATH = "lab/public/bundle/manifest";
+const MANIFEST_DIR = "manifest";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
+
+/**
+ * Where the master bundle-size baseline is published.
+ *
+ * The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+ * authors. That made it the repo's dominant source of both merge conflicts (two
+ * branches rewriting the same generated files) and red CI (any merge left every
+ * other branch's copy stale). It is now measured once per master build and
+ * published as a single file to the same public storage that serves the
+ * per-build Playwright reports and lab sites, so no branch — and no bot — ever
+ * writes it.
+ *
+ * Hardcoded rather than configured because the primary readers are fork PR
+ * builds and local `pnpm build:bundle-scenes` runs, neither of which has
+ * pipeline variables. Must stay in sync with `baselineDeployPath` in
+ * `azure-pipelines-bundle-manifest.yml`.
+ */
+const DEFAULT_MASTER_MANIFEST_URL = "https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json";
 export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
 export const LITE_BUNDLE_TARGET = "esnext";
 
 interface SceneConfigEntry {
     id: number;
     tags?: string[];
+    /** Raw bundle-size ceiling in KB. Absent for scenes that opt out of the check. */
+    maxRawKB?: number;
+    /** Scene opts out of bundle-size ceiling enforcement (mirrors bundle-size.spec.ts). */
+    skipBundleSize?: boolean;
+    /** This scene's runtime dynamic-imports branch on device capability, so its measured
+     *  chunk set differs between a developer's GPU and CI's software renderer. Only CI's
+     *  measurement is comparable to the published baseline. See `DEVICE_DEPENDENT_NOTE`. */
+    deviceDependentChunks?: boolean;
+    /** Right-handed twin scene: built with the `babylon-lite-rh` resolve condition, like an
+     *  application that opts into the right-handed system. */
+    rightHanded?: boolean;
 }
 
 interface BundleManifestEntry {
     rawKB: number;
     gzipKB: number;
+    /** Exact runtime-fetched byte count. `rawKB` is this rounded to 0.1 KB for display, which
+     *  hides sub-50-byte drift — including a ceiling overflow on a zero-headroom scene. Tools
+     *  comparing sizes (the build's ceiling check, the delta report) use this. */
+    rawBytes?: number;
+    /**
+     * The scene's `maxRawKB` ceiling **as it stood on the commit this baseline was measured
+     * from**, stamped in at publish time by `scripts/publish-bundle-baseline.ts`.
+     *
+     * Without it, a consumer asking "was master already over its ceiling?" has only the
+     * baseline's bytes and the *branch's* `scene-config.json`, so a PR that tightens a
+     * ceiling makes master retroactively look like it was in breach. The measurement and
+     * the limit it was measured against have to travel together to answer that.
+     *
+     * Optional because baselines published before this field existed do not carry it, and
+     * because a scene may legitimately have no ceiling (`skipBundleSize`, or no `maxRawKB`).
+     * Consumers must treat "absent" as "unknown", never as "no ceiling".
+     */
+    ceilingKB?: number;
     ignoredRawKB?: number;
     bjsRawKB?: number;
     bjsGzipKB?: number;
@@ -532,31 +369,402 @@ function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     return ordered;
 }
 
-function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
-    const errors: string[] = [];
-    for (const ref of refs) {
+/** Absolute path to a scene's per-scene manifest file. */
+function perSceneManifestPath(scene: string): string {
+    return resolve(outDir, MANIFEST_DIR, `${scene}.json`);
+}
+
+/**
+ * Read the per-scene manifest files (`manifest/<scene>.json`) into a
+ * single aggregate map. This is the source of truth seed for incremental builds.
+ */
+export function readCurrentBundleManifest(): BundleManifest {
+    const dir = resolve(outDir, MANIFEST_DIR);
+    const manifest: BundleManifest = {};
+    if (!existsSync(dir)) return manifest;
+    for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        const scene = file.slice(0, -".json".length);
         try {
-            const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
-            return { ref, manifest: JSON.parse(json) as BundleManifest };
-        } catch (err) {
-            errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+            manifest[scene] = JSON.parse(readFileSync(resolve(dir, file), "utf-8")) as BundleManifestEntry;
+        } catch {
+            /* skip malformed per-scene file */
         }
     }
+    return manifest;
+}
 
-    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master refs; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
+/**
+ * Atomically write JSON to `path` (sibling temp file + rename). The lab UI and
+ * concurrent readers may hold the destination open; rename never truncates it
+ * and survives transient Windows file locks (errno -4094 / EBUSY).
+ */
+function atomicWriteJson(path: string, json: string): void {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmpPath = `${path}.tmp`;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            writeFileSync(tmpPath, json);
+            renameSync(tmpPath, path);
+            return;
+        } catch (err) {
+            if (attempt >= 5) throw err;
+            const wait = Date.now() + 50 * (attempt + 1);
+            while (Date.now() < wait) {
+                /* brief synchronous backoff before retrying the atomic write */
+            }
+        }
+    }
+}
+
+/** Write a single scene's per-scene manifest file. */
+function writePerSceneManifest(scene: string, entry: BundleManifestEntry): void {
+    atomicWriteJson(perSceneManifestPath(scene), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+/** Write the generated (gitignored) aggregate `manifest.json` for runtime consumers. */
+function writeAggregateBundleManifest(manifest: BundleManifest): void {
+    atomicWriteJson(resolve(outDir, MANIFEST_FILE), JSON.stringify(orderBundleManifest(manifest), null, 2));
+}
+
+/**
+ * Read many git blobs in one `git cat-file --batch` call, keyed by the revision
+ * spec that produced them.
+ *
+ * The legacy tracked layout is ~230 files per ref, and spawning `git show` once
+ * per file costs ~15s per resolve — long enough to time out callers and to make
+ * every `build:bundle-scenes` run that misses the published baseline feel hung.
+ * One batched process makes the same read effectively free.
+ *
+ * `--batch` emits `<oid> SP <type> SP <size> LF <contents> LF` per request, or
+ * `<spec> SP missing LF` for one it cannot resolve, so the output is parsed as a
+ * buffer and sliced by the declared byte length rather than split on newlines.
+ */
+function readGitBlobs(specs: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (specs.length === 0) {
+        return out;
+    }
+
+    const stdout = execFileSync("git", ["cat-file", "--batch"], {
+        cwd: ROOT,
+        input: specs.join("\n") + "\n",
+        maxBuffer: 512 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let offset = 0;
+    for (const spec of specs) {
+        const newline = stdout.indexOf("\n", offset);
+        if (newline === -1) {
+            break;
+        }
+        const header = stdout.toString("utf-8", offset, newline);
+        offset = newline + 1;
+        const [, type, rawSize] = header.split(" ");
+        const size = Number(rawSize);
+        if (type === undefined || !Number.isFinite(size)) {
+            // "missing" / "ambiguous" responses carry no body to skip past.
+            continue;
+        }
+        if (type === "blob") {
+            out.set(spec, stdout.toString("utf-8", offset, offset + size));
+        }
+        offset += size + 1; // trailing LF after the contents
+    }
+    return out;
+}
+
+function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
+    // Preferred: distributed per-scene tracked files under `manifest/`.
+    try {
+        const list = execFileSync("git", ["ls-tree", "-r", "--name-only", ref, "--", MANIFEST_DIR_GIT_PATH], {
+            cwd: ROOT,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        const files = list
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.endsWith(".json"));
+        if (files.length > 0) {
+            const blobs = readGitBlobs(files.map((file) => `${ref}:${file}`));
+            const manifest: BundleManifest = {};
+            for (const file of files) {
+                const json = blobs.get(`${ref}:${file}`);
+                if (json === undefined) {
+                    continue;
+                }
+                const scene = file.slice(file.lastIndexOf("/") + 1, -".json".length);
+                manifest[scene] = JSON.parse(json) as BundleManifestEntry;
+            }
+            if (Object.keys(manifest).length > 0) {
+                return manifest;
+            }
+        }
+    } catch {
+        /* fall through to the legacy single-file layout */
+    }
+    // Legacy single-file fallback for pre-migration master refs.
+    try {
+        const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+        return JSON.parse(json) as BundleManifest;
+    } catch {
+        return null;
+    }
+}
+
+function readMasterBundleManifestFromGit(refs = ["upstream/master", "origin/master", "master"]): { source: string; manifest: BundleManifest } | null {
+    for (const ref of refs) {
+        const manifest = readMasterBundleManifestFromRef(ref);
+        if (manifest) return { source: ref, manifest };
+    }
     return null;
 }
 
-export function writeMasterBundleManifest(refs?: string[]): void {
+/** A full 40-character git object name, the only form the published layout uses. */
+const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+function gitOutput(args: string[]): string | null {
+    try {
+        return execFileSync("git", args, { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Commits whose published baseline would be a like-for-like comparison for this
+ * build, most specific first.
+ *
+ * The problem being solved: the mutable `manifest.json` is whatever master
+ * published most recently, which is not necessarily the commit this build was
+ * merged with. Comparing against it silently attributes bytes from every master
+ * commit in between to the PR under test.
+ *
+ * Candidates, at most one of which normally applies:
+ *  - `BUNDLE_BASELINE_COMMIT` — an explicit override. Set but empty means "do not
+ *    look up a per-commit baseline at all", mirroring `BUNDLE_MASTER_MANIFEST_URL`.
+ *  - HEAD's **first parent, only when HEAD is a merge commit**. Azure DevOps checks
+ *    PRs out at `refs/pull/N/merge`, whose first parent is exactly the master commit
+ *    the PR was merged with. Read from the raw commit object rather than via
+ *    `rev-parse HEAD^1`, because CI checks out at `--depth=1`, where the shallow
+ *    graft makes `rev-parse HEAD^1` fail outright ("unknown revision") even though
+ *    the commit object still records both parents. Using `cat-file` therefore needs
+ *    no `fetchDepth` change in the pipeline. The merge-commit requirement matters:
+ *    on an ordinary commit the first parent is just the previous commit, which
+ *    carries no "this is what I was merged with" meaning.
+ *  - The merge base with master, for local `pnpm build:bundle-scenes` runs — the
+ *    commit the branch actually diverged from. Needs real history, so it simply
+ *    yields nothing in CI's shallow checkout.
+ *
+ * Deliberately *not* a candidate: the current `origin/master` SHA. That is the
+ * mutable baseline by another name, so probing it would reintroduce the exact
+ * mis-attribution this lookup exists to remove, while costing an extra request.
+ *
+ * A candidate with no published baseline is a plain 404 — one round trip, then the
+ * mutable baseline. Nothing waits and nothing fails.
+ */
+/**
+ * The outcome of working out which commit's baseline to ask for.
+ *
+ * `disabled` is kept separate from an empty `commits` list because the two lead a
+ * reader to different places: an explicit opt-out is this build's own
+ * configuration doing what it was told, while an empty list is a checkout that
+ * could not say what it was merged with. Collapsing them would report a
+ * deliberate setting as a fault.
+ */
+interface BaselineCommitLookup {
+    /** True when the caller explicitly switched per-commit lookup off. */
+    disabled: boolean;
+    /** Full SHAs to try, in order. Empty when none could be determined. */
+    commits: string[];
+}
+
+function readBaselineCommitCandidates(): BaselineCommitLookup {
+    const explicit = process.env.BUNDLE_BASELINE_COMMIT;
+    if (explicit !== undefined) {
+        const trimmed = explicit.trim();
+        // Set-but-empty is the documented off switch. A non-empty value that is not
+        // a full SHA is a failed attempt at naming a commit, not an opt-out, so it
+        // reports as undetermined rather than as disabled.
+        if (trimmed === "") return { disabled: true, commits: [] };
+        return { disabled: false, commits: FULL_SHA_PATTERN.test(trimmed) ? [trimmed] : [] };
+    }
+
+    const candidates: string[] = [];
+
+    const head = gitOutput(["cat-file", "-p", "HEAD"]);
+    if (head) {
+        // Header lines are ordered: tree, then parent(s), then author.
+        const parents: string[] = [];
+        for (const line of head.split("\n")) {
+            if (line.startsWith("tree ")) continue;
+            if (!line.startsWith("parent ")) break;
+            parents.push(line.slice("parent ".length).trim());
+        }
+        if (parents.length > 1 && parents[0]) candidates.push(parents[0]);
+    }
+
+    for (const ref of ["upstream/master", "origin/master"]) {
+        const base = gitOutput(["merge-base", "HEAD", ref]);
+        if (base) {
+            candidates.push(base);
+            break;
+        }
+    }
+
+    return { disabled: false, commits: [...new Set(candidates.filter((sha) => FULL_SHA_PATTERN.test(sha)))] };
+}
+
+/**
+ * Rewrite a baseline manifest URL to the immutable per-commit copy beside it:
+ * `.../bundle-baseline/manifest.json` -> `.../bundle-baseline/<sha>/manifest.json`.
+ *
+ * Derived from the URL actually in effect rather than from the hardcoded default,
+ * so `BUNDLE_MASTER_MANIFEST_URL` overrides (tests, mirrors) keep working.
+ *
+ * Exported for tests/lite/unit/pipeline-fail-fast-ordering.test.ts, which binds
+ * this derivation to the path the publish step actually uploads to. Nothing else
+ * keeps the two in agreement, and a drift between them is a silent 404 on every
+ * per-commit lookup — which degrades to the mutable baseline and so looks exactly
+ * like the pre-existing behaviour this change was made to replace.
+ */
+export function perCommitBaselineUrl(manifestUrl: string, commit: string): string {
+    const slash = manifestUrl.lastIndexOf("/");
+    if (slash < 0) return manifestUrl;
+    return `${manifestUrl.slice(0, slash)}/${commit}${manifestUrl.slice(slash)}`;
+}
+
+/** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */
+function isBundleManifest(value: unknown): value is BundleManifest {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const entries = Object.values(value);
+    return entries.length > 0 && entries.every((entry) => typeof entry === "object" && entry !== null && typeof (entry as BundleManifestEntry).rawKB === "number");
+}
+
+/** Read a baseline that CI (or a developer) already placed on disk. */
+function readMasterBundleManifestFromFile(path: string): BundleManifest | null {
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+        return isBundleManifest(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Fetch the published baseline. A 404 means master has not published one yet
+ * (first run after this change, or a fork with no deployment) and is not an
+ * error — the caller degrades to "no baseline", which only costs the advisory
+ * delta report.
+ *
+ * `quiet404` suppresses the miss message for per-commit probes, where a 404 is
+ * the ordinary case (the base commit's baseline build may still be running, may
+ * have failed, or may predate per-commit publishing) and the caller reports the
+ * outcome once it knows which candidate, if any, hit.
+ */
+async function fetchMasterBundleManifest(url: string, { quiet404 = false }: { quiet404?: boolean } = {}): Promise<BundleManifest | null> {
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+        if (response.status === 404) {
+            if (!quiet404) console.warn(`No published bundle-size baseline at ${url} yet; skipping the master delta.`);
+            return null;
+        }
+        if (!response.ok) {
+            console.warn(`Could not fetch the bundle-size baseline from ${url}: HTTP ${response.status}.`);
+            return null;
+        }
+        const parsed: unknown = await response.json();
+        if (!isBundleManifest(parsed)) {
+            console.warn(`The response from ${url} is not a bundle-size manifest; skipping the master delta.`);
+            return null;
+        }
+        return parsed;
+    } catch (error) {
+        console.warn(`Could not fetch the bundle-size baseline from ${url}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+}
+
+/**
+ * Resolve the master baseline, in order of preference:
+ *   1. `BUNDLE_MASTER_MANIFEST_FILE` — a baseline CI already downloaded.
+ *   2. The baseline published for *this build's own base commit*, then the
+ *      mutable latest baseline (both skipped when `refs` is given, i.e. when the
+ *      caller explicitly asked to compare against a specific git ref, or when
+ *      `BUNDLE_MASTER_MANIFEST_URL` is set to an empty value).
+ *   3. Git refs — the legacy tracked layout, still readable on old refs.
+ */
+export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ source: string; manifest: BundleManifest } | null> {
+    const filePath = process.env.BUNDLE_MASTER_MANIFEST_FILE;
+    if (filePath) {
+        const manifest = readMasterBundleManifestFromFile(filePath);
+        if (manifest) return { source: filePath, manifest };
+        console.warn(`BUNDLE_MASTER_MANIFEST_FILE=${filePath} could not be read as a manifest; falling back to the published baseline.`);
+    }
+
+    if (!refs) {
+        // An explicitly empty BUNDLE_MASTER_MANIFEST_URL means "do not fetch" — for
+        // offline runs, and for the master build that is about to overwrite the
+        // baseline anyway. Trimmed because a YAML-supplied blank can arrive as " ".
+        const url = (process.env.BUNDLE_MASTER_MANIFEST_URL ?? DEFAULT_MASTER_MANIFEST_URL).trim();
+        if (url) {
+            const lookup = readBaselineCommitCandidates();
+            for (const commit of lookup.commits) {
+                const commitUrl = perCommitBaselineUrl(url, commit);
+                const manifest = await fetchMasterBundleManifest(commitUrl, { quiet404: true });
+                if (manifest) {
+                    console.log(`✓ Bundle-size baseline matched this build's base commit ${commit.slice(0, 8)}.`);
+                    return { source: commitUrl, manifest };
+                }
+            }
+
+            const manifest = await fetchMasterBundleManifest(url);
+            if (manifest) {
+                // Say so explicitly. This baseline may have been measured on a different
+                // commit than the one this build was merged with, so any delta computed
+                // from it can attribute another PR's bytes to this one. Silently doing
+                // that is the failure this per-commit lookup exists to avoid, so when the
+                // fallback fires the reader needs to know it did.
+                //
+                // The three ways of getting here need different words, because they send
+                // the reader to three different places: a base commit with no baseline is
+                // a producer-side gap that closes on its own; an undetermined base commit
+                // is a property of this checkout that will not; and an explicit opt-out is
+                // this build doing what it was configured to do, which is not a fault at
+                // all and should not be reported as one.
+                let why: string;
+                if (lookup.disabled) {
+                    why = "per-commit baseline lookup is switched off for this run";
+                } else if (lookup.commits.length > 0) {
+                    why = "no baseline was published for this build's base commit";
+                } else {
+                    why = "this build's base commit could not be determined, so no per-commit baseline was requested";
+                }
+                console.warn(`Using the latest published bundle-size baseline (${url}); ${why}.`);
+                return { source: url, manifest };
+            }
+        }
+    }
+
+    const fromGit = readMasterBundleManifestFromGit(refs);
+    if (fromGit) return fromGit;
+
+    console.warn("Could not resolve a master bundle-size baseline; the bundle delta UI and PR comment will be skipped.");
+    return null;
+}
+
+export async function writeMasterBundleManifest(refs?: string[]): Promise<void> {
     const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
-    const baseline = readMasterBundleManifest(refs);
+    const baseline = await resolveMasterBundleManifest(refs);
     if (!baseline) {
         rmSync(masterManifestPath, { force: true });
         return;
     }
 
     writeFileSync(masterManifestPath, JSON.stringify(orderBundleManifest(baseline.manifest), null, 2));
-    console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
+    console.log(`✓ Bundle master baseline manifest (${baseline.source}) written to ${masterManifestPath}`);
 }
 
 /**
@@ -824,13 +1032,17 @@ function writeBundleInfoToDir(scene: string, result: unknown, infoDir: string, s
         const modules: BundleInfoModule[] = [];
         for (const [rawId, m] of Object.entries(it.modules ?? {})) {
             const normalizedId = normalizeModuleId(rawId, sourceRoot);
-            const bytes = minifiedBytes[normalizedId] ?? 0;
+            // Preserve the Vite 6 pre-minifier accounting stage for checked-in NME/NPE
+            // payloads even though Rolldown reports module lengths after Oxc compaction.
+            // Other modules still prefer post-minify source-map attribution.
+            const renderedExports = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
+            const payloadBytes = ignoredScenePayloadCompatibilityBytes(rawId, renderedExports);
+            const bytes = payloadBytes || minifiedBytes[normalizedId] || m.renderedLength || 0;
             if (bytes <= 0) continue;
-            const rawNames = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
             // Resolve kinds from the source file on disk (strip any ?query suffix).
             const srcPath = rawId.split("?")[0]!;
             const kinds = srcPath.startsWith("\u0000") ? {} : extractExportKinds(srcPath);
-            const exports: BundleInfoExport[] = rawNames.map((name) => ({
+            const exports: BundleInfoExport[] = renderedExports.map((name) => ({
                 name,
                 kind: kinds[name] ?? "unknown",
             }));
@@ -877,6 +1089,7 @@ const MIME: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".mp3": "audio/mpeg",
     ".css": "text/css",
     ".wasm": "application/wasm",
 };
@@ -915,7 +1128,8 @@ function elapsed(startMs: number): string {
 }
 
 /** Strip the no-op `__vitePreload(() => import("chunk"), [])` wrappers that Vite
- *  injects around every dynamic import down to a bare `import("chunk")`.
+ *  injects around dynamic imports. Bare and one-export projection callbacks
+ *  collapse to `import("chunk")`.
  *
  *  These Lite bundles disable module preload, and the preload helper itself is a
  *  pure passthrough (`baseModule => baseModule()`), so the wrapper and its empty
@@ -925,8 +1139,10 @@ function elapsed(startMs: number): string {
  *  code-split scene (feature-rich glTF assets carry dozens of these). Applied to
  *  the finalized on-disk output in {@link buildScene} because Vite resolves the
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
-function stripNoopPreloadWrappers(code: string): string {
-    return code.replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\))\s*,\s*\[\s*\]\s*\)/g, "$1");
+export function stripNoopPreloadWrappers(code: string): string {
+    return code
+        .replace(/[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await\s*\(?(import\([^()]*\))\)?;return\{\1:\2\}\},\[\]\)/g, "$3")
+        .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
 function minimalVitePreloadPlugin(): Plugin {
@@ -1025,17 +1241,50 @@ export function isLiteBundleExternal(id: string): boolean {
     return VENDOR_RUNTIMES.some((runtime) => runtime.external(id));
 }
 
-/** Force certain modules into their own chunks so bundle-size accounting can isolate
- *  them cleanly. Currently used to separate `text-shaper` (a 670 KB vendor shaping
- *  library) so the gzip-bytes accounting can exclude it as a self-contained chunk
- *  matching the ignored-module pattern in `bundle-size-accounting.ts`. */
-function liteManualChunks(id: string): string | undefined {
-    const clean = id.replace(/\\/g, "/").split("?")[0]!;
-    if (/(?:^|\/)text-shaper\//.test(clean)) {
-        return "text-shaper";
-    }
-    return undefined;
+/** The high-priority code-splitting group pins the `text-shaper` vendor
+ *  runtime into. Every scene imports the `babylon-lite` barrel, which re-exports the
+ *  default text APIs that pull in `text-shaper`; for the ~200 scenes that use no text,
+ *  tree-shaking may empty that pinned chunk, so Rolldown can log a harmless
+ *  `Generated an empty chunk: "text-shaper"` (`EMPTY_BUNDLE`) — once per scene. The
+ *  empty chunk is never referenced or loaded, so {@link liteBundleOnWarn} silences
+ *  exactly that warning while leaving every other Rollup warning intact. */
+const TEXT_SHAPER_CHUNK_NAME = "text-shaper";
+const LITE_INITIAL_CHUNK_NAME = "lite-initial";
+
+/** Native Rolldown groups used by every Lite scene build.
+ *
+ * `$initial` coalesces the entry's statically reachable graph so modules shared with
+ * dynamic entries do not become dozens of tiny common chunks. The vendor group remains
+ * separate and higher priority so bundle accounting can exclude text-shaper bytes. */
+export function createLiteCodeSplitting() {
+    return {
+        groups: [
+            {
+                name: TEXT_SHAPER_CHUNK_NAME,
+                test: /(?:^|[\\/])text-shaper[-\\/]/,
+                priority: 100,
+                includeDependenciesRecursively: false,
+            },
+            {
+                name: LITE_INITIAL_CHUNK_NAME,
+                tags: ["$initial" as const],
+            },
+        ],
+    };
 }
+
+/** Suppress the expected empty-`text-shaper`-chunk warning (see
+ *  {@link TEXT_SHAPER_CHUNK_NAME}); forward all other Rollup warnings unchanged. */
+const liteBundleOnWarn: Rollup.WarningHandlerWithDefault = (warning, defaultHandler) => {
+    if (warning.code === "EMPTY_BUNDLE") {
+        const names = warning.names ?? [];
+        const emptyChunkNames = names.length > 0 ? names : [warning.message];
+        if (emptyChunkNames.every((entry) => entry.includes(TEXT_SHAPER_CHUNK_NAME))) {
+            return;
+        }
+    }
+    defaultHandler(warning);
+};
 
 function readLiteSceneSource(scene: string): string {
     try {
@@ -1093,29 +1342,33 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [litePackageResolverPlugin(sourceSrcDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
-            alias: {
-                "babylon-lite": sourceSrcDir,
-            },
+            // Master-comparison bundle-info resolves `babylon-lite` to the TS SOURCE of an
+            // arbitrary master worktree (`sourceRoot`), NOT its `build/lib`: that worktree
+            // generally has no built package, and this data only drives the lab's advisory
+            // "vs master" size delta (the per-scene ceilings remain the real blocker, and
+            // they ARE measured against `build/lib`). Sizes here may therefore differ
+            // slightly from a real consumer's, which is acceptable for an advisory baseline.
             dedupe: ["@babylonjs/core"],
         },
         build: {
             outDir: sceneOutDir,
             emptyOutDir: true,
             target: LITE_BUNDLE_TARGET,
-            minify: "esbuild",
+            minify: "oxc",
             sourcemap: "hidden",
             modulePreload: false,
-            rollupOptions: {
+            rolldownOptions: {
                 input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
+                onwarn: liteBundleOnWarn,
                 output: {
                     format: "es",
                     entryFileNames: "[name].js",
                     chunkFileNames: `${scene}-[name]-[hash].js`,
                     banner: NAME_POLYFILL,
-                    manualChunks: liteManualChunks,
+                    codeSplitting: createLiteCodeSplitting(),
                 },
             },
         },
@@ -1125,20 +1378,69 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     rmSync(sceneOutDir, { recursive: true, force: true });
 }
 
+/** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
+ *  `--software` flag is passed; otherwise the real GPU (SwiftShader is far slower, and
+ *  several heavy scenes never reach `dataset.ready` under it on Windows).
+ *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
-    const swiftShaderArgs = process.env.CI
-        ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
-        : [];
+    const swiftShaderArgs =
+        process.env.CI || softwareRenderRequested()
+            ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+            : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
 
+/** `--software` on the command line, or `BUNDLE_SOFTWARE_RENDER=1`. Only an explicit
+ *  truthy value counts, so `BUNDLE_SOFTWARE_RENDER=0` disables it as one would expect. */
+function softwareRenderRequested(): boolean {
+    const env = process.env.BUNDLE_SOFTWARE_RENDER;
+    return process.argv.includes("--software") || env === "1" || env === "true";
+}
+
+/** Why a few scenes' local numbers are not comparable to the published master baseline.
+ *
+ *  CI measures under SwiftShader; a developer machine measures on its real GPU. A few
+ *  runtime paths branch on device capability and dynamic-import different chunks as a
+ *  result — scenes 113/114/115 resolve detailed picking to `picking-detailed-pipeline` on
+ *  a real GPU and to `picking-pipeline` under SwiftShader. Their measured chunk set (and
+ *  size) therefore depends on the machine, so a local build shows a delta against the
+ *  CI-measured baseline for scenes it never touched. That delta is noise, not a
+ *  regression; the run logs this note so it is not mistaken for one.
+ *
+ *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
+ *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
+ *  scenes is the canonical way to reproduce CI's numbers for them:
+ *
+ *      pnpm build:bundle-manifest:device
+ *
+ *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
+ *  flaky-to-unusable on Windows, where these scenes also time out. On Windows, treat CI's
+ *  measurement as the authoritative one for these three. */
+const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
+
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
+    // Scenes are bundled against the built `build/lib` tree by default; old baseline
+    // worktrees can opt into TS-source fallback via LITE_BUNDLE_ALLOW_SRC_FALLBACK=true.
+    const liteAliasDir = resolveLiteAliasDir();
+    const requestedSceneNames = normalizeSceneSelection(parseSceneSelectionArg());
+    const scenesToBuild = selectRequestedScenes(SCENES, requestedSceneNames);
+    const bjsScenesRequested = selectRequestedScenes(BJS_SCENES, requestedSceneNames);
+    const knownSceneNames = new Set<string>([...SCENES, ...BJS_SCENES]);
+    if (requestedSceneNames) {
+        const unknown = [...requestedSceneNames].filter((scene) => !knownSceneNames.has(scene));
+        if (unknown.length > 0) {
+            throw new Error(`Unknown bundle scene(s): ${unknown.join(", ")}.`);
+        }
+    }
+    if (scenesToBuild.includes("scene112") || bjsScenesRequested.includes("bjs-scene112")) {
+        await fetchFlightHelmet();
+    }
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
-    writeMasterBundleManifest();
-    for (const scene of SCENES) {
+    await writeMasterBundleManifest();
+    for (const scene of scenesToBuild) {
         ensureBundleHtmlImportMap(scene);
     }
 
@@ -1193,35 +1495,37 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs
+                ? [bjsSideEffectsFalsePlugin()]
+                : [litePackageResolverPlugin(liteAliasDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
-                // Point babylon-lite directly at TS source directory so the bundle always
-                // picks up the current code (no stale node_modules build).
-                // Using the directory (not index.ts) so sub-path imports like
-                // 'babylon-lite/loader-env/load-dds-env' resolve correctly.
-                alias: {
-                    "babylon-lite": srcDir,
-                },
+                // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
+                // so the measured bundle reflects exactly what a consumer of the published
+                // package gets. Using the directory (not index.js) also preserves internal,
+                // lab-only deep imports that are intentionally absent from the public package
+                // export map. `build:lib` must run first unless explicit source fallback is
+                // enabled for legacy baselines.
                 dedupe: ["@babylonjs/core"],
+                ...(!isBjs && sceneConfigByName.get(scene)?.rightHanded && { conditions: [...defaultClientConditions, "babylon-lite-rh"] }),
             },
             build: {
                 outDir: sceneOutDir,
                 emptyOutDir: true,
                 ...(!isBjs && { target: LITE_BUNDLE_TARGET }),
-                minify: "esbuild",
+                minify: isBjs ? "esbuild" : "oxc",
                 sourcemap: "hidden",
                 modulePreload: false,
-                rollupOptions: {
+                rolldownOptions: {
                     input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
-                    ...(!isBjs && { external: isLiteBundleExternal }),
+                    ...(!isBjs && { external: isLiteBundleExternal, onwarn: liteBundleOnWarn }),
                     output: {
                         format: "es",
                         entryFileNames: "[name].js",
                         chunkFileNames: `${scene}-[name]-[hash].js`,
                         banner: NAME_POLYFILL,
-                        ...(!isBjs && { manualChunks: liteManualChunks }),
+                        ...(!isBjs && { codeSplitting: createLiteCodeSplitting() }),
                     },
                     ...(isBjs && {
                         treeshake: {
@@ -1268,37 +1572,31 @@ export async function buildBundleScenes(): Promise<void> {
         rmSync(sceneOutDir, { recursive: true, force: true });
     }
 
-    // Load existing current manifest to check for cached BJS sizes.
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
-    let existingManifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            existingManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
-    }
+    // Load existing per-scene manifest files to check for cached BJS sizes.
+    const existingManifest: BundleManifest = readCurrentBundleManifest();
 
     // Only build BJS scenes whose sizes aren't already cached in the manifest
-    const bjsScenesToBuild = BJS_SCENES.filter((bjsScene) => {
-        const liteScene = bjsScene.replace("bjs-", "");
-        const cached = existingManifest[liteScene];
-        if (cached?.bjsRawKB == null) {
-            return true;
-        }
-        const sourcePath = bjsSceneEntry(liteScene);
-        const bundlePath = resolve(outDir, `${bjsScene}.js`);
-        if (!existsSync(bundlePath)) {
-            return true;
-        }
-        return statSync(sourcePath).mtimeMs > statSync(bundlePath).mtimeMs;
-    });
+    const bjsScenesToBuild = requestedSceneNames
+        ? bjsScenesRequested
+        : BJS_SCENES.filter((bjsScene) => {
+              const liteScene = bjsScene.replace("bjs-", "");
+              const cached = existingManifest[liteScene];
+              if (cached?.bjsRawKB == null) {
+                  return true;
+              }
+              const sourcePath = bjsSceneEntry(liteScene);
+              const bundlePath = resolve(outDir, `${bjsScene}.js`);
+              if (!existsSync(bundlePath)) {
+                  return true;
+              }
+              return statSync(sourcePath).mtimeMs > statSync(bundlePath).mtimeMs;
+          });
 
     // Build sequentially — parallel Vite build() calls within the same process
     // cause race conditions (0-byte chunk files, stale measurements on Windows).
-    const totalScenes = SCENES.length + bjsScenesToBuild.length;
+    const totalScenes = scenesToBuild.length + bjsScenesToBuild.length;
     let built = 0;
-    for (const scene of SCENES) {
+    for (const scene of scenesToBuild) {
         built++;
         const tScene = performance.now();
         console.log(`[${built}/${totalScenes}] Building ${scene}...`);
@@ -1325,11 +1623,11 @@ export async function buildBundleScenes(): Promise<void> {
         return;
     }
     const tMeasure = performance.now();
-    const manifest = await measureLiveSizes();
+    const manifest = await measureLiveSizes(scenesToBuild, bjsScenesToBuild, requestedSceneNames == null);
     console.log(`Live measurement completed in ${elapsed(tMeasure)}`);
 
     console.log("\n=== Per-scene bundle sizes (live runtime measurement) ===");
-    for (const scene of SCENES) {
+    for (const scene of scenesToBuild) {
         const s = manifest[scene];
         if (s) {
             let line = `  ${scene}: ${s.rawKB} KB raw, ${s.gzipKB} KB gzip`;
@@ -1337,7 +1635,62 @@ export async function buildBundleScenes(): Promise<void> {
             console.log(line);
         }
     }
+    reportCeilingHeadroom(scenesToBuild, manifest);
+    if (process.exitCode) {
+        console.error(`✘ Bundle scenes built to ${outDir}, but a ceiling was exceeded (total ${elapsed(t0)})`);
+        return;
+    }
     console.log(`✓ Bundle scenes + manifest built to ${outDir} (total ${elapsed(t0)})`);
+}
+
+/**
+ * Report each measured scene against its `scene-config.json` ceiling, in BYTES.
+ *
+ * `rawKB` is rounded to 0.1 KB, so a scene sitting exactly at its ceiling can overflow by
+ * a few bytes while the printed size still reads the same value — the overflow then only
+ * surfaces in CI's bundle-size job, ~35 minutes later.
+ * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
+ * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
+ *
+ * The thresholds and the arithmetic live in `bundle-ceiling-headroom.ts` because the PR
+ * comment reports the same numbers; see that module for why the tight band is 1 KB. Only
+ * the `over` set affects the exit code — the tight list is advisory and never fails a build.
+ */
+function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<string, BundleManifestEntry>): void {
+    const inputs: SceneHeadroomInput[] = [];
+
+    for (const scene of scenes) {
+        // Exact bytes only, deliberately: this is the path that can set a non-zero exit code,
+        // and a `rawKB` fallback would let a 0.1 KB-quantised size decide it. The PR comment
+        // does fall back, because being approximate there costs nothing.
+        const measuredBytes = manifest[scene]?.rawBytes;
+        const config = sceneConfigByName.get(scene);
+        const ceilingKB = config?.maxRawKB;
+        // Honour the same opt-out as the ceiling test in bundle-size.spec.ts.
+        if (measuredBytes == null || ceilingKB == null || config?.skipBundleSize) {
+            continue;
+        }
+        inputs.push({ scene, measuredBytes, ceilingKB });
+    }
+
+    const { over, under } = computeSceneHeadroom(inputs);
+    const tight = scenesUnderHeadroom(under, TIGHT_HEADROOM_BYTES);
+    const critical = scenesUnderHeadroom(under, CRITICAL_HEADROOM_BYTES);
+
+    if (tight.length > 0) {
+        const shown = tight.slice(0, HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroomBytes} B below its ${t.ceilingKB} KB ceiling`);
+        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)}` : "";
+        const criticalNote = critical.length > 0 ? `, ${critical.length} under ${formatHeadroomThreshold(CRITICAL_HEADROOM_BYTES)}` : "";
+        console.log(
+            `\n⚠ ${tight.length} scene(s) under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)} of headroom${criticalNote} — a shared-path change may push them over:\n${shown.join("\n")}${more}`
+        );
+    }
+    if (over.length > 0) {
+        const lines = over.map((o) => `  ${o.scene}: ${(o.measuredBytes / 1024).toFixed(3)} KB exceeds ceiling ${o.ceilingKB} KB by ${o.headroomBytes} bytes`);
+        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${lines.join("\n")}`);
+        console.error(`\nRaising a ceiling requires explicit user approval — see GUIDANCE.md.`);
+        process.exitCode = 1;
+    }
 }
 
 /**
@@ -1345,54 +1698,97 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
-async function measureLiveSizes(): Promise<BundleManifest> {
+/** How many times to attempt measuring a single Lite scene before giving up. */
+const LITE_MEASURE_ATTEMPTS = 3;
+
+/** Default budget for a Lite scene to reach its `dataset.ready` signal. */
+const READY_TIMEOUT_MS_DEFAULT = 50_000;
+
+/**
+ * Per-scene overrides for the ready-timeout.
+ *
+ * A few scenes perform compute-heavy GPU work that is near-instant on real
+ * hardware but dramatically slower under CI's software WebGPU (SwiftShader).
+ * scene129 (Gaussian Splatting + GPU picking) combines a GS radix-sort compute
+ * pass with a GPU→CPU picking readback (`pickAsync` → buffer `mapAsync`), which
+ * SwiftShader executes far slower than a real adapter. It renders in ~2s on a
+ * real GPU but does not reliably reach `dataset.ready` within the 50s default
+ * under SwiftShader, so the bundle measurement flakes with the identical
+ * "did not become ready (timed out after 50s …)" error across unrelated PRs.
+ *
+ * scene164 (device-lost recovery) is slow for a related but distinct reason: it is
+ * the one scene that deliberately destroys the WebGPU device and rebuilds the whole
+ * resource graph — environment cubemap mips, BRDF LUT, every material texture, meshes,
+ * skeletons, morph targets and the ESM shadow pipelines — and only signals `ready`
+ * after rendering settled post-recovery frames. Every frame it draws re-renders a
+ * 1024² ESM shadow map (`forceRefreshEveryFrame`, required so the map tracks the
+ * pinned pose) for a skinned and morphed caster, so it draws far more expensive
+ * frames than a typical scene, which reaches `ready` after a handful. `dataset.ready`
+ * is withheld until after recovery on purpose — setting it earlier would exclude the
+ * entire recovery path from this scene's recorded size — so that work cannot be moved
+ * outside the measured window.
+ *
+ * Recording a size only once the scene renders is intentional (the render
+ * pipeline's lazy chunks load on first render), so the right fix is a larger
+ * budget for these scenes rather than measuring a truncated bundle. We grant the
+ * same 150s the parity spec already allows for scene129; a genuinely-broken
+ * scene still fails loudly, just after a longer wait.
+ */
+const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
+    scene129: 150_000,
+    scene164: 150_000,
+};
+
+function readyTimeoutForScene(scene: string): number {
+    return READY_TIMEOUT_OVERRIDES_MS[scene] ?? READY_TIMEOUT_MS_DEFAULT;
+}
+
+/**
+ * Measure a Lite scene, retrying on failure. A Lite scene that never reaches its
+ * `dataset.ready` signal (e.g. a transient failure or rate-limit fetching a large
+ * multi-file remote asset such as Sponza's ~70 files in CI) would otherwise be
+ * silently under-counted: the render pipeline's lazily-imported chunks only load
+ * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
+ * measurement rather than recording a truncated size, so we retry a few times to
+ * absorb transient network flakiness before failing the build loudly.
+ */
+async function measureLiteSceneWithRetry(
+    browser: any,
+    port: number,
+    scene: string
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
+        try {
+            return await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", true, readyTimeoutForScene(scene));
+        } catch (err) {
+            lastError = err;
+            console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    throw new Error(
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
+            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+    );
+}
+
+async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
-    const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
-    let masterManifest: BundleManifest = {};
-    if (existsSync(masterManifestPath)) {
-        try {
-            masterManifest = JSON.parse(readFileSync(masterManifestPath, "utf-8"));
-        } catch {
-            /* no master baseline */
-        }
+
+    // Seed from any existing per-scene manifest files so subset builds preserve
+    // other scenes' entries and the live UI can refresh mid-build.
+    const manifest: BundleManifest = readCurrentBundleManifest();
+
+    // Persist a single scene's per-scene file, then refresh the generated
+    // aggregate `manifest.json` that runtime consumers (lab UI, tests) read.
+    function flushScene(scene: string): void {
+        const entry = manifest[scene];
+        if (entry) writePerSceneManifest(scene, entry);
+        writeAggregateBundleManifest(manifest);
     }
 
-    // Load existing manifest so we can update incrementally (UI can refresh mid-build)
-    let manifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
-    }
-
-    function flush(): void {
-        // The lab UI may fetch manifest.json mid-build, so a plain writeFileSync (which truncates
-        // the live file) can collide with a concurrent reader and surface as a transient Windows
-        // file-lock error (errno -4094 UNKNOWN / EBUSY). Write a sibling temp file and rename it
-        // into place — rename is atomic and never truncates the file readers hold open. Retry a few
-        // times to ride out any residual lock (e.g. AV scanning the freshly written file).
-        const json = JSON.stringify(orderBundleManifest(manifest), null, 2);
-        const tmpPath = `${manifestPath}.tmp`;
-        for (let attempt = 0; ; attempt++) {
-            try {
-                writeFileSync(tmpPath, json);
-                renameSync(tmpPath, manifestPath);
-                return;
-            } catch (err) {
-                if (attempt >= 5) {
-                    throw err;
-                }
-                const wait = Date.now() + 50 * (attempt + 1);
-                while (Date.now() < wait) {
-                    /* brief synchronous backoff before retrying the atomic write */
-                }
-            }
-        }
-    }
+    const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
 
     try {
         const tBrowser = performance.now();
@@ -1400,19 +1796,19 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
-        // Measure Lite scenes (write after each)
-        for (const scene of SCENES) {
+        // Measure Lite scenes (write after each), retrying transient failures.
+        for (const scene of liteScenes) {
             const tPage = performance.now();
-            const masterIgnoredRawKB = masterManifest[scene]?.ignoredRawKB;
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", masterIgnoredRawKB);
-            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
-            flush();
+            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
+            manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
+            flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
-            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
+            const note = deviceDependent(scene) ? ` — ${DEVICE_DEPENDENT_NOTE}` : "";
+            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})${note}`);
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
-        for (const bjsScene of BJS_SCENES) {
+        for (const bjsScene of bjsScenes) {
             const liteScene = bjsScene.replace("bjs-", "");
             if (manifest[liteScene]?.bjsRawKB != null) {
                 console.log(`  ${bjsScene}: ${manifest[liteScene]!.bjsRawKB} KB raw, ${manifest[liteScene]!.bjsGzipKB} KB gzip (cached)`);
@@ -1430,7 +1826,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
             if (manifest[liteScene]) {
                 manifest[liteScene].bjsRawKB = rawKB;
                 manifest[liteScene].bjsGzipKB = gzipKB;
-                flush();
+                flushScene(liteScene);
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
@@ -1440,17 +1836,141 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         server.close();
     }
 
-    if (!process.env.BUNDLE_SCENES) {
-        const currentScenes = new Set(SCENES);
+    if (pruneManifest) {
+        const currentScenes = new Set(liteScenes);
         for (const scene of Object.keys(manifest)) {
             if (!currentScenes.has(scene)) {
                 delete manifest[scene];
+                rmSync(perSceneManifestPath(scene), { force: true });
             }
         }
-        flush();
+        writeAggregateBundleManifest(manifest);
     }
 
     return manifest;
+}
+
+/**
+ * On-disk cache for remote scene assets fetched during measurement.
+ *
+ * Bundle-size measurement loads each scene in a headless browser and counts the
+ * JS chunks it fetches. Many scenes pull models/textures/environments from remote
+ * hosts (assets.babylonjs.com, playground.babylonjs.com, cdn.jsdelivr.net, …).
+ * A scene's render-pipeline chunks are dynamic imports that load only once the
+ * scene renders, so any remote asset that fails to fetch would prevent the scene
+ * from rendering and truncate its measured bundle. With ~230 remote requests
+ * across ~10 hosts per run, transient failures/rate-limits are near-certain over
+ * time and make measurement non-deterministic.
+ *
+ * We intercept every non-localhost request in the measurement browser and serve
+ * it from this cache: on a miss we fetch from the origin with PER-REQUEST retry
+ * (far more robust than reloading the whole scene) and persist the bytes; on a
+ * hit we serve from disk with no network at all. This makes measurement
+ * deterministic and lets CI warm the cache once (via BUNDLE_ASSET_CACHE_DIR).
+ * If an asset is genuinely unfetchable after retries the request is aborted, the
+ * scene fails to become ready, and the caller fails loudly — bundle size is never
+ * recorded from a truncated load.
+ */
+const ASSET_CACHE_DIR = process.env.BUNDLE_ASSET_CACHE_DIR ? resolve(process.env.BUNDLE_ASSET_CACHE_DIR) : resolve(ROOT, ".bundle-asset-cache");
+const ASSET_FETCH_ATTEMPTS = 4;
+
+interface CachedAsset {
+    status: number;
+    contentType: string;
+    body: Buffer;
+}
+
+// De-dupe concurrent/repeat requests for the same URL within a single run so an
+// asset shared across scenes is fetched at most once. Cleared on failure so a
+// later scene can retry.
+const assetMemCache = new Map<string, Promise<CachedAsset>>();
+
+function assetCacheKey(url: string): string {
+    return createHash("sha256").update(url).digest("hex");
+}
+
+async function fetchAssetWithRetry(url: string): Promise<CachedAsset> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= ASSET_FETCH_ATTEMPTS; attempt++) {
+        try {
+            const res = await fetch(url, { redirect: "follow" });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            }
+            const body = Buffer.from(await res.arrayBuffer());
+            return { status: res.status, contentType: res.headers.get("content-type") ?? "application/octet-stream", body };
+        } catch (err) {
+            lastErr = err;
+            if (attempt < ASSET_FETCH_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, 250 * 2 ** (attempt - 1)));
+            }
+        }
+    }
+    throw new Error(`asset fetch failed after ${ASSET_FETCH_ATTEMPTS} attempts: ${url} — ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+}
+
+async function getCachedAsset(url: string): Promise<CachedAsset> {
+    const inflight = assetMemCache.get(url);
+    if (inflight) {
+        return inflight;
+    }
+    const load = (async (): Promise<CachedAsset> => {
+        const key = assetCacheKey(url);
+        const bodyPath = resolve(ASSET_CACHE_DIR, key);
+        const metaPath = resolve(ASSET_CACHE_DIR, `${key}.json`);
+        if (!process.env.BUNDLE_ASSET_CACHE_DISABLE && existsSync(bodyPath) && existsSync(metaPath)) {
+            const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as { status: number; contentType: string };
+            return { status: meta.status, contentType: meta.contentType, body: readFileSync(bodyPath) };
+        }
+        const asset = await fetchAssetWithRetry(url);
+        console.log(`    [asset-cache miss] fetched ${url}`);
+        mkdirSync(ASSET_CACHE_DIR, { recursive: true });
+        // Atomic write (tmp + rename) so a crash mid-write can't leave a partial body.
+        const tmpBody = `${bodyPath}.tmp${process.pid}`;
+        writeFileSync(tmpBody, asset.body);
+        renameSync(tmpBody, bodyPath);
+        writeFileSync(metaPath, JSON.stringify({ url, status: asset.status, contentType: asset.contentType }));
+        return asset;
+    })();
+    assetMemCache.set(url, load);
+    load.catch(() => assetMemCache.delete(url));
+    return load;
+}
+
+/**
+ * Route every request the measurement page makes: localhost (the bundle server)
+ * passes through untouched so JS chunks are measured normally; every remote asset
+ * is served from {@link getCachedAsset}. Aborts on unfetchable assets so the scene
+ * fails loudly rather than measuring a truncated bundle.
+ */
+async function installAssetCacheRoute(page: any, port: number): Promise<void> {
+    const localBase = `http://localhost:${port}`;
+    await page.route("**/*", async (route: any) => {
+        const url = route.request().url();
+        if (url.startsWith(localBase) || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            await route.continue().catch(() => {});
+            return;
+        }
+        try {
+            const asset = await getCachedAsset(url);
+            await route.fulfill({
+                status: asset.status,
+                headers: {
+                    "content-type": asset.contentType,
+                    // Faithfully permissive CORS: the real hosts already allow these cross-origin
+                    // asset fetches (that's why scenes load today), so echo an allow-all header
+                    // rather than the origin's specific one.
+                    "access-control-allow-origin": "*",
+                    "cache-control": "public, max-age=31536000",
+                },
+                body: asset.body,
+            });
+        } catch {
+            // Unfetchable after retries — abort so the scene fails to render and the
+            // caller's requireReady guard turns it into a loud, non-silent failure.
+            await route.abort().catch(() => {});
+        }
+    });
 }
 
 export async function measurePage(
@@ -1459,8 +1979,9 @@ export async function measurePage(
     scene: string,
     htmlFile: string,
     bundlePath: string,
-    ignoredRawKBOverride?: number
-): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
+    requireReady = false,
+    readyTimeoutMs = READY_TIMEOUT_MS_DEFAULT
+): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
     const chunkFiles: string[] = [];
@@ -1483,11 +2004,47 @@ export async function measurePage(
         }
     });
 
+    await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
+    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
+    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    let notReadyReason: string | undefined;
     try {
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
-    } catch {
-        // BJS pages may not reach ready state without GPU — just measure fetched JS
+        await page.waitForFunction(
+            () => {
+                const c = document.querySelector("canvas");
+                return c?.dataset.ready === "true" || c?.dataset.error != null;
+            },
+            undefined,
+            { timeout: readyTimeoutMs }
+        );
+        notReadyReason = await page.evaluate(() => {
+            const c = document.querySelector("canvas");
+            if (c?.dataset.ready === "true") return undefined;
+            return c?.dataset.error ?? "canvas reported neither ready nor error";
+        });
+    } catch (err) {
+        // Only treat a genuine Playwright timeout as "not ready"; any other error
+        // (page crash, execution context destroyed, navigation failure, …) is a
+        // real failure that must propagate instead of masquerading as a timeout.
+        if (!(err instanceof Error) || err.name !== "TimeoutError") {
+            await page.close();
+            throw err;
+        }
+        // waitForFunction timed out: the scene set neither ready nor error.
+        notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
+    }
+
+    // For Lite scenes (requireReady), a scene that never rendered would under-count
+    // its bundle: the render pipeline's lazily-imported chunks (pbr-renderable,
+    // ibl-fragment, generate-mipmaps, …) only load once the scene renders, so a
+    // failed remote-asset fetch would silently produce a truncated size. Reject the
+    // measurement so the caller can retry / fail loudly instead of recording a bogus
+    // decrease. BJS pages (requireReady=false) may legitimately never reach ready
+    // without a real GPU, so they keep the lenient "measure whatever loaded" behavior.
+    if (requireReady && notReadyReason !== undefined) {
+        await page.close();
+        throw new Error(`measurePage: scene "${scene}" did not become ready (${notReadyReason}); refusing to record a truncated bundle.`);
     }
 
     await Promise.all(responseReads);
@@ -1495,12 +2052,13 @@ export async function measurePage(
         throw responseReadErrors[0];
     }
     const summary = summarizeRuntimeBundle(jsPayloads, bundleInfoDir, scene);
-    const ignoredRawKB = ignoredRawKBOverride ?? bytesToRoundedKB(summary.ignoredRawBytes);
-    const rawBytes = ignoredRawKBOverride == null ? summary.rawBytes : Math.max(0, summary.fetchedRawBytes - ignoredRawKBOverride * 1024);
+    const ignoredRawKB = bytesToRoundedKB(summary.ignoredRawBytes);
+    const rawBytes = summary.rawBytes;
 
     await page.close();
     return {
         rawKB: bytesToRoundedKB(rawBytes),
+        rawBytes,
         gzipKB: bytesToRoundedKB(summary.gzipBytes),
         ignoredRawKB,
         chunks: Array.from(new Set(chunkFiles)).sort(),

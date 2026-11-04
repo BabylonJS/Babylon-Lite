@@ -28,13 +28,19 @@
  *  end of the fragment to output the data for the geometry textures".
  */
 
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
+import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
+import type { StandardSceneShaderContext } from "./standard-material.js";
+import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { composeStandardShader } from "./standard-pipeline.js";
-import { HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { _rightHanded } from "#coordinate-system";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
+const STD_HAS_UV_TRANSFORM = 1 << 23;
 
 /** Tags whether the geometry pass needs the per-task `gp` UBO. */
 function needsGpUbo(attachments: readonly GeometryTextureType[]): boolean {
@@ -65,7 +71,8 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *
  *  All variable references resolve to symbols already declared by
  *  `standard-template.ts` / the standard fragment registry:
- *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE).
+ *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE). Declared by the lit and
+ *       the unlit (`disableLighting`) template alike.
  *    - `input.vp` — world position.
  *    - `baseColor`/`mat.tl` — diffuse texture sample (rgb) × diffuseLevel.
  *    - `specularColor`/`mat.sc` — specular colour, replaced by the std-specular
@@ -74,49 +81,57 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *    - `gp.cameraNearFar` / `gp.previousViewProjection` — from the geometry
  *       params UBO (added only when `needsGpUbo`).
  *    - `input.vCurrentClip` / `input.vPreviousClip` — added by the velocity
- *       fragment when LINEAR_VELOCITY is requested. */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): string {
+ *       fragment when LINEAR_VELOCITY is requested.
+ *  @internal Exported for tests. */
+export function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS Standard material can't split irradiance — outputs (0, 0, 0).
-            return `vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.WORLD_POSITION:
-            return `vec4<f32>(input.vp, ${wg})`;
+            return wgsl`vec4<f32>(input.vp, ${wg})`;
         case GeometryTextureType.LOCAL_POSITION:
             // `vLocalPos` is contributed by the geometry-params fragment (added
             // only when LOCAL_POSITION is requested).
-            return `vec4<f32>(input.vLocalPos, ${wg})`;
+            return wgsl`vec4<f32>(input.vLocalPos, ${wg})`;
         case GeometryTextureType.REFLECTIVITY:
             // BJS: vec4(toLinearSpace(specularMapColor)) * writeGeometryInfo
             // (.a is glossiness when a specular texture is present). The std
             // pipeline drops the texture .a inside `specularColor`, so the
             // geometry path re-samples the specular texture here to recover it.
             return hasSpecular
-                ? `(vec4<f32>(pow(textureSample(sT, sS, ${specularUv}).rgb, vec3<f32>(2.2)), textureSample(sT, sS, ${specularUv}).a) * ${wg})`
-                : `vec4<f32>(pow(mat.sc.rgb, vec3<f32>(2.2)), 1.0) * ${wg}`;
+                ? wgsl`(vec4<f32>(pow(textureSample(sT, sS, ${specularUv}).rgb, vec3<f32>(2.2)), textureSample(sT, sS, ${specularUv}).a) * ${wg})`
+                : wgsl`vec4<f32>(pow(mat.sc.rgb, vec3<f32>(2.2)), 1.0) * ${wg}`;
         case GeometryTextureType.VIEW_DEPTH:
-            return `vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
+            // Babylon.js's right-handed view space is the Z-mirrored scene view.
+            return _rightHanded
+                ? wgsl`vec4<f32>(-(scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`
+                : wgsl`vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
-            return `vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+            // The engine's view z is the positive distance in both builds, like the positive near/far bounds: [0, 1].
+            return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             // `clipPos` is the @builtin(position) fragment input declared by
             // shader-composer (fragment input struct).
-            return `vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return `vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
+            return _rightHanded
+                ? wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz * vec3<f32>(1.0, 1.0, -1.0)), ${wg})`
+                : wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
-            return `vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
+            return wgsl`vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:
             // BJS: vec4(baseColor.rgb, writeGeometryInfo). The standard
             // fragment already multiplied the diffuse sample by `mat.tl`
             // (texture level) when building `baseColor`.
-            return `vec4<f32>(baseColor, ${wg})`;
+            return wgsl`vec4<f32>(baseColor, ${wg})`;
         case GeometryTextureType.LINEAR_VELOCITY: {
             const cur = `(input.vCurrentClip.xy / input.vCurrentClip.w)`;
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
-            return `vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
+            return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-position varyings.
@@ -124,9 +139,26 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
  *  Only included in the fragment list when an attachment actually needs it,
  *  so opaque-only / WORLD_POSITION-only configs add zero bytes vs the bare
  *  standard shader. */
-function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
-    const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
-    const helpers = needsParamsUbo ? `struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
+function createGeometryParamsFragment(
+    needsParamsUbo: boolean,
+    needsVelocityVaryings: boolean,
+    needsLocalPosVarying: boolean,
+    features: number,
+    meshFeatures: number
+): ShaderFragment {
+    const bindings: NonNullable<ShaderFragment["_bindings"]>[number][] = [];
+    if (needsParamsUbo) {
+        bindings.push({ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX });
+    }
+    const hasSkeletonVelocity = needsVelocityVaryings && (features & HAS_SKELETON) !== 0;
+    if (hasSkeletonVelocity) {
+        bindings.push({
+            _name: "previousBoneSampler",
+            _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" },
+            _visibility: STAGE_VERTEX,
+        });
+    }
+    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
     if (needsVelocityVaryings) {
         varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
@@ -134,21 +166,37 @@ function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVary
     if (needsLocalPosVarying) {
         varyings.push({ _name: "vLocalPos", _type: "vec3<f32>" });
     }
-    // Velocity needs the previous-world matrix on the mesh UBO too — but that
-    // is out of scope of this fragment (the standard mesh UBO does not have
-    // it). LINEAR_VELOCITY is therefore deferred behind a TODO; HillValley /
-    // scene 145 does not request it.
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
-        vbParts.push(`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
-        vbParts.push(`out.vPreviousClip = gp.previousViewProjection * vec4<f32>(out.vp, 1.0);`);
+        vbParts.push(wgsl`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
+        if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
+            vbParts.push(wgsl`out.vPreviousClip = out.vCurrentClip;`);
+        } else {
+            const localPosition = (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position";
+            if (hasSkeletonVelocity) {
+                vbParts.push(wgsl`${makePreviousSkinningCode((features & HAS_SKELETON_8) !== 0)}
+let previousWorldPos = mesh.previousWorld * previousInfluence * vec4<f32>(${localPosition}, 1.0);
+let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
+out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
+            } else {
+                vbParts.push(wgsl`let previousWorldPos = mesh.previousWorld * vec4<f32>(${localPosition}, 1.0);
+let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
+out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
+            }
+        }
     }
     if (needsLocalPosVarying) {
-        vbParts.push(`out.vLocalPos = position;`);
+        vbParts.push(wgsl`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
     }
-    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: vbParts.join("\n") } : {};
+    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
     return {
         _id: "~geometry-params",
+        _uboFields: needsVelocityVaryings
+            ? [
+                  { _name: "previousWorld", _type: "mat4x4<f32>" },
+                  { _name: "velocityEnabled", _type: "f32" },
+              ]
+            : [],
         _bindings: bindings,
         _helperFunctions: helpers,
         // gp UBO is also visible to the vertex stage when present, so the
@@ -157,6 +205,21 @@ function createGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVary
         _varyings: varyings,
         _vertexSlots: slots,
     };
+}
+
+function makePreviousSkinningCode(hasEightInfluences: boolean): WgslSource {
+    let code = wgsl`var previousInfluence = readMatrixFromRawSampler(previousBoneSampler, f32(joints[0])) * weights[0];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[1])) * weights[1];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[2])) * weights[2];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[3])) * weights[3];`;
+    if (hasEightInfluences) {
+        code = wgsl`${code}
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[0])) * weights1[0];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[1])) * weights1[1];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[2])) * weights1[2];
+previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[3])) * weights1[3];`;
+    }
+    return code;
 }
 
 /** Compose a Standard geometry-output shader.
@@ -177,21 +240,26 @@ export function composeStandardGeometryShader(
     extFragments: ShaderFragment[],
     attachments: readonly GeometryTextureType[],
     esmShadowDepthCode = "",
-    emitColor = false
+    emitColor = false,
+    sceneShader: StandardSceneShaderContext | null = null,
+    meshVertexLayout?: MeshVbLayout
 ): ComposedShader {
-    const wantsGp = needsGpUbo(attachments);
-    const wantsVelocity = needsVelocity(attachments);
-    const wantsLocalPos = needsLocalPos(attachments);
-    const fragments = wantsGp || wantsVelocity || wantsLocalPos ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos)] : extFragments;
-
     // Strip MATERIAL_ALPHA_BLEND so the standard fragment does NOT emit
     // ALPHA_COMBINE blend in its color output — we drive blending per
     // attachment in the geometry pipeline state instead.
     const stdFeatures = features & ~MATERIAL_ALPHA_BLEND;
-    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode);
+    const wantsGp = needsGpUbo(attachments);
+    const wantsVelocity = needsVelocity(attachments);
+    const wantsLocalPos = needsLocalPos(attachments);
+    const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    const fragments =
+        wantsGp || wantsVelocity || wantsLocalPos
+            ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures)]
+            : extFragments;
+    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
 
-    const hasSpecular = (features & HAS_SPECULAR_TEXTURE) !== 0;
-    const specularUv = (features & SPECULAR_USES_UV2) !== 0 ? "input.vv" : "input.vu";
+    const hasSpecular = !!(features & HAS_SPECULAR_TEXTURE);
+    const specularUv = features & STD_HAS_UV_TRANSFORM ? "input.vs" : features & SPECULAR_USES_UV2 ? "input.vv" : "input.vu";
 
     // ── Post-process the fragment WGSL ────────────────────────────────────
 
@@ -210,12 +278,12 @@ export function composeStandardGeometryShader(
     //    standard `color` output (the "real" lit material color), with
     //    N = attachments.length.
     const colorSlot = attachments.length;
-    const extraColorLine = emitColor ? `\n@location(${colorSlot}) color: vec4<f32>,` : "";
-    const outputStruct = `struct FragmentOutput {
-${attachments.map((_, i) => `@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
+    const outputStruct = wgsl`struct FragmentOutput {
+${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`)).join("\n")}${extraColorLine}
 };
 `;
-    frag = frag.replace("@fragment fn main", `${outputStruct}@fragment fn main`);
+    frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
 
     // 3) Replace `return color;` with MRT writes + `return out;`. We use
     //    `alpha` (the standard fragment's running alpha) for the
@@ -223,9 +291,11 @@ ${attachments.map((_, i) => `@location(${i}) f${i}: vec4<f32>,`).join("\n")}${ex
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = attachments.map((type, i) => `out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n");
-    const extraColorWrite = emitColor ? `\nout.color = color;` : "";
-    const replacement = `var out: FragmentOutput;
+    const writes = wgsl`${attachments
+        .map((type, i) => (type === extension?.type ? extension.standardWrite(i, features) : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`))
+        .join("\n")}`;
+    const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
+    const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}
 return out;`;
     if (!frag.includes("return color;")) {
@@ -233,5 +303,5 @@ return out;`;
     }
     frag = frag.replace("return color;", replacement);
 
-    return { ...base, _fragmentWGSL: frag };
+    return { ...base, _fragmentWGSL: wgsl`${frag}` };
 }

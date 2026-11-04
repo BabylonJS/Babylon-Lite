@@ -7,16 +7,17 @@
  */
 
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const SPLIT_OUTPUT: Record<string, { readonly expr: (input: string) => string; readonly type: NodeValueType }> = {
     row0: { expr: (input) => `(${input})[0]`, type: "vec4f" },
     row1: { expr: (input) => `(${input})[1]`, type: "vec4f" },
     row2: { expr: (input) => `(${input})[2]`, type: "vec4f" },
     row3: { expr: (input) => `(${input})[3]`, type: "vec4f" },
-    col0: { expr: (input) => `vec4<f32>((${input})[0][0], (${input})[1][0], (${input})[2][0], (${input})[3][0])`, type: "vec4f" },
-    col1: { expr: (input) => `vec4<f32>((${input})[0][1], (${input})[1][1], (${input})[2][1], (${input})[3][1])`, type: "vec4f" },
-    col2: { expr: (input) => `vec4<f32>((${input})[0][2], (${input})[1][2], (${input})[2][2], (${input})[3][2])`, type: "vec4f" },
-    col3: { expr: (input) => `vec4<f32>((${input})[0][3], (${input})[1][3], (${input})[2][3], (${input})[3][3])`, type: "vec4f" },
+    col0: { expr: (input) => wgsl`vec4<f32>((${input})[0][0], (${input})[1][0], (${input})[2][0], (${input})[3][0])`, type: "vec4f" },
+    col1: { expr: (input) => wgsl`vec4<f32>((${input})[0][1], (${input})[1][1], (${input})[2][1], (${input})[3][1])`, type: "vec4f" },
+    col2: { expr: (input) => wgsl`vec4<f32>((${input})[0][2], (${input})[1][2], (${input})[2][2], (${input})[3][2])`, type: "vec4f" },
+    col3: { expr: (input) => wgsl`vec4<f32>((${input})[0][3], (${input})[1][3], (${input})[2][3], (${input})[3][3])`, type: "vec4f" },
 };
 
 function optionalVec4(block: NodeBlock, inputName: string, fallback: string, stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {

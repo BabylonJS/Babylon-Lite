@@ -187,13 +187,12 @@ async function makeBand(
         frames: [{ uvMin: [0, 0], uvMax: [cfg.repeats, 1], sourceSizePx: [texture.width, texture.height], pivot: [0, 0] }],
         premultipliedAlpha: true,
     };
-    const layer = createSprite2DLayer(atlas, { capacity: 1, order, pivot: [0, 0], uvScroll: cfg.scroll, blendMode: spriteBlendPremultiplied });
+    const layer = createSprite2DLayer(atlas, { capacity: 1, order, pivot: [0, 0], blendMode: spriteBlendPremultiplied });
     const slot = addSprite2DIndex(layer, {
         positionPx: [0, 0],
         sizePx: [1, 1],
         frame: 0,
         color: cfg.tint ? [...cfg.tint] : [1, 1, 1, 1],
-        ...(cfg.scroll ? { uvOffset: [0, 0] as [number, number] } : {}),
     });
     return { layer, slot, factor: cfg.factor, repeats: cfg.repeats, drift: cfg.drift, topFrac: cfg.topFrac, heightFrac: cfg.heightFrac, scroll: cfg.scroll };
 }

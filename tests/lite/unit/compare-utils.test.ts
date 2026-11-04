@@ -24,6 +24,7 @@ function makeBrowserSpy(bjsError?: string): { browser: Browser; screenshotCalls:
         close: async () => undefined,
     };
     const browser = {
+        contexts: () => [],
         newContext: async () => context,
     };
 

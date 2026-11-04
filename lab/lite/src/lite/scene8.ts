@@ -1,7 +1,20 @@
 // Scene 8: HDR Glass Sphere — matches Babylon #19JGPR#13
 // PBR glass sphere with HDR environment, alpha transparency, and custom exposure/contrast.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createSphere, createPbrMaterial, createSolidTexture2D, createPointLight, loadHdrEnvironment, attachControl, registerScene } from "babylon-lite";
+import {
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createSphere,
+    createPbrMaterial,
+    createSolidTexture2D,
+    createPointLight,
+    loadHdrEnvironment,
+    attachControl,
+    registerScene,
+} from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -24,6 +37,8 @@ async function main(): Promise<void> {
         faceSize: 512,
         useCubemapSkybox: true,
         skipGround: true,
+        skyboxSize: 415.6922,
+        skyboxPosition: [0, -40.00001, 0],
     });
 
     // Override exposure/contrast to match playground

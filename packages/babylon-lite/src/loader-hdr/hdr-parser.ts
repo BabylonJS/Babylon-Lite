@@ -72,15 +72,28 @@ export function parseRGBE(buffer: ArrayBuffer): HdrImage {
 }
 
 function decodeScanline(bytes: Uint8Array, pos: number, width: number, out: Float32Array, outOffset: number, scanline: Uint8Array): number {
-    if (width >= 8 && width <= 0x7fff && bytes[pos] === 2 && bytes[pos + 1] === 2 && bytes[pos + 2] === ((width >> 8) & 0xff) && bytes[pos + 3] === (width & 0xff)) {
+    const isRle = width >= 8 && width <= 0x7fff && bytes[pos] === 2 && bytes[pos + 1] === 2 && (bytes[pos + 2]! & 0x80) === 0;
+    if (isRle) {
+        if ((bytes[pos + 2]! << 8) + bytes[pos + 3]! !== width) {
+            throw new Error("Invalid HDR: RLE scanline width does not match image");
+        }
         pos += 4;
         for (let ch = 0; ch < 4; ch++) {
             let ptr = ch;
             let count = 0;
             while (count < width) {
+                if (pos >= bytes.length) {
+                    throw new Error("Invalid HDR: truncated RLE scanline");
+                }
                 const a = bytes[pos++]!;
+                if (a === 0) {
+                    throw new Error("Invalid HDR: zero-length RLE packet");
+                }
                 if (a > 128) {
                     const runLen = a - 128;
+                    if (runLen > width - count || pos >= bytes.length) {
+                        throw new Error("Invalid HDR: RLE run exceeds scanline");
+                    }
                     const val = bytes[pos++]!;
                     for (let i = 0; i < runLen; i++) {
                         scanline[ptr] = val;
@@ -88,6 +101,9 @@ function decodeScanline(bytes: Uint8Array, pos: number, width: number, out: Floa
                     }
                     count += runLen;
                 } else {
+                    if (a > width - count || pos + a > bytes.length) {
+                        throw new Error("Invalid HDR: RLE literal exceeds scanline");
+                    }
                     for (let i = 0; i < a; i++) {
                         scanline[ptr] = bytes[pos++]!;
                         ptr += 4;
@@ -100,6 +116,9 @@ function decodeScanline(bytes: Uint8Array, pos: number, width: number, out: Floa
             rgbeToFloat(scanline[x * 4]!, scanline[x * 4 + 1]!, scanline[x * 4 + 2]!, scanline[x * 4 + 3]!, out, outOffset + x * 3);
         }
     } else {
+        if (pos + width * 4 > bytes.length) {
+            throw new Error("Invalid HDR: truncated scanline");
+        }
         for (let x = 0; x < width; x++) {
             rgbeToFloat(bytes[pos]!, bytes[pos + 1]!, bytes[pos + 2]!, bytes[pos + 3]!, out, outOffset + x * 3);
             pos += 4;

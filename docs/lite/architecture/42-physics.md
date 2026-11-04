@@ -1,0 +1,558 @@
+# Module: Physics
+
+> Package path: `packages/babylon-lite/src/physics/`
+
+> **Status: Implemented.**
+> Behavioral integration of **Havok Physics V2** (the same WASM engine Babylon.js
+> uses), re-shaped to Lite idioms: a pure-state `PhysicsWorld` handle plus
+> standalone functions, zero module-level side effects, and opt-in feature
+> modules (collision events, triggers, heightfields, queries, character
+> controller, floating-origin, debug viewer). The **authoritative API is the
+> exported TSDoc** in `packages/babylon-lite/src/physics/`.
+
+---
+
+## Purpose
+
+The Physics module drives rigid-body simulation by wrapping the Havok V2 WASM
+solver. It owns **no scene graph**: it reads transforms from Lite `SceneNode`s to
+seed bodies and writes integrated transforms back each step. The scene owns a
+lazy discovery list of worlds created for it. The
+per-frame step is driven by the scene's before-render loop; the world is the
+data owner and the scene is the clock source.
+
+The module is **100% opt-in and tree-shakable**. A scene that imports nothing
+from `physics/` pays zero bytes, and the Havok WASM binary is loaded lazily by
+the caller and only referenced once `createHavokWorld` runs.
+
+---
+
+## Design: pure-state handle + functions
+
+### Discovery and inspection
+
+All functions below are standalone root exports from `@babylonjs/lite`.
+
+```ts
+getPhysicsWorlds(scene: SceneContext): readonly PhysicsWorld[];
+getPhysicsBodies(world: PhysicsWorld): readonly PhysicsBody[];
+getPhysicsConstraints(world: PhysicsWorld): readonly PhysicsConstraint[];
+getPhysicsBodyWorld(body: PhysicsBody): PhysicsWorld;
+getPhysicsBodyPrestepType(body: PhysicsBody): PhysicsPrestepType;
+getPhysicsBodyShape(body: PhysicsBody): PhysicsShape | null;
+getPhysicsBodyMassPropertiesToRef(world: PhysicsWorld, body: PhysicsBody, out: Required<PhysicsMassProperties>, instanceIndex?: number): Required<PhysicsMassProperties>;
+getPhysicsBodyLinearVelocityToRef(world: PhysicsWorld, body: PhysicsBody, out: Vec3, instanceIndex?: number): Vec3;
+getPhysicsBodyAngularVelocityToRef(world: PhysicsWorld, body: PhysicsBody, out: Vec3, instanceIndex?: number): Vec3;
+getPhysicsBodyLinearDamping(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyLinearDamping(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsBodyAngularDamping(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyAngularDamping(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsBodyGravityFactor(world: PhysicsWorld, body: PhysicsBody, instanceIndex?: number): number;
+setPhysicsBodyGravityFactor(world: PhysicsWorld, body: PhysicsBody, value: number): void;
+getPhysicsShapeType(shape: PhysicsShape): PhysicsShapeType;
+getPhysicsShapeParameters(shape: PhysicsShape): Readonly<PhysicsShapeParameters> | null;
+getPhysicsShapeMaterialToRef(world: PhysicsWorld, shape: PhysicsShape, out: PhysicsShapeMaterial): PhysicsShapeMaterial;
+getPhysicsShapeFilterMembershipMask(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeFilterCollideMask(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeDensity(world: PhysicsWorld, shape: PhysicsShape): number;
+getPhysicsShapeChildCount(world: PhysicsWorld, shape: PhysicsShape): number;
+isPhysicsConstraintEnabled(world: PhysicsWorld, constraint: PhysicsConstraint): boolean;
+setPhysicsConstraintEnabled(world: PhysicsWorld, constraint: PhysicsConstraint, enabled: boolean): void;
+getPhysicsConstraintDebug(constraint: PhysicsConstraint): PhysicsConstraintDebug;
+hidePhysicsConstraint(viewer: PhysicsViewer, constraint: PhysicsConstraintDebug): boolean;
+```
+
+`PhysicsShapeMaterial` is `{ friction: number; staticFriction: number; restitution: number }`.
+The existing allocating velocity getters and all existing setters remain compatible.
+
+- **World lifecycle (G1–G7):** `createHavokWorld` appends to lazy
+  `scene._physicsWorlds`, registering exactly one scene disposable to clear that
+  same list. Readonly lists are live, stable, insertion-ordered and duplicate-free;
+  copy for snapshots. Empty queries do not install registries. `disposePhysics`
+  removes only its world, is idempotent, and empties its body/constraint lists,
+  including floating-origin worlds. Scene disposal clears discovery and stops
+  stepping but does not release native worlds or clear their bodies: callers
+  still own world disposal. Creating worlds after scene disposal is unsupported.
+- **R1 — liveness:** native inspection requires current world/body/constraint
+  membership; there are no defensive liveness checks. Shapes have no registry:
+  re-read them through a live body every refresh and do not retain them across
+  refreshes. User-released shapes cannot safely be read. `getPhysicsBodyWorld`
+  retains the original association even after removal/disposal, not a liveness
+  signal. There is no `isPhysicsWorldDisposed`.
+- **R2 — polling:** ToRef getters update caller-owned vectors/structs and return
+  the identical output object (including its existing nested vectors).
+  Mass readback maps `[centerOfMass, mass, inertia, inertiaOrientation]`;
+  a non-OK result throws `Failed to read physics body mass properties.`.
+  Rotation locks read back native post-lock zero inertia axes. Partial mass
+  edits preserve existing shape-derived defaults and reapply locks.
+- **R3 — thin instances:** indexed getters default to instance 0, resolving
+  `world._thin?.instance(body, instanceIndex) ?? body._hkBody`; out-of-range
+  indices are undefined behavior. Setters fan out to all instances. Damping and
+  gravity-factor setters loop explicitly, outside the hot facade method list.
+  A thin body is listed once; use `getPhysicsBodyInstanceCount`. Shape readback
+  reports the base shape, not advanced per-instance shapes. Constraints bind
+  instance 0 only.
+- **R4 — floating origin:** damping, gravity factor, velocities, mass, shape
+  material and filters are region-independent. Center of mass, inertia and
+  inertia orientation are body-local; apply no origin offset. Thin bodies and
+  floating origin remain mutually exclusive.
+- **R5/R6 — packaging:** only root exports; unused getters tree-shake. The scene
+  registry field uses a type-only physics import, so non-physics scenes pay zero
+  bytes. Shape parameter caching costs only shape creators; constraint discovery
+  costs constraint creators and world disposal.
+
+| Readback                                                | Thin instances                                | Floating origin                      |
+| ------------------------------------------------------- | --------------------------------------------- | ------------------------------------ |
+| Motion/prestep/base shape                               | One cached body value; motion setters fan out | Independent                          |
+| Mass, damping, gravity factor, velocities               | Indexed reads, all-instance writes            | Body-local/region-independent        |
+| Shape type/parameters/material/filters/density/children | Shared shape                                  | Body-local/region-independent        |
+| Constraints                                             | Instance 0 only                               | Cross-region constraints unsupported |
+
+Primitive shape parameters retain the creation parameter object by reference;
+caller mutation changes the cached readback but not native geometry. Aggregate
+parameters retain the computed auto-sized geometry. MESH, CONVEX_HULL,
+HEIGHTFIELD and CONTAINER return null parameters. Material readback maps native
+`[staticFriction, dynamicFriction, restitution, ...]` to the named fields.
+Editing material or filter masks on a shared shape affects all its bodies.
+Child count is meaningful for containers (zero otherwise).
+
+Constraints are appended lazily to `world._constraints`. Release disables,
+releases, marks disposed, and splices once. Removing a body deliberately does
+not delist its constraints. World disposal releases every remaining constraint
+before releasing bodies/worlds (including the floating-origin early return),
+marks each disposed and clears the live list. Inspector must hide a constraint
+if it is unlisted or either body is unlisted.
+
+`getPhysicsConstraintDebug` lazily caches `constraint._debug` with body links,
+type and creation axes/pivots (missing pivots become zero vectors); options are
+immutable after creation. Viewer keys are these stable debug objects. Parallel
+`_constraintKeys`/`_constraintGroups` map each key to its meshes; duplicate show
+returns `[]`. Hide removes that group's meshes from the scene/flat mesh list and
+its line/disk/arrowhead update entries, returns true once (false if absent),
+and unregisters the update when empty. Disposal clears all arrays. Hide/dispose
+make no native calls and remain safe after constraint/body/world release.
+
+Inspector refreshes world, body and constraint lists, checks both bodies,
+re-reads shapes, reconciles viewer visuals and polls with reusable ToRef storage.
+Only showing a body needs a live native body; viewer updates use JS transforms.
+There is no scene-level physics-enabled switch (world presence only), native
+constraint pivot readback, material combine-mode API, sleep-state or
+applied-impulse getter, motor/limit editing, shape/aggregate/controller discovery,
+or floating-origin cross-region constraint support.
+
+Inspection regression coverage: `physics-discovery.test.ts`,
+`physics-inspection.test.ts`, `physics-viewer.test.ts`, and
+`tests/lite/build/public-api-types.test.ts`, plus existing dispose, constraint,
+rotation-lock, thin-instance, event and timestep tests.
+
+| Concept                    | Babylon Lite                                                   |
+| -------------------------- | -------------------------------------------------------------- |
+| `PhysicsEngine` + plugin   | one `PhysicsWorld` state interface + standalone functions      |
+| `PhysicsBody` class        | `PhysicsBody` state interface + `createPhysicsBody(...)` etc.  |
+| `body.applyForce()`        | `applyPhysicsBodyForce(world, body, ...)`                      |
+| `PhysicsViewer` class      | `createPhysicsViewer(...)` + `show*/hide*` functions           |
+| Engine-owned step observer | a callback pushed onto `scene._beforeRender` at world creation |
+
+### Thin-instance rigid bodies
+
+`enableHavokThinInstancePhysics(world)` lazily installs a per-world Havok facade
+as `world._hknp`. The lazy context retains the raw Havok module and maps each
+thin body's primary handle identity to module-private native handles and reusable
+matrix-decomposition scratch values. This explicit enabler owns all
+thin-instance detection, validation, fan-out, and matrix synchronization, so
+ordinary body state has no thin fields and ordinary physics scenes retain none
+of the feature module. After enabling,
+`createPhysicsBody(world, mesh, motionType, startsAsleep)` creates one native
+Havok body per active matrix while retaining one Lite `PhysicsBody` handle:
+
+- `PhysicsBody._hkBody` remains the first native handle for backwards
+  compatibility and single-body consumers.
+- Generic body setters, impulses, removal, and release keep their ordinary
+  direct Havok calls. The facade recognizes only the exact primary handle object
+  and fans those calls out; equivalent cloned tuples delegate once to raw Havok.
+- Getter calls on the primary handle naturally read native instance zero.
+  Instance resolution returns stable cloned handle tuples, including for index
+  zero, so controller contact impulses affect only the struck instance.
+- Feature-specific consumers can address one native instance through the lazy
+  context's internal `instance(body, index)` seam. The Playroom keeps its
+  indexed impulse and velocity helpers in demo code so ordinary physics scenes
+  do not retain game-specific validation and control APIs.
+- Event-safe deferred release and controller native-transform math remain private
+  to the lazy enabler.
+- Each native body is initialized from the rigid decomposition of the same
+  effective transform the renderer consumes:
+  `mesh.worldMatrix × thinInstanceMatrix`. The carrier is therefore applied
+  exactly once; it is neither discarded during creation nor multiplied into
+  the instance slab permanently.
+- Shape, mass, motion, velocity, impulse, force, event-mask, removal, and disposal
+  operations that address the Lite body apply to every native instance. Getters
+  and APIs that inherently accept one native body use instance zero.
+- Constraints and single-body query exclusions use instance zero. Raycast and
+  character-controller contact resolution consult the optional thin resolver.
+  Body-aware collision and trigger subscriptions install a shared lazy event
+  resolver that recognizes both ordinary and thin native handles. Collision-style event payloads return the
+  shared Lite body plus the zero-based thin-instance index, matching Babylon.js
+  `colliderIndex` / `collidedAgainstIndex` semantics; ordinary bodies report
+  index `0`.
+
+Dynamic thin-instance bodies synchronize Havok transforms directly into the
+existing matrix slab after every step, then dirty the matrix range once through
+`flushThinInstances(mesh)`. Body creation retains the canonical signed scale of
+each effective rendered matrix, including a negative determinant. Write-back
+recomposes native translation/rotation with that retained scale in world space,
+then multiplies by the inverse of the carrier's current world matrix to restore
+the carrier-local instance matrix. Consequently
+`mesh.worldMatrix × thinInstanceMatrix` keeps its authored scale, determinant,
+and transformed vertices while native Havok receives only a rigid pose. With
+TELEPORT pre-step enabled, every current effective matrix is decomposed and
+copied back to its matching Havok body; its latest signed scale becomes the
+subsequent write-back scale.
+
+Collision shapes remain body-local geometry. A common non-rigid template scale
+must be baked into the shared geometry/shape before body construction. When an
+effective thin-instance matrix nevertheless has non-unit scale, the lazy thin
+context wraps the caller's shape in a scaled container, shared by instances
+with the same signed scale. Unit-scale instances keep the caller's shape
+directly. This preserves authored shape centers and convex/mesh geometry
+without mutating the shared source shape or treating rigid-body transforms as
+scale. The wrapper belongs to the thin context and is released when replaced
+or when the body is released.
+
+Shape-derived thin-instance mass properties are evaluated from each native
+body's actually attached shape. Differently scaled wrappers therefore retain
+their own scaled centre of mass, inertia, and inertia orientation; instance
+zero is not a template for those derived values. The caller's explicit
+mass/centre/inertia overrides and active angular-lock mask are then applied to
+each instance using the same public-body contract.
+
+Native shape derivation and explicit override application live in a
+side-effect-free mass-properties leaf shared by ordinary and thin bodies.
+Cloning and rotation-lock transforms occupy a separate leaf so importing mass
+derivation does not retain axis-lock machinery. Each caller retains only the modules it invokes.
+The lazy thin chunk imports those leaves directly rather than reaching back
+through `havok.ts`, which prevents thin-only lock machinery from becoming part
+of ordinary physics entry chunks.
+
+The generalized mass-properties setter is also an opt-in leaf. Core body
+creation and the scalar-mass convenience API retain their narrow
+shape-derived path, while callers that override inertia or its orientation
+load the generalized merge helper. Thin physics imports that merge helper in
+its existing lazy chunk; scalar mass supplies its mass-proportional
+shape-less inertia fallback explicitly.
+
+The rotation-lock API itself owns thin-body lock persistence. It uses the thin
+context's existing count and indexed native-handle access, stores one unlocked
+mass source per instance on the body, and installs the same mass-rebuild
+transform seam used by ordinary bodies. The base thin context therefore does
+not retain lock/unlock loops or inertia-axis math unless a caller imports the
+rotation-lock API.
+
+Carrier inversion and shape scaling stay implemented inside the lazy
+thin-instance chunk. Carrier composition reuses the math layer's offset-aware
+multiply helper, while inversion remains local so ordinary scenes do not retain
+an otherwise unused inverse kernel. Optional physics pays for this matrix work
+only after `enableHavokThinInstancePhysics`.
+
+Matrix write-back may canonicalize multiplication residue to exact zero only
+within a small machine-roundoff multiple relative to the affected basis
+column's magnitude. It must not apply a fixed world-space threshold: legitimate
+small authored rotations and basis components remain representable. Unit scale
+is likewise canonicalized only within one ULP of the matrix storage format;
+this removes norm error from quantized rotation bases without turning
+representable non-unit scale into unit scale.
+TELEPORT is the default. ACTION retains Babylon.js behavior and sends the
+carrier node's single target transform to every instance. Public body transform
+sets fan out through the facade and rewrite/flush every thin matrix. The core
+step retains only three optional synchronization hooks (TELEPORT, ACTION, and
+dynamic body-to-matrix sync), while their algorithms stay in the lazy module.
+
+Bodies removed while after-step callbacks are draining remain resolvable until
+all callbacks complete. Body-aware collision or trigger registration installs a
+lazy, per-world event-lifetime seam whose begin/end hooks bracket the drain and
+defer native release for both ordinary and thin bodies. Removals outside the drain
+release immediately.
+
+The same lazy seam owns one native-ID index for every tracked ordinary body and
+every native thin-instance body. Each entry stores a stable
+`[PhysicsBody, nativeHandle, instanceIndex]` identity, including a dedicated
+instance-zero handle for thin bodies. Installing the first body-aware event
+listener indexes bodies that already exist; later body creation adds identities
+directly. Removal outside a drain deletes identities before native release.
+Removal during a drain keeps both identities and native handles alive until the
+matching `end()`, then deletes before release. World disposal clears the index.
+Native IDs can therefore be reused only after the old identity is gone, and
+worlds never share index state. Collision and body-aware trigger resolution are
+one `Map.get` per participant; they never walk thin states, ordinary bodies, or
+deferred-removal lists.
+
+Collision subscriptions share one module-owned dispatcher per world. The first
+subscription installs one after-step drain; subsequent subscriptions append
+observers without adding another native stream iterator. Every native event is
+decoded once and delivered in native order to every observer registered before
+that step. STARTED, CONTINUED, FINISHED, and repeated same-pair events are all
+preserved. Each native event owns a fresh top-level info object and fresh contact
+vectors, so retaining one event cannot observe mutation from a later event.
+Disposal from an observer stops iteration before another native-world call; the
+remaining copied after-step callbacks are likewise skipped after world disposal.
+
+`getPhysicsBodyInstanceCount(body)` reports the native count (`1` for ordinary
+bodies). The active thin-instance count is fixed when the body is created:
+callers must populate matrices and explicitly enable thin-instance physics before
+body construction. Without the enabler, core body creation performs no
+thin-instance detection and follows the ordinary single-body path.
+The Playroom owns its reset checkpoint and restore helpers. They retain the
+body's local matrices, carrier transform, and native transforms without adding
+reset semantics to the core thin-instance module. Restore reuses the existing
+mesh slab and native bodies, clears velocities, sleeps each body, and dirties
+the retained matrix buffer once.
+Floating-origin multi-region simulation rejects thin-instance bodies explicitly
+until it can track one region per native instance.
+
+Native handle order is fixed at construction and matches render-instance order.
+Index zero has its own stable cloned native handle just like every later index,
+so indexed impulses, velocities, raycasts, and collision events never pass the
+primary facade handle and never broadcast accidentally. The existing
+non-indexed setters and impulses deliberately retain their generic broadcast
+behavior. Call the indexed operations only when gameplay or contact logic has a
+specific raycast/collision instance identity.
+
+### Module files
+
+| File                                                   | Responsibility                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `havok.ts`                                             | Core: world create/step/dispose, bodies, shapes, aggregates, forces       |
+| `havok-mass-properties.ts`                             | Shared native mass derivation and explicit overrides                      |
+| `havok-rotation-locks.ts`                              | Mass cloning and shared body-axis inertia lock transforms                 |
+| `havok-thin-instances.ts`                              | Lazy native-body fan-out and matrix synchronization for thin instances    |
+| `havok-instance-access.ts`                             | Validated opt-in impulse/velocity access for one body instance            |
+| `havok-events.ts`                                      | Lazy body resolution and event-safe deferred release                      |
+| `havok-collision.ts`                                   | Opt-in collision-started/continued/finished events (`onPhysicsCollision`) |
+| `havok-trigger.ts`                                     | Opt-in trigger volume enter/exit events                                   |
+| `havok-heightfield.ts`                                 | Heightfield collision shape                                               |
+| `havok-queries.ts`                                     | Raycast, shape-cast, shape-proximity queries                              |
+| `havok-floating-origin.ts`                             | Multi-region simulation for Large World Rendering (loaded on demand)      |
+| `character-controller.ts`                              | Kinematic character controller (cast-and-slide)                           |
+| `physics-viewer.ts` + `physics-debug-line-material.ts` | Debug wireframe overlay of collider shapes                                |
+
+---
+
+## World lifecycle
+
+```ts
+import HavokPhysics from "@babylonjs/havok";
+
+const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
+const world = createHavokWorld(scene, hknp); // world step defaults to 0 (follows the scene)
+// ... create bodies/aggregates ...
+disposePhysics(world); // stops stepping, releases native world
+```
+
+`createHavokWorld` registers the per-frame step by **unshifting a callback onto
+`scene._beforeRender`** and stores a remover in `world._stopStep`. `disposePhysics`
+calls that remover and clears `world._afterStep` **before** releasing the native
+world — otherwise a still-registered callback would step (and read collision
+events from) a freed Havok world, which is both a leak and a use-after-free in the
+WASM heap. See `tests/lite/unit/physics-dispose.test.ts`.
+
+### Discovery
+
+`getPhysicsWorlds(scene)`, `getPhysicsBodies(world)` and
+`getPhysicsConstraints(world)` expose live readonly lists in creation order.
+World creation registers one lazy scene cleanup; scene disposal clears only the
+world list, not native worlds or their bodies. World disposal unregisters itself,
+releases remaining constraints before releasing native worlds, and clears both
+body and constraint lists on ordinary and floating-origin paths. Empty discovery
+queries install nothing. Copy lists for snapshots and recheck membership before
+native reads. Shapes, aggregates and character controllers are not separately
+discoverable. See **Discovery and inspection** above for G1–G7, R1–R6, signatures,
+thin-instance rules and the Inspector refresh contract.
+
+---
+
+## Timestep & delta-time propagation
+
+Physics advances on the **same delta-time contract every time-based subsystem in
+Lite follows**: the scene resolves one effective delta per frame, and each
+subsystem may re-gate it with its own fixed override.
+
+### Stage 1 — the scene resolves one delta per frame
+
+`scene-core.ts` picks the delta once and passes it to every before-render
+callback (animation, sprites, **physics**):
+
+```ts
+// scene-core.ts (buildScene render step)
+const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
+for (const cb of ctx._beforeRender) cb(d);
+```
+
+`scene.fixedDeltaMs` (milliseconds, default `0`) is the determinism knob: set it
+to a fixed value (e.g. `1000 / 60`) for reproducible playback, or leave it `0` to
+use the real `requestAnimationFrame` delta (`engine._currentDelta`).
+
+### Stage 2 — the world re-gates with its own fixed step
+
+The world stores its own **`_fixedDeltaMs` (milliseconds)**, which is **independent
+of the scene** — it defaults to `0` at creation and is only set through the
+accessors. `_stepWorld` applies the identical `> 0 ? fixed : delta` rule the
+animation and sprite managers use:
+
+```ts
+// havok.ts _stepWorld(world, deltaMs)
+const stepMs = world._fixedDeltaMs > 0 ? world._fixedDeltaMs : deltaMs;
+if (!Number.isFinite(stepMs) || stepMs <= 0) return; // reject NaN / non-positive
+const dt = Math.min(stepMs / 1000, 0.1); // → seconds, clamped (see below)
+hknp.HP_World_Step(hkWorld, dt);
+```
+
+Because the world step defaults to `0`, in the common case (no override) the world
+**follows the scene**: the `deltaMs` it receives each frame is the value the render
+loop already resolved as `scene.fixedDeltaMs > 0 ? scene.fixedDeltaMs :
+engine._currentDelta` (Stage 1). Physics therefore steps in **lockstep with
+animation** — both resolve to the same fixed value when the scene is deterministic,
+or both fall back to the real frame delta when it is not — and any **runtime change
+to `scene.fixedDeltaMs` is picked up on the next frame** (no construction-time
+snapshot to go stale).
+
+### Units
+
+The stored step is **milliseconds everywhere** (consistent with
+`scene.fixedDeltaMs` and the animation/sprite managers). Physics converts to
+**seconds only at the Havok boundary**, because `HP_World_Step` and the
+force→impulse / displacement→velocity conversions expect seconds. The
+after-step callbacks (`onPhysicsAfterStep`) receive this per-step `dt` in seconds.
+
+### Overriding the step
+
+`setPhysicsTimestepMs(world, fixedDeltaMs)` / `getPhysicsTimestepMs(world)` read and
+write `_fixedDeltaMs` in **milliseconds**, matching `SceneContext.fixedDeltaMs`. Pass
+`0` (the default) to detach physics from a world-level fixed step and follow the
+scene's per-frame delta:
+
+```ts
+setPhysicsTimestepMs(world, 1000 / 30); // force a 30 fps physics step
+setPhysicsTimestepMs(world, 0); // back to following the scene's delta
+```
+
+`setPhysicsTimestep(world, seconds)` / `getPhysicsTimestep(world)` are the equivalent
+**seconds-based** accessors (`setPhysicsTimestep(world, 1 / 30)` is the same as
+`setPhysicsTimestepMs(world, 1000 / 30)`); the millisecond accessors are preferred in
+new code so units line up with the rest of the engine's delta convention.
+
+This is the physics analogue of assigning `manager.fixedDeltaMs` on an animation
+or sprite manager. See `tests/lite/unit/physics-timestep.test.ts`.
+
+### Out-of-loop callers: `worldStepSeconds`
+
+Some physics operations run **outside** the per-frame `_stepWorld` callback and so
+never receive the render loop's `deltaMs` argument — for example `applyPhysicsBodyForce`
+(force → impulse over one step) and the character controller's `moveWithCollisions`
+(displacement → velocity). These call the shared `worldStepSeconds(world)` helper,
+which resolves the same effective delta the step would use and returns it in **seconds**:
+
+1. `world._fixedDeltaMs` if a fixed step is set, else
+2. `scene.fixedDeltaMs` if the scene runs fixed, else
+3. the engine's real per-frame delta (`scene.surface.engine._currentDelta`).
+
+This keeps force and character motion locked to the same delta the world integrates
+with, whether the world runs fixed-step or follows the real frame delta. The helper
+can return `0` on the very first frame (no delta measured yet); callers guard against
+a zero/negative step.
+
+### Why `Math.min(dt, 0.1)`
+
+The step is clamped to a **100 ms ceiling (a 10 fps floor)**. A long hitch — a
+backgrounded tab, a GC pause, a hit breakpoint — otherwise hands Havok a single
+huge `dt`. Integrating one giant step makes fast bodies **tunnel** through thin
+geometry (they teleport past a collider between two solver samples) and can
+destabilise the constraint solver. Capping turns a stall into a brief slow-motion
+instead of an explosion. Babylon.js caps its physics substep the same way. The
+clamp is intentionally _not_ a substepping loop: Lite runs a single fixed step per
+frame, trading perfect catch-up for simplicity and a stable bundle.
+
+### Consistency with other time-based subsystems
+
+| Subsystem | Gate                                             | Source                  |
+| --------- | ------------------------------------------------ | ----------------------- |
+| Scene     | `fixedDeltaMs > 0 ? fixedDeltaMs : currentDelta` | `scene-core.ts`         |
+| Animation | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `animation-manager.ts`  |
+| Sprites   | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `sprite-animation.ts`   |
+| Physics   | `_fixedDeltaMs > 0 ? _fixedDeltaMs : deltaMs`    | `havok.ts` `_stepWorld` |
+
+The only physics-specific differences are the ms→seconds conversion at the Havok
+boundary and the 100 ms tunnelling clamp; the guard against non-finite / negative
+steps matches the animation and sprite managers.
+
+---
+
+## Rigid-body angular locks
+
+`lockPhysicsBodyRotationAxes(world, body, axes)` locks selected body-local
+axes after the collision shape and mass properties have been configured. Havok
+represents a locked angular degree of freedom with a zero inertia component. Its
+shape-derived inertia is expressed in a rotated principal-axis frame, so the
+helper evaluates `R · diag(inertia) · Rᵀ` in body space and zeros the requested
+`"x"`, `"y"`, or `"z"` components. A single-axis lock retains the exact coupled
+inertia in the remaining free plane through a rotation around the locked axis;
+multi-axis locks use an identity inertia orientation. Mass and centre of mass are
+preserved. The active lock mask and latest unlocked mass properties are retained
+on the body and reapplied by `setPhysicsBodyMass` and
+`setPhysicsBodyMassProperties` when they rebuild shape-derived mass properties.
+`unlockPhysicsBodyRotationAxes(world, body, axes)` selectively restores axes from
+those unlocked properties and removes the internal persistence seam after the
+last axis is unlocked.
+
+---
+
+## Feature modules (opt-in)
+
+- **Collision events** (`havok-collision.ts`): `setPhysicsBodyCollisionEventsEnabled`
+    - `onPhysicsCollision` register an after-step drain on `world._afterStep`.
+      Each event identifies `collider`, `colliderIndex`, `collidedAgainst`, and
+      `collidedAgainstIndex`, and reports contact distance in addition to the point,
+      normal, and impulse. All observers share one drain and receive every native
+      event in order, including duplicate pair/phase events.
+- **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
+  and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
+  Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers
+  to a body that is no longer tracked).
+- **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
+  Raycasts return the shared Lite `body` plus `bodyIndex`, the zero-based
+  thin-instance index resolved from the native hit handle (`0` for ordinary
+  bodies and `-1` when no tracked body is resolved), matching Babylon.js.
+  Shape casts accept one `ignoreBody`, matching Havok's single optional ignored body
+  ID, so callers can sweep a body's own shape without immediately hitting that body.
+- **Heightfield** (`havok-heightfield.ts`): `createHeightFieldShape`.
+- **Character controller** (`character-controller.ts`): kinematic cast-and-slide
+  movement; `moveWithCollisions` uses `worldStepSeconds(world)` (the world's step, or
+  the scene's per-frame delta when no fixed step is set) to convert a requested
+  displacement into a velocity. `getPhysicsCharacterControllerBody` exposes the
+  backing body for queries and event matching.
+- **Floating origin** (`havok-floating-origin.ts`): `enableHavokFloatingOrigin`
+  opts a world into multi-region simulation for Large World Rendering
+  (see [35-large-world-rendering.md](35-large-world-rendering.md)).
+  Its `step(world, dt)` receives the same clamped per-step seconds as the single-region path.
+- **Debug viewer** (`physics-viewer.ts`): wireframe overlay of collider shapes.
+
+---
+
+## Testing
+
+- `tests/lite/unit/physics-dispose.test.ts` — the step / after-step callbacks are
+  registered on creation and fully torn down on dispose (no leak, no use-after-free).
+- `tests/lite/unit/physics-timestep.test.ts` — the world's step defaults to `0`
+  (independent of `scene.fixedDeltaMs`), follows the scene's per-frame delta when
+  unset (respecting runtime changes), is converted to seconds for `HP_World_Step`,
+  and is settable via `setPhysicsTimestep` / `setPhysicsTimestepMs`.
+- `tests/lite/unit/physics-rotation-axis-locks.test.ts` — selected body-local inertia
+  components are zeroed after transforming a non-identity principal inertia frame
+  into body space; single-axis locks preserve free-plane coupling, mass updates
+  preserve active locks, selective unlocking restores the latest unlocked
+  properties, and empty input/native read failures do not write mass properties.
+- `tests/lite/unit/physics-thin-instances.test.ts` — matrix-order native body
+  creation, shared shape/mass propagation, post-step matrix synchronization, one
+  dirty-range publication, complete native-body disposal, and nonzero-instance
+  Babylon.js-compatible body and instance-index reporting from native collision
+  and character-controller events.
+- Parity scenes (physics drop/stack/constraint scenes) set
+  `scene.fixedDeltaMs = 1000 / 60` so Lite and Babylon.js step identically.

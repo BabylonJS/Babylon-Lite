@@ -16,15 +16,15 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Vec3 } from "../math/types.js";
 import { addToScene, onBeforeRender } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { createBox, createCylinder } from "../mesh/mesh-factories.js";
 import { computeAabb } from "../math/compute-aabb.js";
-import { mat4FromQuat } from "../math/mat4-from-quat.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
+import { createMat4FromQuat } from "../math/create-mat4-from-quat.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
 import type { Mat4 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
@@ -54,6 +54,7 @@ function rotatePoint(q: Quat, p: Vec3): Vec3 {
     return { x, y, z };
 }
 
+/** Options for the interactive bounding-box gizmo. */
 export interface BoundingBoxGizmoOptions {
     /** RGB colour for the wireframe + handle materials. Defaults to grey. */
     color?: [number, number, number];
@@ -66,6 +67,7 @@ export interface BoundingBoxGizmoOptions {
     rotationAnchorSize?: number;
 }
 
+/** Interactive bounding-box gizmo that can translate, rotate, and scale an attached node. */
 export interface BoundingBoxGizmo {
     readonly root: SceneNode;
     /** Currently attached node — set via `attachBoundingBoxGizmoToNode`. */
@@ -131,7 +133,7 @@ function computeBoundsRecursive(root: SceneNode, extraCandidates?: readonly Mesh
             // When `preTransform` is supplied, fold it into the mesh's world
             // matrix so the AABB is computed in that rotated frame (used to get
             // the node's rotation-removed bounds for the OBB cage).
-            const m = preTransform ? mat4Multiply(preTransform, probe.worldMatrix as unknown as Mat4) : (probe.worldMatrix as never);
+            const m = preTransform ? multiplyMat4(preTransform, probe.worldMatrix as unknown as Mat4) : (probe.worldMatrix as never);
             const aabb = computeAabb(probe._cpuPositions, m as never);
             if (Number.isFinite(aabb[0][0])) {
                 if (aabb[0][0] < minX) {
@@ -375,6 +377,12 @@ function applyRotation(node: SceneNode, ax: number, ay: number, az: number, angl
     rq.set(out[0], out[1], out[2], out[3]);
 }
 
+/** Create an interactive bounding-box gizmo in the utility layer.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the bounding-box handles.
+ * @param options - Visual size and color options for edges and handles.
+ * @returns A detached bounding-box gizmo ready to attach to a node.
+ */
 export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLayer, options: BoundingBoxGizmoOptions = {}): BoundingBoxGizmo {
     const color = options.color ?? [0.8, 0.8, 0.8];
     const edgeThickness = options.edgeThickness ?? 0.02;
@@ -417,7 +425,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     // per handle without parent-world-matrix recomputation).
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = material;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     root.pickable = false;
     addToScene(utilityScene, root);
 
@@ -616,7 +624,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         }
         // Node world rotation (scale removed) and its inverse rotation matrix.
         const q = rotationQuatFromMatrix(node.worldMatrix);
-        const rInv = mat4FromQuat(-q[0], -q[1], -q[2], q[3]);
+        const rInv = createMat4FromQuat(-q[0], -q[1], -q[2], q[3]);
         // Bounds in the rotation-removed frame so the cage is a tight OBB.
         // Fall back to walking the main scene's meshes so descendants attached
         // via the `.parent` setter alone (not pushed into `.children`) are
@@ -993,6 +1001,9 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     return gizmo;
 }
 
+/** Attach the bounding-box gizmo to a node, or detach it with `null`.
+ * Recomputes the current bounds immediately so handles match the new target.
+ */
 export function attachBoundingBoxGizmoToNode(gizmo: BoundingBoxGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo._refresh();
@@ -1013,6 +1024,7 @@ export function attachBoundingBoxGizmoToNode(gizmo: BoundingBoxGizmo, node: Scen
     }
 }
 
+/** Dispose all meshes, observers, and pointer-drag registrations owned by the bounding-box gizmo. */
 export function disposeBoundingBoxGizmo(gizmo: BoundingBoxGizmo, layer: UtilityLayer): void {
     for (const d of gizmo._disposers) {
         d();

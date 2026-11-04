@@ -1,6 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface PostProcessVec2 {
     x: number;
@@ -23,10 +24,10 @@ export interface ChromaticAberrationPostProcessTask extends PostProcessTask {
     centerPosition: PostProcessVec2;
 }
 
-const CHROMATIC_ABERRATION_UNIFORM_WGSL = `struct ChromaticAberrationParams{chromatic_aberration:f32,screen_width:f32,screen_height:f32,radialIntensity:f32,direction:vec2f,centerPosition:vec2f}
+const CHROMATIC_ABERRATION_UNIFORM_WGSL = wgsl`struct ChromaticAberrationParams{chromatic_aberration:f32,screen_width:f32,screen_height:f32,radialIntensity:f32,direction:vec2f,centerPosition:vec2f}
 @group(0) @binding(2) var<uniform> chromaticAberrationParams:ChromaticAberrationParams;`;
 
-const CHROMATIC_ABERRATION_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let centered=uv-chromaticAberrationParams.centerPosition;var dir=chromaticAberrationParams.direction;if(dir.x==0.0&&dir.y==0.0){dir=normalize(centered);}let radius=sqrt(dot(centered,centered));let amount=chromaticAberrationParams.chromatic_aberration*pow(radius,chromaticAberrationParams.radialIntensity);let shift=amount*dir/vec2f(chromaticAberrationParams.screen_width,chromaticAberrationParams.screen_height);let r=samplePostProcessSource(vec2f(uv.x+shift.x*-0.3,uv.y+shift.y*-0.3*0.5));let g=samplePostProcessSource(uv);let b=samplePostProcessSource(vec2f(uv.x+shift.x*0.3,uv.y+shift.y*0.3*0.5));return vec4f(r.r,g.g,b.b,clamp(r.a+g.a+b.a,0,1));}`;
+const CHROMATIC_ABERRATION_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let centered=uv-chromaticAberrationParams.centerPosition;var dir=chromaticAberrationParams.direction;if(dir.x==0.0&&dir.y==0.0){dir=normalize(centered);}let radius=sqrt(dot(centered,centered));let amount=chromaticAberrationParams.chromatic_aberration*pow(radius,chromaticAberrationParams.radialIntensity);let shift=amount*dir/vec2f(chromaticAberrationParams.screen_width,chromaticAberrationParams.screen_height);let r=samplePostProcessSource(vec2f(uv.x+shift.x*-0.3,uv.y+shift.y*-0.3*0.5));let g=samplePostProcessSource(uv);let b=samplePostProcessSource(vec2f(uv.x+shift.x*0.3,uv.y+shift.y*0.3*0.5));return vec4f(r.r,g.g,b.b,clamp(r.a+g.a+b.a,0,1));}`;
 
 /**
  * Create a post-process task that simulates chromatic aberration by shifting color channels outward from a center point.

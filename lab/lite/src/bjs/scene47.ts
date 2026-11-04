@@ -8,6 +8,7 @@ import HavokPhysics from "@babylonjs/havok";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { PhysicsViewer } from "@babylonjs/core/Debug/physicsViewer";
+import { UtilityLayerRenderer } from "@babylonjs/core/Rendering/utilityLayerRenderer";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
@@ -218,8 +219,12 @@ function createGroundFromHeightMapAsync(scene: Scene): Promise<GroundMesh> {
 
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
     const hk = new HavokPlugin(false, hknp);
-    hk.setTimeStep(1 / PHYSICS_FPS);
     scene.enablePhysics(new Vector3(0, -9.8, 0), hk);
+    // Start paused (fixed step 0): physics does not advance until the PhysicsViewer wireframe
+    // overlay is fully rendered (its utility-layer materials compile asynchronously and are blank
+    // on the first frames). MUST be set AFTER enablePhysics — the PhysicsEngine constructor resets
+    // the plugin time step to 1/60. See the readiness gate in the render loop below.
+    hk.setTimeStep(0);
 
     const viewer = new PhysicsViewer(scene);
 
@@ -286,31 +291,57 @@ function createGroundFromHeightMapAsync(scene: Scene): Promise<GroundMesh> {
     });
 
     const eng = engine as any;
+    let ready = false;
+    let physicsRunning = false;
+    let physStep = 0;
+    let captureQueued = false;
+
+    // The PhysicsViewer renders its wireframes through the default utility layer, whose WebGPU
+    // pipelines compile asynchronously — so the overlay is blank for the first few frames. Gate the
+    // start of the simulation on every utility-layer wireframe mesh being ready, then step physics
+    // and count ACTUAL steps. This makes the parity capture independent of GPU warm-up timing.
+    const utilityScene = UtilityLayerRenderer.DefaultUtilityLayer.utilityLayerScene;
+    const wireframeReady = (): boolean => {
+        const meshes = utilityScene.meshes;
+        if (meshes.length === 0) {
+            return false;
+        }
+        for (const m of meshes) {
+            if (m.isEnabled() && !m.isReady(true)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     scene.onBeforeRenderObservable.add(() => {
         if (eng._drawCalls) {
             eng._drawCalls.fetchNewFrame();
         }
+        if (!physicsRunning && wireframeReady()) {
+            physicsRunning = true;
+            hk.setTimeStep(1 / PHYSICS_FPS);
+        }
     });
 
-    let ready = false;
-    let simulatedFrames = 0;
-    let captureQueued = false;
-    scene.onAfterRenderObservable.add(() => {
-        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
-        const now = performance.now();
-        if (!ready) {
-            ready = true;
-            canvas.dataset.initMs = String(now - __initStart);
-            canvas.dataset.ready = "true";
-        } else {
-            simulatedFrames++;
+    scene.onAfterPhysicsObservable.add(() => {
+        if (!physicsRunning) {
+            return;
         }
-        if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
+        physStep++;
+        if (captureAfterFrames !== null && !captureQueued && physStep >= captureAfterFrames) {
             captureQueued = true;
             canvas.dataset.captureReady = "true";
-            window.setTimeout(() => {
-                engine.stopRenderLoop();
-            }, 0);
+            window.setTimeout(() => engine.stopRenderLoop(), 0);
+        }
+    });
+
+    scene.onAfterRenderObservable.add(() => {
+        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
+        if (!ready) {
+            ready = true;
+            canvas.dataset.initMs = String(performance.now() - __initStart);
+            canvas.dataset.ready = "true";
         }
     });
 

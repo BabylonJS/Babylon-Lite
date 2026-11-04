@@ -6,6 +6,8 @@
  *  scene, and returns the resulting `GaussianSplattingMesh`.
  *
  *  Bundle-size discipline:
+ *    • The PLY parser (`splat-ply-parser.ts`) is dynamic-imported only when
+ *      `isPly(data)` recognises a PLY header, so `.splat` scenes skip it.
  *    • The compressed-PLY parser (`splat-ply-compressed.ts`) is dynamic-
  *      imported only when `isPlyCompressedOrSH(data)` is true so plain `.ply`
  *      scenes (e.g. scene 120) skip both the parser code *and* the SH textures.
@@ -17,7 +19,7 @@
  *  canvas as ready in your scene script. */
 
 import type { SceneContext } from "../scene/scene-core.js";
-import { isPly, isPlyCompressedOrSH, convertPlyToSplat } from "./splat-ply-parser.js";
+import { isPly } from "./splat-ply-header.js";
 import { buildSplatGeometry, type ParsedSplat } from "./splat-data.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { createGaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
@@ -52,12 +54,8 @@ export async function loadSplat(scene: SceneContext, url: string, fragments?: re
 
     let parsed: ParsedSplat;
     if (isPly(data)) {
-        if (isPlyCompressedOrSH(data)) {
-            const { convertCompressedPlyToParsedSplat } = await import("./splat-ply-compressed.js");
-            parsed = convertCompressedPlyToParsedSplat(data);
-        } else {
-            parsed = convertPlyToSplat(data);
-        }
+        const { parsePlySplat } = await import("./splat-ply-parser.js");
+        parsed = await parsePlySplat(data);
         if (parsed.data.byteLength === 0) {
             throw new Error(`loadSplat: failed to parse PLY at ${url} (unsupported property layout)`);
         }

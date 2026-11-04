@@ -43,6 +43,7 @@ import {
     type SpriteRenderer,
     type Texture2D,
 } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /**
  * Present fragment: sample the world render texture over a per-frame sub-rectangle.
@@ -51,7 +52,7 @@ import {
  * shown, scaled to fill the canvas. Linear sampling (the RT's default) makes the between-
  * rung down-scale smooth. `atlasTex`/`atlasSamp` are bound to the world RT.
  */
-const PRESENT_FRAGMENT = `
+const PRESENT_FRAGMENT = wgsl`
 let uv = in.uv * vec2<f32>(fx.params.x, fx.params.y) + vec2<f32>(fx.params.z, fx.params.w);
 return textureSample(atlasTex, atlasSamp, uv) * in.tint * L.opacityMul;
 `;

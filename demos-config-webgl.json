@@ -1,1 +1,30 @@
-[]
+[
+    {
+        "slug": "sine-bands",
+        "name": "Sine Wave Bands",
+        "description": "Layered sine-wave bands with an IQ cosine palette — an original reimplementation inspired by Shadertoy tffSDr.",
+        "tags": ["effect"],
+        "mobile": true
+    },
+    {
+        "slug": "saturday-weirdness",
+        "name": "Saturday Weirdness",
+        "description": "A faithful lite-gl port of mrange's CC0 Shadertoy (43jXWt): a raymarched rotating sphere with frame-feedback through a ping-pong render target, FXAA-resolved to screen. Showcases the lite-gl render-target (FBO) API.",
+        "tags": ["effect", "rtt"],
+        "mobile": false
+    },
+    {
+        "slug": "mandelbulb",
+        "name": "Inside the Mandelbulb",
+        "description": "A faithful lite-gl port of mrange's CC0 Shadertoy (mtScRc): a refraction-bouncing raymarched power-8 mandelbulb rendered into an offscreen render target, then FXAA-resolved to screen. Showcases the lite-gl single render-target (FBO) path.",
+        "tags": ["effect", "rtt"],
+        "mobile": false
+    },
+    {
+        "slug": "just-another-cube",
+        "name": "Just Another Cube",
+        "description": "A faithful lite-gl port of mrange's CC0 Shadertoy (3XdXRr): a single fullscreen-pass raymarched, twisting superquadric ('rounded cube') with volumetric glow, fresnel reflections of a procedural sky/floor and rim lighting. Showcases the lite-gl single-pass fullscreen-effect path (no render target).",
+        "tags": ["effect"],
+        "mobile": false
+    }
+]

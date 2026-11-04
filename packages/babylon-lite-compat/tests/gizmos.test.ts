@@ -1,0 +1,410 @@
+/**
+ * Compat gizmo interactivity API (issue #328).
+ *
+ * BJS gizmos expose `isEnabled` on each per-axis sub-gizmo and `xGizmo`/`yGizmo`/`zGizmo`
+ * on the composite Position/Rotation/Scale gizmos. Setting `isEnabled = false` makes a
+ * gizmo non-interactive (no drag, and — with the Lite dispatcher fix — no GPU hover pick)
+ * while keeping it visible and following its node: the public, BJS-shaped replacement for
+ * poking a native gizmo's private `_disposePointer()`.
+ *
+ * These are GPU-free unit tests: the wrappers are built with `Object.create` over a fake
+ * Lite gizmo so no engine/device is required. They pin down that `isEnabled` proxies to the
+ * Lite `drag.enabled` flag and that the composite sub-gizmo accessors reach the real
+ * sub-gizmos with stable identity.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const liteMocks = vi.hoisted(() => ({
+    attachPositionGizmoToNode: vi.fn(),
+    attachRotationGizmoToNode: vi.fn(),
+    attachScaleGizmoToNode: vi.fn(),
+    createPositionGizmo: vi.fn(),
+    createRotationGizmo: vi.fn(),
+    disposePositionGizmo: vi.fn(),
+    disposeRotationGizmo: vi.fn(),
+    setPositionGizmoLocalCoordinates: vi.fn(),
+    setRotationGizmoLocalCoordinates: vi.fn(),
+}));
+
+vi.mock("babylon-lite", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("babylon-lite")>()),
+    ...liteMocks,
+}));
+
+import type { PickingInfo as LitePickingInfo, PointerDragEndEvent, PointerDragMoveEvent, PointerDragStartEvent } from "babylon-lite";
+import { AxisDragGizmo, PlaneDragGizmo, PlaneRotationGizmo, AxisScaleGizmo, PositionGizmo, RotationGizmo, ScaleGizmo } from "../src/gizmos/gizmos";
+import type { DragEvent, DragStartEndEvent, UtilityLayerRenderer } from "../src/index";
+import { PointerEventTypes, PointerInfo, Ray, Vector3 } from "../src/index";
+import { NullEngine } from "../src/engine/engine";
+import { TransformNode, type AbstractMesh } from "../src/meshes/meshes";
+import { Scene } from "../src/scene/scene";
+import { ArcRotateCamera, FreeCamera } from "../src/cameras/cameras";
+import { HemisphericLight, PointLight } from "../src/lights/lights";
+import { LiteCompatError } from "../src/error";
+
+type FakeDrag = { drag: { enabled: boolean } };
+
+function fakeLite(): FakeDrag {
+    return { drag: { enabled: true } };
+}
+
+class FakeObservable<T> {
+    private readonly _observers: ((event: T) => void)[] = [];
+
+    public add(observer: (event: T) => void): () => void {
+        this._observers.push(observer);
+        return () => {
+            const index = this._observers.indexOf(observer);
+            if (index !== -1) {
+                this._observers.splice(index, 1);
+            }
+        };
+    }
+
+    public notify(event: T): void {
+        for (const observer of this._observers.slice()) {
+            observer(event);
+        }
+    }
+}
+
+type FakeCompositeDrag = {
+    options: { dragAxis?: { x: number; y: number; z: number }; dragPlaneNormal?: { x: number; y: number; z: number } };
+    onDragStart: FakeObservable<PointerDragStartEvent>;
+    onDrag: FakeObservable<PointerDragMoveEvent>;
+    onDragEnd: FakeObservable<PointerDragEndEvent>;
+};
+
+type FakeCompositeLite = {
+    xGizmo: { drag: FakeCompositeDrag };
+    yGizmo: { drag: FakeCompositeDrag };
+    zGizmo: { drag: FakeCompositeDrag };
+};
+
+function fakeCompositeLite(axis: boolean): FakeCompositeLite {
+    const subGizmo = () => ({
+        drag: {
+            options: axis ? { dragAxis: { x: 1, y: 0, z: 0 } } : { dragPlaneNormal: { x: 0, y: 1, z: 0 } },
+            onDragStart: new FakeObservable<PointerDragStartEvent>(),
+            onDrag: new FakeObservable<PointerDragMoveEvent>(),
+            onDragEnd: new FakeObservable<PointerDragEndEvent>(),
+        },
+    });
+    return { xGizmo: subGizmo(), yGizmo: subGizmo(), zGizmo: subGizmo() };
+}
+
+function fakePickInfo(): LitePickingInfo {
+    return {
+        hit: true,
+        distance: 3,
+        pickedPoint: [0, 2, 3],
+        pickedNormal: null,
+        pickedNormalWorld: null,
+        pickedFaceNormal: null,
+        pickedFaceNormalWorld: null,
+        pickedMesh: null,
+        faceId: 4,
+        bu: 0.25,
+        bv: 0.5,
+        subMeshId: 2,
+        thinInstanceIndex: -1,
+        ray: { origin: [1, 2, 3], direction: [0, 0, -1], length: 100 },
+    };
+}
+
+/** Build a single-axis gizmo wrapper over a fake Lite sub-gizmo (no engine). */
+function wrap<T>(ctor: { _fromLite(lite: unknown, layer: unknown): T }, lite: unknown): T {
+    return ctor._fromLite(lite, {} as unknown);
+}
+
+describe("compat gizmo isEnabled proxy", () => {
+    it.each([
+        ["AxisDragGizmo", AxisDragGizmo],
+        ["PlaneDragGizmo", PlaneDragGizmo],
+        ["PlaneRotationGizmo", PlaneRotationGizmo],
+        ["AxisScaleGizmo", AxisScaleGizmo],
+    ] as const)("%s.isEnabled reads/writes the Lite drag.enabled flag", (_name, ctor) => {
+        const lite = fakeLite();
+        const g = wrap(ctor as unknown as { _fromLite(l: unknown, y: unknown): { isEnabled: boolean } }, lite);
+
+        expect(g.isEnabled).toBe(true);
+        g.isEnabled = false;
+        expect(lite.drag.enabled).toBe(false);
+        expect(g.isEnabled).toBe(false);
+        g.isEnabled = true;
+        expect(lite.drag.enabled).toBe(true);
+    });
+});
+
+describe("compat composite gizmo sub-gizmo accessors", () => {
+    function fakeComposite(): { xGizmo: FakeDrag; yGizmo: FakeDrag; zGizmo: FakeDrag } {
+        return { xGizmo: fakeLite(), yGizmo: fakeLite(), zGizmo: fakeLite() };
+    }
+
+    function makeComposite<T>(Ctor: { prototype: T }, lite: unknown): T {
+        const g = Object.create(Ctor.prototype as object) as { _lite: unknown; _layer: unknown };
+        g._lite = lite;
+        g._layer = {};
+        return g as unknown as T;
+    }
+
+    it.each([
+        ["PositionGizmo", PositionGizmo],
+        ["RotationGizmo", RotationGizmo],
+        ["ScaleGizmo", ScaleGizmo],
+    ] as const)("%s exposes xGizmo/yGizmo/zGizmo that disable the matching Lite sub-drag", (_name, Ctor) => {
+        const lite = fakeComposite();
+        const g = makeComposite(Ctor as unknown as { prototype: unknown }, lite) as unknown as {
+            xGizmo: { isEnabled: boolean };
+            yGizmo: { isEnabled: boolean };
+            zGizmo: { isEnabled: boolean };
+        };
+
+        // Identity is stable (cached wrappers).
+        expect(g.xGizmo).toBe(g.xGizmo);
+
+        // Making the whole gizmo display-only disables every axis' Lite drag.
+        g.xGizmo.isEnabled = false;
+        g.yGizmo.isEnabled = false;
+        g.zGizmo.isEnabled = false;
+        expect([lite.xGizmo.drag.enabled, lite.yGizmo.drag.enabled, lite.zGizmo.drag.enabled]).toEqual([false, false, false]);
+    });
+});
+
+describe("compat composite gizmo drag observables", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it.each([
+        ["PositionGizmo", PositionGizmo, liteMocks.createPositionGizmo, liteMocks.disposePositionGizmo],
+        ["RotationGizmo", RotationGizmo, liteMocks.createRotationGizmo, liteMocks.disposeRotationGizmo],
+    ] as const)("%s relays every axis with Babylon.js payloads and cleans up on dispose", (_name, Ctor, create, dispose) => {
+        const isAxis = _name === "PositionGizmo";
+        const lite = fakeCompositeLite(isAxis);
+        create.mockReturnValue(lite);
+        const layer = { _engine: {}, _lite: {} } as UtilityLayerRenderer;
+        const gizmo = new Ctor(layer);
+        const starts: DragStartEndEvent[] = [];
+        const moves: DragEvent[] = [];
+        const ends: DragStartEndEvent[] = [];
+        gizmo.onDragStartObservable.add((event) => starts.push(event));
+        gizmo.onDragObservable.add((event) => moves.push(event));
+        gizmo.onDragEndObservable.add((event) => ends.push(event));
+        const downEvents: PointerEvent[] = [];
+
+        for (const [axisIndex, subGizmo] of [lite.xGizmo, lite.yGizmo, lite.zGizmo].entries()) {
+            const pointerId = axisIndex + 1;
+            const down = { pointerId } as PointerEvent;
+            const up = { pointerId } as PointerEvent;
+            downEvents.push(down);
+            subGizmo.drag.onDragStart.notify({
+                dragPlanePoint: { x: axisIndex, y: 2, z: 3 },
+                dragPlaneNormal: { x: 0, y: 0, z: 1 },
+                pickInfo: fakePickInfo(),
+                pointerId,
+                pointerEvent: down,
+            });
+            subGizmo.drag.onDrag.notify({
+                delta: { x: 1, y: 0, z: 0 },
+                dragPlanePoint: { x: axisIndex + 0.5, y: 2, z: 3 },
+                dragPlaneNormal: { x: 0, y: 1, z: 0 },
+                dragDistance: 0.5,
+                pointerId,
+            });
+            subGizmo.drag.onDragEnd.notify({
+                dragPlanePoint: { x: axisIndex + 0.5, y: 2, z: 3 },
+                pointerId,
+                pointerEvent: up,
+            });
+        }
+
+        expect(starts).toHaveLength(3);
+        expect(moves).toHaveLength(3);
+        expect(ends).toHaveLength(3);
+        expect(starts[0]).toEqual({
+            dragPlanePoint: new Vector3(0, 2, 3),
+            pointerId: 1,
+            pointerInfo: expect.any(PointerInfo),
+        });
+        expect(moves[1]).toEqual({
+            delta: new Vector3(1, 0, 0),
+            dragPlanePoint: new Vector3(1.5, 2, 3),
+            dragPlaneNormal: isAxis ? new Vector3(0, 0, -1) : new Vector3(0, 1, 0),
+            dragDistance: isAxis ? 1 : 0,
+            pointerId: 2,
+            pointerInfo: expect.any(PointerInfo),
+        });
+        expect(ends[2]).toEqual({
+            dragPlanePoint: new Vector3(2.5, 2, 3),
+            pointerId: 3,
+            pointerInfo: expect.any(PointerInfo),
+        });
+        expect(moves[0]!.pointerInfo).toBe(starts[0]!.pointerInfo);
+        expect(ends[0]!.pointerInfo).toBe(starts[0]!.pointerInfo);
+        expect(starts[0]!.dragPlanePoint).toBeInstanceOf(Vector3);
+        expect(starts[0]!.pointerInfo?.type).toBe(PointerEventTypes.POINTERDOWN);
+        expect(starts[0]!.pointerInfo?.event).toBe(downEvents[0]);
+        expect(starts[0]!.pointerInfo?.pickInfo?.ray).toEqual(new Ray(new Vector3(1, 2, 3), new Vector3(0, 0, -1), 100));
+        expect(starts[0]!.pointerInfo?.pickInfo?.faceId).toBe(4);
+        expect(moves[0]!.delta).toBeInstanceOf(Vector3);
+        expect(moves[0]!.dragPlaneNormal).toBeInstanceOf(Vector3);
+
+        const cancelDown = { pointerId: 4 } as PointerEvent;
+        lite.xGizmo.drag.onDragStart.notify({
+            dragPlanePoint: { x: 4, y: 2, z: 3 },
+            dragPlaneNormal: { x: 0, y: 0, z: 1 },
+            pickInfo: fakePickInfo(),
+            pointerId: 4,
+            pointerEvent: cancelDown,
+        });
+        dispose.mockImplementationOnce((value: FakeCompositeLite) => {
+            value.xGizmo.drag.onDragEnd.notify({
+                dragPlanePoint: { x: 4, y: 2, z: 3 },
+                pointerId: 4,
+                pointerEvent: null,
+            });
+        });
+        gizmo.dispose();
+        expect(dispose).toHaveBeenCalledWith(lite, layer._lite);
+        expect(ends).toHaveLength(4);
+        expect(ends[3]!.pointerInfo).toBe(starts[3]!.pointerInfo);
+        expect(gizmo.onDragStartObservable.hasObservers()).toBe(false);
+        expect(gizmo.onDragObservable.hasObservers()).toBe(false);
+        expect(gizmo.onDragEndObservable.hasObservers()).toBe(false);
+
+        lite.xGizmo.drag.onDragStart.notify({
+            dragPlanePoint: { x: 0, y: 0, z: 0 },
+            dragPlaneNormal: { x: 0, y: 0, z: 1 },
+            pickInfo: fakePickInfo(),
+            pointerId: 4,
+            pointerEvent: { pointerId: 4 } as PointerEvent,
+        });
+        expect(starts).toHaveLength(4);
+    });
+
+    it("relays Babylon.js plane dragDistance using the preceding delta, including across drags", () => {
+        const lite = fakeCompositeLite(false);
+        liteMocks.createRotationGizmo.mockReturnValue(lite);
+        const gizmo = new RotationGizmo({ _engine: {}, _lite: {} } as UtilityLayerRenderer);
+        const distances: number[] = [];
+        gizmo.onDragObservable.add((event) => distances.push(event.dragDistance));
+        const down = { pointerId: 1 } as PointerEvent;
+        const notifyStart = () =>
+            lite.xGizmo.drag.onDragStart.notify({
+                dragPlanePoint: { x: 0, y: 0, z: 0 },
+                dragPlaneNormal: { x: 0, y: 1, z: 0 },
+                pickInfo: fakePickInfo(),
+                pointerId: 1,
+                pointerEvent: down,
+            });
+        const notifyMove = (x: number, y: number) =>
+            lite.xGizmo.drag.onDrag.notify({
+                delta: { x, y, z: 0 },
+                dragPlanePoint: { x, y, z: 0 },
+                dragPlaneNormal: { x: 0, y: 1, z: 0 },
+                dragDistance: Math.hypot(x, y),
+                pointerId: 1,
+            });
+
+        notifyStart();
+        notifyMove(3, 4);
+        notifyMove(0, 2);
+        lite.xGizmo.drag.onDragEnd.notify({ dragPlanePoint: { x: 0, y: 2, z: 0 }, pointerId: 1, pointerEvent: null });
+        notifyStart();
+        notifyMove(1, 0);
+
+        expect(distances).toEqual([0, 5, 2]);
+    });
+});
+
+describe("compat composite gizmo attachment", () => {
+    const composites = [
+        ["PositionGizmo", PositionGizmo, liteMocks.attachPositionGizmoToNode],
+        ["RotationGizmo", RotationGizmo, liteMocks.attachRotationGizmoToNode],
+        ["ScaleGizmo", ScaleGizmo, liteMocks.attachScaleGizmoToNode],
+    ] as const;
+
+    type Composite = PositionGizmo | RotationGizmo | ScaleGizmo;
+
+    /** A composite wrapper over a fake Lite gizmo, without running the constructor (no engine). */
+    function makeComposite(Ctor: { prototype: Composite }): Composite {
+        const g = Object.create(Ctor.prototype as object) as { _lite: unknown; _layer: unknown; _attached: unknown };
+        g._lite = {};
+        g._layer = {};
+        g._attached = null;
+        return g as unknown as Composite;
+    }
+
+    beforeEach(() => {
+        for (const [, , attach] of composites) {
+            attach.mockClear();
+        }
+    });
+
+    // A TransformNode keeps its Lite node in `_node`; only meshes have `_lite`. Reading `_lite` attached the gizmo to null,
+    // so it stood at the origin and moved nothing.
+    it.each(composites)("%s attaches to a TransformNode through attachedNode and attachedMesh", (_name, Ctor, attach) => {
+        const node = new TransformNode("root", new Scene(new NullEngine()));
+        const gizmo = makeComposite(Ctor);
+
+        gizmo.attachedNode = node;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, node._node);
+        expect(gizmo.attachedNode).toBe(node);
+
+        gizmo.attachedMesh = null;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, null);
+
+        // Babylon.js code also hands a TransformNode to `attachedMesh` (the setter accepts any node at run time).
+        gizmo.attachedMesh = node as unknown as AbstractMesh;
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, node._node);
+        expect(gizmo.attachedMesh).toBe(node);
+    });
+
+    it.each(composites)("%s still attaches a mesh through its Lite mesh", (_name, Ctor, attach) => {
+        const liteMesh = { position: {}, rotationQuaternion: {}, scaling: {} };
+        const mesh = { _lite: liteMesh } as unknown as AbstractMesh;
+        const gizmo = makeComposite(Ctor);
+
+        gizmo.attachedMesh = mesh;
+
+        expect(attach).toHaveBeenLastCalledWith(gizmo._lite, liteMesh);
+        expect(gizmo.attachedNode).toBe(mesh);
+    });
+
+    // Lights have native SceneNode transforms, so the gizmos can edit them.
+    it.each(composites)("%s attaches to a light", (_name, Ctor, attach) => {
+        const scene = new Scene(new NullEngine());
+        for (const light of [new PointLight("point", new Vector3(1, 2, 3), scene), new HemisphericLight("hemi", new Vector3(0, 1, 0), scene)]) {
+            const gizmo = makeComposite(Ctor);
+
+            gizmo.attachedNode = light;
+
+            expect(attach).toHaveBeenLastCalledWith(gizmo._lite, light._lite);
+            expect(gizmo.attachedNode).toBe(light);
+        }
+    });
+
+    // Lite cameras have no editable transform (an orbit camera has no position, rotation or scaling, a free camera only a
+    // position), so the first drag would dereference a missing field. They are rejected before attachment.
+    it.each(composites)("%s rejects a camera before attaching it", (name, Ctor, attach) => {
+        const scene = new Scene(new NullEngine());
+        const cameras = [new ArcRotateCamera("arc", 0, Math.PI / 3, 10, Vector3.Zero(), scene), new FreeCamera("free", new Vector3(0, 1, -5), scene)];
+        for (const camera of cameras) {
+            const gizmo = makeComposite(Ctor);
+
+            expect(() => {
+                gizmo.attachedNode = camera;
+            }).toThrow(LiteCompatError);
+            expect(() => {
+                gizmo.attachedNode = camera;
+            }).toThrow(`${name}.attachedNode`);
+            expect(() => {
+                gizmo.attachedMesh = camera as unknown as AbstractMesh;
+            }).toThrow(LiteCompatError);
+
+            expect(attach).not.toHaveBeenCalled();
+            expect(gizmo.attachedNode).toBeNull();
+        }
+    });
+});

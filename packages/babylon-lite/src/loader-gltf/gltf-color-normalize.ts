@@ -7,40 +7,69 @@
  *  Zero module-level side effects — safe for tree-shaking.
  */
 
-/** Normalize a glTF COLOR_0 attribute to a tight float32 VEC3 (RGB) buffer.
+/** Normalize a glTF COLOR_0 attribute to a tight float32 VEC4 (RGBA) buffer.
  *
- *  The PBR/standard vertex pipelines bind vertex color as a single format: `float32x3`
- *  (stride 12). glTF COLOR_0 is far more permissive — it may be VEC3 or VEC4, and its
- *  component type may be float OR normalized unsigned byte/short. Binding any other layout
- *  to the stride-12 float pipeline misaligns every vertex (garbage / black colors). So we
- *  always convert here: integer types are normalized to [0,1] (per the glTF spec, integer
- *  COLOR_0 is always normalized), VEC4 alpha is dropped (Lite shading multiplies only the
- *  rgb of vertex color into the base color), and the result is a tight Float32Array RGB.
+ *  The PBR vertex pipeline binds vertex color as `float32x4` (stride 16), matching
+ *  the rest of the engine (procedural meshes, node/shader materials). glTF COLOR_0
+ *  is far more permissive — it may be VEC3 or VEC4, and its component type may be
+ *  float OR normalized unsigned byte/short. Binding any other layout to the stride-16
+ *  float pipeline misaligns every vertex (garbage / black colors). So we always
+ *  convert here: integer types are normalized to [0,1] (per the glTF spec, integer
+ *  COLOR_0 is always normalized), a VEC3 source gets alpha = 1.0, and the result is a
+ *  tight Float32Array RGBA. The rgb modulates base color; the alpha modulates the
+ *  fragment alpha (so vertex-color alpha drives alpha blending / alpha-clip).
  *
  *  `data` is the resolved accessor view (Float32Array | Uint8Array | Uint16Array), `count`
  *  the vertex count, and `comps` the component count (3 or 4). */
-export function normalizeColorToVec3(data: ArrayBufferView, count: number, comps: number): Float32Array {
-    const out = new Float32Array(count * 3);
+export function normalizeColorToVec4(data: ArrayBufferView, count: number, comps: number): Float32Array {
+    const out = new Float32Array(count * 4);
+    const hasAlpha = comps >= 4;
     if (data instanceof Float32Array) {
         for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]!;
-            out[v * 3 + 1] = data[v * comps + 1]!;
-            out[v * 3 + 2] = data[v * comps + 2]!;
+            out[v * 4] = data[v * comps]!;
+            out[v * 4 + 1] = data[v * comps + 1]!;
+            out[v * 4 + 2] = data[v * comps + 2]!;
+            out[v * 4 + 3] = hasAlpha ? data[v * comps + 3]! : 1;
         }
     } else if (data instanceof Uint16Array) {
         const inv = 1 / 65535;
         for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]! * inv;
-            out[v * 3 + 1] = data[v * comps + 1]! * inv;
-            out[v * 3 + 2] = data[v * comps + 2]! * inv;
+            out[v * 4] = data[v * comps]! * inv;
+            out[v * 4 + 1] = data[v * comps + 1]! * inv;
+            out[v * 4 + 2] = data[v * comps + 2]! * inv;
+            out[v * 4 + 3] = hasAlpha ? data[v * comps + 3]! * inv : 1;
         }
     } else if (data instanceof Uint8Array) {
         const inv = 1 / 255;
         for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]! * inv;
-            out[v * 3 + 1] = data[v * comps + 1]! * inv;
-            out[v * 3 + 2] = data[v * comps + 2]! * inv;
+            out[v * 4] = data[v * comps]! * inv;
+            out[v * 4 + 1] = data[v * comps + 1]! * inv;
+            out[v * 4 + 2] = data[v * comps + 2]! * inv;
+            out[v * 4 + 3] = hasAlpha ? data[v * comps + 3]! * inv : 1;
         }
+    }
+    return out;
+}
+
+/** Normalize a glTF TEXCOORD_n attribute to a tight float32 VEC2 buffer.
+ *
+ *  The PBR/standard vertex pipeline binds UVs as `float32x2`. glTF TEXCOORD may
+ *  be FLOAT or normalized UNSIGNED_BYTE / UNSIGNED_SHORT (glTF-Asset-Generator
+ *  Mesh_PrimitiveAttribute / Buffer_Interleaved). Binding an integer source to
+ *  the float32x2 layout misreads every vertex (garbage UVs → wrong texturing),
+ *  so integer UVs are normalized to [0,1] here. `data` is the resolved accessor
+ *  view (Float32Array | Uint8Array | Uint16Array) and `count` the vertex count.
+ *
+ *  KHR_mesh_quantization additionally allows UNNORMALIZED integer TEXCOORD, but
+ *  that case never reaches this function: `gltf-ext-quantization.ts`'s `preParse`
+ *  rewrites every such accessor to FLOAT before any attribute is resolved, so a
+ *  non-FLOAT source arriving here is always base-glTF normalized data. */
+export function normalizeUvToVec2(data: ArrayBufferView, count: number): Float32Array {
+    const out = new Float32Array(count * 2);
+    const inv = data instanceof Uint16Array ? 1 / 65535 : data instanceof Uint8Array ? 1 / 255 : 1;
+    const s = data as unknown as { [i: number]: number };
+    for (let i = 0; i < count * 2; i++) {
+        out[i] = s[i]! * inv;
     }
     return out;
 }

@@ -8,6 +8,9 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
+// jsDelivr's /gh/ endpoint rejects files > ~20MB (HTTP 403); this .ply is 21.6MB, so it
+// stays on raw.githubusercontent.com. The bundle-size measurement asset cache (per-request
+// retry + persistence) makes this single large fetch reliable regardless of host.
 const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/hornedlizard/small_hornedlizard.compressed.ply";
 
 (async function () {

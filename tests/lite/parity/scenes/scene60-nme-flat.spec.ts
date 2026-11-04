@@ -4,7 +4,7 @@
  * Both BJS and Lite parse the SAME inline NME JSON. A sphere rendered with
  * Color4(0.85, 0.2, 0.2, 1) on a black background.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

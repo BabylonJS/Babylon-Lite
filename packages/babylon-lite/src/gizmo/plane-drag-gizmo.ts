@@ -6,7 +6,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { Vec3 } from "../math/types.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -18,6 +18,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
+/** Options for building a planar position drag gizmo. */
 export interface PlaneDragGizmoOptions {
     /** World-space drag plane normal (unit vector). */
     dragPlaneNormal: Vec3;
@@ -26,6 +27,7 @@ export interface PlaneDragGizmoOptions {
     disableColor?: [number, number, number];
 }
 
+/** A square planar gizmo that translates its attached node within a drag plane. */
 export interface PlaneDragGizmo {
     readonly root: SceneNode;
     readonly drag: PointerDrag;
@@ -46,6 +48,12 @@ export interface PlaneDragGizmo {
     _disposeFollow: () => void;
 }
 
+/** Create a planar drag gizmo in the utility layer.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the gizmo.
+ * @param options - Plane normal and material options.
+ * @returns A detached plane drag gizmo ready to attach to a node.
+ */
 export function createPlaneDragGizmo(engine: EngineContext, layer: UtilityLayer, options: PlaneDragGizmoOptions): PlaneDragGizmo {
     const color = options.color ?? [0.5, 0.5, 0.5];
     const utilityScene = layer.scene;
@@ -57,7 +65,7 @@ export function createPlaneDragGizmo(engine: EngineContext, layer: UtilityLayer,
 
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = materials.colored;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     addToScene(utilityScene, root);
 
     const q = lookAtQuat(options.dragPlaneNormal);
@@ -153,11 +161,13 @@ export function createPlaneDragGizmo(engine: EngineContext, layer: UtilityLayer,
     return gizmo;
 }
 
+/** Attach the plane drag gizmo to a scene node, or detach it with `null`. */
 export function attachPlaneDragGizmoToNode(gizmo: PlaneDragGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo.drag.enabled = node !== null;
 }
 
+/** Dispose the plane drag gizmo meshes and pointer-drag registration. */
 export function disposePlaneDragGizmo(gizmo: PlaneDragGizmo, layer: UtilityLayer): void {
     gizmo._disposePointer();
     gizmo._disposeFollow();

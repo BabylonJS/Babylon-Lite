@@ -4,7 +4,7 @@
  * The scene performs one detailed pick on a sphere and uses the picked point and
  * normal to place visible surface/normal markers.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import type { Page } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";

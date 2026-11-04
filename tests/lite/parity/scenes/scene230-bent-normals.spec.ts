@@ -5,7 +5,7 @@
  * `bentNormalTexture`, which replaces the default specular occlusion with the
  * spherical-Gaussian bent-normal reflection occlusion term.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 

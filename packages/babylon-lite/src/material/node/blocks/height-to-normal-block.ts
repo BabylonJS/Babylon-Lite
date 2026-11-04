@@ -1,7 +1,8 @@
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY = "nme_heightToNormal";
-const HELPER_WGSL = `
+const HELPER_WGSL = wgsl`
 fn nme_heightToNormal(height: f32, position: vec3<f32>, tangent: vec3<f32>, normal: vec3<f32>, generateInWorldSpace: bool, normalizeNormal: bool, normalizeTangent: bool) -> vec4<f32> {
     let norm = select(normal, normalize(normal), normalizeNormal);
     let tgt = select(tangent, normalize(tangent), normalizeTangent);
@@ -52,7 +53,7 @@ function emitHeightNormal(
     const tangent = tangentInput?.source ? ctx.cast(ctx.resolve(block, "worldTangent", stage, state), "vec3f").expr : "vec3<f32>(0.0)";
     const out = `_hn${ctx.temp(state, "heightNormal")}`;
     stageState.body.push(
-        `let ${out} = nme_heightToNormal(${height}, ${pos}, ${tangent}, ${normal}, ${boolLiteral(block.serialized.generateInWorldSpace, false)}, ${boolLiteral(block.serialized.automaticNormalizationNormal, true)}, ${boolLiteral(block.serialized.automaticNormalizationTangent, true)});`
+        wgsl`let ${out} = nme_heightToNormal(${height}, ${pos}, ${tangent}, ${normal}, ${boolLiteral(block.serialized.generateInWorldSpace, false)}, ${boolLiteral(block.serialized.automaticNormalizationNormal, true)}, ${boolLiteral(block.serialized.automaticNormalizationTangent, true)});`
     );
     const result = { expr: out, type: "vec4f" } as const;
     stageState.memo.set(memoKey, result);

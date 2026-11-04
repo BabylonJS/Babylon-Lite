@@ -19,6 +19,7 @@ import {
     getPickedNormal,
     pickAsync,
     registerScene,
+    setPbrUnlit,
     startEngine,
 } from "babylon-lite";
 import { createBoxData } from "babylon-lite/mesh/create-box.js";
@@ -34,32 +35,32 @@ const MARKER_DISPLAY_BYTE = 135;
 const MARKER_BOTTOM_SHADE = 46 / 135;
 
 function createUnlitPbr(engine: EngineContext, color: ColorTuple) {
-    return createPbrMaterial({
+    const mat = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, color[0], color[1], color[2]),
         ormTexture: createSolidTexture2D(engine, 1, 1, 0),
-        unlit: true,
-        unlitColor: color,
         metallicFactor: 0,
         roughnessFactor: 1,
         directIntensity: 0,
         environmentIntensity: 0,
         doubleSided: true,
     });
+    setPbrUnlit(mat, color);
+    return mat;
 }
 
 function createMarkerMaterial(engine: EngineContext, color: ColorTuple) {
     void color;
-    return createPbrMaterial({
+    const mat = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, 1, 1, 1),
         ormTexture: createSolidTexture2D(engine, 1, 1, 0),
-        unlit: true,
-        unlitColor: [1, 1, 1],
         metallicFactor: 0,
         roughnessFactor: 1,
         directIntensity: 0,
         environmentIntensity: 0,
         doubleSided: true,
     });
+    setPbrUnlit(mat, [1, 1, 1]);
+    return mat;
 }
 
 function createQuadMesh(engine: EngineContext, name: string, color: ColorTuple): Mesh {
@@ -86,11 +87,13 @@ function createMarkerBoxMesh(engine: EngineContext, name: string, color: ColorTu
     ];
     const bright = toLinearColor(displayColor);
     const dark = toLinearColor([displayColor[0] * MARKER_BOTTOM_SHADE, displayColor[1] * MARKER_BOTTOM_SHADE, displayColor[2] * MARKER_BOTTOM_SHADE]);
-    const colors = new Float32Array(box.vertexCount * 3);
+    const colors = new Float32Array(box.vertexCount * 4);
     for (let face = 0; face < 6; face++) {
         const faceColor = face === 5 ? dark : bright;
         for (let vertex = 0; vertex < 4; vertex++) {
-            colors.set(faceColor, (face * 4 + vertex) * 3);
+            const offset = (face * 4 + vertex) * 4;
+            colors.set(faceColor, offset);
+            colors[offset + 3] = 1;
         }
     }
     return createMeshFromData(engine, name, box.positions, box.normals, box.indices, box.uvs, undefined, undefined, colors);

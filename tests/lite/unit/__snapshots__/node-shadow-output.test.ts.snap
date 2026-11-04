@@ -1,0 +1,310 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Node shadow emission > preserves bindings and shader tokens for empty 1`] = `
+{
+  "_bglEntries": [],
+  "_bindingCount": 0,
+  "_bindings": [],
+  "_fragmentHelper": "fn nme_computeShadowFactors(input: VertexOut) -> array<f32, 16> { var _sf = array<f32, 16>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0); for (var _i = 0u; _i < 16u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); } return _sf; }",
+  "_vertexInject": "let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);",
+  "_wgslDecls": "",
+  "varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+  ],
+}
+`;
+
+exports[`Node shadow emission > preserves bindings and shader tokens for esm 1`] = `
+{
+  "_bglEntries": [
+    {
+      "binding": 7,
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 8,
+      "sampler": {
+        "type": "filtering",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 9,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+  ],
+  "_bindingCount": 3,
+  "_bindings": [
+    {
+      "_lightIndex": 0,
+      "_sampBinding": 8,
+      "_shadowType": "esm",
+      "_texBinding": 7,
+      "_uboBinding": 9,
+    },
+  ],
+  "_fragmentHelper": "fn nme_computeShadowFactors(input: VertexOut) -> array<f32, 16> { var _sf = array<f32, 16>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0); _sf[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w); for (var _i = 0u; _i < 16u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); } return _sf; }",
+  "_vertexInject": "let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0); out.vPosFromLight_0 = shadowInfo_0.lightMatrix * _shadowWp4; out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  "_wgslDecls": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(9) var<uniform> shadowInfo_0: shadowInfo_0Uniforms; @group(1) @binding(7) var shadowTex_0: texture_2d<f32>; @group(1) @binding(8) var shadowSamp_0: sampler; fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 { let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0)); return mix(value, 1.0, mask); } fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0); let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x; let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness); return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff); }",
+  "varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+}
+`;
+
+exports[`Node shadow emission > preserves bindings and shader tokens for mixed 1`] = `
+{
+  "_bglEntries": [
+    {
+      "binding": 7,
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 8,
+      "sampler": {
+        "type": "filtering",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 9,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+    {
+      "binding": 10,
+      "texture": {
+        "sampleType": "depth",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 11,
+      "sampler": {
+        "type": "comparison",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 12,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+  ],
+  "_bindingCount": 6,
+  "_bindings": [
+    {
+      "_lightIndex": 0,
+      "_sampBinding": 8,
+      "_shadowType": "esm",
+      "_texBinding": 7,
+      "_uboBinding": 9,
+    },
+    {
+      "_lightIndex": 1,
+      "_sampBinding": 11,
+      "_shadowType": "pcf",
+      "_texBinding": 10,
+      "_uboBinding": 12,
+    },
+  ],
+  "_fragmentHelper": "fn nme_computeShadowFactors(input: VertexOut) -> array<f32, 16> { var _sf = array<f32, 16>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0); _sf[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w); _sf[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z); for (var _i = 0u; _i < 16u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); } return _sf; }",
+  "_vertexInject": "let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0); out.vPosFromLight_0 = shadowInfo_0.lightMatrix * _shadowWp4; out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y; out.vPosFromLight_1 = shadowInfo_1.lightMatrix * _shadowWp4; out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y;",
+  "_wgslDecls": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(9) var<uniform> shadowInfo_0: shadowInfo_0Uniforms; @group(1) @binding(7) var shadowTex_0: texture_2d<f32>; @group(1) @binding(8) var shadowSamp_0: sampler; fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 { let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0)); return mix(value, 1.0, mask); } fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0); let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x; let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness); return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff); } struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(12) var<uniform> shadowInfo_1: shadowInfo_1Uniforms; @group(1) @binding(10) var shadowTex_1: texture_depth_2d; @group(1) @binding(11) var shadowComp_1: sampler_comparison; fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let depthRef = clamp(clipSpace.z, 0.0, 1.0); var tc = uv * mapSz + 0.5; let st = fract(tc); let base = (floor(tc) - 0.5) * invMapSz; let uvw0 = 4.0 - 3.0 * st; let uvw1 = vec2<f32>(7.0); let uvw2 = 1.0 + 3.0 * st; let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz; let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz; var sh = 0.0; sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef); sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef); sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef); sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef); sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef); sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef); sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef); sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef); sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef); sh /= 144.0; return mix(darkness, 1.0, sh); }",
+  "varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+  ],
+}
+`;
+
+exports[`Node shadow emission > preserves bindings and shader tokens for non-contiguous 1`] = `
+{
+  "_bglEntries": [
+    {
+      "binding": 7,
+      "texture": {
+        "sampleType": "depth",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 8,
+      "sampler": {
+        "type": "comparison",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 9,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+    {
+      "binding": 10,
+      "texture": {
+        "sampleType": "float",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 11,
+      "sampler": {
+        "type": "filtering",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 12,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+  ],
+  "_bindingCount": 6,
+  "_bindings": [
+    {
+      "_lightIndex": 1,
+      "_sampBinding": 8,
+      "_shadowType": "pcf",
+      "_texBinding": 7,
+      "_uboBinding": 9,
+    },
+    {
+      "_lightIndex": 4,
+      "_sampBinding": 11,
+      "_shadowType": "esm",
+      "_texBinding": 10,
+      "_uboBinding": 12,
+    },
+  ],
+  "_fragmentHelper": "fn nme_computeShadowFactors(input: VertexOut) -> array<f32, 16> { var _sf = array<f32, 16>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0); _sf[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z); _sf[4] = computeShadowESM_4(input.vPosFromLight_4, input.vDepthMetric_4, shadowInfo_4.shadowsInfo.x, shadowInfo_4.shadowsInfo.z, shadowInfo_4.shadowsInfo.w); for (var _i = 0u; _i < 16u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); } return _sf; }",
+  "_vertexInject": "let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0); out.vPosFromLight_1 = shadowInfo_1.lightMatrix * _shadowWp4; out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y; out.vPosFromLight_4 = shadowInfo_4.lightMatrix * _shadowWp4; out.vDepthMetric_4 = (out.vPosFromLight_4.z + shadowInfo_4.depthValues.x) / shadowInfo_4.depthValues.y;",
+  "_wgslDecls": "struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(9) var<uniform> shadowInfo_1: shadowInfo_1Uniforms; @group(1) @binding(7) var shadowTex_1: texture_depth_2d; @group(1) @binding(8) var shadowComp_1: sampler_comparison; fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let depthRef = clamp(clipSpace.z, 0.0, 1.0); var tc = uv * mapSz + 0.5; let st = fract(tc); let base = (floor(tc) - 0.5) * invMapSz; let uvw0 = 4.0 - 3.0 * st; let uvw1 = vec2<f32>(7.0); let uvw2 = 1.0 + 3.0 * st; let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz; let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz; var sh = 0.0; sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef); sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef); sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef); sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef); sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef); sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef); sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef); sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef); sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef); sh /= 144.0; return mix(darkness, 1.0, sh); } struct shadowInfo_4Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(12) var<uniform> shadowInfo_4: shadowInfo_4Uniforms; @group(1) @binding(10) var shadowTex_4: texture_2d<f32>; @group(1) @binding(11) var shadowSamp_4: sampler; fn computeFallOff_4(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 { let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0)); return mix(value, 1.0, mask); } fn computeShadowESM_4(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0); let shadowMapSample = textureSampleLevel(shadowTex_4, shadowSamp_4, uv, 0.0).x; let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness); return computeFallOff_4(esm, clipSpace.xy, frustumEdgeFalloff); }",
+  "varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_4",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_4",
+      "_type": "f32",
+    },
+  ],
+}
+`;
+
+exports[`Node shadow emission > preserves bindings and shader tokens for pcf 1`] = `
+{
+  "_bglEntries": [
+    {
+      "binding": 7,
+      "texture": {
+        "sampleType": "depth",
+        "viewDimension": "2d",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 8,
+      "sampler": {
+        "type": "comparison",
+      },
+      "visibility": 2,
+    },
+    {
+      "binding": 9,
+      "buffer": {
+        "minBindingSize": 96,
+        "type": "uniform",
+      },
+      "visibility": 3,
+    },
+  ],
+  "_bindingCount": 3,
+  "_bindings": [
+    {
+      "_lightIndex": 0,
+      "_sampBinding": 8,
+      "_shadowType": "pcf",
+      "_texBinding": 7,
+      "_uboBinding": 9,
+    },
+  ],
+  "_fragmentHelper": "fn nme_computeShadowFactors(input: VertexOut) -> array<f32, 16> { var _sf = array<f32, 16>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0); _sf[0] = computeShadowPCF_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.y, shadowInfo_0.shadowsInfo.z); for (var _i = 0u; _i < 16u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); } return _sf; }",
+  "_vertexInject": "let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0); out.vPosFromLight_0 = shadowInfo_0.lightMatrix * _shadowWp4; out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  "_wgslDecls": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> }; @group(1) @binding(9) var<uniform> shadowInfo_0: shadowInfo_0Uniforms; @group(1) @binding(7) var shadowTex_0: texture_depth_2d; @group(1) @binding(8) var shadowComp_0: sampler_comparison; fn computeShadowPCF_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 { let clipSpace = posFromLight.xyz / posFromLight.w; let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y); if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; } let depthRef = clamp(clipSpace.z, 0.0, 1.0); var tc = uv * mapSz + 0.5; let st = fract(tc); let base = (floor(tc) - 0.5) * invMapSz; let uvw0 = 4.0 - 3.0 * st; let uvw1 = vec2<f32>(7.0); let uvw2 = 1.0 + 3.0 * st; let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz; let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz; var sh = 0.0; sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[0]), depthRef); sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[0]), depthRef); sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[0]), depthRef); sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[1]), depthRef); sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[1]), depthRef); sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[1]), depthRef); sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[2]), depthRef); sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[2]), depthRef); sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[2]), depthRef); sh /= 144.0; return mix(darkness, 1.0, sh); }",
+  "varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+}
+`;

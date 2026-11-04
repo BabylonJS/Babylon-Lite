@@ -1,7 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "./gpu-pool.js";
+import { getOrCreateSampler, type TextureSamplerDescriptor } from "./texture-sampler-pool.js";
 
-const _trilinearAnisotropicDesc: GPUSamplerDescriptor = {
+const _trilinearAnisotropicDesc: TextureSamplerDescriptor = {
     magFilter: "linear",
     minFilter: "linear",
     mipmapFilter: "linear",

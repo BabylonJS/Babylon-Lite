@@ -5,13 +5,17 @@
  *  Pillar 4b: plain data, no scene reference.
  *  Pillar 4c: materials own shaders — mesh just holds material props. */
 
-import type { EngineContext } from "../engine/engine.js";
+import { bumpVisibilityEpoch, type EngineContext } from "../engine/engine.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { release, retain } from "../resource/ref-count.js";
 import type { Mesh } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
+import { setMeshDrawRangeSource } from "./mesh-draw-range-state.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";
+import type { BoxOptions } from "./create-box.js";
 import { createTorusData } from "./create-torus.js";
 import type { TorusOptions } from "./create-torus.js";
 import { createTorusKnotData } from "./create-torus-knot.js";
@@ -34,6 +38,225 @@ import { createTubeData } from "./create-tube.js";
 import type { TubeOptions } from "./create-tube.js";
 import { createExtrudeShapeData } from "./create-extrude.js";
 import type { ExtrudeShapeOptions } from "./create-extrude.js";
+import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
+
+export interface MeshGeometryCapacityResult {
+    readonly stable: boolean;
+    readonly vertexCapacity: number;
+    readonly indexCapacity: number;
+}
+
+/** A contiguous range in the complete replacement arrays, in vertices or index elements (not bytes). */
+export interface MeshGeometryRange {
+    readonly offset: number;
+    readonly count: number;
+}
+
+/** Exact indexed draw selection. Indices are relative to the selected vertex window.
+ *  Offsets/counts are elements, not bytes; zero and non-triangle counts are valid. */
+export interface MeshDrawRange {
+    readonly vertices: MeshGeometryRange;
+    readonly indices: MeshGeometryRange;
+}
+
+/** Select initialized geometry without uploading or replacing GPU buffers.
+ *  Requires owned, unshared, tightly-packed uint32 geometry without vertex deformation.
+ *  Refreshes active CPU geometry/bounds and invalidates cached render/shadow bundles.
+ *  Complete geometry updates clear this selection. */
+export function setMeshDrawRange(engine: EngineContext, mesh: Mesh, range: MeshDrawRange): void {
+    const gpu = mesh._gpu;
+    if (mesh._disposed || gpu._vbLayout || gpu._ownsVertexBuffers === false || gpu._ownsIndexBuffer === false || (gpu._refCount ?? 1) > 1) {
+        throw new Error("setMeshDrawRange requires live, owned, unshared, tightly-packed geometry");
+    }
+    if (mesh.skeleton || mesh.morphTargets || mesh.vat || gpu.indexFormat !== "uint32") {
+        throw new Error("setMeshDrawRange requires undeformed uint32 geometry");
+    }
+    let source = gpu._drawRangeSource;
+    if (!source) {
+        const positions = mesh._cpuPositions;
+        const normals = mesh._cpuNormals;
+        const indices = mesh._cpuIndices;
+        if (!positions || !normals || !indices || positions.length % 3 !== 0 || normals.length !== positions.length) {
+            throw new Error("setMeshDrawRange requires coherent retained CPU geometry");
+        }
+        source = {
+            indexCount: gpu.indexCount,
+            positions,
+            normals,
+            indices,
+            uvs: mesh._cpuUvs,
+            uvs2: mesh._cpuUv2s ?? undefined,
+            tangents: mesh._cpuTangents ?? undefined,
+            colors: mesh._cpuColors ?? undefined,
+        };
+    }
+    const sourceVertexCount = source.positions.length / 3;
+    if (
+        !matchesGeometryAttribute(source.uvs, gpu.hasUv, sourceVertexCount * 2) ||
+        !matchesGeometryAttribute(source.uvs2, gpu.hasUv2, sourceVertexCount * 2) ||
+        !matchesGeometryAttribute(source.tangents, gpu.hasTangent, sourceVertexCount * 4) ||
+        !matchesGeometryAttribute(source.colors, gpu.hasColor, sourceVertexCount * 4)
+    ) {
+        throw new Error("setMeshDrawRange requires coherent retained CPU geometry");
+    }
+    const { offset: vertexOffset, count: vertexCount } = range.vertices;
+    const { offset: indexOffset, count: indexCount } = range.indices;
+    validateGeometryRange(range.vertices, source.positions.length / 3);
+    validateGeometryRange(range.indices, source.indices.length);
+    if (
+        vertexOffset > 0x7fffffff ||
+        indexOffset > 0xffffffff ||
+        indexCount > 0xffffffff ||
+        vertexOffset + vertexCount > (gpu._vertexCapacity ?? source.positions.length / 3) ||
+        indexOffset + indexCount > (gpu._indexCapacity ?? gpu.indexCount)
+    ) {
+        throw new Error("setMeshDrawRange requires ranges within geometry capacity and WebGPU limits");
+    }
+    for (let i = indexOffset; i < indexOffset + indexCount; i++) {
+        if (source.indices[i]! >= vertexCount) {
+            throw new Error("setMeshDrawRange index must be relative to the selected vertex window");
+        }
+    }
+    if (
+        gpu._drawRangeSource &&
+        gpu._baseVertex === vertexOffset &&
+        mesh._cpuPositions?.length === vertexCount * 3 &&
+        gpu._firstIndex === indexOffset &&
+        gpu.indexCount === indexCount
+    ) {
+        return;
+    }
+    gpu._vertexCapacity ??= source.positions.length / 3;
+    gpu._indexCapacity ??= gpu.indexCount;
+    const positions = source.positions.subarray(vertexOffset * 3, (vertexOffset + vertexCount) * 3);
+    const normals = source.normals.subarray(vertexOffset * 3, (vertexOffset + vertexCount) * 3);
+    const indices = source.indices.subarray(indexOffset, indexOffset + indexCount);
+    retainMeshGeometry(
+        engine,
+        mesh,
+        positions,
+        normals,
+        indices,
+        source.uvs?.subarray(vertexOffset * 2, (vertexOffset + vertexCount) * 2),
+        source.uvs2?.subarray(vertexOffset * 2, (vertexOffset + vertexCount) * 2),
+        source.tangents?.subarray(vertexOffset * 4, (vertexOffset + vertexCount) * 4),
+        source.colors?.subarray(vertexOffset * 4, (vertexOffset + vertexCount) * 4),
+        true
+    );
+    if (!gpu._drawRangeSource) {
+        setMeshDrawRangeSource(gpu, source);
+    }
+    gpu._baseVertex = vertexOffset;
+    gpu._firstIndex = indexOffset;
+    source.indexCount = indexCount;
+    if (indexCount === 0) {
+        mesh.boundMin = mesh.boundMax = undefined;
+    }
+    _markWorldMatrixDirty(mesh);
+    invalidateRenderBundles(engine);
+}
+
+/** Explicit uploads for an in-capacity update. Vertex ranges apply to every present attribute.
+ *  Both lists are required; an empty list uploads nothing for that kind. Include all changed and newly
+ *  added elements. Values outside the ranges must already match the GPU, including after GPU-only edits.
+ *  Arrays still describe the complete active geometry for bounds, picking and recovery. They may be
+ *  mutated in place: no comparison with previously retained array values is performed.
+ *  Capacity growth uploads the complete geometry instead; removed index elements are cleared automatically. */
+export interface MeshGeometryUpdateRanges {
+    readonly vertices: readonly MeshGeometryRange[];
+    readonly indices: readonly MeshGeometryRange[];
+}
+
+function validateGeometryRange({ offset, count }: MeshGeometryRange, length: number): void {
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(count) || count < 0 || offset + count > length) {
+        throw new Error("mesh geometry update requires valid ranges within the active geometry");
+    }
+}
+
+function validateGeometryRanges(ranges: readonly MeshGeometryRange[], length: number): void {
+    for (const range of ranges) {
+        validateGeometryRange(range, length);
+    }
+}
+
+function writeGeometryRanges(queue: GPUQueue, buffer: GPUBuffer, values: Float32Array | Uint32Array, components: number, ranges?: readonly MeshGeometryRange[]): void {
+    if (!ranges) {
+        queue.writeBuffer(buffer, 0, values.buffer as ArrayBuffer, values.byteOffset, values.byteLength);
+        return;
+    }
+    for (const { offset, count } of ranges) {
+        if (count > 0) {
+            const byteOffset = offset * components * 4;
+            queue.writeBuffer(buffer, byteOffset, values.buffer as ArrayBuffer, values.byteOffset + byteOffset, count * components * 4);
+        }
+    }
+}
+
+function retainMeshGeometry(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array,
+    preserveDrawRange = false
+): void {
+    const gpu = mesh._gpu;
+    if (gpu._drawRangeSource && !preserveDrawRange) {
+        gpu._drawRangeSource = undefined;
+        gpu._firstIndex = gpu._baseVertex = undefined;
+        invalidateRenderBundles(engine);
+    }
+    const [min, max] = computeAabb(positions);
+    mesh.boundMin = isFinite(min[0]) ? min : undefined;
+    mesh.boundMax = isFinite(max[0]) ? max : undefined;
+    mesh._cpuPositions = positions;
+    mesh._cpuNormals = normals;
+    mesh._cpuUvs = uvs?.length ? uvs : undefined;
+    mesh._cpuUv2s = uvs2?.length ? uvs2 : null;
+    mesh._cpuTangents = tangents?.length ? tangents : null;
+    mesh._cpuColors = colors?.length ? colors : null;
+    mesh._cpuIndices = indices;
+    mesh._cpuGpuIndices = indices;
+    mesh._cpuIndexFormat = "uint32";
+    engine._dlr?.m(mesh, mesh._cpuUv2s, mesh._cpuTangents, mesh._cpuColors, indices, "uint32");
+}
+
+function matchesGeometryAttribute(values: Float32Array | undefined, present: boolean | undefined, length: number): boolean {
+    return !!values?.length === !!present && (!present || values?.length === length);
+}
+
+function validateCapacityGeometry(
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): number {
+    const gpu = mesh._gpu;
+    const vertexCount = positions.length / 3;
+    if (gpu._vbLayout || (gpu._refCount ?? 1) > 1) {
+        throw new Error("updateMeshGeometryCapacity requires unshared, tightly-packed mesh geometry");
+    }
+    if (!Number.isInteger(vertexCount) || normals.length !== positions.length || indices.length % 3 !== 0 || gpu.indexFormat !== "uint32") {
+        throw new Error("updateMeshGeometryCapacity requires coherent triangle-list geometry with uint32 indices");
+    }
+    if (
+        !matchesGeometryAttribute(uvs, gpu.hasUv, vertexCount * 2) ||
+        !matchesGeometryAttribute(uvs2, gpu.hasUv2, vertexCount * 2) ||
+        !matchesGeometryAttribute(tangents, gpu.hasTangent, vertexCount * 4) ||
+        !matchesGeometryAttribute(colors, gpu.hasColor, vertexCount * 4)
+    ) {
+        throw new Error("updateMeshGeometryCapacity requires unchanged optional-attribute layout");
+    }
+    return vertexCount;
+}
 
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
@@ -49,32 +272,31 @@ export function createMeshFromData(
     colors?: Float32Array
 ): Mesh {
     const [min, max] = computeAabb(positions);
-    const mesh = {
+    const mesh = initMeshTransform({
         name,
-        material: null as unknown,
+        material: null as unknown as Mesh["material"],
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
-    } as unknown as Mesh;
-    initMeshTransform(mesh);
+        _cpuPositions: positions,
+        _cpuNormals: normals,
+        _cpuUvs: uvs,
+        _cpuUv2s: uvs2,
+        _cpuTangents: tangents,
+        _cpuColors: colors,
+        _cpuIndices: indices,
+    });
 
-    // Retain CPU geometry for detailed picking (ray-triangle intersection)
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    engine._dlr?.m(mesh, uvs2, tangents, colors, indices, "uint32");
 
     return mesh;
 }
 
-/** Force every registered scene's cached render + shadow bundles to RE-RECORD on the next frame, by bumping
- *  each rendering context's `_renderableVersion` (the same signal a mesh add/remove or `resizeMeshGeometry`
- *  emits). Use after an out-of-band GPU buffer REALLOCATION that the cached bundles can't otherwise notice —
- *  e.g. growing a thin-instanced mesh's matrix buffer past its capacity (the bundle captured the old buffer
- *  handle and would bind a freed buffer). A no-op-cheap version bump; the actual re-record happens lazily. */
+/** Force cached render + shadow bundles to RE-RECORD on the next frame. The global epoch also reaches
+ *  tasks recorded before their scene was registered; registered scenes retain their structural version bump. */
 export function invalidateRenderBundles(engine: EngineContext): void {
+    bumpVisibilityEpoch();
     for (const ctx of engine._renderingContexts) {
         const sc = ctx as { _renderableVersion?: number };
         if (sc._renderableVersion !== undefined) {
@@ -84,13 +306,232 @@ export function invalidateRenderBundles(engine: EngineContext): void {
 }
 
 /** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
- *  `positions` must hold tightly-packed XYZ floats matching the mesh's vertex count.
- *  `vertexOffset` is the first vertex to overwrite (defaults to 0).
+ *  `positions` must hold tightly-packed XYZ floats.
+ *  `vertexOffset` is the first destination vertex to overwrite (defaults to 0). `vertexCount` and
+ *  `sourceVertexOffset` select a range from a retained full-size source array without allocating a view.
  *  The mesh must have been created via createMeshFromData / a mesh factory.
  *  Zero-allocation GPU upload only — CPU-side picking geometry is not refreshed. */
-export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions: Float32Array, vertexOffset = 0): void {
+export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
+    writeVertexAttributeRange(engine, mesh, mesh._gpu.positionBuffer, positions, 3, vertexOffset, vertexCount, sourceVertexOffset);
+}
+
+function writeVertexAttributeRange(
+    engine: EngineContext,
+    mesh: Mesh,
+    buffer: GPUBuffer,
+    values: Float32Array,
+    components: number,
+    vertexOffset: number,
+    vertexCount: number | undefined,
+    sourceVertexOffset: number
+): void {
+    if (mesh._gpu._vbLayout || mesh._gpu._ownsVertexBuffers === false || (mesh._gpu._refCount ?? 1) > 1) {
+        throw new Error(`mesh attribute updates require unshared, tightly-packed geometry; update the source StorageBuffer instead: ${mesh.name}`);
+    }
+    const sourceVertexCount = values.length / components;
+    const count = vertexCount ?? sourceVertexCount - sourceVertexOffset;
+    if (
+        !Number.isInteger(sourceVertexCount) ||
+        !Number.isInteger(vertexOffset) ||
+        vertexOffset < 0 ||
+        !Number.isInteger(sourceVertexOffset) ||
+        sourceVertexOffset < 0 ||
+        !Number.isInteger(count) ||
+        count < 0 ||
+        sourceVertexOffset + count > sourceVertexCount
+    ) {
+        throw new Error("mesh attribute update requires a valid tightly-packed vertex range");
+    }
+    if (count === 0) {
+        return;
+    }
+    const bytesPerVertex = components * 4;
+    const destinationByteOffset = vertexOffset * bytesPerVertex;
+    const byteLength = count * bytesPerVertex;
+    if (destinationByteOffset + byteLength > buffer.size) {
+        throw new Error("mesh attribute update requires a valid destination vertex range");
+    }
+    engine._device.queue.writeBuffer(buffer, destinationByteOffset, values.buffer as ArrayBuffer, values.byteOffset + sourceVertexOffset * bytesPerVertex, byteLength);
+    _markWorldMatrixDirty(mesh);
+}
+
+/** Replace every attribute + index value of a tightly-packed procedural mesh without replacing its GPU
+ *  buffers. Counts and optional-attribute presence must match the existing geometry; use
+ *  `resizeMeshGeometry` when topology/layout changes. Stable buffer identities keep cached render/shadow
+ *  bundles valid, while retained CPU geometry + bounds keep detailed picking and recovery exact. */
+export function updateMeshGeometry(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
     const gpu = mesh._gpu;
-    engine._device.queue.writeBuffer(gpu.positionBuffer, vertexOffset * 3 * 4, positions.buffer as ArrayBuffer, positions.byteOffset, positions.byteLength);
+    const vertexCount = positions.length / 3;
+    const hasUvs = !!uvs && uvs.length > 0;
+    const hasUv2s = !!uvs2 && uvs2.length > 0;
+    const hasTangents = !!tangents && tangents.length > 0;
+    const hasColors = !!colors && colors.length > 0;
+    if (gpu._vbLayout || (gpu._refCount ?? 1) > 1) {
+        throw new Error("updateMeshGeometry requires unshared, tightly-packed mesh geometry");
+    }
+    if (
+        !Number.isInteger(vertexCount) ||
+        (gpu._drawRangeSource?.positions ?? mesh._cpuPositions)?.length !== positions.length ||
+        normals.length !== positions.length ||
+        (gpu._drawRangeSource?.indices ?? mesh._cpuIndices)?.length !== indices.length ||
+        indices.length > (gpu._indexCapacity ?? gpu.indexCount) ||
+        gpu.indexFormat !== "uint32"
+    ) {
+        throw new Error("updateMeshGeometry requires unchanged vertex/index counts; use resizeMeshGeometry for topology changes");
+    }
+    if (
+        hasUvs !== !!gpu.hasUv ||
+        (hasUvs && uvs!.length !== vertexCount * 2) ||
+        hasUv2s !== !!gpu.hasUv2 ||
+        (hasUv2s && uvs2!.length !== vertexCount * 2) ||
+        hasTangents !== !!gpu.hasTangent ||
+        (hasTangents && tangents!.length !== vertexCount * 4) ||
+        hasColors !== !!gpu.hasColor ||
+        (hasColors && colors!.length !== vertexCount * 4)
+    ) {
+        throw new Error("updateMeshGeometry requires unchanged optional-attribute layout; use resizeMeshGeometry for layout changes");
+    }
+
+    const queue = engine._device.queue;
+    queue.writeBuffer(gpu.positionBuffer, 0, positions.buffer as ArrayBuffer, positions.byteOffset, positions.byteLength);
+    queue.writeBuffer(gpu.normalBuffer, 0, normals.buffer as ArrayBuffer, normals.byteOffset, normals.byteLength);
+    queue.writeBuffer(gpu.indexBuffer, 0, indices.buffer as ArrayBuffer, indices.byteOffset, indices.byteLength);
+    if (hasUvs) {
+        queue.writeBuffer(gpu.uvBuffer, 0, uvs!.buffer as ArrayBuffer, uvs!.byteOffset, uvs!.byteLength);
+    }
+    if (hasUv2s) {
+        queue.writeBuffer(gpu.uv2Buffer!, 0, uvs2!.buffer as ArrayBuffer, uvs2!.byteOffset, uvs2!.byteLength);
+    }
+    if (hasTangents) {
+        queue.writeBuffer(gpu.tangentBuffer!, 0, tangents!.buffer as ArrayBuffer, tangents!.byteOffset, tangents!.byteLength);
+    }
+    if (hasColors) {
+        queue.writeBuffer(gpu.colorBuffer!, 0, colors!.buffer as ArrayBuffer, colors!.byteOffset, colors!.byteLength);
+    }
+
+    retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+    _markWorldMatrixDirty(mesh);
+}
+
+/** Update changing triangle-list geometry while retaining grow-only GPU buffer capacity. Unused index
+ *  capacity is zeroed into degenerate triangles so cached render bundles stay stable.
+ *  Optional explicit ranges limit in-capacity GPU uploads; CPU bounds and retained geometry still use
+ *  the complete supplied arrays. Omit ranges for a full upload. Layout changes require resizeMeshGeometry. */
+export function updateMeshGeometryCapacity(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array,
+    reserveFactor?: number
+): MeshGeometryCapacityResult;
+export function updateMeshGeometryCapacity(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs: Float32Array | undefined,
+    uvs2: Float32Array | undefined,
+    tangents: Float32Array | undefined,
+    colors: Float32Array | undefined,
+    reserveFactor: number | undefined,
+    ranges?: MeshGeometryUpdateRanges
+): MeshGeometryCapacityResult;
+export function updateMeshGeometryCapacity(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array,
+    reserveFactor = 1.25,
+    ranges?: MeshGeometryUpdateRanges
+): MeshGeometryCapacityResult {
+    if (!Number.isFinite(reserveFactor) || reserveFactor < 1) {
+        throw new Error("updateMeshGeometryCapacity requires reserveFactor >= 1");
+    }
+    const vertexCount = validateCapacityGeometry(mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+    if (ranges) {
+        validateGeometryRanges(ranges.vertices, vertexCount);
+        validateGeometryRanges(ranges.indices, indices.length);
+    }
+    const oldGpu = mesh._gpu;
+    const vertexCapacity = oldGpu._vertexCapacity ?? (mesh._cpuPositions ? mesh._cpuPositions.length / 3 : vertexCount);
+    const indexCapacity = oldGpu._indexCapacity ?? oldGpu.indexCount;
+
+    if (vertexCount > vertexCapacity || indices.length > indexCapacity) {
+        const nextVertexCapacity = vertexCount > vertexCapacity ? Math.ceil(vertexCount * reserveFactor) : vertexCapacity;
+        const requestedIndexCapacity = indices.length > indexCapacity ? Math.ceil(indices.length * reserveFactor) : indexCapacity;
+        const nextIndexCapacity = Math.ceil(requestedIndexCapacity / 3) * 3;
+        const paddedPositions = new Float32Array(nextVertexCapacity * 3);
+        const paddedNormals = new Float32Array(nextVertexCapacity * 3);
+        const paddedIndices = new Uint32Array(nextIndexCapacity);
+        paddedPositions.set(positions);
+        paddedNormals.set(normals);
+        paddedIndices.set(indices);
+        const paddedUvs = uvs?.length ? new Float32Array(nextVertexCapacity * 2) : undefined;
+        const paddedUv2s = uvs2?.length ? new Float32Array(nextVertexCapacity * 2) : undefined;
+        const paddedTangents = tangents?.length ? new Float32Array(nextVertexCapacity * 4) : undefined;
+        const paddedColors = colors?.length ? new Float32Array(nextVertexCapacity * 4) : undefined;
+        paddedUvs?.set(uvs!);
+        paddedUv2s?.set(uvs2!);
+        paddedTangents?.set(tangents!);
+        paddedColors?.set(colors!);
+        resizeMeshGeometry(engine, mesh, paddedPositions, paddedNormals, paddedIndices, paddedUvs, paddedUv2s, paddedTangents, paddedColors);
+        mesh._gpu._vertexCapacity = nextVertexCapacity;
+        mesh._gpu._indexCapacity = nextIndexCapacity;
+        mesh._gpu._indexScratch = paddedIndices;
+        retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+        return { stable: false, vertexCapacity: nextVertexCapacity, indexCapacity: nextIndexCapacity };
+    }
+
+    oldGpu._vertexCapacity = vertexCapacity;
+    oldGpu._indexCapacity = indexCapacity;
+    const previousIndexCount = oldGpu._indexScratch ? ((oldGpu._drawRangeSource?.indices ?? mesh._cpuIndices)?.length ?? indexCapacity) : indexCapacity;
+    const paddedIndices = oldGpu._indexScratch?.length === indexCapacity ? oldGpu._indexScratch : (oldGpu._indexScratch = new Uint32Array(indexCapacity));
+    paddedIndices.fill(0);
+    paddedIndices.set(indices);
+    const queue = engine._device.queue;
+    writeGeometryRanges(queue, oldGpu.positionBuffer, positions, 3, ranges?.vertices);
+    writeGeometryRanges(queue, oldGpu.normalBuffer, normals, 3, ranges?.vertices);
+    writeGeometryRanges(queue, oldGpu.indexBuffer, paddedIndices, 1, ranges?.indices);
+    if (ranges && indices.length < previousIndexCount) {
+        const byteOffset = indices.length * 4;
+        queue.writeBuffer(oldGpu.indexBuffer, byteOffset, paddedIndices.buffer as ArrayBuffer, byteOffset, (previousIndexCount - indices.length) * 4);
+    }
+    if (uvs?.length) {
+        writeGeometryRanges(queue, oldGpu.uvBuffer, uvs, 2, ranges?.vertices);
+    }
+    if (uvs2?.length) {
+        writeGeometryRanges(queue, oldGpu.uv2Buffer!, uvs2, 2, ranges?.vertices);
+    }
+    if (tangents?.length) {
+        writeGeometryRanges(queue, oldGpu.tangentBuffer!, tangents, 4, ranges?.vertices);
+    }
+    if (colors?.length) {
+        writeGeometryRanges(queue, oldGpu.colorBuffer!, colors, 4, ranges?.vertices);
+    }
+    retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+    _markWorldMatrixDirty(mesh);
+    return { stable: true, vertexCapacity, indexCapacity };
 }
 
 /** Replace a mesh's GPU geometry IN PLACE with new (possibly larger or smaller) buffers, reusing the
@@ -110,110 +551,145 @@ export function resizeMeshGeometry(
     colors?: Float32Array
 ): void {
     const old = mesh._gpu;
+    if (old._vbLayout || old._ownsVertexBuffers === false) {
+        throw new Error(`resizeMeshGeometry requires owned, tightly-packed geometry; recreate or update the source StorageBuffer instead: ${mesh.name}`);
+    }
     // A geometry REALLOCATION: any cached draw recording that captured raw buffer handles (e.g. the main
     // opaque render bundle or the shadow task's bundle) must re-record, or it would keep binding the OLD
     // buffers we're about to free. Resize is a structural (vertex-count) change — conceptually a scene
     // mutation — so bump every registered scene's renderable version, which is exactly what the cached
     // bundles already key off to know they must rebuild. (A mesh holds no scene reference per pillar 4b,
     // so we can't target just its owner; bumping all registered scenes is a no-op for any without it.)
-    for (const ctx of engine._renderingContexts) {
-        const sc = ctx as { _renderableVersion?: number };
-        if (sc._renderableVersion !== undefined) {
-            sc._renderableVersion++;
-        }
-    }
+    invalidateRenderBundles(engine);
     // Allocate the NEW buffers and swap them in FIRST, so any subsequent frame records from the new
-    // geometry. The OLD buffers may still be referenced by a frame that was already submitted to the GPU
-    // this tick, so we must NOT destroy them synchronously — that hits the validation error
-    // "Buffer used in submit while destroyed". Defer their destruction until the GPU has drained the
-    // currently-submitted work (onSubmittedWorkDone), by which point nothing references them.
+    // geometry. The OLD buffers may still be referenced by the next frame command buffer, especially when
+    // resize happens during async scene construction before the first submit. Retire them through the engine's
+    // frame-gated queue so destruction cannot run before that command buffer has submitted and drained.
     mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
-    const [min, max] = computeAabb(positions);
-    mesh.boundMin = isFinite(min[0]) ? min : undefined;
-    mesh.boundMax = isFinite(max[0]) ? max : undefined;
+    retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+    _markWorldMatrixDirty(mesh);
+    // `cloneTransformNode` shares the exact MeshGPU object between siblings. Replacing this mesh's
+    // `_gpu` drops one ownership claim; only retire the old buffers when no sibling still references
+    // them. Otherwise a later frame would legitimately bind the clone's still-live geometry after it
+    // had been destroyed.
+    if (release(old)) {
+        retireMeshGeometryBuffers(engine, old);
+    }
+}
 
-    // Retain CPU geometry for detailed picking + device-loss recovery (mirror createMeshFromData).
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
-    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+/** Replace one shared geometry allocation and keep every mesh in `meshes` sharing the replacement.
+ *  Supply distinct, live meshes referencing the same owned, tightly-packed MeshGPU object.
+ *  Owners omitted from the list keep their original geometry. */
+export function resizeSharedMeshGeometry(
+    engine: EngineContext,
+    meshes: readonly Mesh[],
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
+    const first = meshes[0];
+    if (!first) {
+        throw new Error("resizeSharedMeshGeometry requires at least one mesh");
+    }
+    const old = first._gpu;
+    if (old._vbLayout || old._ownsVertexBuffers === false) {
+        throw new Error("resizeSharedMeshGeometry requires meshes sharing one owned, tightly-packed geometry");
+    }
+    const owners = new Set<Mesh>();
+    for (const mesh of meshes) {
+        if (!mesh || mesh._disposed || mesh._gpu !== old || owners.has(mesh)) {
+            throw new Error("resizeSharedMeshGeometry requires distinct, live meshes sharing one geometry");
+        }
+        owners.add(mesh);
+    }
+    resizeMeshGeometry(engine, first, positions, normals, indices, uvs, uvs2, tangents, colors);
+    const replacement = first._gpu;
+    for (let index = 1; index < meshes.length; index++) {
+        const mesh = meshes[index]!;
+        if (release(old)) {
+            retireMeshGeometryBuffers(engine, old);
+        }
+        retain(replacement);
+        mesh._gpu = replacement;
+        retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+        _markWorldMatrixDirty(mesh);
+    }
+}
 
-    void engine._device.queue
-        .onSubmittedWorkDone()
-        .then(() => {
-            try {
-                old.positionBuffer.destroy();
-                old.normalBuffer.destroy();
-                old.indexBuffer.destroy();
-                old.uvBuffer.destroy();
-                old.uv2Buffer?.destroy();
-                old.tangentBuffer?.destroy();
-                old.colorBuffer?.destroy();
-            } catch {
-                // Device may have been lost/disposed before the deferred destroy ran — nothing to free.
-            }
-        })
-        .catch(() => {});
+function retireMeshGeometryBuffers(engine: EngineContext, gpu: Mesh["_gpu"]): void {
+    retireGpuResources(engine, () => {
+        gpu.positionBuffer.destroy();
+        gpu.normalBuffer.destroy();
+        gpu.indexBuffer.destroy();
+        gpu.uvBuffer.destroy();
+        gpu.uv2Buffer?.destroy();
+        gpu.tangentBuffer?.destroy();
+        gpu.colorBuffer?.destroy();
+        gpu._shaderColorFallback?.destroy();
+    });
 }
 
 /** Re-upload (part of) a mesh's NORMAL buffer — the twin of `updateMeshPositions` for dynamically
  *  re-generated geometry whose per-vertex normals change (e.g. a swept tube re-fitted each rebuild).
  *  No-op if the mesh was created without normals. Zero-allocation GPU upload only. */
-export function updateMeshNormals(engine: EngineContext, mesh: Mesh, normals: Float32Array, vertexOffset = 0): void {
+export function updateMeshNormals(engine: EngineContext, mesh: Mesh, normals: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
     const gpu = mesh._gpu;
     if (!gpu.normalBuffer) {
         return;
     }
-    engine._device.queue.writeBuffer(gpu.normalBuffer, vertexOffset * 3 * 4, normals.buffer as ArrayBuffer, normals.byteOffset, normals.byteLength);
+    writeVertexAttributeRange(engine, mesh, gpu.normalBuffer, normals, 3, vertexOffset, vertexCount, sourceVertexOffset);
 }
 
 /** Re-upload (part of) a mesh's COLOR buffer — the twin of `updateMeshNormals`/`updateMeshPositions`
  *  for dynamically re-generated geometry whose per-vertex colors change (e.g. a procedural mesh whose
  *  parts are re-tinted each rebuild). The color attribute is vec4 (16 bytes/vertex). No-op if the mesh
  *  was created without colors. Zero-allocation GPU upload only. */
-export function updateMeshColors(engine: EngineContext, mesh: Mesh, colors: Float32Array, vertexOffset = 0): void {
+export function updateMeshColors(engine: EngineContext, mesh: Mesh, colors: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
     const gpu = mesh._gpu;
     if (!gpu.colorBuffer) {
         return;
     }
-    engine._device.queue.writeBuffer(gpu.colorBuffer, vertexOffset * 4 * 4, colors.buffer as ArrayBuffer, colors.byteOffset, colors.byteLength);
+    writeVertexAttributeRange(engine, mesh, gpu.colorBuffer, colors, 4, vertexOffset, vertexCount, sourceVertexOffset);
 }
 
 /** Re-upload (part of) a mesh's UV buffer — the twin of `updateMeshNormals`/`updateMeshColors` for
  *  dynamically re-generated geometry whose per-vertex UVs change (e.g. a procedural mesh whose parts
  *  carry per-rebuild UV payloads). The uv attribute is vec2 (8 bytes/vertex). No-op if the mesh was
  *  created without UVs. Zero-allocation GPU upload only. */
-export function updateMeshUvs(engine: EngineContext, mesh: Mesh, uvs: Float32Array, vertexOffset = 0): void {
+export function updateMeshUvs(engine: EngineContext, mesh: Mesh, uvs: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
     const gpu = mesh._gpu;
     if (!gpu.uvBuffer) {
         return;
     }
-    engine._device.queue.writeBuffer(gpu.uvBuffer, vertexOffset * 2 * 4, uvs.buffer as ArrayBuffer, uvs.byteOffset, uvs.byteLength);
+    writeVertexAttributeRange(engine, mesh, gpu.uvBuffer, uvs, 2, vertexOffset, vertexCount, sourceVertexOffset);
 }
 
 /** Re-upload (part of) a mesh's second UV buffer (uv2) — the twin of `updateMeshUvs` for dynamically
  *  re-generated geometry whose per-vertex uv2 payload changes each rebuild (e.g. a procedural batch that
  *  re-bakes per-vertex AO / gradient data). The uv2 attribute is vec2 (8 bytes/vertex). No-op if the mesh
  *  was created without uv2. Zero-allocation GPU upload only. */
-export function updateMeshUv2(engine: EngineContext, mesh: Mesh, uvs2: Float32Array, vertexOffset = 0): void {
+export function updateMeshUv2(engine: EngineContext, mesh: Mesh, uvs2: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
     const gpu = mesh._gpu;
     if (!gpu.uv2Buffer) {
         return;
     }
-    engine._device.queue.writeBuffer(gpu.uv2Buffer, vertexOffset * 2 * 4, uvs2.buffer as ArrayBuffer, uvs2.byteOffset, uvs2.byteLength);
+    writeVertexAttributeRange(engine, mesh, gpu.uv2Buffer, uvs2, 2, vertexOffset, vertexCount, sourceVertexOffset);
 }
 
 /** Re-upload (part of) a mesh's TANGENT buffer — the twin of `updateMeshColors` for dynamically
  *  re-generated geometry whose per-vertex tangent (vec4) payload changes each rebuild (e.g. a procedural
  *  batch that streams a per-vertex coordinate frame / mask through the tangent slot). The tangent attribute
  *  is vec4 (16 bytes/vertex). No-op if the mesh was created without tangents. Zero-allocation GPU upload only. */
-export function updateMeshTangents(engine: EngineContext, mesh: Mesh, tangents: Float32Array, vertexOffset = 0): void {
+export function updateMeshTangents(engine: EngineContext, mesh: Mesh, tangents: Float32Array, vertexOffset = 0, vertexCount?: number, sourceVertexOffset = 0): void {
     const gpu = mesh._gpu;
     if (!gpu.tangentBuffer) {
         return;
     }
-    engine._device.queue.writeBuffer(gpu.tangentBuffer, vertexOffset * 4 * 4, tangents.buffer as ArrayBuffer, tangents.byteOffset, tangents.byteLength);
+    writeVertexAttributeRange(engine, mesh, gpu.tangentBuffer, tangents, 4, vertexOffset, vertexCount, sourceVertexOffset);
 }
 
 /** Create a sphere mesh. Caller must assign material. */
@@ -223,8 +699,8 @@ export function createSphere(engine: EngineContext, options?: SphereOptions): Me
 }
 
 /** Create a box mesh. Caller must assign material. */
-export function createBox(engine: EngineContext, size = 1): Mesh {
-    const data = createBoxData(size);
+export function createBox(engine: EngineContext, options: number | BoxOptions = 1): Mesh {
+    const data = createBoxData(options);
     return createMeshFromData(engine as EngineContext, "box", data.positions, data.normals, data.indices, data.uvs);
 }
 

@@ -4,12 +4,13 @@
  * - Image extraction (embedded or external)
  * - Node hierarchy traversal with memoized world-matrix computation
  */
-import { F32, U32, U16, U8 } from "../engine/typed-arrays.js";
+import { F32, U32, U16, U8, I16, I8 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { getLoaderTmpLocal } from "./_loader-scratch.js";
+import { _rightHanded } from "#coordinate-system";
 
 // glTF 2.0 component types
 const FLOAT = 5126;
@@ -41,26 +42,44 @@ export interface AccessorView {
 
 export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: number): AccessorView {
     const accessor = json.accessors[accessorIdx];
-    const bufferView = json.bufferViews[accessor.bufferView];
     const componentCount = TYPE_SIZES[accessor.type] ?? 1;
-    const byteOffset = (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
     const count = accessor.count;
+    const len = count * componentCount;
 
-    const baseOffset = binChunk.byteOffset + byteOffset;
-    const ab = binChunk.buffer;
-
+    let Ctor: Float32ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor | Uint8ArrayConstructor | Int16ArrayConstructor | Int8ArrayConstructor;
     switch (accessor.componentType) {
         case FLOAT:
-            return { _data: new F32(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = F32;
+            break;
         case UNSIGNED_SHORT:
-            return { _data: new U16(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U16;
+            break;
         case UNSIGNED_INT:
-            return { _data: new U32(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U32;
+            break;
         case UNSIGNED_BYTE:
-            return { _data: new U8(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U8;
+            break;
+        case 5122: // SHORT
+            Ctor = I16;
+            break;
+        case 5120: // BYTE
+            Ctor = I8;
+            break;
         default:
             throw new Error(`Unsupported component type: ${accessor.componentType}`);
     }
+
+    // Spec: an accessor with no `bufferView` is zero-initialized (its values may be supplied by a `sparse`
+    // substitution or an extension) — return a zero-filled array instead of dereferencing a missing
+    // bufferView. Some skinned rigs ship all-zero morph-target POSITION/NORMAL accessors this way, which
+    // otherwise crashed the morph feature with `undefined.byteOffset`.
+    const data =
+        accessor.bufferView === undefined
+            ? new Ctor(len)
+            : new Ctor(binChunk.buffer as ArrayBuffer, binChunk.byteOffset + (json.bufferViews[accessor.bufferView].byteOffset ?? 0) + (accessor.byteOffset ?? 0), len);
+
+    return { _data: data, _count: count, _componentCount: componentCount };
 }
 
 // --- Image Extraction ---
@@ -116,15 +135,7 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
     }
 
     if (image.uri) {
-        // External URI (relative to .gltf base URL)
-        const imageUrl = new URL(image.uri, baseUrl + "x").href;
-        const response = await fetch(imageUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to load image: ${response.status} ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
-        return bmp;
+        return (await import("./gltf-json-asset.js")).resolveExternalImage(image.uri, baseUrl);
     }
 
     throw new Error("Image has neither bufferView nor uri");
@@ -132,9 +143,10 @@ export async function resolveImage(json: any, binChunk: DataView, imageIdx: numb
 
 // --- Node Hierarchy → World Matrix (Memoized) ---
 
-// Babylon.js RH→LH root: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1,1,1,1)
+// Babylon.js RH→LH root: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1,1,1,1). A right-handed engine
+// keeps glTF's native space, so its root conversion is the identity.
 // prettier-ignore
-const RH_TO_LH_ROOT = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]) as unknown as Mat4;
+const GLTF_ROOT = new F32([_rightHanded ? 1 : -1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]) as unknown as Mat4;
 
 /** Build a parent index map by scanning node.children arrays once. O(n). */
 export function buildParentMap(json: any): Map<number, number> {
@@ -162,8 +174,8 @@ export function findParent(parentMap: Map<number, number>, childIdx: number): nu
  * Total cost across all nodes: O(n) instead of O(n²).
  *
  * Zero-alloc path for the TRS case (common): `local` is composed into a shared
- * scratch via `mat4ComposeInto`, then multiplied into the freshly-allocated
- * `world` via `mat4MultiplyInto`. Only one Float32Array allocation per node
+ * scratch via `composeMat4IntoBuffer`, then multiplied into the freshly-allocated
+ * `world` via `multiplyMat4IntoBuffer`. Only one Float32Array allocation per node
  * (the cached world matrix itself) instead of two. Recursion always resolves
  * `parentWorld` before touching the scratch, so the shared buffer is safe.
  */
@@ -176,7 +188,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
     const node = json.nodes[nodeIdx];
     const parentIdx = findParent(parentMap, nodeIdx);
     // Resolve parent FIRST so any recursive call can safely reuse the shared scratch below.
-    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : RH_TO_LH_ROOT;
+    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : GLTF_ROOT;
 
     let localBuf: import("../math/types.js").Mat4Storage;
     if (node.matrix) {
@@ -187,7 +199,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
         const r = node.rotation ?? [0, 0, 0, 1];
         const s = node.scale ?? [1, 1, 1];
         const local = getLoaderTmpLocal() as unknown as Mat4Storage;
-        mat4ComposeInto(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
+        composeMat4IntoBuffer(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
         localBuf = local;
     }
 
@@ -200,7 +212,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
     // `allocateMat4()` in `initMeshTransform` and pick up whatever precision
     // the process-global allocator was set to.
     const world = new F32(16) as unknown as Mat4;
-    mat4MultiplyInto(world as unknown as Mat4Storage, 0, parentWorld as unknown as Mat4Storage, 0, localBuf, 0);
+    multiplyMat4IntoBuffer(world as unknown as Mat4Storage, 0, parentWorld as unknown as Mat4Storage, 0, localBuf, 0);
 
     cache.set(nodeIdx, world);
     return world;

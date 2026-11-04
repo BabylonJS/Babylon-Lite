@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
@@ -33,7 +33,7 @@ test("Scene 153 - autonomous AnimationManager advances on its own RAF loop", asy
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
 
     const first = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));
-    await page.waitForTimeout(700);
+    await page.waitForFunction((start) => Math.abs(Number((document.querySelector("canvas") as HTMLCanvasElement)?.dataset.animatedX) - start) > 0.25, first, { timeout: 5_000 });
     const second = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));
 
     expect(Math.abs(second - first)).toBeGreaterThan(0.25);
@@ -44,7 +44,7 @@ test("Scene 153 - Babylon.js reference advances automatically", async ({ page })
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
 
     const first = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));
-    await page.waitForTimeout(700);
+    await page.waitForFunction((start) => Math.abs(Number((document.querySelector("canvas") as HTMLCanvasElement)?.dataset.animatedX) - start) > 0.25, first, { timeout: 5_000 });
     const second = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));
 
     expect(Math.abs(second - first)).toBeGreaterThan(0.25);

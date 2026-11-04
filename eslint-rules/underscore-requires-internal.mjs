@@ -22,6 +22,10 @@
  * - Underscore-only names (`_`)
  * - Class members with `private` / `protected` accessibility modifiers
  *   (TypeScript's own visibility handles them)
+ * - Constructors: a constructor cannot be renamed to start with `_`, so the
+ *   `@internal`-requires-underscore direction does not apply. `@internal` is
+ *   allowed on a constructor (or a constructor overload signature) to mark an
+ *   internal-only construction path.
  */
 
 /**
@@ -119,6 +123,12 @@ const rule = {
                 return;
             }
             if (member.accessibility === "private" || member.accessibility === "protected") {
+                return;
+            }
+            // Constructors can't start with `_`, so the @internal-requires-underscore
+            // direction never applies — allow `@internal` on a constructor (or one of
+            // its overload signatures) to mark an internal-only construction path.
+            if (member.kind === "constructor") {
                 return;
             }
             if (!isInExportedDeclaration(member)) {

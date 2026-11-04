@@ -1,0 +1,2270 @@
+# Module: Lite-GL (WebGL2 sibling package)
+
+> Package path: `packages/babylon-lite-gl/src/`
+> Package name: `@babylonjs/lite-gl`
+> Status: implemented - `packages/babylon-lite-gl` (productized from the original draft).
+
+> **Productization map (as-built).** This document is the original one-shot
+> design spec; some §12 / §14 paths describe the planned layout. As shipped in
+> this repo:
+>
+> - **Package:** `packages/babylon-lite-gl/` (src, `package.json`, `build.mjs`,
+>   `tsconfig.json`). Published as `@babylonjs/lite-gl` — a single public entry
+>   (the barrel). The plain-`tsc` build emits trimmed public `.d.ts` (all
+>   `@internal` members stripped via `stripInternal`, mirroring `babylon-lite`).
+> - **Unit tests:** `tests/gl/unit/` (`render-loop.test.ts`, `cache.test.ts`,
+>   `_lite-gl-mock.ts`) — run via the `gl-unit` Vitest project
+>   (`pnpm test:unit:gl`). There is no in-package `test/` folder.
+> - **Lab:** `lab/gl/` (WebGL experience), selected by the lab experience toggle.
+> - **Docs:** this core design and focused optional-module documents in this directory, including `01-alpha-to-coverage.md` and `02-text.md`.
+
+---
+
+## 0. Pillar reconciliation
+
+`GUIDANCE.md` pillar #1 says _"WebGPU Exclusive — zero WebGL fallback."_
+This package is an **explicit, scoped carve-out** of that pillar, justified by:
+
+1. It is a **separate package** (`packages/babylon-lite-gl/`). The `babylon-lite` package itself remains 100% WebGPU. The two packages never import each other.
+2. It exists for a **single external consumer** (Microsoft NeonBrush) which is locked to WebGL today and pulls ~120–150 KB of `@babylonjs/core` for a tiny surface. Replacing that with a ~10–12 KB function-only package is the same "slim, not dumb" reduction the Lite pillars exist to deliver — applied to a different backend.
+3. Every other pillar still applies, verbatim: pure-state interfaces, free functions, tree-shakable, zero module-level side effects, no class hierarchies, no abstraction over WebGL1, branchless hot paths via cached state, lazy-init caches owned by the context.
+
+If the rule "no WebGL ever" is preferred, do not merge this doc — the scope dies cleanly with zero impact on the WebGPU core.
+
+---
+
+## 1. Purpose
+
+Provide a minimal, function-only, tree-shakable WebGL2 runtime that re-implements the subset of Babylon.js `ThinEngine` + `Effect` + `EffectWrapper` + `EffectRenderer` + `ThinTexture` actually used by the NeonBrush family of fullscreen-quad effects (Cloth, Orb, Scan, InputGlow, Progressive / RockSteady / Magic loading screens, except the magic-particles sprite path).
+
+Non-goals:
+
+- No WebGL1 path.
+- No scene graph, no materials, no meshes, no skinning, no PBR.
+- Render-to-texture is available from the barrel (§3.8): RGBA8 (or a bring-your-own `colorTexture`, e.g. a float/half-float HDR target), optional core depth, opt-in stencil (`generateRenderTargetStencil`) and mipmap (`generateRenderTargetMipMaps`) helpers and `readPixels` readback. No MRT (multiple render targets). Core effects render to the canvas by default.
+- No `SpriteRenderer` / `ThinSprite` in v1 (deferred; the magic loading screen keeps stock Babylon until v2).
+- No runtime shader preprocessor (`attribute`→`in` etc.). Consumers ship GLSL ES 3.00.
+- No shader-store, no `#include`, no observables, no engine-level customization extension points.
+- No GPU resource pool. The browser owns lifetimes; we own caches.
+
+---
+
+## 2. Pillars (inherited from `babylon-lite`)
+
+- **Pure state interfaces.** `GLEngineContext`, `GLEffect`, `GLTexture`, `GLEffectWrapper` are plain data. Behaviour is provided by standalone functions accepting the state as the first argument.
+- **No classes.** No `class` keyword anywhere in the package source.
+- **Tree-shakable.** Every setter, every loader, every helper is its own `export`. Unused symbols disappear from final bundles.
+- **Zero module-level side effects.** No top-level `new Map()`, `new WeakMap()`, `new Set()`. Caches live on `engine._state`; the single per-package lazy resource (fullscreen quad) is created on first `drawEffect` and stored on the context, never as a module-scoped allocation. `sideEffects: false` in `package.json`.
+- **One-way data ownership.** `GLEngineContext` owns `GLState`. `GLEffect`s and `GLTexture`s do not reference the context; functions take both explicitly. Effects do not know about wrappers; wrappers reference effects but only as plain data.
+- **Branchless hot path.** Each cached setter has the shape _(equality check → early return)_ before any GL call. No `if (option) doExtra()` style branches in per-frame code.
+- **No abstraction layers.** WebGL2 directly, no facade pattern, no enums, no constants table — we use `gl.TRIANGLES`, `gl.UNSIGNED_SHORT`, etc. directly.
+
+---
+
+## 3. Public API Surface
+
+The sections below exhaustively describe the core surface. Optional, separately tree-shakable modules add explicit root exports documented in adjacent architecture files; see `01-alpha-to-coverage.md` and `02-text.md`.
+
+### 3.0 Naming & API-shape conventions
+
+These rules keep `@babylonjs/lite-gl` legible to anyone who knows
+`@babylonjs/lite` (the WebGPU core), while staying unambiguous when both
+packages are imported together (as NeonBrush does).
+
+1. **`GL` type prefix (mandatory).** Every exported _type_ is prefixed `GL`:
+   `GLEngineContext`, `GLEngineOptions`, `GLEngineCaps`, `GLEffect`,
+   `GLEffectOptions`, `GLEffectWrapper`, `GLEffectWrapperOptions`, `GLTexture`,
+   `GLTextureOptions`, `GLTextureUpdateOptions`, `GLViewport`,
+   `GLSamplingMode`, `GLSamplingFilters`. The prefix prevents clashes with lite's
+   unprefixed `EngineContext` / `EffectWrapper` / … and signals "WebGL backend".
+
+2. **Mirror lite's shape when possible.** Same functional style (free functions
+   over an opaque handle — never classes), the same root nouns and verbs as
+   lite-core, and the engine handle is always the **first** parameter, named
+   `engine`. Lifecycle verbs track lite one-for-one:
+
+    | lite-core (`@babylonjs/lite`)          | lite-gl (`@babylonjs/lite-gl`)         |
+    | -------------------------------------- | -------------------------------------- |
+    | `EngineContext`                        | `GLEngineContext`                      |
+    | `EngineOptions`                        | `GLEngineOptions`                      |
+    | `createEngine(canvas, options)`        | `createGLEngine(canvas, options)`      |
+    | `disposeEngine(engine)`                | `disposeGLEngine(engine)`              |
+    | `resizeEngine(engine)`                 | `resizeGLEngine(engine)`               |
+    | `EffectWrapper`                        | `GLEffectWrapper`                      |
+    | `createEffectWrapper(engine, options)` | `createEffectWrapper(engine, options)` |
+    | `disposeEffectWrapper(wrapper)`        | `disposeEffectWrapper(wrapper)`        |
+
+    Wrappers take **shader source** and compile + own their effect (like lite).
+    **Receiver rule:** a function takes `engine` only when it cannot derive it
+    from a resource argument. Creators (`create*`, `loadTexture2D`),
+    engine-scoped state/frame/loop functions (`setDepthState`, `setViewport`,
+    `drawEffect`, `clearEngine`, …) and the resource-less unbinds
+    (`unbindTexture(engine, unit)`, `unbindTexture3D(engine, unit)`,
+    `restoreDefaultFramebuffer(engine)`) take the engine first. Resource
+    arguments are never nullable on engine-deriving functions — binding a
+    resource and clearing a slot are separate functions
+    (`bindTexture(tex, unit)` / `unbindTexture(engine, unit)`,
+    `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`). Every
+    operation on an existing resource takes the
+    **resource first** and reads its owner from an `@internal _engine`
+    back-pointer set by its creator — `applyEffectWrapper(wrapper)`,
+    `setEffectFloat(effect, …)`, `disposeTexture(tex)`, `drawMesh(vao)`,
+    `renderSprites(renderer, …)` — matching lite's `disposeEffectWrapper(wrapper)`
+    and Babylon's receiver methods, and making a mismatched-engine call
+    unrepresentable. The back-pointer adds no lifetime edge: the engine already
+    strongly references every live resource for context-restore replay. The
+    reverse does hold: a resource kept after `disposeGLEngine` keeps the
+    disposed engine object (and its `gl` context) reachable until the resource
+    is dropped; every call on it is a no-op.
+
+3. **Documented divergences (backend-driven, not inconsistencies).**
+    - `createGLEngine` is **synchronous** — WebGL2 context acquisition is sync,
+      whereas lite's `createEngine` is `async` (WebGPU device request).
+    - Uniforms are set **per-call** (`setEffectFloat/2/3/4`, `setEffectColor3/4`,
+      `setEffectInt`) rather than via lite's UBO-block `setEffectUniforms` —
+      WebGL2 has no equivalent ergonomic UBO path for these tiny effects.
+    - **No `RenderingContext` / frame-graph / registration layer.** lite's
+      `EffectRenderer` is a registerable rendering context; lite-gl instead
+      exposes the lower-level `applyEffectWrapper(wrapper)` + `drawEffect(engine)`
+      primitives, and the fullscreen quad is a context-owned lazy resource.
+
+4. **The barrel re-exports explicitly — never `export *`.** `src/index.ts`
+   re-exports the public API by name (`export { … } from "./mod.js"` for values,
+   `export type { … }` for types — the latter required by `isolatedModules`),
+   grouped by module with section comments, exactly like `@babylonjs/lite`'s
+   `index.ts`. This keeps the public surface intentional and reviewable, and keeps
+   internal helpers (e.g. `bindTextureRaw`, `bindTextureForUpload`) out of the
+   barrel and the published `.d.ts`. The html-texture and sprites features
+   are re-exported from the index barrel — because the package is
+   `sideEffects: false` and those modules have no top-level side
+   effects, tree-shaking drops them from bundles that don't use them
+   (verified: the effect-only lab scenes stay the same size
+   after the barrel re-export). When you add a public symbol, add an explicit
+   re-export here; when you add an internal helper, tag it `@internal` and leave it
+   out.
+
+5. **Options vs. separate export (the tree-shaking heuristic).** A boolean/enum
+   **`option` is allowed only if it toggles a GL parameter already on the core
+   path** (`minFilter` / `magFilter` / `wrapS` / `wrapT` / `invertY` /
+   `premultiplyAlpha` / `generateDepthBuffer`). Babylon-style sampling presets
+   are therefore a pure helper (`getSamplingModeFilters`) spread into the
+   options, and mipmaps an explicit `generateTextureMipMaps` call, so texture
+   factories ship neither. A feature instead becomes a **separate, tree-shakeable
+   export** (NOT a create-option) the moment supporting it would pull in a distinct
+   code path or lookup table that non-users would otherwise ship — HDR sized-format
+   resolution, stencil renderbuffers, mipmap pyramids, MRT, pixel readback,
+   compressed/cube formats, dynamic (canvas) uploads, sub-image updates. This is
+   why `generateRenderTargetMipMaps` / `generateRenderTargetStencil` /
+   `createFloatRenderTarget` are standalone functions rather than
+   `createRenderTarget` options: the RGBA8 core stays branch-free and a consumer
+   pays only for what it imports. Texture creators share one
+   `GLTextureOptions` shape, so an option accepted by one creator is accepted
+   (and honored) by all of them.
+
+Any **new** export MUST follow rules 1–2 and 4 (GL-prefixed type, receiver rule —
+`engine` first only when not derivable from a resource —, lite-matching verb, explicit named re-export from the barrel)
+unless a backend difference forces a documented divergence under rule 3; rule 5
+governs whether a new feature should be an export at all.
+
+### 3.1 Context
+
+```ts
+export interface GLEngineOptions {
+    /** Default: true. */
+    alpha?: boolean;
+    /** Default: true. */
+    premultipliedAlpha?: boolean;
+    /** Default: false. */
+    antialias?: boolean;
+    /** Default: false. */
+    preserveDrawingBuffer?: boolean;
+    /** Default: false — disabled for fullscreen-quad workloads. */
+    depth?: boolean;
+    /** Default: false. */
+    stencil?: boolean;
+    /** Default: "default". */
+    powerPreference?: WebGLPowerPreference;
+    /** Default: false. */
+    failIfMajorPerformanceCaveat?: boolean;
+}
+
+export interface GLEngineCaps {
+    readonly maxTextureSize: number;
+    readonly maxTextureUnits: number;
+    readonly parallelShaderCompile: { COMPLETION_STATUS_KHR: number } | null;
+}
+
+/** Pure-state handle. GPU internals (`gl`, `_state`, registries) are reachable
+ *  on the type so functions in this package can operate without casts.
+ *
+ *  INVARIANT: consumers MUST NOT mutate GL state directly through `engine.gl`.
+ *  Doing so silently corrupts the cache in `_state`. The package owns every
+ *  GL call. (`engine.gl` is exposed only so adjacent NeonBrush code that already
+ *  has the pattern of poking `engine._gl.getExtension(...)` can do that, but
+ *  must NOT call `bindTexture`/`useProgram`/`bindBuffer`/`viewport`/etc.) */
+export interface GLEngineContext {
+    readonly canvas: HTMLCanvasElement;
+    readonly gl: WebGL2RenderingContext;
+    readonly caps: GLEngineCaps;
+    /** Hardware-scaling-level. width/height = canvas.client* * dpr / _hsl. */
+    _hsl: number;
+    /** rAF id when a render loop is active, 0 otherwise. */
+    _rafId: number;
+    /** Active per-frame callbacks. `runRenderLoop` is a no-op if `fn` is already
+     *  registered (matches Babylon `AbstractEngine.runRenderLoop`). */
+    _loops: ((dt: number) => void)[];
+    /** Timestamp of last frame for delta computation. */
+    _prevNow: number;
+    /** Cached GL state. See §4. */
+    _state: GLState;
+    /** Live effect registry — populated by `createEffect`, removed by
+     *  `disposeEffect`. Used by the context-lost/restored protocol (§4.7)
+     *  to rebuild programs. */
+    _effects: GLEffect[];
+    /** Live texture registry — all managed 2D/3D factories add their textures;
+     *  the matching dispose function deletes them in expected O(1) time.
+     *  Set iteration preserves creation order among surviving textures. */
+    _textures: Set<GLTexture | GLTexture3D>;
+    /** Context-lost / restored callback lists. */
+    _onLost: (() => void)[];
+    _onRestored: (() => void)[];
+    /** True between `webglcontextlost` and `webglcontextrestored`. While true,
+     *  every `setEffect*` / `bindTexture` / `drawEffect` is a no-op. */
+    _isLost: boolean;
+    /** True once the context has been disposed; calls become no-ops. */
+    _disposed: boolean;
+}
+
+export function createGLEngine(canvas: HTMLCanvasElement, options?: GLEngineOptions): GLEngineContext;
+export function disposeGLEngine(engine: GLEngineContext): void;
+
+export function resizeGLEngine(engine: GLEngineContext): void;
+export function getRenderWidth(engine: GLEngineContext): number;
+export function getRenderHeight(engine: GLEngineContext): number;
+export function getHardwareScalingLevel(engine: GLEngineContext): number;
+export function setHardwareScalingLevel(engine: GLEngineContext, level: number): void;
+export function getRenderingCanvas(engine: GLEngineContext): HTMLCanvasElement;
+
+export function onContextLost(engine: GLEngineContext, cb: () => void): void;
+export function offContextLost(engine: GLEngineContext, cb: () => void): void;
+export function onContextRestored(engine: GLEngineContext, cb: () => void): void;
+export function offContextRestored(engine: GLEngineContext, cb: () => void): void;
+```
+
+### 3.2 Render loop
+
+```ts
+export function runRenderLoop(engine: GLEngineContext, fn: (dt: number) => void): void;
+export function stopRenderLoop(engine: GLEngineContext, fn?: (dt: number) => void): void;
+```
+
+- `runRenderLoop(engine, fn)` is a **no-op when `fn` is already registered** (matches `AbstractEngine.runRenderLoop`). Each unique callback executes once per frame.
+- `stopRenderLoop(engine)` with no callback stops all loops; with a callback removes that one only.
+- Hosts that drive their own frame (no `runRenderLoop`) bracket it with `beginFrame(engine)` / `endFrame(engine)` so opt-in per-frame features (GPU frame timing, §3.2.1) still run. `runRenderLoop` does this automatically.
+
+#### 3.2.1 GPU frame timing (optional)
+
+```ts
+export interface GLPerfCounter {
+    current: number; // ns, latest sample
+    average: number; // ns, all-time mean
+    lastSecAverage: number; // ns, mean over the last completed second
+    min: number;
+    max: number;
+    total: number;
+    count: number;
+}
+export function captureGPUFrameTime(engine: GLEngineContext, enabled: boolean): void;
+export function getGPUFrameTimeCounter(engine: GLEngineContext): GLPerfCounter;
+```
+
+- Mirrors `ThinEngine.captureGPUFrameTime` / `getGPUFrameTimeCounter` using
+  `EXT_disjoint_timer_query_webgl2`. A no-op (counter stays at zero) when the
+  extension is unavailable.
+- Installs frame hooks on the engine; one `TIME_ELAPSED_EXT` query is in flight
+  at a time and polled non-blockingly at the next frame begin. Samples that
+  overlap a `GPU_DISJOINT_EXT` event are discarded.
+- Context loss drops the pending query and re-queries the extension after
+  restore. `captureGPUFrameTime(engine, false)` and `disposeGLEngine` delete the
+  pending query and remove the hooks.
+- Tree-shaken unless imported: the render loop only calls an optional-chained
+  `engine._frameHooks` seam.
+
+### 3.3 Effects
+
+```ts
+export interface GLEffectOptions {
+    name: string;
+    vertexSource: string; // GLSL ES 3.00, ready for `gl.shaderSource`
+    fragmentSource: string; // GLSL ES 3.00
+    /** Declared uniform names. Locations resolved during readiness finalization
+     *  (§4.6). Declaring them up front lets the package allocate the per-uniform
+     *  value cache. Setters for names not in this list are legal but allocate
+     *  the cache slot lazily on first use. */
+    uniformNames: readonly string[];
+    /** Declared sampler names, in unit-assignment order. Each gets a fixed
+     *  texture unit assigned during readiness finalization (§4.4 / §4.6), and
+     *  `gl.uniform1i(loc, unit)` is called exactly once per program lifetime
+     *  (re-run after context-restored). */
+    samplerNames: readonly string[];
+    /** Declared vertex attributes. Default: `["position"]`. The first attribute
+     *  is bound to location 0 via `gl.bindAttribLocation(program, 0, name)`
+     *  BEFORE link, so the shared fullscreen-quad VAO (§4.5) always feeds the
+     *  same location regardless of how the GLSL compiler would have assigned
+     *  it. The GLSL conversion (§6) also emits `layout(location = 0)` as
+     *  belt-and-suspenders. */
+    attributeNames?: readonly string[];
+    /** Optional `#define` block inserted between `#version 300 es` (+ precision)
+     *  and the user shader body. Example: `"#define LANDSCAPE 1\n#define USE_RAMP 1\n"`.
+     *  Each unique `defines` string must be paired with the same vertex/fragment
+     *  source via a separate `createEffect` call — the package does NOT cache
+     *  compiled variants. Used by `orbEffect` (LANDSCAPE), `clothEffectVNext`,
+     *  and `progressiveLoadingScreen` (BACKGROUNDCOLORRAMP). */
+    defines?: string;
+}
+
+export interface GLEffect {
+    readonly name: string;
+    readonly options: GLEffectOptions; // retained for re-compile on context restore
+    program: WebGLProgram; // mutable — replaced on restore
+    _vs: WebGLShader;
+    _fs: WebGLShader;
+    /** Resolved during readiness finalization (§4.6). Missing names map to
+     *  `null` — setters with a `null` location are silent no-ops (matches
+     *  Babylon behaviour for misspelled uniform names). */
+    uniformLocations: { [name: string]: WebGLUniformLocation | null };
+    /** Fixed unit assignment, index into `_state.boundTextures`. Populated
+     *  during readiness finalization. */
+    samplerUnits: { [name: string]: number };
+    /** True once `gl.uniform1i(samplerLoc, unit)` has been issued for every
+     *  declared sampler. Cleared on context restore so finalization re-runs. */
+    _samplersAssigned: boolean;
+    /** Resolved by `getAttribLocation`. -1 means "not found". For the first
+     *  declared attribute this is always 0 because of the pre-link `bindAttribLocation`. */
+    attributeLocations: { [name: string]: number };
+    /** Per-uniform last-UPLOADED value caches. Allocated up front from
+     *  `uniformNames` plus lazily on first use for any extra name. Entries are
+     *  written ONLY after a successful `gl.uniform*` call — a setter that
+     *  skips the upload (effect not ready, location null, context lost) must
+     *  NOT update the cache, otherwise a later "real" set with the same value
+     *  would incorrectly elide.
+     *
+     *  Vec slots are plain `number[]` (NOT `Float32Array`) to avoid float32
+     *  truncation breaking equality for common values like `0.1`. */
+    readonly _lastF1: { [name: string]: number };
+    readonly _lastVec: { [name: string]: number[] };
+    readonly _lastI1: { [name: string]: number };
+    /** Compile/link state machine. */
+    isReady: boolean;
+    _compileError: string | null;
+    _disposed: boolean;
+    /** Callbacks registered before isReady=true; fired exactly once on the
+     *  first transition to ready. Re-registered listeners after restore wait
+     *  for the next finalization. */
+    readonly _onCompiled: ((effect: GLEffect) => void)[];
+}
+
+export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect;
+export function isEffectReady(effect: GLEffect): boolean;
+/** Polls readiness once and returns a recorded compile/link/restore error,
+ *  or null when none has been recorded. Does not schedule background work. */
+export function getEffectCompilationError(effect: GLEffect): string | null;
+export function executeWhenCompiled(effect: GLEffect, cb: (e: GLEffect) => void): void;
+/** Optional readiness scheduler; all scheduling code lives in effect-ready.ts. */
+export interface GLEffectWaitOptions {
+    /** Cancels this wait without disposing or cancelling the shared effect. */
+    signal?: AbortSignal;
+}
+export function waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>;
+export function disposeEffect(effect: GLEffect): void;
+
+/** Sets engine._state.currentProgram and calls gl.useProgram(...) iff changed.
+ *  No-op when the effect is not ready. */
+export function useEffect(effect: GLEffect): void;
+
+// Cached uniform setters — see §4 for the exact cache contract.
+export function setEffectFloat(effect: GLEffect, name: string, x: number): void;
+export function setEffectFloat2(effect: GLEffect, name: string, x: number, y: number): void;
+export function setEffectFloat3(effect: GLEffect, name: string, x: number, y: number, z: number): void;
+export function setEffectFloat4(effect: GLEffect, name: string, x: number, y: number, z: number, w: number): void;
+export function setEffectColor3(effect: GLEffect, name: string, c: { r: number; g: number; b: number }): void;
+export function setEffectColor4(effect: GLEffect, name: string, c: { r: number; g: number; b: number; a: number }): void;
+export function setEffectInt(effect: GLEffect, name: string, x: number): void;
+export function setEffectTexture(effect: GLEffect, samplerName: string, tex: GLTexture): void;
+```
+
+### 3.4 Textures
+
+```ts
+export const GLSamplingMode = { NEAREST: 1, BILINEAR: 2, TRILINEAR: 3 } as const;
+export type GLSamplingMode = (typeof GLSamplingMode)[keyof typeof GLSamplingMode];
+
+/** Pure preset → filters helper (≙ Babylon `_getSamplingParameters`). Spread
+ *  into any texture options or pass to `updateTextureSamplingMode` (or use
+ *  `updateTextureSamplingPreset`); tree-shaken
+ *  unless imported. `useMipMaps` (default false) selects the mipmapped min filter. */
+export interface GLSamplingFilters {
+    minFilter: GLenum;
+    magFilter: GLenum;
+}
+export function getSamplingModeFilters(samplingMode: GLSamplingMode, useMipMaps?: boolean): GLSamplingFilters;
+
+/** Shared by every texture creator: raw, float, loaded, source, handle, dynamic
+ *  and HTML-element textures all accept (and honor) the same options. */
+export interface GLTextureOptions {
+    /** Default: false (matches Babylon's default raw-texture behaviour). */
+    invertY?: boolean;
+    /** Default: false. Image loads premultiply at decode; other uploads use
+     *  `UNPACK_PREMULTIPLY_ALPHA_WEBGL`. */
+    premultiplyAlpha?: boolean;
+    /** Raw GL filters. Default: gl.LINEAR. */
+    minFilter?: GLenum;
+    magFilter?: GLenum;
+    /** Default: gl.CLAMP_TO_EDGE for both. */
+    wrapS?: GLenum;
+    wrapT?: GLenum;
+}
+
+export interface GLTexture {
+    /** Mutable so the SAME logical texture can survive context restore:
+     *  the handle is replaced, but every consumer keeps the same `GLTexture`
+     *  object. `loadTexture2D` also uses the same handle for both the 1×1
+     *  placeholder upload AND the final image upload — bindings made before
+     *  `isReady=true` remain valid. */
+    handle: WebGLTexture;
+    readonly target: GLenum; // normally gl.TEXTURE_2D; retained for source compatibility
+    width: number;
+    height: number;
+    isReady: boolean;
+    _disposed: boolean;
+    /** Internal ref count for shared textures (HtmlElementTexture wrappers etc.). */
+    _refCount: number;
+    /** Replays the latest pixel content into the live texture handle. */
+    _upload: (engine: GLEngineContext) => void;
+    /** Initializes creation-time sampling state on the bound texture handle. */
+    _initializeParameters?: (engine: GLEngineContext) => void;
+}
+
+/** Internal helper for applying sampling and wrap state to the bound upload texture. */
+export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void;
+
+/** Raw typed-array upload, RGBA8 by default. `format` / `type` are optional
+ *  {@link GLRawTextureOptions} fields (default gl.RGBA / gl.UNSIGNED_BYTE), so
+ *  every 2D creator shares the `(engine, [data,] width, height, options?)` shape. */
+export interface GLRawTextureOptions extends GLTextureOptions {
+    format?: GLenum; // default gl.RGBA
+    type?: GLenum; // default gl.UNSIGNED_BYTE
+}
+export function createRawTexture(engine: GLEngineContext, data: ArrayBufferView | null, width: number, height: number, options?: GLRawTextureOptions): GLTexture;
+
+/** Async image upload. The returned texture is usable immediately (1×1 transparent
+ *  placeholder uploaded into the final handle) and becomes `isReady=true` when
+ *  the network/decode completes and the real image has been uploaded into the
+ *  same `WebGLTexture` handle. `ImageBitmap` is retained on the GLTexture for
+ *  context-restore replay. */
+export function loadTexture2D(engine: GLEngineContext, url: string, options?: GLTextureOptions, onLoad?: (tex: GLTexture) => void, onError?: (err: Error) => void): GLTexture;
+
+/** Cached: skips `gl.activeTexture` and/or `gl.bindTexture` when nothing changes.
+ *  No-op when `tex._disposed` or the context is lost. */
+export function bindTexture(tex: GLTexture, unit: number): void;
+
+/** Cached unbind of `TEXTURE_2D` on `unit`. */
+export function unbindTexture(engine: GLEngineContext, unit: number): void;
+
+/** Sets `tex._disposed=true`, calls `gl.deleteTexture(tex.handle)`, walks
+ *  the matching target's binding cache and clears every unit that still references the
+ *  handle (so a later `bindTexture(..., otherTex)` to the same unit is NOT
+ *  incorrectly elided). Deregisters via `engine._textures.delete(tex)` in
+ *  expected O(1) time; duplicate disposal and refcounted releases are unchanged. */
+export function disposeTexture(tex: GLTexture): void;
+
+/** Build a full mip chain for `tex` now and retain the intent (≙ Babylon
+ *  `useMipMaps`, `generateTexture3DMipMaps`): sets `_hasMipMaps` and wraps
+ *  `_upload` once, so every later level-0 upload (`updateRawTexture`,
+ *  dynamic/HTML updates, the `loadTexture2D` arrival, context-restore replay)
+ *  rebuilds the chain. No-op when `tex._disposed` or `engine._isLost`. */
+export function generateTextureMipMaps(tex: GLTexture): void;
+
+/** Raw GL min/mag filters (≙ Babylon `_setTextureParameterInteger` pair). */
+export function updateTextureSamplingMode(tex: GLTexture, minFilter: GLenum, magFilter: GLenum): void;
+
+/** ≙ Babylon `updateTextureSamplingMode(mode, tex, generateMipMaps)`: filters
+ *  from `getSamplingModeFilters(mode, generateMipMaps || hasMipMaps)`; with
+ *  `generateMipMaps` and `TRILINEAR` the chain is generated (and retained)
+ *  unless the texture already has one (it is rebuilt on every upload; call
+ *  `generateTextureMipMaps` to force a regeneration). A separate function so
+ *  raw-filter callers don't bundle the preset / mipmap code. */
+export function updateTextureSamplingPreset(tex: GLTexture, samplingMode: GLSamplingMode, generateMipMaps?: boolean): void;
+
+/** ≙ Babylon `texture.isReady()`: `tex.isReady` and not disposed and the
+ *  context is not lost (the function form, mirroring `isEffectReady`). */
+export function isTextureReady(tex: GLTexture): boolean;
+
+/** Per-update flags of `updateRawTexture` / `updateDynamicTexture` /
+ *  `updateHtmlElementTexture` (≙ lite's `DynamicTextureUpdateOptions`). Omitted flags fall back to the
+ *  creation options; the latest flags are reused by context-restore replay. */
+export interface GLTextureUpdateOptions {
+    invertY?: boolean;
+    premultiplyAlpha?: boolean;
+}
+```
+
+`getSamplingModeFilters` maps presets as in Babylon's `_getSamplingParameters`:
+
+| Preset      | min (no mips) | min (mips)           | mag     |
+| ----------- | ------------- | -------------------- | ------- |
+| `NEAREST`   | NEAREST       | NEAREST              | NEAREST |
+| `BILINEAR`  | LINEAR        | LINEAR               | LINEAR  |
+| `TRILINEAR` | LINEAR        | LINEAR_MIPMAP_LINEAR | LINEAR  |
+
+Like Babylon, only `TRILINEAR` samples mips, and
+`updateTextureSamplingPreset` generates the chain only for it. Babylon's
+mipmapped nearest/bilinear variants are separate modes — pass raw filters.
+
+Without a preset, filters default to LINEAR/LINEAR even when mips are
+generated; a mipmapped preset (`useMipMaps: true`) requires a
+`generateTextureMipMaps` call. Every 2D creator takes the same
+`GLTextureOptions` (no per-creator aliases). Dynamic textures
+(`createDynamicTexture`) track the uploaded source's size in `tex.width` /
+`tex.height`. Every 2D update takes the same trailing options shape —
+`updateRawTexture(tex, data, { width, height, unpackAlignment,
+invertY, premultiplyAlpha })`, `updateDynamicTexture(tex, source, {
+invertY, premultiplyAlpha })` and `updateHtmlElementTexture(tex, {
+invertY, premultiplyAlpha })` — and each update falls back to the
+creation-time `invertY` / `premultiplyAlpha` when a call omits them. The
+latest flags are reused by context-restore replay.
+
+The engine-owned texture registry is a `Set`, allocated inside
+`createGLEngine` (never at module scope). All managed factories register via
+`add`; `disposeTexture` and `disposeTexture3D` use `delete`, avoiding both the
+linear membership search and the array shift on every eviction. Deletion of
+an absent entry is harmless. External-handle wrappers and render-target-owned
+color textures remain unregistered, with their existing ownership semantics.
+Dropping a shared texture's reference count does not unregister it until its
+final release. Binding-cache invalidation still scans only the fixed number
+of hardware texture units, not the number of live textures.
+
+The `Set` preserves insertion order for context-loss/restore replay; deleting
+the current or another entry during traversal cannot shift unvisited entries
+behind the iterator. Loss finishes marking readiness before firing loss
+callbacks, so those callbacks may evict textures without corrupting replay.
+Restore skips disposed textures and replays the surviving set. There is no
+separate suspend/dispose-all API in lite-gl; clients may dispose each texture
+while traversing the live set without skipping entries.
+
+Engine teardown snapshots the live set and clears it before issuing texture
+deletions. Every handle in that snapshot is force-disposed exactly once, even
+if another disposal is triggered during a GL deletion; shared reference counts
+cannot keep resources alive after engine disposal. Unit tests cover a 15,000
+texture registry, arbitrary eviction batches, refcounts, unregistered handles,
+mixed 2D/3D restoration, mutation during restore and reentrant engine teardown.
+
+#### 3.4.0 Already-decoded 2D sources (optional)
+
+```ts
+export interface GLTextureSourceOptions extends Omit<GLTextureOptions, "internalFormat"> {
+    /** Default true: retain the source for context-restore replay. */
+    retainSource?: boolean;
+}
+export function createTextureFromSource(engine: GLEngineContext, source: TexImageSource, options?: GLTextureSourceOptions): GLTexture;
+```
+
+`createTextureFromSource` synchronously creates an immediately ready 2D RGBA
+texture from an already-decoded `ImageBitmap`, `ImageData`, canvas,
+`OffscreenCanvas`, image, video or `VideoFrame`. It performs exactly one
+source-overload `texImage2D(TEXTURE_2D, 0, RGBA, RGBA, UNSIGNED_BYTE, source)`:
+there is no placeholder or blank allocation before the source upload. It
+applies the four min/mag/S/T parameters once to the new handle, defaulting to
+`LINEAR` / `LINEAR` and `CLAMP_TO_EDGE` / `CLAMP_TO_EDGE`. Mipmaps remain a
+separate opt-in via `generateTextureMipMaps`; a mipmap minification filter
+requires the caller to generate its chain once (it is then kept current).
+
+The factory reads intrinsic dimensions: `naturalWidth` / `naturalHeight` for
+images, `videoWidth` / `videoHeight` for videos, `displayWidth` / `displayHeight`
+for video frames, and `width` / `height` otherwise. Dimensions must be positive
+integers within `engine.caps.maxTextureSize`. Invalid dimensions, invalid
+`unpackAlignment` (anything other than 1/2/4/8), a lost/disposed engine or a
+null texture allocation throw explicitly. An `ImageData` whose buffer was
+transferred (empty `data`) is also rejected up front, because WebGL would only
+raise `INVALID_VALUE` without throwing. Video elements must have a decoded
+current frame (`readyState >= 2`, `HAVE_CURRENT_DATA`); positive dimensions at
+`HAVE_METADATA` alone are insufficient. The shared validation rejects videos
+without a current frame before any GL call during creation and routes them
+through the logged blank fallback during restoration. This check uses the
+numeric readiness value without referencing DOM constructors.
+SVG and density-selected (`srcset`)
+image elements can upload at a size other than their natural size; convert
+them to an `ImageBitmap` first. No DOM constructor globals are
+needed, so bitmap/offscreen uploads also work in workers.
+
+Uploads use `setUnpackState` (defaults: `invertY=false`,
+`premultiplyAlpha=false`, alignment 4) and `bindTextureForUpload` (unit 0).
+The helpers elide unchanged pixel-store and binding state and correctly select
+unit 0 after multi-sampler use. WebGL ignores flip/premultiplication flags for
+`ImageBitmap`: callers must choose `imageOrientation` and `premultiplyAlpha`
+when decoding their bitmap. The factory neither decodes nor closes sources.
+
+The returned `GLTexture` is registered in `engine._textures` and disposed with
+`disposeTexture`. It has no update API: to change its pixels, dispose it and
+create a new one; `updateDynamicTexture` and `updateHtmlElementTexture` are
+only valid for their own factories' textures. By default its `_upload` closure retains the source for
+offline context restoration; callers must keep it usable (do not close a
+retained bitmap/video frame). Mutable sources are replayed with their current
+pixels and intrinsic size, not a creation-time snapshot. The standard restore
+protocol installs a new handle, replays one upload and invokes
+`_initializeParameters` to apply the four creation-time sampling parameters.
+If the retained source is unusable at restore time (closed bitmap, zero-size
+video, video without a current frame, upload exception), the closure logs the error, drops the source and
+allocates transparent-black RGBA8 storage at the last uploaded size instead.
+The failure stays local to that texture: it never aborts the engine-wide
+restore replay, so later textures, render targets and buffers still rebuild
+and the engine leaves the lost state.
+With `retainSource: false`, the closure drops its source reference immediately
+after the initial upload; callers may then close their bitmap/frame. Restore
+allocates transparent-black RGBA8 storage at the original dimensions and
+marks it ready. Applications needing the original pixels must re-upload or
+dispose/recreate the texture themselves, typically from `onContextRestored`.
+Restore replays level 0 and the sampling parameters; a chain requested with
+`generateTextureMipMaps` is rebuilt after the restored upload. This does not change
+`createDynamicTexture`'s immediately sampleable blank-allocation contract.
+
+Implementation lives in side-effect-free `texture-source.ts`, explicitly
+exported from the root barrel (no new package subpath). Non-users ship none of
+its source sizing, validation or retention logic. Unit tests assert the exact
+single-upload GL stream, repeated-upload state elision, nonzero active-unit
+transitions, source dimensions, validation, disposal, both restore modes and
+the unusable-retained-source fallback, including metadata-only video creation
+and restoration.
+
+#### 3.4.1 Native 3D pixel textures (optional)
+
+```ts
+export interface GLPixelsTexture3DOptions {
+    addressMode?: GLenum; // CLAMP_TO_EDGE (default), REPEAT, MIRRORED_REPEAT
+    filter?: GLenum; // LINEAR (default) or NEAREST, for min and mag
+    srgb?: boolean; // false (RGBA8) by default; true = SRGB8_ALPHA8
+}
+export interface GLTexture3D extends Omit<GLTexture, "target"> {
+    readonly target: typeof WebGL2RenderingContext.TEXTURE_3D;
+    depth: number;
+}
+export function createTexture3DFromPixels(engine: GLEngineContext, data: Uint8Array, width: number, height: number, depth: number, options?: GLPixelsTexture3DOptions): GLTexture3D;
+export function bindTexture3D(tex: GLTexture3D, unit: number): void;
+export function unbindTexture3D(engine: GLEngineContext, unit: number): void;
+export function setEffectTexture3D(effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void;
+export function generateTexture3DMipMaps(tex: GLTexture3D): void;
+export function updateTexture3DSamplingMode(tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTexture3DWrapMode(tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void;
+export function disposeTexture3D(tex: GLTexture3D): void;
+```
+
+`createTexture3DFromPixels(engine, data, width, height, depth, options?)` is the
+WebGL2 counterpart to lite's `createTexture3DFromPixels`. It returns a
+`GLTexture3D` with a `depth` field and `target = gl.TEXTURE_3D`. Use the
+dedicated `setEffectTexture3D` / `bindTexture3D` / `disposeTexture3D` APIs;
+the generic 2D APIs do not support 3D textures. This deliberate difference
+keeps every 2D-only bundle free of 3D cache and binding code. GLSL consumers
+declare `uniform highp sampler3D lut;` and use `texture(lut, rgb)`; unlike a
+flattened 2D atlas, hardware performs trilinear interpolation on the original
+cube. Source bytes are tightly packed RGBA8 with
+x fastest, then y, then z (one slice = width * height * 4 bytes). Dimensions
+must be positive integers within `MAX_3D_TEXTURE_SIZE`; a too-short buffer is
+rejected. The source must remain unchanged while the texture is live so
+context restoration can replay the exact uploaded data.
+
+`GLPixelsTexture3DOptions` has `addressMode` (`CLAMP_TO_EDGE`, `REPEAT` or
+`MIRRORED_REPEAT`; default `CLAMP_TO_EDGE` on S/T/R), `filter` (`NEAREST` or
+`LINEAR`; default `LINEAR` on min/mag, without mipmaps), and `srgb` (default false, `RGBA8`; true uses
+`SRGB8_ALPHA8`). For color-grading LUTs use the linear default unless the
+source explicitly requires sRGB decoding. Creation sets the cached unpack
+state to alignment 4, flipY false, premultiply false; the optional 3D upload
+cache also zeros `UNPACK_ROW_LENGTH`, `UNPACK_IMAGE_HEIGHT`, and every
+`UNPACK_SKIP_*` field before its first upload and after a cache wipe. It uploads via
+`texImage3D(TEXTURE_3D, 0, format, width, height, depth, 0, RGBA,
+UNSIGNED_BYTE, data)`, and sets five texture parameters including `WRAP_R`.
+The engine registry replays pixels and parameters into a new handle on context
+restoration. Calling `generateTexture3DMipMaps` retains the generated-chain
+intent, so restore regenerates the mip levels from the retained level-0 pixels
+before applying the saved minification filter. The optional module owns an independent 3D per-unit binding cache,
+invalidated to an unknown sentinel on context loss and on `wipeGLStateCache`
+so the first subsequent bind explicitly selects its texture unit and reaches GL
+(including an unbind); `unbindTexture` / `unbindTexture3D` clear only the
+target used by the matching 2D or 3D binder. The module's sampling/wrap
+updates persist across restoration and elide unchanged `texParameteri` calls
+without rebinding. Update setters reject invalid WebGL filter or wrap enums
+before modifying cached or GL state. All 3D creation, binding, disposal and
+parameter logic lives in its own side-effect-free module so 2D-only users do
+not ship 3D code.
+
+This supports Lumina's native 3D filter LUTs without repacking into a 2D
+atlas; consumers can retain the same shader coordinates and interpolation.
+The consumer migration and browser pixel/performance comparison remain separate
+from the LiteGL API change.
+
+**Source test:** `/gl/texture-3d-test.html` runs
+`lab/gl/src/texture-3d-test.ts`, which uploads eight distinct RGBA8 texels in
+x-fastest / y-next / z-last order. A fullscreen `sampler3D` effect samples
+their texel centers and the trilinear midpoint. The source test reads back
+each rendered result, reports PASS/FAIL on the page and rechecks after context
+restoration. It has no gallery card or parity golden; the mock-based unit
+tests cover upload calls, state caching, validation and restore replay.
+
+#### 3.4.2 HTML element textures
+
+Dynamic-importable so only InputGlow pulls it in:
+
+```ts
+/** Same `GLTextureOptions` as every other texture creator. */
+export function createHtmlElementTexture(engine: GLEngineContext, element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement, options?: GLTextureOptions): GLTexture;
+
+/** Re-uploads from the source element (≙ `HtmlElementTexture.update(invertY)`).
+ *  `invertY` is the raw `UNPACK_FLIP_Y_WEBGL` for every element type, whereas
+ *  Babylon flips video with `!invertY` — port video calls as `{ invertY: !invertY }`.
+ *  No-op when the context is lost/disposed or the texture is disposed. */
+export function updateHtmlElementTexture(tex: GLTexture, options?: GLTextureUpdateOptions): void;
+```
+
+### 3.5 Effect renderer (fullscreen quad)
+
+```ts
+export interface GLEffectWrapperOptions {
+    name?: string;
+    /** Defaults to a built-in fullscreen-quad vertex shader (≙ lite's default
+     *  vertexWGSL), so callers can pass only `fragmentSource`. */
+    vertexSource?: string;
+    fragmentSource: string; // ≙ lite's fragmentWGSL
+    uniformNames?: readonly string[];
+    samplerNames?: readonly string[];
+    attributeNames?: readonly string[];
+    defines?: string;
+}
+
+// The wrapper compiles and OWNS its effect. Like every resource operation,
+// `disposeEffectWrapper` / `applyEffectWrapper` take the wrapper alone (receiver rule).
+export interface GLEffectWrapper {
+    readonly name: string;
+    /** The compiled effect the wrapper owns — exposed so the per-uniform
+     *  setters can target it (the WebGL divergence from lite's
+     *  `setEffectUniforms(wrapper, …)`). */
+    readonly effect: GLEffect;
+}
+
+/** Compiles + OWNS the effect built from `options` (≙ lite's
+ *  `createEffectWrapper(engine, options)`). `vertexSource` defaults to a
+ *  built-in fullscreen-quad shader. */
+export function createEffectWrapper(engine: GLEngineContext, options: GLEffectWrapperOptions): GLEffectWrapper;
+/** Idempotent. Releases the wrapper's reference on its effect. */
+export function disposeEffectWrapper(wrapper: GLEffectWrapper): void;
+
+export interface GLViewport {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
+/** Defaults to the full canvas in pixel coordinates. */
+export function setViewport(engine: GLEngineContext, viewport?: GLViewport): void;
+
+/** Polls `isEffectReady(wrapper.effect)`; when ready, calls
+ *  `useEffect(wrapper.effect)` and returns `true`. Returns `false` and
+ *  binds nothing while the effect is compiling, failed, disposed, or the
+ *  context is lost — the caller skips that frame's setters and `drawEffect`.
+ *
+ *  An effect is always required: lite-gl has no `setEffectWrapper` (Babylon
+ *  has none either); a wrapper always holds exactly one effect, compiled by
+ *  `createEffectWrapper`. To draw an EXISTING effect fullscreen, skip the
+ *  wrapper: `isEffectReady` → `useEffect` → setters → `drawEffect`.
+ *
+ *  This MUST be called BEFORE any `setEffectFloat*` / `setEffectTexture` call
+ *  for this effect in the current frame — WebGL `gl.uniform*` writes target the
+ *  currently-bound program, and the setters intentionally do NOT call
+ *  `useEffect` themselves (keeping the hot path a single equality check).
+ *
+ *  No depth/stencil state changes: NeonBrush effects never enable them, and
+ *  `createGLEngine` requested `depth: false, stencil: false`. If a future
+ *  consumer needs depth, add a separate `setDepthTest(engine, on)` cached export. */
+export function applyEffectWrapper(wrapper: GLEffectWrapper): boolean;
+
+/** ≙ Babylon `EffectRenderer.draw`. Lazily creates the shared quad
+ *  (`ensureQuad`), binds its VAO (cached), flushes deferred states and issues
+ *  `gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)` with the CURRENT program,
+ *  whose vertex shader must read positions at location 0. No-op when the
+ *  context is lost/disposed or no program is bound. */
+export function drawEffect(engine: GLEngineContext): void;
+```
+
+### 3.5.1 Blend mode (core, exported from `index.ts`)
+
+A single cached setter that mirrors Babylon's `ThinEngine.setAlphaMode`. The
+preset values are deliberately equal to Babylon's `Constants.ALPHA_*`, so a
+NeonBrush port can forward raw Babylon integers with no translation table.
+
+```ts
+export const GLBlendMode = { DISABLE: 0, ADD: 1, ALPHA: 2, PREMULTIPLIED: 7 } as const;
+export type GLBlendMode = (typeof GLBlendMode)[keyof typeof GLBlendMode];
+
+/** Sets `gl.enable/disable(BLEND)` + `gl.blendFuncSeparate` to match Babylon's
+ *  `setAlphaMode(mode)` exactly. Cached in `_state.blendMode`; a redundant call
+ *  is a no-op. No-op while `_isLost`/`_disposed`. */
+export function setBlendMode(engine: GLEngineContext, mode: GLBlendMode): void;
+```
+
+Blend func parameters — copied verbatim from `@babylonjs/core`
+`Engines/Extensions/engine.alpha.js` (`ThinEngine.setAlphaMode`), where the
+tuple is `gl.blendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha)`:
+
+| `GLBlendMode`       | Babylon `Constants`   | GL call                                                       |
+| ------------------- | --------------------- | ------------------------------------------------------------- |
+| `DISABLE` (0)       | `ALPHA_DISABLE`       | `gl.disable(gl.BLEND)`                                        |
+| `ADD` (1)           | `ALPHA_ADD`           | `blendFuncSeparate(SRC_ALPHA, ONE, ZERO, ONE)`                |
+| `ALPHA` (2)         | `ALPHA_COMBINE`       | `blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE)` |
+| `PREMULTIPLIED` (7) | `ALPHA_PREMULTIPLIED` | `blendFuncSeparate(ONE, ONE_MINUS_SRC_ALPHA, ONE, ONE)`       |
+
+Babylon's `setAlphaMode` leaves the blend **equation** implicit (it relies on
+the GL default `FUNC_ADD`). `setBlendMode` makes it explicit —
+`gl.blendEquationSeparate(FUNC_ADD, FUNC_ADD)` is issued once on each
+disabled/unset → enabled transition (gated by the same dirty check as
+`gl.enable(BLEND)`). This is pixel-identical to Babylon and keeps the result
+deterministic regardless of prior context state.
+
+**Default behaviour is unchanged.** `drawEffect` does not touch blend state, so
+code that never calls `setBlendMode` renders exactly as before (cloth/scan
+fullscreen parity is preserved). The first `setBlendMode` after creation /
+context-loss is never elided because the cache starts at the `-1` sentinel.
+
+### 3.5.2 Two-sided stencil operations
+
+```ts
+export interface GLStencilOpState {
+    opFail?: GLenum;
+    opZFail?: GLenum;
+    opZPass?: GLenum;
+}
+
+export function setStencilOpSeparate(engine: GLEngineContext, face: GLenum, state: GLStencilOpState): void;
+```
+
+`face` must be `gl.FRONT`, `gl.BACK`, or `gl.FRONT_AND_BACK`; any other value
+throws. Each supplied operation updates only the selected face(s), while omitted
+operations retain that face's desired value. The first partial operation after
+engine creation or cache reset initializes both face tuples from WebGL's
+`KEEP/KEEP/KEEP` defaults. The setter is deferred: the next draw or clear emits
+one `gl.stencilOp` when both desired tuples match, otherwise
+`gl.stencilOpSeparate` only for each changed face. This permits front
+`INCR_WRAP` and back `DECR_WRAP` in one unculled geometry draw.
+
+The two-sided path is a lazy opt-in. Engines start with the compact shared
+stencil cache and reconciler; the first non-empty `setStencilOpSeparate` call
+expands the state array by six appended back-face slots and installs the
+two-sided reconciler. A bundle that exports only `setStencilState` contains no
+`stencilOpSeparate` call, validation path, or 52-slot allocation.
+
+### 3.6 Sprite renderer
+
+Re-exported from the barrel; `sideEffects: false` means consumers that don't draw
+sprites never pull it into their bundles. It is the lite-gl equivalent of Babylon's
+`SpriteRenderer` + `ThinSprite` (`@babylonjs/core` `Sprites/spriteRenderer.js`,
+`Sprites/thinSprite.js`). A sprite is a plain data object; the renderer owns its
+own VBO/IBO/VAO + compiled effect (it does **not** reuse the fullscreen quad).
+
+```ts
+export interface GLSpriteColor {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+
+export interface GLSprite {
+    position: { x: number; y: number; z: number };
+    width: number;
+    height: number;
+    angle: number; // radians
+    cellIndex: number; // 0-based, row-major; negatives clamp to 0
+    color?: GLSpriteColor; // defaults to opaque white
+    invertU?: boolean; // defaults false
+    invertV?: boolean; // defaults false
+    isVisible?: boolean; // defaults true; false skips the sprite
+}
+
+export interface GLSpriteRendererOptions {
+    capacity: number; // integer in [1, 16384] (Uint16 index limit)
+    cellWidth: number; // texels
+    cellHeight: number; // texels
+    texture: GLTexture;
+    blendMode?: GLBlendMode; // defaults to GLBlendMode.ALPHA (Babylon parity)
+    disableDepthWrite?: boolean; // stored but inert (no depth attachment)
+}
+
+export interface GLSpriteRenderer {
+    /* texture, cellWidth/Height, blendMode, … (internals trimmed) */
+}
+
+/** Allocates the VAO/VBO/IBO + effect and preallocates the CPU vertex scratch at
+ *  `capacity` (so `renderSprites` never allocates). Buffers are rebuilt on
+ *  `webglcontextrestored`. Throws on invalid capacity / cell size. */
+export function createSpriteRenderer(engine: GLEngineContext, options: GLSpriteRendererOptions): GLSpriteRenderer;
+
+/** Builds per-sprite vertex data into the reused Float32Array, uploads with
+ *  `bufferSubData`, sets the renderer's blend mode, and draws every visible
+ *  sprite in ONE `drawElements`. Allocation-free. No-op on lost/disposed
+ *  context, unready texture/effect, or empty input. `deltaTime` is accepted for
+ *  Babylon parity but unused (no animation state). Resets blend to `DISABLE`
+ *  afterwards (≙ Babylon `autoResetAlpha`). */
+export function renderSprites(
+    renderer: GLSpriteRenderer,
+    sprites: readonly GLSprite[],
+    deltaTime: number,
+    viewMatrix: Float32Array | number[],
+    projectionMatrix: Float32Array | number[]
+): void;
+
+/** Swap the sprite-sheet texture (≙ Babylon assigning `SpriteRenderer.texture`
+ *  after async load). No-op after disposal. */
+export function setSpriteRendererTexture(renderer: GLSpriteRenderer, texture: GLTexture): void;
+
+/** Releases the VAO/VBO/IBO + owned effect and unregisters the restore hook.
+ *  Idempotent. Does NOT dispose the texture (the consumer owns it). */
+export function disposeSpriteRenderer(renderer: GLSpriteRenderer): void;
+```
+
+Geometry / parity notes:
+
+- **Non-instanced 4-vertex quad** per sprite (6 indices), matching Babylon's
+  default `SpriteRenderer` path for byte-level parity. Vertex layout is 18
+  floats (72-byte stride): `position.xyz` + `angle`, `width/height`, corner
+  `offset.xy`, `invertU/V`, `cellInfo.xyzw` (UV origin + size), `color.rgba` —
+  bound to attribute locations 0..5.
+- **Cell UV math** (`cellLeft/cellTop/cellWidthN/cellHeightN`) and the
+  `SPRITE_EPSILON = 0.01` corner inset are copied verbatim from Babylon's
+  `_appendSpriteVertex`, so `cellIndex` selects the same sub-rectangle.
+- **Shaders** are the GLSL ES 3.00 translation of Babylon's
+  `sprites.vertex/fragment` color pass, with the fog / log-depth / pixel-perfect
+  / alpha-test branches removed (lite-gl runs no depth pre-pass).
+- **Allocation discipline:** the vertex Float32Array and index Uint16Array are
+  preallocated in `createSpriteRenderer`; the per-frame matrices are passed
+  straight to `gl.uniformMatrix4fv` (no copy, no cache). `renderSprites`
+  performs zero allocations.
+- **Context restore:** sprite GPU buffers ARE rebuilt automatically via an
+  `onContextRestored` hook (the owned effect is rebuilt by the engine). The CPU
+  vertex/index data survives, so no replay is needed. `renderSprites` bails
+  safely on a lost/disposed context.
+
+### 3.7 Index export
+
+```ts
+// src/index.ts — the public API is re-exported EXPLICITLY by name (never `export *`),
+// grouped by module, with `export type { … }` for type-only re-exports (isolatedModules).
+export { createGLEngine, disposeGLEngine, resizeGLEngine /* …getters + context-lost hooks… */ } from "./context.js";
+export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.js";
+// …render-loop, effects, effect-renderer, textures, blend modules (one export {…} / export type {…} each)…
+// The sprites, html-texture and render-target features are re-exported here from
+// their modules; `sideEffects: false` + no top-level side effects means a bundler
+// tree-shakes them from bundles that don't use them.
+export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeSpriteRenderer } from "./sprites.js";
+export { createHtmlElementTexture, updateHtmlElementTexture } from "./html-texture.js";
+export { createRenderTarget, bindRenderTarget, restoreDefaultFramebuffer, resizeRenderTarget, disposeRenderTarget } from "./render-target.js";
+```
+
+---
+
+### 3.8 Render targets
+
+Re-exported from the barrel; `sideEffects: false` means a consumer that never
+renders to a texture doesn't pull the FBO code into its bundle. This is the lite-gl
+equivalent of Babylon's `RenderTargetTexture` / `createRenderTargetTexture` +
+`bindFramebuffer`. A `GLRenderTarget` owns an FBO plus a sampleable color
+`GLTexture` (and an optional `DEPTH_COMPONENT16` renderbuffer).
+
+```ts
+export interface GLRenderTargetOptions {
+    generateDepthBuffer?: boolean; // default false; allocates a DEPTH_COMPONENT16 renderbuffer
+    minFilter?: GLenum; // default gl.LINEAR
+    magFilter?: GLenum; // default gl.LINEAR
+    wrapS?: GLenum; // default gl.CLAMP_TO_EDGE
+    wrapT?: GLenum; // default gl.CLAMP_TO_EDGE
+    colorTexture?: GLTexture; // BYO color attachment, else owned 8-bit; float BYO → createFloatRenderTarget + matching type
+    format?: GLenum; // owned color format: gl.RGBA (default, RGBA8) | gl.RG (RG8) | gl.RED (R8); else throws
+    // No generateStencilBuffer/generateMipMaps here: stencil is the opt-in
+    // generateRenderTargetStencil (depth-stencil module) helper; mipmaps are the
+    // generateRenderTargetMipMaps function (both tree-shake out of the core).
+}
+
+export interface GLRenderTarget {
+    readonly texture: GLTexture;
+    width: number;
+    height: number; /* + @internal FBO/depth/restore */
+}
+
+// Receiver rule: engine first only on creators / resource-less calls; GL-prefixed, Options-suffixed type names (lite-gl convention).
+// Size is positional (positive integers, texels) like every 2D creator: (engine, width, height, options?).
+export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget;
+export function bindRenderTarget(rt: GLRenderTarget): void;
+export function restoreDefaultFramebuffer(engine: GLEngineContext): void; // canvas framebuffer + full-canvas viewport
+export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void;
+export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void;
+export function createFloatRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLFloatRenderTargetOptions): GLRenderTarget; // float / half-float HDR color
+export function generateRenderTargetMipMaps(rt: GLRenderTarget): void;
+// Stencil is opt-in from the depth-stencil module (NOT a createRenderTarget option),
+// so the packed-renderbuffer code tree-shakes out of the render-target core:
+//   generateRenderTargetStencil(rt, { depth? }): void
+//     packs DEPTH24_STENCIL8 (depth default true) or stencil-only STENCIL_INDEX8 (depth:false),
+//     replacing the core depth-only buffer; installs a restore/resize hook so it survives FBO rebuilds.
+// GPU→CPU readback. Every option is optional: the rect defaults to the whole target
+// (x/y 0, width/height = rt size), `into` to a fresh buffer, `format` to gl.RGBA
+// (always readable); gl.RED / gl.RG read 1 / 2 channels per texel tightly packed
+// (sets PACK_ALIGNMENT 1) — valid when it matches the target's
+// IMPLEMENTATION_COLOR_READ_FORMAT (R8 / RG8 in all major browsers).
+export interface GLReadPixelsRegionOptions {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    format?: GLenum;
+}
+export interface GLReadPixelsOptions extends GLReadPixelsRegionOptions {
+    into?: ArrayBufferView;
+}
+export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView;
+// GPU→GPU readback into a caller-owned PIXEL_PACK_BUFFER (`readPixels` with a byte
+// offset): same rect / format rules, binds `buffer` for the read then unbinds it.
+export interface GLReadPixelsToBufferOptions extends GLReadPixelsRegionOptions {
+    offset?: number; // byte offset into `buffer`, default 0
+}
+export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGLBuffer, options?: GLReadPixelsToBufferOptions): void;
+```
+
+- **`createRenderTarget`** allocates the FBO + an engine-registered color texture
+  (+ optional depth). It is failure-atomic: on a bad size, a null GL handle, or an
+  incomplete framebuffer it frees the color texture and any partial FBO/renderbuffer
+  (and restores the previously-bound framebuffer) before throwing, so a failed create
+  leaks nothing.
+- **`bindRenderTarget`** is the cached framebuffer bind — the analogue of Babylon's
+  `bindFramebuffer`. It sets `_state.boundFramebuffer` (§4.1 / §4.2) and the viewport
+  to the target size; `rt = null` binds the default framebuffer (the canvas) and the
+  canvas viewport. It no-ops on a lost/disposed context or a disposed target.
+- **`resizeRenderTarget`** reallocates color (+ depth + FBO) at the new size while
+  preserving object identity. If the target is the currently-bound one it is re-bound
+  (with the new-size viewport) after the rebuild, because deleting a bound FBO reverts
+  GL to framebuffer 0 — without the re-bind an in-flight pass would silently start
+  drawing to the canvas.
+- **`disposeRenderTarget`** deletes every GL resource, unhooks the restore handler,
+  and is idempotent — and a no-op for `null` / `undefined`, matching the WebGPU
+  `@babylonjs/lite` `disposeRenderTarget`.
+- **Context restore.** A default (owned) RGBA8 color texture is owned, rebuilt and
+  deleted by the render target itself: each target registers its OWN
+  `onContextRestored` hook that re-creates the FBO + depth and the color texture.
+  A bring-your-own `colorTexture` is instead engine-managed (its handle is swapped
+    - re-uploaded by the standard texture restore protocol, §4.7), and the target
+      reattaches the fresh handle — the same per-target hook pattern the sprite
+      renderer uses (§3.6).
+- **Scope.** Color is RGBA8 by default, `R8` / `RG8` via `format`, or any `GLTexture` passed via `colorTexture`
+  (e.g. a `createFloatTexture` half-float HDR target — attach it with
+  `createFloatRenderTarget(engine, w, h, { colorTexture, type })` so readbacks use
+  the matching texel type; `createRenderTarget` reads as `UNSIGNED_BYTE`). Optional core depth16
+  (`generateDepthBuffer`); a packed depth-stencil / stencil-only attachment via the
+  opt-in `generateRenderTargetStencil`; `createFloatRenderTarget`,
+  the `generateRenderTargetMipMaps` function (mipmaps are NOT a create-option) and
+  `readRenderTargetPixels` readback are all available. Out of scope: MRT (§10).
+
+Packaging mirrors sprites and html-texture: re-exported from the
+`@babylonjs/lite-gl` barrel (the single public entry). Because the package is
+`sideEffects: false` and the module has no top-level side effects, a bundler drops it
+from any bundle that doesn't use it.
+
+---
+
+## 4. Internal architecture — the cache layer
+
+### 4.1 `GLState` type (owned by `GLEngineContext._state`)
+
+```ts
+interface GLState {
+    currentProgram: WebGLProgram | null;
+    activeTextureUnit: number; // last gl.activeTexture(...)
+    boundTextures: (WebGLTexture | null)[]; // 2D per-unit, length = caps.maxTextureUnits
+    _boundTextures3D?: (WebGLTexture | null | undefined)[]; // undefined means unknown after wipe
+    _unpack3DLayoutKnown?: boolean; // owned by optional texture-3d module
+    boundArrayBuffer: WebGLBuffer | null;
+    boundElementBuffer: WebGLBuffer | null;
+    boundVao: WebGLVertexArrayObject | null;
+    /** Cached bound framebuffer — null means the default framebuffer (the
+     *  canvas). The single source of truth for the active FBO; `bindRenderTarget`
+     *  (the render-target module) elides redundant `gl.bindFramebuffer`
+     *  against it. Reset to null on context-lost. */
+    boundFramebuffer: WebGLFramebuffer | null;
+    viewportX: number;
+    viewportY: number;
+    viewportW: number;
+    viewportH: number;
+
+    // ── Deferred render state (Babylon's applyStates model) ──────────────────
+    // The blend / depth / cull / stencil / colorMask render-state lives in ONE
+    // flat Float64Array(46) instead of ~48 named fields. Slots 0..20 (indexed by
+    // the @internal `RS_*` consts in state.ts) are the ACTUAL applied GL state;
+    // slots 21..41 (`rs[RS_X + RS_DESIRED]`) are the DESIRED twin the setters
+    // write; slots 42..45 are the standalone (no-desired-twin) cached gl.clearColor
+    // RGBA. `applyGLStates` reconciles desired → actual right before each draw /
+    // clear. Unset sentinels (both halves): -1 for the enable/mask toggles (and
+    // colorMask packed) plus the leading shared stencil-op slot, 0 for other
+    // factor/func/op slots. The first shared stencil-op update seeds its desired
+    // triple to WebGL's KEEP defaults before merging partial fields, so explicit
+    // ZERO operations cannot be mistaken for untouched state. The two-sided API
+    // lazily replaces this with a 52-slot array whose six appended slots hold the
+    // actual + desired back-face operation tuples; base indices never move.
+    //
+    // WHY an index-array (not named fields): the deferred state is touched across
+    // state.ts ↔ blend.ts ↔ depth-stencil.ts ↔ apply-states.ts, so esbuild cannot
+    // mangle named properties — each long name (`.dBlendSrcRGB`) would ship
+    // verbatim, many times, in every scene bundle. The `RS_*` consts are plain
+    // integers esbuild inlines (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` → `rs[22]`),
+    // so the storage costs a single short array access everywhere. Float64 (not
+    // Int32) because stencilMask / stencilFuncMask can be 0xFFFFFFFF, which Int32
+    // stores as -1 — colliding with the -1 unset sentinel.
+    rs: Float64Array; // 46 base slots; lazily expanded to 52 by two-sided stencil
+    /** Raised by any deferred setter; cleared by `applyGLStates`. The flush is a
+     *  fast no-op when false, so a draw that changed no render state pays
+     *  nothing. */
+    statesDirty: boolean;
+    // Per-category reconcilers, installed onto these slots the first time the
+    // matching setter runs (a runtime assignment — NOT a module-level side
+    // effect). `applyGLStates` dispatches ONLY through these slots, so a category
+    // whose setter is absent from a scene tree-shakes its reconciler (and its GL
+    // code) out of the bundle — a clear-only scene drops all four. See §4.2.1.
+    _flushBlend?: (engine: GLEngineContext) => void;
+    _flushDepthCull?: (engine: GLEngineContext) => void;
+    _flushStencil?: (engine: GLEngineContext) => void;
+    _setStencilBack?: (state: GLState, ops: GLStencilOpState) => void;
+    _flushColorMask?: (engine: GLEngineContext) => void;
+
+    /** Lazy fullscreen quad — built on first drawEffect, then reused
+     *  for the lifetime of the context. Lives here (not in a module-scoped
+     *  WeakMap) to satisfy the zero-side-effects rule. Cleared (set to null)
+     *  on context-lost and rebuilt on next `drawEffect`. */
+    quadVbo: WebGLBuffer | null;
+    quadIbo: WebGLBuffer | null;
+    quadVao: WebGLVertexArrayObject | null;
+}
+```
+
+> **Eager vs deferred.** Program / texture / buffer / VAO / framebuffer binds,
+> `viewport`, `scissor` and `pixelStorei` are applied EAGERLY on the setter call
+> (eliding only same-value writes). Blend / depth / cull / stencil / colorMask
+> are DEFERRED: their setters only record the desired half of `rs` and raise
+> `statesDirty`; the GL calls happen in `applyGLStates` (§4.2.1). This collapses
+> intra-frame churn (set A → set B → set A with no draw between applies once, as
+> A) and matches Babylon's `Engine.applyStates()`.
+
+### 4.1.1 GL-state cache invalidation rules
+
+The cache is the source of truth for **what is currently bound**. It must be
+kept in sync with actual GL state. Two protocols enforce that:
+
+- **Disposal:** `disposeTexture` walks the 2D binding cache, while
+  `disposeTexture3D` walks the optional module's independent 3D cache; each
+  clears any slot that held the disposed handle. `disposeEffect` clears `_state.currentProgram`
+  iff it pointed at the disposed program. This prevents the next-bind to the
+  same slot from being elided as a no-op.
+- **Context lost:** the `webglcontextlost` handler sets `_isLost=true` and
+  clears the core `_state` (program=null, 2D texture binding cache filled with null,
+  buffers=null, vao=null, boundFramebuffer=null, quad* = null, viewport=0, and
+  the whole `rs` array — BOTH its actual half AND its desired twins — back to the
+  unset sentinels with `statesDirty=false`). Resetting both halves means the
+  first setter after a restore re-marks `statesDirty` and the next
+  `applyGLStates` re-issues from scratch. The `_flush*` reconciler slots are NOT
+  cleared (they are pure function refs; a post-restore setter re-installs the
+  same ref idempotently, and `statesDirty=false` gates the flush until then).
+  The optional 3D module clears its own cache through a context-lost callback
+  (and a cache invalidator when the host calls `wipeGLStateCache`). Setters
+  become no-ops while `_isLost`. See §4.7.
+
+### 4.2 Cache contract — which GL calls are elided
+
+| Operation                                  | Cache key                                       | Elided when                                                                   |
+| ------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `gl.useProgram`                            | `_state.currentProgram`                         | Same program already current                                                  |
+| `gl.activeTexture`                         | `_state.activeTextureUnit`                      | Already on that unit                                                          |
+| `gl.pixelStorei` (2D unpack flags)         | `_state.unpackFlipY/PremultiplyAlpha/Alignment` | Same flag/alignment already applied, including decoded-source uploads         |
+| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`                    | Same 2D texture already on that unit                                          |
+| `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`                 | Same 3D texture already on that unit                                          |
+| `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                      | Always — never re-issued per frame                                            |
+| `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`             | Value bit-equal to last                                                       |
+| `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                          | Value equal to last                                                           |
+| `gl.bindBuffer(ARRAY_BUFFER, …)`           | `_state.boundArrayBuffer`                       | Same buffer                                                                   |
+| `gl.bindBuffer(ELEMENT_ARRAY_BUFFER, …)`   | `_state.boundElementBuffer`                     | Same buffer                                                                   |
+| `gl.bindVertexArray`                       | `_state.boundVao`                               | Same VAO (the shared quad VAO lives forever)                                  |
+| `gl.bindFramebuffer`                       | `_state.boundFramebuffer`                       | Same FBO already bound (`bindRenderTarget` / `restoreDefaultFramebuffer`)     |
+| `gl.viewport`                              | `_state.viewportX/Y/W/H`                        | All four match                                                                |
+| blend / depth / cull / stencil / colorMask | `rs` actual slot vs desired twin (§4.2.1)       | Deferred — applied by `applyGLStates`, per-slot elided when desired == actual |
+
+For the typical NeonBrush per-frame pattern (one effect, ~5 uniforms, 1–2 textures), after the first frame every steady-state frame issues exactly:
+
+```
+gl.uniform*  (only for uniforms whose values actually changed)
+gl.drawElements(TRIANGLES, 6, UNSIGNED_SHORT, 0)
+```
+
+— and nothing else. Program, VAO, sampler-uniforms, texture units, viewport are all already correct.
+
+### 4.2.1 Deferred render state — `applyGLStates`
+
+Blend, depth, cull, stencil and colorMask follow Babylon's `applyStates()` model
+rather than applying eagerly. Both the storage and the flush are tuned so an
+unused category costs a scene nothing:
+
+- **Storage — one index-array.** The whole deferred state lives in
+  `_state.rs`, a flat `Float64Array(46)`: slots `0..20` (the `@internal` `RS_*`
+  consts in `state.ts`) are the ACTUAL applied GL state, slots `21..41`
+  (`rs[RS_X + RS_DESIRED]`) the DESIRED twin, and slots `42..45` the standalone
+  cached `gl.clearColor` RGBA. This replaced ~42 named fields
+  (`blendEnabled` / `dBlendEnabled` / …): because the state is read/written across
+  four modules, esbuild could not mangle those property names, so each long name
+  shipped verbatim in every scene bundle. The `RS_*` consts are plain integers
+  esbuild inlines to short literals (`rs[RS_BLEND_SRC_RGB + RS_DESIRED]` →
+  a short numeric access), reclaiming ~2.4 KB raw per scene. Float64 (not Int32)
+  keeps a `0xFFFFFFFF` stencil mask distinct from the `-1` unset sentinel. The
+  first two-sided stencil update copies these 46 slots into a 52-slot array and
+  uses appended slots `46..51` for back-face actual/desired operations.
+- **Setters** (`setBlendMode` / `setBlendState` / `disableBlend`, `setDepthState`,
+  `setCullState`, `setStencilState`, `setStencilOpSeparate`, `setColorMask`) write
+  ONLY the desired half of `rs` and set `statesDirty = true`. They issue no
+  `gl.*` and never touch the actual half. Omitted setter fields leave their
+  desired slot untouched (merge-from-desired). Before the lazy two-sided upgrade,
+  `setStencilState` writes one shared operation tuple and uses the compact
+  `gl.stencilOp` reconciler. After upgrade, its optional hook mirrors supplied op
+  fields to the back tuple. `setStencilOpSeparate` writes each supplied op field
+  only to the selected face(s); omitted fields remain independently unchanged.
+  First partial updates initialize the affected tuple(s) from WebGL's
+  `KEEP/KEEP/KEEP` defaults.
+- **Per-category dispatch (tree-shakeable).** `applyGLStates(engine)` (the
+  internal `apply-states.ts`, not exported from the barrel) owns NO reconciliation
+  code — it is a tiny dispatcher. Each category's reconciler (`flushBlend` in
+  blend.ts; `flushDepthCull` / `flushStencil` / `flushColorMask` in
+  depth-stencil.ts) is INSTALLED onto a `_state._flush*` slot the first time its
+  setter runs (a runtime assignment, not a module side effect). `applyGLStates`
+  then just calls whichever slots are populated, in the fixed order
+  blend → depth+cull → stencil → colorMask (reproducing the old monolith's GL
+  call order). Because each reconciler is reachable ONLY through the engine-state
+  slot its setter populates, a scene whose setter is absent tree-shakes that
+  reconciler — and its GL code — out of the bundle: a clear-only scene like
+  `gl-scissor` ships none of the four and `applyGLStates` collapses to four cheap
+  "is it installed?" checks. Within stencil, `setStencilState` installs the
+  compact reconciler; only `setStencilOpSeparate` installs the two-sided one.
+- Each reconciler no-ops when `statesDirty` is false (or the context is
+  lost/disposed — checked once in the dispatcher), otherwise issues only the GL
+  calls whose desired slot differs from its actual twin, copies desired→actual,
+  and the dispatcher clears `statesDirty`. The blend disabled/unset→enabled
+  transition force-issues both `blendEquationSeparate` + `blendFuncSeparate`
+  (Babylon's `AlphaState` does not track them while blending is off); thereafter
+  each is elided independently. The stencil func-triple and each face's op-triple
+  are issued as units. Matching front/back desired operations use one
+  `gl.stencilOp`; differing operations use `gl.stencilOpSeparate` only for faces
+  whose desired triple changed.
+- **Flush sites** — `applyGLStates` is called immediately before every GPU op:
+  `drawEffect` (effect-renderer), `renderSprites` (sprites), `drawIndexed` (mesh),
+  and `clearEngine` before `gl.clear` (a clear respects the current write masks).
+
+Net effect: setting the same state every frame applies GL only on the first
+frame (cross-frame elision via the desired→actual compare), and intra-frame
+churn (A→B→A with no draw between) collapses to a single applied state.
+
+### 4.2.2 Effect cache — identical sources share one program
+
+`createEffect` keeps a per-engine `_effectCache: Map<string, GLEffect>` keyed by
+the source descriptor (vertex + fragment source, defines, attribute / uniform /
+sampler names, joined by `\u0000`). A second `createEffect` with an identical
+descriptor returns the SAME `GLEffect` (and its one `WebGLProgram`) and bumps a
+`_refCount` instead of compiling a duplicate program. `disposeEffect` decrements
+`_refCount` and only performs the real teardown (delete program/shaders, splice
+`_effects`, evict the cache entry, clear `currentProgram` if it matched) when the
+count reaches 0. Sharing one program handle is what lets `useEffect`'s
+`currentProgram` cache elide the redundant `gl.useProgram` when several consumers
+(e.g. multiple `createSpriteRenderer`s built from the same shader) render in turn.
+Context-restore is unaffected: each unique effect is registered in `_effects`
+exactly once, so its `_restore` runs once per program.
+
+### 4.3 Branchless setter shape
+
+The cache stores the **last-uploaded value**, NOT the last-requested value.
+A setter that skips the GL call (effect not ready, context lost, missing
+location) MUST NOT update the cache — otherwise a later "real" set with the
+same value would incorrectly elide and the GPU would keep stale data.
+
+```ts
+export function setEffectFloat(effect: GLEffect, name: string, x: number): void {
+    if (engine._isLost || !effect.isReady) return; // skip; do not touch cache
+    const loc = effect.uniformLocations[name];
+    if (loc === null) return; // unknown uniform; do not touch cache
+    if (effect._lastF1[name] === x) return; // hot path — value already on GPU
+    effect._lastF1[name] = x;
+    engine.gl.uniform1f(loc, x);
+}
+
+export function setEffectFloat2(effect: GLEffect, name: string, x: number, y: number): void {
+    if (engine._isLost || !effect.isReady) return;
+    const loc = effect.uniformLocations[name];
+    if (loc === null) return;
+    let v = effect._lastVec[name];
+    if (v !== undefined && v[0] === x && v[1] === y) return;
+    if (v === undefined) {
+        v = [0, 0];
+        effect._lastVec[name] = v;
+    }
+    v[0] = x;
+    v[1] = y;
+    engine.gl.uniform2f(loc, x, y);
+}
+```
+
+The vec cache is a plain `number[]` (not `Float32Array`) so values like `0.1`
+compare equal across frames — `Float32Array` would truncate to
+`0.10000000149011612` and break the equality check forever.
+
+The cache slot allocation (`v = [0, 0]`) happens **at most once per
+(effect × uniform) pair**, on first successful upload. Steady state is
+allocation-free.
+
+`NaN` inputs: `NaN !== NaN` so the cache check fails every frame and the
+GL upload re-issues every frame. This is acceptable — NaN inputs are a
+caller bug, and re-uploading is the safe fallback.
+
+### 4.3.1 Ordering invariant
+
+Uniform setters require `_state.currentProgram === effect.program`. The
+canonical per-frame sequence is:
+
+```
+setViewport(engine);                       // cached
+if (!applyEffectWrapper(wrapper)) return; // ready poll + useEffect
+setEffectFloat(effect, ...);       // ← AFTER applyEffectWrapper
+setEffectTexture(effect, ...);
+drawEffect(engine);                        // ensureQuad + bind VAO + flush + draw
+```
+
+This matches Babylon's `EffectRenderer` pattern (`applyEffectWrapper` then
+`setFloat`/`setTexture` then `draw`). The setters deliberately do NOT call
+`useEffect` themselves to keep the hot path a single equality check; if a
+caller skips `applyEffectWrapper`, uniforms target the previously bound
+program (or none), which is a caller bug.
+
+### 4.4 Sampler-unit assignment
+
+Sampler→unit mapping is fixed for the lifetime of a linked program (re-run
+after context restore). It happens during **readiness finalization** (§4.6),
+not at `createEffect` time, because with `KHR_parallel_shader_compile` the
+program may not yet be linked when `createEffect` returns.
+
+```ts
+// Runs once when isEffectReady() observes COMPLETION_STATUS_KHR === true.
+function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
+    const gl = engine.gl;
+    // 1. Check link status; on failure record _compileError and stop.
+    // 2. Resolve uniform locations from options.uniformNames.
+    // 3. Resolve attribute locations from options.attributeNames.
+    // 4. useEffect(effect)  — updates _state.currentProgram (cached).
+    useEffect(effect);
+    // 5. Assign each declared sampler a fixed texture unit and tell the shader once.
+    let unit = 0;
+    for (const name of effect.options.samplerNames) {
+        const loc = gl.getUniformLocation(effect.program, name);
+        if (loc !== null) {
+            gl.uniform1i(loc, unit); // ONE-TIME per program lifetime
+        }
+        effect.samplerUnits[name] = unit;
+        unit++;
+    }
+    effect._samplersAssigned = true;
+    effect.isReady = true;
+    // 6. Fire _onCompiled callbacks once, then clear the list.
+}
+```
+
+Then `setEffectTexture(effect, name, tex)` is:
+
+```ts
+const unit = effect.samplerUnits[samplerName]; // O(1) lookup
+bindTexture(tex, unit); // cached: maybe-activeTexture + maybe-bindTexture
+// NO gl.uniform1i — it's already set for the lifetime of the program.
+```
+
+This is the key win over Babylon's `Effect.setTexture` which re-issues
+`gl.uniform1i` on every call.
+
+Sampler uniforms ARE program state, so they survive `useProgram` swaps and
+texture binds. They are invalidated only by program relink — which only
+happens on context restore, where `_samplersAssigned` is reset to false and
+finalization re-runs.
+
+The `useEffect` call inside `finalizeEffect` uses the cached helper, so
+`_state.currentProgram` stays consistent — no raw `gl.useProgram` is ever
+issued outside of `useEffect`.
+
+### 4.5 Lazy quad init
+
+```ts
+function ensureQuad(engine: GLEngineContext): void {
+    const s = engine._state;
+    if (s.quadVao !== null) return;
+    const gl = engine.gl;
+    s.quadVao = gl.createVertexArray();
+    gl.bindVertexArray(s.quadVao);
+    s.boundVao = s.quadVao;
+
+    s.quadVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, s.quadVbo);
+    s.boundArrayBuffer = s.quadVbo;
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([1, 1, -1, 1, -1, -1, 1, -1]), gl.STATIC_DRAW);
+
+    s.quadIbo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, s.quadIbo);
+    s.boundElementBuffer = s.quadIbo;
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0, 1, 2, 0, 2, 3]), gl.STATIC_DRAW);
+
+    // Enable attribute 0 (position) on this VAO. The location is GUARANTEED to
+    // be 0 because every effect calls `gl.bindAttribLocation(program, 0,
+    // attributeNames[0])` BEFORE link (and the GLSL conversion emits
+    // `layout(location = 0)` as belt-and-suspenders). One VAO, every effect.
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+}
+```
+
+The geometry matches Babylon's `EffectRenderer` default (positions
+`[1,1,-1,1,-1,-1,1,-1]`, indices `[0,1,2,0,2,3]`).
+
+`applyEffectWrapper` polls readiness, then calls `useEffect(wrapper.effect)`;
+`drawEffect` calls `ensureQuad(engine)` before drawing, so any current program
+(wrapper or plain `useEffect`) draws the quad.
+Once the quad VAO is built and bound, attribute state is baked into the VAO;
+subsequent frames touch zero buffer/attrib GL calls — only `useProgram` (cached),
+the user's `setEffect*` calls, and `drawElements`.
+
+On context lost, `s.quadVao` (and friends) are cleared to `null`, so the
+next `drawEffect` after restore transparently rebuilds the quad.
+
+#### Why bind to location 0 explicitly
+
+WebGL2 assigns attribute locations at link time unless the GLSL declares
+`layout(location = N)` or the program calls `gl.bindAttribLocation(prog, N,
+name)` BEFORE link. Without one of those, two different programs may put
+`position` at different locations, breaking the shared VAO. We do BOTH:
+
+1. `createEffect` calls `gl.bindAttribLocation(program, 0, options.attributeNames?.[0] ?? "position")` between `attachShader` and `linkProgram`.
+2. The GLSL conversion (§6) emits `layout(location = 0) in vec2 position;`.
+
+Either alone is sufficient; together they're robust against converter mistakes
+and ensure the shared quad VAO is always correct.
+
+### 4.6 Readiness finalization (parallel-compile-safe)
+
+`createEffect` submits shader compilation without querying shader status, calls `attachShader` × 2,
+`bindAttribLocation(program, 0, attributeNames[0])`, then `linkProgram`.
+It does not query compile or link results — `isReady` starts as `false`,
+`_samplersAssigned` as `false`, `uniformLocations` and `samplerUnits` empty.
+Shader/program allocation failures still throw synchronously. Shader syntax
+and link errors instead surface during readiness polling, including without
+the parallel extension. This replaces the former synchronous shader-error
+throws: callers must inspect `getEffectCompilationError` after polling, or
+catch a rejected `waitForEffect` promise.
+Initial creation and restoration use one `compileEffectProgram` allocator,
+which returns the shader/program handles or an allocation diagnostic and
+releases any partial allocation. Creation throws that diagnostic with the
+effect name; restoration records it with a `context-restore` prefix.
+
+`isEffectReady(effect)` is the polling gate:
+
+```
+if (effect.isReady) return true;
+if (effect._compileError !== null) return false;
+
+linked = (caps.parallelShaderCompile !== null)
+    ? gl.getProgramParameter(program, caps.parallelShaderCompile.COMPLETION_STATUS_KHR)
+    : true                                  // LINK_STATUS may block without the extension
+if (!linked) return false;
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    // Only AFTER link failure, query both shaders' COMPILE_STATUS and include
+    // failing stages' info logs alongside the program log. Empty logs get
+    // non-empty fallback diagnostics. Record and log the failure once.
+    effect._compileError = getLinkError(gl, program, effect._vs, effect._fs);
+    return false;
+}
+
+finalizeEffect(engine, effect);                // §4.4
+return true;                                 // effect.isReady is now true
+```
+
+`executeWhenCompiled(effect, cb)`:
+
+```
+if (isEffectReady(effect)) { cb(effect); return; }
+effect._onCompiled.push(cb);
+```
+
+(NeonBrush calls `isEffectReady` every frame via `if (!isReady()) return;` in
+the render loop. That same poll drives finalization — there is no separate
+"tick" the host must call.)
+
+`_onCompiled[]` is fired and cleared during finalization. Listeners added
+_after_ readiness fire synchronously from `executeWhenCompiled` itself.
+
+`getEffectCompilationError(effect)` runs one `isEffectReady` poll and
+returns `_compileError`. `null` means no failure has been recorded, not that
+the effect is ready. Recorded errors survive disposal and context loss for
+diagnostics; a successful context-restoration allocation clears the error,
+then readiness checks diagnose the replacement program normally. Restore
+allocation errors identify the stage and clean up any partially allocated
+shaders. Neither the accessor nor `executeWhenCompiled` starts a scheduler.
+
+`waitForEffect(effect, { signal? })` is an opt-in helper in the separate,
+side-effect-free `effect-ready.ts` module, re-exported from the root barrel.
+It polls immediately, resolves with the effect when finalization succeeds,
+and otherwise polls once per animation frame independently of the render
+loop. It rejects with a labelled error on compile/link/restore failure,
+context loss, or disposal (disposal is observed on the next poll), and with
+the signal's Error reason on cancellation (other reasons become the `cause`
+of a native `DOMException` named `AbortError`). Context loss and abort events
+reject immediately, even while animation frames are suspended. Every exit
+removes the loss/abort listeners and cancels any scheduled frame; an already
+ready/failed/disposed/aborted effect schedules no frame. Polling exceptions
+also reject and clean up. Multiple waiters are independent; cancelling one
+does not dispose the shared effect or stop another waiter. No callbacks are
+added to `_onCompiled`, and importing only the manual APIs retains no promise,
+abort-listener or animation-frame scheduling code from this helper.
+
+The initial signal/lifecycle guards cover calls with an already-aborted,
+disposed, or lost input: registering listeners does not replay past events.
+Disposal has no notification, so it must also be checked on every poll and
+after finalization callbacks. Abort and context-loss listeners instead reject
+synchronously and set `settled`; the post-finalization settlement guard covers
+both, without duplicate abort/loss checks.
+
+### 4.7 Context lost / restored protocol
+
+The package owns this end-to-end because NeonBrush relies on Babylon's
+silent rebuild behaviour today.
+
+#### `webglcontextlost` handler
+
+1. `event.preventDefault()` — opt in to restore.
+2. `engine._isLost = true`.
+3. Zero the entire `_state`: `currentProgram=null`, `boundTextures.fill(null)`,
+   `boundArrayBuffer/ElementBuffer/Vao=null`, `quadVbo/Ibo/Vao=null`,
+   `viewport*=0`, `activeTextureUnit=0`.
+4. For each `effect` in `engine._effects`: `effect.isReady=false`,
+   `effect._samplersAssigned=false`, `effect.uniformLocations={}`,
+   `effect.attributeLocations={}`, clear `_lastF1`/`_lastVec`/`_lastI1`.
+   Old GL handles are already dead per spec; do NOT call `deleteProgram`.
+5. For each `tex` in `engine._textures`: `tex.isReady=false`. Old `tex.handle`
+   is dead.
+6. Stop the render loop (`cancelAnimationFrame(_rafId)`).
+7. Fire every callback in `engine._onLost`.
+
+While `_isLost`, every public function checks the flag and returns early.
+The application's `onContextLost` callback may e.g. hide the canvas.
+
+#### `webglcontextrestored` handler
+
+1. For each `effect` in `engine._effects`: re-compile vs/fs from
+   `effect.options.vertexSource/fragmentSource/defines`, re-attach,
+   re-`bindAttribLocation`, re-link, assign new `effect.program`. Leave
+   `isReady=false` so the next-frame `isEffectReady` poll runs finalization
+   (§4.6) which re-resolves locations and re-assigns sampler units.
+2. For each `tex` in `engine._textures`: allocate a fresh `WebGLTexture`,
+   assign to `tex.handle`, call `tex._upload(engine)` to replay the original
+   upload (raw bytes for `createRawTexture`; retained `ImageBitmap` for
+   `loadTexture2D`; source HTML element for `createHtmlElementTexture`;
+   retained decoded source or blank storage for `createTextureFromSource`), then
+   call `tex._initializeParameters?.(engine)` while that fresh handle remains
+   bound. Set `tex.isReady=true` once the replay completes.
+3. `engine._isLost = false`.
+4. Restart the render loop if it was active before loss.
+5. Fire every callback in `engine._onRestored`.
+
+#### Correctness notes
+
+- The same `GLEffect` and `GLTexture` objects are reused; only their internal
+  GL handles change. Consumer code holds these handles by reference, so
+  rendering resumes transparently after restore.
+- Uniform caches are cleared on loss → the first frame after restore re-uploads
+  every uniform. That's correct, because the new program object has no uniform
+  state.
+- Sampler `uniform1i` is re-assigned during the next finalization pass — see §4.4.
+- `_upload` for `loadTexture2D` MUST NOT re-fetch the URL: the package retains
+  the decoded `ImageBitmap` exactly so restore is offline-safe. (If the
+  `ImageBitmap` was already disposed by the caller via `bitmap.close()`, the
+  restore falls back to placeholder pixels and re-fetches in the background.)
+- This adds ≈ 150 LOC and ≈ 1–2 KB to the bundle, accepted by user §0 decision.
+
+---
+
+## 5. Tree-shaking & packaging
+
+`package.json` (a single public entry — the barrel — built with plain `tsc`):
+
+```json
+{
+    "name": "@babylonjs/lite-gl",
+    "version": "0.1.0",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "sideEffects": false,
+    "exports": {
+        ".": { "import": "./src/index.ts", "types": "./src/index.ts" }
+    },
+    "publishConfig": {
+        "main": "./dist/index.js",
+        "types": "./dist/index.d.ts",
+        "exports": {
+            ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+        }
+    },
+    "files": ["dist"],
+    "scripts": {
+        "build": "node build.mjs",
+        "dev": "tsc -p tsconfig.json --watch"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.0"
+    }
+}
+```
+
+Tree-shaking guarantees:
+
+- A consumer that uses only `createGLEngine`, `createEffect`,
+  `setEffectFloat`, `setEffectFloat2`, `setEffectTexture`, `createRawTexture`,
+  `loadTexture2D`, `setViewport`, `applyEffectWrapper`, `drawEffect`,
+  `createEffectWrapper`, `runRenderLoop` ships those plus their internal
+  helpers (cache update, ensureQuad, finalize, loss-restore protocol).
+- `setEffectColor4`, `setEffectInt`, `executeWhenCompiled`,
+  `setHardwareScalingLevel`, etc. tree-shake out when unused.
+- `html-texture` re-exports from the barrel — consumers that don't use it (e.g.
+  everything except NeonBrush's InputGlow) tree-shake it out.
+- `sprites` likewise re-exports from the barrel — it pulls in `blend.ts` +
+  `effect.ts` but stays out of every bundle that doesn't render sprites.
+- No file in `src/` performs work at import time. Top-level constants are limited
+  to typed-array literals (the quad geometry) which bundlers treat as pure.
+- The loss/restore registries (`_effects`, `_textures`) ARE retained whenever
+  `createEffect` or `createRawTexture` is referenced, because the constructors
+  push into them. This is unavoidable: it's the cost of context restore. Total
+  fixed cost ≈ 1–2 KB.
+
+**Acceptance:** NeonBrush downstream measures its own bundle after migration
+and confirms the per-page delta. The 10–12 KB min+gzip estimate in §0 is a
+hypothesis; a real measurement is required before declaring v1 success.
+
+---
+
+## 6. Shader convention — GLSL ES 3.00 only
+
+Consumers ship preconverted GLSL ES 3.00 shaders. The runtime does **zero**
+preprocessing (no `attribute→in` regex, no `#include` resolution). The only
+runtime injection is the optional `defines` string from `GLEffectOptions`,
+inserted exactly once between the version declaration and the user shader body.
+
+### 6.1 Required output shape
+
+Every shader the package accepts MUST follow this template:
+
+```glsl
+#version 300 es                           // MUST be line 1
+precision highp float;                    // (vertex) — or precision mediump for fragment if intentional
+precision highp int;
+// ← package inserts options.defines here verbatim, if provided
+// ← user shader body starts here
+```
+
+The fragment shader MUST declare exactly one color output named `glFragColor`:
+
+```glsl
+#version 300 es
+precision highp float;
+out vec4 glFragColor;
+// user body here; every former `gl_FragColor = …;` is now `glFragColor = …;`
+```
+
+### 6.2 Build-time conversion rules (recommended for NeonBrush)
+
+NeonBrush's existing `tools/buildShaders.mjs` is extended with the following
+verbatim rewrites applied IN ORDER to each `*.glsl` source. Conditional
+preprocessor blocks (`#ifdef LANDSCAPE`, etc.) are preserved unchanged.
+
+| #   | Rule (regex)                                                                                      | Replacement                                                                                    |
+| --- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | (vertex only) `^attribute\s+(\w[\w ]*)\s+(\w+)\s*;`                                               | `layout(location = <0 \| 1 \| 2 \| …in order of declaration>) in $1 $2;`                       |
+| 2   | (vertex) `^varying\s+(\w+)\s+(\w+)\s*;`                                                           | `out $1 $2;`                                                                                   |
+| 3   | (fragment) `^varying\s+(\w+)\s+(\w+)\s*;`                                                         | `in $1 $2;`                                                                                    |
+| 4   | (both) `\btexture2D\s*\(`                                                                         | `texture(`                                                                                     |
+| 5   | (both) `\btextureCube\s*\(`                                                                       | `texture(`                                                                                     |
+| 6   | (fragment) every `\bgl_FragColor\b`                                                               | `glFragColor`. Plus inject `out vec4 glFragColor;` exactly once after the precision qualifier. |
+| 7   | (fragment) every `\bgl_FragData\s*\[\s*N\s*\]`                                                    | UNSUPPORTED — converter throws. (MRT is explicitly out of scope.)                              |
+| 8   | (both) prepend `#version 300 es\n` + appropriate `precision` declarations if not already present. |                                                                                                |
+
+After conversion, NeonBrush's build emits `*.glsl.ts` modules whose default
+export is the converted source string. The runtime concatenates
+`source = converted.slice(0, defines_insertion_point) + (options.defines ?? "") + converted.slice(defines_insertion_point)`.
+For simplicity, the converter MAY emit a marker comment `// __DEFINES__` and
+the runtime splits on that — keeps the runtime regex-free.
+
+### 6.3 What we don't support
+
+- `#include` directives (NeonBrush doesn't use them).
+- MRT (`gl_FragData[N]`, multiple `out` colors).
+- WebGL1 conditional paths (`#ifdef WEBGL2` blocks).
+- Implicit precision for `int` / `bool` — converter inserts `precision highp int;`
+  alongside the float precision when missing.
+- Shader includes / shader-store lookup.
+
+---
+
+## 7. State machine / lifecycle
+
+```
+[create]   createGLEngine(canvas, opts)
+              acquires WebGL2 context, builds caps, allocates GLState,
+              registers webglcontextlost / webglcontextrestored handlers.
+   ↓
+[idle]     no rAF active.
+   ↓
+runRenderLoop(engine, fn)
+   ↓
+[running]  rAF → resizeGLEngine(engine) → for each _loops: fn(dt)
+   ↓
+stopRenderLoop(engine[, fn])
+   ↓
+[idle]
+   ↓
+disposeGLEngine(engine)
+   ↓
+[disposed] all subsequent calls are no-ops. WebGLTexture/Buffer/Program
+            handles released; canvas left intact.
+```
+
+Effect lifecycle:
+
+```
+[created]      createEffect: shaders compiled, program linked (parallel if available).
+[compiling]    isEffectReady=false. setEffectXxx is legal and updates the value
+                cache but skips the gl.uniform* call (loc lookup returns null).
+[ready]        isEffectReady=true. _onCompiled fires once. useEffect works.
+[disposed]     disposeEffect — gl.deleteProgram / deleteShader.
+```
+
+Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for `loadTexture2D` `isReady` flips true after Image decode + first `gl.texImage2D` call.
+
+---
+
+## 8. Babylon.js equivalence map
+
+| Babylon.js (used by NeonBrush)                                   | lite-gl                                                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `new ThinEngine(canvas, antialias, opts)`                        | `createGLEngine(canvas, opts)`                                                                       |
+| `engine.dispose()`                                               | `disposeGLEngine(engine)`                                                                            |
+| `engine.resize()`                                                | `resizeGLEngine(engine)`                                                                             |
+| `engine.getRenderWidth/Height()`                                 | `getRenderWidth/Height(engine)`                                                                      |
+| `engine.getHardwareScalingLevel()` / `setHardwareScalingLevel`   | `getHardwareScalingLevel(engine)` / `setHardwareScalingLevel(engine, lv)`                            |
+| `engine.getRenderingCanvas()`                                    | `getRenderingCanvas(engine)`                                                                         |
+| `engine.runRenderLoop(fn)` / `stopRenderLoop([fn])`              | `runRenderLoop(engine, fn)` / `stopRenderLoop(engine[, fn])`                                         |
+| `engine.onContextLostObservable.add(cb)`                         | `onContextLost(engine, cb)`                                                                          |
+| `engine.onContextRestoredObservable.add(cb)`                     | `onContextRestored(engine, cb)`                                                                      |
+| `engine.createRawTexture(data, w, h, format, mip, invY, samp)`   | `createRawTexture(engine, data, w, h, { format: fmt, type, invertY, ...getSamplingModeFilters(s) })` |
+| `engine.createTexture(url, noMip, invY, …)`                      | `loadTexture2D(engine, url, opts, onLoad?, onError?)`                                                |
+| `new EffectWrapper({ engine, vertexShader, fragmentShader, … })` | `createEffectWrapper(engine, { fragmentSource, vertexSource?, uniformNames?, samplerNames? })`       |
+| `effect.executeWhenCompiled(cb)`                                 | `executeWhenCompiled(effect, cb)`                                                                    |
+| `effect.isReady()`                                               | `isEffectReady(effect)`                                                                              |
+| `effect.setFloat/2/3/4/Color3(name, …)`                          | `setEffectFloat/2/3/4(engine, effect, name, …)` / `setEffectColor3(effect, name, c)`                 |
+| `effect.setTexture(name, thinTexture)`                           | `setEffectTexture(effect, name, glTexture)`                                                          |
+| `new EffectRenderer(engine)`                                     | (no equivalent — quad is a context-owned lazy resource)                                              |
+| `effectRenderer.setViewport()`                                   | `setViewport(engine)`                                                                                |
+| `effectRenderer.applyEffectWrapper(wrapper)`                     | `applyEffectWrapper(wrapper)`                                                                        |
+| `effectRenderer.draw()`                                          | `drawEffect(engine)`                                                                                 |
+| `new ThinTexture(internalTexture)`                               | (no wrapper — `GLTexture` is the public type, no two-layer split)                                    |
+| `new HtmlElementTexture(name, el, opts)`                         | `createHtmlElementTexture(engine, el, opts)`                                                         |
+| `engine.setAlphaMode(mode)`                                      | `setBlendMode(engine, mode)` \_(values ≙ `Constants.ALPHA\__`)\*                                     |
+| `new SpriteRenderer(name, engine, capacity, …)`                  | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                      |
+| `spriteRenderer.render(sprites, deltaTime, view, proj)`          | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                            |
+| `spriteRenderer.dispose()`                                       | `disposeSpriteRenderer(renderer)`                                                                    |
+| `engine.captureGPUFrameTime(on)` / `getGPUFrameTimeCounter()`    | `captureGPUFrameTime(engine, on)` / `getGPUFrameTimeCounter(engine)`                                 |
+| `engine.updateTextureSamplingMode(mode, tex, mips)`              | `updateTextureSamplingPreset(tex, mode, mips)`                                                       |
+| `effectWrapper.effect = existingEffect`                          | `useEffect(existingEffect)` + setters + `drawEffect(engine)` (no wrapper needed)                     |
+| `texture.isReady()`                                              | `isTextureReady(tex)`                                                                                |
+| `engine.updateDynamicTexture(tex, src, invY, premul)`            | `updateDynamicTexture(tex, src, { invertY, premultiplyAlpha })`                                      |
+| `htmlElementTexture.update(invertY)`                             | `updateHtmlElementTexture(tex, { invertY })` (video: `!invertY`)                                     |
+| `new ThinSprite()` (position/size/angle/cellIndex/color/invert)  | `GLSprite` plain data object (same fields)                                                           |
+| `engine.createRenderTargetTexture(size, opts)`                   | `createRenderTarget(engine, width, height, opts)`                                                    |
+| `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)`  | `bindRenderTarget(rt)` / `restoreDefaultFramebuffer(engine)`                                         |
+| `rtt.resize(size)` / `rtt.dispose()`                             | `resizeRenderTarget(rt, w, h)` / `disposeRenderTarget(rt)`                                           |
+
+Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
+
+---
+
+## 9. Dependencies
+
+- **External (npm):** none. The package depends only on the browser's WebGL2 + DOM types (`@types/web` via `lib: ["DOM", "ESNext"]`).
+- **Workspace:** none. The package does not import from `babylon-lite`.
+- **Peer (downstream):** `@babylonjs/lite-gl` becomes a dependency of NeonBrush. NeonBrush's `@babylonjs/core` peer can be dropped once the magic loading screen is also ported (v2).
+
+---
+
+## 10. Out of scope / explicit limitations
+
+1. No WebGL1 fallback.
+2. Render-to-texture IS available from the barrel
+   (`createRenderTarget` / `bindRenderTarget` / `resizeRenderTarget` /
+   `disposeRenderTarget`; types `GLRenderTarget` /
+   `GLRenderTargetOptions` — see §3.8). Scope is a single RGBA8
+   color attachment (or a bring-your-own `colorTexture` — e.g. a `createFloatTexture`
+   half-float HDR target — with `createFloatRenderTarget` as the direct HDR sugar),
+   an optional core
+   `DEPTH_COMPONENT16` renderbuffer (`generateDepthBuffer`), opt-in stencil via
+   `generateRenderTargetStencil` (packed `DEPTH24_STENCIL8` or
+   stencil-only `STENCIL_INDEX8`) and opt-in mipmaps via
+   `generateRenderTargetMipMaps`, and readback
+   (`readRenderTargetPixels` to the CPU, `readRenderTargetPixelsToBuffer` into a
+   `PIXEL_PACK_BUFFER` at a byte offset, both with an optional `RED` / `RG` read `format` for
+   `R8` / `RG8` targets created via the `format` option — Babylon core only
+   reads RGBA to the CPU). NOT supported: multiple render targets (MRT,
+   item 10).
+3. `SpriteRenderer` / `ThinSprite` are available from the barrel
+   (`createSpriteRenderer` / `renderSprites` / `GLSprite`), matching Babylon's
+   non-instanced 4-vertex path for parity. NOT ported: `ThinSprite` animation
+   (`playAnimation` / `_animate` / `delay`), instanced rendering, and the depth
+   pre-pass (lite-gl has no depth attachment — `disableDepthWrite` is inert).
+4. No shader-store, no `#include`, no runtime preprocessor beyond `options.defines` injection.
+5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
+6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
+7. Depth / stencil / cull / color-mask state setters ARE shipped via the
+   depth-stencil module (`setDepthState` / `setStencilState` /
+   `setStencilOpSeparate` / `setCullState` / `setColorMask` / `clearEngine`).
+   Blend state is `setBlendMode(engine, mode)` /
+   `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
+   still does not touch blend, so fullscreen-effect parity is unchanged.
+8. No texture compression, no KTX, no DDS, no Basis.
+9. No anisotropic filtering knobs (NeonBrush doesn't use them).
+10. No MRT — `gl_FragData[N]` is a converter error (§6.3).
+11. Matrix uniform setters ARE shipped: `setEffectMatrix(effect, name, m)`
+    (4×4) and `setEffectMatrix3x3` for fullscreen effects, alongside the sprite
+    renderer's internal `gl.uniformMatrix4fv` view/projection upload.
+
+---
+
+## 11. NeonBrush migration guide (mechanical)
+
+### 11.1 `engine/thinEngineFactory.ts`
+
+```ts
+// Before
+import { ThinEngine } from "@babylonjs/core/Engines/thinEngine";
+export function createThinEngine(canvas, antialias = false) {
+    return new ThinEngine(canvas, antialias, { antialias, premultipliedAlpha: true, alpha: true, depth: false, stencil: false, preserveDrawingBuffer: false });
+}
+
+// After
+import { createGLEngine, type GLEngineContext } from "@babylonjs/lite-gl";
+export function createNeonContext(canvas: HTMLCanvasElement, antialias = false): GLEngineContext {
+    return createGLEngine(canvas, { antialias, premultipliedAlpha: true, alpha: true, depth: false, stencil: false, preserveDrawingBuffer: false });
+}
+```
+
+### 11.2 `engine/baseEffect.ts` — class → pure state + free functions
+
+```ts
+import { createGLEngine, disposeGLEngine, resizeGLEngine, runRenderLoop, stopRenderLoop, getRenderingCanvas, type GLEngineContext } from "@babylonjs/lite-gl";
+
+export interface BaseEffectState {
+    engine: GLEngineContext;
+    canvas: HTMLCanvasElement | null;
+    ownsContext: boolean;
+}
+
+export function createBaseEffectState(canvasOrCtx: HTMLCanvasElement | GLEngineContext): BaseEffectState {
+    if ("gl" in canvasOrCtx) {
+        return { engine: canvasOrCtx, canvas: getRenderingCanvas(canvasOrCtx), ownsContext: false };
+    }
+    return {
+        engine: createGLEngine(canvasOrCtx, {/* defaults */}),
+        canvas: canvasOrCtx,
+        ownsContext: true,
+    };
+}
+
+export function startBaseEffect(state: BaseEffectState, render: () => void, onError: (e: unknown) => void): void {
+    runRenderLoop(state.engine, () => {
+        try {
+            render();
+        } catch (e) {
+            onError(e);
+            stopBaseEffect(state);
+        }
+    });
+}
+export function stopBaseEffect(state: BaseEffectState): void {
+    stopRenderLoop(state.engine);
+}
+export function resizeBaseEffect(state: BaseEffectState): void {
+    resizeGLEngine(state.engine);
+}
+export function disposeBaseEffect(state: BaseEffectState, onDispose: () => void): void {
+    stopBaseEffect(state);
+    onDispose();
+    if (state.ownsContext) {
+        disposeGLEngine(state.engine);
+    }
+}
+```
+
+### 11.3 Per-effect rewrite (`ScanEffect` shown; others identical)
+
+```ts
+// Before
+this._effectWrapper = new EffectWrapper({ engine: this.engine, useShaderStore: false, vertexShader: scanVertex, fragmentShader: scanFragment, samplerNames: [...], uniformNames: [...] });
+// inside render():
+effectRenderer.setViewport();
+effectRenderer.applyEffectWrapper(this._effectWrapper);
+effect.setFloat("u_Progress", this.progress);
+effect.setTexture("overlaySampler", this._overlayTexture);
+effectRenderer.draw();
+
+// After (state + free functions). NOTE THE ORDER: applyEffectWrapper FIRST,
+// then setters — uniforms target the currently-bound program (§4.3.1).
+this._wrapper = createEffectWrapper(engine, {
+    name: "scanEffect",
+    vertexSource: scanVertexGLSL3,         // pre-converted GLSL ES 3.00, see §6
+    fragmentSource: scanFragmentGLSL3,
+    uniformNames: ["u_Progress", "u_Resolution", "u_backgroundSet"],
+    samplerNames: ["overlaySampler", "backgroundSampler"],   // unit 0 + unit 1
+    // optional: defines: "#define USE_RAMP 1\n",
+});
+this._effect = this._wrapper.effect;            // exposed for the per-uniform setters
+…
+// inside render():
+setViewport(engine);                                      // cached
+applyEffectWrapper(this._wrapper);        // useProgram (cached)
+setEffectFloat(this._effect, "u_Progress", this.progress);
+setEffectFloat2(this._effect, "u_Resolution", rx, ry);
+setEffectTexture(this._effect, "overlaySampler", this._overlayTex);
+setEffectTexture(this._effect, "backgroundSampler", this._backgroundTex);
+drawEffect(engine);                                       // ensureQuad + gl.drawElements
+```
+
+All ten effect files migrate the same way. No GL behaviour changes; uniform-cache behaviour either matches Babylon (per-uniform last-value check) or improves on it (sampler-uniform set once, not every frame).
+
+### 11.4 Babylon → GL constants mapping (for `createRawTexture` migration)
+
+NeonBrush's current calls use Babylon `Constants.*` integer values. The new API
+takes WebGL2 constants directly. The build step or a small inline adapter maps:
+
+| Babylon Constants                | Value | WebGL2 constant                    |
+| -------------------------------- | ----: | ---------------------------------- |
+| `TEXTUREFORMAT_RGBA`             |   `5` | `gl.RGBA`                          |
+| `TEXTUREFORMAT_RGB`              |   `4` | `gl.RGB`                           |
+| `TEXTUREFORMAT_LUMINANCE`        |   `1` | `gl.LUMINANCE`                     |
+| `TEXTURETYPE_UNSIGNED_BYTE`      |   `0` | `gl.UNSIGNED_BYTE`                 |
+| `TEXTURETYPE_FLOAT`              |   `1` | `gl.FLOAT`                         |
+| `TEXTURETYPE_HALF_FLOAT`         |   `2` | `gl.HALF_FLOAT`                    |
+| `TEXTURE_NEAREST_SAMPLINGMODE`   |   `1` | `minFilter/magFilter = gl.NEAREST` |
+| `TEXTURE_BILINEAR_SAMPLINGMODE`  |   `2` | `gl.LINEAR` (mip `gl.NEAREST`)     |
+| `TEXTURE_TRILINEAR_SAMPLINGMODE` |   `3` | `gl.LINEAR_MIPMAP_LINEAR`          |
+
+Example:
+
+```ts
+// Before
+this.engine.createRawTexture(new Uint8Array(4), 1, 1, 5, false, false, 1, null, 0);
+// After
+createRawTexture(engine, new Uint8Array(4), 1, 1, { invertY: false, minFilter: gl.NEAREST, magFilter: gl.NEAREST });
+```
+
+---
+
+## 12. Test specification
+
+lite-gl ships the **same four-layer test harness as the sibling `babylon-lite`
+package**, rooted at `tests/gl/` and mirroring `tests/lite/{unit,build,parity,perf}`:
+
+| Layer              | Location           | Runner                             | Gate                                                                                                                           |
+| ------------------ | ------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Unit               | `tests/gl/unit/`   | vitest — `pnpm test:unit:gl`       | mock-GL call / cache assertions                                                                                                |
+| Build / public API | `tests/gl/build/`  | vitest — `pnpm test:build:gl`      | builds, trims `@internal`, isolated `.d.ts` typecheck, exports-map resolution, **per-scene bundle-size ceilings (`maxRawKB`)** |
+| **Visual parity**  | `tests/gl/parity/` | Playwright — `pnpm test:parity:gl` | canvas screenshot vs committed Babylon `ThinEngine` golden, gated on `MAD ≤ maxMad`                                            |
+| **Performance**    | `tests/gl/perf/`   | Playwright — `pnpm test:perf:gl`   | per-scene frame cost vs Babylon `ThinEngine` ref                                                                               |
+
+### 12.0 Coverage policy — REQUIRED for every addition
+
+**Parity and perf are a mandatory part of the harness, not optional extras.**
+Every new lite-gl **public API** and every new **GL lab scene** (`lab/gl/`) MUST
+ship coverage in all the layers it touches before merge:
+
+- **unit** tests for the new functions / cache behaviour (mock GL);
+- **build** assertions whenever it adds or changes a public export, plus a per-scene **bundle-size ceiling** (`maxRawKB`) for any new GL lab scene;
+- a **parity** scene that renders the feature through BOTH lite-gl AND a Babylon
+  `ThinEngine` reference, then pixel-diffs them (the exact method proven by the
+  NeonBrush migration — ref page vs lite page → `gl.readPixels` → `compareImages`);
+- a **perf** scene measuring its per-frame cost against the committed baseline.
+
+Concretely, a new `lab/gl/` scene flips `skipParity` / `skipPerf` to `false` in
+`scene-config-webgl.json`, sets a `maxRawKB` bundle-size ceiling there (a few KB
+above its measured size — the `gl-build` bundle-size test fails the build on
+growth), and adds the matching Babylon reference render. Do NOT land a feature
+with `skip*: true` (or no `maxRawKB`) unless there is a documented reason in the PR.
+
+### 12.1 Unit tests (vitest, in-package)
+
+| Test                                                       | Description                                                                                               |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `createGLEngine rejects non-WebGL2`                        | Mocked canvas returning null → throws clearly.                                                            |
+| `setEffectFloat elides repeat calls`                       | Spy on `gl.uniform1f`. Two identical calls = one GL call.                                                 |
+| `setEffectFloat with NaN re-uploads every call`            | NaN !== NaN — cache fails closed, safe behaviour.                                                         |
+| `setEffectFloat2 cache uses plain number[]`                | Set (0.1, 0.2) twice → one `gl.uniform2f` call (Float32Array truncation regression guard).                |
+| `setEffectTexture skips activeTexture / bind`              | Bind tex A unit 0, bind A again → zero extra GL calls.                                                    |
+| `setEffectTexture switches unit when needed`               | Bind A unit 0, then B unit 0 → one `bindTexture`, no `activeTexture` reassignment.                        |
+| `setEffectTexture skips uniform1i after first frame`       | After finalization, repeated `setEffectTexture` produces zero `uniform1i` calls.                          |
+| `setViewport elides no-op`                                 | Same rect → zero `gl.viewport` calls.                                                                     |
+| `drawEffect builds quad once`                              | First draw creates VAO; later draws don't touch `createVertexArray`.                                      |
+| `applyEffectWrapper before setters is required`            | Calling setters with a different effect bound writes to the wrong program (regression guard).             |
+| `executeWhenCompiled fires once on success`                | Mock parallel-shader-compile to flip ready on frame 3; callback fires exactly once.                       |
+| `setEffectFloat before isReady does NOT poison the cache`  | setEffectFloat("u",1) → not-ready, skipped; flip ready; setEffectFloat("u",1) → uploads exactly 1.        |
+| `sampler uniforms assigned exactly once at finalization`   | Spy on `uniform1i` between createEffect and frame 100 → exactly one call per sampler.                     |
+| `loadTexture2D placeholder is sampleable`                  | Returned texture has `isReady=false` but binding it doesn't error.                                        |
+| `loadTexture2D reuses the same handle for image upload`    | `tex.handle` value pre- and post-load is identical (cached bindings stay valid).                          |
+| `disposeTexture invalidates _state.boundTextures`          | Bind A unit 0; disposeTexture(A); bind B unit 0 → `gl.bindTexture` IS called (not elided).                |
+| `disposeGLEngine makes later calls no-ops`                 | After dispose, `setEffectFloat` etc. return without throwing.                                             |
+| `context lost: setters become no-ops`                      | Simulate webglcontextlost → `setEffectFloat` skips upload AND skips cache write.                          |
+| `context restored: quad VAO rebuilt`                       | Simulate lost+restored → next `drawEffect` creates a fresh VAO.                                           |
+| `context restored: programs re-linked, samplers re-bound`  | Simulate restore → effects re-linked, sampler `uniform1i` re-issued exactly once per sampler.             |
+| `context restored: raw texture upload replayed`            | Simulate restore → `_upload(engine)` called, texture handle replaced, isReady=true.                       |
+| `context restored: loadTexture2D replays from ImageBitmap` | No re-fetch of the URL; the retained `ImageBitmap` is re-uploaded.                                        |
+| `raw texture updates preserve bound parameters`            | Update pixels on the same handle → no `texParameteri`; restore → pixels plus all four parameters replay.  |
+| `loadTexture2D final upload preserves bound parameters`    | Final image upload emits no `texParameteri`; restore replays the bitmap and all four parameters.          |
+| `runRenderLoop dedupes identical callbacks`                | Registering the same fn twice → fired once per frame (matches `AbstractEngine`).                          |
+| `stopRenderLoop() removes all loops`                       | After no-arg stop, no callbacks fire.                                                                     |
+| `setBlendMode issues Babylon-exact params per mode`        | DISABLE/ADD/ALPHA/PREMULTIPLIED each emit the right `enable/disable` + `blendFuncSeparate` tuple.         |
+| `setBlendMode elides redundant calls`                      | Same mode twice = zero GL calls; enabled→enabled re-issues only `blendFuncSeparate` (no re-enable).       |
+| `setBlendMode no-op on lost/disposed context`              | After `fireLost` / `disposeGLEngine`, `setBlendMode` writes nothing and does not throw.                   |
+| `createSpriteRenderer allocates own VAO/VBO/IBO`           | One `createVertexArray`, two `createBuffer`, two `bufferData`, six attribute pointers.                    |
+| `createSpriteRenderer validates capacity / cell size`      | capacity ∉ ℤ∩[1,16384] or non-positive cell size → throws.                                                |
+| `renderSprites draws N sprites in one call`                | N visible sprites → one `bufferSubData` + one `drawElements(TRIANGLES, N*6, UNSIGNED_SHORT, 0)`.          |
+| `renderSprites honours visibility + capacity`              | `isVisible:false` skipped; sprites beyond capacity ignored (count reflects only drawn sprites).           |
+| `renderSprites is allocation-free`                         | `_vertexData` reference is identical across frames (preallocated scratch reused).                         |
+| `renderSprites applies blend mode then resets`             | Default ALPHA tuple emitted; autoReset leaves blending disabled afterwards. ADD option honoured.          |
+| `renderSprites bails on lost / not-ready`                  | Lost context, unready texture, unready effect, or empty input → no `drawElements`, no throw.              |
+| `disposeSpriteRenderer frees GPU + effect, idempotent`     | One `deleteVertexArray` + two `deleteBuffer` + one `deleteProgram`; texture NOT deleted; re-call = no-op. |
+| `sprite buffers rebuilt on context restore`                | `fireLost`+`fireRestored` → `_vao`/`_vbo` non-null and `renderSprites` draws again.                       |
+
+### 12.2 Visual parity vs Babylon `ThinEngine` (`tests/gl/parity/`, per scene)
+
+Every GL lab scene has a parity spec: it renders the **same** content twice —
+once through stock Babylon `ThinEngine` / `EffectRenderer` / `SpriteRenderer` /
+`HtmlElementTexture` (the **reference**, captured as a committed golden) and once
+through the lite-gl package — then Playwright **screenshots the canvas** of each
+and compares them with `compareImages()`. The gate is the full-image **mean
+absolute difference, `MAD ≤ maxMad`** (per scene in `scene-config-webgl.json`);
+`maxDiff` and the within-1-LSB fraction are logged for diagnosis but do not gate.
+This shows lite-gl is faithful to Babylon (within ANGLE / SwiftShader codegen
+noise) for every shipped feature, not just one fullscreen shader.
+
+The harness reuses the proven NeonBrush pattern — a `ref` page + a `lite` page
+per scene and a shared `compare-utils.ts` — with determinism from the
+`?seekTime=<sec>` freeze convention (both engines render one frame at a fixed
+`uTime`, stamp `dataset.animationFrozen`, then stop). Scenes opt in via
+`skipParity: false` in `scene-config-webgl.json`; a Babylon reference render is
+authored alongside each lite-gl scene (see §12.0). `captureGolden()` reuses the
+committed golden, or regenerates it when absent (`RECAPTURE_GOLDEN=true` forces a
+refresh).
+
+### 12.3 Performance (`tests/gl/perf/`, per scene)
+
+Each GL lab scene also has a perf spec measuring its per-frame cost
+(`perf-raf`-style frame timing, `pnpm test:perf:gl`) and a separate
+`perf-regression` comparison (`pnpm test:perf-regression:gl`) whose **baseline is
+the Babylon `ThinEngine` reference render** — there is no committed prior-bundle
+baseline yet (see §13.2). Scenes opt in via `skipPerf: false`.
+
+### 12.4 NeonBrush downstream tests
+
+NeonBrush's existing Jest + Playwright suites are the ultimate validation: when NeonBrush flips its `engine/` adapter to lite-gl, all `test:unit` and `test:interaction` runs must stay green with no MAD regression on the existing interaction screenshots.
+
+### 12.5 Bundle-size acceptance
+
+NeonBrush measures its production webpack bundle before and after migration.
+Acceptance: the swap drops the per-page `@babylonjs/core` footprint by **at
+least 10×** for the smallest consumer (e.g. ScanEffect or a single loading
+screen). The 10–12 KB min+gzip estimate in §0 is a hypothesis; if the real
+number is materially worse, investigate before merging the NeonBrush PR.
+
+---
+
+## 13. Lab gallery & dashboard (GL experience)
+
+The lab (`lab/`) is a single Vite dashboard (`lab/index.html`) with two
+**experiences** chosen from the hamburger toggle and persisted in
+`localStorage["lab-experience"]`: **Lite** (WebGPU, default) and **Lite GL**
+(`webgl`). The dashboard is _experience-aware_ — nearly every command, manifest
+URL, and hint string is resolved per-experience **at runtime**, so the two sides
+share one page without forking it.
+
+### 13.1 Experience-aware wiring — the rules
+
+- **Two sources of truth, kept in sync.** Server-side, `lab/vite.config.ts`
+  exposes `LITE_TARGETS` and `GL_TARGETS` (each entry `{ command, detect }`);
+  `/lab-api/generate` and `/lab-api/gen-status` select the array from
+  `?experience=gl|lite`. Client-side, `index.html` mirrors them in
+  `TAB_GEN_CONFIG` (lite) + `TAB_GEN_GL_COMMANDS` (GL), resolved via
+  `genCommandFor(tab)`. **When you add or rename a GL pipeline command, update
+  BOTH the server `GL_TARGETS` and the client `TAB_GEN_GL_COMMANDS` — they must
+  agree**, or the Regenerate button and the server run different things.
+- **`:gl` command convention.** Every GL Regenerate runs the `:gl`-suffixed
+  script (`test:parity:gl`, `test:perf:gl`, `test:perf-regression:gl`,
+  `build:bundle-scenes:gl`). Never wire a GL tab to a bare lite command.
+- **Per-experience config object.** `LAB_EXPERIENCES.{webgpu,webgl}` holds
+  `basePath` (`/lite` vs `/gl`), `hasBjsRef`, `runtimeData`, and the manifest
+  URLs (`perfManifestUrl` / `bundleManifestUrl` / `perfRegManifestUrl` /
+  `demosManifestUrl`). All GL data lives under `lab/public/gl/…`. Always read
+  these through `currentExperienceConfig()` / `expBasePath()` / `expHasBjsRef()`
+  rather than hard-coding `/lite` or `scene-config.json`.
+- **Hints & tooltips are runtime-injected, not static.** The static HTML hints
+  are authored for Lite. `applyLabExperienceChrome()` overrides each tab's hint
+  text + Regenerate tooltip for GL from `GL_TAB_HINTS`, **preserving the
+  `perf` / `perfreg` / `bundle` status `<span>`s** (their loaders repopulate
+  them). Any new tab hint that names a command or config file MUST get a GL
+  override here, and reference `scene-config-webgl.json` (not `scene-config.json`).
+- **Empty-state strings** must use `genCommandFor(tab)`, never a hard-coded
+  `pnpm …`, so they print the active experience's command.
+
+### 13.2 Data pipelines — what populates each GL tab
+
+| Tab             | Generator                      | Output (served under `/gl/…`)                 | Shape                                                                     |
+| --------------- | ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------- |
+| Scenes / Source | `pnpm dev`                     | live — `lab/gl/scene{N}.html` auto-discovered | —                                                                         |
+| Parity          | `pnpm test:parity:gl`          | `reference/gl/<slug>/` golden + actual        | per-scene pixel diff                                                      |
+| Perf            | `pnpm test:perf:gl`            | `lab/public/gl/perf-manifest.json`            | lite-gl vs Babylon-ref RAF cost                                           |
+| Bundle          | `pnpm build:bundle-scenes:gl`  | `lab/public/gl/bundle/manifest.json`          | `{ sceneN: { rawKB, gzipKB, bjsRawKB, bjsGzipKB } }`                      |
+| Perf-Reg        | `pnpm test:perf-regression:gl` | `lab/public/gl/perf-regression-manifest.json` | `{ regressionPct, scenes: { sceneN: { current, baseline, …deltaPct } } }` |
+| Demos           | static config                  | `demos-config-webgl.json`                     | `[{ slug, name, description, tags, mobile }]`                             |
+
+- **GL bundle sizing** (`scripts/build-bundle-scenes-gl.ts`) esbuild-bundles each
+  `lab/gl/src/scene{N}.ts` standalone (bundle + minify + tree-shake, `esm`,
+  `esnext`), aliasing `babylon-lite-gl` to `packages/babylon-lite-gl/src/index.ts`
+  so the numbers reflect a real tree-shaken consumer. It **also** bundles the
+  matching parity reference
+  (`lab/gl/src/babylon-ref-scene{N}.ts`, i.e. tree-shaken `@babylonjs/core`) into
+  `bjsRawKB` / `bjsGzipKB`, so each Bundle card shows the lite-gl-vs-Babylon
+  `ThinEngine` size ratio (~10–16×). GL has no _master_ (git-baseline) bundle, so
+  only the master-delta UI is skipped (`hasBjsRef:false`). The measurement logic
+  lives in `scripts/bundle-scenes-gl-core.ts`; the `gl-build` bundle-size test
+  (`tests/gl/build/bundle-size.test.ts`) reuses it to **fail the build** when any
+  scene's `rawKB` exceeds its `maxRawKB` ceiling in `scene-config-webgl.json`.
+- **GL perf-regression** baseline = the Babylon `ThinEngine` reference page
+  (`lab/gl/babylon-ref-scene{N}.html`), not a committed prior bundle. It writes
+  the manifest and **then asserts** per scene that lite-gl stays within
+  `PERF_REGRESSION_PCT` of the Babylon baseline (baselines `< 0.05 ms` are too
+  noisy to gate and are skipped). CI runs it with a generous
+  `PERF_REGRESSION_PCT=50` to absorb software-rendering noise. Covers all scenes,
+  spanning the feature matrix (sprite = scene4, html-texture = scene6,
+  effect-renderer = scenes 1/2/3/5/7).
+- **Demos** are pure config: a `lab/gl/demo-<slug>.html` page (may reuse a scene
+  module) + a `lab/public/gl/thumbnails/demo-<slug>.jpg`. No bundle build needed.
+
+### 13.3 Gotchas (these bite)
+
+- **The Vite dev server returns `200` + HTML (SPA fallback) for a _missing_
+  file**, not `404`. So `fetch("/gl/…json").then(r => r.json())` throws _before_ a
+  manifest is generated. All GL JSON loaders go through `readJsonResponse()`,
+  which rejects any non-`application/json` response and degrades to the empty
+  state. **Never call `r.json()` directly on an optional manifest** — route it
+  through the guard.
+- **`esbuild` must be a declared root `devDependency`**, not merely transitive
+  via Vite. `tests/lite/tsconfig.json` globs `../../scripts/**/*.ts`, so `tsc`
+  typechecks `scripts/build-bundle-scenes-gl.ts` and fails with
+  `TS2307: Cannot find module 'esbuild'` unless it is declared. Pin it to the
+  version `tsx` already resolves so bundle output does not drift.
+- **Switching experience reloads the page** (`setLabExperience` writes
+  localStorage then `location.reload()`), so `applyLabExperienceChrome()` runs
+  once per load against a fixed experience — no live re-application needed. Note
+  the URL `?experience=gl` is **server-side only** (`/lab-api`); the _client_
+  selects via localStorage.
+- **Perf is measured with the live RAF loop**, not the `?seekTime=` freeze:
+  `seekTime` renders one frame and then _stops_ the loop (used for deterministic
+  parity capture), so it cannot time repeated frames. Parity → freeze; perf →
+  live loop.
+
+---
+
+## 14. File manifest
+
+As-built layout:
+
+```
+packages/babylon-lite-gl/
+    package.json            scoped @babylonjs/lite-gl, single "." entry (the barrel)
+    tsconfig.json
+    build.mjs               plain tsc emit (stripInternal) + writes dist/package.json
+    README.md
+    src/
+        index.ts            re-exports (core API + blend)
+        context.ts          createGLEngine/disposeGLEngine/resizeGLEngine, lost/restored handlers, registries
+        state.ts            GLState types
+        render-loop.ts      runRenderLoop (dedupe) / stopRenderLoop
+        shader.ts           compile, link, parallel-compile poll, bindAttribLocation
+        effect.ts           createEffect/createEffectWrapper/applyEffectWrapper, cached uniform setters, sampler finalize
+        effect-ready.ts     opt-in waitForEffect polling, cancellation, lifecycle rejection and frame/listener cleanup
+        texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose, GLSamplingMode + getSamplingModeFilters
+        html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture
+        blend.ts            GLBlendMode preset + setBlendMode (cached, Babylon setAlphaMode parity)
+        sprites.ts          GLSprite + createSpriteRenderer/renderSprites/dispose (own VAO/VBO/IBO)
+        render-target.ts    createRenderTarget/bindRenderTarget/resizeRenderTarget/disposeRenderTarget (FBO + color tex + optional depth)
+        effect-renderer.ts  ensureQuad, setViewport, applyEffectWrapper, drawEffect
+
+tests/gl/                   four-layer harness (mirrors tests/lite/), tsconfig.json
+    unit/                   vitest mock-GL — _lite-gl-mock.ts, {blend,cache,html-texture,render-loop,sprites,render-target}.test.ts
+    build/                  public-api.test.ts (built dist + trimmed .d.ts)
+    parity/                 Playwright pixel-diff vs Babylon ThinEngine — compare-utils.ts, gl-parity.spec.ts
+    perf/                   gl-perf-raf.spec.ts (frame cost) + gl-perf-regression.spec.ts (vs Babylon ref)
+playwright.perf.gl.config.ts
+
+lab/gl/                     GL experience (selected by the lab experience toggle)
+    scene{1..7}.html + src/scene{1..7}.ts                          lite-gl demo scenes
+    babylon-ref-scene{1..7}.html + src/babylon-ref-scene{1..7}.ts  Babylon ThinEngine parity references
+    demo-sine-bands.html                                           showcase demo (reuses scene7)
+    src/_shared/run-effect.ts                                      shared fullscreen-effect harness (?seekTime freeze)
+scene-config-webgl.json     per-scene parity/perf config (id, slug, tags, skip*, maxMad)
+demos-config-webgl.json     Demos-tab entries
+scripts/build-bundle-scenes-gl.ts   esbuild per-scene + Babylon-ref bundle sizer
+reference/gl/<slug>/babylon-ref-golden.png   committed golden (git add -f; *-actual / diff-map are ignored outputs)
+lab/public/gl/              bundle/manifest.json, perf-manifest.json, perf-regression-manifest.json, thumbnails/
+
+docs/gl/architecture/00-lite-gl.md   (this file)
+```
+
+NeonBrush side (downstream PR):
+
+```
+packages/NeonBrush/
+    package.json                                  add @babylonjs/lite-gl, drop @babylonjs/core (after v2)
+    src/engine/thinEngineFactory.ts               → createNeonContext
+    src/engine/baseEffect.ts                      → free functions
+    src/engine/baseInteractiveEffect.ts           → free functions
+    src/generativeEffects/scanEffect.ts           mechanical rewrite
+    src/embodiement/cloth/clothEffect.ts          mechanical rewrite
+    src/embodiement/clothVNext/clothEffectVNext.ts mechanical rewrite (uses defines)
+    src/embodiement/orb/orbEffect.ts              mechanical rewrite (LANDSCAPE define variant)
+    src/inputs/inputGlow.ts                       mechanical rewrite (uses html-element textures)
+    src/loadingScreen/progressive/…               mechanical rewrite (BACKGROUNDCOLORRAMP define)
+    src/loadingScreen/progressiveVNext/…          mechanical rewrite
+    src/loadingScreen/rocksteady/…                mechanical rewrite
+    src/loadingScreen/core/tiles.ts               mechanical rewrite
+    src/loadingScreen/magic/background.ts         mechanical rewrite
+    src/loadingScreen/magic/particles.ts          UNCHANGED (still uses stock SpriteRenderer)
+    src/loadingScreen/magic/magicLoadingScreen.ts UNCHANGED
+    tools/buildShaders.mjs                        extend with GLSL 1.00 → 3.00 pre-conversion (§6.2)
+```
+
+Estimated package source: **~1.15–1.45 K LOC** (incremented from the original
+estimate to account for the loss/restore protocol added in §4.7).
+Estimated bundle delta for NeonBrush (minified + gzipped, what the page actually
+downloads): **~120–150 KB → ~11–14 KB** (≈ 10× smaller — see §12.4 for the
+acceptance criterion).

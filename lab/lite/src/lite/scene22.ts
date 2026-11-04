@@ -17,6 +17,7 @@ import {
     setShadowTaskCasterMeshes,
     createStandardMaterial,
     createPbrMaterial,
+    setPbrGammaAlbedo,
     createSolidTexture2D,
     loadTexture2D,
     attachControl,
@@ -69,9 +70,9 @@ async function main(): Promise<void> {
     ground.material = createPbrMaterial({
         baseColorTexture: groundTex,
         ormTexture: ormTex,
-        gammaAlbedo: true,
         usePhysicalLightFalloff: false,
     });
+    setPbrGammaAlbedo(ground.material);
     ground.receiveShadows = true;
     addToScene(scene, ground);
 

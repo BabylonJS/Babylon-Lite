@@ -6,11 +6,13 @@
  */
 
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { createNodeLightingFeature } from "../node-lighting.js";
 
 export const emitter: BlockEmitter = {
     className: "LightInformationBlock",
     emit(block, outputName, _stage, state, _ctx) {
         state.usesLightsUbo = true;
+        state._meshFeature = createNodeLightingFeature;
         const idxRaw = block.serialized.lightId;
         const idx = typeof idxRaw === "number" ? idxRaw : 0;
         const base = `nmeLights.lights[nli(${idx}u)]`;

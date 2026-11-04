@@ -1,9 +1,9 @@
 // Scene 178 — Khronos IridescenceAbalone (KHR_materials_iridescence)
 // Exercises glTF iridescenceFactor + packed intensity/thickness texture channels.
 
-import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadEnvironment, loadGltf, onBeforeRender, registerScene, startEngine } from "babylon-lite";
+import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, setPbrSkybox, createSceneContext, createSolidTexture2D, loadEnvironment, loadGltf, onBeforeRender, registerScene, startEngine } from "babylon-lite";
 
-const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/IridescenceAbalone/glTF-Binary/IridescenceAbalone.glb";
+const MODEL_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/IridescenceAbalone/glTF-Binary/IridescenceAbalone.glb";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 async function main(): Promise<void> {
@@ -38,8 +38,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.014,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = camera.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

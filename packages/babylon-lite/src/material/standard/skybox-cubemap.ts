@@ -12,10 +12,11 @@ import type { RenderTargetSignature } from "../../engine/render-target.js";
 import skyVertSrc from "../../../shaders/skybox-cubemap.vertex.wgsl?raw";
 import skyFragSrc from "../../../shaders/skybox-cubemap.fragment.wgsl?raw";
 import { getSceneBindGroupLayout, createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
-import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
+import { WGSL_FOG } from "../../shader/wgsl-fog.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
+import { _rightHanded } from "#coordinate-system";
 
 export interface SkyboxCubeMapGPU {
     /** Sig-keyed pipeline lookup (called from `bind()` once the target sig is known). */
@@ -58,7 +59,11 @@ export function buildSkyboxCubeMapGPU(engine: EngineContext, worldMatrix: Float3
     });
 
     const vertModule = device.createShaderModule({ code: SCENE_UBO_WGSL + skyVertSrc, label: "skybox-cm-vert" });
-    const fragModule = device.createShaderModule({ code: SCENE_UBO_WGSL + WGSL_FOG + skyFragSrc, label: "skybox-cm-frag" });
+    // Right-handed: negate the lookup direction's Z, like Babylon.js's REFLECTIONMAP_OPPOSITEZ.
+    const fragModule = device.createShaderModule({
+        code: SCENE_UBO_WGSL + WGSL_FOG + (_rightHanded ? skyFragSrc.replace("vPositionLocal)", "vPositionLocal)*vec3f(1.,1.,-1.)") : skyFragSrc),
+        label: "skybox-cm-frag",
+    });
 
     const gpu: SkyboxCubeMapGPU = {
         getPipeline(_engine, sig) {

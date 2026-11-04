@@ -40,7 +40,13 @@ function preFrame(surface: SurfaceContext): void {
         return;
     }
     surface._swapchainCopySrc = true;
-    surface._context.configure({ device: surface.engine._device, format: surface.format, alphaMode: surface._alphaMode, usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
+    surface._context.configure({
+        device: surface.engine._device,
+        format: surface._configureFormat,
+        alphaMode: surface._alphaMode,
+        usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC,
+        viewFormats: [surface.format],
+    });
 }
 
 /** The readback hook. Called once per surface per frame after the contexts have recorded (so the

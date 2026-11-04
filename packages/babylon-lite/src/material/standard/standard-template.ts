@@ -11,17 +11,30 @@
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
-import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
 import { MAX_LIGHTS } from "../../light/types.js";
-import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
+let lightingArguments: ((source: string | undefined) => string) | null = null;
+let lightingParameters: ((extraCode: string) => string) | null = null;
+/** @internal A lazy material extension may supply extra scalar arguments for its lighting helper. */
+export function _installStandardLightingArgumentsResolver(resolve: (source: string | undefined) => string): void {
+    lightingArguments = resolve;
+}
+/** @internal Scalar parameter transport disappears when no extension supplies additional lighting inputs. */
+export function _installStandardLightingParametersResolver(resolve: (extraCode: string) => string): void {
+    lightingParameters = resolve;
+}
 
 // ── Lighting function (always present unless disableLighting) ───
 
-const LIGHTING_FN = `
-fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>) -> array<vec3<f32>, 2> {
+/** @internal Extend the default lighting helper without shader parsing or feature semantics. */
+export function standardLightingFunction(extraLight = ""): string {
+    return wgsl`
+fn computeLighting(viewDir: vec3<f32>, N: vec3<f32>, L: LightEntry, g: f32, P: vec3<f32>${lightingParameters?.(extraLight) ?? ""}) -> array<vec3<f32>, 2> {
+${extraLight}
 var lv: vec3<f32>;
 var a: f32 = 1.0;
 let t = u32(L.vLightData.w);
@@ -51,6 +64,7 @@ s = pow(s, max(1.0, g));
 return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 }
 `;
+}
 
 export interface StandardTemplateConfig {
     /** @internal */
@@ -67,6 +81,10 @@ export interface StandardTemplateConfig {
     readonly _noColorOutput?: boolean;
     /** @internal Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
     readonly _esmShadowOutput?: boolean;
+    /** @internal Has morph targets — switches the vertex shader to morphedPos/morphedNorm (defined by the morph fragment's VR slot). */
+    readonly _hasMorph?: boolean;
+    /** @internal Material-owned lighting helper contribution. */
+    readonly _lightingFunction?: string;
 }
 
 /**
@@ -74,7 +92,7 @@ export interface StandardTemplateConfig {
  * The template contains slot markers that the composer fills.
  */
 export function createStandardTemplate(config: StandardTemplateConfig, esmShadowDepthCode = ""): ShaderTemplate {
-    const { _diffuse, _needsUV, _needsUV2, _diffuseUsesUV2, _disableLighting, _noColorOutput, _esmShadowOutput } = config;
+    const { _diffuse, _needsUV, _needsUV2, _diffuseUsesUV2, _disableLighting, _noColorOutput, _esmShadowOutput, _hasMorph } = config;
 
     // ── Base vertex attributes ──────────────────────────────────
     const _baseVertexAttributes: VertexAttribute[] = [
@@ -92,7 +110,6 @@ export function createStandardTemplate(config: StandardTemplateConfig, esmShadow
     const _baseVaryings: Varying[] = [
         { _name: "vp", _type: "vec3<f32>" },
         { _name: "vn", _type: "vec3<f32>" },
-        { _name: "vf", _type: "vec3<f32>" },
     ];
     if (_needsUV) {
         _baseVaryings.push({ _name: "vu", _type: "vec2<f32>" });
@@ -133,14 +150,20 @@ export function createStandardTemplate(config: StandardTemplateConfig, esmShadow
 
     // ── Vertex template ─────────────────────────────────────────
 
-    const uvPassthrough = _needsUV ? `out.vu = uv * up.u.xy + up.u.zw;` : "";
+    const uvPassthrough = _needsUV ? wgsl`out.vu = uv * up.u.xy + up.u.zw;` : "";
 
-    const uv2Passthrough = _needsUV2 ? `out.vv = uv2;` : "";
+    const uv2Passthrough = _needsUV2 ? wgsl`out.vv = uv2;` : "";
 
     // Vertex UBO struct definitions (must be before binding declarations)
-    const vertexUboStructs = _needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
+    const vertexUboStructs = _needsUV ? wgsl`struct upUniforms { u: vec4<f32>, }` : "";
 
-    const _vertexTemplate = `/*SU*/
+    // When morph targets are active, the morph fragment's VR slot defines
+    // morphedPos/morphedNorm. The base template uses those in place of the
+    // raw vertex attributes; otherwise it falls back to position/normal.
+    const posVar = _hasMorph ? "morphedPos" : "position";
+    const normVar = _hasMorph ? "morphedNorm" : "normal";
+
+    const _vertexTemplate = wgsl`/*SU*/
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${vertexUboStructs}
@@ -154,12 +177,11 @@ var out: VertexOutput;
 /*VR*/
 var finalWorld = mesh.world;
 /*VW*/
-let worldPos4 = finalWorld * vec4<f32>(position, 1.0);
+let worldPos4 = finalWorld * vec4<f32>(${posVar}, 1.0);
 out.vp = worldPos4.xyz;
 let normalWorld = mat3x3<f32>(finalWorld[0].xyz, finalWorld[1].xyz, finalWorld[2].xyz);
-out.vn = normalize(normalWorld * normal);
+out.vn = normalize(normalWorld * ${normVar});
 out.clipPos = scene.viewProjection * worldPos4;
-out.vf = (scene.view * worldPos4).xyz;
 ${uvPassthrough}
 ${uv2Passthrough}
 /*VB*/
@@ -168,13 +190,13 @@ return out;
 
     // ── Fragment template ────────────────────────────────────────
 
-    const lightsStructs = `
+    const lightsStructs = wgsl`
 struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };
 struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };
 @group(0) @binding(1) var<uniform> lights: lightsUniforms;
 `;
 
-    const materialStruct = `
+    const materialStruct = wgsl`
 struct matUniforms {
 dc: vec4<f32>,
 sc: vec4<f32>,
@@ -193,49 +215,53 @@ _1: f32,
 };
 `;
 
-    const helpers = _disableLighting ? WGSL_FOG : WGSL_FOG + LIGHTING_FN;
+    const helpers = _disableLighting ? "" : (config._lightingFunction ?? standardLightingFunction());
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly
-    const doubleSidedEntry = `@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
+    const doubleSidedEntry = wgsl`@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
 
     // View direction
-    const viewDirCode = !_disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
+    const viewDirCode = !_disableLighting ? wgsl`let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
-    // Normal computation — fragment can override via AC slot
-    const normalCode = _disableLighting ? "" : `var normalW = normalize(input.vn);`;
+    // Normal computation — fragment can override via AC slot. Declared for the unlit variant too: the AC
+    // slot exists in both variants, and a bound normal map writes `normalW` there. Without the declaration
+    // an unlit material with a bump texture (e.g. after a live `disableLighting` toggle) compiled invalid
+    // WGSL and its mesh stopped rendering. Unused in the unlit colour path, so the driver drops it.
+    const normalCode = wgsl`var normalW = normalize(input.vn);`;
 
     // Opacity — default from material alpha, fragment can modify via AT
-    const opacityCode = `var alpha = mat.dc.a;`;
+    const opacityCode = wgsl`var alpha = mat.dc.a;`;
 
     // Base color + alpha test. Texture alpha used for discard only (not blended into output alpha),
     // matching BJS ALPHATEST without ALPHAFROMDIFFUSE.
     const baseColorCode = _diffuse
-        ? `let _ds = textureSample(dT, dS, ${_diffuseUsesUV2 ? "input.vv" : "input.vu"});
+        ? wgsl`let _ds = textureSample(dT, dS, ${_diffuseUsesUV2 ? "input.vv" : "input.vu"});
 if (_ds.a < mat.aCut) { discard; }
 var baseColor = _ds.rgb * mat.tl;`
-        : `var baseColor = vec3<f32>(1.0, 1.0, 1.0);`;
+        : wgsl`var baseColor = vec3<f32>(1.0, 1.0, 1.0);`;
 
     // Diffuse color + emissive + specular — defaults, fragments can override via AT
-    const diffuseColorCode = `let diffuseColor = mat.dc.rgb;`;
-    const emissiveCode = `var emissiveContrib = mat.ec;`;
-    const specularColorCode = !_disableLighting ? `var specularColor = mat.sc.rgb;` : "";
+    const diffuseColorCode = wgsl`let diffuseColor = mat.dc.rgb;`;
+    const emissiveCode = wgsl`var emissiveContrib = mat.ec;`;
+    // Same for `specularColor`: the AT slot exists in both variants and a bound specular map writes it.
+    const specularColorCode = wgsl`var specularColor = mat.sc.rgb;`;
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
     if (!_disableLighting) {
         // Shadow — default to 1.0, fragment overrides via AD slot
         // shadowFactors array is populated by std-shadow-fragment (one per light index)
-        lightingBlock = `var glossiness = mat.sc.a;
+        lightingBlock = wgsl`var glossiness = mat.sc.a;
 var diffuseBase = vec3<f32>(0.0);
 var specularBase = vec3<f32>(0.0);
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
-let lc = min(mesh.lc, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AD*/
 for (var li = 0u; li < lc; li++) {
 let lightIndex = mli(li);
-let r = computeLighting(viewDirectionW, normalW, lights.lights[lightIndex], glossiness, input.vp);
+let r = computeLighting(viewDirectionW, normalW, lights.lights[lightIndex], glossiness, input.vp${lightingArguments?.(config._lightingFunction) ?? ""});
 let sf = shadowFactors[lightIndex];
 diffuseBase += r[0] * sf;
 specularBase += r[1] * sf;
@@ -244,10 +270,13 @@ let finalDiffuse = clamp(diffuseBase * diffuseColor + emissiveContrib + mat.ac, 
 let finalSpecular = specularBase * specularColor;
 var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflectionColor, alpha);`;
     } else {
-        lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
+        lightingBlock = wgsl`var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
-    const _fragmentTemplate = `/*SU*/
+    // For a color-less pass (depth/shadow only) emit only the early `return;` after the alpha-test slot;
+    // the lighting + color tail below would be unreachable dead code (WGSL "code is unreachable"). The
+    // color path is byte-identical to the previous template, so pixel output is unchanged.
+    const _fragmentTemplate = wgsl`/*SU*/
 ${lightsStructs}
 ${materialStruct}
 ${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, depthValues: vec4<f32>, }" : ""}
@@ -269,16 +298,16 @@ ${diffuseColorCode}
 ${emissiveCode}
 ${specularColorCode}
 /*AT*/
-${_noColorOutput ? "return;" : _esmShadowOutput ? esmShadowDepthCode : ""}
+${
+    _noColorOutput
+        ? "return;"
+        : wgsl`${_esmShadowOutput ? esmShadowDepthCode : ""}
 ${lightingBlock}
 /*BC*/
 color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
-if (scene.vFogInfos.x > 0.0) {
-let fog = calcFogFactor(input.vf);
-color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
-}
 /*BA*/
-${_noColorOutput ? "" : "return color;"}
+return color;`
+}
 }`;
 
     return {

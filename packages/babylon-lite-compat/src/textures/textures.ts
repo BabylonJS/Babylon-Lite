@@ -1,0 +1,759 @@
+/**
+ * Babylon.js-compatible texture wrappers over Babylon Lite's `loadTexture2D`.
+ *
+ * Babylon.js's `Texture` constructor is synchronous and loads in the background.
+ * Babylon Lite loads textures asynchronously. The compat `Texture` kicks off the
+ * load in its constructor and resolves `_lite` when ready; assign the texture to
+ * a material after `await texture.whenReadyAsync()` (or construct via
+ * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
+ */
+
+import {
+    loadTexture2D,
+    loadBasisTexture2D,
+    loadKtxTexture2D,
+    createTexture2DFromPixels,
+    updateTexture2DFromPixels,
+    createTexture3DFromPixels,
+    createDynamicTexture,
+    updateDynamicTexture,
+    createHtmlTexture,
+    requestHtmlTextureUpdate,
+    updateHtmlTexture,
+    disposeHtmlTexture,
+    whenHtmlTextureReady,
+} from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D, HtmlTexture2D } from "babylon-lite";
+
+import { unsupported } from "../error.js";
+import type { AbstractEngine } from "../engine/engine.js";
+import { Matrix } from "../math/matrix.js";
+import { Observable } from "../misc/observable.js";
+import type { Scene } from "../scene/scene.js";
+
+/** Compression suffix → `loadKtxTexture2D` token, recognised in a pre-resolved KTX URL. */
+const KTX_SUFFIX_RE = /(-astc|-dxt|-etc2|-pvrtc)\.ktx(\?.*)?$/i;
+
+/**
+ * @internal Recognise a pre-resolved compressed KTX URL and split it into the
+ * `{ baseUrl, suffix }` pair Babylon Lite's `loadKtxTexture2D` expects (which
+ * takes a base image URL plus a format suffix and reconstructs the KTX URL
+ * itself), or `null` when the URL is not a compressed KTX.
+ *
+ * Babylon.js code selects the format via `engine.getCaps()` and hands `Texture`
+ * a single fully-qualified `.ktx` URL (e.g. `…/grid-dxt.ktx`), so the base is the
+ * `.png` fallback (`…/grid.png`) and the suffix is `-dxt.ktx`. Any query string
+ * (auth / cache-busting / signed-URL params) is preserved on the base URL so it
+ * survives onto both the KTX fetch and the `.png` fallback.
+ */
+export function resolveKtxUrl(url: string): { baseUrl: string; suffix: string } | null {
+    const ktx = url.match(KTX_SUFFIX_RE);
+    if (!ktx) {
+        return null;
+    }
+    return { baseUrl: url.replace(KTX_SUFFIX_RE, ".png$2"), suffix: ktx[1]! + ".ktx" };
+}
+
+/**
+ * Pick the right Babylon Lite loader for a texture URL:
+ *  - `.basis` → `loadBasisTexture2D` (GPU-format transcode; manages its own V-flip).
+ *  - a pre-resolved compressed KTX (`…-dxt.ktx` etc.) → `loadKtxTexture2D` (see
+ *    {@link resolveKtxUrl}), which re-checks device support and falls back to the
+ *    base image.
+ *  - everything else → the raster `loadTexture2D`.
+ *
+ * The basis/KTX loaders manage their own V-orientation, so the raster-only
+ * `invertY` / `mipMaps` options are ignored there — passing the same opts is safe.
+ */
+function loadCompatTexture(engine: EngineContext, url: string, opts: Texture2DOptions): Promise<Texture2D> {
+    const path = url.split(/[?#]/)[0]!.toLowerCase();
+    if (path.endsWith(".basis")) {
+        return loadBasisTexture2D(engine, url, opts);
+    }
+    const ktx = resolveKtxUrl(url);
+    if (ktx) {
+        return loadKtxTexture2D(engine, ktx.baseUrl, [ktx.suffix], opts);
+    }
+    return loadTexture2D(engine, url, opts);
+}
+
+export abstract class BaseTexture {
+    public name = "";
+    /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
+    public _lite: Texture2D | undefined;
+
+    /** @internal One-shot listeners fired when the GPU handle first resolves (see {@link _onReady}). */
+    private _readyListeners: Array<() => void> | undefined;
+
+    public getClassName(): string {
+        return "BaseTexture";
+    }
+
+    /**
+     * @internal Register a callback fired once this texture's GPU handle resolves.
+     * Owning compat materials use it to rebind and rebuild once an asynchronously
+     * loaded texture becomes available. Fires immediately if the handle already
+     * exists; otherwise queues until {@link _notifyReady}. One-shot per listener.
+     */
+    public _onReady(listener: () => void): void {
+        if (this._lite) {
+            listener();
+            return;
+        }
+        (this._readyListeners ??= []).push(listener);
+    }
+
+    /** @internal Fire and clear the readiness listeners (called by subclasses once `_lite` resolves). */
+    protected _notifyReady(): void {
+        const listeners = this._readyListeners;
+        if (listeners) {
+            this._readyListeners = undefined;
+            for (const listener of listeners) {
+                listener();
+            }
+        }
+    }
+
+    /**
+     * Babylon.js `BaseTexture.getInternalTexture()` — the backend texture handle. Babylon.js
+     * returns an `InternalTexture`; the compat layer's equivalent is the Lite texture handle,
+     * which is what the compat engine's texture methods accept.
+     */
+    public getInternalTexture(): Texture2D | null {
+        return this._lite ?? null;
+    }
+
+    public abstract whenReadyAsync(): Promise<void>;
+
+    public dispose(): void {
+        // Lite texture lifetimes are managed by the GPU resource pool; explicit
+        // disposal is a no-op in the compat layer.
+    }
+}
+
+/** Options accepted by Babylon.js `HtmlTexture`. */
+export interface IHtmlTextureOptions {
+    width?: number;
+    height?: number;
+    generateMipMaps?: boolean;
+    samplingMode?: number;
+    format?: number;
+    autoUpdate?: boolean;
+    useSvgFallback?: boolean;
+    engine?: AbstractEngine | null;
+    scene?: Scene | null;
+}
+
+/** Babylon.js `HtmlTexture`, forwarding DOM capture and updates to Babylon Lite. */
+export class HtmlTexture extends BaseTexture {
+    public readonly element: HTMLElement;
+    public readonly host: HTMLElement | null;
+    public readonly onLoadObservable = new Observable<HtmlTexture>(undefined, true);
+    private readonly _engine: AbstractEngine | null;
+    private readonly _textureMatrix = Matrix.Identity();
+    private readonly _ready: Promise<void>;
+    private _htmlTexture: HtmlTexture2D | undefined;
+    private _disposed = false;
+
+    public constructor(name: string, element: HTMLElement, options: IHtmlTextureOptions) {
+        super();
+        this.name = name;
+        this.element = element;
+        this._engine = options.scene?.getEngine() ?? options.engine ?? null;
+        this.host = (this._engine?.getRenderingCanvas() as HTMLElement | null | undefined) ?? null;
+        if (!this._engine || !element) {
+            this._ready = Promise.reject(new Error("HtmlTexture requires an engine and HTML element."));
+            void this._ready.catch(() => undefined);
+            return;
+        }
+        if (options.format !== undefined && options.format !== 5) {
+            unsupported("HtmlTexture.format", "Babylon Lite HTML textures use RGBA8; alternate Babylon.js texture formats require a new native upload/storage contract.");
+        }
+        const nearest = options.samplingMode === Texture.NEAREST_SAMPLINGMODE || options.samplingMode === Texture.NEAREST_NEAREST;
+        const htmlTexture = createHtmlTexture(this._engine._lite, element, {
+            width: options.width,
+            height: options.height,
+            mipMaps: options.generateMipMaps ?? false,
+            autoUpdate: options.autoUpdate ?? true,
+            useSvgFallback: options.useSvgFallback ?? true,
+            minFilter: nearest ? "nearest" : "linear",
+            magFilter: nearest ? "nearest" : "linear",
+            invertY: true,
+        });
+        this._htmlTexture = htmlTexture;
+        this._ready = whenHtmlTextureReady(htmlTexture).then(() => {
+            if (this._disposed) {
+                throw new Error("HtmlTexture was disposed before its first upload completed.");
+            }
+            this._lite = htmlTexture;
+            try {
+                this.onLoadObservable.notifyObservers(this);
+            } finally {
+                this._notifyReady();
+            }
+        });
+        void this._ready.catch(() => undefined);
+    }
+
+    public getTextureMatrix(): Matrix {
+        return this._textureMatrix;
+    }
+
+    public requestUpdate(): void {
+        if (this._engine && this._htmlTexture) {
+            requestHtmlTextureUpdate(this._engine._lite, this._htmlTexture);
+        }
+    }
+
+    public update(invertY = true): void {
+        if (this._engine && this._htmlTexture) {
+            updateHtmlTexture(this._engine._lite, this._htmlTexture, invertY);
+        }
+    }
+
+    public override getClassName(): string {
+        return "HtmlTexture";
+    }
+
+    public whenReadyAsync(): Promise<void> {
+        return this._ready;
+    }
+
+    public override dispose(): void {
+        this._disposed = true;
+        if (this._htmlTexture) {
+            disposeHtmlTexture(this._htmlTexture);
+            this._htmlTexture = undefined;
+        }
+        this._lite = undefined;
+        this.onLoadObservable.clear();
+        this.onLoadObservable.cleanLastNotifiedState();
+    }
+}
+
+export class Texture extends BaseTexture {
+    private readonly _ready: Promise<void>;
+    private _onLoadObservable: Observable<Texture> | undefined;
+    /** Babylon.js sampling-mode constants (numeric parity). */
+    public static readonly NEAREST_SAMPLINGMODE = 1;
+    public static readonly BILINEAR_SAMPLINGMODE = 2;
+    public static readonly TRILINEAR_SAMPLINGMODE = 3;
+    public static readonly NEAREST_NEAREST = 8;
+    public static readonly LINEAR_LINEAR = 11;
+    /** Babylon.js coordinate-mode constants (numeric parity). */
+    public static readonly CLAMP_ADDRESSMODE = 0;
+    public static readonly WRAP_ADDRESSMODE = 1;
+    public static readonly MIRROR_ADDRESSMODE = 2;
+    /** Babylon.js texture UV tiling (applied to the Lite material at bind time). */
+    public uScale = 1;
+    public vScale = 1;
+    public uOffset = 0;
+    public vOffset = 0;
+    public hasAlpha = false;
+    public coordinatesIndex = 0;
+    /** Babylon.js sampling mode passed at construction (`NEAREST_SAMPLINGMODE` = 1, etc.). */
+    public readonly samplingMode: number;
+    /** @internal The Scene or engine this texture was created against (for `clone`). */
+    private readonly _source: Scene | { _lite: import("babylon-lite").EngineContext };
+
+    public constructor(
+        url: string,
+        sceneOrEngine: Scene | { _lite: import("babylon-lite").EngineContext },
+        noMipmapOrOptions?: unknown,
+        invertY?: boolean,
+        _samplingMode?: number,
+        onLoad?: (() => void) | null
+    ) {
+        super();
+        this.name = url;
+        // Babylon.js `Texture(url, scene, noMipmapOrOptions?, invertY?, samplingMode?)`.
+        // The third argument is either a `noMipmap` boolean or an options object; parse
+        // both shapes so the load matches what the ported code asked for.
+        let noMipmap = false;
+        let invertYOpt = invertY;
+        let samplingMode = _samplingMode;
+        if (typeof noMipmapOrOptions === "boolean") {
+            noMipmap = noMipmapOrOptions;
+        } else if (noMipmapOrOptions && typeof noMipmapOrOptions === "object") {
+            const o = noMipmapOrOptions as { noMipmap?: boolean; invertY?: boolean; samplingMode?: number };
+            noMipmap = o.noMipmap ?? false;
+            invertYOpt = invertYOpt ?? o.invertY;
+            samplingMode = samplingMode ?? o.samplingMode;
+        }
+        // Babylon.js `Texture.invertY` defaults to true; honour an explicit `false`.
+        this._invertY = invertYOpt ?? true;
+        this._noMipmap = noMipmap;
+        this.samplingMode = samplingMode ?? Texture.BILINEAR_SAMPLINGMODE;
+        this._source = sceneOrEngine;
+        // Babylon.js's `Texture` accepts either a `Scene` or a `ThinEngine`. When a
+        // scene is passed, the load is tracked so the scene awaits it at build; when
+        // a bare engine is passed (e.g. the scene-less `SpriteRenderer` path), there
+        // is no scene to track against, so the caller awaits readiness itself.
+        const scene = (sceneOrEngine as Scene).getEngine ? (sceneOrEngine as Scene) : undefined;
+        const engineWrapper = scene ? undefined : (sceneOrEngine as { _lite: import("babylon-lite").EngineContext; _registerStartupWork?: (w: () => Promise<void>) => void });
+        const engine = scene ? scene.getEngine()._lite : engineWrapper!._lite;
+        // Honour `invertY` / `noMipmap` only on the material (scene-based) path. The
+        // bare-engine path feeds Babylon Lite's sprite renderer, which applies its own
+        // V-orientation, so it keeps `loadTexture2D`'s defaults (matching the Lite ports).
+        // Map the Babylon.js sampling mode to Lite's min/mag filters: `NEAREST_SAMPLINGMODE`
+        // must load with nearest filtering, else the alpha of an alpha-tested (cutout)
+        // texture is bilinear-filtered and the discard boundary shifts — invisible on
+        // axis-aligned sprites but a large divergence on rotated cutout billboards.
+        const nearest = this.samplingMode === Texture.NEAREST_SAMPLINGMODE || this.samplingMode === Texture.NEAREST_NEAREST;
+        const filterOpts: { minFilter?: "nearest" | "linear"; magFilter?: "nearest" | "linear" } = nearest ? { minFilter: "nearest", magFilter: "nearest" } : {};
+        const loadOpts = scene ? { invertY: this._invertY, mipMaps: !this._noMipmap, ...filterOpts } : {};
+
+        this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
+            this._lite = tex;
+            try {
+                this._notifyLoadObservable();
+                if (onLoad) {
+                    onLoad();
+                }
+            } finally {
+                // Rebuild after onLoad has configured UV scale and related fields.
+                this._notifyReady();
+            }
+        });
+        // Let the scene await this load before it builds renderables, so the GPU
+        // handle exists when the owning material binds (Babylon.js loads in the
+        // background but its render loop simply waits a frame; we wait at build).
+        scene?._trackTextureLoad(this._ready);
+        // Scene-less path (bare engine): register the load as engine startup work
+        // so `texture.isReady()` is true by the time the render loop first runs.
+        engineWrapper?._registerStartupWork?.(() => this._ready);
+    }
+
+    /** @internal Upload-time vertical flip / mipmap flags, preserved across `clone`. */
+    private readonly _invertY: boolean;
+    private readonly _noMipmap: boolean;
+
+    public override getClassName(): string {
+        return "Texture";
+    }
+
+    /**
+     * Babylon.js `texture.clone()` — a new `Texture` over the same source URL.
+     * UV tiling/offset and sampling are copied; the clone re-resolves the GPU
+     * handle (tracked against the same scene so it is ready at build).
+     */
+    public clone(): Texture {
+        const c = new Texture(this.name, this._source, this._noMipmap, this._invertY, this.samplingMode);
+        c.uScale = this.uScale;
+        c.vScale = this.vScale;
+        c.uOffset = this.uOffset;
+        c.vOffset = this.vOffset;
+        c.hasAlpha = this.hasAlpha;
+        c.coordinatesIndex = this.coordinatesIndex;
+        return c;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return this._ready;
+    }
+
+    /** Babylon.js `Texture.onLoadObservable`, allocated only when code subscribes. */
+    public get onLoadObservable(): Observable<Texture> {
+        let observable = this._onLoadObservable;
+        if (!observable) {
+            observable = new Observable<Texture>(undefined, true);
+            this._onLoadObservable = observable;
+            if (this.isReady()) {
+                observable.notifyObservers(this);
+            }
+        }
+        return observable;
+    }
+
+    private _notifyLoadObservable(): void {
+        if (this._onLoadObservable) {
+            this._onLoadObservable.notifyObservers(this);
+        }
+    }
+
+    /** Babylon.js `BaseTexture.isReady()` — true once the GPU handle has resolved. */
+    public isReady(): boolean {
+        return this._lite !== undefined;
+    }
+
+    /** Load a texture and resolve once its GPU handle is available. */
+    public static async LoadAsync(url: string, scene: Scene): Promise<Texture> {
+        const texture = new Texture(url, scene);
+        await texture.whenReadyAsync();
+        return texture;
+    }
+}
+
+/**
+ * Babylon.js `RawTexture` — a texture created from raw pixel bytes. Backed by
+ * Babylon Lite's `createTexture2DFromPixels`; the GPU handle is available
+ * synchronously after construction.
+ */
+export class RawTexture extends BaseTexture {
+    private readonly _scene: Scene;
+
+    public constructor(data: Uint8Array, width: number, height: number, scene: Scene) {
+        super();
+        this._scene = scene;
+        this._lite = createTexture2DFromPixels(scene.getEngine()._lite, data, width, height);
+    }
+
+    public override getClassName(): string {
+        return "RawTexture";
+    }
+
+    /** Replace the texture's pixel contents. */
+    public update(data: Uint8Array): void {
+        if (this._lite) {
+            updateTexture2DFromPixels(this._scene.getEngine()._lite, this._lite, data);
+        }
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+
+    public static CreateRGBATexture(data: Uint8Array, width: number, height: number, scene: Scene): RawTexture {
+        return new RawTexture(data, width, height, scene);
+    }
+}
+
+/**
+ * Babylon.js `RawTexture3D` — a volumetric texture created from raw RGBA8 pixel
+ * bytes (the common case being a colour-grading LUT / colour cube). Backed by
+ * Babylon Lite's `createTexture3DFromPixels`; the GPU handle is available
+ * synchronously after construction.
+ *
+ * Babylon Lite's 3D-texture path is RGBA8-only, so the `format` argument is
+ * recorded for API parity but the upload always treats `data` as tightly-packed
+ * `width * height * depth * 4` RGBA bytes (x fastest, then y, then z).
+ */
+export class RawTexture3D extends BaseTexture {
+    private readonly _scene: Scene;
+    /** Babylon.js `RawTexture3D.is3D` — always true for a 3D texture. */
+    public readonly is3D = true;
+
+    public constructor(
+        data: ArrayBufferView | null,
+        width: number,
+        height: number,
+        depth: number,
+        /** Babylon.js texture format (recorded for parity; Lite uploads RGBA8). */
+        public format: number,
+        scene: Scene,
+        generateMipMaps = true,
+        _invertY = false,
+        _samplingMode = 3,
+        _textureType?: number,
+        _creationFlags?: number
+    ) {
+        super();
+        if (generateMipMaps) {
+            unsupported(
+                "RawTexture3D(generateMipMaps)",
+                "Babylon.js 3D mip generation renders every depth slice of every level and requires a mip-capable 3D allocation plus a dedicated shader/pipeline. Babylon Lite's public 3D texture factory allocates only one level; adding this GPU subsystem is not a small mechanical extension. Pass false to create a base-level texture."
+            );
+        }
+        this._scene = scene;
+        const bytes = toRgbaBytes(data, width, height, depth);
+        this._lite = createTexture3DFromPixels(scene.getEngine()._lite, bytes, width, height, depth) as Texture3D;
+    }
+
+    public override getClassName(): string {
+        return "RawTexture3D";
+    }
+
+    /** Gets the width of the texture. */
+    public get width(): number {
+        return (this._lite as Texture3D | undefined)?.width ?? 0;
+    }
+
+    /** Gets the height of the texture. */
+    public get height(): number {
+        return (this._lite as Texture3D | undefined)?.height ?? 0;
+    }
+
+    /** Gets the depth of the texture. */
+    public get depth(): number {
+        return (this._lite as Texture3D | undefined)?.depth ?? 0;
+    }
+
+    /**
+     * Replace the texture's pixel contents. Babylon Lite has no in-place 3D update,
+     * so the volume is re-uploaded (a fresh Lite 3D texture handle).
+     */
+    public update(data: ArrayBufferView): void {
+        const bytes = toRgbaBytes(data, this.width, this.height, this.depth);
+        this._lite = createTexture3DFromPixels(this._scene.getEngine()._lite, bytes, this.width, this.height, this.depth) as Texture3D;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
+
+/**
+ * @internal Coerce a raw `ArrayBufferView` (or a bare `Uint8Array`) into the tightly
+ * packed `width * height * depth * 4` RGBA8 `Uint8Array` Babylon Lite's raw-pixel
+ * texture factories expect (`createTexture3DFromPixels`,
+ * `createTexture2DArrayFromPixels`). Babylon.js allows a `null` data argument
+ * (an empty texture); Lite requires bytes, so `null` becomes a zero-filled volume.
+ * For a 2D array, `depth` is the layer count.
+ */
+export function toRgbaBytes(data: ArrayBufferView | null, width: number, height: number, depth: number): Uint8Array {
+    const expected = width * height * depth * 4;
+    if (data === null) {
+        return new Uint8Array(expected);
+    }
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    // Keep the result tightly packed: trim any trailing bytes beyond width*height*depth*4
+    // so we never upload unintended data past the volume Lite expects.
+    return bytes.byteLength > expected ? bytes.subarray(0, expected) : bytes;
+}
+
+/**
+ * Babylon.js `DynamicTexture` — a canvas-backed texture. Draw into
+ * `getContext()`, then call `update()` to upload the canvas pixels to the GPU.
+ * Backed by Babylon Lite's `createDynamicTexture` / `updateDynamicTexture`, which
+ * blit the canvas straight to the GPU via `copyExternalImageToTexture` (no
+ * `getImageData` CPU readback).
+ */
+export class DynamicTexture extends BaseTexture {
+    private readonly _scene: Scene;
+    private readonly _canvas: HTMLCanvasElement;
+    private readonly _context: CanvasRenderingContext2D;
+    private readonly _width: number;
+    private readonly _height: number;
+    /** @internal Branded Lite dynamic texture; aliases `_lite` and is the only
+     *  handle `updateDynamicTexture` accepts. */
+    private readonly _dyn: DynamicTexture2D;
+
+    public constructor(name: string, options: { width: number; height: number }, scene: Scene) {
+        super();
+        this.name = name;
+        this._scene = scene;
+        this._width = options.width;
+        this._height = options.height;
+        this._canvas = document.createElement("canvas");
+        this._canvas.width = options.width;
+        this._canvas.height = options.height;
+        const ctx = this._canvas.getContext("2d");
+        if (!ctx) {
+            throw new Error("DynamicTexture: 2D canvas context unavailable.");
+        }
+        this._context = ctx;
+        // Allocate the GPU texture up front (blank until the first draw+update),
+        // matching Babylon.js where the texture exists immediately after construction.
+        this._dyn = createDynamicTexture(scene.getEngine()._lite, options.width, options.height);
+        this._lite = this._dyn;
+    }
+
+    public override getClassName(): string {
+        return "DynamicTexture";
+    }
+
+    public getContext(): CanvasRenderingContext2D {
+        return this._context;
+    }
+
+    public getSize(): { width: number; height: number } {
+        return { width: this._width, height: this._height };
+    }
+
+    /** Draw `text` and refresh the GPU texture. */
+    public drawText(text: string, x: number, y: number, font: string, color: string, clearColor: string | null): void {
+        const ctx = this._context;
+        if (clearColor) {
+            ctx.fillStyle = clearColor;
+            ctx.fillRect(0, 0, this._width, this._height);
+        }
+        ctx.font = font;
+        ctx.fillStyle = color;
+        ctx.fillText(text, x, y);
+        this.update();
+    }
+
+    /**
+     * Blit the current canvas pixels straight to the GPU texture (no CPU readback).
+     * @param invertY - Flip V so a top-down canvas samples upright. Default `true` (Babylon.js parity).
+     * @param premulAlpha - Treat the upload as premultiplied alpha. Default `false`.
+     * @param _allowGPUOptimization - Accepted for Babylon.js signature parity; the blit is already GPU-direct, so this is a no-op.
+     */
+    public update(invertY: boolean = true, premulAlpha: boolean = false, _allowGPUOptimization: boolean = false): void {
+        updateDynamicTexture(this._scene.getEngine()._lite, this._dyn, this._canvas, { invertY, premultiplyAlpha: premulAlpha });
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
+
+/**
+ * Babylon.js `CubeTexture` — environment/skybox cube map. Babylon Lite loads
+ * environments through `loadEnvironment` (IBL + skybox registered on the scene)
+ * rather than as a standalone GPU texture object. This compat `CubeTexture`
+ * therefore acts as a lightweight handle that records the environment URL; the
+ * actual GPU work happens when it is assigned to `scene.environmentTexture` and
+ * the engine starts (see `Scene` env handling). It still extends
+ * {@link BaseTexture} to match the Babylon.js class hierarchy, so it can appear
+ * in `BaseTexture[]` surfaces such as `Material.getActiveTextures()`; because the
+ * environment has no standalone Lite handle, `getInternalTexture()` stays `null`.
+ */
+export class CubeTexture extends BaseTexture {
+    /** Source URL of the (prefiltered) environment. */
+    public readonly url: string;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    public coordinatesMode = 0;
+    public gammaSpace = true;
+    public level = 1;
+    /**
+     * @internal Which Lite environment loader the scene should route this handle
+     * through at engine start. Plain `.env`/`.dds` cube maps load via
+     * `loadEnvironment`/`loadDdsEnvironment`; `HDRCubeTexture` overrides this to
+     * `"hdr"` so the scene picks `loadHdrEnvironment`.
+     */
+    public readonly _envLoaderKind: "cube" | "hdr" = "cube";
+    /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
+    public readonly onLoadObservable = new Observable<CubeTexture>();
+    /**
+     * Babylon.js `CubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. A scene that uses the
+     * texture as its `environmentTexture` turns its image-based lighting with it (see `Scene.environmentTexture`).
+     */
+    public rotationY = 0;
+    private _ready = false;
+    private readonly _readyPromise: Promise<void>;
+
+    public constructor(
+        url: string,
+        _scene?: unknown,
+        _extensions?: unknown,
+        _noMipmap?: boolean,
+        _files?: unknown,
+        onLoad?: (() => void) | null,
+        _onError?: unknown,
+        _format?: unknown,
+        _prefiltered?: boolean
+    ) {
+        super();
+        this.url = url;
+        this.name = url;
+        // Babylon.js fires onLoad once the cube map is ready; some scenes await it
+        // before continuing. We resolve on a microtask since the actual GPU upload
+        // is deferred to `loadEnvironment` at engine start.
+        this._readyPromise = new Promise((resolve) => {
+            queueMicrotask(() => {
+                this._ready = true;
+                if (onLoad) {
+                    onLoad();
+                }
+                this.onLoadObservable.notifyObservers(this);
+                resolve();
+            });
+        });
+    }
+
+    public override getClassName(): string {
+        return "CubeTexture";
+    }
+
+    /** Babylon.js `BaseTexture.isReady()`. */
+    public isReady(): boolean {
+        return this._ready;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return this._readyPromise;
+    }
+
+    /** Babylon.js `CubeTexture.CreateFromPrefilteredData(url, scene)`. */
+    public static CreateFromPrefilteredData(url: string, scene?: unknown): CubeTexture {
+        return new CubeTexture(url, scene);
+    }
+
+    public override dispose(): void {
+        // GPU resources are owned by the scene's environment, disposed with the scene.
+    }
+}
+
+/**
+ * Babylon.js `HDRCubeTexture` — a Radiance `.hdr` (RGBE) equirectangular panorama
+ * used as an environment / IBL source. Like {@link CubeTexture} this is a
+ * lightweight handle that records the `.hdr` URL; the actual GPU work (equirect →
+ * prefiltered cubemap + irradiance SH + BRDF LUT) happens when it is assigned to
+ * `scene.environmentTexture` and the engine starts, at which point the scene
+ * routes it through Babylon Lite's native `loadHdrEnvironment`.
+ */
+export class HDRCubeTexture extends BaseTexture {
+    /** Source URL of the `.hdr` panorama. */
+    public readonly url: string;
+    /** Requested cubemap face size (BJS `size`); forwarded to Lite's `faceSize`. */
+    public readonly size: number;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    public coordinatesMode = 0;
+    public gammaSpace = true;
+    public level = 1;
+    /** @internal Selects Lite's `loadHdrEnvironment` in the scene's env loader. */
+    public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
+    /** Fires when the HDR environment is "ready" (resolved on a microtask). */
+    public readonly onLoadObservable = new Observable<HDRCubeTexture>();
+    /**
+     * Babylon.js `HDRCubeTexture.rotationY` — rotation of the environment around the Y axis, in radians. A scene that uses the
+     * texture as its `environmentTexture` turns its image-based lighting with it (see `Scene.environmentTexture`).
+     */
+    public rotationY = 0;
+    private _ready = false;
+    private readonly _readyPromise: Promise<void>;
+
+    public constructor(
+        url: string,
+        _sceneOrEngine?: unknown,
+        size = 256,
+        _noMipmap?: boolean,
+        _generateHarmonics?: boolean,
+        _gammaSpace?: boolean,
+        _prefilterOnLoad?: boolean,
+        onLoad?: (() => void) | null
+    ) {
+        super();
+        this.url = url;
+        this.size = size;
+        this.name = url;
+        // Babylon.js fires onLoad once the HDR is decoded + prefiltered; the real
+        // GPU work is deferred to `loadHdrEnvironment` at engine start, so we
+        // resolve the readiness signal on a microtask (matches CubeTexture).
+        this._readyPromise = new Promise((resolve) => {
+            queueMicrotask(() => {
+                this._ready = true;
+                if (onLoad) {
+                    onLoad();
+                }
+                this.onLoadObservable.notifyObservers(this);
+                resolve();
+            });
+        });
+    }
+
+    public override getClassName(): string {
+        return "HDRCubeTexture";
+    }
+
+    /** Babylon.js `BaseTexture.isReady()`. */
+    public isReady(): boolean {
+        return this._ready;
+    }
+
+    public override whenReadyAsync(): Promise<void> {
+        return this._readyPromise;
+    }
+
+    public override dispose(): void {
+        // GPU resources are owned by the scene's environment, disposed with the scene.
+    }
+}
+
+/** Babylon.js `RenderTargetTexture` — offscreen render target. Use the native frame-graph RTT APIs. */
+export class RenderTargetTexture {
+    public constructor() {
+        unsupported("RenderTargetTexture", "Offscreen rendering uses Babylon Lite's frame-graph render-target APIs (`createRenderTargetTexture` / render tasks).");
+    }
+}

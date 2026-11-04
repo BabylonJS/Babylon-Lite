@@ -6,7 +6,7 @@
  * CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR (Lite slot BC), compared against a Babylon.js
  * golden produced by an equivalent `MaterialPluginBase` plugin.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 

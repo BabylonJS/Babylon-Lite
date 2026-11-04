@@ -22,7 +22,8 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
@@ -100,13 +101,13 @@ interface SpriteRenderableInternal extends Renderable {
  */
 export function buildSpriteRenderable(engine: EngineContext, layer: Sprite2DLayer): { renderable: Renderable; dispose: () => void } {
     if (layer.depth === "none") {
-        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
+        throw new Error('Depth-hosted sprites require depth != "none".');
     }
     const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
-    const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES, "sprite-depth-hosted-ubo");
+    const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES);
     const cap = layer._capacity;
-    const instanceBuffer = createSpriteInstanceBuffer(engine._device, layer, "sprite-depth-hosted-instances");
-    const fx = _getSpriteFxHook()?.createLayerFx(engine, "sprite-depth-hosted-fx-ubo", layer) ?? null;
+    const instanceBuffer = createSpriteInstanceBuffer(engine._device, layer);
+    const fx = _getSpriteFxHook()?.createLayerFx(engine, "", layer) ?? null;
 
     const isTransparent = layer.depth === "test";
     const isDirect = layer.depth === "test-write";
@@ -160,7 +161,8 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContext, target: R
         depthWrite,
         target._depthStencilFormat,
         getSceneBindGroupLayout(engine),
-        r._layer
+        r._layer,
+        target._depthCompare ?? "greater-equal"
     );
     let bindGroup = r._bindGroups.get(pipeline);
     if (!bindGroup) {
@@ -192,7 +194,7 @@ function uploadLayer(r: SpriteRenderableInternal, target: DrawUpdateContext): vo
     if (r._fx) {
         _getSpriteFxHook()!.updateFx(r._fx, r._layer, r._engine._currentDelta);
     }
-    const grown = ensureSpriteInstanceBuffer(r._engine._device, r._layer, r._instanceBuffer, r._instanceBufferCapacity, "sprite-depth-hosted-instances");
+    const grown = ensureSpriteInstanceBuffer(r._engine._device, r._layer, r._instanceBuffer, r._instanceBufferCapacity);
     if (grown.reallocated) {
         r._instanceBuffer = grown.buffer;
         r._instanceBufferCapacity = grown.capacity;

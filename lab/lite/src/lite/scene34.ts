@@ -15,7 +15,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const root = await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CubeVisibility/glTF-Binary/CubeVisibility.glb");
+    const root = await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/CubeVisibility/glTF-Binary/CubeVisibility.glb");
 
     addToScene(scene, root);
 

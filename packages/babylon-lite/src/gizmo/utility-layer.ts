@@ -25,6 +25,7 @@ export interface UtilityLayer {
     readonly mainScene: SceneContext;
 }
 
+/** Options used when creating a utility layer for gizmos and overlays. */
 export interface UtilityLayerOptions {
     /** Add a built-in hemispheric light so gizmo materials are visible without
      *  the caller adding one. Defaults to true. */
@@ -41,6 +42,7 @@ export interface UtilityLayerOptions {
  *  the camera-gizmo box + cylinders) occlude their own back faces correctly. */
 export function createUtilityLayer(engine: EngineContext, mainScene: SceneContext, options?: UtilityLayerOptions): UtilityLayer {
     const scene = createSceneContext(engine);
+    scene.name = "UtilityLayer";
     scene.clearColor = { r: 0, g: 0, b: 0, a: 0 };
 
     // Share the main scene's camera by reference. If the main scene swaps its

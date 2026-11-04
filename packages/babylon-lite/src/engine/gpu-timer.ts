@@ -1,23 +1,19 @@
 // engine/gpu-timer.ts — optional GPU frame-time measurement.
 //
-// Measures how long the GPU spends on a frame using a WebGPU `timestamp-query`. Two EMPTY pass attachments
-// bracket the frame's recorded work: `gpuFrameTimerBegin` records an empty compute pass (as the encoder's first
-// command) whose BEGINNING timestamp is its slot-0 write, and `gpuFrameTimerEnd` records an empty compute pass
-// (as the last command) whose END timestamp is its slot-1 write — so the GPU runs them contiguously around
-// exactly that frame's passes, measuring the frame's GPU work, not the CPU time spent recording it. This uses
-// the STANDARD `timestampWrites` pass attachments (NOT the legacy `GPUCommandEncoder.writeTimestamp`, which
-// Chromium exposes only behind `--enable-unsafe-webgpu`), so it works in stock Chrome/Edge whenever the adapter
-// offers the `timestamp-query` feature. After the frame is submitted, `gpuFrameTimerResolve` copies the pair
-// into a mapped readback buffer ASYNCHRONOUSLY — off the render critical path — so the measurement barely
-// perturbs the number it reports (no pipeline stall, no per-draw cost).
-//
-// Entirely opt-in: the timer is only created on first enable, its per-frame hooks are installed only while
-// timing is on (so nothing is written while disabled), and the whole feature degrades to a no-op on
-// adapters lacking the `timestamp-query` feature. renderFrame ships only three optional-chain short-circuits.
-// Pure state + free functions (no methods, no import side effects) per the engine's data-oriented style.
+// Two compute marker passes bracket the commands recorded for a frame. Each marker
+// dispatches one workgroup with an empty shader body and carries a timestamp write.
+// Empty passes produced zero or repeated timestamps in the measured render fixtures;
+// recording a dispatch avoids relying on an otherwise empty pass. The markers add
+// GPU work, so the interval includes their overhead. Query resolution and readback
+// remain asynchronous. The timer owns one pipeline, created only when enabled.
+// Use standard timestampWrites pass attachments; do not depend on the legacy
+// GPUCommandEncoder.writeTimestamp or Chromium's --enable-unsafe-webgpu flag.
+// Pure state + free functions; no work executes at module import.
 
 export interface GpuFrameTimer {
     readonly device: GPUDevice;
+    /** Pipeline used by the opening and closing marker dispatches. */
+    readonly markerPipeline: GPUComputePipeline;
     /** Two slots: [frame begin, frame end]. */
     readonly querySet: GPUQuerySet;
     /** Destination for `resolveQuerySet` (2 × u64 = 16 bytes). */
@@ -41,27 +37,35 @@ export function createGpuFrameTimer(device: GPUDevice): GpuFrameTimer | null {
     if (!gpuTimingSupportedFor(device)) {
         return null;
     }
+    const markerPipeline = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+            module: device.createShaderModule({ code: "@compute @workgroup_size(1) fn main() {}" }),
+            entryPoint: "main",
+        },
+    });
     const querySet = device.createQuerySet({ type: "timestamp", count: 2 });
     const resolveBuf = device.createBuffer({
         size: 16,
         usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
     });
-    return { device, querySet, resolveBuf, pool: [], lastMs: 0, inFlight: 0 };
+    return { device, markerPipeline, querySet, resolveBuf, pool: [], lastMs: 0, inFlight: 0 };
 }
 
-/** Write the frame's opening timestamp into the frame encoder (call right after it is created, before any
- *  passes are recorded), so it bookends the start of this frame's GPU work. Uses the STANDARD `timestampWrites`
- *  attachment (no `GPUCommandEncoder.writeTimestamp`, which Chromium gates behind `--enable-unsafe-webgpu`): an
- *  EMPTY compute pass whose BEGINNING timestamp lands in slot 0. Empty pass = no dispatch, negligible cost. */
+/** Record the opening marker before the frame's passes. */
 export function gpuFrameTimerBegin(timer: GpuFrameTimer, encoder: GPUCommandEncoder): void {
-    encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, beginningOfPassWriteIndex: 0 } }).end();
+    const pass = encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, beginningOfPassWriteIndex: 0 } });
+    pass.setPipeline(timer.markerPipeline);
+    pass.dispatchWorkgroups(1);
+    pass.end();
 }
 
-/** Write the frame's closing timestamp into the frame encoder (call right before it is finished/submitted), so
- *  it bookends the end of this frame's GPU work — an EMPTY compute pass whose END timestamp lands in slot 1.
- *  slot1 − slot0 is then the GPU time of exactly the passes recorded between the two empty passes. */
+/** Record the closing marker after the frame's passes, before finish/submit. */
 export function gpuFrameTimerEnd(timer: GpuFrameTimer, encoder: GPUCommandEncoder): void {
-    encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, endOfPassWriteIndex: 1 } }).end();
+    const pass = encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, endOfPassWriteIndex: 1 } });
+    pass.setPipeline(timer.markerPipeline);
+    pass.dispatchWorkgroups(1);
+    pass.end();
 }
 
 /** Resolve the just-submitted timestamp pair and update `lastMs` when the readback maps. Submitted as its

@@ -28,11 +28,13 @@ import {
     createStandardMaterial,
     loadGltf,
     onBeforeRender,
+    onPhysicsAfterStep,
     PhysicsMotionType,
     PhysicsShapeType,
     registerScene,
     setPhysicsBodyMass,
     setPhysicsBodyShape,
+    setPhysicsGravity,
     setPhysicsShapeMaterial,
     showPhysicsBody,
     startEngine,
@@ -41,6 +43,7 @@ import {
 import type { AssetContainer, EngineContext, Mesh, PhysicsShapeParameters, PhysicsViewer, PhysicsWorld, SceneNode } from "babylon-lite";
 
 const PHYSICS_FPS = 60;
+const GRAVITY = { x: 0, y: -9.8, z: 0 };
 const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";
 const SEAGULL_URL = "https://playground.babylonjs.com/scenes/seagulf.glb";
 const SEAGULL_SCALE = 0.63695717914937;
@@ -207,21 +210,10 @@ async function main(): Promise<void> {
     light.intensity = 0.9;
     addToScene(scene, light);
 
-    let simulationStarted = false;
-    let simulatedFrames = 0;
+    let physicsRunning = false;
     let captureQueued = false;
     onBeforeRender(scene, () => {
         canvas.dataset.drawCalls = String(engine.drawCallCount);
-        if (simulationStarted) {
-            simulatedFrames++;
-        }
-        if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
-            captureQueued = true;
-            window.setTimeout(() => {
-                canvas.dataset.captureReady = "true";
-                stopEngine(engine);
-            }, 0);
-        }
     });
 
     // Visible terrain from heightMap.png (same image as scene22).
@@ -238,8 +230,30 @@ async function main(): Promise<void> {
     const seagull = findPrimaryMesh(await loadGltf(engine, SEAGULL_URL));
 
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
+    const world = createHavokWorld(scene, hknp, { x: 0, y: 0, z: 0 });
     const viewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });
+
+    // Robust capture gate: the world starts with ZERO gravity, so bodies stay frozen at their settled
+    // drop-height state during the warm-up frames (physics steps every frame at scene.fixedDeltaMs, but
+    // with no gravity and no initial velocity nothing moves). The debug wireframe overlay is thus fully
+    // rendered before any motion, then we enable gravity and count ACTUAL physics steps. This decouples
+    // the parity capture from GPU pipeline warm-up timing (the BJS reference renders its PhysicsViewer
+    // overlay through an async-compiled utility layer that is blank on the very first frames). Both
+    // scenes start from the identical settled drop-height state, so the captured frame matches.
+    let physStep = 0;
+    onPhysicsAfterStep(world, () => {
+        if (!physicsRunning) {
+            return;
+        }
+        physStep++;
+        if (captureAfterFrames !== null && !captureQueued && physStep >= captureAfterFrames) {
+            captureQueued = true;
+            window.setTimeout(() => {
+                canvas.dataset.captureReady = "true";
+                stopEngine(engine);
+            }, 0);
+        }
+    });
 
     // Static heightfield derived from the same ground mesh / heightMap.png.
     const groundShape = createHeightFieldShape(world, { groundMesh: ground });
@@ -306,7 +320,11 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    simulationStarted = true;
+    // The first rendered frame has drawn the inline wireframe overlay (Lite compiles its
+    // pipelines synchronously, so the overlay is present immediately). Enable gravity now so bodies
+    // begin falling from the settled drop-height state.
+    physicsRunning = true;
+    setPhysicsGravity(world, GRAVITY);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }

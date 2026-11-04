@@ -4,7 +4,7 @@
  * Same NME JSON parsed by both BJS and Lite. Adds SubSurfaceBlock translucency
  * plus a modest RefractionBlock input with matching back-light scene setup.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

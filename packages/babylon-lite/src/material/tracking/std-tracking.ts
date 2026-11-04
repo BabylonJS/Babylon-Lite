@@ -4,7 +4,7 @@ import type { StandardMaterialProps } from "../standard/standard-material.js";
 import { trackScalar, observableColor3, observableVec2 } from "./tracking-primitives.js";
 
 export function installStdTracking(mat: StandardMaterialProps): void {
-    for (const key of ["alpha", "specularPower", "bumpLevel", "ambientTexLevel", "lightmapLevel", "opacityLevel", "alphaCutOff", "reflectionLevel"]) {
+    for (const key of ["alpha", "specularPower", "roughness", "bumpLevel", "ambientTexLevel", "lightmapLevel", "opacityLevel", "alphaCutOff", "reflectionLevel"]) {
         trackScalar(mat, key);
     }
     mat.diffuseColor = observableColor3(mat.diffuseColor[0], mat.diffuseColor[1], mat.diffuseColor[2], mat as any);

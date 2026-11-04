@@ -14,7 +14,7 @@
  * - Full image MAD ≤ scene16 maxMad
  * - ≥95% exact match
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

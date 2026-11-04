@@ -4,7 +4,7 @@
  * Port of Babylon.js playground #CSCJO2#89: Khronos Sponza glTF with 1000
  * deterministic small-range point lights rendered through clustered lighting.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

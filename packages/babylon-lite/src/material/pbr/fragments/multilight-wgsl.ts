@@ -2,9 +2,10 @@
  *  Separated into its own module so non-shadow PBR scenes don't pay the bundle cost. */
 
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export function MULTI_LIGHT_STRUCTS(): string {
-    return `
+    return wgsl`
 struct LightEntry {
 vLightData: vec4<f32>,
 vLightDiffuse: vec4<f32>,
@@ -18,7 +19,7 @@ lights: array<LightEntry, ${MAX_LIGHTS}>,
 `;
 }
 
-export const COMPUTE_PBR_LIGHT = `
+export const COMPUTE_PBR_LIGHT = wgsl`
 struct PbrLightResult { L: vec3<f32>, NdotL: f32, atten: f32, color: vec3<f32>, specColor: vec3<f32>, isHemi: bool };
 fn computePbrLight(entry: LightEntry, N: vec3<f32>, worldPos: vec3<f32>, lightFalloffMode: f32) -> PbrLightResult {
 var r: PbrLightResult;
@@ -62,8 +63,8 @@ return r;
 /** The multi-light direct lighting loop WGSL block for the PBR template.
  *  Contains slot markers AD and BL for fragment injection.
  *  Generated at call time because MAX_LIGHTS is runtime-configurable via `setMaxLights`. */
-export function getMultiLightLoop(): string {
-    return `var directDiffuse = vec3<f32>(0.0);
+export function getMultiLightLoop(extraLight = "", computeLight = "computePbrLight"): string {
+    return wgsl`var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 // BJS direct-light specular: roughness is clamped by the geometric AA factor
 // BEFORE being squared (matches BJS pbrDirectLightingFunctions.fx line 103).
@@ -72,7 +73,7 @@ var directSpecular = vec3<f32>(0.0);
 let directRoughness = max(roughness, AA_factor_x);
 let directAlphaG = directRoughness * directRoughness + 0.0005;
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
-let lightCount = min(mesh.lc, ${MAX_LIGHTS}u);
+let lightCount = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AS*/
 // First-light aliases — kept at directLightBlock scope so the AD slot below
 // (clearcoat / sheen / subsurface) sees the same single-light variable names
@@ -80,7 +81,7 @@ let lightCount = min(mesh.lc, ${MAX_LIGHTS}u);
 // for those ancillary BRDFs are not yet supported (single-light parity only).
 let lightIndex0 = mli(0u);
 let entry0 = lights.lights[lightIndex0];
-let pl0 = computePbrLight(entry0, N, input.worldPos, material.lightFalloffMode);
+let pl0 = ${computeLight}(entry0, N, input.worldPos, material.lightFalloffMode);
 let L = pl0.L;
 let NdotL = pl0.NdotL;
 let lightColor = pl0.specColor;
@@ -91,7 +92,8 @@ let VdotH = saturate(dot(V, H));
 for (var li = 0u; li < lightCount; li++) {
 var pl: PbrLightResult;
 let lightIndex = mli(li);
-if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }
+${extraLight}
+if (li == 0u) { pl = pl0; } else { pl = ${computeLight}(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }
 let sf = shadowFactors[lightIndex];
 if (pl.isHemi) {
 directDiffuse += pl.color * surfaceAlbedo * material.directIntensity * sf;

@@ -7,7 +7,8 @@
  * Math follows BJS PBRMaterial BENTNORMAL (spherical-Gaussian visibility cone):
  *  - Bent normal sampled from a tangent-space map and transformed with the vertex
  *    TBN when it is compatible, else a screen-space cotangent frame built from the
- *    geometric normal (same convention as the base normal map).
+ *    geometric normal (same convention as the base normal map, including the
+ *    right-handed axis flip of pbr-normal-cotangent-wgsl.ts).
  *  - The environment specular radiance is multiplied by the ratio of the visibility
  *    cone/reflection-lobe SG overlap to the open-hemisphere overlap. The analytic
  *    specular occlusion (seo) is dropped in that case (see patchIblCalculation).
@@ -16,14 +17,22 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_BENT_NORMAL } from "../pbr-flag-bits.js";
+import { PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP } from "../pbr-flag-bits.js";
 import { MSH_HAS_TANGENTS, MSH_HAS_THIN_INSTANCES } from "../../mesh-features.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 import { pbrExt as iblExt } from "./ibl-fragment.js";
+import { _rightHanded } from "#coordinate-system";
 
 const STAGE_FRAGMENT = 0x2;
 
+// Bent-normal-local material `features` bit. Declared here (not in the shared
+// pbr-flag-bits.ts) per GUIDANCE so scenes without bent normals retain zero bytes;
+// reserved in pbr-flag-bits.ts. Material `features` bit 1<<4 is free because
+// PBR_HAS_TONEMAP only ever lives in `sceneFeatures`.
+const PBR_HAS_BENT_NORMAL = 1 << 4;
+
 // Spherical Gaussians parameterized by spread = 1/sharpness. See BJS pbrIBLFunctions.fx (BENTNORMAL).
-const BENT_NORMAL_HELPERS = `
+const BENT_NORMAL_HELPERS = wgsl`
 fn bentNormalSGOverlap(d2in:f32,spread:f32,rs:f32)->f32{
 let d2=clamp(d2in,0.0,4.0);let sp=spread*rs;let sd=spread-rs;
 let pl=sqrt(sd*sd+sp*(4.0-d2));let e=-d2/max(pl+spread+rs,1e-30);let x=2.0*pl/max(sp,1e-30);
@@ -48,11 +57,12 @@ return bentNormalSGOcclusion(dot(bd,bd),dot(nd,nd),NdotV,v,alphaG);}
  */
 export function createBentNormalFragment(reuseTbn: boolean, doubleSided: boolean): ShaderFragment {
     const frame = reuseTbn
-        ? "let bnTBN=TBN;"
-        : `let bnUV=${doubleSided ? "select(-input.uv,input.uv,frontFacing)" : "input.uv"};
+        ? wgsl`let bnTBN=TBN;`
+        : wgsl`let bnUV=${doubleSided ? "select(-input.uv,input.uv,frontFacing)" : "input.uv"};
 let bnDp1=dpdx(input.worldPos);let bnDp2=dpdy(input.worldPos);let bnDuv1=dpdx(bnUV);let bnDuv2=dpdy(bnUV);
 let bnDp2p=cross(bnDp2,N_geom);let bnDp1p=cross(N_geom,bnDp1);
-let bnT=bnDp2p*bnDuv1.x+bnDp1p*bnDuv2.x;let bnB=-(bnDp2p*bnDuv1.y+bnDp1p*bnDuv2.y);
+let bnT=${_rightHanded ? "-(bnDp2p*bnDuv1.x+bnDp1p*bnDuv2.x)" : "bnDp2p*bnDuv1.x+bnDp1p*bnDuv2.x"};
+let bnB=${_rightHanded ? "bnDp2p*bnDuv1.y+bnDp1p*bnDuv2.y" : "-(bnDp2p*bnDuv1.y+bnDp1p*bnDuv2.y)"};
 let bnDet=max(dot(bnT,bnT),dot(bnB,bnB));let bnInv=select(inverseSqrt(bnDet),0.0,bnDet==0.0);
 let bnTBN=mat3x3<f32>(bnT*bnInv,bnB*bnInv,N_geom);`;
     return {
@@ -65,7 +75,7 @@ let bnTBN=mat3x3<f32>(bnT*bnInv,bnB*bnInv,N_geom);`;
         ],
         _helperFunctions: BENT_NORMAL_HELPERS,
         _fragmentSlots: {
-            AC: `${frame}
+            AC: wgsl`${frame}
 var bentNormalW=normalize(bnTBN*(textureSample(bentNormalTexture_,bentNormalSampler_,input.uv).rgb*2.0-1.0));
 ${doubleSided ? "if(!frontFacing){bentNormalW=-bentNormalW;}" : ""}
 let bentNormalStrength=saturate(material.bentNormalParams.x);`,
@@ -80,13 +90,13 @@ let bentNormalStrength=saturate(material.bentNormalParams.x);`,
  * minifier rewrites them exactly like the IBL source. Skybox materials never get here
  * (gated in `detect`).
  */
-function patchIblCalculation(ai: string): string {
+function patchIblCalculation(ai: WgslSource): WgslSource {
     return ai
-        .replace(`specularEnvironmentReflectance * seo * eho`, `specularEnvironmentReflectance * eho`)
+        .replace(wgsl`specularEnvironmentReflectance * seo * eho`, wgsl`specularEnvironmentReflectance * eho`)
         .replace(
-            `colorSpecularEnvReflectance * energyConservation`,
-            `colorSpecularEnvReflectance * mix(1.0, environmentBentNormalOcclusion(bentNormalW, R_raw, N, NdotVUnclamped, occlusion, alphaG), bentNormalStrength) * energyConservation`
-        );
+            wgsl`colorSpecularEnvReflectance * energyConservation`,
+            wgsl`colorSpecularEnvReflectance * mix(1.0, environmentBentNormalOcclusion(bentNormalW, R_raw, N, NdotVUnclamped, occlusion, alphaG), bentNormalStrength) * energyConservation`
+        ) as WgslSource;
 }
 
 /**
@@ -121,13 +131,13 @@ export function enableBentNormals(): void {
         // BJS gates BENTNORMAL on a lit material with an ambient occlusion texture. Skybox
         // materials use a different IBL path with no specular occlusion to attenuate.
         return {
-            f: 0,
-            f2: m.bentNormalTexture && !m.unlit && !m.skyboxMode && (m.ormTexture || m.occlusionTexture) && (m.occlusionStrength ?? 1) > 0 ? PBR2_HAS_BENT_NORMAL : 0,
+            f: m.bentNormalTexture && !m._unlit && !m._skyboxMode && (m.ormTexture || m.occlusionTexture) && (m.occlusionStrength ?? 1) > 0 ? PBR_HAS_BENT_NORMAL : 0,
+            f2: 0,
         };
     };
     ext.frag = (ctx) => {
         const ibl = iblFrag(ctx);
-        if (!ibl || !(ctx._features2 & PBR2_HAS_BENT_NORMAL)) {
+        if (!ibl || !(ctx._features & PBR_HAS_BENT_NORMAL)) {
             return ibl;
         }
         const reuseTbn = (ctx._features & PBR_HAS_NORMAL_MAP) !== 0 && (ctx._meshFeatures & MSH_HAS_TANGENTS) !== 0 && (ctx._meshFeatures & MSH_HAS_THIN_INSTANCES) === 0;
@@ -136,7 +146,7 @@ export function enableBentNormals(): void {
             ...ibl,
             _uboFields: bent._uboFields,
             _bindings: [...ibl._bindings!, ...bent._bindings!],
-            _helperFunctions: ibl._helperFunctions! + bent._helperFunctions!,
+            _helperFunctions: (ibl._helperFunctions! + bent._helperFunctions!) as WgslSource,
             _fragmentSlots: { ...ibl._fragmentSlots, ...bent._fragmentSlots, AI: patchIblCalculation(ibl._fragmentSlots!.AI!) },
         };
     };
@@ -150,7 +160,7 @@ export function enableBentNormals(): void {
         b = iblBind(ctx, entries, b);
         const t = (ctx._material as PbrMaterialProps).bentNormalTexture;
         // Bindings exist only in the bent variant of the fragment.
-        if (t && ctx._env && ctx._features2 & PBR2_HAS_BENT_NORMAL) {
+        if (t && ctx._env && ctx._features & PBR_HAS_BENT_NORMAL) {
             entries.push({ binding: b++, resource: t.view });
             entries.push({ binding: b++, resource: t.sampler });
         }

@@ -8,13 +8,14 @@ import {
     createArcRotateCamera,
     createBox,
     createEngine,
-    createPbrMaterial,
+    createPbrMaterial, setPbrSkybox,
     createSceneContext,
     createSolidTexture2D,
     createSphere,
     loadEnvironment,
     onBeforeRender,
     registerScene,
+    setPbrIridescence,
     startEngine,
 } from "babylon-lite";
 
@@ -40,13 +41,12 @@ async function main(): Promise<void> {
     scene.imageProcessing.contrast = 1;
 
     const sphere = createSphere(engine, { segments: 16, diameter: 2 });
-    sphere.material = createPbrMaterial({
+    const iriMat = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, 0.1, 0.1, 0.1),
         ormTexture: createSolidTexture2D(engine, 1, 0, 1),
-        iridescence: {
-            isEnabled: true,
-        },
     });
+    setPbrIridescence(iriMat, { isEnabled: true });
+    sphere.material = iriMat;
     addToScene(scene, sphere);
 
     const skybox = createBox(engine, 1000);
@@ -56,8 +56,8 @@ async function main(): Promise<void> {
         environmentIntensity: 1.014,
         directIntensity: 0,
         doubleSided: true,
-        skyboxMode: true,
     });
+    setPbrSkybox(skybox.material);
     const syncSkybox = (): void => {
         const w = camera.worldMatrix;
         skybox.position.set(w[12]!, w[13]!, w[14]!);

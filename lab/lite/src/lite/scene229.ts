@@ -1,6 +1,6 @@
 // Scene 229: Triangle Without Indices — non-indexed glTF primitive regression.
 
-import { addToScene, attachControl, createArcRotateCamera, createEngine, createSceneContext, loadGltf, registerScene, startEngine } from "babylon-lite";
+import { addToScene, attachControl, createArcRotateCamera, createEngine, createSceneContext, loadGltf, registerScene, setPbrUnlit, startEngine } from "babylon-lite";
 import type { ArcRotateCamera, AssetContainer, Mesh, PbrMaterialProps } from "babylon-lite";
 
 const MODEL_URL = "https://cx20.github.io/gltf-test/tutorialModels/TriangleWithoutIndices/glTF/TriangleWithoutIndices.gltf";
@@ -33,8 +33,7 @@ async function main(): Promise<void> {
     const asset = await loadGltf(engine, MODEL_URL);
     for (const mesh of collectMeshes(asset)) {
         const material = mesh.material as PbrMaterialProps;
-        material.unlit = true;
-        material.unlitColor = [0.5, 0.5, 0.5];
+        setPbrUnlit(material, [0.5, 0.5, 0.5]);
     }
     addToScene(scene, asset);
 

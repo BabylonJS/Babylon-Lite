@@ -12,7 +12,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneNode } from "../scene/scene-node.js";
+import type { SceneNode, _WritableVisibility } from "../scene/scene-node.js";
 import type { Vec3 } from "../math/types.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
@@ -24,6 +24,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
+/** Options for building a single-axis position drag gizmo. */
 export interface AxisDragGizmoOptions {
     /** World-space drag axis (unit vector). */
     dragAxis: Vec3;
@@ -37,6 +38,7 @@ export interface AxisDragGizmoOptions {
     thickness?: number;
 }
 
+/** A single arrow-shaped gizmo that translates its attached node along one axis. */
 export interface AxisDragGizmo {
     /** The root node — gizmo follows its `attachedNode` by copying world translation. */
     readonly root: SceneNode;
@@ -101,8 +103,8 @@ function buildArrow(
     addToScene(utilityScene, line);
 
     if (isCollider) {
-        cone.visible = false;
-        line.visible = false;
+        (cone as _WritableVisibility).visible = false;
+        (line as _WritableVisibility).visible = false;
     }
     return [cone, line];
 }
@@ -121,7 +123,7 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
     // scene's `meshes` array for dispatching child transforms.
     const root = createCylinder(engine, { diameterTop: 0, diameterBottom: 0, height: 0, tessellation: 3 });
     root.material = materials.colored;
-    root.visible = false;
+    (root as _WritableVisibility).visible = false;
     addToScene(utilityScene, root);
 
     // Orient root so its +Z points along the configured drag axis.
@@ -135,6 +137,7 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
     const drag = createPointerDrag({
         dragAxis: { x: options.dragAxis.x, y: options.dragAxis.y, z: options.dragAxis.z },
         moveAttached: false,
+        updateDragPlane: false,
         // BJS-faithful drag-plane anchor: pass through the attached node's
         // world position (BJS `_updateDragPlanePosition` overrides
         // `dragPlane.position` with `attachedNode.getAbsolutePosition()`).

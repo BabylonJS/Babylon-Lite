@@ -8,7 +8,7 @@
  * untouched) so the GPU shades with an eye-relative light position — a
  * crisp, stable light cone with no F32 cancellation jitter.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

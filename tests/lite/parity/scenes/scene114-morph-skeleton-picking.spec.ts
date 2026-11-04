@@ -5,7 +5,7 @@
  * on morphed and skinned geometry, so the golden validates deformation-aware
  * hit selection plus face/barycentric details.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

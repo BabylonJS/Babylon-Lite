@@ -14,6 +14,7 @@
  */
 
 import type { ShaderFragment, BindingDecl, Varying } from "../fragment-types.js";
+import { wgsl, type WgslSource } from "../wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -30,7 +31,7 @@ export interface CsmShadowLightSlot {
 export interface CsmShadowFragmentOptions {
     /** WGSL expression yielding the fragment world position (vec3). Default `input.vp` (Standard). */
     worldPosExpr?: string;
-    /** WGSL expression yielding the camera view-space z used for cascade selection. Default `input.vf.z` (Standard). */
+    /** WGSL expression yielding camera view-space z for cascade selection. Defaults to deriving it from Standard's world-position varying. */
     viewZExpr?: string;
     /** Fragment slot to emit the per-light shadow code into. Default `AD` (Standard). */
     outputSlot?: "AD" | "AS";
@@ -45,16 +46,16 @@ export interface CsmShadowFragmentOptions {
  * selects the cascade and the world position is transformed by the selected
  * cascade matrix in the fragment shader. The exact varying expressions and the
  * output slot are supplied per material family via {@link CsmShadowFragmentOptions}
- * (defaults match Standard: `input.vp` / `input.vf.z` / slot `AD`).
+ * (defaults match Standard: `input.vp` / `(scene.view * vec4(input.vp, 1)).z` / slot `AD`).
  */
 export function createCsmShadowFragment(id: string, shadowLights: CsmShadowLightSlot[], opts: CsmShadowFragmentOptions = {}): ShaderFragment {
     const worldPosExpr = opts.worldPosExpr ?? "input.vp";
-    const viewZExpr = opts.viewZExpr ?? "input.vf.z";
+    const viewZExpr = opts.viewZExpr ?? "(scene.view * vec4<f32>(input.vp, 1.0)).z";
     const outputSlot = opts.outputSlot ?? "AD";
     const varyings: Varying[] = [];
     const bindings: BindingDecl[] = [];
-    const fragmentLines: string[] = [];
-    const helperParts: string[] = [];
+    const fragmentLines: WgslSource[] = [];
+    const helperParts: WgslSource[] = [];
 
     for (const slot of shadowLights) {
         const li = slot.lightIndex;
@@ -67,9 +68,9 @@ export function createCsmShadowFragment(id: string, shadowLights: CsmShadowLight
         );
 
         helperParts.push(
-            `struct csmInfo${suffix}Uniforms { cascadeTransforms: array<mat4x4<f32>, 4>, viewFrustumZ: vec4<f32>, frustumLengths: vec4<f32>, shadowsInfo: vec4<f32>, csmParams: vec4<f32> };`
+            wgsl`struct csmInfo${suffix}Uniforms { cascadeTransforms: array<mat4x4<f32>, 4>, viewFrustumZ: vec4<f32>, frustumLengths: vec4<f32>, shadowsInfo: vec4<f32>, csmParams: vec4<f32> };`
         );
-        helperParts.push(`
+        helperParts.push(wgsl`
 fn computeFallOffCsm${suffix}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
 let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
 return mix(value, 1.0, mask);
@@ -122,16 +123,16 @@ shadow = mix(nextShadow, shadow, diffRatio);
 return shadow;
 }`);
 
-        fragmentLines.push(`shadowFactors[${li}] = computeShadowCSM${suffix}(vec4<f32>(${worldPosExpr}, 1.0), ${viewZExpr});`);
+        fragmentLines.push(wgsl`shadowFactors[${li}] = computeShadowCSM${suffix}(vec4<f32>(${worldPosExpr}, 1.0), ${viewZExpr});`);
     }
 
     return {
         _id: id,
         _varyings: varyings,
         _bindings: bindings,
-        _helperFunctions: helperParts.join("\n"),
+        _helperFunctions: wgsl`${helperParts.join("\n")}`,
         _fragmentSlots: {
-            [outputSlot]: fragmentLines.join("\n"),
+            [outputSlot]: wgsl`${fragmentLines.join("\n")}`,
         },
     };
 }

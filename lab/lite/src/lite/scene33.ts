@@ -12,7 +12,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     (getFrameGraph(scene)._tasks[0] as RenderTask)._config.transmission = { copyCount: 1 };
 
-    const asset = await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/LightsPunctualLamp/glTF-Binary/LightsPunctualLamp.glb");
+    const asset = await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/LightsPunctualLamp/glTF-Binary/LightsPunctualLamp.glb");
     addToScene(scene, asset);
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", {

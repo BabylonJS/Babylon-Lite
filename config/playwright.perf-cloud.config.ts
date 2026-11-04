@@ -24,6 +24,9 @@ export default defineConfig({
         channel: "chrome",
         headless: true,
         viewport: { width: 1280, height: 720 },
+        // Explicitly disable all tracing, including retry tracing, because
+        // BrowserStack connection metadata can contain credentials.
+        trace: "off",
         launchOptions: {
             args: ["--force-color-profile=srgb", "--enable-precise-memory-info", "--enable-unsafe-webgpu"],
         },
@@ -32,6 +35,6 @@ export default defineConfig({
         command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
-        timeout: 15_000,
+        timeout: 180_000,
     },
 });

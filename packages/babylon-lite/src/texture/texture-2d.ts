@@ -8,8 +8,11 @@
  */
 
 import { TU } from "../engine/gpu-flags.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
+import type { PixelsTexture2DOptions } from "./pixels-texture.js";
+import type { AreaLightImage } from "../light/area-light-image.js";
 
 /** A loaded 2D texture: the GPU texture, its default view and sampler, pixel
  *  dimensions, and an optional per-texture UV transform. This is the public
@@ -40,26 +43,110 @@ export interface Texture2D {
     invertY?: boolean;
     /** @internal Depth textures require texture_depth_2d shader bindings. */
     _sampleType?: "float" | "depth";
+    /** @internal This texture cannot participate in material UV transforms. */
+    _uvTransformDisabled?: true;
     /** @internal Retained source for opt-in device-lost recovery. */
     _recoverySource?: Texture2DRecoverySource;
+    /** @internal Processed emitter identity; ordinary clones preserve this image provenance. */
+    _areaLightImage?: AreaLightImage;
 }
 
 export type Texture2DRecoverySource =
     | { kind: "url"; url: string; opts: Texture2DOptions }
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
-    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor };
+    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array }
+    | {
+          /** Factory-owned decoded image retained only while opt-in device-lost recovery is active. */
+          kind: "external";
+          bitmap: ImageBitmap | null;
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          levels: number;
+          samplerDesc: GPUSamplerDescriptor;
+          flipY: boolean;
+          premultipliedAlpha: boolean;
+      }
+    | {
+          kind: "pixels";
+          data: Uint8Array;
+          width: number;
+          height: number;
+          options: PixelsTexture2DOptions;
+      }
+    | {
+          kind: "render";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          samplerDesc: GPUSamplerDescriptor;
+      }
+    | {
+          /** A `createDynamicTexture` texture. Like the url/solid/bitmap kinds,
+           *  this carries only the *data* needed to rebuild after device loss — no
+           *  logic. The rebuild itself lives in the `dynamic-texture-recovery`
+           *  module, which device-lost-recovery dynamically imports only when a
+           *  dynamic texture actually needs rebuilding. So the create/update API
+           *  never bundles recovery code, and a scene that enables recovery but
+           *  never creates a dynamic texture never bundles the rebuild logic
+           *  either (it lands in a lazily-loaded chunk). `source` is the live
+           *  external image retained by the last `updateDynamicTexture` (a
+           *  persistent canvas survives loss and is re-blitted); it is null until
+           *  the first update. The caller owns the source's lifetime, so it is not
+           *  cleared here on texture release. */
+          kind: "dynamic";
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          levels: number;
+          samplerDesc: GPUSamplerDescriptor;
+          source: GPUCopyExternalImageSource | null;
+          flipY: boolean;
+          premultipliedAlpha: boolean;
+      };
 
 /** Create a fresh Texture2D wrapper that shares GPU resources with `base`
  *  but carries its own UV transform. Use this when the same underlying image
  *  is referenced with different transforms (e.g. glTF KHR_texture_transform
  *  on different textureInfos pointing at the same source). The caller is
  *  responsible for acquireTexture/release pairing if the wrapper outlives
- *  the base. */
+ *  the base. RTT-derived clones follow replacement attachment generations;
+ *  ordinary clones snapshot the GPU fields. */
 export function cloneTexture2D(
     base: Texture2D,
     transform: Partial<Pick<Texture2D, "uScale" | "vScale" | "uOffset" | "vOffset" | "uAng">> & { _texCoord?: 0 | 1; _hasTx?: true }
 ): Texture2D {
-    return { ...base, ...transform } as Texture2D;
+    const derived = { ...base, ...transform } as Texture2D;
+    _sharedTextureCloneHook?.(base, derived);
+    _derivedTextureHook?.(base, derived);
+    return derived;
+}
+
+let _sharedTextureCloneHook: ((base: Texture2D, derived: Texture2D) => void) | null = null;
+
+/** @internal Install clone backing for replaceable facades, independently of recovery tracking. */
+export function _setSharedTextureCloneHook(hook: (base: Texture2D, derived: Texture2D) => void): void {
+    _sharedTextureCloneHook = hook;
+}
+
+/** Notified when a wrapper is derived from another, so device-lost recovery can track the derived
+ *  wrapper and carry a rebuilt texture across to it. Installed by the recovery capture, null
+ *  otherwise, so a scene that never enables recovery carries none of the bookkeeping.
+ *
+ *  An ordinary derived wrapper starts as a spread of its base: it inherits `_recoverySource` without ever
+ *  passing through the capture stamp, so nothing tracks it even though it owns its own `texture`
+ *  field. Left untracked it survives recovery still holding the lost device's `GPUTexture` — the
+ *  use-after-free tracking exists to prevent, reached one hop later.
+ *
+ *  This is a module-level hook rather than the `engine._dlr` capture seam used everywhere else
+ *  because `cloneTexture2D` is public API and its glTF callers reach it through
+ *  `GltfFeature.wrapTexture`, so no engine is in scope. Call sites that do have an engine use
+ *  `engine._dlr.d` instead, which avoids adding a runtime import edge to this module. */
+let _derivedTextureHook: ((base: Texture2D, derived: Texture2D) => void) | null = null;
+
+/** @internal Install the device-lost recovery hook for derived texture wrappers. */
+export function _setDerivedTexture2DHook(hook: (base: Texture2D, derived: Texture2D) => void): void {
+    _derivedTextureHook = hook;
 }
 
 /** Sampler, format, and decode options for `loadTexture2D()`. */

@@ -13,6 +13,7 @@ import {
     registerScene,
     parseNodeMaterialFromSnippet,
     loadEnvironment,
+    StandardToneMapping,
 } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE87_NME_JSON } from "../shared/scene87-nme.js";
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.015, g: 0.015, b: 0.025, a: 1 };
     scene.imageProcessing.toneMappingEnabled = true;
-    scene.imageProcessing.toneMappingType = "standard";
+    scene.imageProcessing.toneMapping = StandardToneMapping;
     scene.imageProcessing.exposure = 0.85;
     scene.imageProcessing.contrast = 1.15;
 
@@ -39,7 +40,7 @@ async function main(): Promise<void> {
         brdfUrl: "/brdf-lut.png",
     });
     scene.imageProcessing.toneMappingEnabled = true;
-    scene.imageProcessing.toneMappingType = "standard";
+    scene.imageProcessing.toneMapping = StandardToneMapping;
     scene.imageProcessing.exposure = 0.85;
     scene.imageProcessing.contrast = 1.15;
 

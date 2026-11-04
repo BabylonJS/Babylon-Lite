@@ -4,9 +4,11 @@
 // orbited by a GeospatialCamera anchored to a surface point. Six distinct
 // coloured marker cubes sit on the surface at fixed lat/long positions to break
 // the sphere's rotational symmetry so the camera's yaw/pitch/radius are all
-// observable in the render. The camera is set to a fixed center/yaw/pitch/radius
-// (no controls attached) so the frame is fully deterministic and can be compared
-// pixel-for-pixel against the Babylon.js `GeospatialCamera` oracle.
+// observable in the render. The camera is pinned to a fixed center/yaw/pitch/radius;
+// controls are attached (matching the Lite-scene convention and giving the geospatial
+// control/fly code bundle coverage), but no input is delivered during headless capture
+// and zero-input frames cause no camera drift, so the frame stays deterministic and can
+// be compared pixel-for-pixel against the Babylon.js `GeospatialCamera` oracle.
 //
 // World "north" in Babylon's left-handed scene is +Z, so the ECEF mapping places
 // the north pole at +Z and the equator in the XY plane. Markers and the camera
@@ -24,6 +26,7 @@ import {
     registerScene,
     createGeospatialCamera,
     setGeospatialOrientation,
+    attachGeospatialControls,
 } from "babylon-lite";
 
 const PLANET_RADIUS = 100;
@@ -75,6 +78,7 @@ async function main(): Promise<void> {
         pitch: CAMERA_PITCH,
     });
     scene.camera = cam;
+    attachGeospatialControls(cam, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 

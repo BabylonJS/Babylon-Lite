@@ -6,7 +6,7 @@
  * chromatic refraction against the studio.env HDR environment, using
  * frame-graph scene-texture transmission.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

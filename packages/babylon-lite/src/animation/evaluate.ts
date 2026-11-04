@@ -2,6 +2,7 @@
 // Pure functions, zero allocation in the hot path.
 
 import { F32 } from "../engine/typed-arrays.js";
+import type { AnimationEasing } from "./easing.js";
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
@@ -73,6 +74,52 @@ function quatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: nu
     out[1] = wa * ay + wb * by;
     out[2] = wa * az + wb * bz;
     out[3] = wa * aw + wb * bw;
+}
+
+/** Babylon.js-compatible quaternion interpolation for caller-authored property animation. */
+function propertyQuatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
+    let dot = ax * bx + ay * by + az * bz + aw * bw;
+    let endWeight: number;
+    let startWeight: number;
+    const negateEnd = dot < 0;
+    if (negateEnd) {
+        dot = -dot;
+    }
+    if (dot > 0.999999) {
+        startWeight = 1 - t;
+        endWeight = negateEnd ? -t : t;
+    } else {
+        const angle = Math.acos(dot);
+        const inverseSine = 1 / Math.sin(angle);
+        startWeight = Math.sin((1 - t) * angle) * inverseSine;
+        endWeight = (negateEnd ? -1 : 1) * Math.sin(t * angle) * inverseSine;
+    }
+    out[0] = startWeight * ax + endWeight * bx;
+    out[1] = startWeight * ay + endWeight * by;
+    out[2] = startWeight * az + endWeight * bz;
+    out[3] = startWeight * aw + endWeight * bw;
+}
+
+function copySample(output: Float32Array, srcOffset: number, stride: number, dst: Float32Array, dstOffset: number): void {
+    for (let c = 0; c < stride; c++) {
+        dst[dstOffset + c] = output[srcOffset + c]!;
+    }
+}
+
+function interpolateLinearSample(output: Float32Array, keyIndex: number, stride: number, isQuat: boolean, gradient: number, dst: Float32Array, dstOffset: number): void {
+    const s0 = keyIndex * stride;
+    const s1 = (keyIndex + 1) * stride;
+    if (isQuat) {
+        propertyQuatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
+        dst[dstOffset] = _quat[0]!;
+        dst[dstOffset + 1] = _quat[1]!;
+        dst[dstOffset + 2] = _quat[2]!;
+        dst[dstOffset + 3] = _quat[3]!;
+        return;
+    }
+    for (let c = 0; c < stride; c++) {
+        dst[dstOffset + c] = output[s0 + c]! + gradient * (output[s1 + c]! - output[s0 + c]!);
+    }
 }
 
 /**
@@ -151,4 +198,52 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
             dst[dstOffset + c] = output[s0 + c]! + f * (output[s1 + c]! - output[s0 + c]!);
         }
     }
+}
+
+/**
+ * Evaluate a caller-authored property sampler with an optional transform of the
+ * selected segment's normalized progress. Kept separate from {@link evaluateSampler}
+ * so imported glTF samplers retain their unchanged LINEAR/STEP/CUBICSPLINE path.
+ */
+export function evaluatePropertySampler(
+    sampler: AnimationSampler,
+    t: number,
+    stride: number,
+    isQuat: boolean,
+    easing: AnimationEasing | undefined,
+    dst: Float32Array,
+    dstOffset: number
+): void {
+    const { input, output, interpolation } = sampler;
+    // Property key times are stored as Float32. Canonicalize caller-authored
+    // double-precision times to the same domain so exact frame/key boundaries
+    // select the authored key rather than the preceding STEP segment.
+    const sampleTime = Math.fround(t);
+    const keyCount = input.length;
+
+    if (keyCount === 0) {
+        return;
+    }
+    if (keyCount === 1 || sampleTime <= input[0]!) {
+        copySample(output, 0, stride, dst, dstOffset);
+        return;
+    }
+    if (sampleTime >= input[keyCount - 1]!) {
+        copySample(output, (keyCount - 1) * stride, stride, dst, dstOffset);
+        return;
+    }
+
+    const idx = findKeyframe(input, sampleTime);
+    if (interpolation === INTERP_STEP) {
+        copySample(output, idx * stride, stride, dst, dstOffset);
+        return;
+    }
+
+    const t0 = input[idx]!;
+    const t1 = input[idx + 1]!;
+    const dt = t1 - t0;
+    const linearGradient = dt > 0 ? (sampleTime - t0) / dt : 0;
+    const gradient = easing ? easing(linearGradient) : linearGradient;
+
+    interpolateLinearSample(output, idx, stride, isQuat, gradient, dst, dstOffset);
 }

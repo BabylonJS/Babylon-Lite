@@ -1,9 +1,29 @@
 /** Standard Reflection Texture Fragment — spherical/planar environment reflection. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 const STAGE_FRAGMENT = 0x2;
 
-const REFLECTION_HELPERS = `
+// Spherical mapping reads view space. A right-handed build's view space is Babylon.js's right-handed view space
+// mirrored in Z (see doc 61), so it negates the reflected Z to land on the same texel.
+const REFLECTION_HELPERS = _rightHanded
+    ? wgsl`
+fn computeSphericalCoords(worldPos: vec3<f32>, worldNormal: vec3<f32>) -> vec2<f32> {
+let viewDir = normalize((scene.view * vec4<f32>(worldPos, 1.0)).xyz);
+let viewNormal = normalize((scene.view * vec4<f32>(worldNormal, 0.0)).xyz);
+var r = reflect(viewDir, viewNormal);
+r.z = -r.z - 1.0;
+let m = 2.0 * length(r);
+return vec2<f32>(r.x / m + 0.5, r.y / m + 0.5);
+}
+fn computePlanarCoords(worldPos: vec3<f32>, worldNormal: vec3<f32>) -> vec2<f32> {
+let viewDir = worldPos - scene.vEyePosition.xyz;
+let coords = normalize(reflect(viewDir, worldNormal));
+return vec2<f32>(coords.x, 1.0 - coords.y);
+}
+`
+    : wgsl`
 fn computeSphericalCoords(worldPos: vec3<f32>, worldNormal: vec3<f32>) -> vec2<f32> {
 let viewDir = normalize((scene.view * vec4<f32>(worldPos, 1.0)).xyz);
 let viewNormal = normalize((scene.view * vec4<f32>(worldNormal, 0.0)).xyz);
@@ -28,7 +48,7 @@ export function createStdReflectionFragment(): ShaderFragment {
         ],
         _helperFunctions: REFLECTION_HELPERS,
         _fragmentSlots: {
-            AD: `{
+            AD: wgsl`{
 var reflCoords: vec2<f32>;
 if (mat.rCm < 1.5) { reflCoords = computeSphericalCoords(input.vp, normalW); }
 else { reflCoords = computePlanarCoords(input.vp, normalW); }
@@ -47,16 +67,17 @@ export const stdReflectionExt: StdExt = {
     _id: "std-reflection",
     _phase: "mesh",
     _feature: HAS_REFLECTION_TEXTURE,
+    _detect: (mat: StandardMaterialProps): number => (mat._reflectionTexture ? HAS_REFLECTION_TEXTURE : 0),
     _frag: createStdReflectionFragment,
     _bind(mat, entries, b) {
-        const tex = mat.reflectionTexture!;
+        const tex = mat._reflectionTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
     _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
-        if (mat.reflectionTexture) {
-            out.push(mat.reflectionTexture);
+        if (mat._reflectionTexture) {
+            out.push(mat._reflectionTexture);
         }
     },
 };

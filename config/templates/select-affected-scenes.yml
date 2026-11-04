@@ -1,0 +1,3 @@
+steps:
+    - script: pnpm select:affected-scenes -- --azure
+      displayName: "Select affected scenes"

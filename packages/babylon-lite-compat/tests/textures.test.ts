@@ -1,0 +1,373 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineContext } from "babylon-lite";
+
+const liteMocks = vi.hoisted(() => ({
+    loadTexture2D: vi.fn(),
+    loadBasisTexture2D: vi.fn(),
+    loadKtxTexture2D: vi.fn(),
+    createTexture2DFromPixels: vi.fn(),
+    updateTexture2DFromPixels: vi.fn(),
+    createTexture3DFromPixels: vi.fn(),
+    createDynamicTexture: vi.fn(),
+    updateDynamicTexture: vi.fn(),
+    createHtmlTexture: vi.fn(),
+    requestHtmlTextureUpdate: vi.fn(),
+    updateHtmlTexture: vi.fn(),
+    disposeHtmlTexture: vi.fn(),
+    whenHtmlTextureReady: vi.fn(),
+}));
+
+vi.mock("babylon-lite", () => liteMocks);
+
+import { resolveKtxUrl, BaseTexture, CubeTexture, HDRCubeTexture, HtmlTexture, Texture } from "../src/textures/textures";
+
+type Deferred<T> = {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (error: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
+}
+
+function engineWrapper(): { _lite: EngineContext } {
+    return { _lite: {} as EngineContext };
+}
+
+/** The `Texture` constructor's scene param is typed `Scene | { _lite: EngineContext }`;
+ *  the GPU-free tests only need the `_lite` handle, so the minimal fake is cast in. */
+const asTextureScene = (w: { _lite: object }): ConstructorParameters<typeof Texture>[1] => w as unknown as ConstructorParameters<typeof Texture>[1];
+
+function textureHandle(): unknown {
+    return { id: "texture" };
+}
+
+beforeEach(() => {
+    for (const mock of Object.values(liteMocks)) {
+        mock.mockReset();
+    }
+});
+
+/**
+ * `resolveKtxUrl` recognises a pre-resolved compressed `.ktx` URL (the single
+ * fully-qualified URL Babylon.js code hands `Texture` after selecting a format via
+ * `engine.getCaps()`) and splits it into the `{ baseUrl, suffix }` pair Lite's
+ * `loadKtxTexture2D` expects. The query string must survive onto the base URL.
+ */
+describe("resolveKtxUrl", () => {
+    it("splits a compressed KTX URL into base image + format suffix", () => {
+        expect(resolveKtxUrl("https://h/UVgrid-dxt.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-dxt.ktx" });
+        expect(resolveKtxUrl("https://h/UVgrid-astc.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-astc.ktx" });
+        expect(resolveKtxUrl("https://h/UVgrid-etc2.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-etc2.ktx" });
+    });
+
+    describe("HtmlTexture", () => {
+        it("publishes the Lite handle and notifies readiness after the first upload", async () => {
+            const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
+            const host = {} as HTMLCanvasElement;
+            const engine = {
+                _lite: {} as EngineContext,
+                getRenderingCanvas: () => host,
+            } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const element = {} as HTMLElement;
+
+            const html = new HtmlTexture("panel", element, {
+                engine,
+                width: 64,
+                height: 32,
+                generateMipMaps: true,
+                samplingMode: Texture.NEAREST_SAMPLINGMODE,
+                autoUpdate: false,
+                useSvgFallback: false,
+            });
+
+            expect(liteMocks.createHtmlTexture).toHaveBeenCalledWith(engine!._lite, element, {
+                width: 64,
+                height: 32,
+                mipMaps: true,
+                autoUpdate: false,
+                useSvgFallback: false,
+                minFilter: "nearest",
+                magFilter: "nearest",
+                invertY: true,
+            });
+            expect(html.name).toBe("panel");
+            expect(html.element).toBe(element);
+            expect(html.host).toBe(host);
+            expect(html.getInternalTexture()).toBeNull();
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
+            html.requestUpdate();
+            expect(liteMocks.requestHtmlTextureUpdate).toHaveBeenCalledWith(engine!._lite, texture);
+            html.update(false);
+            expect(liteMocks.updateHtmlTexture).toHaveBeenCalledWith(engine!._lite, texture, false);
+
+            upload.resolve();
+            await html.whenReadyAsync();
+
+            expect(html.getInternalTexture()).toBe(texture);
+            expect(readyListener).toHaveBeenCalledOnce();
+            expect(loadListener).toHaveBeenCalledOnce();
+            expect(loadListener).toHaveBeenCalledWith(html);
+            html.dispose();
+            expect(liteMocks.disposeHtmlTexture).toHaveBeenCalledWith(texture);
+        });
+
+        it("does not publish or notify a handle when the first upload fails", async () => {
+            const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
+            const engine = { _lite: {} as EngineContext, getRenderingCanvas: () => null } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const html = new HtmlTexture("panel", {} as HTMLElement, { engine });
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
+            const failure = new Error("upload failed");
+
+            upload.reject(failure);
+
+            await expect(html.whenReadyAsync()).rejects.toBe(failure);
+            expect(html.getInternalTexture()).toBeNull();
+            expect(readyListener).not.toHaveBeenCalled();
+            expect(loadListener).not.toHaveBeenCalled();
+        });
+
+        it("does not publish or notify a handle when disposed before readiness", async () => {
+            const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
+            const engine = { _lite: {} as EngineContext, getRenderingCanvas: () => null } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const html = new HtmlTexture("panel", {} as HTMLElement, { engine });
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
+
+            html.dispose();
+            upload.resolve();
+
+            await expect(html.whenReadyAsync()).rejects.toThrow(/disposed before its first upload/);
+            expect(html.getInternalTexture()).toBeNull();
+            expect(readyListener).not.toHaveBeenCalled();
+            expect(loadListener).not.toHaveBeenCalled();
+            expect(liteMocks.disposeHtmlTexture).toHaveBeenCalledWith(texture);
+        });
+    });
+
+    it("preserves a query string on the base URL (auth / cache-busting / signed URLs)", () => {
+        expect(resolveKtxUrl("https://h/UVgrid-dxt.ktx?cache=1&sig=abc")).toEqual({
+            baseUrl: "https://h/UVgrid.png?cache=1&sig=abc",
+            suffix: "-dxt.ktx",
+        });
+    });
+
+    it("returns null for non-compressed-KTX URLs", () => {
+        expect(resolveKtxUrl("https://h/UVgrid.png")).toBeNull();
+        expect(resolveKtxUrl("https://h/UVgrid.ktx")).toBeNull(); // no recognised format suffix
+        expect(resolveKtxUrl("https://h/model.basis")).toBeNull();
+    });
+});
+
+describe("Texture onLoadObservable", () => {
+    it("does not allocate the observable when nobody subscribes", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()));
+        expect((tex as unknown as { _onLoadObservable?: unknown })._onLoadObservable).toBeUndefined();
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(tex.isReady()).toBe(true);
+        expect((tex as unknown as { _onLoadObservable?: unknown })._onLoadObservable).toBeUndefined();
+    });
+
+    it("fires once with the constructor onLoad callback and whenReadyAsync", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        let onLoadCalls = 0;
+        let observerCalls = 0;
+        const events: string[] = [];
+
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()), undefined, undefined, undefined, () => {
+            events.push("onLoad");
+            onLoadCalls++;
+        });
+        tex.onLoadObservable.add((observed) => {
+            events.push("observable");
+            observerCalls++;
+            expect(observed).toBe(tex);
+        });
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(tex.isReady()).toBe(true);
+        expect(onLoadCalls).toBe(1);
+        expect(observerCalls).toBe(1);
+        expect(events).toEqual(["observable", "onLoad"]);
+    });
+
+    it("fires immediately for subscribers attached after the texture is ready", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()));
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        let addCalls = 0;
+        let addOnceCalls = 0;
+        tex.onLoadObservable.add((observed) => {
+            addCalls++;
+            expect(observed).toBe(tex);
+        });
+        tex.onLoadObservable.addOnce((observed) => {
+            addOnceCalls++;
+            expect(observed).toBe(tex);
+        });
+
+        expect(addCalls).toBe(1);
+        expect(addOnceCalls).toBe(1);
+    });
+
+    it("does not double-fire when a constructor onLoad callback subscribes", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        let observerCalls = 0;
+        const state: { tex?: Texture } = {};
+
+        const tex = new Texture("https://h/albedo.png", asTextureScene(engineWrapper()), undefined, undefined, undefined, () => {
+            state.tex!.onLoadObservable.add((observed) => {
+                observerCalls++;
+                expect(observed).toBe(state.tex);
+            });
+        });
+        state.tex = tex;
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(observerCalls).toBe(1);
+    });
+
+    it("notifies attached materials after constructor onLoad configuration", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const state: { tex?: Texture } = {};
+        const observedScales: number[] = [];
+        const tex = new Texture("https://h/albedo.png", engineWrapper(), undefined, undefined, undefined, () => {
+            state.tex!.uScale = 2;
+        });
+        state.tex = tex;
+        tex._onReady(() => observedScales.push(tex.uScale));
+
+        load.resolve(textureHandle());
+        await tex.whenReadyAsync();
+
+        expect(observedScales).toEqual([2]);
+    });
+
+    it("notifies attached materials even when an onLoadObservable observer throws", async () => {
+        const load = deferred<unknown>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(load.promise);
+        const tex = new Texture("https://h/albedo.png", engineWrapper());
+        let readyCalls = 0;
+        tex.onLoadObservable.add(() => {
+            throw new Error("observer failed");
+        });
+        tex._onReady(() => readyCalls++);
+
+        load.resolve(textureHandle());
+        await expect(tex.whenReadyAsync()).rejects.toThrow("observer failed");
+
+        expect(readyCalls).toBe(1);
+    });
+});
+
+/**
+ * `HDRCubeTexture` is a lightweight environment handle (like `CubeTexture`): it
+ * records the `.hdr` URL and requested face size, resolves a readiness signal on a
+ * microtask, and carries the `_envLoaderKind: "hdr"` marker the `Scene` reads to
+ * route the environment through Lite's native `loadHdrEnvironment` at engine start.
+ */
+describe("HDRCubeTexture", () => {
+    it("records url + size and marks itself as an HDR-loader handle", () => {
+        const tex = new HDRCubeTexture("https://h/room.hdr", null, 512);
+        expect(tex.url).toBe("https://h/room.hdr");
+        expect(tex.name).toBe("https://h/room.hdr");
+        expect(tex.size).toBe(512);
+        expect(tex._envLoaderKind).toBe("hdr");
+    });
+
+    it("defaults the face size to 256", () => {
+        expect(new HDRCubeTexture("https://h/room.hdr").size).toBe(256);
+    });
+
+    it("fires onLoad + onLoadObservable and flips isReady on a microtask", async () => {
+        let loaded = false;
+        const tex = new HDRCubeTexture("https://h/room.hdr", null, 256, false, false, false, false, () => {
+            loaded = true;
+        });
+        expect(tex.isReady()).toBe(false);
+        const observed = await new Promise<HDRCubeTexture>((resolve) => tex.onLoadObservable.add(resolve));
+        expect(observed).toBe(tex);
+        expect(loaded).toBe(true);
+        expect(tex.isReady()).toBe(true);
+    });
+
+    it("is distinct from the plain CubeTexture loader kind", () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube._envLoaderKind).toBe("cube");
+        expect(hdr._envLoaderKind).toBe("hdr");
+    });
+});
+
+/**
+ * Babylon.js models `CubeTexture`/`HDRCubeTexture` as `BaseTexture` subclasses, and
+ * ported code relies on that (they show up in `BaseTexture[]` surfaces such as
+ * `Material.getActiveTextures()`). The compat handles keep that relationship even
+ * though the environment has no standalone Lite GPU handle of its own.
+ */
+describe("environment handles are BaseTexture subclasses", () => {
+    it("extends BaseTexture and reports the Babylon.js class name", () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        expect(cube).toBeInstanceOf(BaseTexture);
+        expect(hdr).toBeInstanceOf(BaseTexture);
+        expect(cube.getClassName()).toBe("CubeTexture");
+        expect(hdr.getClassName()).toBe("HDRCubeTexture");
+    });
+
+    it("has no standalone Lite handle (the scene owns the environment upload)", () => {
+        expect(new CubeTexture("https://h/env.env").getInternalTexture()).toBeNull();
+        expect(new HDRCubeTexture("https://h/room.hdr").getInternalTexture()).toBeNull();
+    });
+
+    it("settles whenReadyAsync() alongside isReady()", async () => {
+        const cube = new CubeTexture("https://h/env.env");
+        const hdr = new HDRCubeTexture("https://h/room.hdr");
+        await Promise.all([cube.whenReadyAsync(), hdr.whenReadyAsync()]);
+        expect(cube.isReady()).toBe(true);
+        expect(hdr.isReady()).toBe(true);
+    });
+});

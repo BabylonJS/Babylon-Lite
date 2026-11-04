@@ -29,10 +29,13 @@
 - Significantly faster and smaller than standard Babylon.js.
 - Avoid heavy OOP overhead where data-oriented design or flat arrays serve GPU buffer transfers better.
 - **We do NOT copy Babylon.js code.** We understand the math, then write the minimum code that produces identical pixels.
-- **Bundle size = runtime bytes only, excluding local NME payload modules and the `text-shaper` vendor dependency.** The bundle size tests measure JS bytes actually fetched at runtime via Playwright network interception, then subtract (a) local `*-nme.ts` graph payload modules so scene-specific checked-in NME data is not counted as engine/runtime code, and (b) the `text-shaper` shaping library so the default-layout text path is not charged for an upstream vendor blob (callers using `GlyphStorage` + `TextData` with their own layout pay zero for it). Dynamic-import chunks that are never loaded (e.g. animation-group for a static model, pbr-reflectance-ext when no reflectance textures) are correctly excluded. Unused chunks in the build output are fine — only fetched counted bytes matter.
+- **Bundle size = runtime bytes only, excluding local NME payload modules and vendor runtimes whose bytes are outside Lite's own engine code.** The bundle size tests measure JS bytes actually fetched at runtime via Playwright network interception, then subtract (a) local `*-nme.ts` graph payload modules so scene-specific checked-in NME data is not counted as engine/runtime code, and (b) bundled third-party WASM/shaping runtimes — `text-shaper`, `manifold-3d`, and `@recast-navigation` — so engine-size ceilings track Lite's own runtime code rather than upstream vendor blobs. Dynamic-import chunks that are never loaded (e.g. animation-group for a static model, pbr-reflectance-ext when no reflectance textures) are correctly excluded. Unused chunks in the build output are fine — only fetched counted bytes matter.
 - **WGSL minification in production bundles.** The bundle build (scripts/bundle-scenes-core.ts) uses a Vite plugin that strips comments, `\r`, leading whitespace, and blank lines from `?raw` WGSL imports. Inline WGSL template strings in TypeScript source should also use minimal whitespace (no leading indentation). This keeps production bundles lean while source stays readable.
 - **Never parse emitted WGSL strings for structured data.** The WGSL minification plugin rewrites inline template-literal content (collapses whitespace, strips newlines). Code that splits WGSL strings on `\n` or uses regex to extract field names WILL break in production bundles even if it works in dev mode. Always use typed interfaces (e.g. `UboField[]`, `BindingDecl[]`) for structured data; reserve WGSL strings for shader code only.
 - **Zero module-level side effects.** No module may execute code at import time (no `register*()` calls, no `globalThis` mutations, no `new Map()`, no `new WeakMap()`, no `new Set()`). Module-level `const cache = new Map()` **kills tree-shaking** — the bundler treats the allocation as a side-effect and cannot eliminate the module even when nothing is imported from it. Use lazy-init instead: `let cache: Map | null = null; function getCache() { if (!cache) cache = new Map(); return cache; }`. Typed-array constants (`new Float32Array([...])`) are safe — bundlers treat them as pure. Caches must auto-invalidate on device change (compare `device !== _cachedDevice`). Material-swap rebuilders are discovered via `_buildGroup._rebuildSingle` property, not a global registry.
+- **Opt-in features pay for themselves at their enabler.** A feature that must be explicitly enabled (device-lost recovery, capture hooks, diagnostics) owns _all_ of its code behind the enable function. Modules that merely _feed_ the feature must contain no feature semantics — no metadata encoding, no branching on feature state, no imports of feature modules. The only acceptable footprint in a general-purpose module is a single optional-chained call on an engine-installed seam (e.g. `engine._dlr?.x(...)`), where the seam object exists only after the feature is enabled. All meaning lives in the seam implementation.
+- **Never pass a branch-gating object to an optional seam — pass the already-computed scalar.** This is about the _runtime value_, not the type annotation (types are erased and cost nothing). Rollup tracks the property values of object literals and uses them to prove branches dead. Handing such an object to an unknown callee (`engine._dlr?.x(bgOptions)`) forces Rollup to **deoptimize** it — the callee might mutate it — so it loses the known property values and keeps branches it would otherwise have eliminated, including the `await import()` inside them. Measured in `load-env.ts`: passing `bgOptions` (whose `skipSkybox`/`skipGround` gate dynamic background imports) retained `background-ground.js` (+4,968 B) and `background-solid-skybox.js` (+1,882 B) in 55 scenes that had tree-shaken them; passing the pre-computed boolean cost 31 B. Passing an _unrelated_ object is harmless (measured: +27 B) — the hazard is specifically an object whose properties gate tree-shakeable code.
+- **Bundle-size regressions in unrelated scenes are a design defect, not a new baseline.** If a change grows scenes that don't use the feature, fix the architecture. Never absorb the growth by moving the published baseline, and never raise a `maxRawKB` ceiling without explicit user approval.
 
 ### 4b. One-Way Data Ownership (Critical)
 
@@ -50,6 +53,7 @@
 - This maximises tree-shakability: unused functions are fully eliminated. Methods on interfaces cannot be tree-shaken.
 - **Do NOT split a type into a public `Foo` + a `FooInternal` companion** just to hide implementation details. Put the internal members directly on `Foo` and tag each with `/** @internal */`. The build's d.ts trimming pass (`vite.config.ts` → `trim-internal-dts`) re-runs api-extractor with `publicTrimmedFilePath` to strip every `@internal` declaration — and any top-level imports kept alive only by them — from `dist/index.d.ts`. Public consumers see a clean type; internal code reads the field directly with full TypeScript typing. File-local `*Internal` interfaces are still fine for cases where the internal shape is genuinely a separate concrete type (e.g. an internal subtype not tied 1:1 to the public type), but the "two types for one thing" pattern is forbidden.
 - **When a property needs a different access modifier in the public API than internally** (e.g. `readonly` externally but mutable internally), expose **two fields on the same object** that alias the same value: a public `foo` with the public-facing modifier and an `@internal` `_foo` with the internal one. Both point to the same underlying storage (typically the same array/object reference). Example: `SpriteRenderer.layers: readonly Sprite2DLayer[]` paired with `_layers: Sprite2DLayer[]`, where the factory sets `layers = _layers = opts.layers.slice()`. Internal mutation goes through `sr._layers.push(...)`; public consumers can only read `sr.layers`. The d.ts trim pass strips `_layers` entirely. Avoid this pattern unless you actually need divergent modifiers — most internal members just need `@internal`.
+- **Never write inline `typeof import("./mod.js")` type annotations — always use a top-level `import type`.** To type a lazily-imported module or one of its exports, add `import type * as Mod from "./mod.js"` or `import type { fn } from "./mod.js"` at the top of the file and annotate with `Mod` / `typeof fn`. `import type` is fully erased, so this costs nothing at runtime and does not create a static edge for the bundler — but unlike the inline form it keeps the module path in one place, stays greppable/refactorable by tooling, and reads like every other import.
 
 ### 4d. No GPU Internals in Public API (Critical)
 
@@ -58,6 +62,13 @@
 - Material property interfaces (e.g. `SheenProps.texture`, `ClearCoatProps`) accept `Texture2D`, not raw GPU objects.
 - Only internal modules (`_gpu`, pipeline builders, renderable builders) may touch GPU handles.
 - Scene setup code in `lab/lite/src/` is the user-facing reference — it must read like a high-level API demo, never like a WebGPU tutorial.
+
+### 4e. One Public Package Entry Point (Critical)
+
+- **`@babylonjs/lite` exposes exactly one package export: `"."`.** Both `packages/babylon-lite/package.json` and the publish-ready package metadata emitted by `packages/babylon-lite/vite.config.ts` must keep `exports` limited to that root entry.
+- **Never add a package subpath export.** When downstream code needs a public value or type, explicitly re-export it by name from `packages/babylon-lite/src/index.ts` and import it from `babylon-lite` (workspace consumers) or `@babylonjs/lite` (published consumers).
+- Root re-exports remain tree-shakable because the package is side-effect-free; alternate package entry points are not required for optional features.
+- `tests/lite/build/public-api-types.test.ts` enforces the root-only export map for both source and emitted package metadata. Do not weaken or bypass that assertion.
 
 ### 4c. Materials Own Shaders (Critical)
 
@@ -75,6 +86,7 @@
     - Standard material extensions → follow the same pattern on the standard material side.
 - **Never hardcode feature-specific logic in the core loader or core material builders.** No `if (primitive.extensions?.KHR_...)` in `load-gltf.ts`. No `if (mat.subsurface)` inside the core PBR pipeline. The core walks an opaque feature list; feature modules own their triggers and their code paths.
 - **Why:** zero bytes for unused features (tree-shaking + dynamic import), no coupling between core and feature code, new extensions can be added without touching the core. Violating this rule breaks bundle-size ceilings for all scenes.
+- **Define extension-only feature bits INSIDE the lazy fragment, not in the shared `pbr-flag-bits.ts`.** A `features2` bit (e.g. `PBR2_CC_UV_TX`) that is set in a fragment's `detect()` and read in its `frag()` is used only within that one lazy fragment module. If you `export const` it from the shared `pbr-flag-bits.ts`, the constant is **retained in the entry/shared chunk** (the lazy fragment chunks import it cross-chunk, so it cannot be tree-shaken) and **every scene's `scene*.js` grows by ~18 bytes per bit — including scenes that never use the feature** (e.g. scene1/BoomBox moved +90 bytes from 5 such bits). Instead, declare the bit as a plain `const` at the top of the fragment file and leave only a **reservation comment** in `pbr-flag-bits.ts` documenting which bit numbers are taken (to prevent collisions). This yields literally 0 KB movement on non-feature scenes. Verified: moving 5 UV-transform bits out of `pbr-flag-bits.ts` returned scene1 to byte-identical vs the pre-feature commit, while feature scenes (scene26 subsurface, scene28 clearcoat) grew as expected.
 
 ### 5. Pixel-Perfect Accuracy
 
@@ -100,6 +112,14 @@ Babylon Lite uses BJS Y-up UVs throughout the mesh and shader stack (V=1 is top 
 2. **Material-side V-flip via `invertY`.** Codec-decoded textures (ktx2/basis) store data row 0 = top in the GPU texture (no upload flip) and set `Texture2D.invertY = true`. Standard/PBR pipelines see this flag and emit a UV V-flip in the material shader (`v = 1 - v`, implemented as a `(scaleY, offsetY)` UV uniform in `standard-pipeline.ts`). This works for clamp/repeat/mirror-repeat where UVs land in `[0, 1]`; for clamp-to-edge with UVs outside `[0, 1]` the V-flip is still safe by codebase convention (atlases always stay in `[0, 1]`).
 
 Offscreen render targets are **not** a third path. As of PR #192 they render **upright** (Y-up, no projection flip, `frontFace = "ccw"` throughout) — the old per-RT Y-flip convention (`RenderTargetDescriptor.flipY` / `RenderTargetSignature._flipY`, `viewProj` row-1 negation, `frontFace = "cw"`) has been removed. Downstream sampling of an RT is handled uniformly by the copy-to-texture / post-process vertex shaders' single unconditional UV convention, so there is no per-RT `flipY` field to set or override.
+
+### 8b. Handedness Seams (Mandatory)
+
+Babylon Lite is left-handed by default and right-handed when built with the `babylon-lite-rh` resolve condition (`docs/lite/architecture/61-right-handed-system.md`). Both builds share one source, so left-handed code that ignores the right-handed case breaks it silently:
+
+- Handedness-sensitive code — a pipeline `frontFace`, a left-handed matrix builder, the glTF RH→LH root mirror, anything that assumes +Z forward — imports `_rightHanded` from `"#coordinate-system"` (never by relative path) and handles both cases, preferably as `_rightHanded ? a : b` so the left-handed build folds back to the original bytes.
+- A file that needs no seam goes in `HANDEDNESS_EXEMPT` in `tests/lite/unit/handedness-guard.test.ts` with the reason; the test fails on any unlisted file and on stale exemptions.
+- A feature that gains right-handed support gets a right-handed twin scene (`"rightHanded": true` in `scene-config.json`, Lite wrapper and Babylon.js reference that only import the source scene), so CI's impact selection re-runs it whenever the source or the engine code it bundles changes.
 
 ---
 
@@ -146,13 +166,13 @@ async function main(): Promise<void> {
 ### 0c. Agent Test Commands (Strict)
 
 - **Agents MUST NOT run `pnpm test:perf`.** Performance tests are machine-sensitive and reserved for the user / CI; running them from an agent session wastes time and produces unreliable signal.
-- **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `npx playwright test tests/lite/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
-- `pnpm test` chains build + parity (no perf), which is acceptable.
-- **The parity suite is slow (many minutes). Only run it when the Lite engine changed.** Run `pnpm test` / `pnpm test:parity` **only if you modified `packages/babylon-lite/src/**`** (the engine/runtime). Changes confined to **demos** (`lab/lite/src/demos/**`), **scenes** (`lab/lite/src/scenes/**`), **lab UI**, thumbnails, docs, manifests, or other static lab assets **do not require** running parity or any test suite — they cannot move engine parity. Skip the suites in those cases unless the user explicitly asks.
+- **Agents MUST NOT run all scenes unless the user explicitly requests it.** Do not execute `pnpm test`, full `pnpm test:parity`, or unfiltered `pnpm build:bundle-scenes`; CI owns repository-wide scene coverage.
+- **Use scoped commands:** run individual parity specs with `pnpm exec playwright test tests/lite/parity/scenes/<spec>.spec.ts`, and filter bundle builds with `pnpm exec tsx scripts/build-bundle-scenes.ts --scenes sceneN,sceneM` after `pnpm build:lib` when runtime bytes may change.
+- **The bundle-size baseline is published by CI, not tracked in git.** Everything under `lab/public/bundle/` is generated build output and gitignored — nothing there belongs in a PR. A master-triggered pipeline (`azure-pipelines-bundle-manifest.yml`) measures every scene after each merge and publishes the aggregate manifest to `https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json`; PR builds and local `pnpm build:bundle-scenes` fetch it from there to compute the delta report. This replaced ~227 tracked per-scene files that were simultaneously the dominant cause of red CI (any merge left every other branch's copy stale) and of merge conflicts (two branches rewriting the same 200 generated files). It is safe because the baseline gates nothing and a missing baseline only skips the advisory delta. **Bundle-size regressions are still gated by the `scene-config.json` ceilings**, which `pnpm build:bundle-scenes` enforces byte-exactly and which no automation may raise.
+- **Changes confined to tests, docs, lab UI, thumbnails, or static assets do not require scene bundle or parity runs** unless the user explicitly asks. Use focused unit tests and static checks instead.
 - **Lab-only UI changes do not require parity/test suites.** When a task only changes the lab UI or static lab presentation, do not run parity or other test suites unless explicitly requested; use lightweight static inspection or a lab build only if validation is needed.
-- **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `npx playwright test tests/lite/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
+- **Keep final validation scoped too.** Run only the unit tests, filtered bundles, and parity specs affected by the change. Do not add an all-scene "final guardrail"; CI supplies that signal.
 - If perf validation is needed, ask the user to run `pnpm test:perf` locally.
-
 
 ### 1. Live Inspection Tooling (Zero Guesswork)
 
@@ -176,6 +196,21 @@ When a parity diff exists on specific meshes:
 4. **Compare buffer values** — use `spector-gpu-get_resource` to read the exact float values in each UBO (world matrix, material uniforms, light data) and diff them between engines.
 5. **Compare shaders** — extract the fragment shader from both captures and diff the key statements (lighting equation, reflection computation, alpha handling).
 6. **Fix and verify** — make the fix, re-run the isolated scene to confirm the specific mesh now matches, then run the full parity test.
+
+### 1c. glTF Loader Parity Root-Causes (Recurring)
+
+Hard-won gotchas that have each caused multiple parity failures. Check these first when a glTF scene renders black, garbled, exploded, or mis-coloured:
+
+- **Interleaved vertex attributes must honor `bufferView.byteStride`.** `resolveAccessor` reads a _tight_ typed-array view and ignores stride. Any feature that calls it on a strided source reads padding / a neighbouring attribute and corrupts the result. Each attribute family needs its own de-stride: skinned rigs interleave `JOINTS_0`/`WEIGHTS_0` (mis-read → exploded or mis-posed mesh — see `gltf-feature-skeleton.ts`); `COLOR_0` is often interleaved _and_ normalized `UNSIGNED_BYTE`/VEC4 (mis-read → rainbow garbage — see `resolveColorVec3` in `gltf-interleave.ts`). The tight path de-strides via `gltf-interleave.ts`; mirror its handling for any new attribute consumer.
+- **A primitive without `NORMAL` needs generated normals on _every_ path.** The tight loader calls `computeSmoothNormals`; the interleaved path previously zero-filled, yielding `normalize(0)` = NaN → pure-black lit fragments (material-less skinned meshes hit this). Always synthesize normals, never zero-fill. **But the glTF spec requires no-`NORMAL` primitives to be _flat_-shaded** (one normal per face), which BJS does — so Lite sets `MSH_FLAT_NORMAL` and derives the face normal per-fragment from `dpdx/dpdy(worldPos)` (oriented to the viewer) instead of interpolating the smooth normal. The WGSL lives in lazily-imported `flat-normal-wgsl.ts` (zero bytes for normal-having scenes).
+- **Vertex color is `float32x4` (RGBA), not RGB.** glTF `COLOR_0` alpha modulates the fragment alpha (vertex-color-driven alpha blending / alpha-clip), so the rgb multiplies base color **and** `alpha *= vColor.a` is threaded before the alpha-test discard. VEC3 sources get `a = 1`. This matches the engine's existing vec4 convention for procedural/node/shader meshes.
+- **`KHR_animation_pointer` material-factor targets need their UBO slot to pre-exist.** Material flags (e.g. `PBR2_HAS_BASE_COLOR_FACTOR`, `PBR_HAS_EMISSIVE_COLOR`) are computed at first render from `!!mat.field`. Seed the animated field during load (before first render) or the pointer animates nothing. `emissiveColor` is stored pre-multiplied (`factor × strength`); keep factor and strength separate so either pointer can recombine.
+
+### 1d. Parity-Harness Gotchas — BJS Image Processing & Loading Overlay (Mandatory)
+
+- **Match `loadEnvironment`'s image processing in the BJS reference scene.** `loadEnvironment` enables tone mapping and sets `exposure = 0.8`, `contrast = 1.2` (mirroring BJS `createDefaultEnvironment`). A flat-`clearColor` BJS scene that skips `createDefaultEnvironment` leaves all three at their defaults (tone mapping OFF, 1.0/1.0) — a non-linear mismatch that silently inflates MAD on every IBL-lit model (the dominant residual, ~10-50% darker mid-tones). Set **all three** in the BJS scene: `scene.imageProcessingConfiguration.exposure = 0.8; contrast = 1.2; toneMappingEnabled = true;`. (Tone mapping was the single biggest parity lever on the cx20 scene batch — it dropped multiple scenes from MAD ~1.5 to ~0.01.)
+- **BJS loading overlay leaks into canvas screenshots.** `page.locator("canvas").screenshot()` captures whatever HTML composites over the canvas box, **including Babylon's `babylonjsLoadingDiv` spinner**. A still-fading overlay darkens the whole frame by a scene-dependent amount and inflates MAD (worst on heavy scenes). In BJS reference scenes that import `@babylonjs/core/Loading/loadingScreen` (a required side-effect for some assets), no-op the overlay right after engine init: `engine.displayLoadingUI = function () {};`.
+- **Use the same flat `clearColor` in both engines** for IBL-only test scenes (a buffer clear is pixel-identical across BJS/Lite, unlike a skybox whose projected geometry diverges at arbitrary framings) so the full-image compare passes with no background masking.
 
 ### 2. Iterative Scene-Based Evolution
 
@@ -284,7 +319,7 @@ Gallery thumbnails are presentation assets for the lab/pages cards — **not** p
 ### 7b. Lab Bundle Files Panel (per-export tokens)
 
 - After `pnpm build:bundle-scenes`, the lab's **Bundle** tab exposes a **📄 Files** button on every scene card that opens a per-scene breakdown of every chunk, every module, and every **exported symbol (token chip)** that survived tree-shaking, annotated with runtime-loaded vs built-but-not-fetched.
-- Backing data lives in `lab/public/bundle/bundle-info/<scene>.json` (full module + export list) and `lab/public/bundle/manifest.json` (runtime-fetched chunk set per scene).
+- Backing data lives in `lab/public/bundle/bundle-info/<scene>.json` (full module + export list) and the per-scene `lab/public/bundle/manifest/<scene>.json` (runtime-fetched chunk set per scene).
 - **When tasked with reducing bundle size, you MUST consult the bundle files data before proposing changes.** Compare the exported tokens retained for a scene against what the scene's `.ts` file actually imports:
     - Tokens that survive tree-shaking but aren't needed by the scene's features reveal unconditional imports, side-effectful modules, or missing feature gates — these are the real optimization targets.
     - Runtime-loaded chunks whose functionality the scene has explicitly opted out of (e.g. `background-renderable` despite `skipSkybox+skipGround`, `skeleton-*` for a non-skinned GLB) indicate conditional dynamic imports that are missing.
@@ -295,7 +330,7 @@ Gallery thumbnails are presentation assets for the lab/pages cards — **not** p
 
 ## Babylon.js Reference Repository
 
-- Location: `C:\Repos\Babylon.js`
+- Location: `D:\Repos\Babylon.js`
 - Use for understanding internal math and algorithms — never for copying code.
 - Key paths:
     - WebGPU engine: `packages/dev/core/src/Engines/webgpuEngine.ts`

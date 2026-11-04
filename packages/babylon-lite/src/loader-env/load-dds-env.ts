@@ -2,8 +2,9 @@ import { F64, I32, U16, U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { EnvironmentTextures } from "./load-env.js";
-import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
-import { assembleEnvironmentTextures } from "./env-helpers.js";
+import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
+import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
+import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { shToPolynomial } from "../math/spherical-harmonics.js";
 import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
@@ -41,6 +42,12 @@ const SH_BASIS = [
 const SH_COS_KERNEL = [PI, (2 * PI) / 3, (2 * PI) / 3, (2 * PI) / 3, PI / 4, PI / 4, PI / 4, PI / 4, PI / 4];
 
 const MAX_HDRI = 4096;
+
+let _ddsEnvironmentExtraUsage = 0;
+/** @internal Enable copying DDS environments into opt-in local probe arrays. */
+export function _enableDdsEnvironmentCopySource(): void {
+    _ddsEnvironmentExtraUsage = TU.COPY_SRC;
+}
 
 // Face orientations matching BJS _FileFaces: +X, -X, +Y, -Y, +Z, -Z
 // [normalX, normalY, normalZ, fileXx, fileXy, fileXz, fileYx, fileYy, fileYz]
@@ -198,9 +205,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
 
     // Fetch DDS and BRDF PNG in parallel
     const ddsPromise = fetch(url).then((r) => r.arrayBuffer());
-    const brdfPromise = fetch(options.brdfUrl)
-        .then((r) => r.blob())
-        .then((b) => createImageBitmap(b, { premultiplyAlpha: "none", colorSpaceConversion: "none" }));
+    const brdfPromise = loadBrdfImage(options.brdfUrl);
 
     const buf = await ddsPromise;
 
@@ -217,7 +222,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
         size: [width, height, 6],
         format: "rgba16float",
         mipLevelCount: mipCount,
-        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | _ddsEnvironmentExtraUsage,
         dimension: "2d",
     });
 

@@ -1,0 +1,682 @@
+# Module: Cascaded Shadow Maps (CSM)
+
+> Package paths:
+> `packages/babylon-lite/src/shadow/csm-directional-shadow-generator.ts`
+> `packages/babylon-lite/src/shadow/csm-shadow-task-hooks.ts`
+> `packages/babylon-lite/src/shadow/csm-shadow-cache.ts`
+> `packages/babylon-lite/src/shadow/csm-refit-gate.ts`
+> `packages/babylon-lite/src/shader/fragments/csm-shadow-fragment-core.ts`
+> `packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment.ts`
+
+## Purpose
+
+Cascaded Shadow Maps for a **directional light**, matching Babylon.js
+`CascadedShadowGenerator` with the default 5×5 PCF filter (`computeShadowWithCSMPCF5`).
+The camera view frustum is split into N depth slices (cascades); each cascade gets
+its own orthographic shadow map fit tightly to that slice, rendered into one layer
+of a `depth32float` `texture_2d_array`. The receiver selects a cascade per fragment
+from the camera-view-space depth and samples that array layer with PCF5, optionally
+cross-fading into the next cascade near the slice boundary.
+
+All substantive CSM code lives in the four modules above plus a byte-minimal set of
+shared edits (see _Bundle Discipline_), so ESM/PCF scenes are byte-unaffected.
+
+## Public API Surface
+
+```ts
+interface CsmDirectionalShadowGeneratorConfig {
+    mapSize?: number; // per-cascade square resolution, default 1024
+    numCascades?: number; // default 4 (max 4)
+    lambda?: number; // log/uniform split blend 0..1, default 0.5
+    cascadeBlendPercentage?: number; // cross-fade fraction, default 0.1 (0 disables)
+    stabilizeCascades?: boolean; // bounding-sphere fit (no shimmer), default false
+    shadowMaxZ?: number; // max shadow distance, default = camera far plane
+    bias?: number; // depth bias, default 0.00005
+    worldSpaceBias?: number; // caster depth offset in world units; supplied non-positive/non-finite values disable bias
+    darkness?: number; // 0 = black shadow, 1 = no shadow, default 0
+    frustumEdgeFalloff?: number; // soft cascade-edge fade 0..1, default 0
+    forceRefreshEveryFrame?: boolean; // default false
+}
+
+function createCsmDirectionalShadowGenerator(engine: EngineContext, light: DirectionalLight, cfg?: CsmDirectionalShadowGeneratorConfig): ShadowGenerator;
+
+interface CsmStaticCacheOptions {
+    refitAngle: number;
+    refitMaxIntervalMs?: number;
+    staticCascadesPerFrame?: number; // 0 or omitted: every cascade re-renders in the refit frame
+    cascadeCoveragePadding?: number; // 0 or omitted: off; otherwise 2 / mapSize through 1, stabilizeCascades only
+}
+
+function enableCsmStaticCache(engine: EngineContext, shadowGenerator: ShadowGenerator, options: CsmStaticCacheOptions): Promise<void>;
+
+function getCsmReceiverTexture(shadowGenerator: ShadowGenerator): Texture2D;
+
+function onCsmReceiverUpdate(shadowGenerator: ShadowGenerator, callback: (data: Float32Array) => void): () => void;
+
+function setShadowCasterMaxCascade(mesh: Mesh, maxCascade: number): void;
+
+interface CsmRefitCaster {
+    readonly worldMatrixVersion: number;
+    readonly thinInstances?: { readonly _version: number } | null;
+}
+
+interface CsmRefitGateOptions {
+    refitAngle: number;
+    refitMaxIntervalMs: number;
+    demoteQuietFrames?: number;
+}
+
+interface CsmRefitDecision {
+    refit: boolean;
+    renderDynamic: boolean;
+}
+
+interface CsmRefitGate<M extends CsmRefitCaster> {
+    syncCasters(casters: readonly M[]): void;
+    markDynamic(caster: M): void;
+    isDynamic(caster: M): boolean;
+    update(
+        lightDirX: number,
+        lightDirY: number,
+        lightDirZ: number,
+        nowMs: number,
+        cameraChanged: boolean,
+        force: boolean,
+        onPromote: (caster: M) => void,
+        onDemote: (caster: M) => void
+    ): CsmRefitDecision;
+}
+
+function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGateOptions): CsmRefitGate<M>;
+```
+
+Usage mirrors the other directional generators:
+
+```ts
+const light = createDirectionalLight([0, -1, -1], 0.8);
+addToScene(scene, light);
+light.shadowGenerator = createCsmDirectionalShadowGenerator(engine, light, { mapSize: 1024 });
+setShadowTaskCasterMeshes(light.shadowGenerator, casterMeshes);
+// receivers: mesh.receiveShadows = true
+await registerSceneWithShadowSupport(scene);
+```
+
+`setShadowCasterMaxCascade(mesh, maxCascade)` limits a caster to cascade layers
+`0..maxCascade` (`0` is nearest). The default is all cascades; pass `Infinity` to
+restore it. Values must be non-negative integer indexes or `Infinity`. The cap is
+snapshotted when `setShadowTaskCasterMeshes` supplies the caster set, so changing a
+live cap requires re-supplying a new caster-array instance. CSM updates only the
+changed caster's per-cascade task membership; ESM and single-map PCF ignore the cap.
+
+Custom `ShaderMaterial` receivers use the same public generator without reading its
+internal WebGPU resources:
+
+```ts
+const material = createShaderMaterial({
+    // ...sources, attributes, and uniforms...
+    samplers: [{ name: "csmShadow", sampleType: "depth", viewDimension: "2d-array", comparison: true }],
+});
+setShaderTexture(material, "csmShadow", getCsmReceiverTexture(light.shadowGenerator));
+onCsmReceiverUpdate(light.shadowGenerator, (data) => {
+    // Mirror the documented 80-float receiver layout into the custom material.
+});
+```
+
+`getCsmReceiverTexture` accepts only a generator created by
+`createCsmDirectionalShadowGenerator`; other shadow techniques throw. It returns a
+borrowed `Texture2D` whose view is explicitly `"2d-array"`, whose sampler is the
+generator's comparison sampler, and whose sample type is depth. The same wrapper
+object is returned for every call on one generator. It shares the generator's
+lifetime and must not be released or disposed independently.
+
+A custom `ShaderMaterial` that both **receives** CSM shadows and **casts** them must not cast through
+itself: the depth-only caster view shares the source material's bind group, so the caster pass would
+sample the cascade array it is rendering into. Give it a sampler-free caster material (same vertex
+stage, and it may share the same storage buffers so GPU-deformed geometry casts its real silhouette)
+and wire it with the public `setShadowCasterMaterial(visibleMaterial, casterMaterial)`.
+
+## Internal Architecture
+
+### `ShadowGenerator` extensions (shared interface, type-only)
+
+- `_shadowType` union widened `"esm" | "pcf"` → `"esm" | "pcf" | "csm"`.
+- `_csmCascadeCount?: number` — number of cascades, read by the receiver renderable
+  to bake the cascade-select loop bound.
+- `_csmReceiverTexture?: Texture2D` — lazily created borrowed public wrapper for
+  custom receivers. It creates exactly one explicit 2d-array view, is cached on
+  the generator rather than in module state, and establishes one generator-owned
+  texture reference so ShaderMaterial acquire/release cycles cannot destroy the
+  shared shadow map.
+
+### Static cache and refit gate
+
+Awaiting `enableCsmStaticCache(engine, generator, options)` enables the static
+shadow cache before scene registration or receiver-texture access. Casters begin in the dynamic
+overlay, become static after 120 quiet frames, and return to the dynamic set
+immediately when their world or thin-instance version changes. A refit recomputes
+the cascades and refreshes the private static depth array after the light drifts by
+`options.refitAngle`, the camera changes (with `options.cascadeCoveragePadding`, only the
+changes listed under _Camera-coverage refit_ below), caster membership changes, a static
+caster moves, or `options.refitMaxIntervalMs` expires. The interval remains active while the
+light is paused so GPU-clock-animated static casters continue refreshing. Generators
+that are not explicitly enabled preserve the original single-task path, allocate no
+cache texture, and do not load the cache implementation.
+
+With `options.staticCascadesPerFrame` above zero, a refit whose only cause is light drift
+re-renders at most that many static cascades per frame, round-robin, so the periodic refresh
+costs a slice of every frame instead of one long frame. Each selected cascade advances
+atomically: its shadow camera and receiver transform are updated together, its static layer is
+rendered, only that array layer is copied to the live shadow map, and only that layer's dynamic
+overlay is rendered. Cascades still waiting retain both their previous depth and previous
+receiver transform, so the sampled data remains coherent throughout the spread.
+
+Published cascades keep owned copies of their light view and caster view-projection. A shadow
+camera holds references to the arrays it is given, and a refit recomputes the shared fit scratch
+for every cascade while some stay published: a spread publishes them over several frames, and a
+coverage refit (below) republishes only the cascades that fail. With references, a waiting
+cascade's camera (and so the culling of its dynamic overlay) would take the new fit before its
+static layer is rendered with it.
+
+A refit caused by the camera (without `cascadeCoveragePadding`; see below; a change of active
+camera counts too, by identity, since the camera change key is a per-camera counter sum that two
+cameras can share), scene content,
+caster set, promotion or demotion updates every cascade in its own frame, as without the option. A drift refit that lands while a spread is
+still draining also updates every cascade immediately, preventing a fast-moving light from
+continually replacing the pending generation. If a dynamic caster changes during a spread,
+the cache is copied and the dynamic overlay is redrawn for every cascade, while each static
+layer remains paired with its currently published transform.
+
+#### Camera-coverage refit (`cascadeCoveragePadding`)
+
+Off by default (`0` or omitted): every camera change refits and re-renders all cascades,
+as described above. A positive value must lie between `2 / mapSize` and `1` and requires
+`stabilizeCascades: true`; `enableCsmStaticCache` rejects any other value. The floor exists
+because texel snapping shifts a fit by up to `sqrt(2) / mapSize` of its radius: a fresh fit
+then reaches at most `1 / (1 + padding) + sqrt(2) / mapSize` of its own coverage disc, which
+stays at or below 1 from `2 / mapSize`. It is a worst-case bound, not a measured threshold.
+
+- **Padded fit.** Every fit of the cached generator passes `radiusScale = 1 + padding` to
+  `_computeCsmCascades`, which widens each stabilized bounding sphere by that factor before
+  the 1/16 rounding. Texels grow by about the same factor.
+- **Coverage test.** On each frame where the camera's transform version changed, the
+  current slice of every cascade is tested against that cascade's **published** map: its
+  eight corners (from `_csmSliceCornersInto`, the slice geometry shared with the fit, using
+  the published split distances) must lie inside the unit disc of the cascade's shadow clip
+  space (read from the receiver UBO) and inside the light-depth range `[0, 2R]` (read from the
+  published light view, before the caster-bound depth tightening).
+- **Same-frame refit.** The cascades that fail are refit and re-rendered in that frame, alone:
+  a fresh fit is computed, and each failed cascade's camera, receiver UBO slot, static layer,
+  array-layer copy and dynamic overlay advance together, as in a spread. Cascades that still
+  pass keep their map, camera and transform.
+- **Full refit.** A change of active camera (identity, read from the camera the cascades were
+  last fit for, `CsmTaskState._lastCamera`: `_projRev` is a per-camera counter, so two cameras can
+  share a revision), of its projection revision (fov, near/far, orthographic
+  bounds) or of the effective aspect refits every cascade, because the splits or slice shapes
+  change. The light, content, caster and interval causes are unchanged.
+- **Spread publication.** A cascade a spread refit publishes one or two frames after its fit is
+  refit first when the camera moved since that fit, so every cascade published while the
+  camera moves is fit to the pose it is shown with.
+- **Scheduler.** A cascade that fails while a spread still waits to render it is re-rendered
+  now, outside the per-frame budget, and removed from the pending set with the internal
+  scheduler's `claim()`, so the spread does not render it a second time.
+- **Floating origin.** Under a floating origin the camera view-projection is eye-relative
+  (`getViewMatrix`), so a pure translation moves no slice corner; the option then falls back
+  to refitting every cascade on every camera change.
+- **Receiver callbacks.** `onCsmReceiverUpdate` callbacks keep the per-frame cadence they have
+  without the option: they are invoked on every frame the camera's change key moves, with the
+  current receiver data, even when that frame redraws no cascade (consumers re-upload their own
+  camera-dependent terms from them). A still camera invokes them only on the frames that publish
+  cascades, as without the option.
+
+What this covers: after every frame, each cascade's map contains the eight corners of the
+camera's current slice for that cascade by the rule above, so the whole (convex) slice. That
+is the level a fresh unpadded stabilized fit already reaches (texel snapping takes it to about
+1.0005 of the disc), not a stronger one. It does not cover the 5×5 PCF footprint at the disc
+edge, nor the cross-fade band: fragments in the last `cascadeBlendPercentage` of a slice
+sample the next cascade, outside that cascade's slice, and with the option that band reaches
+further into the next cascade's map than with a fresh fit.
+
+`createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
+that need the same policy without engine or WebGPU dependencies. The spread scheduler and its
+drift classification are internal cache-orchestration details. Re-supplying a new array with
+identical caster membership does not invalidate the cache.
+
+### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
+
+| offset (f32) | field               | type                                                           |
+| ------------ | ------------------- | -------------------------------------------------------------- |
+| 0..63        | `cascadeTransforms` | `array<mat4x4, 4>`                                             |
+| 64..67       | `viewFrustumZ`      | `vec4<f32>`                                                    |
+| 68..71       | `frustumLengths`    | `vec4<f32>`                                                    |
+| 72..75       | `shadowsInfo`       | `vec4<f32>` (darkness, mapSize, 1/mapSize, frustumEdgeFalloff) |
+| 76..79       | `csmParams`         | `vec4<f32>` (cascadeCount, cascadeBlendFactor, 0, 0)           |
+
+`cascadeBlendFactor = cascadeBlendPercentage === 0 ? 10000 : 1 / cascadeBlendPercentage`.
+Unused cascade slots (when `numCascades < 4`) are never read — the WGSL loop bound is
+the baked cascade count.
+
+### Shadow map texture
+
+`depth32float`, size `mapSize × mapSize × numCascades`,
+`RENDER_ATTACHMENT | TEXTURE_BINDING` plus `COPY_DST` when static caching is enabled.
+The private static cache uses `RENDER_ATTACHMENT | COPY_SRC`. Receiver view:
+`dimension:"2d-array"`. Per-cascade
+caster render targets use a single-layer view
+(`createView({dimension:"2d", baseArrayLayer:i, arrayLayerCount:1})`). Comparison
+sampler `compare:"less"`, linear filtering.
+
+Built-in material receivers bind the generator's internal texture and sampler through
+their material pipeline. Custom `ShaderMaterial` receivers obtain the equivalent
+borrowed `Texture2D` only through `getCsmReceiverTexture`; raw `GPUTexture`,
+`GPUTextureView`, and `GPUSampler` handles never cross that public boundary.
+
+## Pipeline Configuration
+
+- **Caster pass:** N depth-only render tasks (one per cascade layer), each rendering
+  every caster through the material family's _no-color_ view, clearing the layer to
+  depth 1.0 with `depthCompare:"less-equal"`. The per-cascade camera facade carries
+  the cascade view matrix + **bias-adjusted** ortho·view transform. Legacy `bias`
+  supplies the existing normalized projection offset. `worldSpaceBias`, when present,
+  extends the fitted far plane by that distance, then converts the authored
+  world-space distance into a per-cascade clip offset
+  `worldSpaceBias / (paddedFar-near)`. The physical separation stays constant while a
+  moving light or caster changes the fitted cascade depth range, and far-bound casters
+  remain inside the clip volume after the offset.
+- **Static-cache caster passes:** after `enableCsmStaticCache`, every cascade owns a clearing
+  static task targeting the private cache and a non-clearing dynamic task targeting the
+  live map. Refit frames render static tasks, copy the complete cache array to the live
+  map, then depth-test the dynamic overlay against that copy. Overlay-only frames repeat
+  the copy before drawing dynamic casters so moved shadows cannot leave stale depth.
+  Frames with no refit and no dynamic change issue neither passes nor copies.
+- **Receiver pass:** group-2 bind group per CSM light = `[arrayDepthView,
+comparisonSampler, csmUBO]` (binding order 0,1,2). The 2d-array view dimension is
+  produced by the shader composer (`bglEntry` maps `_textureType` containing `"array"`
+  → `viewDimension:"2d-array"`).
+
+## Shader Logic (WGSL outline)
+
+Receiver, per CSM light (suffix `_<lightIndex>`, `N` = baked cascade count):
+
+```wgsl
+// cascade select from camera-view-space depth, LH
+let viewZ = (scene.view * vec4(vp, 1.0)).z;
+var idx = -1; var diff = 0.0;
+for (var i = 0; i < N; i++) {
+    diff = csmInfo.viewFrustumZ[i] - viewZ;
+    if (diff >= 0.0) { idx = i; break; }
+}
+if (idx < 0) { idx = N - 1; }
+
+var shadow = csmSample(idx, vec4(vp, 1.0));      // PCF5 on layer idx
+// optional cross-fade into next cascade
+let ratio = clamp(diff / csmInfo.frustumLengths[idx], 0.0, 1.0) * csmInfo.csmParams.y;
+if (idx < N - 1 && ratio < 1.0) {
+    shadow = mix(csmSample(idx + 1, vec4(vp, 1.0)), shadow, ratio);
+}
+shadowFactors[lightIndex] = shadow;
+```
+
+`csmSample(layer, worldPos)`:
+
+```wgsl
+let p = csmInfo.cascadeTransforms[layer] * worldPos;
+let clip = p.xyz / p.w;
+let uv = vec2(0.5*clip.x + 0.5, 0.5 - 0.5*clip.y);   // Lite Y-flip convention
+let depthRef = clamp(clip.z, 0.0, 0.99999994);        // GREATEST_LESS_THAN_ONE
+// 5×5 PCF (9 textureSampleCompareLevel taps, /144 weighting)
+// textureSampleCompareLevel(csmTex, csmComp, base + offset, layer, depthRef)
+return computeFallOff(mix(darkness, 1.0, sh), clip.xy, frustumEdgeFalloff);
+```
+
+The `0.99999994` clamp is critical: fragments projecting beyond a cascade's far plane
+must compare strictly _less than_ the cleared shadow-map value (1.0) so they read as
+**lit**, not shadowed.
+
+`vp` is the existing world-position varying. Standard CSM derives camera-view-space
+depth from `scene.view × vec4(vp, 1)` in the fragment shader. It must not depend on
+the fog-only `vf` varying, so a non-fog CSM material composes without retaining fog
+WGSL or requiring fog-generated vertex output. CSM still avoids emitting N
+per-cascade light-space varyings.
+
+## CSM Math (`csm-shadow-task-hooks.ts`)
+
+### Splits (`_computeCsmCascades`)
+
+`near = camera.near`, `far = camera.far`, `cameraRange = far - near`,
+`maxDistance = shadowMaxZ < far && shadowMaxZ >= near ? min((shadowMaxZ-near)/cameraRange, 1) : 1`,
+`minZ = near`, `maxZ = near + maxDistance*cameraRange`, `range = maxZ-minZ`, `ratio = maxZ/minZ`.
+For `p = (i+1)/N`: `log = minZ*ratio^p`, `uniform = minZ + range*p`,
+`d = lambda*(log-uniform) + uniform`.
+`viewFrustumZ[i] = d`; `breakDist[i] = (d-near)/cameraRange`;
+`frustumLengths[i] = (breakDist[i]-prevBreak)*cameraRange`.
+
+### Per-cascade matrix
+
+1. Invert the **reverse-Z** camera view-projection (`getViewProjectionMatrix`). Transform
+   the 8 reverse-Z NDC frustum corners (**near z=1, far z=0**) to world space.
+2. Slice [prevSplit, split]: `corner[k] = near + ray*prevSplit`,
+   `corner[k+4] = near + ray*split` where `ray = far - near` per side.
+3. Centroid = mean of the 8 slice corners.
+4. Fit a light-space AABB: temp `LookAtLH` from centroid along `lightDir`
+   (`buildLightViewMatrix`), transform corners, take min/max extents.
+   (`stabilizeCascades` instead uses a `ceil(radius*16)/16` bounding sphere.)
+5. Shadow camera eye = `centroid + lightDir * minExtents.z`; cascade view =
+   `buildLightViewMatrix(lightDir, eye)`.
+6. Z range: `viewMinZ = 0`, `viewMaxZ = extents.z`, then tightened to the casters'
+   world-AABB Z in cascade view space (depthClamp-false behaviour:
+   `viewMinZ = min(0, castersMinZ)`, `viewMaxZ = min(extents.z, castersMaxZ)` when
+   `castersMinZ <= viewMaxZ`). v1 uses depthClamp = false so no GPU depth-clip feature
+   is required. A positive `worldSpaceBias` then extends `viewMaxZ` by the same
+   distance so the farthest fitted caster is not clipped after biasing.
+7. `ortho = OrthoOffCenterLH(minX,maxX,minY,maxY, viewMinZ, viewMaxZ)` (column-major,
+   half-z, near→0 far→1 — same convention as the PCF generator's shadow ortho).
+8. `transform = ortho · view`. **Texel snap (always applied):** project the world origin
+   (`transform[12], transform[13]`), `× mapSize/2`, round, build an XY translation of the
+   rounded offset, `transform = (T·ortho) · view`.
+9. Receiver `cascadeTransforms[i] = transform` (unbiased). Caster camera view-projection
+   adds `clipOffset·w` to its Z row, where `clipOffset = bias·0.5` for the legacy
+   normalized bias, or `worldSpaceBias / (paddedViewMaxZ-viewMinZ)` for a world-space
+   bias. The latter is invariant in world units even when caster-AABB fitting changes
+   the range.
+
+## State Machine / Lifecycle
+
+`createShadowTask` (scene-owned) drives the generic hooks:
+`_preloadShadowTask` → loads the no-color material-view factories.
+`_ensureShadowTaskState` → builds N per-layer render targets + cameras + tasks once;
+they live as long as the generator, and later caster changes are reconciled into them
+(see the caster reconcile below).
+`_renderShadowMap` → per frame, dirty-checked on `casterVersion + lightVersion +
+cameraVersion`, the aspect and the camera's identity (`CsmTaskState._lastCamera`, since two
+cameras can share a change key); recomputes splits + matrices, writes the 320-byte UBO (bumping
+`_version`), updates each cascade camera, executes all cascade tasks.
+
+With static caching enabled, the dynamically imported `csm-shadow-cache.ts` owns the
+GPU task split and `csm-refit-gate.ts` owns the caster partition and refit decision.
+A cascade's matrix, receiver UBO slot and shadow-camera version change only in a frame that
+re-renders that cascade's static layer and redraws its overlay: every cascade on a refit
+frame (spread over the following frames for a drift refit), and, with
+`cascadeCoveragePadding`, the cascades whose map stopped covering the camera on frames where
+the gate decided no refit. Dynamic-only frames reuse the published cameras so cached and
+overlay depth stay in the same coordinate system. Quiet dynamic casters demote only during a
+refit. A changed static caster promotes immediately and forces that refit. Resolved
+renderables transfer between task sets without rebuilding their per-mesh packets.
+The cache state (tasks, cache texture, gate) is created on the first ensure (or when it
+replaces a default state built before the cache chunk loaded) and kept for the generator's
+lifetime; its initial camera key forces the new cache texture to be populated before use.
+Caster changes are reconciled into it like the default state. The cache also drops the
+removed and held casters from its static tasks and moves each requeued caster the gate
+holds static from the dynamic overlay back into the static tasks, so a static caster whose
+material was rebuilt or re-pointed, or whose cascade cap changed, stays static. A caster
+that leaves the set and returns later is new to the gate, which forgets departed casters,
+so it starts dynamic like any new caster. Any drop or requeue forces a full refit, so every static cascade
+re-renders without the old depth (a re-capped caster's depth leaves the cascades above its
+new cap at once); when a caster was queued, the scheduler's record also re-binds every
+static task. Besides the requeued casters' own packets, that refit and that re-bind are
+the whole cost of a caster change: no task, target, cache texture or kept caster packet is
+recreated.
+
+The custom-receiver texture wrapper is lazy and generator-scoped. The first
+`getCsmReceiverTexture` call validates the CSM technique, creates the array view, and
+caches the wrapper. It also anchors the generator's texture ownership in the shared
+ref-count pool; receiver materials may acquire and release the wrapper without
+destroying the generator-owned depth array. Later calls preserve object/view identity.
+Shadow-map recreation is not supported by the current fixed generator configuration;
+therefore the wrapper remains valid until the generator's GPU resources are disposed
+with the scene.
+
+`onCsmReceiverUpdate` immediately replays the most recently published 80-float UBO to
+a late subscriber once at least one cascade update has completed. This is required in
+cache mode because the next refit may be far in the future.
+
+Each CSM task state also snapshots every caster's maximum cascade and renderable
+generation (`Mesh._renderableGen`) and, per receive material, its terminal caster
+material, that material's `_csmGen` and its `_renderFeatures` object. Every ensure
+reconciles them with the live casters (`_reconcileCsmCasters`):
+
+- **Requeue.** Casters that left the set or were re-capped, casters whose own renderable
+  was rebuilt, and casters whose no-colour view is stale, are removed from every cascade
+  task in one pass per task, their packets retiring behind the frame fence. The ones
+  still in the set are queued again: a caster with a stale view through a fresh one, a
+  caster that was only re-capped or rebuilt through the cached view of its material. A
+  caster's renderable is rebuilt when its `_renderableGen` moved: every path that rebuilds
+  a mesh's renderable and retires its per-mesh resources moves it (the material-swap
+  drain, a runtime build, a material or group rebuild), and the caster's packets may
+  reference those resources. Only that caster is requeued: adding one mesh with a shared
+  material, or replacing one mesh's geometry, leaves the packets of the material's other
+  casters alone. A view is stale when the caster's material was rebuilt (`_csmGen` bump),
+  has recomputed `_renderFeatures` (material plugins drop them and rebuild the meshes one
+  by one; dropped features not recomputed yet keep the current view) or was re-pointed
+  (`setShadowCasterMaterial`) since the snapshot, or when
+  the caster's material is missing from it, because it switched material, got its first
+  one, or joins with an unseen material. A joining caster counts too: another caster's
+  chain may have cached a view on its chain before the terminal was rebuilt, and that
+  caster may leave or be re-pointed in the same ensure, so the prune would keep that
+  view (below). A caster whose family has no no-colour view is queued with its own
+  material, as the first build queues it. All other packets are kept, and so are the
+  tasks, targets and cameras (with static caching, the cache texture and refit gate).
+- **Hold.** A changed caster waits while its view cannot be built yet: the no-colour
+  view factory of its family is not imported (the generator is parked once while it
+  imports, as for a re-supplied set), or the material it casts through itself has no
+  completed group build in this scene (its swap drain or runtime build provides one).
+  The hold is per caster: other changed casters are requeued at once (one whose
+  material was only rebuilt, through a fresh view), and caster-set changes apply
+  meanwhile. A `setShadowCasterMaterial` override is not held for its group; recording
+  it throws as before. The reconcile keeps the held casters (`_held`): while they are
+  unchanged, an ensure with the same caster array and no stale material returns
+  without touching any task. It runs again when the array changes, a caster material is
+  rebuilt or re-pointed, or the hold changes or lifts, also without a scene version
+  bump (a factory import lands, a change is reverted). A renderable version or material
+  epoch move alone changes nothing: a rebuilt caster material moves its `_csmGen` and a
+  rebuilt caster its `_renderableGen`, which the scan reads.
+- **What a held caster draws.** Nothing. It leaves every cascade task (and static-cache
+  task), its packets retired once behind the frame fence. Those packets were built
+  through its previous material and may reference per-mesh resources retired with it,
+  possibly in a frame the shadow task did not see because the generator was parked. A
+  registered held caster keeps its cap entry, and its material is not snapshotted, so
+  it still reads as changed: it is requeued through a fresh view once the hold lifts,
+  or rejoins if its change is reverted. A new one stays out until it can join. The hold
+  is decided per material, so every caster of a held material waits: queueing a new one
+  would snapshot the material, and a registered caster sharing it would then never be
+  requeued. The drop forces a redraw, so the depth a held caster last rendered leaves
+  the map with the next draw. It is dropped once, when it becomes held: a later
+  reconcile that still holds it has nothing to drop.
+- **A caster without a material.** One with no packet waits like a held caster: one
+  whose hold lifted to no material, or one that joined, or was in the first build,
+  without a material (it gets no cap entry until it is queued; the first build starts
+  `_held` with them). One re-capped without a material waits too: its packets are dropped
+  then, since its cap changed. It is queued once a material is assigned, also one the
+  snapshot already knows, which would otherwise read as unchanged and leave it out for
+  good while the same caster array is re-supplied. A caster that has packets keeps them
+  when its material becomes `null` and its cap does not change (below).
+- **Not covered.** Forgetting a stale chain's views can leave two views of an unchanged
+  link: another live caster drawing through it (the re-pointed material's new target, or
+  a link of a joining caster's chain) keeps its packets on the old view while the stale
+  chain's casters get a new one. Both are valid. A registered caster whose material
+  becomes `null` keeps casting through its old packets. A group that never builds keeps
+  the caster held, and out of the cascades, until its material is reassigned or it
+  leaves the set: after a failed runtime build, which reports its own error, or for a
+  caster mesh outside the scene, which gets no build. A caster that switches material
+  and back while the generator is parked, with the switch back still queued behind an
+  in-flight runtime build, keeps its packets: the scan sees the same material and
+  `_csmGen` (this also happens without a hold).
+
+The shadow scheduler resolves the queued casters in its next record, one transaction per
+cascade that re-binds the kept packets once without rebuilding them. Because neither a new
+caster array nor a re-point bumps a scene version, the reconcile forces a redraw
+(`_lastCasterVersion = -1`) whenever a caster was dropped or queued, and the record
+(`_recordedVersion = -1`) only when one was queued: a drop alone has already filtered the
+binding lists. If that record throws, the replaced casters are missing from the cascade
+until a later record succeeds. On the same change path the material snapshots and views are
+pruned to what the live casters reach (their receive materials and every link of their
+`_shadowCasterMaterial` chains), so the state does not retain materials of departed casters.
+The prune runs after the queue and keeps every view a live chain reaches, so fresh views
+rest on the staleness rule: a material that casts again later, possibly rebuilt meanwhile
+through a non-caster mesh, is missing from the snapshot, so its chain's views are forgotten
+first. A new array with the same members, caps and unchanged materials, also while a caster
+stays held, is only adopted: no binding list changes, so every cascade bundle and binding
+version is kept, and a rebuilt material no caster uses changes nothing.
+
+## Babylon.js Equivalence Map
+
+| Babylon.js                              | Babylon Lite                                |
+| --------------------------------------- | ------------------------------------------- |
+| `CascadedShadowGenerator._splitFrustum` | `_computeCsmCascades` (split section)       |
+| `_computeFrustumInWorldSpace`           | reverse-Z frustum corner extraction + slice |
+| `_computeCascadeFrustum`                | centroid + light-space AABB / sphere fit    |
+| `_computeMatrices` (ortho + snap)       | `orthoOffCenterLH` + texel-snap block       |
+| `computeShadowWithCSMPCF5`              | `csmSample_<i>` (PCF5, array layer)         |
+| cascade select in `lightFragment.fx`    | `computeShadowCSM_<i>` loop + blend         |
+| `GREATEST_LESS_THAN_ONE`                | `0.99999994` depthRef clamp                 |
+
+Two deliberate deviations from default BJS, applied symmetrically to the BJS oracle so
+parity holds: **reverse-Z** NDC (Lite's projection) and **depthClamp = false**
+(avoids the optional `depth-clip-control` WebGPU feature). Both are reflected in the
+reference scene (`sg.depthClamp = false`). Result: full-image MAD = 0.000.
+
+## Bundle Discipline (no movement for unrelated scenes)
+
+Shared edits are byte-minimal:
+
+- TS union widenings `"esm" | "pcf"` → add `"csm"` (type-only, 0 runtime bytes) in
+  `shadow-generator.ts`, `standard-renderable.ts`; PBR/Node renderables filter out CSM
+  lights (they ignore CSM in v1).
+- `_depthView` field swap in the three receiver renderables (call → field read).
+- One `hasCsm`-gated dynamic import of `std-csm-shadow-fragment.ts` in
+  `standard-group-builder.ts`.
+- `shader-composer.ts` `bglEntry` gains `"array"` → `"2d-array"` view-dimension support
+  (a few bytes on the shared material chunk; well within ceilings).
+
+All cascade math + WGSL live in the four new modules, dynamically imported only by
+scenes that create a CSM generator.
+
+The static-cache orchestration and refit gate live behind the dynamic import performed
+by `enableCsmStaticCache`. Default CSM scenes therefore do not fetch the cache task
+split, transfer helper, or gate.
+
+## Dependencies
+
+`shadow-base` (`buildLightViewMatrix`, `multiply4x4`, `createShadowCamera`,
+`updateShadowCameraBase`, `createShadowParamsUBO`, `casterVersionSum`),
+`pcf-shadow-task-hooks` (`getNoColorView`, `preloadPcfShadowTaskState`),
+`math/invert-mat4`, `camera` (`getViewProjectionMatrix`), `frame-graph/render-task`,
+`csm-refit-gate`.
+
+## Test Specification
+
+`tests/lite/parity/scenes/scene214-cascaded-shadows.spec.ts` — captures the BJS CSM
+oracle (`captureGolden({ force: true })`) and compares the Lite render of
+`scene214.html` (6×6 Standard box casters + Standard ground receiver, 4-cascade CSM).
+Threshold `maxMad` in `scene-config.json` (achieved MAD = 0.000).
+
+`tests/lite/unit/csm-world-space-bias.test.ts` proves that per-cascade clip offsets
+map back to the same authored world-space distance across changing fitted depth
+ranges, preserve a tightly fitted far caster after the projection reserves bias
+headroom, and produce no bias for invalid or collapsed inputs.
+
+`tests/lite/unit/csm-receiver-texture.test.ts` proves that the public custom-receiver
+adapter creates one explicit 2d-array depth wrapper, reuses the generator texture and
+comparison sampler without exposing them in its signature, preserves wrapper identity,
+survives a ShaderMaterial acquire/release cycle, and rejects ESM/PCF generators.
+
+`tests/lite/unit/shadow-caster-max-cascade.test.ts` validates cap input, default and
+reset behavior, and in-place reassignment of an existing caster across cascade tasks
+after a live cap change (queued, with one forced record).
+
+`tests/lite/unit/csm-caster-material-switch.test.ts` drives the real shadow task,
+`mesh.material` setter, swap drain, `rebuildMaterial` and task transaction, with fresh
+modules per case so no view factory leaks between cases. For the default and
+static-cache hooks it proves that a registered caster switching to (or getting) an
+unseen material is requeued through it in the same cascade tasks, retiring only its
+old packets and keeping the cache texture and refit gate, that a new caster with an
+unseen material is simply queued, that a held caster neither throws nor creates
+anything and parks the generator once, that set changes and the requeue of other
+casters apply during a hold while held casters stay out of every task with their caps
+kept, and that held casters join when the hold lifts with or without a version bump, or
+when their change is reverted (with an unchanged cap, back on the cached view of a
+material another caster still draws). An override whose group is not built still throws. With
+packets that own resources and per-mesh resources retired by `rebuildMaterial` or the
+swap drain, it proves that a caster rebuilt while another caster is held retires its old
+packets once behind the fence and casts again at once through a fresh view, also over
+many frames of a hold whose build never lands, with no draw submitting a released
+resource and no bundle touched; that a held caster whose previous material was rebuilt
+is dropped too; that a caster switched and reverted during a hold casts its old
+material again; and that no draw submits a released resource of a held caster whose
+material was switched while the generator was parked, whether it then waits for its
+view factory (the pass whose ensure parks the generator again still draws) or for its
+group. Frames of an unresolved hold leave every task's bundles and binding version
+alone and retire nothing, and a pending caster or cap is applied once when the hold
+lifts by a group build or, without a version bump, by a factory import.
+
+`tests/lite/unit/csm-caster-reconcile.test.ts` proves that a rebuilt or re-pointed caster
+material keeps the cascade tasks (and, with the static cache, the cache texture), requeues
+only that material's casters with one fresh view shared through override chains, queues
+casters added to recorded cascades instead of rebinding the task per caster, requeues a
+rebuilt caster in the same reconcile that holds a joining caster whose group is not built
+(and queues that one once the build lands, with the same caster array), removes stale
+casters with one batch selection per task (leaving tasks without them untouched), forces
+only a redraw for a drop, forgets the materials and views no live caster reaches (so a
+former override terminal rebuilt after a re-point gets a fresh view when a caster joins with
+it), gives a caster joining with a rebuilt override terminal a fresh view when the chain
+that cached the terminal's view loses its caster or is re-pointed in the same ensure (in
+both hook sets), ignores non-caster materials and same-member re-supplies (also while a
+joining or registered caster stays held: no record, redraw or static refit, in both hook
+sets), keeps a re-pointed caster whose family factory is missing out of every task (the
+other packets kept, and no task touched again while the hold is unchanged), requeues a
+static-cache caster (rebuilt or re-capped) into the task set of its current class while the
+other packets are kept, requeues a caster whose family has no no-colour view through its own
+material, goes quiet again for the same caster array once the last held caster has joined or
+its change was reverted (no bundle clear, retirement or new view, in both hook sets), and,
+through the real shadow scheduler, publishes the replacement packet before the shadow map
+renders.
+
+`tests/lite/unit/csm-refit-gate.test.ts` validates stable re-supply, version-sum
+collision handling, promotion/demotion timing, angular drift, and interval refits.
+
+`tests/lite/unit/csm-static-refit-scheduler.test.ts` validates the spread budget, round-robin
+order and maximum lag, and that `claim()` removes only a pending cascade and leaves the next
+spread budgeted.
+
+`tests/lite/unit/enable-csm-static-cache.test.ts` additionally validates that
+`cascadeCoveragePadding` defaults to 0, is stored when valid, and is rejected outside `[0, 1]`,
+below `2 / mapSize`, or without `stabilizeCascades`.
+
+`tests/lite/unit/csm-camera-coverage-refit.test.ts` drives the real cached render, cascade fit,
+arc-rotate camera and directional light (only the GPU tasks are stubbed) and counts static
+re-renders. It proves that without the option an orbit re-renders every cascade every frame,
+and that with it the same orbit re-renders far fewer; that after every frame the published
+maps satisfy the coverage rule (checked by re-implementing that rule from the receiver UBO and
+shadow cameras, so it catches a bypassed test, not a wrong rule), with and without the
+interval floor, for a camera sliding along the light direction, and for seeded back-and-forth
+yaw jumps that publish spread cascades late; that texels widen by the padding factor; that a
+still camera costs only the interval floor; that a coverage miss re-renders only the missed
+cascades, once, while the others keep their camera matrices; and that a field-of-view change,
+a swap to a camera sharing the previous one's projection revision, or a floating origin
+refits every cascade, and that without the option a swap to a camera sharing the previous one's
+change key still refits every cascade, once. It also checks that the receiver callbacks fire on every frame the camera
+key changes, as without the option, and that a still camera adds none beyond the default path.
+
+`tests/lite/unit/csm-default-camera-swap.test.ts` drives the real default (uncached)
+`renderCsmShadowMap` and proves that a swap to a camera sharing the previous one's change key and
+aspect refits every cascade to the new camera's splits, once.
+
+`tests/lite/unit/csm-static-spread-camera-ownership.test.ts` drives the real cache through a
+drift refit spread over several frames and proves that a cascade not yet re-rendered keeps the
+camera matrix its static layer was rendered with, and that every dynamic overlay is drawn with
+its static layer's matrix while the spread drains.
+
+`tests/lite/unit/light-version.test.ts` validates that direct scalar light mutations
+can bump the light UBO version without dirtying the world matrix.
+
+## File Manifest
+
+- `shadow/csm-directional-shadow-generator.ts` — public factory, custom-receiver
+  `Texture2D` adapter, update subscription, and texture/UBO/sampler ownership.
+- `shadow/csm-shadow-task-hooks.ts` — cascade math + N-layer caster render hooks.
+- `shadow/csm-shadow-cache.ts` — dynamically loaded static-cache GPU orchestration.
+- `shadow/csm-refit-gate.ts` — GPU-free static/dynamic partition and refit policy.
+- `shader/fragments/csm-shadow-fragment-core.ts` — receiver WGSL codegen.
+- `material/standard/fragments/std-csm-shadow-fragment.ts` — Standard-family wrapper.
+- `lab/lite/src/lite/scene214.ts`, `lab/lite/scene214.html` — Lite demo scene.
+- `lab/lite/src/bjs/scene214.ts`, `lab/lite/babylon-ref-scene214.html` — BJS oracle.
+- `reference/lite/scene214-cascaded-shadows/babylon-ref-golden.png` — golden.

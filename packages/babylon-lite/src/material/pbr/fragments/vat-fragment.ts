@@ -13,6 +13,7 @@
  */
 
 import type { ShaderFragment, VertexAttribute } from "../../../shader/fragment-types.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 // WebGPU shader stage constants
 const STAGE_VERTEX = 0x1;
@@ -20,7 +21,7 @@ const STAGE_VERTEX = 0x1;
 // `vat.params` = (fromRow, toRow, frameOffset, fps); `vat.clock.x` = elapsed seconds. The current row is
 // fromRow + ((frameOffset + clock*fps) wrapped into [0, toRow-fromRow+1)). readMatrixFromVat reads bone
 // `index`'s 4 column-texels from that row.
-const VAT_HELPERS = `struct vatUniforms {
+const VAT_HELPERS = wgsl`struct vatUniforms {
 params: vec4<f32>,
 clock: vec4<f32>,
 }
@@ -41,12 +42,12 @@ return i32(p.x + wrapped);
 
 /** WGSL summing the 4- (or 8-) bone skin matrix for one frame `row` into a new matrix var `dest`. */
 function vatSkinSum(dest: string, row: string, has8Bones: boolean): string {
-    let s = `var ${dest}: mat4x4<f32> = readMatrixFromVat(vatSampler, f32(joints[0]), ${row}) * weights[0];
+    let s = wgsl`var ${dest}: mat4x4<f32> = readMatrixFromVat(vatSampler, f32(joints[0]), ${row}) * weights[0];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[1]), ${row}) * weights[1];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[2]), ${row}) * weights[2];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[3]), ${row}) * weights[3];`;
     if (has8Bones) {
-        s += `
+        s = wgsl`${s}
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[0]), ${row}) * weights1[0];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[1]), ${row}) * weights1[1];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[2]), ${row}) * weights1[2];
@@ -58,14 +59,34 @@ ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[3]), ${row}) * wei
 // Place the fully-posed prototype (mesh.world * skin) into the world by the per-instance matrix
 // (world0-3) applied OUTERMOST, so grid/herd offsets are world-space and not scaled by the prototype's
 // own transform.
-const VAT_INSTANCE_PLACEMENT = `let vatInstWorld = mat4x4<f32>(world0, world1, world2, world3);
+const VAT_INSTANCE_PLACEMENT = wgsl`let vatInstWorld = mat4x4<f32>(world0, world1, world2, world3);
 finalWorld = vatInstWorld * mesh.world * influence;`;
 
-function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): string {
+function vatRegularInfluence(has8Bones: boolean): string {
+    return wgsl`let vatRow = vatFrameRow(vat.params, vat.clock.x);
+${vatSkinSum("influence", "vatRow", has8Bones)}`;
+}
+
+function vatInstancedInfluence(has8Bones: boolean, instanceIndex: string, storage = false): string {
+    const reads = storage
+        ? wgsl`let vatIdx = ${instanceIndex} * 2u;
+let vatA = vatInstanceStorage[vatIdx];
+let vatB = vatInstanceStorage[vatIdx + 1u];`
+        : wgsl`let vatIdx = i32(${instanceIndex}) * 2;
+let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
+let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);`;
+    return wgsl`${reads}
+let rowA = vatFrameRow(vatA, vat.clock.x);
+let rowB = vatFrameRow(vec4f(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
+${vatSkinSum("infA", "rowA", has8Bones)}
+${vatSkinSum("infB", "rowB", has8Bones)}
+var influence: mat4x4f = infA * (1.0 - vatB.z) + infB * vatB.z;`;
+}
+
+function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): WgslSource {
     if (!instanced) {
         // Non-instanced: shared settings UBO, single clip (Stage 1).
-        return `let vatRow = vatFrameRow(vat.params, vat.clock.x);
-${vatSkinSum("influence", "vatRow", has8Bones)}
+        return wgsl`${vatRegularInfluence(has8Bones)}
 finalWorld = mesh.world * influence;`;
     }
     // Per-instance: ALWAYS the dual-clip path — two texels per instance: A=(fromRow,toRow,offset,fps),
@@ -73,16 +94,29 @@ finalWorld = mesh.world * influence;`;
     // reproducing a weighted gait cross-fade. A single-clip instance just sets B==A with blend=0, so this
     // ONE variant covers both — no extra mesh-feature bit, so mesh-features.ts (a shared chunk) stays
     // byte-identical for non-VAT scenes. The 2x bone reads are negligible vs the one-draw-call win.
-    return `let vatIdx = i32(vatInstanceIndex) * 2;
-let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
-let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);
-let vatRowA = vatFrameRow(vatA, vat.clock.x);
-let vatRowB = vatFrameRow(vec4<f32>(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
-${vatSkinSum("vatInfA", "vatRowA", has8Bones)}
-${vatSkinSum("vatInfB", "vatRowB", has8Bones)}
-let vatBlend = vatB.z;
-var influence: mat4x4<f32> = vatInfA * (1.0 - vatBlend) + vatInfB * vatBlend;
+    return wgsl`${vatInstancedInfluence(has8Bones, "vatInstanceIndex")}
 ${VAT_INSTANCE_PLACEMENT}`;
+}
+
+/** @internal VAT-owned shader projection reused by the GPU picker so its mesh pass deforms the
+ *  exact same vertices, with the exact same transform order, as the visible material. */
+export function createVatPickProjectionWgsl(
+    has8Bones: boolean,
+    instanceStorage = false
+): {
+    readonly helpers: string;
+    readonly regularBody: string;
+    readonly thinBody: string;
+} {
+    return {
+        helpers: VAT_HELPERS,
+        regularBody: wgsl`${vatRegularInfluence(has8Bones)}
+let projectedTransform = mesh.world * influence;
+let projectedWorld = (projectedTransform * vec4f(position, 1.0)).xyz;`,
+        thinBody: wgsl`${vatInstancedInfluence(has8Bones, "instanceIndex", instanceStorage)}
+let projectedTransform = instanceWorld * tiMesh.world * influence;
+let projectedWorld = (projectedTransform * vec4f(position, 1.0)).xyz;`,
+    };
 }
 
 /**
@@ -151,7 +185,7 @@ export const pbrExt: PbrExt = {
         return createVatFragment((ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0, (ctx._meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0);
     },
     bind(ctx, entries, b) {
-        const mesh = ctx._mesh as { vat?: { texture: GPUTexture; settingsBuffer: GPUBuffer; instanceTexture?: GPUTexture | null } } | undefined;
+        const mesh = ctx._mesh as { vat?: { texture: GPUTexture; settingsBuffer: GPUBuffer; instanceTexture?: GPUTexture | null } } | null | undefined;
         if (!(ctx._meshFeatures & MSH_VAT) || !mesh?.vat) {
             return b;
         }

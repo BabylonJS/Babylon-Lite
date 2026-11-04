@@ -1,5 +1,23 @@
 import type { ArcRotateCamera } from "./arc-rotate.js";
 import type { SceneContext } from "../scene/scene.js";
+import type { ArcRotateKeyboardOptions } from "./arc-rotate-keyboard-controls.js";
+import { _rightHanded } from "#coordinate-system";
+
+/** Camera gesture assigned to an arc-rotate pointer button. */
+export type ArcRotatePointerAction = "rotate" | "pan";
+
+/**
+ * Optional mappings for non-touch pointer buttons.
+ *
+ * Each field falls back independently: the primary button rotates and the
+ * secondary button pans by default. Touch input is intentionally unaffected.
+ */
+export interface ArcRotatePointerMappings {
+    /** Gesture for `PointerEvent.button === 0`. Default: `"rotate"`. */
+    primaryButton?: ArcRotatePointerAction;
+    /** Gesture for `PointerEvent.button === 2`. Default: `"pan"`. */
+    secondaryButton?: ArcRotatePointerAction;
+}
 
 /**
  * Optional hooks that let an {@link attachControl} caller defer pointer
@@ -9,6 +27,17 @@ import type { SceneContext } from "../scene/scene.js";
  * the default behavior (the camera always handles its own pointer input).
  */
 export interface AttachControlOptions {
+    /**
+     * Independent primary/secondary mappings for mouse and pen drags.
+     * Touch remains one-finger rotate plus two-finger pinch zoom.
+     */
+    pointerMappings?: ArcRotatePointerMappings;
+    /**
+     * Keyboard controls after {@link enableArcRotateKeyboardControls} installs
+     * the opt-in module. Pass `true` for legacy-compatible Arrow-key defaults,
+     * a configuration object to customize them, or omit/false to disable them.
+     */
+    keyboard?: boolean | ArcRotateKeyboardOptions;
     /** Optional predicate consulted on every pointer-down.  When it returns
      *  false the camera ignores that gesture (no rotate / pan).  Used to defer
      *  to gizmo interaction so pressing or dragging a gizmo doesn't also orbit
@@ -43,6 +72,20 @@ export interface ArcRotateCameraLimits {
     lowerRadiusLimit?: number;
     /** Maximum radius (farthest zoom). */
     upperRadiusLimit?: number;
+}
+
+type ArcRotateKeyboardAttachment = readonly [applyInput: () => void, dispose: () => void];
+type ArcRotateKeyboardFactory = (
+    camera: ArcRotateCamera,
+    canvas: HTMLCanvasElement,
+    keyboard: boolean | ArcRotateKeyboardOptions | undefined
+) => ArcRotateKeyboardAttachment | undefined;
+
+let _arcRotateKeyboardFactory: ArcRotateKeyboardFactory | undefined;
+
+/** @internal Install the optional arc-rotate keyboard input factory. */
+export function _installArcRotateKeyboardControls(factory: ArcRotateKeyboardFactory): void {
+    _arcRotateKeyboardFactory = factory;
 }
 
 /**
@@ -140,10 +183,17 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
 /**
  * Attach orbit/zoom/pan controls to an ArcRotateCamera.
  * Matches Babylon.js ArcRotateCameraPointersInput behavior with inertia:
- * - Left-drag: rotate (alpha/beta) with momentum
- * - Right-drag: pan (shift target) with momentum
+ * - Primary-button drag: rotate (alpha/beta) with momentum by default
+ * - Secondary-button drag: pan (shift target) with momentum by default
  * - Wheel: zoom (radius) with momentum
  * - Pinch: zoom (touch, direct — no inertia)
+ *
+ * Mouse and pen button actions can be configured independently through
+ * {@link AttachControlOptions.pointerMappings}. Touch and wheel behavior are
+ * fixed so remapping desktop pointer buttons cannot alter mobile gestures.
+ * Keyboard input is a separate opt-in installed by
+ * {@link enableArcRotateKeyboardControls}; mappings and sensitivities are
+ * configured through {@link AttachControlOptions.keyboard}.
  *
  * Input handlers accumulate into the camera's inertial offset properties.
  * Inertia is applied each frame via scene._beforeRender (the engine's render
@@ -153,21 +203,63 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * self-clamps in its setters, so this loop carries no limit code.
  *
  * Camera stays plain data — this function reads/writes its properties.
- * Returns a cleanup function to remove all listeners and the beforeRender hook.
+ *
+ * ### Lifecycle / cleanup (important)
+ *
+ * The returned function detaches everything this call attached: it removes the
+ * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture plus any
+ * listeners owned by installed input modules) and, when a `scene` was supplied,
+ * removes its `_beforeRender` inertia hook. It is idempotent — calling
+ * it more than once is safe (the hook is removed only if still present, and
+ * removing a DOM listener twice is a no-op).
+ *
+ * The controls are **not** automatically tied to the scene's lifetime. Passing a
+ * `scene` only enables inertia (it registers the per-frame hook); it does **not**
+ * register this cleanup for scene disposal. Because the DOM listeners live on the
+ * `canvas` rather than on the scene, {@link disposeScene} clears scene-owned state
+ * (including `_beforeRender`) but does **not** remove the canvas listeners added
+ * here. The caller owns the controls' lifetime and must detach them explicitly:
+ *
+ * ```ts
+ * const detachCameraControl = attachControl(camera, canvas, scene);
+ * // Later — detach controls yourself before/after disposing the scene:
+ * detachCameraControl();
+ * disposeScene(scene);
+ * ```
+ *
+ * To tie the controls to the scene so `disposeScene(scene)` also detaches them,
+ * register the returned cleanup with {@link onSceneDispose}:
+ *
+ * ```ts
+ * onSceneDispose(scene, attachControl(camera, canvas, scene));
+ * // Now disposeScene(scene) removes the canvas listeners too.
+ * ```
+ *
+ * @returns A cleanup function that removes all canvas listeners and the
+ * `_beforeRender` inertia hook. Safe to call multiple times.
  */
 export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void {
-    const angularSensibility = 1000; // Babylon default
-    const panningSensibility = 50; // Babylon default (pixels per unit)
-    const wheelPrecision = 3; // Babylon default
+    // These tuning values are read LIVE at point-of-use (not snapshotted here) so
+    // that a caller can mutate camera.angularSensibility / panningSensibility /
+    // wheelPrecision after attachControl and have it take effect immediately —
+    // matching Babylon.js, whose camera inputs read these fields on every event.
+    // The fields are always defined (the createArcRotateCamera factory seeds the
+    // Babylon defaults: angularSensibility 1000, panningSensibility 50,
+    // wheelPrecision 3), so the reads below need no ?? fallback.
 
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;
     const PANNING_EPSILON = 0.0001;
+    // Decay one inertial offset by `factor`, snapping it to 0 once its magnitude drops below `epsilon`. Kept local so
+    // the bundler can still inline attachControl into a scene that calls it once.
+    const decayInertia = (offset: number, factor: number, epsilon: number): number => (Math.abs((offset *= factor)) < epsilon ? 0 : offset);
 
     let isDragging = false;
     let isPanning = false;
     let lastX = 0;
     let lastY = 0;
+
+    const keyboardAttachment = _arcRotateKeyboardFactory?.(camera, canvas, options?.keyboard);
 
     // Touch state for pinch-zoom
     const activeTouches = new Map<number, { x: number; y: number }>();
@@ -184,12 +276,18 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         lastX = e.clientX;
         lastY = e.clientY;
 
-        if (e.button === 0) {
-            isDragging = true;
-            isPanning = false;
-        } else if (e.button === 2) {
-            isDragging = false;
-            isPanning = true;
+        const pointerAction =
+            e.button === 0
+                ? e.pointerType === "touch"
+                    ? "rotate"
+                    : (options?.pointerMappings?.primaryButton ?? "rotate")
+                : e.button === 2
+                  ? (options?.pointerMappings?.secondaryButton ?? "pan")
+                  : undefined;
+
+        if (pointerAction) {
+            isDragging = pointerAction === "rotate";
+            isPanning = !isDragging;
         }
     }
 
@@ -232,11 +330,13 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
 
         if (isDragging) {
+            const angularSensibility = camera.angularSensibility;
             camera.inertialAlphaOffset -= dx / angularSensibility;
             camera.inertialBetaOffset -= dy / angularSensibility;
         }
 
         if (isPanning) {
+            const panningSensibility = camera.panningSensibility;
             camera.inertialPanningX += -dx / panningSensibility;
             camera.inertialPanningY += dy / panningSensibility;
         }
@@ -250,48 +350,49 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
     function onWheel(e: WheelEvent): void {
         e.preventDefault();
-        // Scale by current radius for logarithmic zoom feel
-        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (wheelPrecision * 1000);
+        // Read wheelPrecision live so a caller that sets it after attachControl
+        // — as Babylon.js allows — takes effect immediately. Scale by current
+        // radius for logarithmic zoom feel.
+        camera.inertialRadiusOffset -= (e.deltaY * camera.radius) / (camera.wheelPrecision * 1000);
     }
 
-    function onContextMenu(e: Event): void {
-        e.preventDefault();
-    }
-
-    function onTouchStart(e: TouchEvent): void {
+    /** Record the changed touches; returns true while two or more fingers are down. */
+    function trackTouches(e: TouchEvent): boolean {
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i]!;
             activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
         }
-        if (activeTouches.size >= 2) {
+        return activeTouches.size >= 2;
+    }
+
+    /** Distance between the first two active touches. */
+    function pinchDistance(): number {
+        const iter = activeTouches.values();
+        const p0 = iter.next().value!;
+        const p1 = iter.next().value!;
+        return Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    }
+
+    function onTouchStart(e: TouchEvent): void {
+        if (trackTouches(e)) {
             // A second finger landed: this is a pinch, not a rotate. Cancel any
             // in-progress pointer rotate/pan so the gesture only zooms, and stop
             // the browser from hijacking the two-finger gesture as a page zoom
             // (iOS Safari ignores touch-action:none for pinch-zoom).
             isDragging = false;
             isPanning = false;
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            pinchStartDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            pinchStartDist = pinchDistance();
             pinchStartRadius = camera.radius;
             e.preventDefault();
         }
     }
 
     function onTouchMove(e: TouchEvent): void {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i]!;
-            activeTouches.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-        }
-        if (activeTouches.size >= 2) {
+        if (trackTouches(e)) {
             // Prevent the browser's native pinch-to-zoom (page zoom on iOS) so the
             // gesture drives the camera radius instead.
             e.preventDefault();
-            const iter = activeTouches.values();
-            const p0 = iter.next().value!;
-            const p1 = iter.next().value!;
-            const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            const dist = pinchDistance();
             if (pinchStartDist > 0 && dist > 0) {
                 // Direct write — the camera's radius setter self-clamps to any
                 // configured orbit limits, so no transient out-of-bounds value
@@ -318,32 +419,30 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         }
     }
 
-    // iOS Safari fires non-standard gesture* events for pinch and still zooms the
-    // page even with touch-action:none; preventing them keeps the gesture for the
-    // camera. (No-op on browsers that don't emit these events.)
-    function onGesture(e: Event): void {
+    // Suppresses the canvas context menu. iOS Safari also fires non-standard
+    // gesture* events for pinch and still zooms the page even with
+    // touch-action:none; preventing them keeps the gesture for the camera.
+    // (No-op on browsers that don't emit these events.)
+    function preventDefault(e: Event): void {
         e.preventDefault();
     }
 
     /** Per-frame: apply inertial offsets to camera properties and decay them. */
     function applyInertia(): void {
+        keyboardAttachment?.[0]();
+
         // --- Rotation inertia ---
         if (camera.inertialAlphaOffset !== 0 || camera.inertialBetaOffset !== 0) {
-            camera.alpha += camera.inertialAlphaOffset;
+            // Right-handed: the camera's right vector is reversed, so alpha and the horizontal pan run the other way
+            // to keep a drag screen-relative, like Babylon.js's handedness multiplier.
+            camera.alpha += _rightHanded ? -camera.inertialAlphaOffset : camera.inertialAlphaOffset;
             camera.beta += camera.inertialBetaOffset;
 
             const eps = 0.01;
             camera.beta = Math.max(eps, Math.min(Math.PI - eps, camera.beta));
 
-            camera.inertialAlphaOffset *= camera.inertia;
-            camera.inertialBetaOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialAlphaOffset) < ROTATION_EPSILON) {
-                camera.inertialAlphaOffset = 0;
-            }
-            if (Math.abs(camera.inertialBetaOffset) < ROTATION_EPSILON) {
-                camera.inertialBetaOffset = 0;
-            }
+            camera.inertialAlphaOffset = decayInertia(camera.inertialAlphaOffset, camera.inertia, ROTATION_EPSILON);
+            camera.inertialBetaOffset = decayInertia(camera.inertialBetaOffset, camera.inertia, ROTATION_EPSILON);
         }
 
         // --- Zoom inertia ---
@@ -351,36 +450,42 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             camera.radius -= camera.inertialRadiusOffset;
             camera.radius = Math.max(0.01, camera.radius);
 
-            camera.inertialRadiusOffset *= camera.inertia;
-
-            if (Math.abs(camera.inertialRadiusOffset) < RADIUS_EPSILON) {
-                camera.inertialRadiusOffset = 0;
-            }
+            camera.inertialRadiusOffset = decayInertia(camera.inertialRadiusOffset, camera.inertia, RADIUS_EPSILON);
         }
 
         // --- Panning inertia ---
         if (camera.inertialPanningX !== 0 || camera.inertialPanningY !== 0) {
-            const cosA = Math.cos(camera.alpha);
-            const sinA = Math.sin(camera.alpha);
-            const rightX = -sinA;
-            const rightZ = cosA;
-            const panScale = camera.radius * 0.001;
-
+            // The camera places its eye at sinβ = 0.0001 when sinβ is exactly 0.
+            const sinB = Math.sin(camera.beta) || 0.0001;
+            // The camera looks at its target with world up, so for sinβ < 0 (an unclamped β below 0 or above π) its right
+            // and up vectors both flip. Fold that sign into the scale, except where the look-at degenerates (below).
+            const panScale = camera.radius / (sinB <= -1e-10 ? -1000 : 1000);
+            const panX = (_rightHanded ? -camera.inertialPanningX : camera.inertialPanningX) * panScale;
+            const panY = camera.inertialPanningY * panScale;
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.
-            camera.target.x += rightX * camera.inertialPanningX * panScale;
-            camera.target.y += camera.inertialPanningY * panScale;
-            camera.target.z += rightZ * camera.inertialPanningX * panScale;
+            const target = camera.target;
 
-            camera.inertialPanningX *= camera.panningInertia;
-            camera.inertialPanningY *= camera.panningInertia;
+            if (Math.abs(sinB) < 1e-10) {
+                // The eye is straight above or below the target, so the camera's look-at falls back to the identity basis
+                // (its right axis has length |sinβ| there, below the helper's 1e-10 threshold): right +X, up +Y.
+                target.x += panX;
+                target.y += panY;
+            } else {
+                // Pan in the camera's view plane, as Babylon.js does: X along the camera's right vector ±(-sinα, 0, cosα), Y
+                // along its up vector ±(-cosα·cosβ, sinβ, -sinα·cosβ), which is world up made orthogonal to the view
+                // direction. On a tilted camera a vertical drag therefore also moves the target across the ground, and the
+                // target never moves towards or away from the eye.
+                const cosA = Math.cos(camera.alpha);
+                const sinA = Math.sin(camera.alpha);
+                const panYAcross = Math.cos(camera.beta) * panY;
+                target.x -= sinA * panX + cosA * panYAcross;
+                target.y += sinB * panY;
+                target.z += cosA * panX - sinA * panYAcross;
+            }
 
-            if (Math.abs(camera.inertialPanningX) < PANNING_EPSILON) {
-                camera.inertialPanningX = 0;
-            }
-            if (Math.abs(camera.inertialPanningY) < PANNING_EPSILON) {
-                camera.inertialPanningY = 0;
-            }
+            camera.inertialPanningX = decayInertia(camera.inertialPanningX, camera.panningInertia, PANNING_EPSILON);
+            camera.inertialPanningY = decayInertia(camera.inertialPanningY, camera.panningInertia, PANNING_EPSILON);
         }
     }
 
@@ -391,18 +496,19 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         scene._beforeRender.push(applyInertia);
     }
 
+    const nonPassive: AddEventListenerOptions = { passive: false };
     const listeners: [string, EventListener, AddEventListenerOptions?][] = [
         ["pointerdown", onPointerDown as EventListener],
         ["pointermove", onPointerMove as EventListener],
         ["pointerup", onPointerUp as EventListener],
-        ["wheel", onWheel as EventListener, { passive: false }],
-        ["contextmenu", onContextMenu as EventListener],
-        ["touchstart", onTouchStart as EventListener, { passive: false }],
-        ["touchmove", onTouchMove as EventListener, { passive: false }],
+        ["wheel", onWheel as EventListener, nonPassive],
+        ["contextmenu", preventDefault],
+        ["touchstart", onTouchStart as EventListener, nonPassive],
+        ["touchmove", onTouchMove as EventListener, nonPassive],
         ["touchend", onTouchEnd as EventListener],
-        ["gesturestart", onGesture as EventListener, { passive: false }],
-        ["gesturechange", onGesture as EventListener, { passive: false }],
-        ["gestureend", onGesture as EventListener, { passive: false }],
+        ["gesturestart", preventDefault, nonPassive],
+        ["gesturechange", preventDefault, nonPassive],
+        ["gestureend", preventDefault, nonPassive],
     ];
     for (const [ev, h, opts] of listeners) {
         canvas.addEventListener(ev, h, opts);
@@ -418,5 +524,6 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         for (const [ev, h] of listeners) {
             canvas.removeEventListener(ev, h);
         }
+        keyboardAttachment?.[1]();
     };
 }

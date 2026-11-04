@@ -118,12 +118,37 @@ try {
 
 // Use the current bundle builder for baseline generation. This keeps perf
 // comparisons focused on runtime source changes, not historical bundler bugs.
-cpSync(resolve(ROOT, "scripts/bundle-scenes-core.ts"), resolve(WORKTREE_DIR, "scripts/bundle-scenes-core.ts"));
+// Keep helper imports in sync too, so baseline refs that predate helper files
+// (or helper exports) still build with the current bundle builder.
+//
+// This list is the full import closure of bundle-scenes-core.ts within scripts/,
+// and it has to be maintained by hand: the baseline worktree is checked out at an
+// older ref, so any sibling module the *current* core imports is absent there
+// unless it is copied in. Extracting a new helper out of bundle-scenes-core.ts
+// without adding it here fails the perf job with "Cannot find module './<helper>'"
+// — and only the perf job, because every other consumer builds from a full
+// checkout where the file simply exists.
+for (const scriptName of ["bundle-scenes-core.ts", "bundle-ceiling-headroom.ts", "bundle-size-accounting.ts", "wgsl-minify-plugin.ts", "fetch-flight-helmet.ts"]) {
+    cpSync(resolve(ROOT, "scripts", scriptName), resolve(WORKTREE_DIR, "scripts", scriptName));
+}
+
+console.log("\nBuilding baseline package outputs required by bundle harness...");
+try {
+    // Newer layouts expose build/lib directly.
+    run("pnpm --filter babylon-lite build:lib", { cwd: WORKTREE_DIR });
+} catch {
+    // Older refs may not have build:lib; fall back to the package's default build.
+    run("pnpm build", { cwd: WORKTREE_DIR });
+}
 
 console.log("\nBuilding bundle scenes from baseline (Lite only, skip measurement)...");
 run("pnpm build:bundle-scenes", {
     cwd: WORKTREE_DIR,
-    env: { SKIP_BJS: "true", SKIP_MEASURE: "true" },
+    env: {
+        SKIP_BJS: "true",
+        SKIP_MEASURE: "true",
+        LITE_BUNDLE_ALLOW_SRC_FALLBACK: "true",
+    },
 });
 
 // ── 4. Copy baseline bundles to lab/public/bundle-baseline/ ────────

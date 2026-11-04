@@ -10,7 +10,7 @@
  *
  * The audit uses a conservative line-by-line regex. False positives are
  * resolved by extending the allowlist with a comment explaining WHY the file
- * (or specific `file:line`) is deferred. Each allowlist entry must carry a
+ * (or specific `file:source-line`) is deferred. Each allowlist entry must carry a
  * follow-up reference (architecture D4 or M0-followup) so reviewers can audit
  * the suppression list trivially.
  */
@@ -61,24 +61,19 @@ const FILE_ALLOWLIST = new Set<string>([
     "packages/babylon-lite/src/material/pbr/background-solid-skybox.ts",
 ]);
 
-/** Line-level allowlist `relPath:lineNumber` for specific lines that are
- *  *correct* under the substrate (e.g. F32 destination + opaque Mat4 source
- *  where `.set()` is an in-spec downcast equivalent to packMat4IntoF32 for
- *  the simple length-16 case). Adding to this list requires the same
- *  justification standard as FILE_ALLOWLIST. */
-const LINE_ALLOWLIST = new Set<string>([
-    // `scene-uniforms.ts` receives pre-packed Float32Array view/viewProj
-    // matrices from upstream callers that already routed through the packer.
-    // The `.set(...)` here is an F32->F32 byte copy, not an opaque Mat4 write.
-    "packages/babylon-lite/src/material/scene-uniforms.ts:21",
-    "packages/babylon-lite/src/material/scene-uniforms.ts:22",
-
+/** Source-line allowlist `relPath:trimmedSourceLine` for specific writes that
+ *  are correct under the substrate. Matching the exact trimmed source line
+ *  rather than its line number keeps unrelated edits above it from invalidating
+ *  the exemption while still requiring review if any code on the line changes.
+ *  Adding to this list requires the same justification standard as
+ *  FILE_ALLOWLIST. */
+const SOURCE_LINE_ALLOWLIST = new Set<string>([
     // `addThinInstance` seeds the per-mesh F32 capacity buffer from an opaque
     // Mat4. `.set(matrix, 0)` performs an in-spec element-wise downcast that
     // produces the same F32 bytes packMat4IntoF32 would write for offset 0.
     // TODO(HPM-followup): collapse into packMat4IntoF32 to fully retire the
     // opaque-Mat4-as-array-like dependency.
-    "packages/babylon-lite/src/mesh/thin-instance.ts:115",
+    "packages/babylon-lite/src/mesh/thin-instance.ts:matrices.set(matrix, 0);",
 ]);
 
 /** Variable-name heuristic: matrix-like identifiers. */
@@ -112,6 +107,10 @@ interface Violation {
     relPath: string;
     line: number;
     snippet: string;
+}
+
+function isAllowlisted(violation: Violation): boolean {
+    return SOURCE_LINE_ALLOWLIST.has(`${violation.relPath}:${violation.snippet}`);
 }
 
 function relFromRepoRoot(abs: string): string {
@@ -148,25 +147,45 @@ function scanFile(abs: string, relPath: string): Violation[] {
     return violations;
 }
 
-describe("audit: no direct mat4 GPU writes outside allowlist", () => {
-    it("every direct mat4 write in packages/babylon-lite/src is in the allowlist", () => {
-        const violations: Violation[] = [];
-        for (const abs of walkTs(SRC_ROOT)) {
-            const relPath = relFromRepoRoot(abs);
-            if (FILE_ALLOWLIST.has(relPath)) {
-                continue;
-            }
-            const fileViolations = scanFile(abs, relPath).filter((v) => !LINE_ALLOWLIST.has(`${v.relPath}:${v.line}`));
-            violations.push(...fileViolations);
+function scanSourceTree(): Violation[] {
+    const violations: Violation[] = [];
+    for (const abs of walkTs(SRC_ROOT)) {
+        const relPath = relFromRepoRoot(abs);
+        if (FILE_ALLOWLIST.has(relPath)) {
+            continue;
         }
-        if (violations.length > 0) {
-            const msg = violations.map((v) => `  ${v.relPath}:${v.line}: ${v.snippet}`).join("\n");
+        const fileViolations = scanFile(abs, relPath).filter((violation) => !isAllowlisted(violation));
+        violations.push(...fileViolations);
+    }
+    return violations;
+}
+
+// Keep the recursive filesystem scan outside Vitest's per-test timeout. The
+// assertion below remains timed, while collection happens during module setup.
+const sourceViolations = scanSourceTree();
+
+describe("audit: no direct mat4 GPU writes outside allowlist", () => {
+    it("keeps reviewed source lines allowlisted when line numbers move", () => {
+        const violation: Violation = {
+            relPath: "packages/babylon-lite/src/mesh/thin-instance.ts",
+            line: 1,
+            snippet: "matrices.set(matrix, 0);",
+        };
+
+        expect(isAllowlisted(violation)).toBe(true);
+        expect(isAllowlisted({ ...violation, line: 999 })).toBe(true);
+        expect(isAllowlisted({ ...violation, snippet: "matrices.set(matrix, 1);" })).toBe(false);
+    });
+
+    it("every direct mat4 write in packages/babylon-lite/src is in the allowlist", () => {
+        if (sourceViolations.length > 0) {
+            const msg = sourceViolations.map((violation) => `  ${violation.relPath}:${violation.line}: ${violation.snippet}`).join("\n");
             throw new Error(
-                `Found ${violations.length} direct mat4 GPU write(s) outside the allowlist.\n` +
-                    `Route the write through packMat4IntoF32, or add the file/line to the audit allowlist with a justification comment.\n\n` +
+                `Found ${sourceViolations.length} direct mat4 GPU write(s) outside the allowlist.\n` +
+                    `Route the write through packMat4IntoF32, or add the file/source-line to the audit allowlist with a justification comment.\n\n` +
                     msg
             );
         }
-        expect(violations).toEqual([]);
+        expect(sourceViolations).toEqual([]);
     });
 });

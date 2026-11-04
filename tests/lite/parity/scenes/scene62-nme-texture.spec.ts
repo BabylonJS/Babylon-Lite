@@ -4,7 +4,7 @@
  * Both BJS and Lite parse the SAME inline NME JSON and inject the SAME
  * crate image URL. A sphere textured with `crate.png` on a black background.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 

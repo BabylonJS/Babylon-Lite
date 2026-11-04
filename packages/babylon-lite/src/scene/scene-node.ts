@@ -3,13 +3,15 @@
  *  Provides position, rotationQuaternion (source of truth), rotation (Euler XYZ proxy),
  *  scaling, parent, worldMatrix, worldMatrixVersion, and children. */
 
-import type { Mat4 } from "../math/types.js";
+import type { Mat4, Mat4Storage, Quat, Vec3 } from "../math/types.js";
+import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
+import type { LightBaseCopier } from "../light/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState, attachWorldMatrixState } from "./world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrixIntoBuffer } from "./world-matrix-state.js";
+import { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "../math/quat-euler.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -28,47 +30,44 @@ export interface EulerProxy {
 export interface SceneNode {
     name: string;
     children: SceneNode[];
-    position: ObservableVec3;
+    readonly position: ObservableVec3;
     /** Quaternion rotation — source of truth for the local matrix. */
-    rotationQuaternion: ObservableQuat;
+    readonly rotationQuaternion: ObservableQuat;
     /** Euler XYZ bidirectional proxy — reads decompose current quat; writes update quat atomically. */
-    rotation: EulerProxy;
-    scaling: ObservableVec3;
+    readonly rotation: EulerProxy;
+    readonly scaling: ObservableVec3;
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-    /** @internal Raw local matrix for glTF matrix nodes. */
+    /** @internal Raw local matrix for glTF matrix nodes. While set, it IS the local transform and
+     *  `position`/`rotationQuaternion`/`scaling` are ignored. Clearing it hands control back to the
+     *  TRS triple (what `setParent` does so it can move a `matrix`-declared glTF node). */
     _localMatrix?: Mat4;
+    /** @internal Raw glTF matrices ignore TRS writes until `setParent` seeds an editable baseline. */
+    _localMatrixLocked?: boolean;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
-     *  Cascade is materialized at write-time by `setSubtreeVisible`. */
+     *
+     *  Read-only: change it with `setMeshVisible(node, visible)`, which cascades the value to
+     *  descendants and invalidates cached opaque render bundles. A plain field write would do
+     *  neither, leaving a hidden mesh drawing or a revealed mesh missing. */
+    readonly visible?: boolean;
+    /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
+    metadata?: LiteMetadata;
+    /** @internal Creates an independent clone for specialized SceneNode implementations.
+     *  `cloneTransformNode` passes the shared light-state copier, so only scenes that clone
+     *  nodes ship it; non-light implementations ignore it. */
+    _cloneNode?: (copyLightBase: LightBaseCopier) => SceneNode;
+}
+
+/** @internal Write view of `SceneNode.visible`. Engine code uses it to seed visibility while
+ *  building a node, before it can be in a recorded render bundle, and in `setMeshVisible`. */
+export interface _WritableVisibility {
     visible?: boolean;
-}
-
-// ─── Math helpers ─────────────────────────────────────────────────────
-
-/** Euler XYZ → quaternion (intrinsic XYZ order). */
-export function eulerToQuat(rx: number, ry: number, rz: number): [number, number, number, number] {
-    const cx = Math.cos(rx * 0.5),
-        sx_ = Math.sin(rx * 0.5);
-    const cy = Math.cos(ry * 0.5),
-        sy_ = Math.sin(ry * 0.5);
-    const cz = Math.cos(rz * 0.5),
-        sz_ = Math.sin(rz * 0.5);
-    return [sx_ * cy * cz + cx * sy_ * sz_, cx * sy_ * cz - sx_ * cy * sz_, cx * cy * sz_ + sx_ * sy_ * cz, cx * cy * cz - sx_ * sy_ * sz_];
-}
-
-/** Quaternion → Euler XYZ (inverse of eulerToQuat). */
-export function quatToEulerXYZ(qx: number, qy: number, qz: number, qw: number): [number, number, number] {
-    const sinY = 2 * (qx * qz + qw * qy);
-    const ry = Math.asin(Math.max(-1, Math.min(1, sinY)));
-    const rx = Math.atan2(-(2 * (qy * qz - qw * qx)), 1 - 2 * (qx * qx + qy * qy));
-    const rz = Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qy * qy + qz * qz));
-    return [rx, ry, rz];
 }
 
 /** Create a live bidirectional EulerProxy backed by the given ObservableQuat.
  *
- *  Euler⇄quaternion is many-to-one and `quatToEulerXYZ` is unstable at gimbal lock
+ *  Euler⇄quaternion is many-to-one and `quatToEulerXYZTuple` is unstable at gimbal lock
  *  (e.g. yaw near ±π/2), so re-deriving Euler from the quaternion on every read makes
  *  per-axis updates (`node.rotation.x = …; node.rotation.y = …`) lossy and can flip the
  *  node. To stay stable, the proxy caches the Euler triple it last applied and reuses it
@@ -83,7 +82,7 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
 
     const sync = (): void => {
         if (rq.version !== syncedVersion) {
-            const e = quatToEulerXYZ(rq.x, rq.y, rq.z, rq.w);
+            const e = quatToEulerXYZTuple(rq.x, rq.y, rq.z, rq.w);
             ex = e[0];
             ey = e[1];
             ez = e[2];
@@ -95,7 +94,7 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
         ex = x;
         ey = y;
         ez = z;
-        const [a, b, c, d] = eulerToQuat(x, y, z);
+        const [a, b, c, d] = eulerXYZToQuatTuple(x, y, z);
         rq.set(a, b, c, d);
         // The cached Euler is authoritative for this quaternion value, so adopt the
         // version we just produced — avoids an immediate lossy re-derive on next read.
@@ -133,41 +132,96 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
 
 // ─── Factory ──────────────────────────────────────────────────────────
 
-/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion). */
-export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion).
+ *  Omitted values default to the identity transform (applied once, in `initSceneNodeTransform`). */
+export function createSceneNode(
+    name: string,
+    px?: number,
+    py?: number,
+    pz?: number,
+    qx?: number,
+    qy?: number,
+    qz?: number,
+    qw?: number,
+    sx?: number,
+    sy?: number,
+    sz?: number
+): SceneNode {
     return createSceneNodeCore(name, null, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
-export function createSceneNodeFromMatrix(name: string, matrix: Mat4): SceneNode {
-    return createSceneNodeCore(name, matrix);
+export function createSceneNodeFromMatrix(name: string, matrix: Mat4, translation?: Vec3, rotation?: Quat, scale?: Vec3): SceneNode {
+    const node = createSceneNodeCore(
+        name,
+        matrix,
+        translation?.x,
+        translation?.y,
+        translation?.z,
+        rotation?.x,
+        rotation?.y,
+        rotation?.z,
+        rotation?.w,
+        scale?.x,
+        scale?.y,
+        scale?.z
+    );
+    node._localMatrixLocked = translation ? undefined : true;
+    return node;
 }
 
-function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+function createSceneNodeCore(
+    name: string,
+    matrix: Mat4 | null,
+    px?: number,
+    py?: number,
+    pz?: number,
+    qx?: number,
+    qy?: number,
+    qz?: number,
+    qw?: number,
+    sx?: number,
+    sy?: number,
+    sz?: number
+): SceneNode {
+    const node = initSceneNodeTransform({ name, children: [] }, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+    if (matrix) {
+        node._localMatrix = matrix;
+    }
+    return node;
+}
+
+/** Add the common SceneNode transform contract to an existing object. */
+export function initSceneNodeTransform<T extends SceneNode>(partialNode: Partial<T>, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): T {
+    let localMatrix: Mat4 | undefined;
+    // Read the raw matrix off the node, not off a captured local: clearing `_localMatrix`
+    // (setParent on a glTF `matrix` node) must switch the node back to TRS-driven.
     const wm = createWorldMatrixState(() => {
-        if (matrix) {
-            return matrix;
+        if (node._localMatrix) {
+            return node._localMatrix;
         }
-        const p = node.position,
-            rq = node.rotationQuaternion,
-            s = node.scaling;
-        const isIdentity = p.x === 0 && p.y === 0 && p.z === 0 && rq.x === 0 && rq.y === 0 && rq.z === 0 && rq.w === 1 && s.x === 1 && s.y === 1 && s.z === 1;
-        return isIdentity ? mat4Identity() : mat4Compose(p.x, p.y, p.z, rq.x, rq.y, rq.z, rq.w, s.x, s.y, s.z);
+        localMatrix ??= allocateMat4();
+        composeTrsLocalMatrixIntoBuffer(localMatrix as unknown as Mat4Storage, position, rq, scaling);
+        return localMatrix;
     });
     const onWmDirty = () => {
-        if (!matrix) {
-            wm.markLocalDirty();
+        if (node._localMatrixLocked) {
+            return;
         }
+        node._localMatrix = undefined;
+        wm.markLocalDirty();
     };
 
+    const position = new ObservableVec3(px, py, pz, onWmDirty);
     const rq = new ObservableQuat(qx, qy, qz, qw, onWmDirty);
+    const rotation = createEulerProxy(rq);
+    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
 
-    const node: SceneNode = {
-        name,
-        children: [],
-        position: new ObservableVec3(px, py, pz, onWmDirty),
+    const node = {
+        ...partialNode,
+        position,
         rotationQuaternion: rq,
-        rotation: createEulerProxy(rq),
-        scaling: new ObservableVec3(sx, sy, sz, onWmDirty),
+        rotation,
+        scaling,
         get parent() {
             return wm.parent;
         },
@@ -180,10 +234,7 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
         get worldMatrixVersion() {
             return wm.getWorldMatrixVersion();
         },
-    };
-    if (matrix) {
-        node._localMatrix = matrix;
-    }
+    } as T;
     attachWorldMatrixState(node, wm);
     return node;
 }

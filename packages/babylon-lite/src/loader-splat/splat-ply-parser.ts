@@ -8,18 +8,25 @@
  *  per-vertex `f_rest_*`) are handled by a separate, dynamic-imported parser
  *  (`splat-ply-compressed.ts`) so plain `.ply` scenes (e.g. scene 120) don't
  *  bundle the additional decoder code. `isPlyCompressedOrSH` lets callers
- *  decide which path to take. */
+ *  decide which path to take.
+ *
+ *  `loadSplat` dynamic-imports this module only once `isPly` (in
+ *  `splat-ply-header.ts`) has recognised a PLY asset, so `.splat` scenes skip it. */
 
 import { F32, U8C, U8, DV } from "../engine/typed-arrays.js";
 import type { ParsedSplat } from "./splat-data.js";
+import { PLY_HEADER_END as HEADER_END } from "./splat-ply-header.js";
 
 const SH_C0 = 0.28209479177387814;
 
-/** True when the buffer starts with a PLY ASCII header that contains `end_header\n`. */
-export function isPly(data: ArrayBuffer): boolean {
-    const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
-    const header = new TextDecoder().decode(ubuf);
-    return header.startsWith("ply") && header.indexOf("end_header\n") >= 0;
+/** Parse a PLY splat asset, routing compressed or SH-carrying files to the
+ *  separately-imported compressed parser. */
+export async function parsePlySplat(data: ArrayBuffer): Promise<ParsedSplat> {
+    if (isPlyCompressedOrSH(data)) {
+        const { convertCompressedPlyToParsedSplat } = await import("./splat-ply-compressed.js");
+        return convertCompressedPlyToParsedSplat(data);
+    }
+    return convertPlyToSplat(data);
 }
 
 /** True when the PLY header declares either an `element chunk` block
@@ -29,11 +36,11 @@ export function isPly(data: ArrayBuffer): boolean {
 export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
     const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
     const header = new TextDecoder().decode(ubuf);
-    const end = header.indexOf("end_header\n");
-    if (end < 0) {
+    const end = HEADER_END.exec(header);
+    if (!end) {
         return false;
     }
-    const slice = header.slice(0, end);
+    const slice = header.slice(0, end.index);
     return slice.indexOf("element chunk ") >= 0 || slice.indexOf("element sh ") >= 0 || slice.indexOf("f_rest_") >= 0;
 }
 
@@ -44,13 +51,14 @@ export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
 export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
     const ubuf = new U8(data);
     const header = new TextDecoder().decode(ubuf.slice(0, 1024 * 10));
-    const headerEnd = "end_header\n";
-    const headerEndIndex = header.indexOf(headerEnd);
-    if (headerEndIndex < 0) {
+    const headerEnd = HEADER_END.exec(header);
+    if (!headerEnd) {
         return { data };
     }
+    const headerEndIndex = headerEnd.index;
+    const headerText = header.slice(0, headerEndIndex);
 
-    const vmatch = /element vertex (\d+)\n/.exec(header);
+    const vmatch = /element vertex (\d+)\r?\n/.exec(headerText);
     if (!vmatch) {
         return { data };
     }
@@ -59,7 +67,7 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
     const offsets: Record<string, number> = { double: 8, int: 4, uint: 4, float: 4, short: 2, ushort: 2, uchar: 1 };
     const properties: { name: string; type: string; offset: number }[] = [];
     let rowOffset = 0;
-    for (const line of header.slice(0, headerEndIndex).split("\n")) {
+    for (const line of headerText.split(/\r?\n/)) {
         if (!line.startsWith("property ")) {
             continue;
         }
@@ -71,7 +79,7 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
         rowOffset += offsets[type]!;
     }
 
-    const dv = new DV(data, headerEndIndex + headerEnd.length);
+    const dv = new DV(data, headerEndIndex + headerEnd[0].length);
     const ROW_OUTPUT_LENGTH = 32;
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * vertexCount);
 

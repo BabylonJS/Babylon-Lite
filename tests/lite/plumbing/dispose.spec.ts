@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity/parity-fixtures";
 
 test.describe("Dispose", () => {
     test("scene.dispose() + engine.dispose() release GPU resources without errors", async ({ page }) => {

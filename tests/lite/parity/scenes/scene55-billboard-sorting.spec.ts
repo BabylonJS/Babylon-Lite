@@ -4,7 +4,7 @@
  * Compares Babylon Lite's CPU-sorted transparent billboard upload against a
  * Babylon.js SpriteManager reference whose sprite array is already far-to-near.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

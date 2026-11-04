@@ -43,7 +43,7 @@ export interface HavokFloatingOriginContext {
     /** Most recently set world-wide gravity `[x, y, z]`; seeds newly created regions. */
     gravity: number[];
     placeBody(world: PhysicsWorld, body: PhysicsBody, startsAsleep: boolean): void;
-    step(world: PhysicsWorld): void;
+    step(world: PhysicsWorld, dt: number): void;
     setGravity(world: PhysicsWorld, gravity: number[], worldPosition?: Vec3): void;
     getRegionGravity(world: PhysicsWorld, worldPosition: Vec3): number[];
     setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: number): void;
@@ -122,7 +122,7 @@ function _placeBody(world: PhysicsWorld, body: PhysicsBody, startsAsleep: boolea
     body._region = region;
 }
 
-function _step(world: PhysicsWorld): void {
+function _step(world: PhysicsWorld, dt: number): void {
     const hknp = world._hknp;
     const bodies = world._bodies;
     const regions = world._fo!.regions;
@@ -142,7 +142,7 @@ function _step(world: PhysicsWorld): void {
 
     // Step every region world.
     for (let i = 0; i < regions.length; i++) {
-        hknp.HP_World_Step(regions[i]!._world, world._timestep);
+        hknp.HP_World_Step(regions[i]!._world, dt);
     }
 
     // Post-step: sync DYNAMIC bodies from Havok → node.

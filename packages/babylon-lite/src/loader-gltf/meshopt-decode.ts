@@ -9,16 +9,18 @@
  * `extensionsUsed` lists EXT_meshopt_compression.
  */
 
-// Public base URL where meshopt_decoder.js is hosted. Defaults to site root.
-let meshoptBaseUrl = "/";
+// Public base URL where meshopt_decoder.js is hosted. Defaults to the Babylon CDN.
+let meshoptBaseUrl = "https://cdn.babylonjs.com/";
 
 /** Override the base URL where meshopt_decoder.js is hosted. */
 export function setMeshoptBaseUrl(url: string): void {
     meshoptBaseUrl = url.endsWith("/") ? url : url + "/";
 }
 
-/** Minimal surface of the global `MeshoptDecoder` object we rely on. */
-interface MeshoptDecoderModule {
+/** Minimal surface of the global `MeshoptDecoder` object we rely on. Exported so
+ *  the MeshLoD page decoder can share this exact decoder without duplicating the
+ *  script-URL / singleton loading logic below. */
+export interface MeshoptDecoderModule {
     ready: Promise<void>;
     decodeGltfBuffer(target: Uint8Array, count: number, size: number, source: Uint8Array, mode: string, filter?: string): void;
 }
@@ -37,16 +39,29 @@ function loadMeshoptScript(): Promise<MeshoptDecoderModule> {
         }
         const script = document.createElement("script");
         script.src = meshoptBaseUrl + "meshopt_decoder.js";
+        const cleanup = (): void => {
+            script.onload = null;
+            script.onerror = null;
+            script.remove();
+        };
+        const fail = (message: string): void => {
+            cleanup();
+            reject(new Error(message));
+        };
         script.onload = () => {
             const mod = (globalThis as { MeshoptDecoder?: MeshoptDecoderModule }).MeshoptDecoder;
             if (!mod) {
-                reject(new Error("meshopt_decoder.js loaded but MeshoptDecoder is undefined"));
+                fail("meshopt_decoder.js loaded but MeshoptDecoder is undefined");
             } else {
+                cleanup();
                 resolve(mod);
             }
         };
-        script.onerror = () => reject(new Error("Failed to load meshopt_decoder.js from " + script.src));
+        script.onerror = () => fail("Failed to load meshopt_decoder.js from " + script.src);
         document.head.appendChild(script);
+    });
+    void scriptLoadPromise.catch(() => {
+        scriptLoadPromise = null;
     });
     return scriptLoadPromise;
 }

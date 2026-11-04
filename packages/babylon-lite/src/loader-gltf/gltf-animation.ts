@@ -2,19 +2,18 @@
  *  Lazy-loaded animation/skin parsing for glTF.
  *  Dynamically imported by load-gltf.ts only when a glTF contains animations or skins.
  *
- *  This module is pointer-feature agnostic: KHR_animation_pointer (and the
- *  non-Float32 sampler conversion that CubeVisibility-style assets need) are
- *  installed via the registration seam below, so scenes that don't declare
- *  the extension pay zero bytes for it.
+ *  This module is pointer-feature agnostic: KHR_animation_pointer is installed
+ *  via the registration seam below, so scenes that don't declare the extension
+ *  pay zero bytes for pointer resolution.
  */
 import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
-import { mat4Identity } from "../math/mat4-identity.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { createIdentityMat4 } from "../math/create-identity-mat4.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import { getLoaderTmpAnim } from "./_loader-scratch.js";
@@ -22,26 +21,38 @@ import type { SceneNode } from "../scene/scene-node.js";
 
 /** Registration seam for KHR_animation_pointer. The pointer feature module
  *  calls `_installPointerHandlers` on side-effect import; if never called,
- *  pointer channels are skipped and non-Float32 samplers fall back to the
- *  aliasing fast path (which throws on misaligned/short accessors). */
-export type PointerChannelParser = (ptr: string, channel: any, nodeMap: readonly (SceneNode | undefined)[] | undefined) => AnimationChannel | null;
-export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+ *  pointer channels are skipped. */
+export type PointerChannelParser = (
+    ptr: string,
+    channel: any,
+    nodeMap: readonly (SceneNode | undefined)[] | undefined,
+    json: any,
+    meshes: readonly Mesh[]
+) => AnimationChannel | null;
 let _parsePointerChannel: PointerChannelParser | null = null;
-let _convertSampler: SamplerConverter | null = null;
-export function _installPointerHandlers(parser: PointerChannelParser, converter: SamplerConverter): void {
+export function _installPointerHandlers(parser: PointerChannelParser): void {
     _parsePointerChannel = parser;
+}
+
+/** Registration seam for the non-Float32 / normalized sampler converter. Installed only by the lazy
+ *  `gltf-sampler-denorm` module — loaded when an animation sampler accessor is non-float (e.g.
+ *  glTF-Asset-Generator Animation_SamplerType normalized BYTE/SHORT rotation) or by
+ *  KHR_animation_pointer. When never installed, `toSamplerFloat32` folds to the aligned-Float32 fast
+ *  path, so plain float-sampler animations stay byte-identical. */
+export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+let _convertSampler: SamplerConverter | null = null;
+export function _installSamplerConverter(converter: SamplerConverter): void {
     _convertSampler = converter;
 }
 
-/** Convert sampler input/output to Float32Array. Default: reinterpret existing
- *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
- *  aligned Float32 data). KHR_animation_pointer installs a converter that
- *  additionally handles non-Float32 / normalized accessors. */
+/** Convert a sampler input/output accessor to a tightly-packed Float32Array. Aligned Float32 sources
+ *  (the overwhelmingly common case) are reinterpreted in place for free; non-Float32 / normalized
+ *  sources are handled by the lazily-installed converter. */
 function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
     if (_convertSampler) {
         return _convertSampler(src, length, normalized);
     }
-    return new F32(src.buffer, src.byteOffset, length);
+    return new F32(src.buffer as ArrayBuffer, src.byteOffset, length);
 }
 
 /** Parsed skin/skeleton data. */
@@ -94,11 +105,11 @@ export function extractSkin(
 export function computeBoneTextureData(skin: GltfSkinData): Float32Array {
     const numBones = skin.jointNodes.length;
     const data = new F32(numBones * 16);
-    const invMeshWorld = mat4Invert(skin.meshWorldMatrix) ?? mat4Identity();
+    const invMeshWorld = invertMat4(skin.meshWorldMatrix) ?? createIdentityMat4();
     const tmp = getLoaderTmpAnim() as unknown as Mat4Storage;
     for (let i = 0; i < numBones; i++) {
-        mat4MultiplyInto(tmp, 0, invMeshWorld as unknown as Mat4Storage, 0, skin.jointWorldMatrices[i]! as unknown as Mat4Storage, 0);
-        mat4MultiplyInto(data, i * 16, tmp, 0, skin.inverseBindMatrices, i * 16);
+        multiplyMat4IntoBuffer(tmp, 0, invMeshWorld as unknown as Mat4Storage, 0, skin.jointWorldMatrices[i]! as unknown as Mat4Storage, 0);
+        multiplyMat4IntoBuffer(data, i * 16, tmp, 0, skin.inverseBindMatrices, i * 16);
     }
     return data;
 }
@@ -132,7 +143,8 @@ export function parseAnimationData(
     meshes: Mesh[],
     parentMap: Map<number, number>,
     worldMatrixCache: Map<number, Mat4>,
-    nodeMap?: readonly (SceneNode | undefined)[]
+    nodeMap?: readonly (SceneNode | undefined)[],
+    boneOverrides?: ReadonlyMap<number, import("../skeleton/bone-control.js").BoneOverride>
 ): GltfAnimationData | null {
     if (!json.animations || json.animations.length === 0) {
         return null;
@@ -165,7 +177,7 @@ export function parseAnimationData(
                 if (!_parsePointerChannel) {
                     continue;
                 }
-                const ch = _parsePointerChannel(ptr, c, nodeMap);
+                const ch = _parsePointerChannel(ptr, c, nodeMap, json, meshes);
                 if (ch) {
                     channels.push(ch);
                     pointerChannelCount++;
@@ -253,7 +265,7 @@ export function parseAnimationData(
         const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
 
         const meshWorldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
-        const invMeshWorld = mat4Invert(meshWorldMatrix) ?? mat4Identity();
+        const invMeshWorld = invertMat4(meshWorldMatrix) ?? createIdentityMat4();
 
         // Create a binding for EACH mesh primitive of this skinned node
         for (const mi of meshIndices) {
@@ -339,7 +351,8 @@ export function parseAnimationData(
     ) {
         return null;
     }
-    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices };
+    const nodeNames: readonly (string | undefined)[] = (json.nodes ?? []).map((n: { name?: string }) => n?.name);
+    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides };
 }
 
 /** True if any clip animates a non-excluded node that has a live scene target —

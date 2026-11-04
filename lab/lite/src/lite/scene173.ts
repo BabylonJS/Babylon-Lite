@@ -213,7 +213,7 @@ async function main(): Promise<void> {
                 navDebug.material = navDebugMat;
                 navDebug.position.set(0, 0.02, 0);
                 addToScene(scene, navDebug);
-                rebuildMaterial(scene, navDebugMat);
+                void rebuildMaterial(scene, navDebugMat);
             }
             if (boxTubes) {
                 for (const t of boxTubes) removeFromScene(scene, t);

@@ -1,11 +1,21 @@
 # Azure Pipelines — Babylon Lite npm Publish
 #
-# Publishes the built @babylonjs/lite package to npm. Configure NPM_TOKEN as
-# a secret pipeline variable or variable-group value before enabling this run.
+# Publishes the built @babylonjs/lite package to npm. NPM_TOKEN is provided by
+# the NPM_Publish variable group.
 #
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release.json read the release type from
 # that file, so repeated patch releases can be requested by bumping its nonce.
+#
+# The same run also publishes @babylonjs/lite-compat as `<lite-version>-preview`
+# under the `latest` dist-tag. npm requires every package to carry a `latest`
+# tag, so the `-preview` version suffix (not a separate dist-tag) is what marks
+# the compatibility layer as pre-release.
+#
+# Set the `dryRun` parameter (manual run) to exercise the whole pipeline —
+# build, test, version resolution, and package-content validation — without
+# uploading to npm or pushing a release tag. In dry-run mode both `npm publish`
+# calls use `--dry-run` and the git tag is created locally but not pushed.
 
 trigger:
     branches:
@@ -29,22 +39,34 @@ parameters:
     - name: releaseType
       displayName: "Release type"
       type: string
-      default: auto
+      default: minor
       values:
           - auto
           - patch
           - minor
           - major
+    - name: dryRun
+      displayName: "Dry run (validate + resolve versions, but do NOT publish or push tags)"
+      type: boolean
+      default: false
 
 variables:
+    - group: NPM_Publish
+    - group: BabylonJS-Deployment
+    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
+    # liteplayground.babylonjs.com, so versioned playground snapshots serve
+    # same-origin as nightly (required by the client-side deploy coordinator).
+    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
-      value: "9.15.4"
+      value: "11.9.0"
     - name: CI
       value: "true"
     - name: HEADLESS
       value: "true"
+    - name: DRY_RUN
+      value: "${{ parameters.dryRun }}"
 
 stages:
     - stage: PublishNpm
@@ -85,28 +107,60 @@ stages:
                   env:
                       CI: "true"
 
-                - script: pnpm build
-                  displayName: "Build package"
-
+                # Resolve the next published version BEFORE building, so the build can
+                # bake it into the bundle's `VERSION` constant and the emitted dist
+                # `package.json`. The script reads the source manifest (dist does not
+                # exist yet) and sets the `PACKAGE_VERSION` pipeline variable, which the
+                # build step below consumes via `process.env.PACKAGE_VERSION`.
                 - script: npx tsx scripts/prepare-npm-release.ts
                   displayName: "Resolve npm package version"
                   env:
                       RELEASE_TYPE: ${{ parameters.releaseType }}
                       RELEASE_CONFIG_PATH: config/release.json
 
-                - script: npm pack --dry-run ./packages/babylon-lite/dist
+                - script: pnpm build
+                  displayName: "Build package"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+
+                # Generate the changelog from the Conventional-Commit history.
+                # This must run BEFORE the new release tag is created below, so the
+                # auto-detected "previous tag" is the prior release rather than the
+                # tag we are about to push. Two artefacts: the full cumulative
+                # CHANGELOG.md ships inside the npm tarball (build root), and the
+                # single latest section feeds the GitHub release notes.
+                - script: |
+                      set -euo pipefail
+                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      npx tsx scripts/generate-changelog.ts
+                  displayName: "Generate release changelog"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+                      PACKAGE_NAME: $(PACKAGE_NAME)
+                      CHANGELOG_OUTPUT: packages/babylon-lite/build/CHANGELOG.md
+                      RELEASE_NOTES_OUTPUT: $(Build.ArtifactStagingDirectory)/release-notes.md
+                      GITHUB_REPOSITORY: $(Build.Repository.Name)
+                      BUILD_REPOSITORY_URI: $(Build.Repository.Uri)
+
+                - script: npm pack --dry-run ./packages/babylon-lite/build
                   displayName: "Validate npm package contents"
 
                 - script: |
                       set -euo pipefail
 
                       if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                        echo "NPM_TOKEN must be configured as a secret in the NPM_Publish variable group."
                         exit 1
                       fi
 
                       printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-                      npm publish ./packages/babylon-lite/dist --access public --registry https://registry.npmjs.org/
+
+                      EXTRA=""
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
+                        EXTRA="--dry-run"
+                      fi
+                      npm publish ./packages/babylon-lite/build $EXTRA --access public --registry https://registry.npmjs.org/
                   displayName: "Publish package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
@@ -118,5 +172,162 @@ stages:
                       git config user.email "bjsplat@gmail.com"
                       git config user.name "Babylon.js CI"
                       git tag "$TAG" -m "Publish @babylonjs/lite $(PACKAGE_VERSION)"
-                      git push origin "refs/tags/$TAG"
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: created tag $TAG locally but will NOT push it."
+                      else
+                        git push origin "refs/tags/$TAG"
+                      fi
                   displayName: "Tag published npm version"
+
+                # --- GitHub release ---------------------------------------------
+                # Publish a GitHub release for the just-pushed npm tag, attaching a
+                # zip of the built @babylonjs/lite package (build/ contents). Skipped
+                # in dry-run mode because the underlying tag is never pushed.
+                - script: |
+                      set -euo pipefail
+
+                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
+                      ( cd ./packages/babylon-lite/build && zip -r "$ZIP_PATH" . )
+                      echo "Created release archive: $ZIP_PATH"
+                  displayName: "Zip @babylonjs/lite dist for release"
+                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+
+                - task: GitHubRelease@1
+                  displayName: "Create GitHub release"
+                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      action: "create"
+                      target: "$(Build.SourceVersion)"
+                      tagSource: "userSpecifiedTag"
+                      tag: "npm-lite-v$(PACKAGE_VERSION)"
+                      title: "@babylonjs/lite v$(PACKAGE_VERSION)"
+                      releaseNotesSource: "filePath"
+                      releaseNotesFilePath: "$(Build.ArtifactStagingDirectory)/release-notes.md"
+                      assets: "$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
+                      addChangeLog: false
+
+                # --- @babylonjs/lite-compat -------------------------------------
+                # The compatibility layer publishes each build as
+                # `<lite-version>-preview` under npm's default `latest` dist-tag.
+                # npm requires every package to carry a `latest` tag, so there is no
+                # "preview-only" state: the `-preview` version suffix is what marks
+                # these builds as pre-release. Each run records the @babylonjs/lite
+                # version it was built against.
+
+                - script: pnpm --filter @babylonjs/lite-compat build
+                  displayName: "Build @babylonjs/lite-compat"
+
+                - script: npx tsx scripts/prepare-compat-preview-release.ts
+                  displayName: "Resolve compat version"
+                  env:
+                      LITE_VERSION: $(PACKAGE_VERSION)
+
+                - script: npm pack --dry-run ./packages/babylon-lite-compat/dist
+                  displayName: "Validate compat package contents"
+
+                - script: |
+                      set -euo pipefail
+
+                      if [ -z "${NPM_TOKEN:-}" ]; then
+                        echo "NPM_TOKEN must be configured as a secret in the NPM_Publish variable group."
+                        exit 1
+                      fi
+
+                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
+
+                      EXTRA=""
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
+                        EXTRA="--dry-run"
+                      fi
+                      npm publish ./packages/babylon-lite-compat/dist $EXTRA --access public --registry https://registry.npmjs.org/
+                  displayName: "Publish compat package to npm"
+                  env:
+                      NPM_TOKEN: $(NPM_TOKEN)
+
+                # --- Versioned playground snapshot ------------------------------
+                # After a successful publish, build the Lite Playground from this
+                # tagged commit and deploy it to an immutable per-version sub-path
+                # on the tools account (served at liteplayground.babylonjs.com/v/<ver>/),
+                # so every release gets a permanent, self-consistent playground URL
+                # served same-origin as nightly (its self-hosted engine is built
+                # from — and stamped with — the published version via PACKAGE_VERSION).
+                # PLAYGROUND_BASE matches the public sub-path so assets, the runner,
+                # the engine, and SPA snippet routes resolve under it.
+                #
+                # The build itself runs unconditionally. It is the heaviest step in
+                # this pipeline and the only one that has broken a release so far (a
+                # Node OOM, which struck *after* npm publish had already succeeded),
+                # so a dry run has to exercise it to be worth running. Only the steps
+                # with external side effects — the upload and the shared versions
+                # manifest — are compile-time gated on dryRun.
+                - script: pnpm build:playground
+                  displayName: "Build versioned playground"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+                      PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
+
+                - ${{ if eq(parameters.dryRun, false) }}:
+                      - template: config/templates/upload-static-site.yml
+                        parameters:
+                            siteDir: $(System.DefaultWorkingDirectory)/playground/dist
+                            deployPath: litePlayground/v/$(PACKAGE_VERSION)
+                            storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                            siteName: "Lite Playground v$(PACKAGE_VERSION)"
+                            postComment: false
+
+                      # Record this release in the deployed-versions manifest the
+                      # playground reads to populate its version selector (only
+                      # versions with a live /v/<ver>/ snapshot are offered). The
+                      # manifest lives at the origin root (/v/versions.json), shared
+                      # by every snapshot. Read-modify-write: fetch the current list,
+                      # add this version, dedupe + sort newest first, then re-upload
+                      # just that file to the /v path. The deploy server overlays at
+                      # the given path, so sibling /v/<ver>/ snapshots are left
+                      # intact. Finally purge the manifest (a .json, otherwise cached
+                      # at the CDN default TTL) so the new release shows up promptly.
+                      - script: |
+                            set -euo pipefail
+
+                            VER="$(PACKAGE_VERSION)"
+                            MANIFEST_URL="https://liteplayground.babylonjs.com/v/versions.json"
+                            WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
+                            mkdir -p "$WORK"
+
+                            # Fetch the current manifest, distinguishing "not there yet"
+                            # from a transient failure. A 404 is the first-run empty
+                            # case; any other non-200 (5xx, network error) must NOT be
+                            # treated as empty, or we'd overwrite the manifest with just
+                            # this version and drop older still-deployed releases from
+                            # the selector. On such failures, skip the update (the step
+                            # is continueOnError) and leave the manifest intact — this
+                            # version is picked up by the next successful publish.
+                            HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
+                            if [ "$HTTP_CODE" = "404" ]; then
+                              echo "No existing manifest (404); starting a new list."
+                              echo '[]' > "$WORK/current.json"
+                            elif [ "$HTTP_CODE" != "200" ]; then
+                              echo "Manifest fetch failed (HTTP $HTTP_CODE); skipping update to avoid clobbering existing versions."
+                              exit 1
+                            fi
+
+                            node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
+
+                            echo "Updated manifest:"; cat "$WORK/versions.json"
+
+                            (cd "$WORK" && zip -j versions.zip versions.json)
+
+                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                              -H "Content-Type: multipart/form-data" \
+                              -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                              -F "path=litePlayground/v" \
+                              -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                              -F "zip=@$WORK/versions.zip"
+
+                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=lite-playground&profileName=$(CDN_PROFILE_TOOLS)" --fail-with-body -i -X POST \
+                              -H "Authorization: Bearer $(DEPLOY_TOKEN)"
+                        displayName: "Update deployed-versions manifest"
+                        condition: succeeded()
+                        continueOnError: true

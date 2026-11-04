@@ -2,6 +2,8 @@
 // Designed for zero-allocation per-frame evaluation.
 
 import type { Mat4 } from "../math/types.js";
+import type { StorageBuffer } from "../resource/storage-buffer.js";
+import type { Skeleton } from "../skeleton/bone-control.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
 export const INTERP_LINEAR = 0;
@@ -52,8 +54,10 @@ export interface AnimationClip {
     readonly name: string;
     readonly channels: readonly AnimationChannel[];
     readonly samplers: readonly AnimationSampler[];
-    /** Total duration in seconds (max of all sampler input times). */
+    /** Total playback duration in seconds. */
     readonly duration: number;
+    /** @internal Authored first sample time. Defaults to 0 for glTF. */
+    readonly _startTime?: number;
     /** Frame rate used by AnimationGroup goToFrame(); defaults to 60. */
     readonly frameRate?: number;
 }
@@ -90,11 +94,11 @@ export interface SkeletonBinding {
 export interface MorphBinding {
     /** Node index that owns the morph targets. */
     readonly nodeIdx: number;
-    /** GPU uniform buffer written each frame with current weights. */
+    /** GPU storage buffer written each frame with current weights (header + weights array). */
     readonly weightsBuffer: GPUBuffer;
-    /** CPU mirror of the first four current weights, used by deformation-aware picking. */
+    /** CPU mirror of the current weights, used by deformation-aware picking. */
     readonly weights: Float32Array;
-    /** Number of morph targets (max 4 supported). */
+    /** Number of morph targets. */
     readonly targetCount: number;
     readonly runtimeMorphTargets?: MorphTargetData;
 }
@@ -124,6 +128,16 @@ export interface GltfAnimationData {
      *  matrices bake an `invMeshWorld` captured at load, so moving them at runtime
      *  would double-transform the skinned vertices). */
     readonly excludedNodeIndices: ReadonlySet<number>;
+    /** glTF node names indexed by node index (undefined for unnamed nodes). Used by
+     *  {@link AnimationGroupMask} to resolve include/exclude target names to the node
+     *  indices its channels animate. */
+    readonly nodeNames: readonly (string | undefined)[];
+    /** Shared node-index → bone override map, present only when `enableBoneControl()`
+     *  installed bone control. Handed to every AnimationController so a playing clip
+     *  honours user bone overrides (animation wins per-component). `undefined` on the
+     *  default path. Typed as `unknown` value to keep the internal `BoneOverride`
+     *  shape out of the public API surface. */
+    readonly boneOverrides?: ReadonlyMap<number, unknown>;
 }
 
 // ─── GPU-side data objects attached to Mesh ─────────────────────────────────
@@ -144,6 +158,32 @@ export interface SkeletonData {
     readonly weights1Buffer: GPUBuffer | null;
     readonly joints1: Uint16Array | Uint8Array | null;
     readonly weights1: Float32Array | null;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
+    /** @internal True once the last owning mesh has released the GPU resources. Animation
+     *  controllers may outlive removed meshes, so they use this to skip stale uploads. */
+    _disposed?: boolean;
+    /** @internal Shared ownership for skin vertex buffers reused by VAT data. */
+    readonly _skinBuffers: SkinBufferData;
+    /** @internal Shared node-index → bone override map, stamped by `enableBoneControl`'s
+     *  skeleton builder when bone control is active. Bridges user bone overrides to the
+     *  optional weighted-blend mixer (which reuses this shared runtime skeleton), so a
+     *  blended clip honours overrides without any always-loaded plumbing. Undefined on the
+     *  default path. Typed `unknown` value to keep the internal `BoneOverride` shape private. */
+    _overrides?: ReadonlyMap<number, unknown>;
+    /** @internal Public handle stamped only by the opt-in glTF bone-control builder. */
+    _skeleton?: Skeleton;
+}
+
+/** @internal Ref-counted skin vertex buffers shared by live skeletons and VAT data. */
+export interface SkinBufferData {
+    jointsBuffer: GPUBuffer;
+    weightsBuffer: GPUBuffer;
+    joints1Buffer: GPUBuffer | null;
+    weights1Buffer: GPUBuffer | null;
+    /** @internal Extra-owner count shared by a live skeleton and one or more VAT data objects. */
+    _refCount?: number;
 }
 
 /** VAT (Vertex Animation Texture) GPU data — BAKED skinning. Attached to `mesh.vat` by vat/vat-baker.ts.
@@ -163,21 +203,39 @@ export interface VatData {
     readonly weightsBuffer: GPUBuffer;
     readonly joints1Buffer: GPUBuffer | null;
     readonly weights1Buffer: GPUBuffer | null;
+    /** @internal Shared ownership record for the baked texture. */
+    readonly _textureResource: { readonly texture: GPUTexture; _refCount?: number };
+    /** @internal Shared ownership for skin vertex buffers reused from the baked skeleton. */
+    readonly _skinBuffers: SkinBufferData;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode`. */
+    _refCount?: number;
     /** Optional per-instance VAT params texture (rgba32float, (2*instanceCount) x 1): TWO texels per
      *  thin-instance — A=(fromRow,toRow,offset,fps), B=(fromRow,toRow,blend,fps) — so each instance plays
      *  its own clip + phase (and can blend two clips) from the one shared baked texture. Present + the mesh
      *  thin-instanced ⇒ the VAT vertex path reads its frame rows from this texture indexed by
      *  `@builtin(instance_index)` instead of the shared settings UBO. Set via the VatHandle. */
     instanceTexture?: GPUTexture | null;
+    /** @internal Authoritative dual-clip params used by a custom VAT material and every derived
+     *  mesh pass (including picking). Set through setVatInstanceStorage(). */
+    _instanceStorage?: StorageBuffer | null;
 }
 
-/** Morph target GPU data — delta texture + weights UBO.
+/** Morph target GPU data — delta storage buffer + weights storage buffer.
  *  Created by createMorphTargets() in morph/create-morph-targets.ts.
  *  Attached to mesh.morphTargets. */
 export interface MorphTargetData {
-    readonly texture: GPUTexture;
+    /** Per-target names, index-aligned with targets and weights, when supplied by the source. */
+    readonly names?: readonly string[];
+    /** Read-only storage buffer: 6 f32 per (target, vertex) — position xyz then normal xyz. */
+    readonly deltasBuffer: GPUBuffer;
     readonly count: number;
+    /** Read-only storage buffer: 16-byte header (count, vertexCount) + one f32 weight per target. */
     readonly weightsBuffer: GPUBuffer;
     readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];
     readonly weights: Float32Array<ArrayBuffer>;
+    /** @internal Extra-owner count when shared with a clone via `cloneTransformNode` — see
+     *  resource/ref-count.ts. Absent/undefined means exactly one (implicit) owner. */
+    _refCount?: number;
+    /** @internal True once the last owning mesh has released the GPU resources. */
+    _disposed?: boolean;
 }

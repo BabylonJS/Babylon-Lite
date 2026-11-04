@@ -5,7 +5,7 @@
  * time (via ?seekTime=0.5) so the skinned pose is identical. The meshopt-compressed
  * + quantized buffers are decoded in dynamic-imported loader features.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

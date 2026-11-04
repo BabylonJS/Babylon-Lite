@@ -9,7 +9,7 @@
  * Golden is captured automatically from the BJS reference page on first run
  * (or when RECAPTURE_GOLDEN=1 is set).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

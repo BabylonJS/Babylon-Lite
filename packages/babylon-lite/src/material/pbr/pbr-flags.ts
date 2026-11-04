@@ -3,6 +3,10 @@
 
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { WgslSource } from "../../shader/wgsl.js";
 
 export * from "./pbr-flag-bits.js";
 
@@ -16,28 +20,42 @@ export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
 export interface _PbrFragCtx {
+    /** @internal Scene-owned extension feature bits. */
+    readonly _sceneFeatures?: number;
+    /** @internal Effective per-mesh light path; zero means no light declarations are emitted. */
+    readonly _lightMode?: number;
     /** @internal */
     readonly _features: number;
     /** @internal */
     readonly _features2: number;
+    /** @internal Material-plugin shader variant, separate from native feature bits. */
+    readonly _pi?: number;
     /** @internal Mesh feature bits, separate from material feature bits. */
     readonly _meshFeatures: number;
+    /** @internal Per-channel UV1 (TEXCOORD_1) selection bitmask (see pbr-material.ts). */
+    readonly _uv2Mask?: number;
     /** @internal */
     readonly _hasIbl: boolean;
+    /** @internal Whether the scene, rather than only a material extension, supplies IBL. */
+    readonly _hasSceneIbl?: boolean;
     /** @internal */
     readonly _hasAnyNormal: boolean;
     /** @internal */
     readonly _hasSpecularAA: boolean;
     /** @internal Aniso bent-normal WGSL (IBL only). */
-    readonly _anisoBentNormalCode?: string;
+    readonly _anisoBentNormalCode?: WgslSource;
     /** @internal Pre-baked skybox WGSL (IBL only). */
-    readonly _iblSkyboxCalc?: string;
+    readonly _iblSkyboxCalc?: WgslSource;
 }
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
+    /** @internal Opaque scene resource identity. */
+    _lightingId?: number;
+    /** @internal Binding-owned cleanup, including auxiliary material generations. */
+    _disposers?: (() => void)[];
     /** @internal */
-    readonly _engine: import("../../engine/engine.js").EngineContext;
+    readonly _engine: EngineContext;
     /** @internal */
     readonly _features: number;
     /** @internal */
@@ -47,8 +65,8 @@ export interface _PbrBindCtx {
     /** @internal */
     readonly _material: unknown;
     /** @internal Populated for "vertex" phase (skeleton, morph). */
-    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null };
-    /** @internal Populated for "ibl" phase. */
+    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null;
+    /** @internal Scene environment, or an active extension's fallback when the scene has none. */
     readonly _env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
     /** @internal Per-render-task scene-color snapshot for transmissive RTT refraction. */
     readonly _refractionTexture?: Texture2D | null;
@@ -94,4 +112,30 @@ export function _getPbrExtsSorted(): readonly PbrExt[] {
         _pbrExtsSorted = map ? Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id)) : [];
     }
     return _pbrExtsSorted;
+}
+
+// ─── Scene-level PBR setup hooks ────────────────────────────────────
+/** @internal A PBR feature that must mutate the *scene* (not just contribute a
+ *  `PbrExt`) before renderables are built — e.g. transmission, which retargets the
+ *  render task's colour buffer and appends a frame-graph task.
+ *
+ *  An opt-in setter runs at material-creation time and has no scene, so it registers
+ *  the hook instead of calling it; `buildPbrRenderables` drains the list with the
+ *  `scene`/`engine`/`meshes` it already holds. This is the same inversion `PbrExt`
+ *  uses for per-material work, and it keeps the feature's trigger predicate and
+ *  `import()` specifier out of the renderable's shared chunk.
+ *
+ *  The registry is per-runtime, so a hook fires for every mesh group once any material
+ *  opts in — each hook MUST re-check `meshes` and return early when its feature is
+ *  absent. */
+export type PbrSceneHook = (scene: SceneContext, engine: EngineContext, meshes: readonly Mesh[]) => void | Promise<void>;
+
+let _pbrSceneHooks: Set<PbrSceneHook> | null = null;
+/** @internal Register a scene-setup hook. Idempotent (keyed by function identity). */
+export function _registerPbrSceneHook(hook: PbrSceneHook): void {
+    (_pbrSceneHooks ??= new Set()).add(hook);
+}
+/** @internal Iterate the registered scene-setup hooks. */
+export function _getPbrSceneHooks(): Iterable<PbrSceneHook> {
+    return _pbrSceneHooks ?? [];
 }

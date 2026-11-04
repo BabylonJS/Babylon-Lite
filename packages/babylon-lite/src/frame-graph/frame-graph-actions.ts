@@ -44,6 +44,35 @@ export function addTaskBefore(target: FrameGraph | SceneContext, task: Task, bef
     }
 }
 
+/** Insert a task immediately AFTER another task in execute order. Accepts a FrameGraph or a SceneContext.
+ *  If `after` is not found, the task is appended at the end (matching `addTaskBefore`'s fallback). */
+export function addTaskAfter(target: FrameGraph | SceneContext, task: Task, after: Task): void {
+    const fg = resolveFg(target);
+    const i = fg._tasks.indexOf(after);
+    if (i < 0) {
+        fg._tasks.push(task);
+    } else {
+        fg._tasks.splice(i + 1, 0, task);
+    }
+}
+
+/** Detach every registration of a task without disposing its passes or resources.
+ *  Call between graph builds/executions; the caller owns cleanup and consumer rewiring.
+ *  @returns Whether the task was registered in the selected graph.
+ */
+export function removeTask(target: FrameGraph | SceneContext, task: Task): boolean {
+    const tasks = resolveFg(target)._tasks;
+    let count = 0;
+    for (const current of tasks) {
+        if (current !== task) {
+            tasks[count++] = current;
+        }
+    }
+    const removed = count !== tasks.length;
+    tasks.length = count;
+    return removed;
+}
+
 /** Create a `RenderPass`, wire it to the task currently recording, and return
  *  it. Must be called from inside `Task.record()` so the FG can associate the
  *  new pass with the right task (mirrors BJS `frameGraph.addRenderPass`).

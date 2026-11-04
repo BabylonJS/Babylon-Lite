@@ -14,6 +14,7 @@
 
 import type { NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeGraph, NodeValueType, Stage, StageState, BlockEmitter } from "./node-types.js";
 import { WGSL } from "./node-types.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 // ─── Build-state construction ───────────────────────────────────────
 
@@ -52,6 +53,7 @@ export function createBuildState(): NodeBuildState {
         shadowLights: [],
         hasSkeleton: false,
         hasInstances: false,
+        usesInstanceIndex: false,
     };
 }
 
@@ -96,15 +98,40 @@ export function castExpr(value: NodeExpr, target: NodeValueType): NodeExpr {
         return { expr: `${t}(${value.expr})`, type: target };
     }
     if (value.type === "vec3f" && target === "vec4f") {
-        return { expr: `vec4<f32>(${value.expr}, 1.0)`, type: target };
+        return { expr: wgsl`vec4<f32>(${value.expr}, 1.0)`, type: target };
     }
     if (value.type === "vec2f" && target === "vec4f") {
-        return { expr: `vec4<f32>(${value.expr}, 0.0, 1.0)`, type: target };
+        return { expr: wgsl`vec4<f32>(${value.expr}, 0.0, 1.0)`, type: target };
     }
     if (value.type === "vec2f" && target === "vec3f") {
-        return { expr: `vec3<f32>(${value.expr}, 0.0)`, type: target };
+        return { expr: wgsl`vec3<f32>(${value.expr}, 0.0)`, type: target };
     }
     throw new Error(`NodeMaterial: cannot cast ${value.type} to ${target} for expression \`${value.expr}\``);
+}
+
+/** @internal Sanitize a block/input name for use as a WGSL identifier. */
+export function sanitize(name: string): string {
+    return name.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+/** @internal Map Babylon.js connection-point flags to Lite's node value types. */
+export function bjsTypeToNodeType(type: number, source = "NodeMaterial"): NodeValueType {
+    if (type === 0x1 || type === 0x2) {
+        return "f32";
+    }
+    if (type === 0x4) {
+        return "vec2f";
+    }
+    if (type === 0x8 || type === 0x20) {
+        return "vec3f";
+    }
+    if (type === 0x10 || type === 0x40) {
+        return "vec4f";
+    }
+    if (type === 0x80) {
+        return "mat4f";
+    }
+    throw new Error(`${source}: unsupported BJS connection point type 0x${type.toString(16)}`);
 }
 
 function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>): NodeEmitContext {
@@ -113,6 +140,8 @@ function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>
         _loadedEmitters: loadedEmitters,
         temp: (state, prefix) => mintTemp(state, prefix),
         cast: castExpr,
+        sanitize,
+        bjsTypeToNodeType,
         resolve: (block, inputName, stage, state) => {
             const input = block.inputs.get(inputName);
             if (!input) {
@@ -163,7 +192,7 @@ function bridgeVarying(state: NodeBuildState, varyingName: string, value: NodeEx
     const already = state.varyings.find((v) => v._name === varyingName);
     if (!already) {
         state.varyings.push({ _name: varyingName, _type: WGSL[value.type] });
-        state.vertex.body.push(`out.${varyingName} = ${value.expr};`);
+        state.vertex.body.push(wgsl`out.${varyingName} = ${value.expr};`);
     }
 }
 

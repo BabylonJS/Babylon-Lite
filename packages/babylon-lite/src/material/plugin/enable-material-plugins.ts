@@ -6,12 +6,9 @@
  * always-fetched engine graph references the plugin bridges. A scene only pulls
  * in plugin code when the application imports and calls `enableMaterialPlugins`.
  *
- * This is what keeps plugin-free scenes BYTE-IDENTICAL to a build without the
- * plugin system at all: the shared PBR/Standard renderable and group-builder
- * modules carry zero plugin-specific code; they merely walk their generic
- * extension registries. `enableMaterialPlugins` registers the plugin bridges
- * into those global registries, and the pre-existing hook loops invoke them with
- * no shared-code changes.
+ * Shared PBR/Standard renderables carry no plugin implementation; they merely
+ * walk generic extension registries and pass their owning scene to binding hooks.
+ * `enableMaterialPlugins` registers the plugin bridges into those registries.
  *
  * Contract: call AFTER creating materials/meshes and adding them to the scene,
  * and BEFORE `registerScene(scene)`. Attach plugins via
@@ -28,25 +25,70 @@
  */
 
 import type { SceneContext } from "../../scene/scene.js";
+import type { Material } from "../material.js";
+import { getMaterialSource } from "../material-view.js";
 import { _registerPbrExt } from "../pbr/pbr-flags.js";
 import { _registerStdExt } from "../standard/standard-flags.js";
+import { getStandardGroupBuilder, type StandardMaterialProps } from "../standard/standard-material.js";
+import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
+import { processMaterialSwaps } from "../../scene/scene-material-swap.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
-import { registerStdPlugins } from "./std-plugin-bridge.js";
+import { bakeStdPluginMaterial, registerStdPluginBridge, registerStdPlugins } from "./std-plugin-bridge.js";
+
+function isStandardMaterial(material: Material): material is StandardMaterialProps {
+    return material._buildGroup === getStandardGroupBuilder();
+}
+
+function installRefresh(scene: SceneContext, refresh: (deltaMs: number) => void): void {
+    // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
+    // after plugin-value mutations regardless of whether they register before or after us.
+    const previous = scene._beforeRender.indexOf(refresh);
+    if (previous >= 0) {
+        scene._beforeRender.splice(previous, 1);
+    }
+    scene._beforeRender.push(refresh);
+}
 
 /**
  * Enable material-plugin support for `scene`.
  *
- * - Registers the PBR plugin bridge: its `detect` hook encodes a per-signature
- *   index into each PBR material's feature bits during the build, so no mesh
+ * - Registers the PBR plugin bridge: its `detect` hook assigns a stable signature
+ *   identity outside the material's feature bits during the build, so no mesh
  *   walk is needed here.
  * - Registers the Standard plugin bridge and walks `scene.meshes`, pre-baking a
- *   per-signature index into every Standard plugin material's cached
- *   `_renderFeatures` (Standard's feature computation is not ext-extensible, so
- *   the index must be baked in up front). Standard plugin uniforms are delivered
+ *   per-signature identity into every Standard plugin material's `_pi`.
+ *   Only a presence flag enters per-renderable features. Standard plugin uniforms are delivered
  *   through a self-managed uniform buffer built here and bound via the
  *   pre-existing `StdExt._bind` loop.
  */
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
-    registerStdPlugins(scene.meshes, scene.surface.engine, _registerStdExt);
+    const refresh = registerStdPlugins(scene, _registerStdExt);
+    installRefresh(scene, refresh);
+}
+
+/**
+ * Reconcile a plugin material after its shader-affecting state changes in a live scene.
+ *
+ * The bridge is enabled before the material's renderables are rebuilt. Standard
+ * materials are baked by {@link enableMaterialPlugins}; PBR materials receive their
+ * stable signature index while the queued renderable rebuild runs.
+ */
+export async function reconcileMaterialPlugins(scene: SceneContext, material: Material): Promise<void> {
+    registerPbrPlugins(_registerPbrExt);
+    installRefresh(scene, registerStdPluginBridge(scene, _registerStdExt));
+    const source = getMaterialSource(material);
+    source._renderFeatures = undefined;
+    if (isStandardMaterial(source)) {
+        bakeStdPluginMaterial(source, scene);
+    }
+    for (const mesh of scene.meshes) {
+        if (mesh.material && getMaterialSource(mesh.material) === source) {
+            enqueueMaterialSwap(scene, mesh);
+        }
+    }
+    const pending = processMaterialSwaps(scene);
+    if (pending) {
+        await pending;
+    }
 }

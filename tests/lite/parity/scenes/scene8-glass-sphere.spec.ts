@@ -7,7 +7,7 @@
  * Scene features: HDR environment (room.hdr), PBR glass sphere with
  * alpha=0.5, roughness=0, custom exposure/contrast.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

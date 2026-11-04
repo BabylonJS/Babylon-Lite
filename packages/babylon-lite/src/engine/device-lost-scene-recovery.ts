@@ -1,0 +1,32 @@
+import type { EngineContext } from "./engine.js";
+import { _enableDeviceLostRecovery } from "./device-lost-recovery.js";
+import type { DeviceLostRecoveryCallbacks, DeviceLostRecoveryHandle } from "./device-lost-recovery-types.js";
+import { _releaseDeviceLostRecoveryCapture, _retainDeviceLostRecoveryCapture } from "./device-lost-recovery-capture.js";
+
+/**
+ * Enable best-effort WebGPU device-lost recovery for every registered SceneContext.
+ *
+ * Device reacquisition is coordinated per engine so additional renderer-specific
+ * recovery strategies can share the same replacement device. Every rendering
+ * context kind that is registered when the device is lost needs its own strategy
+ * enabled — recovery fails rather than leave one bound to the lost device.
+ */
+export function enableDeviceLostSceneRecovery(engine: EngineContext, options: DeviceLostRecoveryCallbacks = {}): DeviceLostRecoveryHandle {
+    return _enableDeviceLostRecovery(engine, {
+        _kind: "scene",
+        _recoverOrder: 100,
+        _enable(currentEngine): void {
+            _retainDeviceLostRecoveryCapture(currentEngine, true);
+        },
+        _disable(currentEngine): void {
+            _releaseDeviceLostRecoveryCapture(currentEngine, true);
+        },
+        async _recover(currentEngine): Promise<void> {
+            const { rebuildRegisteredScenes } = await import("./recovery-rebuild.js");
+            await rebuildRegisteredScenes(currentEngine);
+        },
+        _onLost: options.onLost,
+        _onRecovered: options.onRecovered,
+        _onRecoveryFailed: options.onRecoveryFailed,
+    });
+}

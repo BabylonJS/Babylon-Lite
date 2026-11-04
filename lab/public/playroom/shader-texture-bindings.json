@@ -1,0 +1,51 @@
+[
+  {
+    "path": "shaders/domino.json",
+    "sourceSha256": "36dff3ca42a7c81e512539557ab530cc68be33e44c30f57f943d6119802901ca",
+    "transform": "Losslessly extracted embedded JPEG payloads and assigned unique block names; graph IDs/connections and image bytes are unchanged.",
+    "bindings": [
+      {
+        "blockId": 50,
+        "oldName": "ImageSourceBlock",
+        "name": "EmbeddedDomino50",
+        "path": "textures/shader-embedded/domino-50.jpg",
+        "sha256": "b9f67ff9fb26275edf960e0c2ed8553f071ae5a0e5ab43985b2df9c2fd8a32f8"
+      },
+      {
+        "blockId": 84,
+        "oldName": "ImageSourceBlock",
+        "name": "EmbeddedDomino84",
+        "path": "textures/shader-embedded/domino-84.jpg",
+        "sha256": "c0194f90c3cb70be942b4ce02c7a28ca7711e85f473f672d0b4e8907ad25827f"
+      }
+    ]
+  },
+  {
+    "path": "shaders/babylonBurster.json",
+    "sourceSha256": "43788359972c40f688923196b9f75fc02ed5e5853f65a7cd23bf90b59b43905f",
+    "transform": "Losslessly extracted embedded JPEG payloads and assigned unique block names; graph IDs/connections and image bytes are unchanged.",
+    "bindings": [
+      {
+        "blockId": 55,
+        "oldName": "ImageSource",
+        "name": "EmbeddedBabylonburster55",
+        "path": "textures/shader-embedded/babylonBurster-55.jpg",
+        "sha256": "a4d4e45c53ab3cdf6b501186cdf8dcf16e91d708adc8c88f19f1da5b9c27fbbb"
+      },
+      {
+        "blockId": 59,
+        "oldName": "ImageSource",
+        "name": "EmbeddedBabylonburster59",
+        "path": "textures/shader-embedded/babylonBurster-59.jpg",
+        "sha256": "9c7e42df2ef9686387cad8c78a190a23b673064c690cfd21cb7e3ba3a21f373e"
+      },
+      {
+        "blockId": 63,
+        "oldName": "Texture",
+        "name": "EmbeddedBabylonburster63",
+        "path": "textures/shader-embedded/babylonBurster-63.jpg",
+        "sha256": "030dc8fb9003be9a0f15675889c452cb98b564e03f41b7908e8b2f6462bb9804"
+      }
+    ]
+  }
+]

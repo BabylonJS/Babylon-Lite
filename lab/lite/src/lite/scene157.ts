@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {
         for (const group of [walk, run]) {
-            group.currentFrame = seekTime;
+            group.currentTime = seekTime;
             pauseAnimation(group);
         }
         canvas.dataset.animationFrozen = "true";

@@ -10,8 +10,9 @@ import { createShaderMaterial, createTexture2DFromPixels, setShaderTexture, type
 
 import type { BspMipTex } from "../bsp/parse-bsp.js";
 import type { Palette } from "../palette.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) worldPos: vec3<f32>,
 };
@@ -23,7 +24,7 @@ const vertexSource = `struct VertexOutput {
   return out;
 }`;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) worldPos: vec3<f32>,
 };

@@ -144,10 +144,10 @@ export function createGridSpriteAtlas(texture: Texture2D, options: GridAtlasOpti
  */
 export async function loadSpriteAtlas(engine: EngineContext, textureUrl: string, options: LoadAtlasOptions = {}): Promise<SpriteAtlas> {
     if (options.metadataUrl !== undefined) {
-        throw new Error("loadSpriteAtlas: metadataUrl is not implemented in PR 1.");
+        throw new Error("loadSpriteAtlas: metadataUrl unsupported.");
     }
     if (!options.gridSize) {
-        throw new Error("loadSpriteAtlas: options.gridSize is required in PR 1.");
+        throw new Error("loadSpriteAtlas: gridSize required.");
     }
 
     const texOpts: Texture2DOptions = {
@@ -183,4 +183,22 @@ export function resolveSpriteFrame(atlas: SpriteAtlas, frame: number): number {
         throw new Error(`resolveSpriteFrame: index ${frame} out of range [0, ${atlas.frames.length})`);
     }
     return frame;
+}
+
+/**
+ * Release the GPU texture backing `atlas`.
+ *
+ * A `SpriteAtlas` is a pure data record whose lifetime is governed by its
+ * `Texture2D`; it is deliberately NOT owned by any `Sprite2DLayer` or
+ * `SpriteRenderer` (those hold it `readonly` and never free it), so a single
+ * atlas can back many layers/renderers across many surfaces. That makes the
+ * atlas the caller's to dispose: call this once, after every renderer/layer
+ * referencing it has been disposed. Idempotence is NOT guaranteed — the
+ * underlying `GPUTexture.destroy()` must be called exactly once.
+ *
+ * Note: atlases created via `createGridSpriteAtlas` from an externally-owned
+ * `Texture2D` should be freed by whoever owns that texture, not via this call.
+ */
+export function disposeSpriteAtlas(atlas: SpriteAtlas): void {
+    atlas.texture.texture.destroy();
 }

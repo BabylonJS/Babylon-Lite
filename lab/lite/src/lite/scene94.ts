@@ -28,7 +28,6 @@ import {
 import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
 const CAMERA_ALPHA = -Math.PI / 3;
-export const SCENE94_PARAMS: [number, number, number, number] = [1.0, 0.78, 0.55, 1.0];
 
 async function main(): Promise<void> {
     const initStart = performance.now();
@@ -67,7 +66,7 @@ async function main(): Promise<void> {
     });
 
     const billboards = createFacingBillboardSystem(atlas, { capacity: 6, customShader });
-    setBillboardShaderParams(billboards, SCENE94_PARAMS);
+    setBillboardShaderParams(billboards, [1.0, 0.78, 0.55, 1.0]);
 
     addBillboardSpriteIndex(billboards, {
         position: [-1.6, 0.7, -2.15],

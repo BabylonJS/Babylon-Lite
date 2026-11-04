@@ -5,6 +5,8 @@
  *  factors), while the shared `_buildGroup` hook lets the renderer dispatch
  *  materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
+import type { LiteMetadata } from "../metadata.js";
+import type { MaterialPlugin } from "./plugin/material-plugin.js";
 
 /** Base material interface — the polymorphic anchor shared by every concrete
  *  material kind (Standard, PBR, Shader, Node). Concrete materials add their own
@@ -16,10 +18,28 @@ export interface Material {
     /** Optional human-readable name. Populated by loaders from the source asset
      *  (e.g. the glTF material name) so callers can look a material up by name. */
     name?: string;
+    /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
+    metadata?: LiteMetadata;
     /** @internal Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
     _renderFeatures?: MaterialRenderFeatures;
+    /** @internal Stable material-plugin shader variant, kept outside native feature bitfields. */
+    _pi?: number;
+    /** @internal Enabled, priority-sorted material plugins prepared when the material signature is baked. */
+    _preparedPlugins?: readonly MaterialPlugin[];
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
+    /** @internal Monotonic CSM material-view generation. */
+    _csmGen?: number;
+    /** @internal Optional ALTERNATE material the shadow caster pass renders this material's mesh with, instead of
+     *  deriving a no-colour view from this (receive) material. Use when this material samples the shadow map it would
+     *  cast into (a CSM-receiving custom ShaderMaterial): its own no-colour view would bind that depth texture WHILE it
+     *  is the shadow render target → a read/write aliasing error. Point this at a sampler-free depth-only caster
+     *  material and the SAME mesh (same geometry + thin instances) casts through it — no twin caster mesh, no instance
+     *  mirror. The shadow pass takes the override's own no-colour view (so an alpha-clip caster can still set
+     *  depthOnlyFragment). Honoured by the CSM + PCF caster passes (the ESM exponential path has its own shadow views). */
+    _shadowCasterMaterial?: Material;
+    /** @internal Explicit vertex encodings declared by a material, also used to validate default picking. */
+    _attributeFormats?: Readonly<Partial<Record<string, GPUVertexFormat>>>;
 }
 
 /** Exact material render-feature override used by MaterialView.
@@ -29,6 +49,29 @@ export interface MaterialRenderFeatures {
     features2?: number;
 }
 
+/** Optional stencil-test state baked into a material's main-pass pipeline. Shared by every concrete material kind
+ *  (Standard, PBR, Shader) so none has to depend on another. Lets one material WRITE the stencil buffer where it
+ *  draws (a mask) and another DISCARD fragments where the stencil was written — with NO dynamic stencil reference:
+ *  a writer uses `compare:"always"` + `passOp:"increment-clamp"` (stencil 0→1 where it draws); a tester uses
+ *  `compare:"equal"` (passes only where the stencil is still 0, i.e. NOT written), since the render pass's default
+ *  stencil reference is 0. Only takes effect on a stencil-capable depth target (the main color pass); ignored on
+ *  depth-only/shadow targets. Assigning `material.stencil` is inert until {@link enableMaterialStencil} is called
+ *  (the opt-in that keeps stencil-free scenes byte-identical) — call it once before `registerScene`. */
+export interface StencilState {
+    /** Stencil compare function, applied to front & back faces. Default `"always"`. */
+    readonly compare?: GPUCompareFunction;
+    /** Stencil operation when the stencil + depth tests both pass. Default `"keep"`. */
+    readonly passOp?: GPUStencilOperation;
+    /** Stencil operation when the stencil test fails. Default `"keep"`. */
+    readonly failOp?: GPUStencilOperation;
+    /** Stencil operation when the stencil test passes but depth fails. Default `"keep"`. */
+    readonly depthFailOp?: GPUStencilOperation;
+    /** Stencil read mask. Default `0xFF`. */
+    readonly readMask?: number;
+    /** Stencil write mask. Default `0xFF`. */
+    readonly writeMask?: number;
+}
+
 /** A lightweight render view over an editable source material.
  *  The view is also a Material: it inherits material state from {@link source}
  *  through the prototype chain and owns only render-feature bits. Keeping views
@@ -36,7 +79,7 @@ export interface MaterialRenderFeatures {
  *  scenes that never create views do not retain view-specific unwrap branches.
  *
  *  Specialized views (e.g. the Standard geometry MRT view) override
- *  {@link Material._buildGroup} with a view-specific builder whose
+ *  `_buildGroup` with a view-specific builder whose
  *  `_rebuildSingle` builds the right kind of Renderable — no per-family
  *  branching is required in the core render-task. */
 export interface MaterialView extends Material {

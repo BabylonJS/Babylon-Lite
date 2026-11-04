@@ -2,8 +2,9 @@
  *  Eliminates boilerplate repeated across hemispheric, directional, point, and spot lights. */
 
 import type { Mat4 } from "../math/types.js";
-import type { IWorldMatrixProvider } from "../scene/parentable.js";
-import { createWorldMatrixState, attachWorldMatrixState, type WorldMatrixAccessors } from "../scene/world-matrix-state.js";
+import type { SceneNode } from "../scene/scene-node.js";
+import { initSceneNodeTransform } from "../scene/scene-node.js";
+import type { ObservableVec3 } from "../math/observable-vec3.js";
 
 export { ObservableVec3 } from "../math/observable-vec3.js";
 
@@ -13,65 +14,46 @@ export { ObservableVec3 } from "../math/observable-vec3.js";
 export interface LightVersionState {
     /** @internal */
     _lightVersion: number;
-    bump(): void;
+    b(): void;
 }
 
-/** Create the world-matrix state + dirty callback shared by all light types. */
-export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAccessors; onDirty: () => void; lvs: LightVersionState } {
-    const wm = createWorldMatrixState(getLocalMatrix);
+/** Create the SceneNode transform and version state shared by all light types. */
+export function createLightBase(position: readonly [number, number, number]): { node: SceneNode; lvs: LightVersionState } {
     const lvs: LightVersionState = {
         _lightVersion: 0,
-        bump() {
+        b() {
             lvs._lightVersion++;
         },
     };
-    const onDirty = () => {
-        wm.markLocalDirty();
-        lvs._lightVersion++;
-    };
-    return { wm, onDirty, lvs };
+    return { node: initSceneNodeTransform({ name: "", children: [] }, position[0], position[1], position[2]), lvs };
 }
 
-/** Mixin world-matrix accessors (parent, worldMatrix, worldMatrixVersion) onto a light object.
- *  Also adds _lightVersion from the LightVersionState. Returns the same object reference
- *  typed as R (defineProperties adds the accessors at runtime). */
-export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAccessors, lvs?: LightVersionState): R {
-    Object.defineProperties(target, {
-        parent: {
-            get() {
-                return wm.parent;
-            },
-            set(v: IWorldMatrixProvider | null) {
-                wm.parent = v;
-            },
-            enumerable: true,
-            configurable: true,
-        },
-        worldMatrix: {
-            get() {
-                return wm.getWorldMatrix();
-            },
-            enumerable: true,
-            configurable: true,
-        },
-        worldMatrixVersion: {
-            get() {
-                return wm.getWorldMatrixVersion();
-            },
-            enumerable: true,
-            configurable: true,
-        },
-    });
+/** Write a normalized world-space direction from a light matrix. Parent scale
+ *  must not change lighting intensity or spotlight cone tests. */
+export function writeWorldLightDirection(data: Float32Array, offset: number, world: Mat4, direction: ObservableVec3): void {
+    const x = world[0]! * direction.x + world[4]! * direction.y + world[8]! * direction.z;
+    const y = world[1]! * direction.x + world[5]! * direction.y + world[9]! * direction.z;
+    const z = world[2]! * direction.x + world[6]! * direction.y + world[10]! * direction.z;
+    const invLength = 1 / (Math.hypot(x, y, z) || 1);
+    data[offset] = x * invLength;
+    data[offset + 1] = y * invLength;
+    data[offset + 2] = z * invLength;
+}
+
+/** Add light-specific state to a SceneNode and return the same object. */
+export function applyLightBase<R>(node: SceneNode, target: object, lvs?: LightVersionState): R {
+    Object.assign(node, target);
     if (lvs) {
-        Object.defineProperty(target, "_lightVersion", {
+        Object.defineProperty(node, "_lightVersion", {
             get() {
-                return lvs._lightVersion;
+                return lvs._lightVersion + node.worldMatrixVersion;
             },
             enumerable: false,
             configurable: true,
         });
+        // Direct scalar/array writes cannot notify, so expose the version-only bump without
+        // dirtying the world matrix (unlike a no-op ObservableVec3 set).
+        (node as { _bumpLightVersion?: () => void })._bumpLightVersion = lvs.b;
     }
-    // Tag so children parented to this light get push invalidation (O(1) reads).
-    attachWorldMatrixState(target, wm);
-    return target as R;
+    return node as R;
 }

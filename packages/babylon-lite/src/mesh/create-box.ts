@@ -19,21 +19,16 @@ export interface BoxData {
     indexCount: number;
 }
 
-// prettier-ignore
-const BOX_POSITIONS = new F32([
-  // +Z face
-   0.5, -0.5,  0.5,   -0.5, -0.5,  0.5,   -0.5,  0.5,  0.5,    0.5,  0.5,  0.5,
-  // -Z face
-   0.5,  0.5, -0.5,   -0.5,  0.5, -0.5,   -0.5, -0.5, -0.5,    0.5, -0.5, -0.5,
-  // +X face
-   0.5,  0.5, -0.5,    0.5, -0.5, -0.5,    0.5, -0.5,  0.5,    0.5,  0.5,  0.5,
-  // -X face
-  -0.5,  0.5,  0.5,   -0.5, -0.5,  0.5,   -0.5, -0.5, -0.5,   -0.5,  0.5, -0.5,
-  // +Y face
-  -0.5,  0.5,  0.5,   -0.5,  0.5, -0.5,    0.5,  0.5, -0.5,    0.5,  0.5,  0.5,
-  // -Y face
-   0.5, -0.5,  0.5,    0.5, -0.5, -0.5,   -0.5, -0.5, -0.5,   -0.5, -0.5,  0.5,
-]);
+/** Options for box dimensions. Explicit axis dimensions override `size`. */
+export interface BoxOptions {
+    size?: number;
+    width?: number;
+    height?: number;
+    depth?: number;
+}
+
+// One bit per coordinate in face order: 1 = +0.5, 0 = -0.5.
+const BOX_POSITION_SIGNS = [0x4b213fa5, 0xded6426f, 0x80] as const;
 
 // prettier-ignore
 const BOX_NORMALS = new F32([
@@ -72,27 +67,34 @@ const BOX_INDICES = new U32([
   20, 21, 22,  20, 22, 23,
 ]);
 
-/** Create box CPU data. `size` scales all positions (default 1). */
-export function createBoxData(size = 1): BoxData {
-    if (size === 1) {
-        return {
-            positions: BOX_POSITIONS,
-            normals: BOX_NORMALS,
-            uvs: BOX_UVS,
-            indices: BOX_INDICES,
-            vertexCount: 24,
-            indexCount: 36,
-        };
+/**
+ * Create box CPU data. A number sets a uniform size; structured options can set
+ * independent dimensions, with `size` as the fallback for unspecified axes.
+ *
+ * Always returns freshly-allocated typed arrays (never the shared module-level
+ * constants), matching the other primitive data factories (createSphereData,
+ * createCylinderData, …). This keeps the public API safe: callers may freely
+ * mutate the returned buffers without corrupting subsequent calls.
+ */
+export function createBoxData(options: number | BoxOptions = 1): BoxData {
+    let dimensions: number[];
+    if (typeof options === "number") {
+        dimensions = [options, options, options];
+    } else {
+        const { size = 1, width = size, height = size, depth = size } = options;
+        dimensions = [width, height, depth];
     }
-    const positions = new F32(BOX_POSITIONS.length);
-    for (let i = 0; i < positions.length; i++) {
-        positions[i] = BOX_POSITIONS[i]! * size;
+
+    const positions = new F32(72);
+    for (let index = 0; index < positions.length; index++) {
+        const sign = (BOX_POSITION_SIGNS[index >> 5]! >>> (index & 31)) & 1;
+        positions[index] = (sign - 0.5) * dimensions[index % 3]!;
     }
     return {
         positions,
-        normals: BOX_NORMALS,
-        uvs: BOX_UVS,
-        indices: BOX_INDICES,
+        normals: BOX_NORMALS.slice(),
+        uvs: BOX_UVS.slice(),
+        indices: BOX_INDICES.slice(),
         vertexCount: 24,
         indexCount: 36,
     };

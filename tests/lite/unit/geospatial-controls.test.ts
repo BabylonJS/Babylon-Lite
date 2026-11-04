@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attachGeospatialControls } from "../../../packages/babylon-lite/src/camera/geospatial-camera-controls";
 import { createGeospatialCamera } from "../../../packages/babylon-lite/src/camera/geospatial-camera";
+import { flyGeospatialCameraToAsync } from "../../../packages/babylon-lite/src/camera/geospatial-camera-fly";
 import type { GeospatialCamera } from "../../../packages/babylon-lite/src/camera/geospatial-camera";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Vec3 } from "../../../packages/babylon-lite/src/math/types";
+
+vi.mock("../../../packages/babylon-lite/src/camera/geospatial-camera-fly", () => ({
+    flyGeospatialCameraToAsync: vi.fn(() => Promise.resolve()),
+}));
 
 const W = 800;
 const H = 600;
@@ -97,6 +102,10 @@ function tp(identifier: number, clientX: number, clientY: number): { identifier:
 
 function touchEvent(changed: Array<{ identifier: number; clientX: number; clientY: number }>): unknown {
     return { changedTouches: changed, preventDefault: vi.fn() };
+}
+
+function dblclick(clientX: number, clientY: number, button = 0, buttons = 0): unknown {
+    return { clientX, clientY, button, buttons, preventDefault: vi.fn() };
 }
 
 function copy(v: Vec3): Vec3 {
@@ -234,6 +243,31 @@ describe("attachGeospatialControls — keyboard (M6)", () => {
         }
         expect(camera.radius).toBeLessThan(before);
     });
+
+    it("a diagonal pan (up+left) is normalized — no sqrt(2) speed boost over a single axis", () => {
+        // Single axis: ArrowUp for one frame.
+        const single = createGeospatialCamera({ planetRadius: 100 });
+        const sScene = makeScene();
+        attachGeospatialControls(single, canvas as unknown as HTMLCanvasElement, sScene);
+        const sBefore = copy(single.center);
+        fireWindow("keydown", key("ArrowUp"));
+        tick(sScene);
+        const singleDist = moved(single.center, sBefore);
+        fireWindow("keyup", key("ArrowUp"));
+
+        // Diagonal: ArrowUp + ArrowLeft for one frame on a fresh camera/scene.
+        const diag = createGeospatialCamera({ planetRadius: 100 });
+        const dScene = makeScene();
+        attachGeospatialControls(diag, canvas as unknown as HTMLCanvasElement, dScene);
+        const dBefore = copy(diag.center);
+        fireWindow("keydown", key("ArrowUp"));
+        fireWindow("keydown", key("ArrowLeft"));
+        tick(dScene);
+        const diagDist = moved(diag.center, dBefore);
+
+        expect(diagDist).toBeGreaterThan(0);
+        expect(diagDist).toBeCloseTo(singleDist, 6);
+    });
 });
 
 describe("attachGeospatialControls — touch pinch (M6)", () => {
@@ -325,5 +359,76 @@ describe("attachGeospatialControls — touch pinch (M6)", () => {
         dispose();
         expect(c.listeners.get("touchmove")?.length).toBe(0);
         expect(c.listeners.get("pointermove")?.length).toBe(0);
+    });
+});
+
+describe("attachGeospatialControls — double-tap fly-to", () => {
+    let canvas: FakeCanvas;
+    let camera: GeospatialCamera;
+    let scene: SceneContext;
+    const flyMock = vi.mocked(flyGeospatialCameraToAsync);
+
+    beforeEach(() => {
+        windowListeners = new Map();
+        (globalThis as Record<string, unknown>).window = {
+            addEventListener(): void {
+                return;
+            },
+            removeEventListener(): void {
+                return;
+            },
+        };
+        flyMock.mockClear();
+        canvas = makeCanvas();
+        camera = createGeospatialCamera({ planetRadius: 100 });
+        scene = makeScene();
+        attachGeospatialControls(camera, canvas as unknown as HTMLCanvasElement, scene);
+    });
+
+    afterEach(() => {
+        delete (globalThis as Record<string, unknown>).window;
+    });
+
+    it("flies to the picked point on a primary-button double tap", () => {
+        const evt = dblclick(CX, CY, 0, 0) as { preventDefault: ReturnType<typeof vi.fn> };
+        fire(canvas, "dblclick", evt);
+        expect(flyMock).toHaveBeenCalledTimes(1);
+        const [, , opts] = flyMock.mock.calls[0]!;
+        // The picked point lands on the planet surface (radius = planetRadius).
+        expect(Math.hypot(opts.center!.x, opts.center!.y, opts.center!.z)).toBeCloseTo(100, 3);
+        expect(opts.durationMs).toBe(1000);
+        // Browser defaults (selection / page zoom) are suppressed for the recognised gesture.
+        expect(evt.preventDefault).toHaveBeenCalled();
+    });
+
+    it("ignores a non-primary (right) button double tap", () => {
+        const evt = dblclick(CX, CY, 2, 0) as { preventDefault: ReturnType<typeof vi.fn> };
+        fire(canvas, "dblclick", evt);
+        expect(flyMock).not.toHaveBeenCalled();
+        expect(evt.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("ignores a double tap while another button is held", () => {
+        // Primary button released but right button (bit 2) still pressed.
+        fire(canvas, "dblclick", dblclick(CX, CY, 0, 2));
+        expect(flyMock).not.toHaveBeenCalled();
+    });
+
+    it("forwards the configured duration and easing function", () => {
+        const dispose = attachGeospatialControls(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            doubleTapAnimationDurationMs: 500,
+            doubleTapEasingFunction: easing,
+        });
+        function easing(g: number): number {
+            return g;
+        }
+        flyMock.mockClear();
+        fire(canvas, "dblclick", dblclick(CX, CY, 0, 0));
+        // Two controls are attached to the same canvas now; both react. Assert the
+        // configured one forwarded its duration + easing.
+        const configured = flyMock.mock.calls.find((c) => c[2].durationMs === 500);
+        expect(configured).toBeDefined();
+        expect(configured![2].ease).toBe(easing);
+        dispose();
     });
 });

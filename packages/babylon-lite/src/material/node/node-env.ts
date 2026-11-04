@@ -17,6 +17,7 @@
 
 import { SS } from "../../engine/gpu-flags.js";
 import type { SceneContext } from "../../scene/scene.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 export interface EnvEmit {
     readonly bindings: {
@@ -43,10 +44,10 @@ export function emitEnv(startBinding: number): EnvEmit {
     const brdfTexBinding = startBinding + 2;
     const brdfSampBinding = startBinding + 3;
     const wgslDecls = [
-        `@group(1) @binding(${iblTexBinding}) var nmeIblTexture: texture_cube<f32>;`,
-        `@group(1) @binding(${iblSampBinding}) var nmeIblSampler: sampler;`,
-        `@group(1) @binding(${brdfTexBinding}) var nmeBrdfLUT: texture_2d<f32>;`,
-        `@group(1) @binding(${brdfSampBinding}) var nmeBrdfSampler: sampler;`,
+        wgsl`@group(1) @binding(${iblTexBinding}) var nmeIblTexture: texture_cube<f32>;`,
+        wgsl`@group(1) @binding(${iblSampBinding}) var nmeIblSampler: sampler;`,
+        wgsl`@group(1) @binding(${brdfTexBinding}) var nmeBrdfLUT: texture_2d<f32>;`,
+        wgsl`@group(1) @binding(${brdfSampBinding}) var nmeBrdfSampler: sampler;`,
     ].join("\n");
     const bglEntries: GPUBindGroupLayoutEntry[] = [
         { binding: iblTexBinding, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },

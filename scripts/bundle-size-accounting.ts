@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readFileSync, realpathSync } from "fs";
+import { dirname, relative, resolve } from "path";
 import { gzipSync } from "zlib";
+import { buildSync } from "esbuild";
 
 /** Human-readable label for the ignored-module set used in test/log output. */
-export const IGNORED_BUNDLE_MODULE_PATTERN = "*-nme.ts + text-shaper";
+export const IGNORED_BUNDLE_MODULE_PATTERN = "*-nme.ts, *-npe.ts + vendor runtimes (text-shaper, manifold, recast-navigation)";
 
 export interface RuntimeJsPayload {
     file: string;
@@ -39,15 +40,88 @@ export interface RuntimeBundleSummary {
 }
 
 /** A module is excluded from the runtime-code measurement when it is either:
- *    1. A scene-specific NME data payload (`*-nme.ts`) — checked-in scene data,
- *       not engine code, so ceiling drift should not track it.
- *    2. The `text-shaper` third-party shaping library — only loaded by the
- *       default-layout text path (`createDefaultTextData` and friends). Callers
- *       using `GlyphStorage` + `TextData` with their own layout pay zero for it,
- *       so it should not count against engine-size ceilings. */
+ *    1. A scene-specific node-graph data payload (`*-nme.ts` for Node Materials,
+ *       `*-npe.ts` for Node Particles) — checked-in scene data, not engine code,
+ *       so ceiling drift should not track it.
+ *    2. A bundled third-party WASM/shaping runtime — `text-shaper` (default-layout
+ *       text), `manifold-3d` (CSG), or `@recast-navigation` (navmesh). These are
+ *       upstream vendor blobs loaded only by the feature that needs them, not Lite
+ *       engine code, so they should not count against engine-size ceilings (a caller
+ *       not using that feature pays zero). Matches BOTH the source form
+ *       (`node_modules/<name>/…`) AND the built-package form, where the lib build has
+ *       pre-bundled each runtime into `build/lib/_chunks/vendor/<name>-<hash>.js`. */
+export function isIgnoredScenePayloadModule(id: string): boolean {
+    const clean = id.replace(/\\/g, "/").split("?")[0]!;
+    return /(?:^|\/)[^/]+-(?:nme|npe)\.ts$/.test(clean);
+}
+
+/** Stable pre-minifier byte weight for a checked-in scene graph payload.
+ *
+ * The bundle ceilings were established from Rollup's rendered module length before
+ * Vite 6 ran its final esbuild minifier. Rolldown applies Oxc during code generation,
+ * so its module length is already compacted and is not comparable. Transpile the data
+ * module without minification to preserve the established accounting stage across the
+ * bundler migration; the payload remains excluded, and no ceiling needs redefining. */
+export function ignoredScenePayloadCompatibilityBytes(id: string, renderedExports: readonly string[]): number {
+    if (!isIgnoredScenePayloadModule(id)) {
+        return 0;
+    }
+    const clean = id.split("?")[0]!;
+    const exportNames = renderedExports.filter((name) => name === "default" || /^[$A-Z_a-z][$\w]*$/.test(name));
+    if (!existsSync(clean) || exportNames.length === 0) {
+        return 0;
+    }
+    const relativeSpecifier = relative(dirname(clean), clean).replace(/\\/g, "/");
+    const importSpecifier = relativeSpecifier.startsWith(".") ? relativeSpecifier : `./${relativeSpecifier}`;
+    const result = buildSync({
+        stdin: {
+            contents: `export { ${exportNames.join(", ")} } from ${JSON.stringify(importSpecifier)};`,
+            loader: "js",
+            resolveDir: dirname(clean),
+        },
+        bundle: true,
+        write: false,
+        format: "esm",
+        platform: "browser",
+        minify: false,
+        treeShaking: true,
+        metafile: true,
+        logLevel: "silent",
+    });
+    const target = realpathSync(clean);
+    for (const output of Object.values(result.metafile.outputs)) {
+        for (const [input, contribution] of Object.entries(output.inputs)) {
+            const resolvedInput = resolve(input);
+            if (existsSync(resolvedInput) && realpathSync(resolvedInput) === target) {
+                return contribution.bytesInOutput;
+            }
+        }
+    }
+    return 0;
+}
+
 function isIgnoredBundleModule(id: string): boolean {
     const clean = id.replace(/\\/g, "/").split("?")[0]!;
-    return /(?:^|\/)[^/]+-nme\.ts$/.test(clean) || /(?:^|\/)text-shaper\//.test(clean);
+    if (isIgnoredScenePayloadModule(clean)) {
+        return true;
+    }
+    // `<name>-<hash>.js` is the built-package vendor-chunk form; `<name>/…` is the
+    // source node_modules form. `@recast-navigation/<sub>` is handled separately
+    // because its package scope prefixes the segment with `@`.
+    return /(?:^|\/)(?:text-shaper|manifold|recast-navigation)[-/]/.test(clean) || /(?:^|\/)@recast-navigation\//.test(clean);
+}
+
+/** Whether an emitted scene-bundle CHUNK file is a bundled third-party WASM/shaping
+ *  runtime (text-shaper, manifold-3d, @recast-navigation). Scene chunk filenames take
+ *  the `scene<N>-<name>-<hash>.js` form, so the vendor name appears as an interior
+ *  segment delimited by `-` (e.g. `scene170-recast-navigation-CYBQI-zY-….js`). These
+ *  vendor runtimes ship pre-built emscripten glue whose `_`-prefixed internals must NOT
+ *  be touched by the first-party property mangler — mangling them corrupts the glue
+ *  (e.g. breaks recast's WASM init). A real consumer never runs that mangler, so this
+ *  only affects the in-repo measurement harness. */
+export function isVendorRuntimeChunkFile(file: string): boolean {
+    const clean = file.replace(/\\/g, "/").split("/").pop() ?? file;
+    return /(?:^|[-/])(?:text-shaper|manifold|recast-navigation)-/.test(clean);
 }
 
 export function findIgnoredBundleModules(bundleInfoDir: string, scene: string, runtimeChunks: Iterable<string>): IgnoredBundleModule[] {

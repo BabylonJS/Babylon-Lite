@@ -3,7 +3,7 @@ import {
     addToScene,
     attachControl,
     createAnimationManager,
-    createDefaultCamera,
+    createArcRotateCamera,
     createEngine,
     createHemisphericLight,
     createPropertyAnimationClip,
@@ -40,9 +40,8 @@ async function main(): Promise<void> {
         }
     }
 
-    const cam = createDefaultCamera(scene);
-    cam.alpha = -0.7;
-    cam.beta = Math.PI / 2.2;
+    const cam = createArcRotateCamera(-0.7, Math.PI / 2.2, 28.816, { x: 0, y: 2.36936, z: -0.65368 });
+    scene.camera = cam;
     attachControl(cam, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));

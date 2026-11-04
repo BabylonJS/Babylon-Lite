@@ -1,7 +1,8 @@
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY = "nme_ambientOcclusion";
-const HELPER_WGSL = `
+const HELPER_WGSL = wgsl`
 fn nme_aoNormalFromDepth(depthTex: texture_2d<f32>, depthSamp: sampler, depth: f32, coords: vec2<f32>, radius: f32) -> vec3<f32> {
     let offset1 = vec2<f32>(0.0, radius);
     let offset2 = vec2<f32>(radius, 0.0);
@@ -46,10 +47,6 @@ fn nme_computeAo(depthTex: texture_2d<f32>, depthSamp: sampler, fragCoord: vec4<
 }
 `;
 
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 function num(value: unknown, fallback: number): string {
     return typeof value === "number" ? `${value}` : `${fallback}`;
 }
@@ -63,7 +60,7 @@ export const emitter: BlockEmitter = {
             throw new Error(`NodeMaterial: AmbientOcclusionBlock "${block.name}" requires an ImageSourceBlock source`);
         }
         const producer = ctx.graph.blocks.get(source.blockId);
-        const bindingName = sanitize(producer?.name || `ao${block.id}`);
+        const bindingName = ctx.sanitize(producer?.name || `ao${block.id}`);
         if (!state.textures.find((t) => t.name === bindingName)) {
             state.textures.push({ name: bindingName, kind: "texture2d", texture: null });
         }

@@ -1,5 +1,6 @@
 import type { BlockEmitter } from "../node-types.js";
 import { formatFloat } from "./_math-factory.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 interface ColorStep {
     readonly step: number;
@@ -29,7 +30,7 @@ function readSteps(raw: unknown): ColorStep[] {
 }
 
 function colorLiteral(step: ColorStep): string {
-    return `vec3<f32>(${formatFloat(step.color.r)}, ${formatFloat(step.color.g)}, ${formatFloat(step.color.b)})`;
+    return wgsl`vec3<f32>(${formatFloat(step.color.r)}, ${formatFloat(step.color.g)}, ${formatFloat(step.color.b)})`;
 }
 
 export const emitter: BlockEmitter = {
@@ -44,13 +45,15 @@ export const emitter: BlockEmitter = {
         const g = gradient.type === "f32" ? gradient.expr : `((${gradient.expr}).x)`;
         const tempColor = ctx.temp(state, "gradientColor");
         const tempPosition = ctx.temp(state, "gradientPosition");
-        state[stage].body.push(`var ${tempColor}: vec3<f32> = ${colorLiteral(steps[0]!)};`);
-        state[stage].body.push(`var ${tempPosition}: f32;`);
+        state[stage].body.push(wgsl`var ${tempColor}: vec3<f32> = ${colorLiteral(steps[0]!)};`);
+        state[stage].body.push(wgsl`var ${tempPosition}: f32;`);
         for (let i = 1; i < steps.length; i++) {
             const previous = steps[i - 1]!;
             const current = steps[i]!;
-            state[stage].body.push(`${tempPosition} = clamp((${g} - ${formatFloat(previous.step)}) / (${formatFloat(current.step)} - ${formatFloat(previous.step)}), 0.0, 1.0);`);
-            state[stage].body.push(`${tempColor} = mix(${tempColor}, ${colorLiteral(current)}, ${tempPosition});`);
+            state[stage].body.push(
+                wgsl`${tempPosition} = clamp((${g} - ${formatFloat(previous.step)}) / (${formatFloat(current.step)} - ${formatFloat(previous.step)}), 0.0, 1.0);`
+            );
+            state[stage].body.push(wgsl`${tempColor} = mix(${tempColor}, ${colorLiteral(current)}, ${tempPosition});`);
         }
         return { expr: tempColor, type: "vec3f" };
     },

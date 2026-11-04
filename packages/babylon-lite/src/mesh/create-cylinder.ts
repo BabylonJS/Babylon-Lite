@@ -30,6 +30,7 @@ export interface CylinderOptions {
     subdivisions?: number;
 }
 
+/** Generate indexed vertex data for a cylinder, cone, truncated cone, or prism using Babylon-compatible defaults. The returned arrays contain positions, normals, UVs, and indices suitable for constructing a mesh. */
 export function createCylinderData(options: CylinderOptions = {}): CylinderData {
     const height = options.height ?? 2;
     let diameterTop = options.diameterTop === 0 ? 0 : (options.diameterTop ?? options.diameter ?? 1);

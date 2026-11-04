@@ -3,24 +3,53 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
+import type { AnimationGroupMask } from "./animation-group-mask.js";
+import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
+import type { AnimationManager } from "./animation-manager.js";
+import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
+
+/** @internal Custom accumulation for non-scalar property values such as affine matrices. */
+export interface AnimationPropertyMixStrategy {
+    readonly accumulate: (output: Float32Array, sample: Float32Array, weight: number, accumulatedWeight: number) => void;
+    readonly finish: (output: Float32Array, accumulatedWeight: number) => void;
+}
 
 export interface AnimationPropertyRuntimeTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
+    readonly easing?: (gradient: number) => number;
     readonly writer: (output: Float32Array, offset: number) => void;
-    readonly mixTarget: object;
+    readonly mixTarget: () => object;
     readonly mixProperty: string;
+    /** @internal Optional transform-aware accumulation in the weighted property mixer. */
+    readonly _mix?: AnimationPropertyMixStrategy;
+    /** @internal Target name used by AnimationGroupMask. */
+    readonly _targetName?: string;
+    /** @internal Deduplicated publication step after weighted property writes. */
+    readonly _afterWrite?: () => void;
 }
-export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number];
+export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number, number?];
 export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];
 export interface AnimationAdditiveMixer {
     readonly referenceTime: number;
+}
+
+/** Lightweight public description of one target affected by an animation group. */
+export interface TargetedAnimation {
+    /** Runtime target object when one is directly addressable. */
+    readonly target?: object;
+    /** glTF node or bone name when available. */
+    readonly targetName?: string;
+    /** glTF node index for node channels. Undefined for manual property tracks. */
+    readonly nodeIndex?: number;
+    /** Animated path, e.g. `translation`, `rotation`, `scale`, `weights`, or a manual property path. */
+    readonly path: string;
 }
 
 /** User-facing animation group — one per animation clip. Pure state. */
@@ -34,23 +63,49 @@ export interface AnimationGroup {
     /** True if currently playing. */
     isPlaying: boolean;
     /** Current playback time in seconds. */
-    currentFrame: number;
+    currentTime: number;
+    /** @internal Authored playback start in seconds. */
+    readonly _startTime?: number;
+    /** Lightweight list of targets affected by this group. */
+    readonly targetedAnimations: readonly TargetedAnimation[];
+    /** User metadata bag. */
+    metadata?: LiteMetadata;
     /** Playback speed multiplier (default 1). */
     speedRatio: number;
     /** Whether animation loops (default true). */
     loopAnimation: boolean;
     /** Weighted contribution used by AnimationManager mixing (default 1). */
     weight: number;
+    /** Optional include/exclude target-name mask. When set, only targets the mask retains
+     *  animate; masked-out targets stay at their bind/rest pose. Matched by glTF node /
+     *  bone name. See {@link createAnimationGroupMask}. To update an active mask, change
+     *  its `mode`/`disabled`, replace its `names` array, or reassign `group.mask`;
+     *  in-place same-length edits of `names` are not picked up. */
+    mask?: AnimationGroupMask;
     /** @internal Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
     _propertyMixer?: AnimationPropertyMixer;
+    /** @internal True only for the current manager tick when the property mixer consumed this group. */
+    _propertyMixerHandled?: boolean;
     /** @internal glTF skeleton metadata used by the optional weighted mixer. */
     _gltfMixer?: AnimationGltfMixer;
     /** @internal Additive animation metadata used by the optional blending mixer. */
     _additive?: AnimationAdditiveMixer;
     /** @internal Whether stop() was called (suppresses tickAnimation). */
     _stopped: boolean;
+    /** @internal The AnimationManager that currently owns/drives this group, if any. Set by
+     *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
+     *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
+    _animationManager?: AnimationManager;
+    /** @internal Optional mixer scratch cleanup invoked when this group leaves its manager. */
+    _mixerCleanup?: (manager: AnimationManager) => void;
+    /** @internal Stable first-attachment order within `_animationOrderManager`. */
+    _animationOrder?: number;
+    /** @internal Manager for which `_animationOrder` was allocated. */
+    _animationOrderManager?: AnimationManager;
+    /** @internal Applies the current time once without advancing playback. */
+    _evaluate?: (engine?: EngineContext) => void;
 }
 
 /** Start playing an animation group. */
@@ -64,78 +119,110 @@ export function pauseAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
 }
 
-/** Stop playback and reset to frame 0. */
+/** Stop playback and reset to the first authored frame. */
 export function stopAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
-    group.currentFrame = 0;
+    group.currentTime = group._startTime ?? 0;
     group._stopped = true;
+}
+
+/** Push the group's public playback state into its controller. */
+function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
+    ctrl.time = group.currentTime;
+    ctrl.playing = group.isPlaying;
+    ctrl.speedRatio = group.speedRatio;
+    ctrl.loop = group.loopAnimation;
+    ctrl._setMask?.(group.mask ?? null);
+}
+
+/** @internal The real per-frame stepper, advancing the group unconditionally. Manager-driven
+ *  callers (the weighted mixers and the generic group task) invoke this directly because they
+ *  own the group and must always advance it. Lives in this dynamically-loaded module. */
+export function tickAnimationCore(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (!group._stopped && group._ctrl) {
+        syncControllerFromGroup(group, group._ctrl);
+        group._ctrl.tick(deltaMs, engine);
+        group.currentTime = group._ctrl.time;
+    }
+}
+
+/** The scene auto-tick path. Registered on the always-loaded animation-tick forwarder, so this
+ *  runs for the scene render-loop tick. Defers to an AnimationManager if one owns the group — the
+ *  manager drives and blends it, so ticking here too would double-advance time and clobber the
+ *  blended pose (last-writer-wins). Checked per-frame because the manager typically attaches after
+ *  addToScene. Keeping the guard here (dynamically-loaded) rather than in scene-core keeps the
+ *  always-loaded core free of the property read. */
+function tickAnimationImpl(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
+    if (group._animationManager) {
+        return;
+    }
+    tickAnimationCore(group, deltaMs, engine);
+}
+
+/** @internal Wire the always-loaded tickAnimation forwarder to its real implementation.
+ *  Called by the group factories so a scene cannot hold groups before the impl is registered. */
+export function _installTickAnimation(): void {
+    _setTickAnimationImpl(tickAnimationImpl);
 }
 
 /** Seek to a specific frame, apply the pose, and pause. */
 export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void {
     const ctrl = group._ctrl;
-    group.currentFrame = frame / (group.frameRate || DEFAULT_FRAME_RATE);
+    group.currentTime = frame / (group.frameRate || DEFAULT_FRAME_RATE);
     group.isPlaying = false;
     if (ctrl) {
         syncControllerFromGroup(group, ctrl);
-        if (engine || !group._stopped || !group._gltfMixer) {
+        if (group._evaluate) {
+            group._evaluate(engine);
+            group.currentTime = ctrl.time;
+        } else if (engine || !group._stopped || !group._gltfMixer) {
             ctrl.tick(0, engine);
-            group.currentFrame = ctrl.time;
+            group.currentTime = ctrl.time;
         }
     }
-}
-
-/** @internal Advance animation by deltaMs. Called by the engine each frame. */
-export function tickAnimation(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
-    if (!group._stopped && group._ctrl) {
-        syncControllerFromGroup(group, group._ctrl);
-        group._ctrl.tick(deltaMs, engine);
-        group.currentFrame = group._ctrl.time;
-    }
-}
-
-function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
-    ctrl.time = group.currentFrame;
-    ctrl.playing = group.isPlaying;
-    ctrl.speedRatio = group.speedRatio;
-    ctrl.loop = group.loopAnimation;
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
-    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices } = animData;
-    const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
-    const hasNodeWriteback = clips.some((c) =>
-        c.channels.some(
-            (ch) =>
-                (ch.path === PATH_TRANSLATION || ch.path === PATH_ROTATION || ch.path === PATH_SCALE) &&
-                ch.nodeIdx >= 0 &&
-                !excludedNodeIndices.has(ch.nodeIdx) &&
-                !!nodeTargets[ch.nodeIdx]
-        )
-    );
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback)) {
+    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides } = animData;
+    if (clips.length === 0) {
         return [];
     }
 
+    _installTickAnimation();
+
     return clips.map((clip, clipIndex) => {
-        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices);
+        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
+        const started = clipIndex === 0;
+        const startTime = clip._startTime ?? 0;
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,
             frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
-            isPlaying: true,
-            currentFrame: 0,
+            isPlaying: started,
+            currentTime: startTime,
+            _startTime: startTime || undefined,
+            targetedAnimations: clip.channels.map((ch) => {
+                const nodeIndex = ch.nodeIdx >= 0 ? ch.nodeIdx : undefined;
+                return {
+                    target: nodeIndex !== undefined ? nodeTargets[nodeIndex] : undefined,
+                    targetName: nodeIndex !== undefined ? nodeNames[nodeIndex] : undefined,
+                    nodeIndex,
+                    path: pathName(ch.path),
+                };
+            }),
             speedRatio: 1,
             loopAnimation: true,
             weight: 1,
             _ctrl: ctrl,
-            _stopped: false,
+            _stopped: !started,
         };
-        if (skeletons[0]) {
-            group._gltfMixer = [clip, nodes, skeletons];
-        }
+        group._gltfMixer = [clip, nodes, skeletons];
         return group;
     });
+}
+
+function pathName(path: number): string {
+    return path === PATH_TRANSLATION ? "translation" : path === PATH_ROTATION ? "rotation" : path === PATH_SCALE ? "scale" : path === PATH_POINTER ? "pointer" : "weights";
 }

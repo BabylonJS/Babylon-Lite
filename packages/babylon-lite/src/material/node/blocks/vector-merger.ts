@@ -6,6 +6,7 @@
  */
 
 import type { BlockEmitter, NodeExpr, NodeEmitContext, NodeBuildState, NodeBlock, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function tryResolve(block: NodeBlock, inputName: string, stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr | null {
     const input = block.inputs.get(inputName);
@@ -43,12 +44,12 @@ export const emitter: BlockEmitter = {
         const sw = w ? ctx.cast(w, "f32").expr : zwIn ? `(${zwIn.expr}).y` : "0.0";
 
         if (outputName === "xy") {
-            return { expr: `vec2<f32>(${sx}, ${sy})`, type: "vec2f" };
+            return { expr: wgsl`vec2<f32>(${sx}, ${sy})`, type: "vec2f" };
         }
         if (outputName === "xyz") {
-            return { expr: `vec3<f32>(${sx}, ${sy}, ${sz})`, type: "vec3f" };
+            return { expr: wgsl`vec3<f32>(${sx}, ${sy}, ${sz})`, type: "vec3f" };
         }
         // Default to xyzw.
-        return { expr: `vec4<f32>(${sx}, ${sy}, ${sz}, ${sw})`, type: "vec4f" };
+        return { expr: wgsl`vec4<f32>(${sx}, ${sy}, ${sz}, ${sw})`, type: "vec4f" };
     },
 };

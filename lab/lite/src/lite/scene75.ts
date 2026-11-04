@@ -1,7 +1,7 @@
 import {
     addTaskAtStart,
     addToScene,
-    createDefaultCamera,
+    createArcRotateCamera,
     createEffectRenderTask,
     createEffectWrapper,
     createEngine,
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     sphere.material = material;
     addToScene(scene, sphere);
 
-    createDefaultCamera(scene);
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5.19616, { x: 0, y: 0, z: 0 });
 
     await registerScene(scene);
     await startEngine(engine);

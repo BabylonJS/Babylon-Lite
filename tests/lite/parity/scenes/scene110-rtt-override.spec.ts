@@ -7,7 +7,7 @@
  *
  * Scene id 110 — moved from id 52.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 

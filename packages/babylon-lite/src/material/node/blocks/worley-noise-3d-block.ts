@@ -1,4 +1,5 @@
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "WorleyNoise3DBlock",
@@ -8,7 +9,7 @@ export const emitter: BlockEmitter = {
         const manhattan = block.serialized.manhattanDistance === true ? "true" : "false";
         state[stage].helpers.set(
             "nme_worley3D",
-            `fn nme_worleyPermuteScalar(x: f32) -> f32 {
+            wgsl`fn nme_worleyPermuteScalar(x: f32) -> f32 {
 return ((34.0 * x + 1.0) * x) - floor(((34.0 * x + 1.0) * x) / 289.0) * 289.0;
 }
 fn nme_worleyDistance(x: f32, y: f32, z: f32, manhattanDistance: bool) -> f32 {
@@ -50,7 +51,7 @@ return sqrt(vec2<f32>(d1, d2));
 }`
         );
         const temp = ctx.temp(state, "worley");
-        state[stage].body.push(`let ${temp} = nme_worley(${seed.expr}, ${jitter.expr}, ${manhattan});`);
+        state[stage].body.push(wgsl`let ${temp} = nme_worley(${seed.expr}, ${jitter.expr}, ${manhattan});`);
         return { expr: outputName === "y" ? `${temp}.y` : outputName === "output" ? temp : `${temp}.x`, type: outputName === "output" ? "vec2f" : "f32" };
     },
 };

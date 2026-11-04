@@ -6,30 +6,31 @@
  */
 
 import { F32 } from "../engine/typed-arrays.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import { addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import {
-    buildLightViewMatrix,
     casterVersionSum,
+    computeDirectionalLightMatrix,
     createSharedShadowUBO,
     createShadowCamera,
     createShadowParamsUBO,
     createShadowRenderTarget,
-    multiply4x4,
     updateShadowCameraBase,
     writeShadowUboFields,
 } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface EsmLightMatrix {
     /** @internal */
@@ -57,6 +58,20 @@ export interface EsmShadowTaskResources {
     _blurVBG: GPUBindGroup;
     /** @internal */
     _shadowUboData: Float32Array;
+    /** @internal Blur kernel width retained for loss-only shadow reconstruction. */
+    _blurKernel: number;
+    /**
+     * @internal Blur downscale factor retained for loss-only shadow reconstruction.
+     *
+     * Retained rather than re-derived as `mapSize / _blurTexH.width`: `blurSize` is
+     * `mapSize / blurScale`, which is not integral for every scale, so the round-trip through a
+     * texture dimension cannot recover the caller's original value.
+     */
+    _blurScale: number;
+}
+
+interface EsmShadowGenerator extends ShadowGenerator {
+    _esmResources?: EsmShadowTaskResources;
 }
 
 /** Configuration for a directional-light ESM shadow generator: map size, depth scale, blur kernel, darkness, and ortho projection bounds. */
@@ -80,11 +95,12 @@ export interface EsmDirectionalShadowGeneratorConfig {
 interface EsmTaskState extends ShadowTaskInternalState {
     _task: RenderTask;
     _camera: Camera;
-    _cameraVersion: number;
     _lastCasterVersion: number;
     _lastLightVersion: number;
     /** @internal Floating-origin offset version (active camera worldMatrixVersion) at last shadow-map render; -1 when never rendered. */
     _lastFoVersion: number;
+    /** @internal Floating-origin camera at last shadow-map render. A replacement camera can report the same version. */
+    _lastFoCamera?: Camera | null;
     _casterMeshes: readonly Mesh[];
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
@@ -94,22 +110,26 @@ type StandardEsmFactory = typeof import("../material/standard/esm-shadow-view.js
 type PbrEsmFactory = typeof import("../material/pbr/esm-shadow-view.js").createPbrEsmShadowMaterialView;
 type NodeEsmFactory = typeof import("../material/node/esm-shadow-view.js").createNodeEsmShadowMaterialView;
 
-let esmShadowTaskResources: WeakMap<ShadowGenerator, EsmShadowTaskResources> | null = null;
 let createStandardEsmShadowMaterialView: StandardEsmFactory;
 let createPbrEsmShadowMaterialView: PbrEsmFactory;
 let createNodeEsmShadowMaterialView: NodeEsmFactory;
 
-function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskResources> {
-    esmShadowTaskResources ??= new WeakMap<ShadowGenerator, EsmShadowTaskResources>();
-    return esmShadowTaskResources;
+/**
+ * @internal
+ *
+ * Intentionally NOT `_`-prefixed. `shadow-recovery.ts` reaches these through a dynamic-import
+ * namespace object, and the scene bundler's Terser property mangler (`/^_[a-z]/`, see
+ * scripts/bundle-scenes-core.ts) rewrites the namespace *property access* but not the `export`
+ * *binding*. The two desynchronize and recovery dies with "t is not a function" in minified
+ * builds only. Same hazard previously hit `_runDeviceLostRecovery`; do not re-add the underscore.
+ */
+export function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
+    (sg as EsmShadowGenerator)._esmResources = resources;
 }
 
-function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
-    getEsmShadowTaskResourceMap().set(sg, resources);
-}
-
-function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
-    return esmShadowTaskResources?.get(sg) ?? null;
+/** @internal See {@link setEsmShadowTaskResources} for why this is not `_`-prefixed. */
+export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
+    return (sg as EsmShadowGenerator)._esmResources ?? null;
 }
 
 async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
@@ -145,66 +165,6 @@ async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise
         );
     }
     await Promise.all(loads);
-}
-
-/** @internal Compute the ESM directional light view/projection matrix for ShadowTask. */
-function _computeDirectionalLightMatrix(
-    light: DirectionalLight,
-    casterMeshes: readonly Mesh[],
-    orthoMinZ: number,
-    orthoMaxZ: number,
-    offX = 0,
-    offY = 0,
-    offZ = 0
-): EsmLightMatrix {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
-    let lMinX = Infinity;
-    let lMaxX = -Infinity;
-    let lMinY = Infinity;
-    let lMaxY = -Infinity;
-    for (const mesh of casterMeshes) {
-        const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
-        const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
-        for (let ci = 0; ci < 8; ci++) {
-            const lx = ci & 1 ? bmax[0]! : bmin[0]!;
-            const ly = ci & 2 ? bmax[1]! : bmin[1]!;
-            const lz = ci & 4 ? bmax[2]! : bmin[2]!;
-            const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]! - offX;
-            const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]! - offY;
-            const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]! - offZ;
-            const vx = view[0]! * wx + view[4]! * wy + view[8]! * wz + view[12]!;
-            const vy = view[1]! * wx + view[5]! * wy + view[9]! * wz + view[13]!;
-            lMinX = Math.min(lMinX, vx);
-            lMaxX = Math.max(lMaxX, vx);
-            lMinY = Math.min(lMinY, vy);
-            lMaxY = Math.max(lMaxY, vy);
-        }
-    }
-    if (!Number.isFinite(lMinX)) {
-        lMinX = -1;
-        lMaxX = 1;
-        lMinY = -1;
-        lMaxY = 1;
-    }
-    const sx = (lMaxX - lMinX) * 0.1;
-    const sy = (lMaxY - lMinY) * 0.1;
-    lMinX -= sx;
-    lMaxX += sx;
-    lMinY -= sy;
-    lMaxY += sy;
-
-    const near = orthoMinZ;
-    const far = orthoMaxZ;
-    const proj = new F32(16);
-    proj[0] = 2 / (lMaxX - lMinX);
-    proj[5] = 2 / (lMaxY - lMinY);
-    proj[10] = 1 / (far - near);
-    proj[12] = -(lMaxX + lMinX) / (lMaxX - lMinX);
-    proj[13] = -(lMaxY + lMinY) / (lMaxY - lMinY);
-    proj[14] = -near / (far - near);
-    proj[15] = 1;
-    return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
 }
 
 function nearestBestKernel(idealKernel: number): number {
@@ -278,10 +238,11 @@ function wgslFloat(value: number): string {
 function createShadowBlurFragmentWGSL(blurKernel: number): string {
     const { offsets, weights } = createKernelBlurSamples(blurKernel);
     const count = offsets.length;
-    return `struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
+    return wgsl`struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
 }
 
-function ensureEsmShadowTaskState(
+/** @internal Exported for the shadow-task lifetime tests; reached at runtime through `sg._ensureShadowTaskState`. */
+export function ensureEsmShadowTaskState(
     engine: EngineContext,
     scene: SceneContext,
     sg: ShadowGenerator,
@@ -293,7 +254,9 @@ function ensureEsmShadowTaskState(
         if (existing._casterMeshes === casterMeshes) {
             return existing;
         }
-        existing._task.dispose();
+        // Same lifetime rule as the PCF and CSM hooks: the frame being recorded may still reference the
+        // old task's buffers, so retire them behind the queue fence instead of destroying them here.
+        retireGpuResources(engine, existing._task.dispose);
     }
     const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
@@ -309,12 +272,15 @@ function ensureEsmShadowTaskState(
                 clr: true,
                 clrColor: { r: 0, g: 0, b: 0, a: 0 },
                 cam: camera,
+                // The render list is the caster set only: with no casters the scene must not be mirrored into the
+                // map, or every mesh — receivers included — would cast (see the CSM hooks).
+                autoMirror: false,
+                _skipClusteredLights: true,
             },
             engine,
             scene
         ),
         _camera: camera,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastFoVersion: -1,
@@ -325,7 +291,7 @@ function ensureEsmShadowTaskState(
     for (const mesh of casterMeshes) {
         const material = mesh.material;
         if (material) {
-            taskState._task.addMesh(mesh, { material: getEsmShadowView(material, materialViews, sg._shadowParamsUBO) });
+            addMeshToTask(taskState._task, mesh, { material: getEsmShadowView(material, materialViews, sg._shadowParamsUBO) });
         }
     }
 
@@ -339,17 +305,23 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     }
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     const foCam = engine.useFloatingOrigin ? state._scene.camera : null;
     const foVersion = foCam ? foCam.worldMatrixVersion : 0;
     const offX = foCam ? foCam.worldMatrix[12]! : 0;
     const offY = foCam ? foCam.worldMatrix[13]! : 0;
     const offZ = foCam ? foCam.worldMatrix[14]! : 0;
-    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion && foVersion === state._lastFoVersion) {
+    if (
+        !sg._config._forceRefreshEveryFrame &&
+        casterVersion === state._lastCasterVersion &&
+        lightVersion === state._lastLightVersion &&
+        foVersion === state._lastFoVersion &&
+        foCam === state._lastFoCamera
+    ) {
         return 0;
     }
 
-    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
+    const matrix = computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
     if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
         packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
         sg._version++;
@@ -360,45 +332,35 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     state._lastCasterVersion = casterVersion;
     state._lastLightVersion = lightVersion;
     state._lastFoVersion = foVersion;
+    state._lastFoCamera = foCam;
 
-    let draws = state._task.execute?.() ?? 0;
+    const draws = state._task.execute?.() ?? 0;
     const encoder = engine._currentEncoder;
-    const bh = encoder.beginRenderPass({
-        colorAttachments: [
-            {
-                view: resources._blurTexH.createView(),
-                loadOp: "clear",
-                storeOp: "store",
-                clearValue: { r: 0, g: 0, b: 0, a: 0 },
-            },
-        ],
-    });
-    bh.setPipeline(resources._blurPipeline);
-    bh.setBindGroup(0, resources._blurHBG);
-    bh.draw(3);
-    bh.end();
+    renderBlurPass(encoder, resources._blurPipeline, resources._blurTexH, resources._blurHBG);
+    renderBlurPass(encoder, resources._blurPipeline, sg._depthTexture, resources._blurVBG);
+    return draws + 2;
+}
 
-    const bv = encoder.beginRenderPass({
+function renderBlurPass(encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, target: GPUTexture, binding: GPUBindGroup): void {
+    const pass = encoder.beginRenderPass({
         colorAttachments: [
             {
-                view: sg._depthTexture.createView(),
+                view: target.createView(),
                 loadOp: "clear",
                 storeOp: "store",
                 clearValue: { r: 0, g: 0, b: 0, a: 0 },
             },
         ],
     });
-    bv.setPipeline(resources._blurPipeline);
-    bv.setBindGroup(0, resources._blurVBG);
-    bv.draw(3);
-    bv.end();
-    draws += 2;
-    return draws;
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, binding);
+    pass.draw(3);
+    pass.end();
 }
 
 function updateShadowCamera(state: EsmTaskState, matrix: EsmLightMatrix): void {
-    state._cameraVersion++;
-    updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, matrix._viewProj);
+    const camera = state._camera;
+    updateShadowCameraBase(camera, camera.worldMatrixVersion + 1, matrix._near, matrix._far, matrix._view, matrix._viewProj);
 }
 
 function getEsmShadowView(material: Material, cache: Map<Material, MaterialView>, shadowParamsUBO: GPUBuffer): MaterialView {
@@ -556,6 +518,8 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _blurHBG: blurHBG,
         _blurVBG: blurVBG,
         _shadowUboData: shadowUboData,
+        _blurKernel: blurKernel,
+        _blurScale: blurScale,
     });
     return sg;
 }

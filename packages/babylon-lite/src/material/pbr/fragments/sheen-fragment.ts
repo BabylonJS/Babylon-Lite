@@ -2,7 +2,7 @@
  * Sheen Fragment
  *
  * Adds a soft velvet-like sheen layer (fabric, cloth).
- * Only bundled when a scene uses PbrMaterialProps.sheen.
+ * Only bundled when a scene uses PbrMaterialProps._sheen.
  *
  * Math follows BJS PBRSheenConfiguration:
  *  - Charlie NDF (sheen distribution)
@@ -14,11 +14,21 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING, PBR2_HAS_SHEEN_UV_TX } from "../pbr-flag-bits.js";
+import { PBR_HAS_SHEEN } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
+const PBR_HAS_SHEEN_TEXTURE = 1 << 23;
+const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
 const STAGE_FRAGMENT = 0x2;
+const PBR2_HAS_SHEEN_UV_TX = 8192; // 1 << 13
 
-const SHEEN_HELPERS = `
+// Extension-local features2 bit (defined here, not in the shared flag module, so scenes
+// without a separate sheen roughness texture carry zero bytes for it). Set when the material
+// has a KHR_materials_sheen sheenRoughnessTexture distinct from sheenColorTexture: sheen
+// roughness is then read from that texture's A channel at its own (animatable) UV transform.
+const PBR2_HAS_SHEEN_ROUGH_TEX = -2147483648; // 1 << 31
+
+const SHEEN_HELPERS = wgsl`
 fn normalDistributionFunction_CharlieSheen(NdotH_sh: f32, alphaG_sh: f32) -> f32 {
 let invR = 1.0 / alphaG_sh;
 let cos2h = NdotH_sh * NdotH_sh;
@@ -30,7 +40,7 @@ return 1.0 / (4.0 * (NdotL_sh + NdotV_sh - NdotL_sh * NdotV_sh));
 }
 `;
 
-const SHEEN_DIRECT_MOD = (intensityExpr: string): string => `
+const SHEEN_DIRECT_MOD = (intensityExpr: string): string => wgsl`
 {
 let shIntensity = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity;
@@ -42,7 +52,7 @@ sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * 
 }
 `;
 
-const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => `
+const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => wgsl`
 {
 let shIntensity_ibl = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity_ibl;
@@ -59,7 +69,7 @@ ${albedoScaling ? "let shMax = max(shColorScaled.r, max(shColorScaled.g, shColor
 
 const SHEEN_IBL_COLOR_MOD = (albedoScaling: boolean): string =>
     albedoScaling
-        ? `
+        ? wgsl`
 {
 color = (finalIrradiance
       + finalRadianceScaled
@@ -70,7 +80,7 @@ color = (finalIrradiance
       + emissive;
 }
 `
-        : `
+        : wgsl`
 {
 color = finalIrradiance
       + finalRadianceScaled
@@ -82,7 +92,7 @@ color = finalIrradiance
 }
 `;
 
-const SHEEN_NON_IBL_MOD = `
+const SHEEN_NON_IBL_MOD = wgsl`
 {
 color = color + sheenDirectTerm;
 }
@@ -97,8 +107,14 @@ color = color + sheenDirectTerm;
  *   as sRGB so the sampler does the conversion). When false (legacy), applies
  *   pow(rgb, 2.2) to the texture and uses (1-F0) as the sheen intensity scalar.
  */
-export function createSheenFragment(hasSheenTexture: boolean, hasIbl: boolean = false, hasAlbedoScaling: boolean = false, hasSheenUvTx: boolean = false): ShaderFragment {
-    let scopeVars = `var sheenDirectTerm = vec3<f32>(0.0);
+export function createSheenFragment(
+    hasSheenTexture: boolean,
+    hasIbl: boolean = false,
+    hasAlbedoScaling: boolean = false,
+    hasSheenUvTx: boolean = false,
+    hasSheenRoughTex: boolean = false
+): ShaderFragment {
+    let scopeVars = wgsl`var sheenDirectTerm = vec3<f32>(0.0);
 var sheenIblTerm = vec3<f32>(0.0);
 var sheenAlbedoScaling = 1.0;
 var sheenColorFinal = material.sheenParams.rgb;
@@ -108,12 +124,22 @@ var sheenRoughnessAdjusted = material.sheenParams2.x;`;
         const sheenUvDecl = hasSheenUvTx
             ? "let sheenUV = vec2<f32>(dot(material.sheenUVm.xy, input.uv), dot(material.sheenUVm.zw, input.uv)) + material.sheenUVt.xy;"
             : "let sheenUV = input.uv;";
-        scopeVars += `
+        // Roughness from the colour texture's alpha only when there is no distinct
+        // sheenRoughnessTexture (BJS useRoughnessFromMainTexture); otherwise it is read below.
+        const roughFromColor = hasSheenRoughTex ? "" : "\nsheenRoughnessAdjusted *= sheenMapData.a;";
+        scopeVars = wgsl`${scopeVars}
 {
 ${sheenUvDecl}
 let sheenMapData = textureSample(sheenTexture_, sheenSampler_, sheenUV);
-sheenColorFinal *= ${gammaStmt};
-sheenRoughnessAdjusted *= sheenMapData.a;
+sheenColorFinal *= ${gammaStmt};${roughFromColor}
+}`;
+    }
+    if (hasSheenRoughTex) {
+        // Distinct sheenRoughnessTexture: roughness from its A channel at its own animatable UV.
+        scopeVars = wgsl`${scopeVars}
+{
+let sheenRoughUV = vec2<f32>(dot(material.sheenRoughUVm.xy, input.uv), dot(material.sheenRoughUVm.zw, input.uv)) + material.sheenRoughUVt.xy;
+sheenRoughnessAdjusted *= textureSample(sheenRoughTexture_, sheenRoughSampler_, sheenRoughUV).a;
 }`;
     }
 
@@ -136,6 +162,12 @@ sheenRoughnessAdjusted *= sheenMapData.a;
             { _name: "sheenSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
+    if (hasSheenRoughTex) {
+        bindings.push(
+            { _name: "sheenRoughTexture_", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "sheenRoughSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
+        );
+    }
 
     const uboFields: UboField[] = [
         { _name: "sheenParams", _type: "vec4<f32>" },
@@ -143,6 +175,9 @@ sheenRoughnessAdjusted *= sheenMapData.a;
     ];
     if (hasSheenUvTx) {
         uboFields.push({ _name: "sheenUVm", _type: "vec4<f32>" }, { _name: "sheenUVt", _type: "vec4<f32>" });
+    }
+    if (hasSheenRoughTex) {
+        uboFields.push({ _name: "sheenRoughUVm", _type: "vec4<f32>" }, { _name: "sheenRoughUVt", _type: "vec4<f32>" });
     }
 
     return {
@@ -161,7 +196,7 @@ sheenRoughnessAdjusted *= sheenMapData.a;
 
 /** Write the sheen material-UBO slice (sheenParams, sheenParams2, optional UV transform). */
 export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const sh = material.sheen as SheenProps | undefined;
+    const sh = material._sheen as SheenProps | undefined;
     if (!sh?.isEnabled || !offsets.has("sheenParams")) {
         return;
     }
@@ -174,18 +209,26 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
     data[off + 4] = sh.roughness ?? 0.0;
     data[off + 5] = sh.texture ? 1.0 : 0.0;
 
-    // Optional per-texture UV transform (KHR_texture_transform on sheenColorTexture).
-    const mOff = offsets.get("sheenUVm");
-    const tOff = offsets.get("sheenUVt");
+    // Optional per-texture UV transforms (KHR_texture_transform), each animatable.
+    writeSheenUvTransform(data, offsets, "sheenUVm", "sheenUVt", sh.texture);
+    writeSheenUvTransform(data, offsets, "sheenRoughUVm", "sheenRoughUVt", sh.roughnessTexture);
+}
+
+function writeSheenUvTransform(
+    data: Float32Array,
+    offsets: ReadonlyMap<string, number>,
+    mName: string,
+    tName: string,
+    tex: { uScale?: number; vScale?: number; uAng?: number; uOffset?: number; vOffset?: number } | undefined
+): void {
+    const mOff = offsets.get(mName);
+    const tOff = offsets.get(tName);
     if (mOff === undefined || tOff === undefined) {
         return;
     }
-    const tex = sh.texture;
     const sx = tex?.uScale ?? 1;
     const sy = tex?.vScale ?? 1;
     const ang = tex?.uAng ?? 0;
-    const ox = tex?.uOffset ?? 0;
-    const oy = tex?.vOffset ?? 0;
     const mi = mOff / 4;
     const ti = tOff / 4;
     if (ang === 0) {
@@ -197,12 +240,12 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
         const c = Math.cos(ang);
         const s = Math.sin(ang);
         data[mi] = c * sx;
-        data[mi + 1] = -s * sy;
-        data[mi + 2] = s * sx;
+        data[mi + 1] = s * sy;
+        data[mi + 2] = -s * sx;
         data[mi + 3] = c * sy;
     }
-    data[ti] = ox;
-    data[ti + 1] = oy;
+    data[ti] = tex?.uOffset ?? 0;
+    data[ti + 1] = tex?.vOffset ?? 0;
     data[ti + 2] = 0;
     data[ti + 3] = 0;
 }
@@ -211,7 +254,7 @@ export const pbrExt: PbrExt = {
     id: "sheen",
     phase: "base-tex",
     detect(mat) {
-        const sh = (mat as PbrMaterialProps).sheen as SheenProps | undefined;
+        const sh = (mat as PbrMaterialProps)._sheen as SheenProps | undefined;
         if (!sh?.isEnabled) {
             return { f: 0, f2: 0 };
         }
@@ -222,6 +265,9 @@ export const pbrExt: PbrExt = {
             if ((sh.texture as { _hasTx?: boolean })._hasTx) {
                 f2 |= PBR2_HAS_SHEEN_UV_TX;
             }
+        }
+        if (sh.roughnessTexture) {
+            f2 |= PBR2_HAS_SHEEN_ROUGH_TEX;
         }
         if (sh.albedoScaling) {
             f |= PBR_HAS_SHEEN_ALBEDO_SCALING;
@@ -236,25 +282,30 @@ export const pbrExt: PbrExt = {
             (ctx._features & PBR_HAS_SHEEN_TEXTURE) !== 0,
             ctx._hasIbl,
             (ctx._features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
-            (ctx._features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
+            (ctx._features2 & PBR2_HAS_SHEEN_UV_TX) !== 0,
+            (ctx._features2 & PBR2_HAS_SHEEN_ROUGH_TEX) !== 0
         );
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        if ((ctx._features & PBR_HAS_SHEEN_TEXTURE) === 0) {
-            return b;
-        }
-        const sh = (ctx._material as PbrMaterialProps).sheen as SheenProps | undefined;
-        if (sh?.texture) {
+        const sh = (ctx._material as PbrMaterialProps)._sheen as SheenProps | undefined;
+        if ((ctx._features & PBR_HAS_SHEEN_TEXTURE) !== 0 && sh?.texture) {
             entries.push({ binding: b++, resource: sh.texture.view });
             entries.push({ binding: b++, resource: sh.texture.sampler });
+        }
+        if ((ctx._features2 & PBR2_HAS_SHEEN_ROUGH_TEX) !== 0 && sh?.roughnessTexture) {
+            entries.push({ binding: b++, resource: sh.roughnessTexture.view });
+            entries.push({ binding: b++, resource: sh.roughnessTexture.sampler });
         }
         return b;
     },
     textures(mat, out) {
-        const sh = (mat as PbrMaterialProps).sheen;
+        const sh = (mat as PbrMaterialProps)._sheen;
         if (sh?.texture) {
             out.push(sh.texture);
+        }
+        if (sh?.roughnessTexture) {
+            out.push(sh.roughnessTexture);
         }
     },
 };

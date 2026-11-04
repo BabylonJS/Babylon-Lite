@@ -1,0 +1,443 @@
+# Module: Core Math
+
+> Package path: `packages/babylon-lite/src/math/`
+
+## Purpose
+
+The Core Math module provides math types and standalone functions used throughout Babylon Lite. Types are plain interfaces for data-oriented GPU buffer packing. Allocating operations return new values; `ToRef`, `InPlace`, and buffer writers mutate caller-owned destinations. The module uses the **Babylon.js left-handed coordinate system** with **column-major matrices** matching WebGPU/WGSL `mat4x4<f32>` memory layout.
+
+## Public API Surface
+
+### Types (`types.ts`)
+
+```typescript
+/** 3-component vector (position, direction, color) */
+export interface Vec3 {
+    x: number;
+    y: number;
+    z: number;
+}
+
+/** 4-component vector (homogeneous coords, quaternion, tangent) */
+export interface Vec4 {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+}
+
+/** RGB color */
+export interface Color3 {
+    r: number;
+    g: number;
+    b: number;
+}
+
+/** RGBA color */
+export interface Color4 {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+
+/** 4x4 column-major matrix (16 elements). Opaque-by-convention: the
+ *  underlying storage is `Float32Array` (default) or `Float64Array`
+ *  (after an HPM engine is created — see `36-high-precision-matrix.md`).
+ *  Layout matches WebGPU/WGSL mat4x4<f32> memory order. */
+export interface Mat4 {
+    readonly __brand: "Mat4";
+    readonly length: 16;
+    readonly [index: number]: number;
+}
+
+/** @internal Writable backing for Mat4 used by kernels and the GPU packer.
+ *  Raw typed-array union (no brand). Not re-exported from the public root API. */
+export type Mat4Storage = Float32Array | Float64Array;
+
+/** Quaternion rotation */
+export interface Quat {
+    x: number;
+    y: number;
+    z: number;
+    w: number;
+}
+```
+
+### Scalar Functions
+
+```typescript
+export function inverseLerp(a: number, b: number, value: number): number;
+```
+
+The [bounded inverse interpolation contract](inverse-lerp.md) defines endpoint order, saturation, degenerate intervals, and compatibility forwarding.
+
+### Vec3 Functions (`vec3.ts`)
+
+```typescript
+// --- Constructors ---
+export function vec3(x: number, y: number, z: number): Vec3;
+
+export const Vec3Up: Readonly<Vec3>; // { x: 0, y: 1, z: 0 }
+
+// --- Arithmetic (all return new objects — no mutation) ---
+export function addVec3(a: Vec3, b: Vec3): Vec3;
+export function subtractVec3(a: Vec3, b: Vec3): Vec3;
+export function scaleVec3(v: Vec3, s: number): Vec3;
+export function dotVec3(a: Vec3, b: Vec3): number;
+export function crossVec3(a: Vec3, b: Vec3): Vec3;
+export function lengthVec3(v: Vec3): number;
+export function normalizeVec3(v: Vec3): Vec3;
+export function normalizeVec3TupleOrUp(x: number, y: number, z: number, epsilon?: number): Vec3Tuple;
+export function negateVec3(v: Vec3): Vec3;
+export function lerpVec3(a: Vec3, b: Vec3, t: number): Vec3;
+
+/** Write Vec3 into a Float32Array at the given element offset (for uniform buffers). */
+export function writeVec3(out: Float32Array, offset: number, v: Vec3): void;
+```
+
+### Mat4 Functions (`mat4.ts`)
+
+```typescript
+/** Create a new identity Mat4. */
+export function createIdentityMat4(): Mat4;
+
+/** Multiply two Mat4: out = a * b (column-major). */
+export function multiplyMat4(a: Mat4, b: Mat4): Mat4;
+
+/** LookAt matrix (left-handed). */
+export function createLookAtMat4LH(eye: Vec3, target: Vec3, up: Vec3): Mat4;
+
+/** Camera-to-world matrix for an eye looking at `target` — the inverse of `createLookAtMat4LH`,
+ *  written in place. Used by every camera factory for its local world matrix. */
+export function writeLookAtWorldMat4LHIntoBuffer(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void;
+
+/** Perspective projection (left-handed, zero-to-one depth). */
+export function createPerspectiveMat4LH(fov: number, aspect: number, near: number, far: number): Mat4;
+
+/** Compute inverse of a Mat4. Returns null if singular. */
+export function invertMat4(m: Mat4): Mat4 | null;
+
+/** Create a scaling matrix. */
+export function createScalingMat4(x: number, y: number, z: number): Mat4;
+
+/** Create a translation matrix. */
+export function createTranslationMat4(x: number, y: number, z: number): Mat4;
+
+/** Create a rotation matrix from a quaternion. */
+export function createMat4FromQuat(qx: number, qy: number, qz: number, qw: number): Mat4;
+
+/** Write a rotation matrix from a quaternion into an existing matrix buffer. */
+export function writeMat4FromQuatIntoBuffer<T extends Float32Array | Float64Array>(out: T, qx: number, qy: number, qz: number, qw: number): T;
+
+/** Compose TRS (translation * rotation * scale) into a single Mat4. */
+export function composeMat4(tx: number, ty: number, tz: number, qx: number, qy: number, qz: number, qw: number, sx: number, sy: number, sz: number): Mat4;
+
+/** Decompose a column-major affine Mat4 into translation/rotation(quaternion)/scale.
+ *  Shared by setParent(), the gizmo/Gaussian-splat rotation extraction, and the Havok
+ *  compound-shape path. **Behaviour change:** earlier versions always returned a
+ *  non-negative scale and silently dropped the reflection of a mirrored matrix;
+ *  `scale.y` is now negative for one, so callers assuming non-negative components
+ *  must take `Math.abs` themselves. Mirrored matrices are preserved by folding the
+ *  reflection onto a negative Y scale, matching Babylon.js `Matrix.decompose` —
+ *  lossless, but canonical rather than sign-faithful (a negative X scale comes back
+ *  as negative Y + a different rotation). Assumes a shear-free TRS matrix; a
+ *  degenerate axis (scale below 1e-8) yields a finite but meaningless rotation
+ *  rather than an error. */
+export function decomposeMat4(m: Mat4): { translation: Vec3; rotation: Quat; scale: Vec3 };
+
+/** Unit quaternion from the rotation part of a column-major Mat4 (Babylon.js
+ *  `Quaternion.FromRotationMatrix`). The upper-left 3×3 must be a pure rotation. */
+export function createQuatFromRotationMat4(matrix: Mat4): Quat;
+
+/** Unit quaternion orienting local +Z onto `forward` and +Y onto `up`, right-handed
+ *  (`right = up × forward`); Babylon.js `Quaternion.FromLookDirectionRH`. Inputs are
+ *  orthonormalized, so non-unit / slightly non-orthogonal vectors still give a pure rotation. */
+export function createQuatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat;
+```
+
+### Color Functions (`color.ts`)
+
+```typescript
+export function linearToSrgbByte(v: number): number;
+export function srgbByteToLinear(b: number): number;
+export function packedSrgbToLinearRgba(packed: number, alpha?: number): readonly [number, number, number, number];
+```
+
+### Barrel Export (`index.ts`)
+
+The internal math barrel (`math/index.ts`) aggregates commonly used math functions, including internal helpers such as `Mat4Storage`, `writePerspectiveMat4LHIntoBuffer`, `packMat4IntoF32`, and `shToPolynomial`.
+The public root API exports the public-safe subset: vector/matrix constructors and operations, AABB helpers, color conversion helpers, and the public math types.
+Both barrels use `normalizeVec3(v)` for objects and `normalizeVec3TupleOrUp(x, y, z, epsilon?)` for scalar input and a tuple result. Object normalization, including `ToRef` and `InPlace` with their default settings, returns zero when the length is at or below `1e-10`. The tuple helper deliberately retains its `[0, 1, 0]` fallback.
+
+### Breaking math API migration
+
+Import public APIs from `@babylonjs/lite`, not internal math paths. The old names are removed rather than retained as compatibility aliases.
+
+| Previous API | Replacement |
+| --- | --- |
+| `normalizeVec3Object(v)` | `normalizeVec3(v)` |
+| `normalizeVec3(x, y, z, epsilon?)` | `normalizeVec3TupleOrUp(x, y, z, epsilon?)` |
+| `subVec3`, `subVec3ToRef`, `subVec3InPlace` | `subtractVec3`, `subtractVec3ToRef`, `subtractVec3InPlace` |
+| `mat4Identity` | `createIdentityMat4` |
+| `mat4Translation` | `createTranslationMat4` |
+| `mat4Scale` | `createScalingMat4` |
+| `mat4LookAtLH` | `createLookAtMat4LH` |
+| `mat4PerspectiveLH` | `createPerspectiveMat4LH` |
+| `mat4Compose`, `mat4Decompose` | `composeMat4`, `decomposeMat4` |
+| `mat4Multiply`, `mat4Invert` | `multiplyMat4`, `invertMat4` |
+| `mat4FromQuat` | `createMat4FromQuat` |
+| `mat4FromQuatInto` | `writeMat4FromQuatIntoBuffer` |
+| `quatFromRotationMatrix` | `createQuatFromRotationMat4` |
+| `quatFromLookDirectionRH` | `createQuatFromLookDirectionRH` |
+| `eulerToQuat` | `eulerXYZToQuatTuple` |
+| `quatToEulerXYZ` | `quatToEulerXYZTuple` |
+
+Quaternion conversions retain scalar inputs and tuple results. `createMat4FromQuat` retains four scalar inputs. Buffer kernels retain destination-first calls and operate directly on F32/F64 storage; matrix constructors continue to use the configured allocator. Internal matrix writers previously named `ToRef` now explicitly use `IntoBuffer`, without wrappers or changed argument order.
+
+`maximizeMat4InPlace` accepts allocator-owned `Mat4` values as well as existing raw-buffer callers, returning the same destination without copying or reducing F64 precision. `scaleBoundsFromCenterToRef` now returns `void`; read its two output vectors instead of an allocated return wrapper.
+
+Public `ToRef` inputs precede destinations and optional settings. `InPlace` mutates its first argument. No additional allocating variants or object adapters are introduced merely for uniformity. Bundle neutrality must be measured against the same focused production scenes before and after a migration, using runtime-loaded bytes rather than only checking the size ceilings.
+
+## Internal Architecture
+
+### Mat4 Memory Layout (Column-Major)
+
+```
+Index:  [0]  [4]  [8]  [12]
+        [1]  [5]  [9]  [13]
+        [2]  [6]  [10] [14]
+        [3]  [7]  [11] [15]
+
+Column:  0    1    2    3
+
+Logical matrix:
+  | m[0]  m[4]  m[8]   m[12] |
+  | m[1]  m[5]  m[9]   m[13] |
+  | m[2]  m[6]  m[10]  m[14] |
+  | m[3]  m[7]  m[11]  m[15] |
+```
+
+This matches WGSL `mat4x4<f32>` which stores columns contiguously. Mat4 values are written to GPU uniform buffers via the single packing helper `packMat4IntoF32` (see `36-high-precision-matrix.md`) — never directly via `Float32Array.set(mat)`, because the backing may be `Float64Array` when HPM is enabled and must be down-cast at the upload boundary.
+
+### Branded Opaque Type
+
+`Mat4` is an opaque interface, not a typed array:
+
+```typescript
+export interface Mat4 {
+    readonly __brand: "Mat4";
+    readonly length: 16;
+    readonly [index: number]: number;
+}
+```
+
+This prevents callers from passing a raw `Float32Array` (or array of the wrong length, or arbitrary buffer) where a `Mat4` is expected — they would have to launder through `as unknown as Mat4`, which signals deliberate intent. The `readonly` indexer also prevents accidental writes to engine-vended matrices.
+
+Internal kernels (`multiplyMat4`, `invertMat4`, `packMat4IntoF32`, the allocator) operate on `Mat4Storage = Float32Array | Float64Array` — a raw typed-array union without brand, so the kernel can write freely. The two types describe the same memory; you cross between them at the trust boundary via `as unknown as Mat4Storage` / `as unknown as Mat4`.
+
+New matrices are allocated via `allocateMat4()` from `_matrix-allocator.ts`, which returns `Float32Array(16)` by default and `Float64Array(16)` after `useHighPrecisionMatrix: true` is installed on the page (see `36-high-precision-matrix.md`).
+
+## Shader Logic (Exact Math Formulas)
+
+### Vec3 Operations
+
+| Function                 | Formula                                                                |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `addVec3(a, b)`          | `{ x: a.x+b.x, y: a.y+b.y, z: a.z+b.z }`                               |
+| `subtractVec3(a, b)`          | `{ x: a.x-b.x, y: a.y-b.y, z: a.z-b.z }`                               |
+| `scaleVec3(v, s)`        | `{ x: v.x*s, y: v.y*s, z: v.z*s }`                                     |
+| `dotVec3(a, b)`          | `a.x*b.x + a.y*b.y + a.z*b.z`                                          |
+| `crossVec3(a, b)`        | `{ x: a.y*b.z - a.z*b.y, y: a.z*b.x - a.x*b.z, z: a.x*b.y - a.y*b.x }` |
+| `lengthVec3(v)`          | `√(v.x² + v.y² + v.z²)`                                                |
+| `normalizeVec3(v)`       | `v * (1/length)`, returns zero if `length <= 1e-10` |
+| `negateVec3(v)`          | `{ x: -v.x, y: -v.y, z: -v.z }`                                        |
+| `lerpVec3(a, b, t)`      | `{ x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t, z: a.z+(b.z-a.z)*t }`       |
+| `writeVec3(out, off, v)` | `out[off]=v.x; out[off+1]=v.y; out[off+2]=v.z`                         |
+
+### multiplyMat4(a, b)
+
+Standard column-major 4×4 matrix multiplication:
+
+```
+for col in 0..3:
+  for row in 0..3:
+    out[col*4+row] = a[row]*b[col*4] + a[4+row]*b[col*4+1] + a[8+row]*b[col*4+2] + a[12+row]*b[col*4+3]
+```
+
+### createLookAtMat4LH(eye, target, up)
+
+Left-handed look-at:
+
+```
+zAxis = normalize(target - eye)     // forward (into screen in LH)
+xAxis = normalize(cross(up, zAxis)) // right
+yAxis = cross(zAxis, xAxis)         // true up
+
+out = | xAxis.x  xAxis.y  xAxis.z  -dot(xAxis, eye) |
+      | yAxis.x  yAxis.y  yAxis.z  -dot(yAxis, eye) |
+      | zAxis.x  zAxis.y  zAxis.z  -dot(zAxis, eye) |
+      | 0        0        0         1                |
+```
+
+Column-major storage:
+
+```
+out[0]=xAxis.x  out[4]=xAxis.y  out[8]=xAxis.z   out[12]=-dot(xAxis,eye)
+out[1]=yAxis.x  out[5]=yAxis.y  out[9]=yAxis.z   out[13]=-dot(yAxis,eye)
+out[2]=zAxis.x  out[6]=zAxis.y  out[10]=zAxis.z  out[14]=-dot(zAxis,eye)
+out[3]=0        out[7]=0        out[11]=0         out[15]=1
+```
+
+Returns identity if `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
+
+### writeLookAtWorldMat4LHIntoBuffer(out, eye, target, up)
+
+The **inverse** of `createLookAtMat4LH` — the camera-to-world matrix — written in place, with the same basis and the same degenerate fallbacks:
+
+```
+out[0]=xAxis.x  out[4]=yAxis.x  out[8]=zAxis.x   out[12]=eye.x
+out[1]=xAxis.y  out[5]=yAxis.y  out[9]=zAxis.y   out[13]=eye.y
+out[2]=xAxis.z  out[6]=yAxis.z  out[10]=zAxis.z  out[14]=eye.z
+out[3]=0        out[7]=0        out[11]=0        out[15]=1
+```
+
+This is what every camera factory needs (the engine stores a camera's world matrix and derives the view matrix from it in `getViewMatrix`), so building it directly avoids allocating a view matrix, computing a translation column of three dot products that is immediately discarded, and transposing the rotation back out. Leaves an identity rotation with the eye translation when `|target - eye| < 1e-10` or `|cross(up, zAxis)| < 1e-10`.
+
+### createPerspectiveMat4LH(fov, aspect, near, far)
+
+Left-handed perspective, depth range [0, 1]:
+
+```
+tan = 1 / Math.tan(fov * 0.5)
+range = far - near
+
+out[0]  = tan / aspect
+out[5]  = tan
+out[10] = far / range
+out[11] = 1                    // LH: w_clip = +z_eye
+out[14] = -(far * near) / range
+out[15] = 0
+```
+
+All other elements are 0.
+
+### invertMat4(m)
+
+Full cofactor expansion using 12 intermediate 2×2 determinants (`b00`–`b11`). Returns `null` if `|det| < 1e-10`.
+
+Determinant:
+
+```
+det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06
+```
+
+Each element of the inverse is the corresponding cofactor divided by `det`.
+
+### createScalingMat4(x, y, z)
+
+```
+out = diag(x, y, z, 1) → out[0]=x, out[5]=y, out[10]=z, out[15]=1
+```
+
+### createTranslationMat4(x, y, z)
+
+```
+out = identity with out[12]=x, out[13]=y, out[14]=z
+```
+
+### createMat4FromQuat(qx, qy, qz, qw)
+
+`writeMat4FromQuatIntoBuffer(out, qx, qy, qz, qw)` writes the same 16 values into an
+existing matrix buffer and returns `out`.
+
+```
+xx=qx*qx  yy=qy*qy  zz=qz*qz
+xy=qx*qy  xz=qx*qz  yz=qy*qz
+wx=qw*qx  wy=qw*qy  wz=qw*qz
+
+out[0]  = 1 - 2*(yy+zz)    out[4]  = 2*(xy-wz)       out[8]  = 2*(xz+wy)
+out[1]  = 2*(xy+wz)         out[5]  = 1 - 2*(xx+zz)   out[9]  = 2*(yz-wx)
+out[2]  = 2*(xz-wy)         out[6]  = 2*(yz+wx)        out[10] = 1 - 2*(xx+yy)
+out[15] = 1
+```
+
+### composeMat4(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz)
+
+Computes `Translation × Rotation × Scale` in one step:
+
+1. Build rotation from quaternion via `createMat4FromQuat`.
+2. Scale rotation columns: `col0 *= sx`, `col1 *= sy`, `col2 *= sz`.
+3. Set translation: `rot[12]=tx`, `rot[13]=ty`, `rot[14]=tz`.
+
+```
+result[0..2]  = rotCol0 * sx    // column 0 (X axis)
+result[4..6]  = rotCol1 * sy    // column 1 (Y axis)
+result[8..10] = rotCol2 * sz    // column 2 (Z axis)
+result[12..14] = (tx, ty, tz)   // column 3 (translation)
+result[15] = 1
+```
+
+## Babylon.js Equivalence Map
+
+| Babylon Lite                    | Babylon.js                                           |
+| ------------------------------- | ---------------------------------------------------- |
+| `Vec3` interface                | `BABYLON.Vector3` class                              |
+| `Vec4` interface                | `BABYLON.Vector4` class                              |
+| `Color3` interface              | `BABYLON.Color3` class                               |
+| `Color4` interface              | `BABYLON.Color4` class                               |
+| `Mat4` (Float32Array)           | `BABYLON.Matrix` (Float32Array `_m`)                 |
+| `Quat` interface                | `BABYLON.Quaternion` class                           |
+| `vec3(x,y,z)`                   | `new BABYLON.Vector3(x,y,z)`                         |
+| `addVec3(a,b)`                  | `a.add(b)`                                           |
+| `subtractVec3(a,b)`                  | `a.subtract(b)`                                      |
+| `crossVec3(a,b)`                | `BABYLON.Vector3.Cross(a,b)`                         |
+| `normalizeVec3(v)`              | `BABYLON.Vector3.Normalize(v)`                       |
+| `createIdentityMat4()`                | `BABYLON.Matrix.Identity()`                          |
+| `multiplyMat4(a,b)`             | `a.multiply(b)`                                      |
+| `createLookAtMat4LH(eye,target,up)`   | `BABYLON.Matrix.LookAtLH(eye,target,up)`             |
+| `createPerspectiveMat4LH(fov,ar,n,f)` | `BABYLON.Matrix.PerspectiveFovLH(fov,ar,n,f)`        |
+| `invertMat4(m)`                 | `m.invert()` / `BABYLON.Matrix.Invert(m)`            |
+| `createMat4FromQuat(qx,qy,qz,qw)`     | `BABYLON.Matrix.FromQuaternion(q)`                   |
+| `writeMat4FromQuatIntoBuffer(out,...)`     | `BABYLON.Matrix.FromQuaternionToRef(q,out)`          |
+| `composeMat4(t,r,s)`            | `BABYLON.Matrix.Compose(scale,rotation,translation)` |
+| Column-major layout             | Column-major layout (same)                           |
+| Left-handed                     | Left-handed (same)                                   |
+| Depth [0,1]                     | Depth [0,1] for WebGPU                               |
+
+## Dependencies
+
+- **No internal dependencies** — the core math module is a leaf module.
+- **Depended on by**: Every other module (camera, scene, loaders, pipelines, materials).
+
+## Test Specification
+
+| Test                                   | Description                                             |
+| -------------------------------------- | ------------------------------------------------------- |
+| `createIdentityMat4`                         | All diagonal elements = 1, rest = 0                     |
+| `multiplyMat4 identity`                | `A × I = A`                                             |
+| `multiplyMat4 associativity`           | `(A×B)×C ≈ A×(B×C)` within epsilon                      |
+| `createLookAtMat4LH basic`                   | Eye at (0,0,-5), target (0,0,0): verify zAxis = (0,0,1) |
+| `writeLookAtWorldMat4LHIntoBuffer ≡ inverse`     | Element-for-element match with the transpose-of-look-at path it replaced, incl. both degenerate fallbacks |
+| `createPerspectiveMat4LH`                    | Verify `m[0] = tan/aspect`, `m[10] = far/(far-near)`    |
+| `invertMat4 × m = identity`            | Verify `m × m⁻¹ ≈ I`                                    |
+| `invertMat4 returns null for singular` | Zero matrix → null                                      |
+| `createMat4FromQuat identity`                | Quat (0,0,0,1) → identity matrix                        |
+| `createMat4FromQuat 90° around Y`            | Verify correct rotation                                 |
+| `writeMat4FromQuatIntoBuffer`                     | Writes into existing storage with no replacement         |
+| `composeMat4 T×R×S`                    | Compare with manual multiply of separate matrices       |
+| `normalizeVec3 zero`                   | Returns (0,0,0) for zero vector                         |
+| `crossVec3 X×Y=Z`                      | (1,0,0) × (0,1,0) = (0,0,1)                             |
+| `lerpVec3 t=0 and t=1`                 | Returns a and b respectively                            |
+| `writeVec3`                            | Verify Float32Array written at correct offset           |
+| `Mat4 brand`                           | Ensure typed as Float32Array with length 16             |
+
+## File Manifest
+
+| File                           | Size       | Purpose                                                   |
+| ------------------------------ | ---------- | --------------------------------------------------------- |
+| `src/core/types.ts`            | ~44 lines  | Type definitions (Vec3, Vec4, Color3, Color4, Mat4, Quat) |
+| `src/core/vec3.ts`             | ~68 lines  | Vec3 constructors, constants, arithmetic                  |
+| `src/core/mat4.ts`             | ~185 lines | Mat4 identity, multiply, lookAt, perspective, invert, TRS |
+| `src/core/index.ts`            | ~11 lines  | Barrel re-exports                                         |
+| `src/core/generate-mipmaps.ts` | ~141 lines | GPU mipmap generation (used by loaders, not math)         |

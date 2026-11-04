@@ -23,6 +23,8 @@ import { billboardBlendAdditive, billboardBlendCutout, billboardBlendPremultipli
 import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../../packages/babylon-lite/src/sprite/billboard-custom-shader";
 import { SPRITE_FX_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
+import { addFacingBillboardSystemWithParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-billboard-scene";
+import { createParticleBlend } from "../../../packages/babylon-lite/src/particle/particle-blend";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
@@ -112,6 +114,7 @@ function makeMockAtlas(): SpriteAtlas {
 
 function makeDrawPassMock(): GPURenderPassEncoder {
     return {
+        setPipeline: vi.fn(),
         setBindGroup: vi.fn(),
         setIndexBuffer: vi.fn(),
         setVertexBuffer: vi.fn(),
@@ -381,10 +384,10 @@ describe("addFacingBillboardSystem", () => {
         expect((vertexBuffer.attributes as GPUVertexAttribute[]).map((attribute) => attribute.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
         const shaderDescriptor = device.createShaderModule.mock.calls.find((call) =>
-            (call[0] as GPUShaderModuleDescriptor).code.includes("cameraRight")
+            (call[0] as GPUShaderModuleDescriptor).code.includes("basis")
         )![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).toContain("scene.viewProjection");
-        expect(shaderDescriptor.code).toContain("getBillboardBasis");
+        expect(shaderDescriptor.code).toContain("basis");
         expect(shaderDescriptor.code).toContain("scene.view[0][0]");
 
         device.queue.writeBuffer.mockClear();
@@ -422,7 +425,7 @@ describe("addFacingBillboardSystem", () => {
         const shaderDescriptor = device.createShaderModule.mock.calls.find((call) =>
             (call[0] as GPUShaderModuleDescriptor).code.includes("discard")
         )![0] as GPUShaderModuleDescriptor;
-        expect(shaderDescriptor.code).toContain("sampleColor.a < billboards.axisAndCutoff.w");
+        expect(shaderDescriptor.code).toContain("s.a < billboards.axisAndCutoff.w");
         expect(shaderDescriptor.code).toContain("discard");
 
         device.queue.writeBuffer.mockClear();
@@ -557,6 +560,102 @@ describe("addFacingBillboardSystem", () => {
     });
 });
 
+describe("addFacingBillboardSystemWithParticleBlend", () => {
+    it("draws Multiply with its custom shader in one pass", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const multiply = createParticleBlend(3);
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiply });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, system, 3);
+        await registerScene(scene);
+
+        expect(system._customShader?._key).toBe("particle-multiply");
+        expect(system.shaderParams).toBeUndefined();
+
+        const device = engine._device as unknown as {
+            createRenderPipeline: ReturnType<typeof vi.fn>;
+            createShaderModule: ReturnType<typeof vi.fn>;
+        };
+        device.createRenderPipeline.mockClear();
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+
+        expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+        const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        expect((descriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(multiply._descriptor);
+        expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).toContainEqual(
+            expect.stringContaining("baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha)")
+        );
+        expect(device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code)).not.toContainEqual(expect.stringContaining("struct SpriteFx"));
+
+        const pass = makeDrawPassMock();
+        expect(binding.draw(pass, engine)).toBe(1);
+        expect(pass.drawIndexed).toHaveBeenCalledOnce();
+        expect(pass.setPipeline).not.toHaveBeenCalled();
+    });
+
+    it("draws MultiplyAdd as two ordered pipelines over one instance upload", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const multiplyAdd = createParticleBlend(4);
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: multiplyAdd });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, system, 4);
+        await registerScene(scene);
+
+        const device = engine._device as unknown as {
+            createRenderPipeline: ReturnType<typeof vi.fn>;
+            createShaderModule: ReturnType<typeof vi.fn>;
+            queue: { writeBuffer: ReturnType<typeof vi.fn> };
+        };
+        device.createRenderPipeline.mockClear();
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+
+        expect(device.createRenderPipeline).toHaveBeenCalledTimes(2);
+        const multiplyDescriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        const addDescriptor = device.createRenderPipeline.mock.calls[1]![0] as GPURenderPipelineDescriptor;
+        expect((multiplyDescriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(multiplyAdd._descriptor);
+        expect((addDescriptor.fragment!.targets as GPUColorTargetState[])[0]!.blend).toEqual(createParticleBlend(2)._descriptor);
+        const shaderCodes = device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code);
+        expect(shaderCodes).toContainEqual(expect.stringContaining("baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha)"));
+        expect(shaderCodes).toContainEqual(expect.stringContaining("return s * in.tint * billboards.opacityMul"));
+
+        device.queue.writeBuffer.mockClear();
+        binding.update?.({ targetWidth: 512, targetHeight: 256 });
+        expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_INSTANCE_STRIDE_BYTES)).toHaveLength(1);
+        expect(device.queue.writeBuffer.mock.calls.filter((call) => call[4] === BILLBOARD_SYSTEM_UBO_BYTES)).toHaveLength(2);
+
+        const pass = makeDrawPassMock();
+        expect(binding.draw(pass, engine)).toBe(2);
+        expect(pass.drawIndexed).toHaveBeenCalledTimes(2);
+        const multiplyPipeline = device.createRenderPipeline.mock.results[0]!.value as GPURenderPipeline;
+        const addPipeline = device.createRenderPipeline.mock.results[1]!.value as GPURenderPipeline;
+        expect(pass.setPipeline).toHaveBeenNthCalledWith(1, addPipeline);
+        expect(pass.setPipeline).toHaveBeenNthCalledWith(2, multiplyPipeline);
+    });
+
+    it("shares one Multiply pipeline across systems", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const first = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        const second = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(3) });
+        addBillboardSpriteIndex(first, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addBillboardSpriteIndex(second, { position: [1, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, first, 3);
+        addFacingBillboardSystemWithParticleBlend(scene, second, 3);
+        await registerScene(scene);
+
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        device.createRenderPipeline.mockClear();
+        const target = { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 } as const;
+        const firstBinding = scene._renderables[0]!.bind(engine, target);
+        const secondBinding = scene._renderables[1]!.bind(engine, target);
+
+        expect(device.createRenderPipeline).toHaveBeenCalledOnce();
+        expect(secondBinding.pipeline).toBe(firstBinding.pipeline);
+    });
+});
+
 describe("AxisLockedBillboardSpriteSystem", () => {
     it("creates an axis-locked billboard system with normalized axis", () => {
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 3, 0], { capacity: 1 });
@@ -595,7 +694,7 @@ describe("AxisLockedBillboardSpriteSystem", () => {
         expect(scene._renderables[0]!.isTransparent).toBe(true);
     });
 
-    it("generates axis-locked shader with billboards.axisAndCutoff and projectedRight", async () => {
+    it("generates axis-locked shader with billboards.axisAndCutoff and projected right basis", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { capacity: 1 });
@@ -618,9 +717,9 @@ describe("AxisLockedBillboardSpriteSystem", () => {
             (call[0] as GPUShaderModuleDescriptor).code.includes("billboards.axisAndCutoff")
         )![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).toContain("billboards.axisAndCutoff");
-        expect(shaderDescriptor.code).toContain("projectedRight");
-        expect(shaderDescriptor.code).toContain("lockAxis");
-        expect(shaderDescriptor.code).toContain("getBillboardBasis");
+        expect(shaderDescriptor.code).toContain("let pr = cr - a * dot(cr, a)");
+        expect(shaderDescriptor.code).toContain("cross(a, f)");
+        expect(shaderDescriptor.code).toContain("basis");
     });
 
     it("writes axis data to UBO after opacity", async () => {
@@ -677,18 +776,18 @@ return vec4<f32>(base.rgb * (0.5 + 0.5 * sin(fx.time + fx.params.x)), base.a);`;
 
         const facing = cs._composeWgsl("facing", "transparent");
         expect(facing).toContain("@group(1) @binding(3) var<uniform> fx: SpriteFx");
-        expect(facing).toContain("fn fs(in: VOut) -> @location(0) vec4<f32>");
+        expect(facing).toContain("fn fs(in: O) -> @location(0) vec4f");
         expect(facing).toContain(FX_FRAGMENT);
-        expect(facing).toContain("@location(3) vWorldPos: vec3<f32>");
-        expect(facing).toContain("out.vWorldPos = worldPos;");
-        expect(facing).toContain("getBillboardBasis");
-        expect(facing).toContain("cameraRight");
+        expect(facing).toContain("@location(3) vWorldPos: vec3f");
+        expect(facing).toContain("out.vWorldPos = wp;");
+        expect(facing).toContain("basis");
+        expect(facing).toContain("scene.view[0][0]");
 
         // Axis-locked uses a different basis but the same fragment contract.
         const axisLocked = cs._composeWgsl("axis-locked", "transparent");
-        expect(axisLocked).toContain("projectedRight");
-        expect(axisLocked).toContain("lockAxis");
-        expect(axisLocked).toContain("@location(3) vWorldPos: vec3<f32>");
+        expect(axisLocked).toContain("let pr = cr - a * dot(cr, a)");
+        expect(axisLocked).toContain("cross(a, f)");
+        expect(axisLocked).toContain("@location(3) vWorldPos: vec3f");
     });
 
     it("places the fx UBO after extra textures and binds them at group 1", () => {

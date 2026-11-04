@@ -1,0 +1,392 @@
+# Module: Engine
+
+> Package path: `packages/babylon-lite/src/engine/engine.ts`
+
+## Purpose
+
+The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adapter and device, configures the swap chain on a render canvas, creates MSAA and depth/stencil render targets, and drives the per-frame render loop via `requestAnimationFrame`. All other modules depend on the Engine for GPU device access and frame orchestration.
+
+The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `OffscreenCanvas` (e.g. one transferred to a Web Worker via `transferControlToOffscreen()`). The engine runs unchanged in both cases — see _Offscreen / Worker Rendering_ below.
+
+## Public API Surface
+
+```typescript
+/** A surface the engine can render into: a DOM canvas or an OffscreenCanvas. */
+export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
+
+/** Read-only public view of a registered rendering context. */
+export interface RenderingContext {
+    clearColor: GPUColorDict;
+}
+
+/** Return the surface's live rendering-context list in render order. */
+export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[];
+
+/** Return the rendering context's stable family identifier. */
+export function getRenderingContextKind(context: RenderingContext): string;
+
+/** Top-level scene context. */
+export interface SceneContext extends RenderingContext {
+    /** Optional display name for tooling and diagnostics. */
+    name?: string;
+}
+
+/** Handle to the WebGPU engine — public API surface.
+ *  GPU internals (device, context, format) are @internal — not user-facing. */
+export interface EngineContext {
+    readonly canvas: RenderCanvas;
+    readonly msaaSamples: number; // 1 or 4
+    readonly format: GPUTextureFormat;
+
+    /** GPU draw calls executed by the latest `renderFrame` call, summed across its selected surfaces. */
+    drawCallCount: number;
+
+    /** Instrumented GPU interval for the last measured frame, in milliseconds. Includes every frame
+     *  command plus the opening and closing marker dispatches. 0 before the first sample and while disabled. */
+    gpuFrameTimeMs: number;
+}
+
+/** Whether GPU frame-time measurement is available on this engine's device (the adapter offered the
+ *  WebGPU `timestamp-query` feature). When false, `setGpuTimingEnabled` is a no-op. */
+export function isGpuTimingSupported(engine: EngineContext): boolean;
+/** Enable or disable per-frame GPU timing (disabled by default). While on, `engine.gpuFrameTimeMs`
+ *  reports the instrumented frame interval including marker dispatches. Opt-in and zero-cost when unused. */
+export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void;
+
+export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
+export interface RenderTaskGpuTiming {
+    readonly index: number;
+    readonly name: string;
+    /** Raw task interval; intervals can overlap and are not additive. */
+    readonly durationMs: number;
+}
+export interface RenderTaskGpuTimings {
+    readonly status: RenderTaskGpuTimingStatus;
+    readonly supported: boolean;
+    readonly enabled: boolean;
+    readonly frameIndex: number;
+    readonly tasks: readonly RenderTaskGpuTiming[];
+    /** Envelope from the earliest measured task begin to the latest measured task end. */
+    readonly totalDurationMs: number;
+    readonly droppedTaskCount: number;
+    readonly error?: string;
+}
+export function isRenderTaskGpuTimingSupported(engine: EngineContext): boolean;
+export function getRenderTaskGpuTimings(engine: EngineContext): RenderTaskGpuTimings;
+export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: boolean): Promise<RenderTaskGpuTimings>;
+
+/** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
+export function startEngine(engine: EngineContext): Promise<void>;
+/** Resolve after all GPU commands submitted before this call have completed. */
+export function waitForGpuIdle(engine: EngineContext): Promise<void>;
+export function waitForGpuResourceRetirements(engine: EngineContext): Promise<void>;
+/** Stop the render loop. */
+export function stopEngine(engine: EngineContext): void;
+/** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
+export function resizeEngine(engine: EngineContext): void;
+/** Set the backing-store size directly in device pixels (used for OffscreenCanvas). */
+export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: number): void;
+/** Release all engine-owned GPU resources (render targets, device). */
+export function disposeEngine(engine: EngineContext): void;
+/** Render all engine surfaces, or an explicit non-empty subset, through one encoder and submission. */
+export function renderFrame(engine: EngineContext, delta: number, surfaces?: readonly [SurfaceContext, ...SurfaceContext[]]): void;
+
+export interface EngineOptions extends SurfaceOptions {
+    readonly requiredLimits?: Record<string, GPUSize64 | undefined>;
+    readonly useHighPrecisionMatrix?: boolean;
+    readonly useFloatingOrigin?: boolean;
+}
+
+export interface EngineFeatureOptions extends EngineOptions {
+    readonly requiredFeatures: readonly GPUFeatureName[];
+}
+
+export function createEngineWithFeatures(canvas: RenderCanvas, options: EngineFeatureOptions): Promise<EngineContext>;
+
+/** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
+export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
+```
+
+### Internal Types (not exported)
+
+```typescript
+/** @internal — GPU internals accessible only to renderable/loader code. */
+interface EngineContextInternal extends EngineContext {
+    readonly device: GPUDevice;
+    readonly context: GPUCanvasContext;
+    readonly format: GPUTextureFormat;
+    readonly alphaMode: GPUCanvasAlphaMode;
+    _renderingContexts: RenderingContext[];
+    _currentEncoder: GPUCommandEncoder;
+    _swapchainView: GPUTextureView;
+    _currentDelta: number;
+    _cbs: GPUCommandBuffer[];
+}
+```
+
+## Internal Architecture
+
+### Initialization Sequence (`createEngine`)
+
+1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
+2. **Device request**: `createEngine` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. The opt-in `createEngineWithFeatures` wrapper additionally validates and requests explicit adapter-supported features such as `shader-f16`, without retaining feature-selection logic in ordinary engine bundles.
+3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
+4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
+5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
+6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
+
+### Rendering-Context Introspection
+
+`getRenderingContexts(surface)` returns the surface's existing registry array as a readonly live view; it does not allocate a snapshot. Registration and unregistration are therefore visible through a previously returned reference, in render order, with no per-frame work. `getRenderingContextKind(context)` returns `"scene"`, `"frame-graph-context"`, `"effect-renderer"`, `"sprite-renderer"`, or `"text-renderer"` for the current built-in contexts. Its return type is intentionally the open `string` type, so adding a new context family is not a breaking API change. It throws a `TypeError` when passed a structural public object that is not a rendering context created by Lite. A utility layer registers an ordinary scene context with the default name `"UtilityLayer"`; tools can display `SceneContext.name` without treating utility layers as a separate rendering-context family.
+
+### Render Targets
+
+The engine no longer owns per-frame color/depth render targets directly. Render targets are owned by registered rendering contexts, primarily scene frame-graph `RenderTask`s. The engine owns the canvas/swapchain and exposes the current swapchain view once per frame through `_swapchainView`.
+
+Render-target disposal has one shared attachment-detachment path. Ordinary targets destroy their
+owned textures; sampled RTTs install an owner callback that releases texture references instead.
+Both paths clear attachment handles, views, and dimensions even if a release throws. Eager wrappers
+without an owner callback remain borrowed and are not detached or destroyed.
+The RTT factory selects color-versus-depth sampling from the requested format before allocating
+the target. Allocation cannot change that choice, so a depth-only caller does not retain the
+color-facade and bilinear-sampler path merely because GPU allocation receives the descriptor.
+
+### Resize Logic
+
+`resizeEngine(engine)` is called at the **start of every frame** (inside the rAF callback), not on a resize event. It auto-sizes only a **DOM canvas** from its layout box:
+
+```
+if canvas is not an HTMLCanvasElement: return         // OffscreenCanvas → externally sized
+w = canvas.clientWidth * devicePixelRatio | 0
+h = canvas.clientHeight * devicePixelRatio | 0
+setEngineSize(engine, w, h)                           // applies only if changed
+```
+
+`setEngineSize(engine, w, h)` is the shared apply path:
+
+```
+if w<=0 or h<=0: return
+if (w == canvas.width && h == canvas.height) return
+canvas.width = w; canvas.height = h;
+for each registered context: context._resize?.()
+```
+
+The bitwise OR with 0 (`| 0`) truncates to integer.
+
+### Offscreen / Worker Rendering
+
+An `OffscreenCanvas` has no layout box (`clientWidth`/`clientHeight`) and no attributes, so:
+
+- The canvas tag (`setAttribute("data-engine", …)`) is skipped for it. That tag is applied in `_buildSurface`, guarded by a DOM-canvas check, so every DOM canvas Babylon Lite renders into — the engine's primary canvas and any auxiliary `createSurface` canvas — carries it.
+- `resizeEngine` is a **no-op** for it — the visible canvas lives on another thread.
+- The host thread (which owns the visible canvas) measures the CSS size, multiplies by `devicePixelRatio`, and posts those device-pixel dimensions to the worker, which calls `setEngineSize(engine, w, h)`. This both sets the backing store **and** fires `_resize()` hooks so canvas-sized GPU resources rebuild.
+
+Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF render loop) is identical — dedicated workers in Chromium expose `requestAnimationFrame`/`cancelAnimationFrame`. See the **Offscreen** lab demo (`lab/lite/src/demos/offscreen*.ts`) for an end-to-end main-thread-vs-worker example.
+
+### Render Loop
+
+`startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
+
+`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It does not wait for deferred resource-release callbacks. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
+
+`waitForGpuResourceRetirements(engine)` is the separate orderly-teardown boundary. Stop producers and
+dispose scene/render-task consumers first, then await this function before disposing their shared
+resources. It yields past the current synchronous frame, snapshots outstanding retirement batches,
+waits for submitted GPU work, and claims those exact batches synchronously. The ordinary deferred
+fence may also claim a batch, but its callbacks run only once. Retirements queued during the wait or
+by another release callback are drained in subsequent fenced batches. Newly queued batches are never
+released against an earlier fence. GPU-fence failure rejects without releasing unfenced resources;
+callback failures are reported while remaining callbacks are attempted. The drain is tree-shakable
+and introduces no additional steady-frame scheduling.
+
+Retirement users install the engine's optional `_flushGpuRetirements` seam on their first queued
+release. Frame submission and stopping only invoke that seam; engine creation does not import the
+retirement implementation. `disposeEngine` lives in a separate module so its synchronous drain does
+not pull retirement code into the initial Vite chunk of applications that never queue a retirement.
+Outstanding fenced batches are tracked by identity in a `Set`, preserving insertion order for
+teardown while allowing either the fence callback or an explicit drain to remove a batch directly.
+Each batch is claimed by emptying its callback array before running any callback.
+The core queue and its batch helper accept cleanup callbacks only. Feature-specific collections
+of callbacks and objects with `destroy()` use `gpu-resource-disposal.ts`, which is separate so
+ordinary rendering does not retain heterogeneous-disposer dispatch.
+
+```
+registerScene(scene):
+  adds scene as a RenderingContext
+
+startEngine(engine):
+  return new Promise(resolve => {
+    renderFn = (now) => {
+      resizeEngine(engine);
+      deltaMs = now - prev
+      renderFrame(engine, deltaMs);
+      resolve()                  // first frame only
+      prev = now
+      animFrameId = requestAnimationFrame(renderFn);
+    };
+    animFrameId = requestAnimationFrame(renderFn);
+  })
+
+stopEngine(engine):
+  cancelAnimationFrame(animFrameId);
+  animFrameId = 0; renderFn = null;
+```
+
+Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixedDeltaMs` is set, the scene uses that value instead — useful for deterministic animation playback.
+
+### Frame Rendering (`renderFrame`)
+
+`renderFrame(engine, delta, surfaces?)` renders every surface in `engine.surfaces` in registration order when `surfaces` is omitted. The default list is live: if an earlier surface callback disposes a later surface, the remaining frame and capture loops observe the shorter list and skip the disposed surface. Passing a non-empty readonly tuple renders exactly that fixed subset in caller order through the same encoder and submission. Explicit tuple ownership is verified before encoder creation; callers must provide registered, unique surfaces and keep them registered until the call returns to avoid per-frame registration scans or deduplication allocations. Cache a singleton tuple when repeatedly rendering one surface to avoid caller-side per-frame allocation.
+
+`engine.drawCallCount` records the calls emitted by the latest completed `renderFrame` invocation, summed across only its selected surfaces. Rendering callbacks continue to observe the previous completed frame's value; a successful no-context invocation publishes zero before returning.
+
+Each invocation consists of:
+
+1. **Preflight selected surfaces**: validate engine ownership and count their rendering contexts. If none exist, flush pending resource retirements and return without allocating or submitting an empty encoder.
+2. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
+3. **Prepare each selected surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
+4. **Update/record contexts**: For each selected surface, call `_update()` then `_record()` on every registered `RenderingContext`.
+    - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
+    - A scene `_record()` delegates to `scene._frameGraph.execute()`.
+    - A render task that targets `scene.surface.scRT` re-reads that surface's attachment view immediately before opening the pass. It must not compare against `engine.scRT`, which identifies only the primary canvas and would leave auxiliary scenes submitting an expired build-time swapchain view.
+5. **Record screenshot copies**: each selected surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
+6. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+
+The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
+
+Both all-surface and explicitly targeted frames use the same retirement seam and encoder lifetime.
+The active encoder is cleared in `finally`, including when a selected surface throws; partially
+recorded work is not submitted and the previous draw count remains published. A selection with no
+rendering contexts still flushes pending retirements through the opt-in seam.
+
+### Deferred Builder Execution
+
+When `registerScene(scene)` is called, the scene runs its deferred builders, builds material renderables, and rebuilds its frame graph. `startEngine(engine)` then begins the rAF loop and resolves after the first `renderFrame()` call completes.
+
+Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` through render-target helpers, not by the engine render loop itself.
+
+### GPU Frame Timing (optional, zero-cost when unused)
+
+`setGpuTimingEnabled(engine, true)` publishes a lightly-smoothed **GPU** interval to
+`engine.gpuFrameTimeMs` (milliseconds). The interval begins at the opening marker pass and ends at the
+closing marker pass, so it includes every command recorded for the frame plus both one-workgroup marker
+dispatches. It is distinct from CPU/wall-clock time and is an instrumented profiling value rather than a
+marker-free sum of render/compute pass durations. The feature is a developer/HUD aid and is disabled by default.
+
+The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries three frame-timing optional-chain short-circuits plus the independent task-timing resolve short-circuit described below; all are no-ops while their profiler is off. The only other always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that remain within the existing scene bundle ceilings.
+
+How it works when enabled:
+
+1. `createEngine` opportunistically requests the `timestamp-query` feature whenever the adapter offers it (alongside the texture-compression features), so timing can be turned on later. `isGpuTimingSupported(engine)` reports whether it was available.
+2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set, one no-binding compute pipeline, and recycled MAP_READ readback buffers), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
+3. Each frame marker records one compute workgroup with an empty shader body (`@compute @workgroup_size(1) fn main() {}`), using the pipeline allocated once with the timer. The opening pass writes query 0 at its beginning; the closing pass writes query 1 at its end. The pipeline stays with the timer across disable/re-enable, has no buffers or bindings, and requires no explicit destroy method. The two marker dispatches are part of the measured interval; their cost must be measured on the target device.
+4. `renderFrame` records the opening marker into its command encoder after creating it and the closing marker before finishing it. After submission, `_gpuTimerResolve` records query resolution and a buffer copy, then maps asynchronously. Valid non-negative intervals under 5 seconds feed the existing exponential smoothing (80% previous value, 20% new value after the first positive sample). Positive timestamps alone do not establish freshness or cross-pass timing accuracy; target-device validation must check raw samples.
+
+Disabling clears the frame begin/end hooks and resets `gpuFrameTimeMs` to 0; the shared resolve hook becomes a no-op unless task timing remains enabled independently. The frame timer's GPU resources are kept and reused if it is re-enabled.
+
+#### Marker-overhead evidence and limits
+
+The retained marker design was measured on Windows 10, Chrome 151, and an NVIDIA Blackwell adapter with
+1,000 interleaved timestamp-query pairs after a warm-up submission:
+
+- baseline: one no-op workgroup inside one compute pass with beginning/end timestamps;
+- instrumented: an opening marker pass, the same payload pass, and a closing marker pass;
+- baseline median / p95 / mean: `0.544 / 0.608 / 0.5392 µs`;
+- instrumented median / p95 / mean: `0.544 / 0.576 / 0.4621 µs`.
+
+The measured median delta was `0.000 µs`; the p95 and mean differences were smaller than timestamp noise
+and must not be interpreted as negative overhead. On this target, the two marker passes therefore added no
+measurable GPU interval, including for the deliberately minimal one-workgroup payload. This is evidence for
+that adapter/driver only, not a universal guarantee: tile-based and other GPU architectures may expose a
+different pass-boundary cost. Callers comparing sub-microsecond workloads across devices must account for
+the documented markers, and exact task/pass attribution should use the separate task timing API.
+
+### GPU Render-Task Timing (optional, zero-cost when unused)
+
+`setRenderTaskGpuTimingEnabled(engine, true)` enables per-frame-graph-task GPU timings. It returns a snapshot immediately (`"pending"` after a successful enable), and `getRenderTaskGpuTimings(engine)` returns the latest asynchronously completed frame:
+
+```typescript
+await setRenderTaskGpuTimingEnabled(engine, true);
+// Later, after one or more rendered frames:
+const timings = getRenderTaskGpuTimings(engine);
+if (timings.status === "available") {
+    for (const task of timings.tasks) {
+        // task.name is the existing Task.name label ("shadow", "scene", "post-process", ...)
+        console.log(task.index, task.name, task.durationMs);
+    }
+}
+```
+
+Unsupported devices are explicit: if the WebGPU device lacks `timestamp-query`, `isRenderTaskGpuTimingSupported(engine)` is false and both enable/read APIs return `status: "unsupported"` with an empty `tasks` array.
+
+Bundle-size protection mirrors screenshot capture and frame timing:
+
+1. `createEngine` only requests `timestamp-query` opportunistically when the adapter offers it.
+2. The public API lives in a thin module (`engine/gpu-task-timing.ts`). The timestamp-query implementation (`engine/gpu-task-timer.ts`) is reachable only through the dynamic import inside `setRenderTaskGpuTimingEnabled`.
+3. Non-users do not fetch the profiler chunk and do not carry task-profiling code in the always-fetched frame-graph module. On enable, the dynamic profiler wraps the currently registered frame graphs' `execute()` functions, plus newly pushed surfaces/contexts, so timestamp passes are written only while profiling is explicitly enabled.
+
+When enabled, the first timed task seen for a new frame encoder clears the current record list. The dynamic frame-graph wrapper writes an empty timestamped compute pass before and after each `Task` execution. After `renderFrame` submits the frame command buffer, one shared resolve hook dispatches frame timing first (when enabled) and task timing second. Task timing owns that hook directly when frame timing is off, so either profiler works independently without double-resolving when both are enabled. The task profiler resolves/copies the used query slots through a tiny follow-up command buffer, then maps a recycled readback buffer asynchronously. Results are one or more frames behind and include the existing `Task.name` label plus an execution-order `index` to disambiguate duplicate names. If the fixed query capacity is exceeded, excess tasks execute normally and `droppedTaskCount` reports how many were not timed.
+
+Disabling task timing destroys its query set, resolve buffer, pooled readbacks, and any pending readback buffers. A readback that settles after disable is ignored, and re-enabling creates a fresh task timer. This intentionally differs from the frame timer above, whose smaller resource set is retained for reuse.
+
+## State Machine / Lifecycle
+
+```
+[Created] --registerScene(scene)--> [Context registered + frame graph built]
+          --startEngine(engine)-----------> [Running (rAF loop)]
+                                                          |
+                                                      resizeEngine(engine) each frame
+                                                      _beforeRender(deltaMs) each frame
+                                                      renderFrame() each frame
+                                                          |
+                                          --stopEngine(engine)----> [Stopped]
+                                                          |
+                                           --startEngine(engine)----------> [Running]
+```
+
+## Babylon.js Equivalence Map
+
+| Babylon Lite                                   | Babylon.js                                                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createEngine(canvas)`                         | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()`                                                                                           |
+| `engine._device`                               | `engine._device`                                                                                                                                    |
+| `engine.format`                                | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
+| `engine.msaaSamples` (1 or 4)                  | `engine._samples`                                                                                                                                   |
+| `registerScene(scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
+| `waitForGpuIdle(engine)`                       | `engine._device.queue.onSubmittedWorkDone()`                                                                                                        |
+| `stopEngine(engine)`                           | `engine.stopRenderLoop()`                                                                                                                           |
+| `resizeEngine(engine)`                         | `engine.resize()`                                                                                                                                   |
+| Registered `RenderingContext`s                 | Engine render loop callbacks                                                                                                                        |
+| Scene frame graph execution                    | Scene render graph / rendering manager                                                                                                              |
+| `scene._prePasses` in `_update()`              | `scene.onBeforeRenderObservable` + shadow pre-work                                                                                                  |
+| `scene._frameGraph.execute()`                  | Internal draw list dispatch                                                                                                                         |
+
+## Dependencies
+
+- **Imports**: `SceneContext` from `../scene/scene.js` (type-only, for `start()` parameter).
+- **External**: WebGPU API (`navigator.gpu`, `GPUDevice`, `GPUCanvasContext`, etc.).
+- **No other internal dependencies.**
+
+## Test Specification
+
+| Test                                              | Description                                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `createEngine returns valid Engine`               | Mock `navigator.gpu`, verify all interface fields are populated                                |
+| `resize only recreates targets when size changes` | Call resize with same dimensions → targets unchanged; change `clientWidth` → targets recreated |
+| `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
+| `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
+| `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
+| `rendering-context query is live and readonly`    | Verify stable array identity, registration-order updates, and public kind discriminators       |
+| `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
+| `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
+
+## File Manifest
+
+| File                                    | Size       | Purpose                                                                                                |
+| --------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `src/engine/engine.ts`                  | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/engine-dispose.ts`          | ~25 lines  | Explicit engine teardown and synchronous resource-retirement drain                                     |
+| `src/engine/gpu-resource-retirement.ts` | ~110 lines | Deferred retirement, exactly-once batch ownership, and awaitable teardown                              |
+| `src/engine/gpu-timer.ts`               | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
+| `src/engine/gpu-task-timing.ts`         | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
+| `src/engine/gpu-task-timer.ts`          | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |

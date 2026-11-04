@@ -5,9 +5,20 @@
 // (no per-frame vertex rebuilds). Churn is safe thanks to deferred GPU disposal
 // being handled by the engine's scene removal.
 
-import { addToScene, createMeshFromData, createShaderMaterial, removeFromScene, setShaderFloat, type EngineContext, type Mesh, type SceneContext, type ShaderMaterial } from "babylon-lite";
+import {
+    addToScene,
+    createMeshFromData,
+    createShaderMaterial,
+    removeFromScene,
+    setShaderFloat,
+    type EngineContext,
+    type Mesh,
+    type SceneContext,
+    type ShaderMaterial,
+} from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
@@ -18,7 +29,7 @@ const vertexSource = `struct VertexOutput {
   return out;
 }`;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
@@ -27,12 +38,8 @@ const fragmentSource = `struct VertexOutput {
 }`;
 
 // Unit cube centred on the origin (8 corners, 12 triangles). Unlit, so no normals.
-const CUBE_POS = new Float32Array([
-    -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5,
-]);
-const CUBE_IDX = new Uint32Array([
-    0, 1, 2, 0, 2, 3, 1, 5, 6, 1, 6, 2, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
-]);
+const CUBE_POS = new Float32Array([-0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5]);
+const CUBE_IDX = new Uint32Array([0, 1, 2, 0, 2, 3, 1, 5, 6, 1, 6, 2, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0]);
 const GRAVITY = 16;
 
 interface Particle {

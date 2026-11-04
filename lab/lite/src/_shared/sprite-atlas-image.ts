@@ -63,9 +63,9 @@ function drawCell(ctx: CanvasRenderingContext2D, x: number, y: number, idx: numb
         const i = idx - 8;
         const bgHue = (i * 360) / 16;
         const fgHue = (bgHue + 180) % 360;
-        ctx.fillStyle = `hsl(${bgHue}, 60%, 30%)`;
+        ctx.fillStyle = `hsl(${bgHue},60%,30%)`;
         ctx.fillRect(x, y, CELL, CELL);
-        ctx.fillStyle = `hsl(${fgHue}, 80%, 65%)`;
+        ctx.fillStyle = `hsl(${fgHue},80%,65%)`;
         ctx.beginPath();
         ctx.arc(x + CELL / 2, y + CELL / 2, 11, 0, Math.PI * 2);
         ctx.fill();

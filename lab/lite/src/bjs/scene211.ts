@@ -14,7 +14,7 @@ import "@babylonjs/loaders/glTF";
 // Use the same vendored decoder as Babylon-Lite for deterministic parity.
 MeshoptCompression.Configuration = { decoder: { url: "/meshopt_decoder.js" } };
 
-const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BrainStem/glTF-Meshopt-EXT/";
+const MODEL_ROOT = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/BrainStem/glTF-Meshopt-EXT/";
 const MODEL_FILE = "BrainStem.gltf";
 
 (async function () {

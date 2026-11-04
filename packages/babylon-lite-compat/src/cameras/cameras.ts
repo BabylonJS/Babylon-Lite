@@ -1,0 +1,572 @@
+/**
+ * Babylon.js-compatible camera classes implemented over the Babylon Lite camera
+ * factories.
+ *
+ * Babylon.js cameras take the scene in their constructor and become the active
+ * camera; these wrappers do the same by assigning `scene.activeCamera` when a
+ * scene is supplied. `attachControl()` is a method here (Lite separates it into
+ * standalone functions) and returns the detach handle Lite already provides.
+ */
+
+import {
+    createArcRotateCamera,
+    createBankedFreeCamera,
+    createFreeCamera,
+    createGeospatialCamera,
+    disableOrthographicCamera,
+    enableArcRotateKeyboardControls,
+    enableOrthographicCamera,
+    setGeospatialOrientation,
+    attachGeospatialControls,
+    attachControl as liteAttachControl,
+    attachFreeControl,
+    getCameraPosition,
+    getViewMatrix as liteGetViewMatrix,
+    getProjectionMatrix as liteGetProjectionMatrix,
+    onBeforeRender,
+} from "babylon-lite";
+import type {
+    ArcRotateCamera as LiteArcRotateCamera,
+    BankedFreeCamera as LiteBankedFreeCamera,
+    FreeCamera as LiteFreeCamera,
+    GeospatialCamera as LiteGeospatialCamera,
+    Camera as LiteCamera,
+} from "babylon-lite";
+
+import { unsupported } from "../error.js";
+import { liteBackedVector3, Vector3 } from "../math/vector.js";
+import { Matrix } from "../math/matrix.js";
+import { Viewport } from "../math/size.js";
+import { Node } from "../node/node.js";
+import type { Scene } from "../scene/scene.js";
+
+/** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
+export abstract class Camera extends Node {
+    public static readonly PERSPECTIVE_CAMERA = 0;
+    public static readonly ORTHOGRAPHIC_CAMERA = 1;
+
+    /** @internal Underlying Babylon Lite camera. */
+    public abstract readonly _lite: LiteCamera;
+    private _detach: (() => void) | undefined;
+    private _orthoLeft: number | null = null;
+    private _orthoRight: number | null = null;
+    private _orthoBottom: number | null = null;
+    private _orthoTop: number | null = null;
+
+    protected constructor(name: string, scene?: Scene) {
+        super(name, scene);
+        scene?._registerCamera(this);
+    }
+
+    public override getClassName(): string {
+        return "Camera";
+    }
+
+    public get fov(): number {
+        return this._lite.fov;
+    }
+    public set fov(value: number) {
+        this._lite.fov = value;
+    }
+
+    public get minZ(): number {
+        return this._lite.nearPlane;
+    }
+    public set minZ(value: number) {
+        this._lite.nearPlane = value;
+    }
+
+    public get maxZ(): number {
+        return this._lite.farPlane;
+    }
+    public set maxZ(value: number) {
+        this._lite.farPlane = value;
+    }
+
+    public get orthoLeft(): number | null {
+        return this._lite.ortho ? this._lite.ortho.left : this._orthoLeft;
+    }
+    public set orthoLeft(value: number | null) {
+        this._orthoLeft = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.left = value;
+        }
+    }
+
+    public get orthoRight(): number | null {
+        return this._lite.ortho ? this._lite.ortho.right : this._orthoRight;
+    }
+    public set orthoRight(value: number | null) {
+        this._orthoRight = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.right = value;
+        }
+    }
+
+    public get orthoBottom(): number | null {
+        return this._lite.ortho ? this._lite.ortho.bottom : this._orthoBottom;
+    }
+    public set orthoBottom(value: number | null) {
+        this._orthoBottom = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.bottom = value;
+        }
+    }
+
+    public get orthoTop(): number | null {
+        return this._lite.ortho ? this._lite.ortho.top : this._orthoTop;
+    }
+    public set orthoTop(value: number | null) {
+        this._orthoTop = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.top = value;
+        }
+    }
+
+    public get mode(): number {
+        return this._lite.ortho ? Camera.ORTHOGRAPHIC_CAMERA : Camera.PERSPECTIVE_CAMERA;
+    }
+    public set mode(value: number) {
+        if (value === this.mode) {
+            return;
+        }
+        if (value === Camera.ORTHOGRAPHIC_CAMERA) {
+            enableOrthographicCamera(this._lite, {
+                left: this._orthoLeft,
+                right: this._orthoRight,
+                bottom: this._orthoBottom,
+                top: this._orthoTop,
+            });
+            return;
+        }
+        if (value === Camera.PERSPECTIVE_CAMERA) {
+            this._orthoLeft = this.orthoLeft;
+            this._orthoRight = this.orthoRight;
+            this._orthoBottom = this.orthoBottom;
+            this._orthoTop = this.orthoTop;
+            disableOrthographicCamera(this._lite);
+            return;
+        }
+        unsupported("Camera.mode", `Projection mode ${value} is not supported.`);
+    }
+
+    public get viewport(): Viewport {
+        const viewport = this._lite.viewport;
+        if (viewport instanceof Viewport) {
+            return viewport;
+        }
+        const compatViewport = viewport ? new Viewport(viewport.x, viewport.y, viewport.width, viewport.height) : new Viewport(0, 0, 1, 1);
+        this._lite.viewport = compatViewport;
+        return compatViewport;
+    }
+    public set viewport(value: Viewport) {
+        this._lite.viewport = value;
+    }
+
+    /** World-space position of the camera. */
+    public get globalPosition(): Vector3 {
+        const p = getCameraPosition(this._lite);
+        return new Vector3(p.x, p.y, p.z);
+    }
+
+    /** Babylon.js `camera.getViewMatrix()` — the camera's view matrix. */
+    public getViewMatrix(): Matrix {
+        return Matrix.FromArray(liteGetViewMatrix(this._lite));
+    }
+
+    /** Babylon.js `camera.getDirection(localAxis)`: `localAxis` in world space, without translation. */
+    public getDirection(localAxis: Vector3): Vector3 {
+        const result = Vector3.Zero();
+        this.getDirectionToRef(localAxis, result);
+        return result;
+    }
+
+    /** Babylon.js `camera.getDirectionToRef(localAxis, result)`: `localAxis` turned by the camera's world matrix, which Lite
+     *  keeps current. `result` may be `localAxis`. */
+    public getDirectionToRef(localAxis: Vector3, result: Vector3): void {
+        const w = this._lite.worldMatrix;
+        const { x, y, z } = localAxis;
+        result.set(x * w[0]! + y * w[4]! + z * w[8]!, x * w[1]! + y * w[5]! + z * w[9]!, x * w[2]! + y * w[6]! + z * w[10]!);
+    }
+
+    /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
+    public getProjectionMatrix(): Matrix {
+        return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()));
+    }
+
+    private _aspectRatio(): number {
+        const scene = this._scene;
+        const canvas = scene?.getEngine().getRenderingCanvas() as { width?: number; height?: number } | undefined;
+        const w = canvas?.width ?? 1;
+        const h = canvas?.height ?? 1;
+        const viewport = this._lite.viewport;
+        return h !== 0 && (!viewport || viewport.height !== 0) ? (w / h) * (viewport ? viewport.width / viewport.height : 1) : 1;
+    }
+
+    public abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;
+
+    public detachControl(): void {
+        if (this._detach) {
+            this._detach();
+            this._detach = undefined;
+        }
+    }
+
+    /** @internal Store the detach handle returned by Lite's attach function. */
+    protected _setDetach(detach: () => void): void {
+        this._detach = detach;
+    }
+
+    protected _makeActive(scene: Scene | undefined): void {
+        // Babylon.js sets `scene.activeCamera` to the **first** camera constructed
+        // against a scene; later cameras are added but do not steal the active
+        // slot (e.g. a `CameraGizmo`'s subject camera must not become the view).
+        if (scene && !scene.activeCamera) {
+            scene.activeCamera = this;
+        }
+    }
+}
+
+export class ArcRotateCamera extends Camera {
+    /** @internal Underlying Babylon Lite arc-rotate camera. */
+    public readonly _lite: LiteArcRotateCamera;
+
+    public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene?: Scene);
+    /** @internal Adopt an already-built Lite arc-rotate camera (e.g. from `createDefaultCamera`) instead of creating a new one. */
+    public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene: Scene | undefined, adoptLite: LiteArcRotateCamera);
+    public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene?: Scene, adoptLite?: LiteArcRotateCamera) {
+        super(name, scene);
+        this._lite = adoptLite ?? createArcRotateCamera(alpha, beta, radius, { x: target.x, y: target.y, z: target.z });
+        if (!adoptLite) {
+            this._makeActive(scene);
+        }
+    }
+
+    public override getClassName(): string {
+        return "ArcRotateCamera";
+    }
+
+    public get alpha(): number {
+        return this._lite.alpha;
+    }
+    public set alpha(value: number) {
+        this._lite.alpha = value;
+    }
+
+    public get beta(): number {
+        return this._lite.beta;
+    }
+    public set beta(value: number) {
+        this._lite.beta = value;
+    }
+
+    public get radius(): number {
+        return this._lite.radius;
+    }
+    public set radius(value: number) {
+        this._lite.radius = value;
+    }
+
+    /** Live, as in Babylon.js: `camera.target.x = …` and in-place vector math move the target. */
+    public get target(): Vector3 {
+        return liteBackedVector3(this._lite.target);
+    }
+    public set target(value: Vector3) {
+        // Write into Lite's observable target. Replacing the object would drop its change notification, so neither
+        // this assignment nor Lite's later pans would move the view until alpha, beta or radius changed.
+        const target = this._lite.target;
+        target.x = value.x;
+        target.y = value.y;
+        target.z = value.z;
+    }
+
+    /** Babylon.js `setTarget` — point the arc-rotate camera at a world-space target. */
+    public setTarget(target: Vector3): void {
+        this.target = target;
+    }
+
+    public get lowerRadiusLimit(): number | undefined {
+        return this._lite.lowerRadiusLimit;
+    }
+    public set lowerRadiusLimit(value: number | undefined) {
+        this._lite.lowerRadiusLimit = value;
+    }
+
+    public get upperRadiusLimit(): number | undefined {
+        return this._lite.upperRadiusLimit;
+    }
+    public set upperRadiusLimit(value: number | undefined) {
+        this._lite.upperRadiusLimit = value;
+    }
+
+    // These input-tuning fields delegate straight through to the underlying Lite
+    // camera so that Babylon.js-style code — which may set them either before or
+    // AFTER attachControl — takes effect. Lite's attachControl reads these live on
+    // every input event, so a post-attach write (as Babylon.js allows) is honored.
+    // Without these accessors a write would land on the wrapper instance and never
+    // reach _lite, leaving zoom/orbit/pan at the Lite defaults (e.g. wheel zoom
+    // running far too fast because a raised wheelPrecision was silently dropped).
+
+    /** Wheel-zoom sensitivity (HIGHER = slower zoom). Babylon default 3. */
+    public get wheelPrecision(): number {
+        return this._lite.wheelPrecision;
+    }
+    public set wheelPrecision(value: number) {
+        this._lite.wheelPrecision = value;
+    }
+
+    /** Mouse-drag orbit sensitivity (HIGHER = slower rotation). Babylon default 1000. */
+    public get angularSensibility(): number {
+        return this._lite.angularSensibility;
+    }
+    public set angularSensibility(value: number) {
+        this._lite.angularSensibility = value;
+    }
+
+    /** Right-drag panning sensitivity in pixels-per-unit (LOWER = faster pan). Babylon default 50. */
+    public get panningSensibility(): number {
+        return this._lite.panningSensibility;
+    }
+    public set panningSensibility(value: number) {
+        this._lite.panningSensibility = value;
+    }
+
+    public attachControl(canvas: HTMLCanvasElement, noPreventDefault = false): void {
+        enableArcRotateKeyboardControls();
+        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite, { keyboard: { preventDefault: !noPreventDefault } });
+        this._setDetach(detach);
+    }
+
+    /** @internal Wrap an already-built Lite arc-rotate camera (e.g. from `createDefaultCamera`). */
+    public static _adopt(name: string, lite: LiteArcRotateCamera, scene?: Scene): ArcRotateCamera {
+        return new ArcRotateCamera(name, lite.alpha, lite.beta, lite.radius, new Vector3(lite.target.x, lite.target.y, lite.target.z), scene, lite);
+    }
+}
+
+/**
+ * Babylon.js `TargetCamera` — a free-moving camera with a look-at target. Base
+ * for `FreeCamera`/`UniversalCamera`/`TouchCamera`/`FlyCamera`/`FollowCamera`.
+ */
+export class TargetCamera extends Camera {
+    /** @internal Underlying Babylon Lite free camera. */
+    public readonly _lite: LiteFreeCamera;
+
+    public constructor(name: string, position: Vector3, scene?: Scene);
+    /** @internal Adopt an already-built Lite free camera (e.g. one parsed from a `.babylon` file) instead of creating a new one. */
+    public constructor(name: string, position: Vector3, scene: Scene | undefined, adoptLite: LiteFreeCamera);
+    public constructor(name: string, position: Vector3, scene?: Scene, adoptLite?: LiteFreeCamera) {
+        super(name, scene);
+        this._lite = adoptLite ?? createFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
+        this._makeActive(scene);
+    }
+
+    public override getClassName(): string {
+        return "TargetCamera";
+    }
+
+    public get position(): Vector3 {
+        const p = this._lite.position;
+        return new Vector3(p.x, p.y, p.z);
+    }
+    public set position(value: Vector3) {
+        this._lite.position.set(value.x, value.y, value.z);
+    }
+
+    public get speed(): number {
+        return this._lite.speed;
+    }
+    public set speed(value: number) {
+        this._lite.speed = value;
+    }
+
+    /** Babylon.js `setTarget` — aim the camera at a world-space point. */
+    public setTarget(target: Vector3): void {
+        this._lite.target.set(target.x, target.y, target.z);
+    }
+
+    public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
+        const detach = attachFreeControl(this._lite, canvas, this._scene?._lite);
+        this._setDetach(detach);
+    }
+}
+
+/** Babylon.js `FreeCamera` — keyboard/mouse free camera. */
+export class FreeCamera extends TargetCamera {
+    public override getClassName(): string {
+        return "FreeCamera";
+    }
+
+    /** @internal Wrap an already-built Lite free camera (e.g. one parsed from a `.babylon` file). */
+    public static _adopt(name: string, lite: LiteFreeCamera, scene?: Scene): FreeCamera {
+        const p = lite.position;
+        return new FreeCamera(name, new Vector3(p.x, p.y, p.z), scene, lite);
+    }
+}
+
+/** Babylon.js `UniversalCamera` — touch-friendly free camera. */
+export class UniversalCamera extends FreeCamera {
+    public override getClassName(): string {
+        return "UniversalCamera";
+    }
+}
+
+/** Babylon.js `TouchCamera` — touch-controlled free camera. */
+export class TouchCamera extends FreeCamera {
+    public override getClassName(): string {
+        return "TouchCamera";
+    }
+}
+
+/** Babylon.js `GamepadCamera` — gamepad-controlled free camera. */
+export class GamepadCamera extends UniversalCamera {
+    public override getClassName(): string {
+        return "GamepadCamera";
+    }
+}
+
+/** Babylon.js `FlyCamera` — 6-DOF free-flight camera. */
+export class FlyCamera extends TargetCamera {
+    /** @internal Underlying banked Babylon Lite free camera. */
+    public override readonly _lite: LiteBankedFreeCamera;
+
+    public constructor(name: string, position: Vector3, scene?: Scene) {
+        const lite = createBankedFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
+        super(name, position, scene, lite);
+        this._lite = lite;
+    }
+
+    public get upVector(): Vector3 {
+        return liteBackedVector3(this._lite.upVector);
+    }
+    public set upVector(value: Vector3) {
+        this._lite.upVector.set(value.x, value.y, value.z);
+    }
+
+    public override getClassName(): string {
+        return "FlyCamera";
+    }
+}
+
+interface LockedTarget {
+    position: { x: number; y: number; z: number };
+}
+
+/**
+ * Babylon.js `FollowCamera` — follows a `lockedTarget` at a fixed radius /
+ * height / rotation offset, updated each frame via the scene's before-render hook.
+ */
+export class FollowCamera extends TargetCamera {
+    public lockedTarget: LockedTarget | null = null;
+    public radius = 12;
+    public heightOffset = 4;
+    /** Rotation offset around the target, in degrees. */
+    public rotationOffset = 0;
+
+    public constructor(name: string, position: Vector3, scene?: Scene, lockedTarget?: LockedTarget) {
+        super(name, position, scene);
+        this.lockedTarget = lockedTarget ?? null;
+        if (scene) {
+            onBeforeRender(scene._lite, () => this._follow());
+        }
+    }
+
+    public override getClassName(): string {
+        return "FollowCamera";
+    }
+
+    private _follow(): void {
+        const target = this.lockedTarget;
+        if (!target) {
+            return;
+        }
+        const radians = (this.rotationOffset * Math.PI) / 180;
+        const x = target.position.x + this.radius * Math.sin(radians);
+        const z = target.position.z + this.radius * Math.cos(radians);
+        const y = target.position.y + this.heightOffset;
+        this._lite.position.set(x, y, z);
+        this.setTarget(new Vector3(target.position.x, target.position.y, target.position.z));
+    }
+}
+
+/**
+ * Babylon.js `GeospatialCamera` — globe-orbit camera anchored to a surface
+ * `center` (ECEF), orbiting at `radius` with `yaw`/`pitch`. Wraps Babylon Lite's
+ * `createGeospatialCamera` + `setGeospatialOrientation` (which clamps pitch
+ * against the effective max for the current radius, so each orientation field is
+ * applied through Lite with the others left at their current values).
+ */
+export class GeospatialCamera extends Camera {
+    /** @internal Underlying Babylon Lite geospatial camera. */
+    public readonly _lite: LiteGeospatialCamera;
+
+    public constructor(name: string, scene?: Scene, options?: { planetRadius: number }) {
+        super(name, scene);
+        this._lite = createGeospatialCamera({ planetRadius: options?.planetRadius ?? 1 });
+        this._makeActive(scene);
+    }
+
+    public override getClassName(): string {
+        return "GeospatialCamera";
+    }
+
+    /** Anchored surface point the camera orbits (ECEF coordinates). */
+    public get center(): Vector3 {
+        const c = this._lite.center;
+        return new Vector3(c.x, c.y, c.z);
+    }
+    public set center(value: Vector3) {
+        setGeospatialOrientation(this._lite, { center: { x: value.x, y: value.y, z: value.z } });
+    }
+
+    /** Distance from the camera to its centre point. */
+    public get radius(): number {
+        return this._lite.radius;
+    }
+    public set radius(value: number) {
+        setGeospatialOrientation(this._lite, { radius: value });
+    }
+
+    /** Yaw about the geocentric up axis (0 = north, π/2 = east). */
+    public get yaw(): number {
+        return this._lite.yaw;
+    }
+    public set yaw(value: number) {
+        setGeospatialOrientation(this._lite, { yaw: value });
+    }
+
+    /** Pitch from looking straight down (0) to the horizon (π/2). */
+    public get pitch(): number {
+        return this._lite.pitch;
+    }
+    public set pitch(value: number) {
+        setGeospatialOrientation(this._lite, { pitch: value });
+    }
+
+    public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
+        if (this._scene) {
+            const detach = attachGeospatialControls(this._lite, canvas, this._scene._lite);
+            this._setDetach(detach);
+        }
+    }
+}
+
+/** Babylon.js `DeviceOrientationCamera` — device-orientation input is not available in Babylon Lite. */
+export class DeviceOrientationCamera {
+    public constructor() {
+        unsupported("DeviceOrientationCamera", "Device-orientation input is not part of Babylon Lite.");
+    }
+}
+
+/** Babylon.js `WebXRCamera` — WebXR is not part of Babylon Lite. */
+export class WebXRCamera {
+    public constructor() {
+        unsupported("WebXRCamera", "WebXR is not part of Babylon Lite.");
+    }
+}
+
+/** Babylon.js `AnaglyphArcRotateCamera` — stereoscopic camera rigs are not implemented in Babylon Lite. */
+export class AnaglyphArcRotateCamera {
+    public constructor() {
+        unsupported("AnaglyphArcRotateCamera", "Stereoscopic camera rigs are not implemented in Babylon Lite. (An anaglyph post-process exists separately.)");
+    }
+}

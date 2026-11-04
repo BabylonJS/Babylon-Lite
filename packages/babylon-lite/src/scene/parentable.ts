@@ -12,7 +12,9 @@ export interface IWorldMatrixProvider {
     /** World-space 4×4 column-major matrix. May trigger lazy recomputation. */
     readonly worldMatrix: Mat4;
     /** Monotonically increasing counter — bumped each time worldMatrix recomputes.
-     *  Children snapshot this value to detect when their parent has changed. */
+     *  Children snapshot this value to detect when their parent has changed.
+     *  Must never decrease: `_cameraChangeKey` sums it with the projection revision
+     *  and relies on that to detect every change without aliasing. */
     readonly worldMatrixVersion: number;
 }
 

@@ -13,7 +13,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    addToScene(scene, await loadGltf(engine, "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/SheenWoodLeatherSofa/glTF-Binary/SheenWoodLeatherSofa.glb"));
+    addToScene(scene, await loadGltf(engine, "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/SheenWoodLeatherSofa/glTF-Binary/SheenWoodLeatherSofa.glb"));
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", {
         skipSkybox: true,

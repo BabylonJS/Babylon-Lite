@@ -26,7 +26,9 @@
  * `in.tint` (repurposed: `.x` = pool width in tiles), `fx.time` (seconds, auto-
  * accumulating), and `L.opacityMul`. Fully procedural — no `atlasTex` sample.
  */
-export const LAVA_FRAGMENT = `
+import { wgsl } from "babylon-lite/shader/wgsl.js";
+
+export const LAVA_FRAGMENT = wgsl`
 let t = fx.time;
 let tilesX = max(in.tint.x, 1.0);
 let u = in.uv.x * tilesX;

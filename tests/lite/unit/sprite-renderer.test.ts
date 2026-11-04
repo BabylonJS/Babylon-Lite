@@ -20,19 +20,16 @@ G.GPUColorWrite ??= { ALL: 0xf };
 import {
     DEPTH_INSTANCE_FLOATS_PER_SPRITE,
     DEPTH_INSTANCE_STRIDE_BYTES,
-    DEPTH_UVSCROLL_FLOATS_PER_SPRITE,
-    DEPTH_UVSCROLL_STRIDE_BYTES,
     PURE_2D_INSTANCE_FLOATS_PER_SPRITE,
     PURE_2D_INSTANCE_STRIDE_BYTES,
-    PURE_2D_UVSCROLL_FLOATS_PER_SPRITE,
-    PURE_2D_UVSCROLL_STRIDE_BYTES,
     addSprite2DIndex,
     clearSprite2DLayer,
     createSprite2DLayer,
     setSprite2DShaderParams,
-    setSprite2DUvOffset,
     updateSprite2DIndex,
 } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
+import { setSprite2DUvOffset } from "../../../packages/babylon-lite/src/sprite/sprite-2d-uvscroll";
+import { enableSprite2DInstanceParams } from "../../../packages/babylon-lite/src/sprite/sprite-2d-instance-params";
 import {
     createSpriteRenderer,
     addSpriteRendererLayer,
@@ -42,19 +39,21 @@ import {
     disposeSpriteRenderer,
     _spriteRendererPipelineCacheSize,
 } from "../../../packages/babylon-lite/src/sprite/sprite-renderer";
-import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
+import { createSpritePipelineCache, getOrCreateSpritePipeline, buildSpriteLayerUbo, LAYER_UBO_FLOATS } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied, spriteBlendMultiply } from "../../../packages/babylon-lite/src/sprite/sprite-blend";
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
+import { setSprite2DCoverageGamma } from "../../../packages/babylon-lite/src/sprite/sprite-2d-coverage-gamma";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
+import { disposeSpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { getRenderingContextKind, type EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 // ── Mock GPU device ───────────────────────────────────────────────
 
 interface MockBuffer {
-    destroy: ReturnType<typeof vi.fn>;
-    getMappedRange: ReturnType<typeof vi.fn>;
-    unmap: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn<() => undefined>>;
+    getMappedRange: ReturnType<typeof vi.fn<() => ArrayBuffer>>;
+    unmap: ReturnType<typeof vi.fn<() => undefined>>;
     _destroyed: boolean;
 }
 
@@ -74,9 +73,10 @@ function mockBuffer(counters: MockCounters): MockBuffer {
                 buf._destroyed = true;
                 counters.buffersDestroyed++;
             }
+            return undefined;
         }),
         getMappedRange: vi.fn(() => new ArrayBuffer(64)),
-        unmap: vi.fn(),
+        unmap: vi.fn(() => undefined),
     };
     return buf;
 }
@@ -157,12 +157,12 @@ function makeMockAtlas(): SpriteAtlas {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe("createSpriteRenderer", () => {
-    it("returns an object with _kind === 'sprite-renderer' and the RenderingContext methods", () => {
+    it("returns an object identified as a sprite renderer with the RenderingContext methods", () => {
         const { engine } = makeMockEngine();
         const atlas = makeMockAtlas();
         const layer = createSprite2DLayer(atlas);
         const sr = createSpriteRenderer(engine, { layers: [layer] });
-        expect(sr._kind).toBe("sprite-renderer");
+        expect(getRenderingContextKind(sr)).toBe("sprite-renderer");
         expect(typeof sr._update).toBe("function");
         expect(typeof sr._record).toBe("function");
         expect(sr._drawCallsPre).toBe(0);
@@ -200,7 +200,7 @@ describe("createSpriteRenderer", () => {
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).not.toContain("iZ");
         expect(shaderDescriptor.code).not.toContain("iUvOffset");
-        expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 0.0, 1.0)");
+        expect(shaderDescriptor.code).toContain("vec4f(n, 0, 1)");
     });
 
     it("converts depth-hosted sprite NDC Z to reverse-Z clip depth", () => {
@@ -213,36 +213,85 @@ describe("createSpriteRenderer", () => {
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
-        expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
+        expect(shaderDescriptor.code).toContain("vec4f(n, 1 - in.z, 1)");
         expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
     });
 });
 
-describe("uvScroll (per-sprite uvOffset)", () => {
-    it("widens the pure-2D layer to 15 floats / 60 bytes and never names _uvScroll when off", () => {
-        const off = createSprite2DLayer(makeMockAtlas());
-        expect(off._instanceFloatsPerSprite).toBe(PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
-        expect(off._instanceStrideBytes).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
-        expect(Object.prototype.hasOwnProperty.call(off, "_uvScroll")).toBe(false);
+describe("uvScroll (per-sprite uvOffset, opt-in via setSprite2DUvOffset)", () => {
+    it("stays narrow until the first setSprite2DUvOffset, which lazily widens pure-2D to 15 floats / 60 bytes", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const i = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
+        // Narrow until opted in — the layer never names `_uvScrollAttr`.
+        expect(layer._instanceFloatsPerSprite).toBe(PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
+        expect(layer._instanceStrideBytes).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
+        expect(Object.prototype.hasOwnProperty.call(layer, "_uvScrollAttr")).toBe(false);
 
-        const on = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
-        expect(on._uvScroll).toBe(true);
-        expect(on._instanceFloatsPerSprite).toBe(PURE_2D_UVSCROLL_FLOATS_PER_SPRITE);
-        expect(on._instanceStrideBytes).toBe(PURE_2D_UVSCROLL_STRIDE_BYTES);
-        expect(PURE_2D_UVSCROLL_STRIDE_BYTES).toBe(60);
+        setSprite2DUvOffset(layer, i, [0.25, 0.5]);
+
+        expect(layer._uvScrollAttr).toEqual({ shaderLocation: 7, offset: 52, format: "float32x2" });
+        expect(layer._instanceFloatsPerSprite).toBe(PURE_2D_INSTANCE_FLOATS_PER_SPRITE + 2);
+        expect(layer._instanceStrideBytes).toBe(60);
+        // Existing sprite's base data is preserved across the re-stride; offset lands in slot 13/14.
+        const stride = layer._instanceFloatsPerSprite;
+        expect(layer._instanceData[i * stride + 0]).toBeCloseTo(10);
+        expect(layer._instanceData[i * stride + 1]).toBeCloseTo(20);
+        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.25);
+        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.5);
     });
 
-    it("widens the depth-hosted layer to 16 floats / 64 bytes (Z stays at slot 13)", () => {
-        const on = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true });
-        expect(on._instanceFloatsPerSprite).toBe(DEPTH_UVSCROLL_FLOATS_PER_SPRITE);
-        expect(on._instanceStrideBytes).toBe(DEPTH_UVSCROLL_STRIDE_BYTES);
-        expect(DEPTH_UVSCROLL_STRIDE_BYTES).toBe(64);
+    it("lazily widens a depth-hosted layer to 16 floats / 64 bytes (Z stays at slot 13, uvOffset at 14)", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", layerZ: 0.3 });
+        const i = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0, z: 0.7 });
+
+        setSprite2DUvOffset(layer, i, [0.1, 0.2]);
+
+        expect(layer._instanceFloatsPerSprite).toBe(DEPTH_INSTANCE_FLOATS_PER_SPRITE + 2);
+        expect(layer._instanceStrideBytes).toBe(64);
+        const stride = layer._instanceFloatsPerSprite;
+        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.7); // Z preserved
+        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.1);
+        expect(layer._instanceData[i * stride + 15]).toBeCloseTo(0.2);
     });
 
-    it("builds a pure-2D uvScroll pipeline with a 60-byte stride and a location-7 iUvOffset attribute", () => {
+    it("re-strides multiple existing sprites and zero-fills the uvOffset of those not yet set", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const i0 = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
+        const i1 = addSprite2DIndex(layer, { positionPx: [40, 50], sizePx: [32, 32], frame: 0 });
+
+        // Enable scroll by setting only sprite 1's offset; sprite 0 is re-strided but unset.
+        setSprite2DUvOffset(layer, i1, [0.75, 0.125]);
+
+        const stride = layer._instanceFloatsPerSprite;
+        // Sprite 0 base data preserved, its uvOffset defaults to [0,0].
+        expect(layer._instanceData[i0 * stride + 0]).toBeCloseTo(10);
+        expect(layer._instanceData[i0 * stride + 13]).toBe(0);
+        expect(layer._instanceData[i0 * stride + 14]).toBe(0);
+        // Sprite 1 base data preserved, offset written.
+        expect(layer._instanceData[i1 * stride + 0]).toBeCloseTo(40);
+        expect(layer._instanceData[i1 * stride + 13]).toBeCloseTo(0.75);
+        expect(layer._instanceData[i1 * stride + 14]).toBeCloseTo(0.125);
+    });
+
+    it("preserves uvOffset across a later updateSprite2DIndex that omits it", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const i = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
+        setSprite2DUvOffset(layer, i, [0.25, 0.5]);
+        const stride = layer._instanceFloatsPerSprite;
+
+        updateSprite2DIndex(layer, i, { positionPx: [11, 21] });
+
+        expect(layer._instanceData[i * stride + 0]).toBeCloseTo(11);
+        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.25);
+        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.5);
+    });
+
+    it("builds a pure-2D uvScroll pipeline with a 60-byte stride and a location-7 uvOffset attribute once enabled", () => {
         const { engine } = makeMockEngine();
         const cache = createSpritePipelineCache();
-        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const i = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        setSprite2DUvOffset(layer, i, [0.1, 0.2]);
 
         getOrCreateSpritePipeline(engine, cache, "bgra8unorm", 4, spriteBlendAlpha, false, false, undefined, undefined, layer);
 
@@ -251,22 +300,24 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
         const shaderLocations = (vertexBuffer.attributes as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
-        expect(vertexBuffer.arrayStride).toBe(PURE_2D_UVSCROLL_STRIDE_BYTES);
+        expect(vertexBuffer.arrayStride).toBe(60);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 7]);
         const uvAttr = (vertexBuffer.attributes as GPUVertexAttribute[]).find((a) => a.shaderLocation === 7)!;
         expect(uvAttr.offset).toBe(52);
         expect(uvAttr.format).toBe("float32x2");
 
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
-        expect(shaderDescriptor.code).toContain("@location(7) iUvOffset: vec2<f32>");
-        expect(shaderDescriptor.code).toContain("+ in.iUvOffset");
+        expect(shaderDescriptor.code).toContain("@location(7) o: vec2f");
+        expect(shaderDescriptor.code).toContain("+ in.o");
     });
 
-    it("builds a depth-hosted uvScroll pipeline with a 64-byte stride and uvOffset at byte offset 56", () => {
+    it("builds a depth-hosted uvScroll pipeline with a 64-byte stride and uvOffset at byte offset 56 once enabled", () => {
         const { engine } = makeMockEngine();
         const cache = createSpritePipelineCache();
         const sceneBGL = {} as GPUBindGroupLayout;
-        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true });
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test" });
+        const i = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        setSprite2DUvOffset(layer, i, [0.1, 0.2]);
 
         getOrCreateSpritePipeline(engine, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL, layer);
 
@@ -275,58 +326,103 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
         const shaderLocations = (vertexBuffer.attributes as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
-        expect(vertexBuffer.arrayStride).toBe(DEPTH_UVSCROLL_STRIDE_BYTES);
+        expect(vertexBuffer.arrayStride).toBe(64);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
         const uvAttr = (vertexBuffer.attributes as GPUVertexAttribute[]).find((a) => a.shaderLocation === 7)!;
         expect(uvAttr.offset).toBe(56);
     });
 
-    it("writes uvOffset into slot 13 on add (pure-2D), preserves on update, and defaults to [0,0]", () => {
-        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
-        const i0 = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0, uvOffset: [0.25, 0.5] });
-        const i1 = addSprite2DIndex(layer, { positionPx: [40, 50], sizePx: [32, 32], frame: 0 });
-
-        const stride = layer._instanceFloatsPerSprite;
-        expect(layer._instanceData[i0 * stride + 13]).toBeCloseTo(0.25);
-        expect(layer._instanceData[i0 * stride + 14]).toBeCloseTo(0.5);
-        // Omitted on add → cleared to [0,0].
-        expect(layer._instanceData[i1 * stride + 13]).toBe(0);
-        expect(layer._instanceData[i1 * stride + 14]).toBe(0);
-
-        // Update without uvOffset preserves it; position still moves.
-        updateSprite2DIndex(layer, i0, { positionPx: [11, 21] });
-        expect(layer._instanceData[i0 * stride + 13]).toBeCloseTo(0.25);
-        expect(layer._instanceData[i0 * stride + 14]).toBeCloseTo(0.5);
+    it("setSprite2DUvOffset throws on an out-of-range index", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        expect(() => setSprite2DUvOffset(layer, 5, [0, 0])).toThrow(/out of range/);
     });
 
-    it("writes uvOffset into slot 14 on a depth-hosted layer and leaves Z at slot 13 intact", () => {
-        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true, layerZ: 0.3 });
-        const i = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0, z: 0.7, uvOffset: [0.1, 0.2] });
-        const stride = layer._instanceFloatsPerSprite;
-        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.7); // Z
-        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.1);
-        expect(layer._instanceData[i * stride + 15]).toBeCloseTo(0.2);
-    });
-
-    it("setSprite2DUvOffset writes the live offset and throws on a non-uvScroll layer", () => {
-        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
-        const i = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
-        setSprite2DUvOffset(layer, i, [0.75, 0.125]);
-        const stride = layer._instanceFloatsPerSprite;
-        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.75);
-        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.125);
-
-        const plain = createSprite2DLayer(makeMockAtlas());
-        addSprite2DIndex(plain, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
-        expect(() => setSprite2DUvOffset(plain, 0, [0, 0])).toThrow(/uvScroll/);
-    });
-
-    it("keeps the non-uvScroll instance buffer byte-identical (no uvOffset slot)", () => {
+    it("keeps a never-scrolled layer narrow and byte-identical (no uvOffset slot)", () => {
         const layer = createSprite2DLayer(makeMockAtlas());
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
         expect(layer._instanceData.length).toBe(layer._capacity * PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
-        // The public uvOffset prop is silently ignored when the layer is not a uvScroll layer.
-        expect(() => addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0, uvOffset: [0.5, 0.5] })).not.toThrow();
+        expect(Object.prototype.hasOwnProperty.call(layer, "_uvScrollAttr")).toBe(false);
+    });
+});
+
+describe("coverageGamma (opt-in via setSprite2DCoverageGamma)", () => {
+    it("stores the gamma value internally; plain layers never name it", () => {
+        const plain = createSprite2DLayer(makeMockAtlas());
+        expect(Object.prototype.hasOwnProperty.call(plain, "_coverageGamma")).toBe(false);
+
+        const layer = createSprite2DLayer(makeMockAtlas());
+        setSprite2DCoverageGamma(layer, 2);
+        expect(layer._coverageGamma).toBe(2);
+    });
+
+    it("builds a distinct pipeline + extra shader module for a gamma layer, with a `pow` permutation", () => {
+        const { engine, counters } = makeMockEngine();
+        const cache = createSpritePipelineCache();
+
+        const plainLayer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(plainLayer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        const plain = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, plainLayer);
+        const modulesAfterPlain = counters.shaderModules;
+
+        const gammaLayer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(gammaLayer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        setSprite2DCoverageGamma(gammaLayer, 2);
+        const gamma = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, gammaLayer);
+
+        // Distinct pipeline (the `cg` key part differs) and a new shader module was compiled.
+        expect(gamma).not.toBe(plain);
+        expect(counters.shaderModules).toBeGreaterThan(modulesAfterPlain);
+
+        // The gamma fragment applies the coverage `pow`; the base fragment does not.
+        const device = engine._device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
+        const codes = device.createShaderModule.mock.calls.map((c) => (c[0] as GPUShaderModuleDescriptor).code);
+        expect(codes.some((c) => c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+        expect(codes.some((c) => !c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+
+        // Re-requesting the same gamma layer hits the cache (no new pipeline).
+        const again = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, gammaLayer);
+        expect(again).toBe(gamma);
+    });
+
+    it("writes aa.x = 1/gamma into UBO slot [12] for an active gamma layer", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        setSprite2DCoverageGamma(layer, 2);
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        buildSpriteLayerUbo(layer, 800, 600, ubo);
+        expect(ubo[12]).toBeCloseTo(0.5);
+    });
+
+    it("treats identity / non-finite / non-positive gamma as disabled (UBO slot [12] = 0, no `pow` permutation)", () => {
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        // `1` is the identity no-op; `0`, negatives, NaN and Infinity must not produce a non-finite exponent.
+        for (const g of [1, 0, -2, NaN, Infinity]) {
+            const layer = createSprite2DLayer(makeMockAtlas());
+            setSprite2DCoverageGamma(layer, g);
+            ubo[12] = 123; // sentinel — must be overwritten with 0
+            buildSpriteLayerUbo(layer, 800, 600, ubo);
+            expect(ubo[12]).toBe(0);
+
+            // And the layer selects the base (non-gamma) shader / pipeline.
+            const { engine } = makeMockEngine();
+            const cache = createSpritePipelineCache();
+            addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+            getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer);
+            const device = engine._device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
+            const codes = device.createShaderModule.mock.calls.map((c) => (c[0] as GPUShaderModuleDescriptor).code);
+            expect(codes.every((c) => !c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+        }
+    });
+
+    it("a plain (non-gamma) layer leaves UBO slot [12] at 0 once the gamma hook is registered", () => {
+        // Registering the hook (via any gamma layer) is what enables the aa.x writer; a plain layer
+        // then deterministically writes 0 so the reused scratch UBO can't leak a stale gamma value.
+        setSprite2DCoverageGamma(createSprite2DLayer(makeMockAtlas()), 2);
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        ubo[12] = 123;
+        buildSpriteLayerUbo(layer, 800, 600, ubo);
+        expect(ubo[12]).toBe(0);
     });
 });
 
@@ -512,7 +608,7 @@ describe("pure-2D instance layout", () => {
 
         sr._update();
 
-        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).label === "sprite-layer-instances");
+        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).size === PURE_2D_INSTANCE_STRIDE_BYTES);
         expect((instanceBufferCreate![0] as GPUBufferDescriptor).size).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === PURE_2D_INSTANCE_STRIDE_BYTES)).toBe(true);
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === DEPTH_INSTANCE_STRIDE_BYTES)).toBe(false);
@@ -544,10 +640,10 @@ describe("Sprite2D custom shader", () => {
         const cs = createSprite2DCustomShader({ fragment: FX_FRAGMENT });
         const wgsl = cs._composeWgsl(false, 0, false);
         expect(wgsl).toContain("@binding(3) var<uniform> fx: SpriteFx");
-        expect(wgsl).toContain("fn fs(in: VOut) -> @location(0) vec4<f32>");
+        expect(wgsl).toContain("fn fs(in: O) -> @location(0) vec4f");
         expect(wgsl).toContain(FX_FRAGMENT);
         // The vertex prologue must still be present.
-        expect(wgsl).toContain("fn vs(in: VIn)");
+        expect(wgsl).toContain("fn vs(in: I)");
         expect(wgsl).toContain("var atlasTex");
     });
 
@@ -613,6 +709,138 @@ describe("Sprite2D custom shader", () => {
         expect(fxCreate).toBeDefined();
         expect((fxCreate![0] as GPUBufferDescriptor).size).toBe(32);
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === 32)).toBe(true);
+    });
+});
+
+describe("Sprite2D instance-parameter pipeline", () => {
+    it("separates enabled, plain and both UV orders for a shared shader without changing its descriptor", () => {
+        const { engine, counters } = makeMockEngine();
+        const shader = createSprite2DCustomShader({ fragment: "return in.tint;" });
+        const cache = createSpritePipelineCache();
+        const layers = Array.from({ length: 4 }, () => createSprite2DLayer(makeMockAtlas(), { customShader: shader }));
+        for (const layer of layers) {
+            addSprite2DIndex(layer, { positionPx: [10, 10] });
+        }
+        enableSprite2DInstanceParams(layers[1]!);
+        setSprite2DUvOffset(layers[2]!, 0, [0.25, 0.5]);
+        enableSprite2DInstanceParams(layers[2]!);
+        enableSprite2DInstanceParams(layers[3]!);
+        setSprite2DUvOffset(layers[3]!, 0, [0.25, 0.5]);
+        const pipelines = layers.map((layer) => getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer));
+        expect(new Set(pipelines).size).toBe(4);
+        expect(counters.shaderModules).toBe(3);
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const layouts = device.createRenderPipeline.mock.calls.map((call) => ((call[0] as GPURenderPipelineDescriptor).vertex.buffers as GPUVertexBufferLayout[])[0]!);
+        expect(layouts.map((layout) => layout.arrayStride)).toEqual([52, 68, 76, 76]);
+        expect(layouts.map((layout) => Array.from(layout.attributes).find((attribute) => attribute.shaderLocation === 8)?.offset)).toEqual([undefined, 52, 60, 52]);
+        expect(layouts.map((layout) => Array.from(layout.attributes).find((attribute) => attribute.shaderLocation === 7)?.offset)).toEqual([undefined, undefined, 52, 68]);
+        const codes = device.createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code);
+        expect(codes[0]).not.toContain("instanceParams");
+        expect(codes[1]).toContain("@location(8) instanceParams: vec4f");
+        expect(codes[1]).toContain("@location(2) @interpolate(flat) instanceParams: vec4f");
+        expect(codes[1]).toContain("out.instanceParams = in.instanceParams;");
+        expect(shader._composeWgsl(false, 0, false)).not.toContain("instanceParams");
+        expect(getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layers[1]!)).toBe(pipelines[1]);
+        expect(counters.shaderModules).toBe(3);
+    });
+
+    it("replaces the buffer and pipeline and re-records the bundle when enabled after a pure-2D frame", () => {
+        const { engine, counters } = makeMockEngine();
+        vi.mocked(engine._device.createBuffer, { partial: true }).mockImplementation((descriptor) => Object.assign(mockBuffer(counters), { size: descriptor.size }));
+        const bundleEncoder = {
+            setIndexBuffer: vi.fn(),
+            setPipeline: vi.fn<(pipeline: GPURenderPipeline) => void>(),
+            setBindGroup: vi.fn(),
+            setVertexBuffer: vi.fn<(slot: number, buffer: GPUBuffer) => void>(),
+            drawIndexed: vi.fn(),
+            finish: vi.fn(() => ({}) as GPURenderBundle),
+        };
+        const createBundleEncoder = vi.fn(() => bundleEncoder);
+        Object.assign(engine._device, { createRenderBundleEncoder: createBundleEncoder });
+        Object.assign(engine._currentEncoder, { beginRenderPass: vi.fn(() => ({ executeBundles: vi.fn(), end: vi.fn() })) });
+        const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 2, customShader: createSprite2DCustomShader({ fragment: "return in.tint;" }) });
+        addSprite2DIndex(layer, { positionPx: [10, 10] });
+        addSprite2DIndex(layer, { positionPx: [40, 10] });
+        const sr = createSpriteRenderer(engine, { layers: [layer] });
+        try {
+            sr._update();
+            sr._record();
+            const gpu = sr._layerGpu.get(layer)!;
+            const oldBuffer = gpu.instanceBuffer;
+            const oldPipeline = gpu.pipeline;
+            const oldBundle = gpu.renderBundle;
+            expect(oldBuffer.size).toBe(2 * 52);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(1);
+
+            enableSprite2DInstanceParams(layer);
+            sr._update();
+            expect(oldBuffer.destroy).toHaveBeenCalledOnce();
+            expect(gpu.instanceBuffer).not.toBe(oldBuffer);
+            expect(gpu.instanceBuffer.size).toBe(2 * 68);
+            expect(gpu.renderBundle).toBeNull();
+            sr._record();
+            expect(gpu.pipeline).not.toBe(oldPipeline);
+            expect(gpu.renderBundle).not.toBe(oldBundle);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(2);
+            expect(bundleEncoder.setPipeline).toHaveBeenLastCalledWith(gpu.pipeline);
+            expect(bundleEncoder.setVertexBuffer).toHaveBeenLastCalledWith(0, gpu.instanceBuffer);
+            const descriptor = vi.mocked(engine._device.createRenderPipeline).mock.calls.at(-1)![0];
+            expect(Array.from(descriptor.vertex.buffers!)[0]!.arrayStride).toBe(68);
+
+            const buffers = counters.buffersCreated;
+            const pipelines = counters.pipelinesBuilt;
+            const bundle = gpu.renderBundle;
+            sr._update();
+            sr._record();
+            expect(counters.buffersCreated).toBe(buffers);
+            expect(counters.pipelinesBuilt).toBe(pipelines);
+            expect(gpu.renderBundle).toBe(bundle);
+            expect(createBundleEncoder).toHaveBeenCalledTimes(2);
+        } finally {
+            disposeSpriteRenderer(sr);
+        }
+    });
+
+    it.each(["test", "test-write"] as const)("keeps Z and resource groups unchanged on %s layers", (depth) => {
+        const { engine } = makeMockEngine();
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth, customShader: createSprite2DCustomShader({ fragment: "return in.instanceParams;" }) });
+        enableSprite2DInstanceParams(layer);
+        getOrCreateSpritePipeline(
+            engine,
+            createSpritePipelineCache(),
+            engine.format,
+            1,
+            spriteBlendAlpha,
+            true,
+            depth === "test-write",
+            "depth24plus-stencil8",
+            {} as GPUBindGroupLayout,
+            layer
+        );
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        const layout = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
+        expect(layout.arrayStride).toBe(72);
+        expect(Array.from(layout.attributes).filter((attribute) => attribute.shaderLocation >= 6)).toEqual([
+            { shaderLocation: 6, offset: 52, format: "float32" },
+            { shaderLocation: 8, offset: 56, format: "float32x4" },
+        ]);
+        const code = (device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor).code;
+        expect(code).toContain("@group(1)");
+        expect(code).toContain("vec4f(n, 1 - in.z, 1)");
+    });
+
+    it("recompiles the extended module for a replacement device", () => {
+        const first = makeMockEngine();
+        const second = makeMockEngine();
+        const layer = createSprite2DLayer(makeMockAtlas(), { customShader: createSprite2DCustomShader({ fragment: "return in.instanceParams;" }) });
+        enableSprite2DInstanceParams(layer);
+        const cache = createSpritePipelineCache();
+        const a = getOrCreateSpritePipeline(first.engine, cache, first.engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer);
+        const b = getOrCreateSpritePipeline(second.engine, cache, second.engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer);
+        expect(a).not.toBe(b);
+        expect(first.counters.shaderModules).toBe(1);
+        expect(second.counters.shaderModules).toBe(1);
     });
 });
 
@@ -703,5 +931,129 @@ describe("depth-hosted per-instance Z (slot [13] of the per-instance vertex buff
         // New sprite picks up the new layer default.
         addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10] });
         expect(layer._instanceData[1 * DEPTH_INSTANCE_FLOATS_PER_SPRITE + 13]).toBeCloseTo(0.8);
+    });
+});
+
+describe("shared pipeline cache across SpriteRenderer instances", () => {
+    it("reuses one compiled pipeline for multiple renderers on the same device (same blend mode)", () => {
+        const { engine, counters } = makeMockEngine();
+        const atlas = makeMockAtlas();
+
+        const srA = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+        expect(_spriteRendererPipelineCacheSize(srA)).toBe(1);
+
+        // A second renderer on the same device with an identical blend mode must
+        // hit the shared cache — no additional pipeline compile.
+        const srB = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+        expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srA);
+        disposeSpriteRenderer(srB);
+    });
+
+    it("disposing one renderer does not clear pipelines still needed by another", () => {
+        const { engine, counters } = makeMockEngine();
+        const atlas = makeMockAtlas();
+
+        const srA = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        const srB = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+
+        // Disposing A releases its refcount but must NOT wipe the shared cache
+        // while B is still alive.
+        disposeSpriteRenderer(srA);
+        expect(_spriteRendererPipelineCacheSize(srB)).toBe(1);
+
+        // A new renderer on the same device still reuses the cached pipeline.
+        const srC = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        expect(counters.pipelinesBuilt).toBe(1);
+
+        // Balance the shared-cache refcount so process-wide state doesn't leak across tests.
+        disposeSpriteRenderer(srB);
+        disposeSpriteRenderer(srC);
+    });
+});
+
+describe("disposeSpriteAtlas", () => {
+    function makeDestroyableAtlas(): { atlas: SpriteAtlas; destroy: ReturnType<typeof vi.fn> } {
+        const destroy = vi.fn();
+        const texture = {
+            texture: { destroy } as unknown as GPUTexture,
+            view: {} as GPUTextureView,
+            sampler: {} as GPUSampler,
+            width: 128,
+            height: 128,
+        } satisfies Texture2D;
+        const atlas: SpriteAtlas = {
+            texture,
+            textureSizePx: [128, 128],
+            frames: [{ uvMin: [0, 0], uvMax: [1, 1], sourceSizePx: [128, 128], pivot: [0.5, 0.5] }],
+            premultipliedAlpha: true,
+        };
+        return { atlas, destroy };
+    }
+
+    it("destroys the backing GPU texture", () => {
+        const { atlas, destroy } = makeDestroyableAtlas();
+        disposeSpriteAtlas(atlas);
+        expect(destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("is decoupled from renderer disposal — disposing a SpriteRenderer never frees the atlas texture", () => {
+        const { engine } = makeMockEngine();
+        const { atlas, destroy } = makeDestroyableAtlas();
+        const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha })] });
+        disposeSpriteRenderer(sr);
+        expect(destroy).not.toHaveBeenCalled();
+
+        // The atlas is the caller's to free, and can be shared across renderers.
+        disposeSpriteAtlas(atlas);
+        expect(destroy).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("secondary-surface rendering (multi-canvas)", () => {
+    it("records its render pass into its OWN surface's swapchain, not the engine's primary surface", () => {
+        // Regression: a SpriteRenderer attached to a secondary surface (createSurface)
+        // must target THAT surface's swapchain view — not `engine.scRT._colorView`
+        // (the engine's primary surface). The text renderer already used the per-surface
+        // view; the sprite renderer fell back to the engine's, so with the primary surface
+        // bound to a throwaway offscreen canvas (multi-canvas / shared-engine model), sprites
+        // drew to the offscreen target and the real canvas rendered blank/black.
+        const { engine } = makeMockEngine();
+        const primaryView = engine.scRT._colorView;
+        const secondaryView = { _tag: "secondary-color-view" };
+
+        // Distinct secondary surface: shares the engine/device, owns its own swapchain view.
+        const secondarySurface = {
+            engine,
+            canvas: { width: 640, height: 480 } as HTMLCanvasElement,
+            format: engine.format,
+            _renderingContexts: [],
+            scRT: { _colorView: secondaryView },
+        } as unknown as Parameters<typeof createSpriteRenderer>[0];
+
+        // Capture the color-attachment view handed to beginRenderPass.
+        let capturedView: unknown;
+        const pass = { executeBundles: vi.fn(), end: vi.fn() };
+        (engine as unknown as { _currentEncoder: unknown })._currentEncoder = {
+            beginRenderPass: vi.fn((desc: GPURenderPassDescriptor) => {
+                capturedView = (desc.colorAttachments as GPURenderPassColorAttachment[])[0]?.view;
+                return pass;
+            }),
+        };
+
+        // Clear-only renderer (no layers): the pass opens + clears the target, then ends.
+        const sr = createSpriteRenderer(secondarySurface, { layers: [], clear: true });
+        (sr as unknown as { _record(): number })._record();
+
+        expect(capturedView).toBe(secondaryView);
+        expect(capturedView).not.toBe(primaryView);
+
+        // Balance the shared-cache refcount and free per-renderer GPU resources.
+        disposeSpriteRenderer(sr);
     });
 });

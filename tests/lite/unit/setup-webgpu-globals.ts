@@ -25,6 +25,11 @@ g.GPUBufferUsage ??= {
     QUERY_RESOLVE: 0x0200,
 };
 
+g.GPUMapMode ??= {
+    READ: 0x0001,
+    WRITE: 0x0002,
+};
+
 g.GPUTextureUsage ??= {
     COPY_SRC: 0x01,
     COPY_DST: 0x02,

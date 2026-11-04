@@ -1,6 +1,24 @@
 // Core math types — plain typed objects, not classes.
 // Pure functions operate on these. Data-oriented for GPU buffer packing.
 
+/** 2-component vector (uv, screen-space, 2D scale) */
+export interface Vec2 {
+    x: number;
+    y: number;
+}
+
+/** Mutable axis-aligned bounds in an arbitrary 2D coordinate space. */
+export interface Bounds2D {
+    /** Minimum X coordinate. */
+    minX: number;
+    /** Minimum Y coordinate. */
+    minY: number;
+    /** Maximum X coordinate. */
+    maxX: number;
+    /** Maximum Y coordinate. */
+    maxY: number;
+}
+
 /** 3-component vector (position, direction, color) */
 export interface Vec3 {
     x: number;

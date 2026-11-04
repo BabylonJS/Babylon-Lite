@@ -15,7 +15,7 @@ import "@babylonjs/loaders/glTF";
     const scene = new Scene(engine);
 
     await SceneLoader.AppendAsync(
-        "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/EmissiveStrengthTest/glTF-Binary/",
+        "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/EmissiveStrengthTest/glTF-Binary/",
         "EmissiveStrengthTest.glb",
         scene,
     );

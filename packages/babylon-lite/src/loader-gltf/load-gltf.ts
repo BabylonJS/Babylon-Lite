@@ -2,6 +2,7 @@ import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
 import { computeAabb } from "../math/compute-aabb.js";
+import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
@@ -11,16 +12,20 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, anyPrimitive, needsOrmComposite, TYPE_SIZES } from "./gltf-parser.js";
 import type { AccessorView } from "./gltf-parser.js";
 import type { GltfVb } from "./gltf-interleave.js";
-import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
+import type { GltfImageCache, GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, applyGltfOptInPbrFeatures, uploadTex } from "./gltf-pbr-builder.js";
+import type * as GltfColorNormalize from "./gltf-color-normalize.js";
+import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
+import { _appendEnabledGltfFeatures } from "./gltf-feature-hooks.js";
+import { _rightHanded } from "#coordinate-system";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -29,6 +34,16 @@ type InterleaveModule = typeof import("./gltf-interleave.js");
 let _interleavePromise: Promise<InterleaveModule> | undefined;
 function loadInterleave(): Promise<InterleaveModule> {
     return (_interleavePromise ??= import("./gltf-interleave.js"));
+}
+
+let _gltfFeatureRegistryPromise: Promise<typeof GltfFeatureRegistry> | undefined;
+function importGltfFeatureRegistry(): Promise<typeof GltfFeatureRegistry> {
+    return (_gltfFeatureRegistryPromise ??= import("./gltf-feature-registry.js"));
+}
+
+let _colorNormalizePromise: Promise<typeof GltfColorNormalize> | undefined;
+function importColorNormalize(): Promise<typeof GltfColorNormalize> {
+    return (_colorNormalizePromise ??= import("./gltf-color-normalize.js"));
 }
 
 /** Parsed mesh data ready for GPU upload. */
@@ -46,6 +61,12 @@ export interface GltfMeshData {
     _uv2s: Float32Array | null;
     /** @internal */
     _colors: Float32Array | null;
+    /** @internal Primitive had no NORMAL attribute → flat-shade (glTF spec). */
+    _flatNormal?: boolean;
+    /** @internal Non-triangle-list primitive topology index (1=points, 2=lines,
+     *  3=line-strip, 4=triangle-strip) from the glTF primitive `mode`. Undefined =
+     *  triangle-list (the default). LINE_LOOP/TRIANGLE_FAN are unsupported (so is BJS). */
+    _topology?: number;
     /** @internal */
     _indices: Uint16Array | Uint32Array;
     /** @internal */
@@ -69,17 +90,72 @@ export interface GltfMeshData {
     _decoded?: DecodedPrimitive;
 }
 
+/** Build one tightly-packed glTF mesh, optionally reusing a prior instance's
+ * immutable CPU/GPU geometry. Instance state and object-local bounds stay unique. */
+function buildTightGltfMesh(engine: EngineContext, meshData: GltfMeshData, material: PbrMaterialProps, name: string, source?: Mesh): Mesh {
+    // Object-local box (see `Mesh.boundMin`): do NOT bake `_worldMatrix` in. This mesh is attached as a child
+    // of its glTF node by `buildNodeHierarchy`, so its own `worldMatrix` already reproduces that node's world
+    // transform — baking it here too would make every reader that composes `worldMatrix × bounds` (shadow fit,
+    // thin-instance cull, physics) transform the box a second time.
+    const [boundMin, boundMax] = computeAabb(meshData._positions!);
+    const indices = meshData._indices;
+    const uint32 = indices instanceof U32;
+    const gpu: MeshGPU = source
+        ? source._gpu
+        : ({
+              positionBuffer: createMappedBuffer(engine, meshData._positions!, BU.VERTEX),
+              normalBuffer: createMappedBuffer(engine, meshData._normals!, BU.VERTEX),
+              tangentBuffer: meshData._tangents ? createMappedBuffer(engine, meshData._tangents, BU.VERTEX) : null,
+              uvBuffer: createMappedBuffer(engine, meshData._uvs!, BU.VERTEX),
+              uv2Buffer: meshData._uv2s ? createMappedBuffer(engine, meshData._uv2s, BU.VERTEX) : null,
+              colorBuffer: meshData._colors ? createMappedBuffer(engine, meshData._colors, BU.VERTEX) : null,
+              indexBuffer: createMappedBuffer(engine, indices, BU.INDEX),
+              indexCount: meshData._indexCount,
+              indexFormat: (uint32 ? "uint32" : "uint16") as GPUIndexFormat,
+          } satisfies MeshGPU);
+
+    const mesh = initMeshTransform({
+        name,
+        material,
+        receiveShadows: false,
+        boundMin,
+        boundMax,
+        _gpu: gpu,
+        _flatNormal: meshData._flatNormal,
+    });
+    mesh._cpuPositions = meshData._positions!;
+    mesh._cpuNormals = meshData._normals!;
+    mesh._cpuUvs = meshData._uvs!;
+    mesh._cpuIndices = source ? source._cpuIndices : uint32 ? indices : new U32(indices);
+    engine._dlr?.m(mesh, meshData._uv2s, meshData._tangents, meshData._colors, indices, gpu.indexFormat);
+    return mesh;
+}
+
 /**
- * Load a .glb or .gltf file, parse it, and upload mesh + material data to GPU.
- * Supports both binary GLB and separate .gltf + .bin + image files.
- * Registers a deferred PBR renderable builder.
- * Automatically parses glTF animations if present.
+ * Load a glTF/GLB asset, parse it, and upload mesh + material data to GPU.
+ * Registers a deferred PBR renderable builder and automatically parses glTF
+ * animations if present.
  *
- * Returns a AssetContainer. Pass it to addToScene() which adds the hierarchy,
- * registers animation ticks, and applies any scene-level settings.
+ * Returns an {@link AssetContainer}. Pass it to {@link addToScene} which adds the
+ * hierarchy, registers animation ticks, and applies any scene-level settings.
+ *
+ * The `source` may be either:
+ * - **A URL (`string`)** — fetches the asset. Supports both binary GLB and
+ *   separate `.gltf` + `.bin` + image files; relative `.bin`/image paths are
+ *   resolved against non-`blob:`/`data:` URLs. `blob:` and `data:` URL strings
+ *   have no directory base, so they must be self-contained like raw data.
+ * - **Raw data (`ArrayBuffer` | `Blob`)** — loads from already-loaded local data
+ *   (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is determined from
+ *   the data's magic bytes, not a file extension. Because raw data has no base
+ *   URL it must be self-contained: a GLB, or a glTF whose buffers/images use
+ *   `data:` URIs. A glTF that references external `.bin`/image files by relative
+ *   path can only be loaded from a URL.
+ *
+ * @param engine - The engine to upload GPU resources to.
+ * @param source - A URL string, or the raw `ArrayBuffer`/`Blob` of a self-contained glTF/GLB asset.
  */
-export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer> {
-    const { json, binChunk, baseUrl } = await fetchGltfAsset(url);
+export async function loadGltf(engine: EngineContext, source: string | ArrayBuffer | Blob): Promise<AssetContainer> {
+    const { json, binChunk, baseUrl } = await fetchGltfAsset(source);
 
     // Build parent map + world-matrix cache once for O(n) hierarchy traversal
     const parentMap = buildParentMap(json);
@@ -91,7 +167,9 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // the asset can possibly trigger a feature — so plain metallic-roughness
     // GLBs (no extensions/animations/skins/morphs/ORM-composite) never fetch the
     // registry. Core loader knows zero feature names.
-    const features = assetUsesGltfFeatures(json) ? await (await import("./gltf-feature-registry.js")).loadGltfFeatures(json) : [];
+    const featureRegistry = assetUsesGltfFeatures(json) ? await importGltfFeatureRegistry() : undefined;
+    const features = featureRegistry ? await featureRegistry.loadGltfFeatures(json) : [];
+    _appendEnabledGltfFeatures(json, features);
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
@@ -134,6 +212,7 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
         _parentMap: parentMap,
         _worldMatrixCache: worldMatrixCache,
         _matExts: matExts,
+        _runMatExts: featureRegistry?.runGltfMaterialFeatures,
         _wrapTex: wrapTex,
     };
 
@@ -144,43 +223,62 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     const { root, nodeMap } = buildNodeHierarchy(json, meshes, meshDatas);
     ctx._nodeMap = nodeMap;
 
-    // Run every feature's per-asset hook (animations, variants, …) and merge
-    // the returned AssetContainer fragments. `entities` is appended (never
+    // Run every feature's per-asset hook (animations, variants, metadata, …) and
+    // merge the returned AssetContainer fragments. `entities` is appended (never
     // overwritten) so features like KHR_lights_punctual can contribute lights
-    // without trampling the root TransformNode.
+    // without trampling the root TransformNode. `_sceneSetup` is composed (chained
+    // in feature order) rather than overwritten, so multiple features can each
+    // contribute deferred scene wiring without the last one winning.
     const assetFragments = await Promise.all(features.flatMap((f) => (f.applyAsset ? [f.applyAsset(meshes, root, ctx)] : [])));
     const container: AssetContainer = { entities: [root] };
     for (const frag of assetFragments) {
         if (frag.entities?.length) {
             container.entities.push(...frag.entities);
         }
-        const { entities: _ignored, ...rest } = frag;
+        const { entities: _ignored, _sceneSetup, ...rest } = frag;
         void _ignored;
         Object.assign(container, rest);
+        if (_sceneSetup) {
+            const prev = container._sceneSetup;
+            container._sceneSetup = (scene, target) => {
+                prev?.(scene, target);
+                _sceneSetup(scene, target);
+            };
+        }
     }
     return container;
 }
 
-/** Fetch + parse a .glb or .gltf asset. Returns the JSON, binary chunk, and base URL. */
-async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
-    const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
-    if (url.toLowerCase().endsWith(".glb")) {
-        const buffer = await fetch(url).then((r) => r.arrayBuffer());
-        const { parseGlbContainer } = await import("./gltf-glb-parser.js");
-        const { json, binChunk } = parseGlbContainer(buffer);
-        return { json, binChunk, baseUrl };
+/** Fetch/resolve + parse a glTF or GLB asset from a URL string, ArrayBuffer, or Blob.
+ *  Returns the JSON, binary chunk, and base URL (empty for non-URL sources). */
+async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
+    // Resolve the source to bytes. Only a URL string yields a base URL for resolving external .bin/image
+    // references; ArrayBuffer/Blob and blob:/data: URL inputs are self-contained (GLB, or glTF with data: URIs).
+    const isUrl = typeof source === "string";
+    // Resolve the source to an absolute URL so external .bin / image URIs resolve correctly even when the
+    // caller passes a root-relative ("/models/foo.gltf") or document-relative path — `new URL(uri, base)`
+    // downstream requires an absolute base. Opaque schemes (blob:/data:) cannot be used as a base and
+    // are treated as base-less, so relative resources fail later with the loader's explicit no-base error.
+    let baseUrl = "";
+    if (isUrl) {
+        try {
+            baseUrl = new URL(".", new URL(source, globalThis.location?.href)) + "";
+        } catch {
+            // Opaque schemes (blob:/data:) and relative strings outside DOM contexts have no directory base.
+        }
     }
-    const json = await fetch(url).then((r) => r.json());
-    const bufferDef = json.buffers?.[0];
-    let binChunk: DataView;
-    if (bufferDef?.uri) {
-        const binUrl = new URL(bufferDef.uri, baseUrl + "x").href;
-        const binBuffer = await fetch(binUrl).then((r) => r.arrayBuffer());
-        binChunk = new DV(binBuffer);
-    } else {
-        binChunk = new DV(new ArrayBuffer(0));
+    const buffer = isUrl ? await (await fetch(source)).arrayBuffer() : source instanceof Blob ? await source.arrayBuffer() : source;
+
+    // Classify by the GLB magic ("glTF" = 0x46546c67, little-endian) rather than the URL extension, so
+    // object URLs (blob:…), OPFS handles, and extensionless sources are detected correctly. The length guard
+    // keeps an empty/too-short input failing with the JSON/GLB parse error below, not a DataView RangeError.
+    if (buffer.byteLength >= 4 && new DV(buffer).getUint32(0, true) === 0x46546c67) {
+        const glb = await import("./gltf-glb-parser.js");
+        return { ...glb.parseGlbContainer(buffer), baseUrl };
     }
-    return { json, binChunk, baseUrl };
+
+    const jsonAsset = await import("./gltf-json-asset.js");
+    return jsonAsset.parseGltfJsonAsset(buffer, baseUrl);
 }
 
 /** Cheap superset gate: returns true iff the asset can possibly trigger at least
@@ -190,12 +288,24 @@ async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataV
  *  `loadGltfFeatures` would return `[]` anyway — letting the core loader skip the
  *  registry import entirely and keep its ~24 feature import-thunks out of the
  *  bundle for plain metallic-roughness assets. */
-function assetUsesGltfFeatures(json: any): boolean {
-    return !!(
+function assetUsesGltfFeatures(json: any) {
+    return (
+        // A right-handed engine routes every mesh through the primitive feature (see the registry).
+        _rightHanded ||
         json.extensionsUsed?.length ||
         json.animations?.length ||
+        // "extras" (per-item metadata) or "sparse" (sparse accessor) anywhere in the asset means a
+        // feature module is needed. One stringify covers both — same cheap substring gate as extras.
+        /extras|sparse/.test(JSON.stringify(json)) ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
+        // A node with a negative-determinant local transform (odd negative scale, or a `matrix`
+        // with negative 3x3 determinant) may need the negative-winding feature. This mirrors the
+        // registry's `hasNegDetNode` predicate so a positive-determinant `matrix` node — extremely
+        // common, e.g. TextureSettingsTest — does NOT needlessly pull the feature registry.
+        (json.nodes as any[] | undefined)?.some((n: any) => (n.scale ? n.scale[0] * n.scale[1] * n.scale[2] < 0 : n.matrix ? mat4Determinant3(n.matrix) < 0 : false)) ||
+        // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP).
+        anyPrimitive(json, (p) => p.mode !== undefined && p.mode !== 4) ||
         needsOrmComposite(json)
     );
 }
@@ -210,15 +320,10 @@ function assetUsesGltfFeatures(json: any): boolean {
  *  (KHR_node_visibility, KHR_animation_pointer) to address specific nodes. */
 function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]): { root: TransformNode; nodeMap: (TransformNode | undefined)[] } {
     // Map nodeIndex → uploaded Mesh[]
-    const nodeToMeshes = new Map<number, Mesh[]>();
+    const nodeToMeshes: Mesh[][] = [];
     for (let i = 0; i < meshDatas.length; i++) {
         const ni = meshDatas[i]!._nodeIndex;
-        let arr = nodeToMeshes.get(ni);
-        if (!arr) {
-            arr = [];
-            nodeToMeshes.set(ni, arr);
-        }
-        arr.push(meshes[i]!);
+        (nodeToMeshes[ni] ??= []).push(meshes[i]!);
     }
 
     const nodeMap: (TransformNode | undefined)[] = new Array(json.nodes?.length ?? 0);
@@ -242,16 +347,17 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
                 tn.children.push(buildNode(childIdx));
             }
         }
-        const nodeMeshes = nodeToMeshes.get(nodeIdx) ?? [];
+        const nodeMeshes = nodeToMeshes[nodeIdx] ?? [];
         tn.children.push(...nodeMeshes);
         return tn;
     }
 
     // Synthetic root (like BJS __root__) — applies RH→LH conversion via scale
-    // BJS: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1, 1, 1, 1)
+    // BJS: rotation [0,1,0,0] + scale [1,1,-1] = diag(-1, 1, 1, 1). A right-handed engine keeps glTF's
+    // native space, so its root is the identity (BJS adds no root conversion either).
     const sceneRoots: number[] = json.scenes?.[json.scene ?? 0]?.nodes ?? [];
     const rootChildren = sceneRoots.map((ni: number) => buildNode(ni));
-    const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+    const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, _rightHanded ? 1 : -1, 1, 1);
     root.children.push(...rootChildren);
     return { root, nodeMap };
 }
@@ -267,18 +373,13 @@ async function extractAllMeshes(
     decodedPrimitives: Map<unknown, DecodedPrimitive>
 ): Promise<GltfMeshData[]> {
     // Per-load image cache — avoids decoding the same glTF image index multiple times
-    const imageCache = new Map<number, Promise<ImageBitmap>>();
+    const imageCache: GltfImageCache = [];
 
     // Cache material assembly by glTF material index — avoids duplicate image fetches
-    const matCache = new Map<number, Promise<GltfMaterialData>>();
-    const getMat = (matIdx: number): Promise<GltfMaterialData> => {
-        const key = matIdx ?? -1;
-        let p = matCache.get(key);
-        if (!p) {
-            p = assembleMaterial(json, binChunk, matIdx, baseUrl, imageCache);
-            matCache.set(key, p);
-        }
-        return p;
+    const matCache: Promise<GltfMaterialData>[] = [];
+    const getMat = (matIdx: number | undefined): Promise<GltfMaterialData> => {
+        const key = (matIdx ?? -1) + 1;
+        return (matCache[key] ??= assembleMaterial(json, binChunk, key - 1, baseUrl, imageCache));
     };
 
     // First pass: do all sync work, fire all material fetches concurrently
@@ -313,10 +414,12 @@ async function extractAllMeshes(
             continue;
         }
 
-        const mesh = json.meshes[node.mesh];
+        const meshIndex = node.mesh as number;
+        const mesh = json.meshes[meshIndex];
         const worldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
 
-        for (const primitive of mesh.primitives) {
+        for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
+            const primitive = mesh.primitives[primitiveIndex];
             const attrs = primitive.attributes;
             const decoded = decodedPrimitives.get(primitive);
 
@@ -326,7 +429,7 @@ async function extractAllMeshes(
             // first need — non-interleaved assets never fetch it. Tight primitives
             // fall through to the path below (byte-identical to non-interleaved).
             if (!decoded && _strided(primitive)) {
-                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
+                const ip = await (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
                 if (ip) {
                     matPromises.push(getMat(primitive.material));
                     partials.push(ip);
@@ -358,12 +461,29 @@ async function extractAllMeshes(
                   : null;
             const normalsHelper = !idxData || !normData ? await import("./gltf-normals.js") : null;
             // glTF COLOR_0 may be VEC3 or VEC4 with float, normalized ubyte, or normalized
-            // ushort components, but the PBR/standard pipelines bind vertex color as a single
-            // float32x3 layout. Normalize any source to a tight float32 RGB buffer so the GPU
-            // stride matches the layout (otherwise every vertex misaligns -> garbage/black).
+            // ushort components, but the PBR pipeline binds vertex color as a single
+            // float32x4 layout (rgb modulates base color, a modulates alpha). Normalize any
+            // source to a tight float32 RGBA buffer so the GPU stride matches the layout
+            // (otherwise every vertex misaligns -> garbage/black); a VEC3 source gets a=1.
             // The normalizer is imported lazily on first need — colorless assets never fetch it
             // (the runtime caches the module, so the per-primitive import() resolves instantly).
-            const colors = colorData ? (await import("./gltf-color-normalize.js")).normalizeColorToVec3(colorData._data, colorData._count, colorData._componentCount) : null;
+            const colors = colorData ? (await importColorNormalize()).normalizeColorToVec4(colorData._data, colorData._count, colorData._componentCount) : null;
+
+            // TEXCOORD_0/_1 may be FLOAT or a normalized UNSIGNED_BYTE/SHORT accessor; the vertex
+            // pipeline binds UVs as float32x2, so integer UVs are denormalized to [0,1] (reusing the
+            // lazily-imported color/UV normalizer). Float UVs (the common case) pass through untouched.
+            // (KHR_mesh_quantization's UNNORMALIZED integer TEXCOORD never reaches here — it's
+            // rewritten to FLOAT upstream by gltf-ext-quantization.ts's preParse.)
+            const uvs = uvData
+                ? uvData._data instanceof F32
+                    ? (uvData._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uvData._data, uvData._count)
+                : new F32(posData._count * 2);
+            const uv2s = uv2Data
+                ? uv2Data._data instanceof F32
+                    ? (uv2Data._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uv2Data._data, uv2Data._count)
+                : null;
 
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
@@ -385,9 +505,10 @@ async function extractAllMeshes(
                 _positions: posData._data as Float32Array,
                 _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
-                _uvs: uvData ? (uvData._data as Float32Array) : new F32(posData._count * 2),
-                _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
+                _uvs: uvs,
+                _uv2s: uv2s,
                 _colors: colors,
+                _flatNormal: !normData,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: indices.length,
@@ -417,6 +538,7 @@ async function ensureMipmapModule(): Promise<void> {
 
 async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], ctx: GltfLoadCtx): Promise<Mesh[]> {
     const { _engine: engine, _json: json, _binChunk: binChunk, _baseUrl: baseUrl, _matExts: matExts, _wrapTex: wrapTex } = ctx;
+    // Default sampler (repeat/linear) used for factor textures and when a texture has no glTF sampler.
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
@@ -425,31 +547,41 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         addressModeV: "repeat",
         maxAnisotropy: 4,
     });
+    // Per-texture glTF samplers (wrap/filter) are honored only when the asset declares a
+    // NON-default sampler (clamp/mirror wrap, or nearest filtering); the common case
+    // (default repeat/linear) uses the single shared sampler above and the master-identical
+    // buildDefaultPbrTextures path. Both the descriptor logic AND the sampler-aware texture
+    // builder are lazy so default-sampler assets pay zero bundle bytes for the feature.
+    let samplerFor: ((texInfo: any) => GPUSampler) | undefined;
+    let buildSampledPbrTextures: typeof import("./gltf-sampler-desc.js").buildSampledPbrTextures | undefined;
+    if (json.samplers?.some((s: any) => s.wrapS > 10497 || s.wrapT > 10497 || s.magFilter === 9728 || (s.minFilter != null && s.minFilter !== 9729 && s.minFilter !== 9987))) {
+        const mod = await import("./gltf-sampler-desc.js");
+        samplerFor = mod.makeSamplerFor(engine, json, sampler);
+        buildSampledPbrTextures = mod.buildSampledPbrTextures;
+    }
 
     await ensureMipmapModule();
     const meshFeatures = features.filter((f) => f.applyMesh);
 
-    // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb)
-    const texCache = new Map<number, Texture2D>();
-    let texId = 0;
-    const bitmapIds = new Map<ImageBitmap, number>();
+    // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb).
+    const texCache = new Map<ImageBitmap, Texture2D[]>();
 
-    function getCachedTexture(bitmap: ImageBitmap, srgb: boolean): Texture2D {
-        let id = bitmapIds.get(bitmap);
-        if (id === undefined) {
-            bitmapIds.set(bitmap, (id = texId++));
+    const getCachedTexture = (bitmap: ImageBitmap, srgb: boolean): Texture2D => {
+        let textures = texCache.get(bitmap);
+        if (!textures) {
+            texCache.set(bitmap, (textures = []));
         }
-        const key = id * 2 + +srgb;
-        let tex = texCache.get(key);
+        const key = +srgb;
+        let tex = textures[key];
         if (!tex) {
             tex = uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!);
-            texCache.set(key, tex);
+            textures[key] = tex;
         }
         return tex;
-    }
+    };
 
     // Per-load image fetcher for ext modules (uses same image cache as core).
-    const extImageCache = matExts.length ? new Map<number, Promise<ImageBitmap>>() : null;
+    const extImageCache: GltfImageCache | null = matExts.length ? [] : null;
     const extFetchImg = extImageCache ? makeImageFetcher(json, binChunk, baseUrl, extImageCache) : null;
     const extCtx: GltfMatExtCtx = {
         _engine: engine,
@@ -484,78 +616,58 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     // Build a PbrMaterialProps from parsed glTF material data.
     // Uses shared texture caches so identical bitmaps are uploaded once.
     const builtMaterialCache = new Map<GltfMaterialData, Promise<PbrMaterialProps>>();
-    async function buildPbrFromGltfMat(mat: GltfMaterialData): Promise<PbrMaterialProps> {
+    const buildPbrFromGltfMat = (mat: GltfMaterialData): Promise<PbrMaterialProps> => {
         let cached = builtMaterialCache.get(mat);
-        if (cached) {
-            return cached;
+        if (!cached) {
+            cached = (async () => {
+                const extLayers = matExts.length ? await ctx._runMatExts!(mat, matExts, extCtx) : undefined;
+                let props: PbrMaterialProps;
+                if (_needsPbrExt) {
+                    const extMod = await _ensurePbrExt();
+                    const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex, extLayers, samplerFor);
+                    props = extMod.assemblePbrPropsExt(mat, tex, extLayers);
+                    // UV-transform is opt-in; the gate and its conditional import live in the ext
+                    // module so the import plumbing is not emitted into this file, which every
+                    // glTF scene loads. Applied before emissive to keep the ext registration
+                    // order identical to when both lived inside assemblePbrPropsExt.
+                    await extMod.applyGltfUvTransform(props, tex);
+                } else {
+                    const tex = buildSampledPbrTextures
+                        ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture, extLayers)
+                        : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture, extLayers);
+                    props = assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+                }
+                // Opt-in PBR features decided from the glTF material data (emissive,
+                // alpha-test). Shared with the variants loader so the gates can't drift.
+                await applyGltfOptInPbrFeatures(props, mat);
+                return props;
+            })();
+            builtMaterialCache.set(mat, cached);
         }
-        cached = (async () => {
-            const extLayers = await runMatExts(mat, matExts, extCtx);
-            if (_needsPbrExt) {
-                const extMod = await _ensurePbrExt();
-                const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex);
-                return extMod.assemblePbrPropsExt(mat, tex, extLayers);
-            }
-            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
-            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
-        })();
-        builtMaterialCache.set(mat, cached);
         return cached;
+    };
+
+    if (new Set(meshDatas.map((m) => m._primitive)).size < meshDatas.length) {
+        return import("./gltf-share.js").then((module) => module.share(meshDatas, buildPbrFromGltfMat, buildTightGltfMesh, meshFeatures, ctx));
     }
 
-    const meshes = await Promise.all(
+    return Promise.all(
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m._material);
+            const meshName = json.meshes[json.nodes[m._nodeIndex].mesh].name || `gltf_mesh_${i}`;
 
             // Interleaved meshes are fully built by the dynamic module (kept out of
             // this bundle for non-interleaved scenes). The tight path below is
             // byte-identical to the non-interleaved engine.
-            let mesh: Mesh;
-            if (m._vb) {
-                mesh = (await loadInterleave()).buildInterleavedMesh(engine, m, i, material) as Mesh;
-            } else {
-                const [boundMin, boundMax] = computeAabb(m._positions!, m._worldMatrix);
-                const gpu: MeshGPU = {
-                    positionBuffer: createMappedBuffer(engine, m._positions!, BU.VERTEX),
-                    normalBuffer: createMappedBuffer(engine, m._normals!, BU.VERTEX),
-                    tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, BU.VERTEX) : null,
-                    uvBuffer: createMappedBuffer(engine, m._uvs!, BU.VERTEX),
-                    uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, BU.VERTEX) : null,
-                    colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, BU.VERTEX) : null,
-                    indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
-                    indexCount: m._indexCount,
-                    indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
-                };
-
-                mesh = {
-                    name: `gltf_mesh_${i}`,
-                    material,
-                    receiveShadows: false,
-                    boundMin,
-                    boundMax,
-                    skeleton: null,
-                    morphTargets: null,
-                    _gpu: gpu,
-                } as unknown as Mesh;
-                initMeshTransform(mesh);
-
-                // Retain CPU geometry for detailed picking.
-                mesh._cpuPositions = m._positions!;
-                mesh._cpuNormals = m._normals!;
-                mesh._cpuUvs = m._uvs!;
-                mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
-                engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
-            }
-
-            // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
-            // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).
-            if (meshFeatures.length > 0) {
-                await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
-            }
-
+            const mesh = m._vb ? (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) : buildTightGltfMesh(engine, m, material, meshName);
+            // glTF geometry is authored for the negative-determinant space created by the RH→LH
+            // `__root__` flip, so an ordinary glTF mesh has a NEGATIVE world determinant. The
+            // mirrored-mesh opt-in reverses winding for meshes whose CURRENT determinant disagrees
+            // with this. Set here rather than inside a builder so the tight and interleaved paths
+            // are both covered (gltf-share.ts marks its own meshes for the shared-geometry path).
+            mesh._authoredSign = -1;
+            await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
             return mesh;
         })
     );
-
-    return meshes;
 }

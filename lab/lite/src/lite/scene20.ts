@@ -1,7 +1,7 @@
 // Scene 20: PBR Emissive Spheres Grid — 2500 spheres with random emissive colors
 // Based on playground #6HWS9M#85 (without performancePriority)
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, createSphere, createPbrMaterial, createSolidTexture2D, loadEnvironment, createHemisphericLight, setParent, registerScene } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, createSphere, createPbrMaterial, setPbrEmissive, createSolidTexture2D, loadEnvironment, createHemisphericLight, setParent, registerScene } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
 
 // Seeded PRNG for deterministic positions/colors across BJS and Lite
@@ -42,15 +42,14 @@ async function main(): Promise<void> {
         const r = random(),
             g = random(),
             b = random();
-        // Use float emissiveColor uniform — matches BJS PBRMaterial.emissiveColor (no 8-bit quantization)
-        materials.push(
-            createPbrMaterial({
-                baseColorTexture: baseColorTex,
-                ormTexture: ormTex,
-                emissiveColor: [r, g, b],
-                reflectance: 1.0,
-            })
-        );
+        // Use a float emissive uniform — matches BJS PBRMaterial.emissiveColor (no 8-bit quantization)
+        const sphereMat = createPbrMaterial({
+            baseColorTexture: baseColorTex,
+            ormTexture: ormTex,
+            reflectance: 1.0,
+        });
+        setPbrEmissive(sphereMat, [r, g, b]);
+        materials.push(sphereMat);
     }
 
     // Create 2500 spheres with random positions

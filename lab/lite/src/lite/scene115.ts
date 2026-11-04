@@ -18,7 +18,7 @@ import {
     getPickedNormal,
     goToFrame,
     loadGltf,
-    normalizeVec3,
+    normalizeVec3TupleOrUp,
     onBeforeRender,
     pauseAnimation,
     pickAsync,
@@ -68,10 +68,10 @@ function cross(a: Vec3Tuple, b: Vec3Tuple): Vec3Tuple {
 }
 
 function computeNormalBasisQuaternion(normal: Vec3Tuple): QuatTuple {
-    const yAxis = normalizeVec3(normal[0], normal[1], normal[2], 1e-8);
+    const yAxis = normalizeVec3TupleOrUp(normal[0], normal[1], normal[2], 1e-8);
     const reference: Vec3Tuple = Math.abs(yAxis[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
     const xBasis = cross(reference, yAxis);
-    const xAxis = normalizeVec3(xBasis[0], xBasis[1], xBasis[2], 1e-8);
+    const xAxis = normalizeVec3TupleOrUp(xBasis[0], xBasis[1], xBasis[2], 1e-8);
     const zAxis = cross(xAxis, yAxis);
 
     const m00 = xAxis[0];
@@ -163,7 +163,7 @@ function placeMarkers(info: PickingInfo, surfaceMarker: Mesh, normalMarker: Mesh
 
     const point = info.pickedPoint;
     const visualPoint = snapPickPoint(point);
-    const normal = getPickedNormal(info, true) ?? normalizeVec3(visualPoint[0], visualPoint[1], visualPoint[2], 1e-8);
+    const normal = getPickedNormal(info, true) ?? normalizeVec3TupleOrUp(visualPoint[0], visualPoint[1], visualPoint[2], 1e-8);
     surfaceMarker.position.set(visualPoint[0] + normal[0] * SURFACE_MARKER_OFFSET, visualPoint[1] + normal[1] * SURFACE_MARKER_OFFSET, visualPoint[2] + normal[2] * SURFACE_MARKER_OFFSET);
 
     normalMarker.position.set(visualPoint[0] + normal[0] * NORMAL_MARKER_OFFSET, visualPoint[1] + normal[1] * NORMAL_MARKER_OFFSET, visualPoint[2] + normal[2] * NORMAL_MARKER_OFFSET);

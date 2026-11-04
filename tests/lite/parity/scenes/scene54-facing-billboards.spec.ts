@@ -5,7 +5,7 @@
  * against Babylon.js SpriteManager using the same atlas, world positions,
  * sizes, colors, rotations, and depth-tested transparent composition.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
