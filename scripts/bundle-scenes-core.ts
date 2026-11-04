@@ -1379,13 +1379,15 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
 }
 
 /** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
- *  `--software` flag is passed; otherwise the real GPU (SwiftShader is far slower, and
- *  several heavy scenes never reach `dataset.ready` under it on Windows).
+ *  `--software` flag is passed; otherwise the real GPU. Windows uses Dawn's explicit
+ *  software-adapter selector: forcing Chromium's Vulkan compositor there hides all adapters.
  *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
     const swiftShaderArgs =
         process.env.CI || softwareRenderRequested()
-            ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+            ? process.platform === "win32"
+                ? ["--use-webgpu-adapter=swiftshader"]
+                : ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
             : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
@@ -1701,7 +1703,7 @@ function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<strin
 /** How many times to attempt measuring a single Lite scene before giving up. */
 const LITE_MEASURE_ATTEMPTS = 3;
 
-/** Default budget for a Lite scene to reach its `dataset.ready` signal. */
+/** Default budget for a Lite scene to reach its explicit render-readiness signal. */
 const READY_TIMEOUT_MS_DEFAULT = 50_000;
 
 /**
@@ -1728,11 +1730,6 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
  * entire recovery path from this scene's recorded size — so that work cannot be moved
  * outside the measured window.
  *
- * scene348 (SSAO Kitchen) deliberately waits for frame 144: it resets temporal
- * history at frame 16, then renders two complete 64-frame noise cycles before
- * freezing. Those frames are substantially slower under SwiftShader. Keep that
- * readiness contract intact and allow 180s rather than measuring before convergence.
- *
  * Recording a size only once the scene renders is intentional (the render
  * pipeline's lazy chunks load on first render), so the right fix is a larger
  * budget for these scenes rather than measuring a truncated bundle. We grant the
@@ -1742,7 +1739,6 @@ const READY_TIMEOUT_MS_DEFAULT = 50_000;
 const READY_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
     scene129: 150_000,
     scene164: 150_000,
-    scene348: 180_000,
 };
 
 /** @internal Shared with focused tests of the measurement readiness budgets. */
@@ -1994,6 +1990,8 @@ export async function measurePage(
     const chunkFiles: string[] = [];
     const responseReads: Promise<void>[] = [];
     const responseReadErrors: unknown[] = [];
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error: Error) => pageErrors.push(error.message));
 
     page.on("response", (resp: any) => {
         const url = resp.url();
@@ -2013,21 +2011,22 @@ export async function measurePage(
 
     await installAssetCacheRoute(page, port);
     await page.goto(`http://localhost:${port}/${htmlFile}`);
-    // Resolve as soon as the scene finishes (dataset.ready) OR reports a fatal
-    // error (dataset.error), so a fast-failing scene doesn't burn the full timeout.
+    // bundleReady explicitly means all size-relevant code has rendered, independently
+    // of visual convergence. Scenes without that signal keep their existing ready contract.
     let notReadyReason: string | undefined;
     try {
         await page.waitForFunction(
             () => {
                 const c = document.querySelector("canvas");
-                return c?.dataset.ready === "true" || c?.dataset.error != null;
+                return c?.dataset.bundleReady === "true" || c?.dataset.ready === "true" || c?.dataset.error != null;
             },
             undefined,
             { timeout: readyTimeoutMs }
         );
         notReadyReason = await page.evaluate(() => {
             const c = document.querySelector("canvas");
-            if (c?.dataset.ready === "true") return undefined;
+            if (c?.dataset.error != null) return c.dataset.error;
+            if (c?.dataset.bundleReady === "true" || c?.dataset.ready === "true") return undefined;
             return c?.dataset.error ?? "canvas reported neither ready nor error";
         });
     } catch (err) {
@@ -2040,6 +2039,9 @@ export async function measurePage(
         }
         // waitForFunction timed out: the scene set neither ready nor error.
         notReadyReason = `timed out after ${Math.round(readyTimeoutMs / 1000)}s waiting for canvas ready/error signal`;
+        if (pageErrors.length) {
+            notReadyReason += `; uncaught page errors: ${pageErrors.join("; ")}`;
+        }
     }
 
     // For Lite scenes (requireReady), a scene that never rendered would under-count

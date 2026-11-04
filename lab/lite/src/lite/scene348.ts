@@ -27,6 +27,7 @@ import {
     resetSsaoTemporal,
     startEngine,
     stopEngine,
+    waitForGpuIdle,
 } from "babylon-lite";
 import { KITCHEN_ASSET_URL } from "../shared/kitchen-asset.js";
 
@@ -90,6 +91,8 @@ async function main(): Promise<void> {
     });
     await registerScene(scene);
     await startEngine(engine);
+    await waitForGpuIdle(engine);
+    canvas.dataset.bundleReady = "true";
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     if (interactive) {
         canvas.dataset.ready = "true";
