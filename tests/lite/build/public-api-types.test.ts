@@ -1367,9 +1367,8 @@ void [current, ready];
         expect(dts).not.toContain("_renderingContextKind");
         expect(dts).not.toMatch(/^\s*_renderingContexts:/m);
         expect(dts).not.toMatch(/^\s*_overlayBase\??:/m);
-        expect(dts).not.toContain("_installOverlayRegistration");
-        expect(dts).not.toMatch(/^\s*_sceneOverlayChanged\??:/m);
-        expect(dts).not.toContain("_installSwapchainOverlayHookLookup");
+        expect(dts).not.toMatch(/^\s*_overlayConfigured\??:/m);
+        expect(dts).not.toContain("_installOverlaySceneRegistration");
         expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
     });
 

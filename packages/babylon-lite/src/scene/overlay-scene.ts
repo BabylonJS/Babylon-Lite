@@ -2,8 +2,8 @@ import type { RenderingContext } from "../engine/engine.js";
 import { isRenderingContextRegistered } from "../engine/engine.js";
 import { moveRenderingContext } from "../engine/rendering-context-order.js";
 import type { SceneContext } from "./scene-core.js";
-import { _installOverlayRegistration, createSceneContext } from "./scene-core.js";
-import { retargetSwapchainOverlay } from "./overlay-lifecycle.js";
+import { _installOverlaySceneRegistration, createSceneContext } from "./scene-core.js";
+import { configureSwapchainOverlayScene } from "./swapchain-overlay.js";
 
 function isOverlayDescendant(context: RenderingContext, base: SceneContext): boolean {
     let parent = (context as Partial<SceneContext>)._overlayBase;
@@ -58,18 +58,14 @@ function isSuspended(scene: SceneContext): boolean {
     return !!base;
 }
 
-/** Prepare any scene for registration once explicit overlay scenes exist. */
-function prepareRegistration(scene: SceneContext, orderOrdinary: (() => void) | undefined): () => void {
+/** Configure a newly inserted overlay once, then regroup the scene's overlay tree. */
+function sceneRegistered(scene: SceneContext): void {
     const base = scene._overlayBase;
-    if (base && !scene._z && !isRenderingContextRegistered(scene.surface, scene)) {
-        retargetSwapchainOverlay(scene.surface, scene, base);
+    if (base && !scene._overlayConfigured) {
+        scene._overlayConfigured = true;
+        configureSwapchainOverlayScene(scene);
     }
-    return () => {
-        orderOrdinary?.();
-        moveSwapchainOverlaysAfterBase(base ?? scene);
-        // Ordinary scenes may now have a different nearest active base.
-        scene.surface.engine._sceneOverlayChanged?.(scene, false);
-    };
+    moveSwapchainOverlaysAfterBase(base ?? scene);
 }
 
 /**
@@ -88,7 +84,7 @@ export function createOverlayScene(baseScene: SceneContext): SceneContext {
     const scene = createSceneContext(baseScene.surface);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 0 };
     scene._overlayBase = baseScene;
-    _installOverlayRegistration(prepareRegistration);
+    _installOverlaySceneRegistration(sceneRegistered);
 
     const update = scene._update;
     const record = scene._record;

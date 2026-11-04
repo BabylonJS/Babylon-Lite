@@ -82,12 +82,6 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
     return eng;
 }
 
-/** Ordinary-scene removal is reconciled by a lazily imported module; wait for it to apply. */
-async function settleOverlayReconciliation(): Promise<void> {
-    await import("../../../packages/babylon-lite/src/scene/auto-overlay-reconcile");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 function makeRenderingContext(): RenderingContext {
     return {
         _kind: "test",
@@ -171,10 +165,10 @@ describe("registerScene / unregisterScene", () => {
         expect(list).toEqual([]);
     });
 
-    it.each([1, 4])("does not reconfigure a scene when registrations overlap at MSAA %i", async (samples) => {
+    it.each([1, 4])("does not reconfigure an overlay scene when registrations overlap at MSAA %i", async (samples) => {
         const engine = makeMockEngine(samples);
         const first = createSceneContext(engine);
-        const second = createSceneContext(engine);
+        const second = createOverlayScene(first);
         await registerScene(first);
         let finish!: () => void;
         const pending = new Promise<void>((resolve) => (finish = resolve));
@@ -190,29 +184,25 @@ describe("registerScene / unregisterScene", () => {
         expect((second._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(false);
     });
 
-    it.each([1, 4])("places an ordinary scene after the latest scene and before non-scene contexts at MSAA %i", async (samples) => {
+    it.each([1, 4])("appends and clears an ordinary scene registered after another scene at MSAA %i", async (samples) => {
         const engine = makeMockEngine(samples);
         const first = createSceneContext(engine);
         const second = createSceneContext(engine);
         const third = createSceneContext(engine);
         const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-        const unrelated = { ...makeRenderingContext(), _kind: "frame-graph-context", _frameGraph: { _tasks: [] } };
 
         await registerScene(first);
         await registerScene(second);
-        const secondTask = second._frameGraph._tasks[0] as RenderTaskBase;
-        const secondView = {} as GPUTextureView;
-        secondTask._colorAttachment.view = secondView;
         registerRenderingContext(engine, text);
-        registerRenderingContext(engine, unrelated);
         await registerScene(third);
 
-        expect(getRenderingContexts(engine)).toEqual([first, second, third, text, unrelated]);
-        third._update();
-        const thirdTask = third._frameGraph._tasks[0] as RenderTaskBase;
-        expect(thirdTask._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(thirdTask._colorAttachment.view).toBe(secondView);
+        expect(getRenderingContexts(engine)).toEqual([first, second, text, third]);
+        for (const scene of [second, third]) {
+            scene._update();
+            const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+            expect(task._config.clr).toBe(true);
+            expect(task._colorAttachment.view).toBe(task._config.rt._colorView);
+            expect(scene._beforeRender).toHaveLength(0);
         }
     });
 
@@ -230,308 +220,10 @@ describe("registerScene / unregisterScene", () => {
         expect(scene._beforeRender).toHaveLength(0);
     });
 
-    it.each([1, 4])("keeps inferred overlay ordering and retargeting on each scene's own surface at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const secondary = makeMockEngine(samples);
-        Object.assign(secondary, { engine });
-        const first = createSceneContext(engine);
-        const overlay = createSceneContext(engine);
-        const secondaryFirst = createSceneContext(secondary);
-        const secondaryOverlay = createSceneContext(secondary);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-        const secondaryText = { ...makeRenderingContext(), _kind: "text-renderer" };
-
-        await registerScene(first);
-        registerRenderingContext(engine, text);
-        await registerScene(secondaryFirst);
-        registerRenderingContext(secondary, secondaryText);
-        await registerScene(overlay);
-        await registerScene(secondaryOverlay);
-        expect(getRenderingContexts(engine)).toEqual([first, overlay, text]);
-        expect(getRenderingContexts(secondary)).toEqual([secondaryFirst, secondaryOverlay, secondaryText]);
-
-        unregisterScene(first);
-        await settleOverlayReconciliation();
-        secondaryOverlay._update();
-        expect((overlay._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(true);
-        const secondaryTask = secondaryOverlay._frameGraph._tasks[0] as RenderTaskBase;
-        expect(secondaryTask._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(secondaryTask._colorAttachment.view).toBe((secondaryFirst._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-    });
-
-    it.each([1, 4])("reorders a generic overlay when re-registered after a non-scene context at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const first = createSceneContext(engine);
-        const second = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-        await registerScene(first);
-        await registerScene(second);
-        second._update();
-        const task = second._frameGraph._tasks[0] as RenderTaskBase;
-        const callbackCount = second._beforeRender.length;
-        expect(task._config.clr).toBe(false);
-        registerRenderingContext(engine, text);
-
-        unregisterScene(second);
-        await registerScene(second);
-        second._update();
-
-        expect(getRenderingContexts(engine)).toEqual([first, second, text]);
-        expect(task._config.clr).toBe(false);
-        expect(second._beforeRender).toHaveLength(callbackCount);
-    });
-
-    it.each([1, 4])("restores a former ordinary overlay when no earlier scene remains at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const first = createSceneContext(engine);
-        const overlay = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-        const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
-
-        await registerScene(first);
-        await registerScene(overlay);
-        overlay._update();
-        expect(task._config.clr).toBe(false);
-        unregisterScene(overlay);
-        unregisterScene(first);
-        registerRenderingContext(engine, text);
-        await registerScene(overlay);
-        expect(getRenderingContexts(engine)).toEqual([text, overlay]);
-        expect(task._config.clr).toBe(true);
-        expect(overlay._beforeRender).toHaveLength(0);
-
-        unregisterScene(overlay);
-        unregisterRenderingContext(engine, text);
-        await registerScene(first);
-        await registerScene(overlay);
-        unregisterScene(overlay);
-        unregisterScene(first);
-        await registerScene(overlay);
-        expect(getRenderingContexts(engine)).toEqual([overlay]);
-        expect(task._config.clr).toBe(true);
-        expect(overlay._beforeRender).toHaveLength(0);
-    });
-
-    it.each([1, 4])("retargets ordinary overlays when a base is removed and re-registered at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const first = createSceneContext(engine);
-        const middle = createSceneContext(engine);
-        const last = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-
-        await registerScene(first);
-        await registerScene(middle);
-        await registerScene(last);
-        registerRenderingContext(engine, text);
-        middle._update();
-        last._update();
-
-        const middleTask = middle._frameGraph._tasks[0] as RenderTaskBase;
-        const lastTask = last._frameGraph._tasks[0] as RenderTaskBase;
-        unregisterScene(middle);
-        await settleOverlayReconciliation();
-        last._update();
-        expect(getRenderingContexts(engine)).toEqual([first, last, text]);
-        expect(lastTask._config.clr).toBe(false);
-        expect(middleTask._config.clr).toBe(true);
-        expect(middle._beforeRender).toHaveLength(0);
-        if (samples > 1) {
-            expect(lastTask._colorAttachment.view).toBe((first._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-            expect(middleTask._colorAttachment.view).toBe(middleTask._config.rt._colorView);
-        }
-
-        await registerScene(middle);
-        last._update();
-        middle._update();
-        expect(getRenderingContexts(engine)).toEqual([first, last, middle, text]);
-        expect(middleTask._config.clr).toBe(false);
-        expect(lastTask._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(middleTask._colorAttachment.view).toBe(lastTask._colorAttachment.view);
-            expect(middle._beforeRender).toHaveLength(1);
-            expect(last._beforeRender).toHaveLength(1);
-        }
-    });
-
-    it.each([1, 4])("restores an ordinary scene when its base is unregistered or disposed at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const first = createSceneContext(engine);
-        const middle = createSceneContext(engine);
-        const last = createSceneContext(engine);
-        await registerScene(first);
-        await registerScene(middle);
-        await registerScene(last);
-        middle._update();
-        last._update();
-
-        const middleTask = middle._frameGraph._tasks[0] as RenderTaskBase;
-        const lastTask = last._frameGraph._tasks[0] as RenderTaskBase;
-        const replacementView = {} as GPUTextureView;
-        if (samples > 1) {
-            middleTask._config.rt._colorView = replacementView;
-        }
-        unregisterScene(first);
-        await settleOverlayReconciliation();
-        expect(middleTask._config.clr).toBe(true);
-        expect(middle._beforeRender).toHaveLength(0);
-        if (samples > 1) {
-            expect(middleTask._colorAttachment.view).toBe(replacementView);
-        }
-        last._update();
-        expect(lastTask._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(lastTask._colorAttachment.view).toBe(middleTask._colorAttachment.view);
-        }
-
-        disposeScene(middle);
-        await settleOverlayReconciliation();
-        expect(getRenderingContexts(engine)).toEqual([last]);
-        expect(lastTask._config.clr).toBe(true);
-        expect(last._beforeRender).toHaveLength(0);
-        if (samples > 1) {
-            expect(lastTask._colorAttachment.view).toBe(lastTask._config.rt._colorView);
-        }
-    });
-
-    it.each([1, 4])("retargets past an explicit overlay whose base is removed at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const first = createSceneContext(engine);
-        const middle = createSceneContext(engine);
-        const child = createOverlayScene(middle);
-        const last = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-
-        await registerScene(first);
-        await registerScene(middle);
-        await registerScene(child);
-        await registerScene(last);
-        registerRenderingContext(engine, text);
-        middle._update();
-        child._update();
-        last._update();
-
-        const lastTask = last._frameGraph._tasks[0] as RenderTaskBase;
-        unregisterScene(middle);
-        await settleOverlayReconciliation();
-        last._update();
-        expect(getRenderingContexts(engine)).toEqual([first, last, child, text]);
-        expect(child._record()).toBe(0);
-        expect(lastTask._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(lastTask._colorAttachment.view).toBe((first._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-
-        await registerScene(middle);
-        last._update();
-        middle._update();
-        child._update();
-        expect(getRenderingContexts(engine)).toEqual([first, last, middle, child, text]);
-        if (samples > 1) {
-            expect((middle._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view).toBe(lastTask._colorAttachment.view);
-        }
-    });
-
-    it.each([1, 4])("recomposites an ordinary scene when an earlier explicit overlay becomes active again at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const main = createSceneContext(engine);
-        const child = createOverlayScene(main);
-        const ordinary = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-        await registerScene(main);
-        await registerScene(child);
-        await registerScene(ordinary);
-        registerRenderingContext(engine, text);
-        child._update();
-        ordinary._update();
-
-        const task = ordinary._frameGraph._tasks[0] as RenderTaskBase;
-        unregisterScene(main);
-        await settleOverlayReconciliation();
-        expect(task._config.clr).toBe(true);
-        expect(ordinary._beforeRender).toHaveLength(0);
-        expect(child._record()).toBe(0);
-
-        await registerScene(main);
-        await settleOverlayReconciliation();
-        child._update();
-        ordinary._update();
-        expect(getRenderingContexts(engine)).toEqual([main, child, ordinary, text]);
-        expect(task._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(task._colorAttachment.view).toBe((child._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-    });
-
-    it.each([1, 4])("retargets an ordinary scene when an explicit overlay is inserted before it at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const main = createSceneContext(engine);
-        const ordinary = createSceneContext(engine);
-        await registerScene(main);
-        await registerScene(ordinary);
-        const child = createOverlayScene(main);
-        await registerScene(child);
-        await settleOverlayReconciliation();
-        expect(getRenderingContexts(engine)).toEqual([main, child, ordinary]);
-        expect((ordinary._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(samples === 1 ? false : true);
-
-        if (samples > 1) {
-            const childTask = child._frameGraph._tasks[0] as RenderTaskBase;
-            const currentView = {} as GPUTextureView;
-            childTask._colorAttachment.view = currentView;
-            ordinary._update();
-            expect((ordinary._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view).toBe(currentView);
-        }
-    });
-
-    it.each([1, 4])("ignores an inactive explicit overlay when inferring an ordinary scene's base at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const main = createSceneContext(engine);
-        const absentBase = createSceneContext(engine);
-        const inactive = createOverlayScene(absentBase);
-        const ordinary = createSceneContext(engine);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-
-        await registerScene(main);
-        await registerScene(inactive);
-        registerRenderingContext(engine, text);
-        await registerScene(ordinary);
-
-        expect(getRenderingContexts(engine)).toEqual([main, ordinary, inactive, text]);
-        ordinary._update();
-        const task = ordinary._frameGraph._tasks[0] as RenderTaskBase;
-        expect(task._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(task._colorAttachment.view).toBe((main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-    });
-
-    it.each([1, 4])("finds the previous scene before a text-separated child-first overlay at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const previous = createSceneContext(engine);
-        const main = createSceneContext(engine);
-        const child = createOverlayScene(main);
-        const text = { ...makeRenderingContext(), _kind: "text-renderer" };
-
-        await registerScene(previous);
-        registerRenderingContext(engine, text);
-        await registerScene(child);
-        await registerScene(main);
-
-        expect(getRenderingContexts(engine)).toEqual([previous, main, child, text]);
-        main._update();
-        const task = main._frameGraph._tasks[0] as RenderTaskBase;
-        expect(task._config.clr).toBe(false);
-        if (samples > 1) {
-            expect(task._colorAttachment.view).toBe((previous._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-    });
-
-    it("orders an ordinary scene registered with shadow support before intervening text", async () => {
+    it("orders an overlay scene registered with shadow support before intervening text", async () => {
         const engine = makeMockEngine();
         const main = createSceneContext(engine);
-        const overlay = createSceneContext(engine);
+        const overlay = createOverlayScene(main);
         const text = { ...makeRenderingContext(), _kind: "text-renderer" };
         const shadow = {
             name: "shadow",
@@ -553,56 +245,21 @@ describe("registerScene / unregisterScene", () => {
         expect(task._colorAttachment.view).toBe((main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
     });
 
-    it("replaces a generic MSAA overlay callback when re-registering", async () => {
-        const engine = makeMockEngine();
-        const first = createSceneContext(engine);
-        const second = createSceneContext(engine);
-        await registerScene(first);
-        await registerScene(second);
-        for (let i = 0; i < 3; i++) {
-            unregisterScene(second);
-            await registerScene(second);
-            expect(second._beforeRender).toHaveLength(1);
-        }
-    });
-
-    it("never shares an unregistered base's MSAA attachment before removal is reconciled", async () => {
-        const engine = makeMockEngine(4);
-        const first = createSceneContext(engine);
-        const second = createSceneContext(engine);
-        await registerScene(first);
-        await registerScene(second);
-        const task = second._frameGraph._tasks[0] as RenderTaskBase;
-        second._update();
-        expect(task._colorAttachment.view).toBe((first._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-
-        disposeScene(first);
-        second._update();
-        expect(task.enabled).toBe(false);
-        await settleOverlayReconciliation();
-        second._update();
-        expect(task.enabled).not.toBe(false);
-        expect(task._config.clr).toBe(true);
-        expect(task._colorAttachment.view).toBe(task._config.rt._colorView);
-    });
-
-    it.each([1, 4])("releases generic overlay bookkeeping on disposal at MSAA %i", async (samples) => {
+    it.each([1, 4])("does not accumulate overlay callbacks or cleanup when re-registering at MSAA %i", async (samples) => {
         const engine = makeMockEngine(samples);
         const first = createSceneContext(engine);
-        const second = createSceneContext(engine);
+        const second = createOverlayScene(first);
         await registerScene(first);
         await registerScene(second);
         const cleanupCount = second._disposables.length;
         for (let i = 0; i < 3; i++) {
             unregisterScene(second);
             await registerScene(second);
+            expect(second._beforeRender).toHaveLength(samples > 1 ? 1 : 0);
             expect(second._disposables).toHaveLength(cleanupCount);
         }
 
-        expect(second._swapchainOverlay?._base).toBe(first);
         disposeScene(second);
-        await settleOverlayReconciliation();
-        expect(second._swapchainOverlay).toBeUndefined();
         expect(second._disposables).toHaveLength(0);
         expect(second._beforeRender).toHaveLength(0);
         disposeScene(first);
@@ -829,44 +486,6 @@ describe("registerScene / unregisterScene", () => {
             utility.scene._update();
             expect(defaultTask(utility.scene).enabled).not.toBe(false);
             expect(defaultTask(utility.scene)._config.clr).toBe(false);
-        });
-
-        it.each([1, 4])("restores a main scene configured as an overlay before utility creation at MSAA %i", async (samples) => {
-            const engine = makeMockEngine(samples);
-            const first = createSceneContext(engine);
-            const main = createSceneContext(engine);
-            await registerScene(first);
-            await registerScene(main);
-            main._update();
-            expect(defaultTask(main)._config.clr).toBe(false);
-
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
-            await registerUtilityLayer(utility);
-            unregisterScene(main);
-            unregisterScene(first);
-            await settleOverlayReconciliation();
-            await registerScene(main);
-
-            expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
-            expect(defaultTask(main)._config.clr).toBe(true);
-            main._update();
-            utility.scene._update();
-            expect(defaultTask(utility.scene)._config.clr).toBe(false);
-            if (samples > 1) {
-                expect(defaultTask(utility.scene)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
-            }
-
-            unregisterScene(main);
-            unregisterScene(utility.scene);
-            await registerScene(first);
-            await registerScene(main);
-            main._update();
-            expect(defaultTask(main)._config.clr).toBe(false);
-            unregisterScene(main);
-            unregisterScene(first);
-            await registerScene(main);
-            expect(getRenderingContexts(engine)).toEqual([main]);
-            expect(defaultTask(main)._config.clr).toBe(true);
         });
 
         it("orders the layer on its main scene's surface", async () => {
