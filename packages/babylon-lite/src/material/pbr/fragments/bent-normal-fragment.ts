@@ -74,10 +74,14 @@ let bnTBN=mat3x3<f32>(bnT*bnInv,bnB*bnInv,N_geom);`;
             { _name: "bentNormalSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _helperFunctions: BENT_NORMAL_HELPERS,
+        // Face orientation is applied exactly once (BJS pbrBlockNormalFinal). The vertex TBN is
+        // unflipped, so its result is negated on back faces. The cotangent frame is built after the
+        // template's double-sided flip from the already viewer-facing N_geom with negated UVs, which
+        // yields BJS's cotangent_frame(normalW, -uv) followed by its back-face flip, so no extra flip.
         _fragmentSlots: {
             AC: wgsl`${frame}
 var bentNormalW=normalize(bnTBN*(textureSample(bentNormalTexture_,bentNormalSampler_,input.uv).rgb*2.0-1.0));
-${doubleSided ? "if(!frontFacing){bentNormalW=-bentNormalW;}" : ""}
+${reuseTbn && doubleSided ? "if(!frontFacing){bentNormalW=-bentNormalW;}" : ""}
 let bentNormalStrength=saturate(material.bentNormalParams.x);`,
         },
     };
