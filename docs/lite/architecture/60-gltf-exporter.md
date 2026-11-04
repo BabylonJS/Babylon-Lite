@@ -1277,6 +1277,8 @@ Three layers, mapped onto TESTING.md's categories:
 - Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts`, with the lab page `lab/lite/export-gltf-test.html`).
 - Playwright visual parity scenes 348 to 352 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
 
+The five parity specs share `tests/lite/parity/export-gltf-parity.ts`: the existing 120-second test timeout, 90-second golden/readiness waits, loader-overlay removal, canvas capture, artifacts and configured MAD assertion. Each scene keeps its test title and golden directory; scene 348 retains `?iterations=2`.
+
 The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
 Because Lite entities are plain data, unit-test stubs are object literals; no engine or real GPU is required.
@@ -1553,6 +1555,7 @@ The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.t
 | `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | visual parity scenes 348–352: Lite page and Babylon.js reference page                                            |
 | `lab/public/lite/export-gltf-fixtures.css`                                                       | shared canvas layout for the fifteen exporter fixture pages                                                      |
 | `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | visual parity specs                                                                                              |
+| `tests/lite/parity/export-gltf-parity.ts`                                                        | shared runner for the five exporter parity specs; preserves per-scene configuration, paths and assertions        |
 | `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | goldens and gallery thumbnails                                                                                   |
 | `scene-config.json`                                                                              | ids 348–352 with `maxMad` and `maxRawKB`                                                                         |
 | `lab/package.json`                                                                               | `@babylonjs/serializers` dev dependency for the reference pages                                                  |
