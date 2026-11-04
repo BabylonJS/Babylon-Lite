@@ -12,8 +12,9 @@
  * depth and/or stencil renderbuffer, all wrapped in a single
  * `WebGLFramebuffer`.
  *
- * The default {@link createRenderTarget} makes an **RGBA8** color target and
- * ships none of the HDR sized-format knowledge; {@link createFloatRenderTarget}
+ * The default {@link createRenderTarget} makes an 8-bit **RGBA8** (or, via
+ * `format`, `R8` / `RG8`) color target and ships none of the HDR sized-format
+ * knowledge; {@link createFloatRenderTarget}
  * is the separate opt-in for float / half-float color attachments (it alone
  * carries the `RGBA16F` / `RGBA32F` table, so RGBA8 consumers tree-shake it
  * away).
@@ -25,7 +26,7 @@
  * (BYO) color texture lives in the engine's `_textures` registry and is restored
  * there first; the RT then re-attaches its freshly-swapped handle.
  */
-import { bindTextureForUpload, pickSizedInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
+import { bindTextureForUpload, pickSizedInternalFormat, resolveLdrInternalFormat, setBoundTextureParams, type GLTexture } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** GL `gl.UNSIGNED_BYTE` — the default (RGBA8) color attachment type. */
@@ -36,28 +37,30 @@ const HALF_FLOAT = 0x140b;
 const FLOAT = 0x1406;
 /** GL `gl.RGBA`. */
 const RGBA = 0x1908;
-/** GL `gl.RGBA8` — the default sized internalFormat. */
-const RGBA8 = 0x8058;
+/** GL `gl.RED`. */
+const RED = 0x1903;
+/** GL `gl.RG`. */
+const RG = 0x8227;
 /** GL `gl.LINEAR`. */
 const LINEAR = 0x2601;
 /** GL `gl.CLAMP_TO_EDGE`. */
 const CLAMP_TO_EDGE = 0x812f;
 
-/** Options for {@link createRenderTarget}. `width`/`height` are required; every
- *  other field has a Babylon-matching default. The bare
- *  `createRenderTarget(engine, { width, height })` makes an RGBA8 color-only
- *  target with linear filtering and clamp wrapping. */
+/** Options for {@link createRenderTarget}. Every field has a Babylon-matching
+ *  default: the bare `createRenderTarget(engine, width, height)` makes an RGBA8
+ *  color-only target with linear filtering and clamp wrapping. */
 export interface GLRenderTargetOptions {
-    /** Color attachment width in texels. Must be a positive integer. */
-    width: number;
-    /** Color attachment height in texels. Must be a positive integer. */
-    height: number;
     /** Allocate a depth renderbuffer (`DEPTH_COMPONENT16`). Default `false`.
      *  Stencil is NOT a create option — opt in (packed depth+stencil, or
      *  stencil-only) via `generateRenderTargetStencil`
      *  (`@babylonjs/lite-gl`), which keeps the stencil/packed
      *  renderbuffer code out of the render-target core bundle. */
     generateDepthBuffer?: boolean;
+    /** 8-bit color attachment format: `gl.RGBA` (default, `RGBA8`), `gl.RG`
+     *  (`RG8`) or `gl.RED` (`R8`) — ≙ Babylon's `RenderTargetCreationOptions.format`.
+     *  Ignored when {@link colorTexture} is supplied. Read single/two-channel
+     *  targets tightly via `readRenderTargetPixels(rt, { format })`. */
+    format?: GLenum;
     /** Color texture minification filter. Default `gl.LINEAR`. */
     minFilter?: GLenum;
     /** Color texture magnification filter. Default `gl.LINEAR`. */
@@ -70,18 +73,53 @@ export interface GLRenderTargetOptions {
      *  one. When supplied the render target does NOT own or restore it — the
      *  texture is engine-managed (restored by the standard texture-restore path
      *  first) and the RT re-attaches its swapped handle afterwards. The caller is
-     *  responsible for sizing it to `width`×`height` and for disposing it. */
+     *  responsible for sizing it to `width`×`height` and for disposing it.
+     *  Readbacks use the creator's texel type, so a float / half-float texture
+     *  must be attached via `createFloatRenderTarget` with a matching `type`
+     *  (`createRenderTarget` reads as `UNSIGNED_BYTE`). */
     colorTexture?: GLTexture;
 }
 
 /** Options for {@link createFloatRenderTarget} — {@link GLRenderTargetOptions}
- *  plus the float color `type`. */
-export interface GLFloatRenderTargetOptions extends GLRenderTargetOptions {
+ *  (always RGBA, so without `format`) plus the float color `type`. */
+export interface GLFloatRenderTargetOptions extends Omit<GLRenderTargetOptions, "format"> {
     /** Float color attachment type. Default `gl.HALF_FLOAT`. Pass `gl.FLOAT` for
      *  full 32-bit. Downgraded to the best renderable type the engine supports
      *  (`caps.textureFloatRender` / `caps.textureHalfFloatRender`), mirroring
      *  Babylon's `getTextureType`. */
     type?: GLenum;
+}
+
+/** Read rectangle and channel layout shared by {@link readRenderTargetPixels}
+ *  and {@link readRenderTargetPixelsToBuffer}. Every field is optional: the
+ *  defaults read the whole target as RGBA. */
+export interface GLReadPixelsRegionOptions {
+    /** Lower-left X of the read rectangle, in texels. Default `0`. */
+    x?: number;
+    /** Lower-left Y of the read rectangle, in texels. Default `0`. */
+    y?: number;
+    /** Read rectangle width in texels. Default: the target's width. */
+    width?: number;
+    /** Read rectangle height in texels. Default: the target's height. */
+    height?: number;
+    /** Read format: `gl.RGBA` (default, 4 channels), `gl.RG` (2) or `gl.RED` (1). */
+    format?: GLenum;
+}
+
+/** Options for {@link readRenderTargetPixels}. Every field is optional: the bare
+ *  `readRenderTargetPixels(rt)` reads the whole target as RGBA into a fresh
+ *  buffer. */
+export interface GLReadPixelsOptions extends GLReadPixelsRegionOptions {
+    /** Preallocated buffer (`width*height*channels` elements of the matching
+     *  type), reused to avoid per-call allocation. Default: a fresh buffer. */
+    into?: ArrayBufferView;
+}
+
+/** Options for {@link readRenderTargetPixelsToBuffer}. */
+export interface GLReadPixelsToBufferOptions extends GLReadPixelsRegionOptions {
+    /** Byte offset into the destination `WebGLBuffer` where the first texel is
+     *  written. Must be a multiple of the read type's size. Default `0`. */
+    offset?: number;
 }
 
 /** Resolved (defaults-applied) attachment description, retained on the render
@@ -133,6 +171,9 @@ export interface GLRenderTarget {
     _rebuildDepthStencil?: (engine: GLEngineContext) => void;
     /** @internal Resolved attachment config, for context-restore rebuild. */
     _config: ResolvedRTConfig;
+    /** The engine that created (and owns) this render target. Operations on it derive
+     *  their engine from here, so they take the render target alone. @internal */
+    _engine: GLEngineContext;
     /** @internal */
     _disposed: boolean;
     /** @internal Delete every GPU object the target owns (FBO, renderbuffer, and
@@ -146,21 +187,30 @@ export interface GLRenderTarget {
 }
 
 /**
- * Create an offscreen **RGBA8** render target.
+ * Create an offscreen 8-bit render target — **RGBA8** by default, or `R8` /
+ * `RG8` via {@link GLRenderTargetOptions.format}.
  *
  * The color attachment is an owned {@link GLTexture} (rebuilt by this target's
  * own restore hook), unless {@link GLRenderTargetOptions.colorTexture} supplies a
  * caller-managed (BYO) one. Mirrors Babylon's `createRenderTargetTexture`.
  *
  * @param engine - The engine to allocate GL resources on.
- * @param options - See {@link GLRenderTargetOptions} (`width`/`height` required).
+ * @param width - Color attachment width in texels. Must be a positive integer.
+ * @param height - Color attachment height in texels. Must be a positive integer.
+ * @param options - See {@link GLRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
- * @throws If `width`/`height` are not positive integers, a GL handle could not
- *  be allocated, or the resulting framebuffer is not complete. On failure every
- *  partial GPU object (including an owned color texture) is released first.
+ * @throws If `format` is not `RGBA` / `RG` / `RED`, `width`/`height` are not
+ *  positive integers, a GL handle could not be allocated, or the resulting
+ *  framebuffer is not complete. On failure every partial GPU object (including
+ *  an owned color texture) is released first.
  */
-export function createRenderTarget(engine: GLEngineContext, options: GLRenderTargetOptions): GLRenderTarget {
-    return buildRT(engine, options, RGBA8, RGBA, UNSIGNED_BYTE);
+export function createRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLRenderTarget {
+    const opts = options ?? {};
+    const format = opts.format ?? RGBA;
+    if (format !== RGBA && format !== RG && format !== RED) {
+        throw new Error(`lite-gl: unsupported render target format 0x${format.toString(16)}`);
+    }
+    return buildRT(engine, width, height, opts, resolveLdrInternalFormat(engine.gl, format, UNSIGNED_BYTE), format, UNSIGNED_BYTE);
 }
 
 /**
@@ -174,57 +224,69 @@ export function createRenderTarget(engine: GLEngineContext, options: GLRenderTar
  * supports (mirroring Babylon's `getTextureType`).
  *
  * @param engine - The engine to allocate GL resources on.
+ * @param width - Color attachment width in texels. Must be a positive integer.
+ * @param height - Color attachment height in texels. Must be a positive integer.
  * @param options - See {@link GLFloatRenderTargetOptions}.
  * @returns The new {@link GLRenderTarget}.
  * @throws As {@link createRenderTarget}.
  */
-export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloatRenderTargetOptions): GLRenderTarget {
-    const type = resolveColorType(engine, options.type ?? HALF_FLOAT);
+export function createFloatRenderTarget(engine: GLEngineContext, width: number, height: number, options?: GLFloatRenderTargetOptions): GLRenderTarget {
+    const opts = options ?? {};
+    const type = resolveColorType(engine, opts.type ?? HALF_FLOAT);
     const internalFormat = pickSizedInternalFormat(engine.gl, RGBA, type);
-    return buildRT(engine, options, internalFormat, RGBA, type);
+    return buildRT(engine, width, height, opts, internalFormat, RGBA, type);
 }
 
 /**
  * Bind the render target's framebuffer as the draw target and set the viewport
- * to cover it. `rt = null` binds the default (canvas) framebuffer and resets the
- * viewport to the full canvas — the counterpart of Babylon's
- * `restoreDefaultFramebuffer`. Subsequent `drawEffect` / `drawIndexed` /
- * `clearEngine` calls write into the bound target.
+ * to cover it. Use {@link restoreDefaultFramebuffer} to return to the canvas.
+ * Subsequent `drawEffect` / `drawIndexed` / `clearEngine` calls write into the
+ * bound target.
  *
  * Cached. No-op on a lost/disposed context or a disposed `rt`. Mipmaps are NOT
  * regenerated here — refresh a target's mip chain explicitly via
  * {@link generateRenderTargetMipMaps} after rendering into it.
  *
- * @param engine - The engine.
- * @param rt - The render target to draw into, or `null` for the canvas.
+ * @param rt - The render target to draw into.
  */
-export function bindRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null): void {
+export function bindRenderTarget(rt: GLRenderTarget): void {
+    const engine = rt._engine;
+    if (engine._isLost || engine._disposed || rt._disposed) {
+        return;
+    }
+    bindFramebufferAndViewport(engine, rt, rt._framebuffer, rt.width, rt.height);
+}
+
+/**
+ * Bind the default (canvas) framebuffer and reset the viewport to the full
+ * canvas — the counterpart of Babylon's `restoreDefaultFramebuffer`. Cached;
+ * no-op on a lost/disposed context.
+ *
+ * @param engine - The engine.
+ */
+export function restoreDefaultFramebuffer(engine: GLEngineContext): void {
     if (engine._isLost || engine._disposed) {
         return;
     }
-    if (rt !== null && rt._disposed) {
-        return;
-    }
-    const gl = engine.gl;
+    bindFramebufferAndViewport(engine, null, null, engine.canvas.width, engine.canvas.height);
+}
+
+function bindFramebufferAndViewport(engine: GLEngineContext, rt: GLRenderTarget | null, fb: WebGLFramebuffer | null, width: number, height: number): void {
     const s = engine._state;
-    const fb = rt === null ? null : rt._framebuffer;
     if (s.boundFramebuffer !== fb) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        engine.gl.bindFramebuffer(engine.gl.FRAMEBUFFER, fb);
         s.boundFramebuffer = fb;
     }
     engine._currentRenderTarget = rt;
-    if (rt === null) {
-        setViewportCached(engine, 0, 0, engine.canvas.width, engine.canvas.height);
-    } else {
-        setViewportCached(engine, 0, 0, rt.width, rt.height);
-    }
+    setViewportCached(engine, 0, 0, width, height);
 }
 
 /** Regenerate a render target's color-attachment mip chain from its (freshly
  *  rendered) level-0 — mipmaps for render targets are a pure manual opt-in
  *  (call this after rendering into the target). No-op for a disposed target, a
  *  handle-less color attachment, or a lost/disposed context. */
-export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRenderTarget): void {
+export function generateRenderTargetMipMaps(rt: GLRenderTarget): void {
+    const engine = rt._engine;
     if (engine._isLost || engine._disposed || rt._disposed || rt.texture.handle === null) {
         return;
     }
@@ -243,12 +305,12 @@ export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRende
  * lost the new size is recorded but the GL reallocation is deferred to the
  * restore hook.
  *
- * @param engine - The engine.
  * @param rt - The render target to resize.
  * @param width - New width in texels (≥ 1).
  * @param height - New height in texels (≥ 1).
  */
-export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, width: number, height: number): void {
+export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: number): void {
+    const engine = rt._engine;
     if (rt._disposed) {
         return;
     }
@@ -278,7 +340,7 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
     rt._deleteGpu(engine.gl);
     allocateRenderTargetGpu(engine, rt);
     if (wasBound) {
-        bindRenderTarget(engine, rt);
+        bindRenderTarget(rt);
     }
 }
 
@@ -292,21 +354,82 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
  * `Uint8Array` for `UNSIGNED_BYTE`, `Float32Array` for `FLOAT`, `Uint16Array`
  * for `HALF_FLOAT`. Origin is GL bottom-left.
  *
- * @param engine - The engine.
+ * Reads `RGBA` by default (like Babylon; always readable, a `RED` target reads
+ * back as `R,0,0,1`). Pass `format` `gl.RED` / `gl.RG` to read 1 / 2 channels
+ * per texel into a tightly packed buffer (`PACK_ALIGNMENT` is set to 1 and left
+ * there — lite-gl does not otherwise use it). WebGL only guarantees non-RGBA
+ * reads when they match the implementation-chosen
+ * `gl.IMPLEMENTATION_COLOR_READ_FORMAT` (`RED` for `R8`, `RG` for `RG8` in all
+ * major browsers).
+ *
  * @param rt - The render target to read from.
- * @param x - Lower-left X of the read rectangle, in texels.
- * @param y - Lower-left Y of the read rectangle, in texels.
- * @param width - Read rectangle width in texels.
- * @param height - Read rectangle height in texels.
- * @param into - Optional preallocated buffer (`width*height*4` elements of the
- *  matching type). Reused to avoid per-call allocation.
+ * @param options - See {@link GLReadPixelsOptions}. Default: the whole target,
+ *  as RGBA, into a fresh buffer.
  * @returns The pixel buffer (the provided `into`, or a freshly allocated one).
  *  Empty buffer on a lost/disposed context.
  */
-export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarget, x: number, y: number, width: number, height: number, into?: ArrayBufferView): ArrayBufferView {
-    const elements = width * height * 4;
-    if (engine._isLost || engine._disposed || rt._disposed) {
+export function readRenderTargetPixels(rt: GLRenderTarget, options?: GLReadPixelsOptions): ArrayBufferView {
+    const opts = options ?? {};
+    const width = opts.width ?? rt.width;
+    const height = opts.height ?? rt.height;
+    const format = opts.format ?? RGBA;
+    const into = opts.into;
+    const gl = bindForRead(rt, format);
+    if (gl === null) {
         return into ?? new Uint8Array(0);
+    }
+    const type = rt._config.type;
+    let buffer = into;
+    if (buffer === undefined) {
+        const elements = width * height * (format === RED ? 1 : format === RG ? 2 : 4);
+        buffer = type === gl.FLOAT ? new Float32Array(elements) : type === gl.HALF_FLOAT ? new Uint16Array(elements) : new Uint8Array(elements);
+    }
+    gl.readPixels(opts.x ?? 0, opts.y ?? 0, width, height, format, type, buffer);
+    return buffer;
+}
+
+/**
+ * Read a rectangle of the render target's color attachment into a GPU
+ * `WebGLBuffer` (`PIXEL_PACK_BUFFER` readback): `gl.readPixels` with a byte
+ * offset instead of a CPU array, so the copy stays on the GPU and can be
+ * consumed later without a sync stall (e.g. `gl.fenceSync` +
+ * `gl.getBufferSubData`, or as vertex data).
+ *
+ * Same rectangle / `format` rules as {@link readRenderTargetPixels}: whole
+ * target as RGBA by default, `gl.RED` / `gl.RG` read 1 / 2 channels per texel
+ * tightly packed (`PACK_ALIGNMENT` 1). The texel type follows the color
+ * attachment type. `buffer` must already be allocated (`gl.bufferData`) large
+ * enough for `offset + width*height*channels*bytesPerChannel` bytes, and (per
+ * WebGL2) must never have been bound to `ELEMENT_ARRAY_BUFFER`.
+ *
+ * Binds the target's framebuffer (left bound, like
+ * {@link readRenderTargetPixels}), binds `buffer` to `PIXEL_PACK_BUFFER` for
+ * the read and then unbinds it (`null`), so later CPU readbacks keep working.
+ * No-op on a lost/disposed context or a disposed target.
+ *
+ * @param rt - The render target to read from.
+ * @param buffer - Destination `WebGLBuffer`, created on `rt`'s context.
+ * @param options - See {@link GLReadPixelsToBufferOptions}.
+ */
+export function readRenderTargetPixelsToBuffer(rt: GLRenderTarget, buffer: WebGLBuffer, options?: GLReadPixelsToBufferOptions): void {
+    const opts = options ?? {};
+    const format = opts.format ?? RGBA;
+    const gl = bindForRead(rt, format);
+    if (gl === null) {
+        return;
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+    gl.readPixels(opts.x ?? 0, opts.y ?? 0, opts.width ?? rt.width, opts.height ?? rt.height, format, rt._config.type, opts.offset ?? 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+}
+
+/** Shared readback prologue: bail on a lost/disposed context or target, bind
+ *  `rt`'s framebuffer (cached), and set `PACK_ALIGNMENT` 1 for the tightly
+ *  packed `RED` / `RG` reads. Returns the context, or `null` to skip the read. */
+function bindForRead(rt: GLRenderTarget, format: GLenum): WebGL2RenderingContext | null {
+    const engine = rt._engine;
+    if (engine._isLost || engine._disposed || rt._disposed) {
+        return null;
     }
     const gl = engine.gl;
     const s = engine._state;
@@ -314,13 +437,11 @@ export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarg
         gl.bindFramebuffer(gl.FRAMEBUFFER, rt._framebuffer);
         s.boundFramebuffer = rt._framebuffer;
     }
-    const type = rt._config.type;
-    let buffer = into;
-    if (buffer === undefined) {
-        buffer = type === gl.FLOAT ? new Float32Array(elements) : type === gl.HALF_FLOAT ? new Uint16Array(elements) : new Uint8Array(elements);
+    if (format !== RGBA) {
+        // Not cached: a sync readback dwarfs it, and callers may change it directly.
+        gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
     }
-    gl.readPixels(x, y, width, height, gl.RGBA, type, buffer);
-    return buffer;
+    return gl;
 }
 
 /**
@@ -333,13 +454,13 @@ export function readRenderTargetPixels(engine: GLEngineContext, rt: GLRenderTarg
  * A BYO {@link GLRenderTargetOptions.colorTexture} is NOT disposed here — it is
  * engine-managed and the caller owns its lifetime.
  *
- * @param engine - The engine.
  * @param rt - The render target to dispose, or `null`/`undefined` for a no-op.
  */
-export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null | undefined): void {
+export function disposeRenderTarget(rt: GLRenderTarget | null | undefined): void {
     if (rt === null || rt === undefined || rt._disposed) {
         return;
     }
+    const engine = rt._engine;
     rt._disposed = true;
     // Only the owned color texture is marked disposed here; a BYO texture stays
     // live for its caller-owner.
@@ -377,9 +498,7 @@ export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget 
  *  exact sized `internalFormat` by the caller — NO format-table lookup), wires
  *  the owned-or-BYO color texture, allocates the GPU set atomically, and
  *  registers the target. */
-function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
-    const width = options.width;
-    const height = options.height;
+function buildRT(engine: GLEngineContext, width: number, height: number, options: GLRenderTargetOptions, internalFormat: GLenum, format: GLenum, type: GLenum): GLRenderTarget {
     validateSize(width, height);
     const gl = engine.gl;
     const byo = options.colorTexture;
@@ -401,6 +520,7 @@ function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, intern
         width,
         height,
         isReady: false,
+        _engine: engine,
         _disposed: false,
         _refCount: 1,
         // Owned-by-RT: its storage is (re)allocated by allocateRenderTargetGpu,
@@ -418,6 +538,7 @@ function buildRT(engine: GLEngineContext, options: GLRenderTargetOptions, intern
         _depthStencil: null,
         _rebuildDepthStencil: undefined,
         _config: config,
+        _engine: engine,
         _disposed: false,
         _deleteGpu: () => {},
         _restore: () => {},

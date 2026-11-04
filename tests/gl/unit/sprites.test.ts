@@ -15,7 +15,7 @@ function setup() {
     const gl = engine.gl;
     // A 64x64 sheet of 32x32 cells (2x2 = 4 cells). `null` data is fine — the
     // mock records but never reads it; width/height/isReady are what matter.
-    const texture = createRawTexture(engine, null, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE);
+    const texture = createRawTexture(engine, null, 64, 64);
     return { mock, canvas, engine, gl, texture };
 }
 
@@ -167,17 +167,17 @@ describe("lite-gl sprites: blend mode", () => {
 
 describe("lite-gl sprites: texture swap", () => {
     it("setSpriteRendererTexture replaces the sampled texture", () => {
-        const { engine, gl, texture } = setup();
+        const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
-        const tex2 = createRawTexture(engine, null, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE);
+        const tex2 = createRawTexture(engine, null, 32, 32);
         setSpriteRendererTexture(renderer, tex2);
         expect(renderer.texture).toBe(tex2);
     });
 
     it("setSpriteRendererTexture is a no-op after disposal", () => {
-        const { engine, gl, texture } = setup();
+        const { engine, texture } = setup();
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
-        const tex2 = createRawTexture(engine, null, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE);
+        const tex2 = createRawTexture(engine, null, 32, 32);
         disposeSpriteRenderer(renderer);
         setSpriteRendererTexture(renderer, tex2);
         expect(renderer.texture).toBe(texture);
@@ -304,8 +304,7 @@ describe("lite-gl sprites: lost / disposed safety", () => {
         const canvas = createMockCanvas(mock);
         const engine = createGLEngine(canvas);
         mock.setParallelComplete(false);
-        const gl = engine.gl;
-        const texture = createRawTexture(engine, null, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE);
+        const texture = createRawTexture(engine, null, 64, 64);
         const renderer = createSpriteRenderer(engine, { capacity: 4, cellWidth: 32, cellHeight: 32, texture });
         renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(0);

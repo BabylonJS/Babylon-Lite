@@ -40,9 +40,11 @@ describe("babylon-lite-gl bundle size ceilings", () => {
                 })
             ).outputFiles[0]!;
 
-        // Exact pre-3D sizes, measured with this same esbuild configuration at HEAD.
+        // Exact pre-3D sizes, measured with this same esbuild configuration at HEAD
+        // (createRawTexture includes the `_engine` back-pointer and its optional
+        // `format` / `type` defaults).
         for (const [name, maxBytes] of [
-            ["createRawTexture", 1672],
+            ["createRawTexture", 1755],
             ["bindTexture", 317],
             ["setEffectTexture", 419],
         ] as const) {
@@ -55,7 +57,7 @@ describe("babylon-lite-gl bundle size ceilings", () => {
 
     for (const [sceneId, baselineBytes] of [
         [1, 11801],
-        [3, 16762],
+        [3, 16832],
         [6, 14850],
     ] as const) {
         it(`keeps 2D-only scene${sceneId} at or below its pre-3D byte count`, async () => {

@@ -1,4 +1,4 @@
-import { offContextLost, onContextLost, type GLEngineContext } from "./context.js";
+import { offContextLost, onContextLost } from "./context.js";
 import { getEffectCompilationError, type GLEffect } from "./effect.js";
 
 /** Options for the opt-in `waitForEffect` readiness scheduler. */
@@ -14,12 +14,12 @@ export interface GLEffectWaitOptions {
  *  on the next poll), or signal cancellation. All exits cancel the pending
  *  frame and remove listeners. Call again after context restoration to wait
  *  for the replacement program. Scheduling code is tree-shaken when unused.
- *  @param engine - Engine owning the effect.
  *  @param effect - Effect to finalize.
  *  @param options - Optional cancellation signal.
  *  @returns The ready effect, or a rejected promise with the failure reason.
  */
-export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect> {
+export function waitForEffect(effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect> {
+    const engine = effect._engine;
     return new Promise((resolve, reject) => {
         const signal = options?.signal;
         let frame: number | null = null;
@@ -70,7 +70,7 @@ export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options
                     lost();
                     return;
                 }
-                const error = getEffectCompilationError(engine, effect);
+                const error = getEffectCompilationError(effect);
                 // Abort/loss callbacks set settled synchronously during finalization.
                 if (settled) {
                     return;

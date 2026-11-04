@@ -29,6 +29,7 @@ import {
     setEffectFloat3,
     setEffectTexture,
     bindRenderTarget,
+    restoreDefaultFramebuffer,
     createRenderTarget,
     resizeRenderTarget,
 } from "babylon-lite-gl";
@@ -371,7 +372,7 @@ function cappedRtSize(w: number, h: number): { w: number; h: number } {
 // so the FXAA pass can sample it smoothly). No depth, no ping-pong — Buffer A
 // reads nothing, so one render target is enough.
 const initRt = cappedRtSize(canvas.width || 1, canvas.height || 1);
-const rt = createRenderTarget(engine, { width: initRt.w, height: initRt.h });
+const rt = createRenderTarget(engine, initRt.w, initRt.h);
 let rtW = initRt.w;
 let rtH = initRt.h;
 
@@ -395,14 +396,14 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, bufferEffect) || !isEffectReady(engine, imageEffect)) {
+    if (!isEffectReady(bufferEffect) || !isEffectReady(imageEffect)) {
         return;
     }
     resizeGLEngine(engine);
     // Buffer A renders at the CAPPED resolution; the FXAA pass upscales to canvas.
     const target = cappedRtSize(canvas.width, canvas.height);
     if (target.w !== rtW || target.h !== rtH) {
-        resizeRenderTarget(engine, rt, target.w, target.h);
+        resizeRenderTarget(rt, target.w, target.h);
         rtW = target.w;
         rtH = target.h;
     }
@@ -410,19 +411,19 @@ runRenderLoop(engine, () => {
     const time = (performance.now() - startMs) / 1000;
 
     // Pass 1 — Buffer A: raymarch the mandelbulb into the (capped) render target.
-    bindRenderTarget(engine, rt);
+    bindRenderTarget(rt);
     applyEffectWrapper(bufferWrapper);
-    setEffectFloat(engine, bufferEffect, "iTime", time);
-    setEffectFloat3(engine, bufferEffect, "iResolution", rtW, rtH, 1);
+    setEffectFloat(bufferEffect, "iTime", time);
+    setEffectFloat3(bufferEffect, "iResolution", rtW, rtH, 1);
     drawEffect(engine);
 
     // Pass 2 — Image: FXAA-resolve Buffer A (at its capped resolution) to the
     // full-size canvas. iResolution is the render-target size so the FXAA texel
     // offsets land on adjacent Buffer-A texels.
-    bindRenderTarget(engine, null);
+    restoreDefaultFramebuffer(engine);
     applyEffectWrapper(imageWrapper);
-    setEffectFloat3(engine, imageEffect, "iResolution", rtW, rtH, 1);
-    setEffectTexture(engine, imageEffect, "iChannel0", rt.texture);
+    setEffectFloat3(imageEffect, "iResolution", rtW, rtH, 1);
+    setEffectTexture(imageEffect, "iChannel0", rt.texture);
     drawEffect(engine);
 
     if (!firstFrameDrawn) {

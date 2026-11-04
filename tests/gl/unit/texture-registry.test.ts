@@ -30,17 +30,15 @@ function setup() {
 
 function mixedTextures(engine: GLEngineContext, count: number): (GLTexture | GLTexture3D)[] {
     return Array.from({ length: count }, (_, index) =>
-        index % 2 === 0
-            ? createRawTexture(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE)
-            : createTexture3DFromPixels(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, 1)
+        index % 2 === 0 ? createRawTexture(engine, new Uint8Array([index, 0, 0, 255]), 1, 1) : createTexture3DFromPixels(engine, new Uint8Array([index, 0, 0, 255]), 1, 1, 1)
     );
 }
 
-function release(engine: GLEngineContext, tex: GLTexture | GLTexture3D): void {
+function release(tex: GLTexture | GLTexture3D): void {
     if ("depth" in tex) {
-        disposeTexture3D(engine, tex);
+        disposeTexture3D(tex);
     } else {
-        disposeTexture(engine, tex);
+        disposeTexture(tex);
     }
 }
 
@@ -51,14 +49,14 @@ afterEach(() => {
 
 describe("lite-gl texture registry", () => {
     it("registers every managed factory in creation order", async () => {
-        const { mock, engine, gl } = setup();
+        const { mock, engine } = setup();
         vi.stubGlobal("HTMLImageElement", class {});
         vi.stubGlobal("HTMLVideoElement", class {});
         const source = { width: 2, height: 1, close: vi.fn() } as ImageBitmap;
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]))));
         vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(source));
         const textures = [
-            createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE),
+            createRawTexture(engine, null, 1, 1),
             createFloatTexture(engine, null, 1, 1),
             createDynamicTexture(engine, 1, 1),
             createTextureFromSource(engine, source),
@@ -73,22 +71,22 @@ describe("lite-gl texture registry", () => {
         expect(Array.from(engine._textures)).toEqual(textures);
         for (const tex of textures) {
             expect(engine._textures.has(tex)).toBe(true);
-            release(engine, tex);
+            release(tex);
             expect(engine._textures.has(tex)).toBe(false);
         }
         expect(engine._textures.size).toBe(0);
     });
 
     it("removes front/middle/end and arbitrary batches from 15,000 textures with one registry delete per release", () => {
-        const { mock, engine, gl } = setup();
-        const textures = Array.from({ length: 15_000 }, () => createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE));
+        const { mock, engine } = setup();
+        const textures = Array.from({ length: 15_000 }, () => createRawTexture(engine, null, 1, 1));
         const indices = [7_500, 14_999, 0, ...Array.from({ length: 100 }, (_, index) => (index * 127 + 37) % textures.length)];
         const removed = new Set(indices.map((index) => textures[index]!));
         const deletion = vi.spyOn(engine._textures, "delete");
         mock.clear();
         for (const tex of removed) {
-            disposeTexture(engine, tex);
-            disposeTexture(engine, tex);
+            disposeTexture(tex);
+            disposeTexture(tex);
         }
         expect(deletion).toHaveBeenCalledTimes(removed.size);
         expect(mock.log.filter((call) => call.name === "deleteTexture").map((call) => call.args[0])).toEqual(Array.from(removed, (tex) => tex.handle));
@@ -98,35 +96,35 @@ describe("lite-gl texture registry", () => {
     });
 
     it.each(["2D", "3D"])("keeps a shared %s texture registered until its final release", (kind) => {
-        const { mock, engine, gl } = setup();
-        const tex = kind === "2D" ? createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE) : createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        const { mock, engine } = setup();
+        const tex = kind === "2D" ? createRawTexture(engine, null, 1, 1) : createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
         tex._refCount = 2;
         const deletion = vi.spyOn(engine._textures, "delete");
         mock.clear();
-        release(engine, tex);
+        release(tex);
         expect(tex._refCount).toBe(1);
         expect(tex._disposed).toBe(false);
         expect(engine._textures.has(tex)).toBe(true);
         expect(deletion).not.toHaveBeenCalled();
         expect(mock.log).toEqual([]);
-        release(engine, tex);
-        release(engine, tex);
+        release(tex);
+        release(tex);
         expect(deletion).toHaveBeenCalledTimes(1);
         expect(engine._textures.has(tex)).toBe(false);
         expect(mock.log).toEqual([{ name: "deleteTexture", args: [tex.handle] }]);
     });
 
     it("safely disposes unregistered and already-removed textures without disturbing live entries", () => {
-        const { mock, engine, gl } = setup();
-        const live = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
-        const removed = createRawTexture(engine, null, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE);
+        const { mock, engine } = setup();
+        const live = createRawTexture(engine, null, 1, 1);
+        const removed = createRawTexture(engine, null, 1, 1);
         engine._textures.delete(removed);
         const external = createTextureFromHandle(engine, {} as WebGLTexture, 1, 1);
         mock.clear();
-        disposeTexture(engine, external);
-        disposeTexture(engine, removed);
-        disposeTexture(engine, external);
-        disposeTexture(engine, removed);
+        disposeTexture(external);
+        disposeTexture(removed);
+        disposeTexture(external);
+        disposeTexture(removed);
         expect(Array.from(engine._textures)).toEqual([live]);
         expect(mock.log).toEqual([
             { name: "deleteTexture", args: [external.handle] },
@@ -139,7 +137,7 @@ describe("lite-gl texture registry", () => {
         const textures = mixedTextures(engine, 32);
         mock.clear();
         for (const tex of engine._textures) {
-            release(engine, tex);
+            release(tex);
         }
         expect(engine._textures.size).toBe(0);
         expect(textures.every((tex) => tex._disposed)).toBe(true);
@@ -160,11 +158,11 @@ describe("lite-gl texture registry", () => {
             };
         }
         for (const index of [7, 0, 11]) {
-            release(engine, textures[index]!);
+            release(textures[index]!);
         }
         onContextLost(engine, () => {
-            release(engine, textures[4]!);
-            release(engine, textures[5]!);
+            release(textures[4]!);
+            release(textures[5]!);
         });
         fireLost(canvas);
         mock.clear();
@@ -195,8 +193,8 @@ describe("lite-gl texture registry", () => {
                 replayed.push(tex);
                 upload(target);
                 if (tex === textures[1]) {
-                    release(engine, textures[0]!);
-                    release(engine, textures[3]!);
+                    release(textures[0]!);
+                    release(textures[3]!);
                 }
             };
         }
@@ -208,7 +206,7 @@ describe("lite-gl texture registry", () => {
         expect(mock.count("createTexture")).toBe(5);
         onContextRestored(engine, () => {
             for (const tex of engine._textures) {
-                release(engine, tex);
+                release(tex);
             }
         });
         fireLost(canvas);
@@ -219,8 +217,8 @@ describe("lite-gl texture registry", () => {
     it("force-deletes each live handle once during teardown despite reentrant disposal and shared references", () => {
         const { mock, engine, gl } = setup();
         const textures = mixedTextures(engine, 32);
-        release(engine, textures[0]!);
-        release(engine, textures[9]!);
+        release(textures[0]!);
+        release(textures[9]!);
         const live = Array.from(engine._textures);
         textures[2]!._refCount = 2;
         const deleteTexture = gl.deleteTexture.bind(gl);
@@ -229,8 +227,8 @@ describe("lite-gl texture registry", () => {
             deleteTexture(handle);
             if (!reentered) {
                 reentered = true;
-                release(engine, textures[2]!);
-                release(engine, textures[7]!);
+                release(textures[2]!);
+                release(textures[7]!);
                 disposeGLEngine(engine);
             }
         });
@@ -238,7 +236,7 @@ describe("lite-gl texture registry", () => {
         disposeGLEngine(engine);
         disposeGLEngine(engine);
         for (const tex of textures) {
-            release(engine, tex);
+            release(tex);
         }
         expect(engine._textures.size).toBe(0);
         expect(textures.every((tex) => tex._disposed)).toBe(true);
@@ -258,8 +256,8 @@ describe("lite-gl texture registry", () => {
         const deleteProgram = gl.deleteProgram.bind(gl);
         vi.spyOn(gl, "deleteProgram").mockImplementation((handle) => {
             deleteProgram(handle);
-            release(engine, textures[0]!);
-            release(engine, textures[1]!);
+            release(textures[0]!);
+            release(textures[1]!);
         });
         mock.clear();
         disposeGLEngine(engine);

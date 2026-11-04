@@ -79,12 +79,12 @@ let vao: GLMeshVao | null = null;
 let firstFrameDrawn = false;
 
 function drawCard(centerX: number, centerY: number, rotation: number, depth: number, color: readonly [number, number, number], opacity: number): void {
-    setEffectFloat2(engine, effect, "center", centerX, centerY);
-    setEffectFloat(engine, effect, "angle", rotation);
-    setEffectFloat(engine, effect, "depth", depth);
-    setEffectFloat3(engine, effect, "color", color[0], color[1], color[2]);
-    setEffectFloat(engine, effect, "opacity", opacity);
-    drawMesh(engine, vao!);
+    setEffectFloat2(effect, "center", centerX, centerY);
+    setEffectFloat(effect, "angle", rotation);
+    setEffectFloat(effect, "depth", depth);
+    setEffectFloat3(effect, "color", color[0], color[1], color[2]);
+    setEffectFloat(effect, "opacity", opacity);
+    drawMesh(vao!);
 }
 
 function drawPanel(x: number): void {
@@ -96,7 +96,7 @@ function drawPanel(x: number): void {
 }
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     if (vao === null) {
@@ -109,7 +109,7 @@ runRenderLoop(engine, () => {
     setDepthState(engine, { test: true, write: true, func: gl.LESS });
     setCullState(engine, false);
     clearEngine(engine, { color: { r: 0.035, g: 0.045, b: 0.07, a: 1 }, depth: true });
-    useEffect(engine, effect);
+    useEffect(effect);
 
     const sampleCount = getCurrentSampleCount(engine);
     setAlphaToCoverage(engine, false);
