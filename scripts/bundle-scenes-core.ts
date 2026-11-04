@@ -1764,7 +1764,7 @@ export async function measureLiteSceneWithRetry(
     );
 }
 
-async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
+export async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
 
@@ -1785,6 +1785,7 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
     let browser: Browser | undefined;
     const restartBrowser = async (): Promise<Browser> => {
         await browser?.close();
+        browser = undefined;
         browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         return browser;
     };
