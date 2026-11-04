@@ -67,6 +67,7 @@ function fixture(filterable = true) {
         sourceDepth: {} as GPUTextureView,
         sourceNormal: {} as GPUTextureView,
         dummyNormalView: {} as GPUTextureView,
+        depthSampler: {} as GPUSampler,
         resolveLayout: {} as GPUBindGroupLayout,
         resolveGroup: {} as GPUBindGroup,
         uniform: {} as GPUBuffer,
@@ -77,6 +78,38 @@ function fixture(filterable = true) {
 }
 
 describe("XeGTAO temporal reconstruction", () => {
+    it.each([true, false])("reuses the owner's point-clamp sampler across history lanes and rebinds (filterable depth: %s)", (filterable) => {
+        const f = fixture(filterable);
+        const state = createXegtaoTemporalGpu(f.owner, null);
+        const linearSampler = vi.mocked(f.device.createSampler).mock.calls[0]![0]!;
+        expect({
+            addressModeU: "clamp-to-edge",
+            addressModeV: "clamp-to-edge",
+            mipmapFilter: "nearest",
+            ...linearSampler,
+        }).toMatchObject({
+            minFilter: "linear",
+            magFilter: "linear",
+            addressModeU: "clamp-to-edge",
+            addressModeV: "clamp-to-edge",
+            mipmapFilter: "nearest",
+        });
+        const checkRepairSamplers = (): void => {
+            for (const stages of state.stages) {
+                const repair = stages.find((stage) => stage.pipeline === state.repairPipeline)!;
+                const groupIndex = f.createBindGroup.mock.results.findIndex(({ value }) => value === repair.group);
+                const entries = Array.from(f.createBindGroup.mock.calls[groupIndex]![0].entries);
+                expect(entries).toContainEqual({ binding: 7, resource: f.owner.depthSampler });
+            }
+            expect(f.device.createSampler).toHaveBeenCalledOnce();
+        };
+        checkRepairSamplers();
+        f.owner.sourceDepth = {} as GPUTextureView;
+        bindXegtaoTemporalGpu(state, null);
+        checkRepairSamplers();
+        disposeXegtaoTemporalGpu(state);
+    });
+
     it("fills every motion-bounds level in one cleared dispatch and gates transport indirectly", () => {
         const f = fixture();
         const velocity = {} as GPUTextureView;

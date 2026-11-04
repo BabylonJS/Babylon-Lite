@@ -885,6 +885,8 @@ Reduction bindings are preceding AO/depth mip views; targets are R8 AO plus
 R32 depth. There is no mip-zero pipeline or bind group.
 History repair bindings are AO parameters, current depth/normal/count, all AO
 mips, all depth mips, linear-clamp depth sampler, point-clamp AO sampler.
+The point-clamp sampler is borrowed from the estimator owner, not allocated
+again or mirrored in temporal state; both history lanes and source rebinds reuse it.
 Use hardware linear depth only with `float32-filterable`; otherwise emit manual
 bilinear texture loads. Repair targets R8.
 The spatial/output pass binds AO parameters, raw current depth, current normal

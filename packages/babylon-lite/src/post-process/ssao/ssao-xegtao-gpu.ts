@@ -48,7 +48,6 @@ export interface XegtaoTemporalGpu {
     outputPipeline: GPURenderPipeline;
     stages: [ReconstructionStage[], ReconstructionStage[]];
     linearSampler: GPUSampler;
-    pointSampler: GPUSampler;
     transportExtension?: XegtaoTransportExtension;
     boundTransportExtension?: XegtaoTransportExtension;
 }
@@ -172,8 +171,7 @@ export function createXegtaoTemporalGpu(owner: SsaoGpu, velocity: GPUTextureView
         repairPipeline,
         outputPipeline,
         stages: undefined!,
-        linearSampler: device.createSampler({ minFilter: "linear", magFilter: "linear", mipmapFilter: "nearest", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" }),
-        pointSampler: device.createSampler({ addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" }),
+        linearSampler: device.createSampler({ minFilter: "linear", magFilter: "linear" }),
     };
     bindXegtaoTemporalGpu(state, velocity);
     return state;
@@ -281,7 +279,7 @@ export function bindXegtaoTemporalGpu(state: XegtaoTemporalGpu, velocity: GPUTex
             ...reductions,
             stage(
                 state.repairPipeline,
-                [...shared, state.convolution.createView(), state.convolutionDepth.createView(), state.linearSampler, state.pointSampler],
+                [...shared, state.convolution.createView(), state.convolutionDepth.createView(), state.linearSampler, o.depthSampler],
                 [state.repaired.createView()]
             ),
             stage(

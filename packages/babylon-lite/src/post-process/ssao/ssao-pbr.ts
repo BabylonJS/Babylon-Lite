@@ -47,12 +47,17 @@ interface ScopedSampling {
 let _materials: WeakMap<PbrMaterialProps, ScopedSampling> | null = null;
 let _fallbacks: WeakMap<EngineContext, { device: GPUDevice; texture: Texture2D }> | null = null;
 
+function createNeutralTexture(engine: EngineContext): Texture2D {
+    const texture = createSolidTexture2D(engine, 1, 1, 1, 1);
+    texture.sampler = getNearestSampler(engine);
+    return texture;
+}
+
 function fallbackFor(engine: EngineContext): Texture2D {
     const fallbacks = (_fallbacks ??= new WeakMap());
     let entry = fallbacks.get(engine);
     if (!entry || entry.device !== engine._device) {
-        const texture = createSolidTexture2D(engine, 1, 1, 1, 1);
-        texture.sampler = getNearestSampler(engine);
+        const texture = createNeutralTexture(engine);
         if (entry) {
             const old = entry.texture;
             entry.device = engine._device;
@@ -149,12 +154,7 @@ export async function enablePbrSsao(scene: SceneContext, task: SsaoTask, materia
     );
 
     if (!state) {
-        const makeNeutral = (): Texture2D => {
-            const neutral = createSolidTexture2D(engine, 1, 1, 1, 1);
-            neutral.sampler = getNearestSampler(engine);
-            return neutral;
-        };
-        const neutral = makeNeutral();
+        const neutral = createNeutralTexture(engine);
         const sampling: SamplingState = {
             texture: neutral,
             neutral,
@@ -181,7 +181,7 @@ export async function enablePbrSsao(scene: SceneContext, task: SsaoTask, materia
                 return;
             }
             const old = sampling.neutral;
-            sampling.neutral = makeNeutral();
+            sampling.neutral = createNeutralTexture(engine);
             sampling.device = engine._device;
             replace(sampling.neutral);
             retireGpuResources(engine, () => releaseTexture(old));

@@ -147,6 +147,27 @@ describe("IBL calculation selection", () => {
 });
 
 describe("PBR SSAO scope and ownership", () => {
+    it("creates identical white nearest fallbacks without sharing task and engine ownership", async () => {
+        const f = fixture();
+        await enablePbrSsao(f.scene, f.task, [f.material]);
+        const plugin = f.material.plugins![0]!;
+        const neutral = sampled(plugin);
+        const plain = createSceneContext(f.engine, { defaultRenderTask: false });
+        plugin._selectBindingScope!(plain);
+        const fallback = sampled(plugin);
+        expect(fallback).not.toBe(neutral);
+        expect(fallback.sampler).toBe(neutral.sampler);
+        expect(vi.mocked(f.device.queue.writeTexture).mock.calls.map(([, data]) => data)).toEqual([new Uint8Array([255, 255, 255, 255]), new Uint8Array([255, 255, 255, 255])]);
+        expect(getTextureReferenceStore().get(neutral.texture)).toBe(2);
+        expect(getTextureReferenceStore().get(fallback.texture)).toBe(1);
+        for (const dispose of f.scene._disposables) dispose();
+        disposeGpuResourceRetirements(f.engine);
+        expect(neutral.texture.destroy).toHaveBeenCalledOnce();
+        expect(fallback.texture.destroy).not.toHaveBeenCalled();
+        f.engine._disposeManagedResources?.();
+        expect(fallback.texture.destroy).toHaveBeenCalledOnce();
+    });
+
     it("keeps a shared source material's sampling and disposal isolated by consuming scene", async () => {
         const first = fixture(),
             second = fixture(),
