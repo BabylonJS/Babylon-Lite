@@ -180,7 +180,7 @@ export interface GLState {
      * `unbindInstanceAttributes` resets each back to divisor 0 and clears this.
      */
     instanceLocations: number[];
-    /** Shared fullscreen quad — lazily created on first `applyEffectWrapper`. */
+    /** Shared fullscreen quad — lazily created on first `drawEffect`. */
     quadVbo: WebGLBuffer | null;
     quadIbo: WebGLBuffer | null;
     quadVao: WebGLVertexArrayObject | null;

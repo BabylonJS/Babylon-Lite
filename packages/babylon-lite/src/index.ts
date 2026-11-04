@@ -23,6 +23,7 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { moveRenderingContext } from "./engine/rendering-context-order.js";
 export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
 export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
 // Device-level signals and capabilities, so applications never need the GPUDevice itself.
@@ -60,6 +61,8 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+// Opt-in scene overlays: composite a scene onto an explicit base scene on the same surface.
+export { createOverlayScene } from "./scene/overlay-scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
@@ -180,6 +183,8 @@ export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/s
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
+export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
+export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

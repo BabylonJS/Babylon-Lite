@@ -20,7 +20,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *    hwScaling=1).
  *  - SEED renders the SAME radial pattern into the first 512×512 RGBA8 target,
  *    then the boolean `readIsA` flips — the analogue of lite-gl's first
- *    `bindRenderTarget(engine, pp.write)` + draw + `pp.swap()`.
+ *    `bindRenderTarget(pp.write)` + draw + `pp.swap()`.
  *  - FEEDBACK runs the SAME N=6 iterations: `renderer.render(feedbackWrapper, writeRT)`
  *    binds the write target while the wrapper's onApplyObservable points `uPrev`
  *    at the READ target's ThinTexture and `uK` at k, then the boolean flips —

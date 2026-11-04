@@ -218,6 +218,8 @@ export interface SceneContext extends RenderingContext {
     _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
+    /** @internal Scene whose swapchain output this overlay scene composites onto; set only by `createOverlayScene`. */
+    _overlayBase?: SceneContext;
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
     /** @internal Physics discovery list, allocated lazily by createHavokWorld. */
@@ -690,11 +692,18 @@ export function _installAsyncShaderPipelinePreparation(prepare: (scene: SceneCon
     _prepareShaderPipelines = prepare;
 }
 
+let _overlaySceneRegistered: ((scene: SceneContext) => void) | undefined;
+/** @internal Install overlay-scene handling that runs after any scene is inserted into its surface. */
+export function _installOverlaySceneRegistration(registered: (scene: SceneContext) => void): void {
+    _overlaySceneRegistered = registered;
+}
+
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to its bound surface's render list in overlay order. The scene is
- * always attached to `scene.surface` (which equals the engine itself in the
- * single-canvas case).
+ * and adds the scene to its bound surface's render list. A scene clears its target unless
+ * it was created with `createOverlayScene`, in which case it composites over its base scene
+ * and is kept immediately after it. The scene is always attached to `scene.surface`
+ * (which equals the engine itself in the single-canvas case).
  */
 export async function registerScene(scene: SceneContext): Promise<void> {
     const ctx = scene;
@@ -711,11 +720,7 @@ export async function registerScene(scene: SceneContext): Promise<void> {
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 /**
@@ -739,11 +744,7 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
         await _prepareShaderPipelines(ctx);
     }
     ctx._frameGraph.build();
-    if (surface._renderingContexts[0]) {
-        const overlay = await import("./swapchain-overlay.js");
-        overlay.configureSwapchainOverlayScene(surface, ctx);
-    }
-    _lateCleanup?.get(ctx)?.() || registerRenderingContext(surface, ctx);
+    _lateCleanup?.get(ctx)?.() || (registerRenderingContext(surface, ctx) && _overlaySceneRegistered?.(ctx));
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
@@ -762,5 +763,5 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
  *  The scene is always removed from `scene.surface`. */
 export function unregisterScene(scene: SceneContext): void {
-    unregisterRenderingContext(scene.surface, scene as SceneContext);
+    unregisterRenderingContext(scene.surface, scene);
 }

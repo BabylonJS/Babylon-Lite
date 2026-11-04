@@ -78,7 +78,7 @@ export async function createTrackEditor(
         return marker;
     });
 
-    const utilityLayer: UtilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer: UtilityLayer = createUtilityLayer(scene);
     const gizmo: PositionGizmo = createPositionGizmo(engine, utilityLayer);
     const editorPointer = attachEditorPointerDrag(canvas, utilityLayer, gizmo);
     const picker: GpuPicker = createGpuPicker(scene);

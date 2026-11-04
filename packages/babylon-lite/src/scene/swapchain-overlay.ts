@@ -13,34 +13,51 @@ function getDefaultSwapchainTask(scene: SceneContext, surface: SurfaceContext): 
     }
 }
 
-/** @internal Configure a later scene to preserve pixels already rendered into the same
- *  surface swapchain. */
-export function configureSwapchainOverlayScene(surface: SurfaceContext, overlay: SceneContext): void {
-    const baseScene = surface._renderingContexts[surface._renderingContexts.length - 1] as Partial<SceneContext> | undefined;
-    if (!baseScene?._frameGraph) {
-        return;
-    }
-    const overlayTask = getDefaultSwapchainTask(overlay, surface);
-    if (!overlayTask) {
-        return;
-    }
-    if (surface.msaaSamples === 1) {
-        // Load (don't clear) the swapchain so the overlay composites onto the base scene.
-        overlayTask._config.clr = false;
-        return;
-    }
-    const enabled = overlayTask.enabled;
-    overlayTask._config.clr = true;
-    overlayTask.enabled = false;
-    overlay._beforeRender.unshift(() => {
-        const baseTask = getDefaultSwapchainTask(baseScene as SceneContext, surface);
-        const view = baseTask?._config.rst === surface.scRT && baseTask._config.rt._colorView;
-        overlayTask.enabled = view ? enabled : false;
-        overlayTask._config.clr = !view;
-        if (view) {
-            // Both scenes must use the base task's MSAA colour texture before the overlay
-            // can load its pixels and resolve the composited result into the swapchain.
-            overlayTask._colorAttachment.view = view;
+/** @internal Composite an overlay scene's current swapchain task onto its `_overlayBase`.
+ *  Wraps the overlay's record, so it runs after every before-render callback and re-resolves the
+ *  task each frame: tasks added or replaced after creation are configured, and a replaced task gets
+ *  its clear state and own colour view back. At MSAA, a frame without a shareable base attachment
+ *  skips the task by disabling it only for that record, leaving the app's `enabled` gate intact. */
+export function configureSwapchainOverlayScene(overlay: SceneContext): void {
+    const surface = overlay.surface;
+    const record = overlay._record;
+    let task: RenderTask | undefined;
+    let clr: boolean | undefined;
+    overlay._record = () => {
+        const current = getDefaultSwapchainTask(overlay, surface);
+        if (current !== task) {
+            if (task) {
+                task._config.clr = clr;
+                task._colorAttachment.view = task._config.rt._colorView!;
+            }
+            task = current;
+            clr = current?._config.clr;
         }
-    });
+        if (current) {
+            if (surface.msaaSamples > 1) {
+                // Every overlay in a chain composites into the root scene's MSAA colour texture.
+                let root = overlay._overlayBase!;
+                while (root._overlayBase) {
+                    root = root._overlayBase;
+                }
+                const rootTask = getDefaultSwapchainTask(root, surface);
+                // A root that did not render this frame (disabled or paused), or that does not resolve into
+                // the swapchain (post-process/copy), has no colour the overlay can load and resolve.
+                const view = rootTask?.enabled !== false && rootTask?.executionEnabled !== false && rootTask?._config.rst === surface.scRT && rootTask._colorAttachment.view;
+                if (!view) {
+                    const enabled = current.enabled;
+                    current.enabled = false;
+                    try {
+                        return record();
+                    } finally {
+                        current.enabled = enabled;
+                    }
+                }
+                current._colorAttachment.view = view;
+            }
+            // Load (don't clear) so the overlay composites onto the base scene's colour.
+            current._config.clr = false;
+        }
+        return record();
+    };
 }

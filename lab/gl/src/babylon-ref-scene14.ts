@@ -22,7 +22,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
  *    HALF_FLOAT (RGBA16F) render target. `renderer.render(patternWrapper, rtw)`
  *    binds the RT framebuffer, sets the viewport to the RT size, draws the
  *    fullscreen quad, then unbinds — the analogue of lite-gl's
- *    `bindRenderTarget(engine, rt)` + `drawEffect`.
+ *    `bindRenderTarget(rt)` + `drawEffect`.
  *  - PASS 2 samples that float RT fullscreen, tone-maps it with the SAME fixed
  *    exposure (`1 - exp(-c·exposure)`), then applies the SAME aspect-corrected
  *    vignette.

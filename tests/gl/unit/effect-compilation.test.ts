@@ -46,9 +46,9 @@ describe("lite-gl: non-blocking effect compilation", () => {
         expect(mock.count("getShaderInfoLog")).toBe(0);
         expect(effect.isReady).toBe(false);
         mock.clear();
-        expect(isEffectReady(engine, effect)).toBe(false);
+        expect(isEffectReady(effect)).toBe(false);
         expect(mock.log).toEqual([{ name: "getProgramParameter", args: [effect.program, engine.caps.parallelShaderCompile!.COMPLETION_STATUS_KHR] }]);
-        expect(getEffectCompilationError(engine, effect)).toBeNull();
+        expect(getEffectCompilationError(effect)).toBeNull();
         expect(mock.count("getShaderParameter")).toBe(0);
     });
 
@@ -56,7 +56,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
         const { mock, engine } = setup(parallel);
         const effect = createEffect(engine, OPTIONS);
         mock.clear();
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         expect(mock.log.filter((call) => call.name === "getProgramParameter").map((call) => call.args[1])).toEqual(
             parallel ? [engine.caps.parallelShaderCompile!.COMPLETION_STATUS_KHR, engine.gl.LINK_STATUS] : [engine.gl.LINK_STATUS]
         );
@@ -65,8 +65,8 @@ describe("lite-gl: non-blocking effect compilation", () => {
         expect(mock.count("getProgramInfoLog")).toBe(0);
         expect(mock.count("uniform1i")).toBe(1);
         mock.clear();
-        expect(getEffectCompilationError(engine, effect)).toBeNull();
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(getEffectCompilationError(effect)).toBeNull();
+        expect(isEffectReady(effect)).toBe(true);
         expect(mock.log).toEqual([]);
     });
 
@@ -76,13 +76,13 @@ describe("lite-gl: non-blocking effect compilation", () => {
         mock.setParallelComplete(false);
         const effect = createEffect(engine, OPTIONS);
         const compiled = vi.fn();
-        executeWhenCompiled(engine, effect, compiled);
+        executeWhenCompiled(effect, compiled);
         if (parallel) {
-            expect(getEffectCompilationError(engine, effect)).toBeNull();
+            expect(getEffectCompilationError(effect)).toBeNull();
             expect(mock.count("getShaderParameter")).toBe(0);
         }
         mock.setParallelComplete(true);
-        const error = getEffectCompilationError(engine, effect);
+        const error = getEffectCompilationError(effect);
         expect(error).toContain("link failed: mock link error");
         expect(error).toContain("vertex compile failed: mock compile error");
         expect(error).toContain("fragment compile failed: mock compile error");
@@ -92,12 +92,12 @@ describe("lite-gl: non-blocking effect compilation", () => {
         expect(mock.count("uniform1i")).toBe(0);
         expect(console.error).toHaveBeenCalledTimes(1);
         mock.clear();
-        expect(getEffectCompilationError(engine, effect)).toBe(error);
-        expect(isEffectReady(engine, effect)).toBe(false);
+        expect(getEffectCompilationError(effect)).toBe(error);
+        expect(isEffectReady(effect)).toBe(false);
         expect(mock.log).toEqual([]);
         expect(console.error).toHaveBeenCalledTimes(1);
-        disposeEffect(engine, effect);
-        expect(getEffectCompilationError(engine, effect)).toBe(error);
+        disposeEffect(effect);
+        expect(getEffectCompilationError(effect)).toBe(error);
     });
 
     it("collects info logs only for failed shader stages", () => {
@@ -106,7 +106,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
         const effect = createEffect(engine, OPTIONS);
         vi.spyOn(engine.gl, "getShaderParameter").mockImplementation((shader) => shader !== effect._fs);
         const shaderLog = vi.spyOn(engine.gl, "getShaderInfoLog").mockReturnValue("fragment syntax error");
-        expect(getEffectCompilationError(engine, effect)).toBe("link failed: mock link error\nfragment compile failed: fragment syntax error");
+        expect(getEffectCompilationError(effect)).toBe("link failed: mock link error\nfragment compile failed: fragment syntax error");
         expect(shaderLog).toHaveBeenCalledExactlyOnceWith(effect._fs);
     });
 
@@ -114,7 +114,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
         const { mock, engine } = setup();
         mock.setLinkSuccess(false);
         const effect = createEffect(engine, OPTIONS);
-        expect(getEffectCompilationError(engine, effect)).toBe("link failed: mock link error");
+        expect(getEffectCompilationError(effect)).toBe("link failed: mock link error");
         expect(mock.count("getShaderParameter")).toBe(2);
         expect(mock.count("getShaderInfoLog")).toBe(0);
     });
@@ -125,9 +125,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
         const effect = createEffect(engine, OPTIONS);
         vi.spyOn(engine.gl, "getProgramInfoLog").mockReturnValue(log);
         vi.spyOn(engine.gl, "getShaderInfoLog").mockReturnValue(log);
-        expect(getEffectCompilationError(engine, effect)).toBe(
-            "link failed: no program info log\nvertex compile failed: no shader info log\nfragment compile failed: no shader info log"
-        );
+        expect(getEffectCompilationError(effect)).toBe("link failed: no program info log\nvertex compile failed: no shader info log\nfragment compile failed: no shader info log");
     });
 
     it.each(["vertex", "fragment", "program"] as const)("throws on %s allocation failure and releases partial resources", (stage) => {
@@ -151,7 +149,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
     it("keeps restored compilation non-blocking and clears an old error on a successful retry", () => {
         const { mock, canvas, engine } = setup();
         const effect = createEffect(engine, OPTIONS);
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         fireLost(canvas);
         mock.setParallelComplete(false);
         mock.setCompileSuccess(false);
@@ -159,20 +157,20 @@ describe("lite-gl: non-blocking effect compilation", () => {
         fireRestored(canvas);
         expect(mock.count("getShaderParameter")).toBe(0);
         expect(mock.count("getProgramParameter")).toBe(0);
-        expect(getEffectCompilationError(engine, effect)).toBeNull();
+        expect(getEffectCompilationError(effect)).toBeNull();
         mock.setParallelComplete(true);
-        expect(getEffectCompilationError(engine, effect)).toContain("mock compile error");
+        expect(getEffectCompilationError(effect)).toContain("mock compile error");
         fireLost(canvas);
         mock.setCompileSuccess(true);
         fireRestored(canvas);
-        expect(getEffectCompilationError(engine, effect)).toBeNull();
+        expect(getEffectCompilationError(effect)).toBeNull();
         expect(effect.isReady).toBe(true);
     });
 
     it.each(["vertex", "fragment", "program"] as const)("exposes %s restore allocation failure and releases partial resources", (stage) => {
         const { mock, canvas, engine } = setup();
         const effect = createEffect(engine, OPTIONS);
-        expect(isEffectReady(engine, effect)).toBe(true);
+        expect(isEffectReady(effect)).toBe(true);
         fireLost(canvas);
         mock.clear();
         if (stage === "program") {
@@ -186,7 +184,7 @@ describe("lite-gl: non-blocking effect compilation", () => {
             }
         }
         fireRestored(canvas);
-        expect(getEffectCompilationError(engine, effect)).toBe(`context-restore: ${stage}${stage === "program" ? "" : " shader"} allocation failed`);
+        expect(getEffectCompilationError(effect)).toBe(`context-restore: ${stage}${stage === "program" ? "" : " shader"} allocation failed`);
         expect(mock.count("deleteShader")).toBe(stage === "vertex" ? 0 : stage === "fragment" ? 1 : 2);
         expect(console.error).toHaveBeenCalledTimes(1);
         expect(effect.isReady).toBe(false);
