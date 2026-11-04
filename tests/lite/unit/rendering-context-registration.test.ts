@@ -15,7 +15,7 @@ import { createFrameGraphContext } from "../../../packages/babylon-lite/src/fram
 import { addTask, addTaskAtStart, removeTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
-import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { addToScene, createSceneContext, disposeScene, onBeforeRender, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { _installAsyncShaderPipelinePreparation, registerSceneWithShadowSupport } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -81,6 +81,13 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
     const _surfaces = [eng];
     Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
     return eng;
+}
+
+/** Run one frame of an overlay scene against a stubbed frame graph; overlays composite at record time. */
+function drawOverlay(scene: SceneContext): void {
+    vi.spyOn(scene._frameGraph, "execute").mockReturnValue(0);
+    scene._update();
+    scene._record();
 }
 
 function makeRenderingContext(): RenderingContext {
@@ -180,8 +187,8 @@ describe("registerScene / unregisterScene", () => {
         await Promise.all(registrations);
 
         expect(getRenderingContexts(engine)).toEqual([first, second]);
-        expect(second._beforeRender).toHaveLength(1);
-        second._update();
+        expect(second._beforeRender).toHaveLength(0);
+        drawOverlay(second);
         expect((second._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(false);
     });
 
@@ -239,7 +246,7 @@ describe("registerScene / unregisterScene", () => {
         registerRenderingContext(engine, text);
 
         await registerSceneWithShadowSupport(overlay);
-        overlay._update();
+        drawOverlay(overlay);
         const task = overlay._frameGraph._tasks[1] as RenderTaskBase;
         expect(getRenderingContexts(engine)).toEqual([main, overlay, text]);
         expect(task._config.clr).toBe(false);
@@ -256,7 +263,7 @@ describe("registerScene / unregisterScene", () => {
         for (let i = 0; i < 3; i++) {
             unregisterScene(second);
             await registerScene(second);
-            expect(second._beforeRender).toHaveLength(1);
+            expect(second._beforeRender).toHaveLength(0);
             expect(second._disposables).toHaveLength(cleanupCount);
         }
 
@@ -272,9 +279,11 @@ describe("registerScene / unregisterScene", () => {
         const overlay = createOverlayScene(main);
         await registerScene(main);
         await registerScene(overlay);
-        overlay._update();
         const original = overlay._frameGraph._tasks[0] as RenderTaskBase;
-        const originalView = original._colorAttachment.view;
+        drawOverlay(overlay);
+        if (samples > 1) {
+            expect(original._colorAttachment.view).toBe((main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
+        }
 
         unregisterScene(overlay);
         removeTask(overlay, original);
@@ -282,7 +291,7 @@ describe("registerScene / unregisterScene", () => {
         const replacement = createRenderTask({ name: "scene", rt, rst, depth }, engine, overlay) as unknown as RenderTaskBase;
         addTask(overlay, replacement as unknown as Task);
         await registerScene(overlay);
-        overlay._update();
+        drawOverlay(overlay);
 
         const mainView = (main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view;
         expect(replacement._config.clr).toBe(false);
@@ -291,9 +300,10 @@ describe("registerScene / unregisterScene", () => {
         expect(original.enabled).toBeUndefined();
         if (samples > 1) {
             expect(replacement._colorAttachment.view).toBe(mainView);
-            expect(original._colorAttachment.view).toBe(originalView);
+            expect(original._colorAttachment.view).toBe(original._config.rt._colorView);
+            expect(original._colorAttachment.view).not.toBe(mainView);
         }
-        expect(overlay._beforeRender).toHaveLength(1);
+        expect(overlay._beforeRender).toHaveLength(0);
         disposeScene(overlay);
         disposeScene(main);
     });
@@ -339,7 +349,7 @@ describe("registerScene / unregisterScene", () => {
 
             expect(getRenderingContexts(engine)).toEqual([main, first.scene, second.scene, text]);
             for (const utility of [first, second]) {
-                utility.scene._update();
+                drawOverlay(utility.scene);
                 expect(defaultTask(utility.scene)._config.clr).toBe(false);
                 if (samples > 1) {
                     expect(defaultTask(utility.scene)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
@@ -380,7 +390,7 @@ describe("registerScene / unregisterScene", () => {
 
             disposeUtilityLayer(a1);
             expect(getRenderingContexts(engine)).toEqual([a, a2.scene, b, b1.scene, text]);
-            a2.scene._update();
+            drawOverlay(a2.scene);
             expect(defaultTask(a2.scene)._config.clr).toBe(false);
         });
 
@@ -486,7 +496,7 @@ describe("registerScene / unregisterScene", () => {
             await registerUtilityLayer(utility);
             expect(getRenderingContexts(engine)).toEqual([main, second, first, utility.scene, text]);
             for (const overlay of [first, second]) {
-                overlay._update();
+                drawOverlay(overlay);
                 expect(defaultTask(overlay)._config.clr).toBe(false);
                 if (samples > 1) {
                     expect(defaultTask(overlay)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
@@ -516,28 +526,60 @@ describe("registerScene / unregisterScene", () => {
                 expect(utility.scene._beforeRender).toHaveLength(callbackCount);
             }
 
-            utility.scene._update();
+            drawOverlay(utility.scene);
             expect(defaultTask(utility.scene)._config.clr).toBe(false);
         });
 
-        it("restores an overlay disabled while its MSAA attachment was unavailable", async () => {
+        it("skips only the frames recorded while its MSAA attachment is unavailable", async () => {
             const engine = makeMockEngine();
             const main = createSceneContext(engine);
             const utility = createUtilityLayer(main, { addDefaultLight: false });
             await registerScene(main);
             await registerUtilityLayer(utility);
             const task = defaultTask(main);
+            const overlayTask = defaultTask(utility.scene);
+            const seen: Array<boolean | undefined> = [];
+            vi.spyOn(utility.scene._frameGraph, "execute").mockImplementation(() => (seen.push(overlayTask.enabled), 0));
             const resolveTarget = task._config.rst;
             task._config.rst = undefined;
             utility.scene._update();
-            expect(defaultTask(utility.scene).enabled).toBe(false);
+            utility.scene._record();
+            expect(seen).toEqual([false]);
+            expect(overlayTask.enabled).not.toBe(false);
 
             unregisterScene(utility.scene);
             await registerUtilityLayer(utility);
             task._config.rst = resolveTarget;
             utility.scene._update();
-            expect(defaultTask(utility.scene).enabled).not.toBe(false);
-            expect(defaultTask(utility.scene)._config.clr).toBe(false);
+            utility.scene._record();
+            expect(seen).toEqual([false, undefined]);
+            expect(overlayTask._config.clr).toBe(false);
+        });
+
+        it.each([1, 4])("respects an app's before-render enabled gate on the overlay task at MSAA %i", async (samples) => {
+            const engine = makeMockEngine(samples);
+            const main = createSceneContext(engine);
+            const overlay = createOverlayScene(main);
+            await registerScene(main);
+            await registerScene(overlay);
+            const task = defaultTask(overlay);
+            let visible = true;
+            onBeforeRender(overlay, () => (task.enabled = visible));
+            const seen: Array<boolean | undefined> = [];
+            vi.spyOn(overlay._frameGraph, "execute").mockImplementation(() => (seen.push(task.enabled), 0));
+
+            for (const show of [true, false, true, false]) {
+                visible = show;
+                overlay._update();
+                overlay._record();
+            }
+
+            expect(seen).toEqual([true, false, true, false]);
+            expect(task.enabled).toBe(false);
+            expect(task._config.clr).toBe(false);
+            if (samples > 1) {
+                expect(task._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
+            }
         });
 
         it("orders the layer on its main scene's surface", async () => {
@@ -657,7 +699,7 @@ describe("registerScene / unregisterScene", () => {
             await Promise.all([first, second]);
 
             expect(getRenderingContexts(engine)).toEqual(utilityFirst ? [utility.scene] : [main, utility.scene]);
-            expect(utility.scene._beforeRender).toHaveLength(2);
+            expect(utility.scene._beforeRender).toHaveLength(1);
             if (utilityFirst) {
                 await registerScene(main);
                 expect(getRenderingContexts(engine)).toEqual([main, utility.scene]);
