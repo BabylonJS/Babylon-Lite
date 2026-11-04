@@ -133,6 +133,29 @@ describe("configureSwapchainOverlayScene", () => {
         expect(overlayTask.enabled).toBe(true);
     });
 
+    it("skips an MSAA overlay while the root task's execution is paused", () => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const baseView = {} as GPUTextureView;
+        const overlayView = {} as GPUTextureView;
+        const baseTask = makeSwapchainTask(swapchain, baseView);
+        const overlayTask = makeSwapchainTask(swapchain, overlayView);
+        const overlay = makeOverlay(makeSurface(swapchain, 4, []), overlayTask, makeBase([baseTask]));
+        const record = configure(overlay);
+        const seen: Array<boolean | undefined> = [];
+        record.mockImplementation(() => (seen.push(overlayTask.enabled), 0));
+
+        baseTask.executionEnabled = false;
+        overlay._record();
+        expect(seen).toEqual([false]);
+        expect(overlayTask.enabled).toBeUndefined();
+        expect(overlayTask._colorAttachment.view).toBe(overlayView);
+
+        baseTask.executionEnabled = true;
+        overlay._record();
+        expect(seen).toEqual([false, undefined]);
+        expect(overlayTask._colorAttachment.view).toBe(baseView);
+    });
+
     it("keeps an MSAA overlay skipped when post-process/copy base tasks cannot share an attachment", () => {
         const swapchain = {} as SurfaceContext["scRT"];
         const overlayView = {} as GPUTextureView;

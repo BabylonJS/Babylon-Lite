@@ -582,6 +582,28 @@ describe("registerScene / unregisterScene", () => {
             }
         });
 
+        it("skips an MSAA overlay while its base scene's task execution is paused", async () => {
+            const engine = makeMockEngine(4);
+            const main = createSceneContext(engine);
+            const overlay = createOverlayScene(main);
+            await registerScene(main);
+            await registerScene(overlay);
+            const baseTask = defaultTask(main);
+            const task = defaultTask(overlay);
+            const seen: Array<boolean | undefined> = [];
+            vi.spyOn(overlay._frameGraph, "execute").mockImplementation(() => (seen.push(task.enabled), 0));
+
+            for (const paused of [false, true, false]) {
+                baseTask.executionEnabled = !paused;
+                overlay._update();
+                overlay._record();
+            }
+
+            expect(seen).toEqual([undefined, false, undefined]);
+            expect(task.enabled).toBeUndefined();
+            expect(task._colorAttachment.view).toBe(baseTask._colorAttachment.view);
+        });
+
         it("orders the layer on its main scene's surface", async () => {
             const engine = makeMockEngine();
             const surface = makeMockEngine();

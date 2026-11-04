@@ -41,9 +41,9 @@ export function configureSwapchainOverlayScene(overlay: SceneContext): void {
                     root = root._overlayBase;
                 }
                 const rootTask = getDefaultSwapchainTask(root, surface);
-                // A root that did not render this frame, or that does not resolve into the swapchain
-                // (post-process/copy), has no colour the overlay can load and resolve.
-                const view = rootTask?.enabled !== false && rootTask?._config.rst === surface.scRT && rootTask._colorAttachment.view;
+                // A root that did not render this frame (disabled or paused), or that does not resolve into
+                // the swapchain (post-process/copy), has no colour the overlay can load and resolve.
+                const view = rootTask?.enabled !== false && rootTask?.executionEnabled !== false && rootTask?._config.rst === surface.scRT && rootTask._colorAttachment.view;
                 if (!view) {
                     const enabled = current.enabled;
                     current.enabled = false;
