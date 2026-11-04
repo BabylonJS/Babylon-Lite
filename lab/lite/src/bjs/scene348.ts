@@ -5,11 +5,10 @@
 // `iterations` times (default 1). The parity test uses `?iterations=2`.
 // The two right-handed tests are not ported (Babylon Lite has no right-handed scenes).
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
+import type { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { Light } from "@babylonjs/core/Lights/light";
-import { LoadAssetContainerAsync, SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
-import "@babylonjs/core/Loading/loadingScreen";
+import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { Material } from "@babylonjs/core/Materials/material";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -18,13 +17,10 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Scene } from "@babylonjs/core/scene";
 import { GLTF2Export } from "@babylonjs/serializers/glTF/2.0";
 import "@babylonjs/loaders/glTF";
+import { createExportReferenceEngine, installExportReferenceRandom, startExportReference } from "./export-gltf-fixtures";
 
 // Babylon.js visualization harness: seeded Math.random.
-let seed = 1;
-Math.random = () => {
-    const x = Math.sin(seed++) * 10000;
-    return x - Math.floor(x);
-};
+installExportReferenceRandom();
 
 // Test variant (config `replace`): `//options//` -> `useRightHandedSystem = false; iterations = 1|2;`
 const params = new URLSearchParams(location.search);
@@ -104,23 +100,10 @@ async function createScene(engine: WebGPUEngine, canvas: HTMLCanvasElement) {
 }
 
 (async function () {
-    const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const antialias = params.get("antialias") !== "0";
-    const engine = new WebGPUEngine(canvas, { antialias, adaptToDeviceRatio: true });
-    await engine.initAsync();
-    SceneLoader.ShowLoadingScreen = false;
-    engine.displayLoadingUI = () => {};
-
+    const { engine, canvas, startedAt } = await createExportReferenceEngine();
     const scene = await createScene(engine, canvas);
     scene.useConstantAnimationDeltaTime = true;
-
-    await scene.whenReadyAsync();
-    engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    await startExportReference(engine, canvas, scene, startedAt);
 })().catch((err) => {
     console.error(err);
 });

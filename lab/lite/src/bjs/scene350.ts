@@ -4,9 +4,7 @@
 // both animation groups started on frame 60 (from = to = 60).
 import { Animation } from "@babylonjs/core/Animations/animation";
 import "@babylonjs/core/Animations/animatable";
-import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
-import "@babylonjs/core/Loading/loadingScreen";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -21,31 +19,15 @@ import { GLTF2Export } from "@babylonjs/serializers/glTF/2.0";
 import "@babylonjs/loaders/glTF";
 import { GLTFLoaderAnimationStartMode } from "@babylonjs/loaders/glTF/glTFFileLoader";
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-
-// Babylon.js visualization harness: seeded Math.random (installed after the engine exists, right before the snippet runs).
-let seed = 1;
-const installSeededRandom = () => {
-    seed = 1;
-    Math.random = () => {
-        const x = Math.sin(seed++) * 10000;
-        return x - Math.floor(x);
-    };
-};
+import { createExportReferenceEngine, installExportReferenceRandom, startExportReference } from "./export-gltf-fixtures";
 
 // The snippet passes `{ segments: 16, size: 2 }`; CreateSphere has no `size` option, so it is ignored and the spheres keep the default diameter 1.
 const SPHERE_OPTIONS = { segments: 16, size: 2 } as { segments: number };
 
 (async function () {
-    const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const params = new URLSearchParams(location.search);
-    const antialias = params.get("antialias") !== "0";
-    const engine = new WebGPUEngine(canvas, { antialias, adaptToDeviceRatio: true });
-    await engine.initAsync();
-    SceneLoader.ShowLoadingScreen = false;
-    engine.displayLoadingUI = () => {};
-
-    installSeededRandom();
+    const { engine, canvas, startedAt } = await createExportReferenceEngine();
+    // The morph fixture seeds randomness after engine initialization, before creating its two geometry IDs.
+    installExportReferenceRandom();
     const scene = new Scene(engine);
 
     const sphere1 = MeshBuilder.CreateSphere("sphere1", SPHERE_OPTIONS, scene);
@@ -119,12 +101,7 @@ const SPHERE_OPTIONS = { segments: 16, size: 2 } as { segments: number };
     outScene.animationGroups[1]!.setWeightForAllAnimatables(1);
     outScene.useConstantAnimationDeltaTime = true;
 
-    await outScene.whenReadyAsync();
-    engine.runRenderLoop(() => outScene.render());
-    window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => outScene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    await startExportReference(engine, canvas, outScene, startedAt);
 })().catch((err) => {
     console.error(err);
 });

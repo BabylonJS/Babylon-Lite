@@ -1279,6 +1279,8 @@ Three layers, mapped onto TESTING.md's categories:
 
 The five parity specs share `tests/lite/parity/export-gltf-parity.ts`: the existing 120-second test timeout, 90-second golden/readiness waits, loader-overlay removal, canvas capture, artifacts and configured MAD assertion. Each scene keeps its test title and golden directory; scene 348 retains `?iterations=2`.
 
+The Babylon.js reference pages share engine startup, seeded randomness and first-frame signaling in `lab/lite/src/bjs/export-gltf-fixtures.ts`. Scene construction stays independent in each page. Scene 350 seeds randomness after engine initialization; the other four retain their pre-engine seeding. Scene 352 keeps both additional `executeWhenReady` waits around its export and import.
+
 The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
 Because Lite entities are plain data, unit-test stubs are object literals; no engine or real GPU is required.
@@ -1554,6 +1556,7 @@ The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.t
 | `tests/lite/unit/export-gltf/animations.test.ts`                                                 | animation channels, samplers and conversion                                                                      |
 | `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | visual parity scenes 348–352: Lite page and Babylon.js reference page                                            |
 | `lab/public/lite/export-gltf-fixtures.css`                                                       | shared canvas layout for the fifteen exporter fixture pages                                                      |
+| `lab/lite/src/bjs/export-gltf-fixtures.ts`                                                       | shared reference engine startup, random seed and first-frame signaling                                           |
 | `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | visual parity specs                                                                                              |
 | `tests/lite/parity/export-gltf-parity.ts`                                                        | shared runner for the five exporter parity specs; preserves per-scene configuration, paths and assertions        |
 | `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | goldens and gallery thumbnails                                                                                   |

@@ -4,11 +4,9 @@
 // exported with GLTF2Export and reloaded. The test sets `meshCount = 2` (default in the snippet is 3).
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
-import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { Light } from "@babylonjs/core/Lights/light";
-import { LoadAssetContainerAsync, SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
-import "@babylonjs/core/Loading/loadingScreen";
+import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Geometry } from "@babylonjs/core/Meshes/geometry";
@@ -17,13 +15,10 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Scene } from "@babylonjs/core/scene";
 import { GLTF2Export } from "@babylonjs/serializers/glTF/2.0";
 import "@babylonjs/loaders/glTF";
+import { createExportReferenceEngine, installExportReferenceRandom, startExportReference } from "./export-gltf-fixtures";
 
 // Babylon.js visualization harness: seeded Math.random.
-let seed = 1;
-Math.random = () => {
-    const x = Math.sin(seed++) * 10000;
-    return x - Math.floor(x);
-};
+installExportReferenceRandom();
 
 let meshCount = 3; // Since conversions often involve negating signs, try this with odd and even numbers of meshes
 meshCount = 2; // test option: `//options//` -> `meshCount = 2;`
@@ -47,13 +42,7 @@ const normals: number[] = [];
 VertexData.ComputeNormals(positions, indices, normals);
 
 (async function () {
-    const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const antialias = new URLSearchParams(location.search).get("antialias") !== "0";
-    const engine = new WebGPUEngine(canvas, { antialias, adaptToDeviceRatio: true });
-    await engine.initAsync();
-    SceneLoader.ShowLoadingScreen = false;
-    engine.displayLoadingUI = () => {};
+    const { engine, canvas, startedAt } = await createExportReferenceEngine();
 
     function createGeometry() {
         const geometry = new Geometry("shared");
@@ -114,12 +103,7 @@ VertexData.ComputeNormals(positions, indices, normals);
     const scene = await createScene();
     scene.useConstantAnimationDeltaTime = true;
 
-    await scene.whenReadyAsync();
-    engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    await startExportReference(engine, canvas, scene, startedAt);
 })().catch((err) => {
     console.error(err);
 });

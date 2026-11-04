@@ -5,10 +5,8 @@
 // (Babylon Lite has no right-handed scenes).
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { Light } from "@babylonjs/core/Lights/light";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
-import "@babylonjs/core/Loading/loadingScreen";
 import { Quaternion } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -16,13 +14,10 @@ import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Helpers/sceneHelpers";
 import { GLTF2Export } from "@babylonjs/serializers/glTF/2.0";
 import "@babylonjs/loaders/glTF";
+import { createExportReferenceEngine, installExportReferenceRandom, startExportReference } from "./export-gltf-fixtures";
 
 // Babylon.js visualization harness: seeded Math.random.
-let seed = 1;
-Math.random = () => {
-    const x = Math.sin(seed++) * 10000;
-    return x - Math.floor(x);
-};
+installExportReferenceRandom();
 
 const roundtrip = true;
 const exportFileName = "exported";
@@ -31,13 +26,7 @@ const exportOptions = {
 };
 
 (async function () {
-    const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const antialias = new URLSearchParams(location.search).get("antialias") !== "0";
-    const engine = new WebGPUEngine(canvas, { antialias, adaptToDeviceRatio: true });
-    await engine.initAsync();
-    SceneLoader.ShowLoadingScreen = false;
-    engine.displayLoadingUI = () => {};
+    const { engine, canvas, startedAt } = await createExportReferenceEngine();
 
     function createRotatedParentChild(scene: Scene, xOffset: number, yOffset: number, parentQuaternion: Quaternion, childQuaternion: Quaternion) {
         const parent = new TransformNode("parent", scene);
@@ -90,12 +79,7 @@ const exportOptions = {
     const scene = await createScene();
     scene.useConstantAnimationDeltaTime = true;
 
-    await scene.whenReadyAsync();
-    engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - __initStart);
-    canvas.dataset.ready = "true";
+    await startExportReference(engine, canvas, scene, startedAt);
 })().catch((err) => {
     console.error(err);
 });
