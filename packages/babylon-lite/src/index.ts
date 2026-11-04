@@ -216,6 +216,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
+export { enableBentNormals } from "./material/pbr/fragments/bent-normal-fragment.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────

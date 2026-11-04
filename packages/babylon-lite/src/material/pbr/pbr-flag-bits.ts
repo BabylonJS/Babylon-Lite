@@ -77,3 +77,7 @@ export const PBR2_HAS_DISPERSION = 1 << 20;
  *  colour. Consumed only by the geometry-renderer task; PBR scenes without
  *  geometry rendering never set this bit. */
 export const PBR2_GEOMETRY_OUTPUT = 1 << 21;
+/** Material has a bent normal texture used for IBL specular occlusion
+ *  (maps to BJS PBRMaterial.bentNormalTexture / BENTNORMAL define).
+ *  Bits 20-23 are also used fragment-locally by iridescence-fragment.ts, so stay above them. */
+export const PBR2_HAS_BENT_NORMAL = 1 << 24;

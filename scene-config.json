@@ -1798,5 +1798,16 @@
         "description": "Minimal glTF tutorial asset whose single triangle primitive omits `indices`. Verifies Lite expands non-indexed triangle primitives to identity indices before GPU upload so the existing indexed draw path remains fast and unchanged.",
         "tags": ["pbr", "gltf", "non-indexed"],
         "skipPerf": true
+    },
+    {
+        "id": 230,
+        "slug": "scene230-bent-normals",
+        "name": "Scene 230 — Bent Normals",
+        "maxMad": 1,
+        "maxRegionMad": 2,
+        "maxRawKB": 79.5,
+        "description": "Bent normal reflection occlusion (Babylon.js PG #ZH5HB3#3). The same glTF is loaded twice; only the right copy gets a tangent-space `bentNormalTexture`, replacing the default specular occlusion with the spherical-Gaussian bent-normal visibility term in the IBL specular lobe.",
+        "tags": ["pbr", "gltf", "ibl", "bent-normal"],
+        "skipPerf": true
     }
 ]

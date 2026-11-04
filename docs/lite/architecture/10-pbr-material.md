@@ -179,6 +179,8 @@ export interface PbrMaterialProps extends Material {
   occlusionStrength?: number;
   occlusionTexCoord?: number;
   occlusionTexture?: Texture2D;
+  bentNormalTexture?: Texture2D;
+  bentNormalStrength?: number;
   metallicF0Factor?: number;
   metallicReflectanceColor?: [number, number, number];
   useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
@@ -326,6 +328,23 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 - **Fragment slots**:
     - `AI` — full IBL computation: reflected vector, BRDF LUT sampling, specular radiance, SH irradiance, horizon occlusion, energy conservation
     - `BA` — luminance-over-alpha accumulation for alpha blending
+
+### `bent-normal-fragment.ts` — Bent Normal Reflection Occlusion
+
+Port of BJS `PBRMaterial.bentNormalTexture` (BENTNORMAL define, Babylon.js PR #19069). **Explicit opt-in**: call `enableBentNormals()` once before `registerScene` (same pattern as `enableMaterialPlugins`). Setting `bentNormalTexture` without that call has no effect. Neither `pbr-renderable.ts` nor `ibl-fragment.ts` references this module, so scenes that do not opt in pay zero bytes.
+
+- **API**: `enableBentNormals(): void` — idempotent and global. It augments the exported IBL `pbrExt` object in place (adding `detect`, `writeUbo` and `textures`, and wrapping `frag` and `bind`). This is required rather than registering a separate ext because the IBL `AI` code must be modified (later fragments such as clearcoat, sheen and refraction recompute from its `let`s) and `pbr-renderable` re-registers the `"ibl"` ext by id during its build.
+- **Factory**: `createBentNormalFragment(reuseTbn: boolean, doubleSided: boolean): ShaderFragment` — merged into the IBL fragment (same id `"ibl"`), with bent bindings appended after the IBL bindings.
+- **Flag**: `PBR2_HAS_BENT_NORMAL` (`features2`, `1 << 24` — bits 20-23 are reused fragment-locally by iridescence), set by `detect` when the material is lit, not in skybox mode, has `bentNormalTexture`, and has an AO texture (`ormTexture` or `occlusionTexture`) with `occlusionStrength > 0` — mirroring BJS, which requires an ambient texture. Only takes effect when IBL is active.
+- **UBO**: `bentNormalParams: vec4<f32>` — `.x` is the strength (clamped with `saturate`, maps to BJS `bentNormalTexture.level`). A full `vec4` keeps the 16-byte packing that later fragments' writers (e.g. reflectance) assume.
+- **Bindings**: `bentNormalTexture_`, `bentNormalSampler_`
+- **Helper WGSL**: `bentNormalSGOverlap()`, `bentNormalSGOcclusion()`, `environmentBentNormalOcclusion()` — spherical-Gaussian overlap between the AO visibility cone around the bent normal and the GGX reflection lobe, normalized by the open-hemisphere overlap.
+- **Fragment slots**:
+    - `AC` — builds the tangent frame, decodes `bentNormalW` from the tangent-space map (sampled with UV1), applies the double-sided flip, and defines `bentNormalStrength` for the IBL `AI` code.
+    - `AI` — the IBL `AI` code is string-patched: the analytic specular occlusion (`seo`) is dropped from `colorSpecularEnvReflectance`, and the environment radiance is multiplied by `mix(1, environmentBentNormalOcclusion(...), bentNormalStrength)` before energy conservation. Search/replacement strings are template literals so the bundle WGSL minifier rewrites them identically to the IBL source.
+- **Tangent frame**: reuses the template's vertex `TBN` when a normal map and vertex tangents are present without thin instances; otherwise builds a screen-space cotangent frame from `N_geom` using the same convention as the base normal map (negated bitangent, mirrored UV on back faces).
+- **Known differences vs BJS**: requires the explicit `enableBentNormals()` opt-in; the bent texture always samples UV1 with no UV transform; a mesh with tangents but no normal map uses the cotangent frame (BJS would reuse vTBN, which Lite only emits on the normal-map path); BJS' non-uniform-scaling check is not mirrored (Lite has no non-uniform-scaling mesh feature; its base normal mapping does not mirror it either); skybox-mode materials ignore the bent texture.
+- **Parity scene**: scene 230 (`scene230-bent-normals`), from BJS PG `#ZH5HB3#3`.
 
 ### `clearcoat-fragment.ts` — Clearcoat Layer
 
