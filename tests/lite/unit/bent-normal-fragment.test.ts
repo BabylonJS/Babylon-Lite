@@ -5,6 +5,8 @@ import { pbrExt as iblExt } from "../../../packages/babylon-lite/src/material/pb
 import { pbrExt as lightmapExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/lightmap-fragment";
 import { createReflectanceFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/reflectance-fragment";
 import * as flagBits from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
+import { PBR_HAS_NORMAL_MAP, PBR2_HAS_UV_TRANSFORM } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
+import { MSH_HAS_TANGENTS } from "../../../packages/babylon-lite/src/material/mesh-features";
 import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { _PbrFragCtx } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-layout";
@@ -90,6 +92,18 @@ describe("bent normals", () => {
         const bjs = scale(frame(n), -1);
         const lite = frame(scale(n, -1));
         lite.forEach((c, i) => expect(c).toBeCloseTo(bjs[i]!, 12));
+    });
+
+    it("reuses the vertex TBN only for an untransformed UV0 normal map", () => {
+        const ctx = (features2: number, uv2Mask: number) =>
+            ({ ...fragCtx(BENT | PBR_HAS_NORMAL_MAP, true), _features2: features2, _uv2Mask: uv2Mask, _meshFeatures: MSH_HAS_TANGENTS }) as _PbrFragCtx;
+        const reuses = (c: _PbrFragCtx) => iblExt.frag!(c)!._fragmentSlots!.AC!.includes("let bnTBN=TBN;");
+        expect(reuses(ctx(0, 0))).toBe(true);
+        // Normal map on TEXCOORD_1: its tangents don't match the bent map's UV0 basis.
+        expect(reuses(ctx(0, 4))).toBe(false);
+        // Another channel on TEXCOORD_1 doesn't affect the normal map's basis.
+        expect(reuses(ctx(0, 1))).toBe(true);
+        expect(reuses(ctx(PBR2_HAS_UV_TRANSFORM, 0))).toBe(false);
     });
 
     it("keeps the reflectance UBO writer's 16-byte packing", () => {

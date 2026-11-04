@@ -17,7 +17,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP } from "../pbr-flag-bits.js";
+import { PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
 import { MSH_HAS_TANGENTS, MSH_HAS_THIN_INSTANCES } from "../../mesh-features.js";
 import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 import { pbrExt as iblExt } from "./ibl-fragment.js";
@@ -30,6 +30,9 @@ const STAGE_FRAGMENT = 0x2;
 // reserved in pbr-flag-bits.ts. Material `features` bit 1<<4 is free because
 // PBR_HAS_TONEMAP only ever lives in `sceneFeatures`.
 const PBR_HAS_BENT_NORMAL = 1 << 4;
+
+// `_uv2Mask` bit selecting TEXCOORD_1 for the normal map (see pbr-template-ext.ts).
+const UV2_MASK_NORMAL = 4;
 
 // Spherical Gaussians parameterized by spread = 1/sharpness. See BJS pbrIBLFunctions.fx (BENTNORMAL).
 const BENT_NORMAL_HELPERS = wgsl`
@@ -144,7 +147,14 @@ export function enableBentNormals(): void {
         if (!ibl || !(ctx._features & PBR_HAS_BENT_NORMAL)) {
             return ibl;
         }
-        const reuseTbn = (ctx._features & PBR_HAS_NORMAL_MAP) !== 0 && (ctx._meshFeatures & MSH_HAS_TANGENTS) !== 0 && (ctx._meshFeatures & MSH_HAS_THIN_INSTANCES) === 0;
+        // Reuse the vertex TBN only when the normal map samples UV0 without a UV transform, so its
+        // tangents match the bent map's UV0 basis (BJS BENTNORMALDIRECTUV && BUMPDIRECTUV gate).
+        const reuseTbn =
+            (ctx._features & PBR_HAS_NORMAL_MAP) !== 0 &&
+            (ctx._meshFeatures & MSH_HAS_TANGENTS) !== 0 &&
+            (ctx._meshFeatures & MSH_HAS_THIN_INSTANCES) === 0 &&
+            (ctx._features2 & PBR2_HAS_UV_TRANSFORM) === 0 &&
+            ((ctx._uv2Mask ?? 0) & UV2_MASK_NORMAL) === 0;
         const bent = createBentNormalFragment(reuseTbn, (ctx._features & PBR_HAS_DOUBLE_SIDED) !== 0);
         return {
             ...ibl,
