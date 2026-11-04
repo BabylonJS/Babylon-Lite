@@ -7,12 +7,13 @@ import { SCENE348_ASSETS } from "../../../lab/lite/src/shared/scene348-parallax.
 test.use({ baseURL: `http://127.0.0.1:${process.env.LAB_TEST_PORT ?? 5179}` });
 
 const invalidViewMessage = "Scene 348 view must be front, oblique, or grazing.";
+const bundleDirectory = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
 
 for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-scene348.html", "/bundle-bjs-scene348.html", "/lite/compare-scene348.html"]) {
     test(`Scene 348 - reports startup failure for ${route}`, async ({ page }) => {
         if (route.startsWith("/bundle-")) {
             const file = route.includes("bjs") ? "bjs-scene348.js" : "scene348.js";
-            test.skip(!existsSync(resolve(__dirname, "..\\..\\..\\lab\\public\\bundle", file)), "Build scene348's production bundles before checking their errors.");
+            test.skip(!existsSync(resolve(bundleDirectory, file)), "Build scene348's production bundles before checking their errors.");
         }
         await page.goto(`${route}?view=invalid`);
         const status = page.locator("[data-scene348-status]");
@@ -113,3 +114,63 @@ test("Scene 348 - live recovery clears only the renderer that succeeded", async 
     }
     await expect(status).toHaveText("");
 });
+
+for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-scene348.html", "/bundle-bjs-scene348.html", "/lite/compare-scene348.html"]) {
+    test(`Scene 348 - reverting a failed live update clears errors without reload for ${route}`, async ({ page }) => {
+        if (route.startsWith("/bundle-")) {
+            const file = route.includes("bjs") ? "bjs-scene348.js" : "scene348.js";
+            test.skip(!existsSync(resolve(bundleDirectory, file)), "Build scene348's production bundles before checking their recovery.");
+        }
+        const texture = new PNG({ width: 2, height: 2 });
+        for (let i = 0; i < texture.data.length; i += 4) {
+            texture.data.set([128, 128, 255, 128], i);
+        }
+        const body = PNG.sync.write(texture);
+        for (const asset of Object.values(SCENE348_ASSETS)) {
+            await page.route(asset.color, (route) => route.fulfill({ contentType: "image/png", body }));
+        }
+        await page.route(SCENE348_ASSETS.stone.normalHeight, (route) => route.fulfill({ contentType: "image/png", body }));
+        let failedRequests = 0;
+        await page.route(SCENE348_ASSETS.wall.normalHeight, (route) => {
+            failedRequests++;
+            return route.abort("failed");
+        });
+        await page.goto(route);
+        const canvases =
+            route === "/lite/compare-scene348.html"
+                ? [page.frameLocator("#lite-frame").locator("canvas"), page.frameLocator("#babylon-frame").locator("canvas")]
+                : [page.locator("canvas")];
+        for (const canvas of canvases) {
+            await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+            await canvas.evaluate((element) => {
+                (element as HTMLCanvasElement).dataset.testIdentity = "revert-after-failure";
+            });
+        }
+        const timeOrigins = await Promise.all(canvases.map((canvas) => canvas.evaluate(() => performance.timeOrigin)));
+        const versions = await Promise.all(canvases.map(async (canvas) => Number(await canvas.getAttribute("data-settings-version"))));
+        await page.locator('select[name="asset"]').selectOption("wall");
+        for (const canvas of canvases) {
+            await expect(canvas).toHaveAttribute("data-error", /.+/);
+            await expect(canvas).toHaveAttribute("data-updating", "false");
+            await expect(canvas).toHaveAttribute("data-asset", "stone");
+        }
+        const status = page.locator("[data-scene348-status]");
+        await expect(status).toHaveText(/.+/);
+        await expect(status).toHaveClass(/scene-error/);
+        expect(failedRequests).toBeGreaterThan(0);
+        const requestsBeforeRecovery = failedRequests;
+        await page.locator('select[name="asset"]').selectOption("stone");
+        for (let i = 0; i < canvases.length; i++) {
+            const canvas = canvases[i]!;
+            await expect(canvas).not.toHaveAttribute("data-error");
+            await expect(canvas).toHaveAttribute("data-updating", "false");
+            await expect(canvas).toHaveAttribute("data-asset", "stone");
+            await expect(canvas).toHaveAttribute("data-settings-version", String(versions[i]! + 1));
+            await expect(canvas).toHaveAttribute("data-test-identity", "revert-after-failure");
+            expect(await canvas.evaluate(() => performance.timeOrigin)).toBe(timeOrigins[i]);
+        }
+        await expect(status).toHaveText("");
+        await expect(status).not.toHaveClass(/scene-error/);
+        expect(failedRequests).toBe(requestsBeforeRecovery);
+    });
+}

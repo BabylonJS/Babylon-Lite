@@ -496,6 +496,11 @@ mapping, identical clear color and camera near/far/FOV, and matching
 texture assets/filtering. Orbit/zoom is interactive; panning is disabled so
 synchronization has a fixed target. Resize behavior remains engine-native.
 
+The live-update controller retains the last successfully applied settings on
+failure. Requesting that same selection while an error is present still reapplies
+and publishes it, clearing the renderer and comparison-page errors after recovery
+without reloading either document.
+
 The new BJS golden and its 1280x720 JPG thumbnail are captured once from the
 Grazing embedded view (`?embed=1&view=grazing`), matching the interactive default
 so the relief is easier to see. The saved-reference comparison selects Grazing

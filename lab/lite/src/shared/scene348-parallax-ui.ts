@@ -160,7 +160,7 @@ export function installScene348LiveUpdates(
         });
     };
     const request = (next: Scene348Settings): void => {
-        if (scene348Query(next, true) === scene348Query(pending ?? applying ?? current, true)) {
+        if (canvas.dataset.error === undefined && scene348Query(next, true) === scene348Query(pending ?? applying ?? current, true)) {
             return;
         }
         pending = next;

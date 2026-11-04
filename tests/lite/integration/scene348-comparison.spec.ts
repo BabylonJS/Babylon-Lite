@@ -8,6 +8,8 @@ import { waitForCanvasReady } from "../parity/compare-utils";
 
 test.use({ baseURL: `http://127.0.0.1:${process.env.LAB_TEST_PORT ?? 5179}` });
 
+const bundleDirectory = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
+
 interface Scene348GpuState {
     devices: number;
     writes: { bufferSize: number; heightScale: number; min: number; max: number; refinement: number }[];
@@ -347,7 +349,7 @@ for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-sc
     test(`Scene 348 - standalone live controls do not reload ${route}`, async ({ page }) => {
         if (route.startsWith("/bundle-")) {
             const file = route.includes("bjs") ? "bjs-scene348.js" : "scene348.js";
-            test.skip(!existsSync(resolve(__dirname, "..\\..\\..\\lab\\public\\bundle", file)), "Build the scene348 production bundles before checking their controls.");
+            test.skip(!existsSync(resolve(bundleDirectory, file)), "Build the scene348 production bundles before checking their controls.");
         }
         await page.goto(route);
         const canvas = page.locator("canvas");
@@ -385,7 +387,6 @@ test("Scene 348 - live controls chosen before renderer readiness are retained", 
 });
 
 test("Scene 348 - production bundles preserve both native source renders", async ({ page }) => {
-    const bundleDirectory = resolve(__dirname, "..\\..\\..\\lab\\public\\bundle");
     test.skip(
         !existsSync(resolve(bundleDirectory, "scene348.js")) || !existsSync(resolve(bundleDirectory, "bjs-scene348.js")),
         "Build scene348,bjs-scene348 before checking their production render output."
