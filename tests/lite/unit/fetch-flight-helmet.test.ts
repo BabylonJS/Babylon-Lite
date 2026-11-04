@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
     remove: vi.fn(),
     digest: vi.fn(),
     update: vi.fn(),
+    delay: vi.fn(),
 }));
+
+vi.mock("node:timers/promises", () => ({ setTimeout: mocks.delay }));
 
 vi.mock("node:fs", () => ({
     existsSync: mocks.exists,
@@ -34,9 +37,23 @@ beforeEach(() => {
     vi.resetAllMocks();
     mocks.update.mockReturnValue({ update: mocks.update, digest: mocks.digest });
     mocks.exists.mockReturnValue(false);
+    mocks.delay.mockResolvedValue(undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+});
+
+function cacheAllButLastAsset(): void {
+    const [name] = FLIGHT_HELMET_FILES[FLIGHT_HELMET_FILES.length - 1]!;
+    mocks.exists.mockImplementation((file: string) => !file.endsWith(name));
+    mocks.read.mockReturnValue(new Uint8Array([1, 2, 3]));
+    for (const [, digest] of FLIGHT_HELMET_FILES) {
+        mocks.digest.mockReturnValueOnce(digest);
+    }
+}
 
 describe("Flight Helmet fixture setup", () => {
     it("reuses every verified cached file without downloading or rewriting", async () => {
@@ -82,15 +99,16 @@ describe("Flight Helmet fixture setup", () => {
     });
 
     it("fails setup with the asset URL and HTTP status instead of publishing an error body", async () => {
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockImplementation(() => Promise.resolve(new Response("Unavailable", { status: 503 })))
-        );
+        const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("Unavailable", { status: 503 })));
+        vi.stubGlobal("fetch", fetchMock);
 
         await expect(fetchFlightHelmet()).rejects.toThrow(/FlightHelmet.gltf: HTTP 503/);
 
         expect(mocks.write).not.toHaveBeenCalled();
         expect(mocks.rename).not.toHaveBeenCalled();
+        expect(fetchMock).toHaveBeenCalledTimes(12);
+        expect(mocks.delay).toHaveBeenCalledTimes(8);
+        expect(mocks.delay.mock.calls.map(([milliseconds]) => milliseconds).sort((a, b) => a - b)).toEqual([500, 500, 500, 500, 1000, 1000, 1000, 1000]);
     });
 
     it("rejects corrupt downloads and checks stale cache entries before redownloading", async () => {
@@ -103,6 +121,7 @@ describe("Flight Helmet fixture setup", () => {
         await expect(fetchFlightHelmet()).rejects.toThrow(/integrity check failed: .*FlightHelmet.gltf/);
 
         expect(fetchMock).toHaveBeenCalledTimes(4);
+        expect(mocks.delay).not.toHaveBeenCalled();
         expect(mocks.write).not.toHaveBeenCalled();
     });
 
@@ -110,5 +129,88 @@ describe("Flight Helmet fixture setup", () => {
         vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("request timed out")));
 
         await expect(fetchFlightHelmet()).rejects.toThrow(/FlightHelmet.gltf: request timed out/);
+    });
+
+    it("recovers from a transient request timeout without redownloading verified files", async () => {
+        cacheAllButLastAsset();
+        const timeouts = vi.spyOn(AbortSignal, "timeout");
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new DOMException("request timed out", "TimeoutError"))
+            .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await fetchFlightHelmet();
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(timeouts.mock.calls).toEqual([[30_000], [30_000]]);
+        expect(fetchMock.mock.calls[0]![1].signal).not.toBe(fetchMock.mock.calls[1]![1].signal);
+        expect(mocks.delay).toHaveBeenCalledExactlyOnceWith(500);
+        expect(mocks.read).toHaveBeenCalledTimes(16);
+        expect(mocks.write).toHaveBeenCalledOnce();
+        expect(mocks.rename).toHaveBeenCalledOnce();
+    });
+
+    it.each([408, 429, 500, 502, 503, 504])("retries a transient HTTP %i response and releases its body", async (status) => {
+        cacheAllButLastAsset();
+        const response = new Response("Temporarily unavailable", { status });
+        const cancel = vi.spyOn(response.body!, "cancel");
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(response)
+            .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await fetchFlightHelmet();
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(mocks.delay).toHaveBeenCalledExactlyOnceWith(500);
+        expect(mocks.write).toHaveBeenCalledOnce();
+    });
+
+    it("retries when the response body times out after successful headers", async () => {
+        cacheAllButLastAsset();
+        const response = new Response(new Uint8Array([1, 2, 3]));
+        vi.spyOn(response, "arrayBuffer").mockRejectedValueOnce(new DOMException("body timed out", "TimeoutError"));
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(response)
+            .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await fetchFlightHelmet();
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(mocks.delay).toHaveBeenCalledExactlyOnceWith(500);
+        expect(mocks.write).toHaveBeenCalledOnce();
+    });
+
+    it.each([401, 403, 404])("does not retry a permanent HTTP %i error", async (status) => {
+        const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("Unavailable", { status })));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(fetchFlightHelmet()).rejects.toThrow(`FlightHelmet.gltf: HTTP ${status}`);
+
+        expect(fetchMock).toHaveBeenCalledTimes(4);
+        expect(mocks.delay).not.toHaveBeenCalled();
+        expect(mocks.write).not.toHaveBeenCalled();
+    });
+
+    it("does not retry filesystem failures after downloading verified bytes", async () => {
+        cacheAllButLastAsset();
+        const error = new Error("disk unavailable");
+        mocks.write.mockImplementation(() => {
+            throw error;
+        });
+        const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(fetchFlightHelmet()).rejects.toBe(error);
+
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(mocks.delay).not.toHaveBeenCalled();
+        expect(mocks.rename).not.toHaveBeenCalled();
+        expect(mocks.remove).toHaveBeenCalledOnce();
     });
 });

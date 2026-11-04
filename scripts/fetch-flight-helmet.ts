@@ -2,15 +2,19 @@
  * Restore scene 112's KTX2 fixture from an immutable BabylonJS/Assets revision.
  * Keep the binary payload out of this repository and verify Git blob digests
  * even on cache hits, so a partial or stale download cannot reach the browser.
+ * Retry transient transport failures up to three attempts per file, each with
+ * the same 30-second budget. Integrity and filesystem failures are not retried.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = join(ROOT, "lab/public/models/FlightHelmetKTX");
 const SOURCE = "https://raw.githubusercontent.com/BabylonJS/Assets/183f26290601abe1d5282eed00c306f4c8228307/meshes/FlightHelmetKTX";
+const DOWNLOAD_ATTEMPTS = 3;
 
 export const FLIGHT_HELMET_FILES = [
     ["FlightHelmet.gltf", "601641f97c0d12c2941e2ad226dcd2b74379c4c0"],
@@ -36,6 +40,29 @@ function blobDigest(bytes: Uint8Array): string {
     return createHash("sha1").update(`blob ${bytes.byteLength}\0`).update(bytes).digest("hex");
 }
 
+async function downloadAsset(url: string): Promise<Uint8Array> {
+    for (let attempt = 1; ; attempt++) {
+        let retryable = true;
+        try {
+            const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+            if (!response.ok) {
+                retryable = response.status === 408 || response.status === 429 || (response.status >= 500 && response.status <= 599);
+                await response.body?.cancel();
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return new Uint8Array(await response.arrayBuffer());
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!retryable || attempt === DOWNLOAD_ATTEMPTS) {
+                throw new Error(`Flight Helmet asset download failed (attempt ${attempt}/${DOWNLOAD_ATTEMPTS}): ${url}: ${message}`, { cause: error });
+            }
+            const retryDelay = 500 * attempt;
+            console.warn(`Flight Helmet asset download attempt ${attempt}/${DOWNLOAD_ATTEMPTS} failed: ${url}: ${message}; retrying in ${retryDelay}ms.`);
+            await delay(retryDelay);
+        }
+    }
+}
+
 export async function fetchFlightHelmet(): Promise<void> {
     mkdirSync(OUTPUT_DIR, { recursive: true });
     // Four independent downloads at a time avoid serial cold-start latency
@@ -48,16 +75,7 @@ export async function fetchFlightHelmet(): Promise<void> {
                     return;
                 }
                 const url = `${SOURCE}/${name}`;
-                let bytes: Uint8Array;
-                try {
-                    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-                    bytes = new Uint8Array(await response.arrayBuffer());
-                } catch (error) {
-                    throw new Error(`Flight Helmet asset download failed: ${url}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-                }
+                const bytes = await downloadAsset(url);
                 if (blobDigest(bytes) !== digest) {
                     throw new Error(`Flight Helmet asset integrity check failed: ${url}`);
                 }
