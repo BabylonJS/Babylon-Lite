@@ -9,9 +9,9 @@ import { cleanupTempDirs, ensureLibBuilt, isExternalRequest, LIB_ENTRY, makeTemp
 async function bundle(source: string): Promise<string> {
     const build = await rollup({
         input: makeTempEntry(source),
-        plugins: [packageImportsPlugin()],
         external: (id) => isExternalRequest(id) && !/[\\/]_chunks[\\/]vendor[\\/]navcat/.test(id),
         treeshake: { moduleSideEffects: false },
+        plugins: [packageImportsPlugin()],
         onwarn(warning) {
             if (warning.code !== "CIRCULAR_DEPENDENCY") {
                 throw new Error(warning.message);
