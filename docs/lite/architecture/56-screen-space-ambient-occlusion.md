@@ -35,7 +35,7 @@ importing or adding the task alone does not change a material's lighting.
 
 ## Algorithm identity and provenance
 
-Babylon Lite ships one AO estimator: XeGTAO, based on
+The `createSsaoTask` pipeline uses one AO estimator: XeGTAO, based on
 [Intel's implementation](https://github.com/GameTechDev/XeGTAO/tree/a5b1686c7ea37788eeb3576b5be47f7c03db532c).
 The default temporal accumulation, convolution, history repair, and spatial
 reconstruction described here are adapted from
@@ -43,6 +43,10 @@ reconstruction described here are adapted from
 They filter the XeGTAO output; there is no separate runtime "Diligent" AO
 implementation or algorithm selector. This combination is not presented as
 Intel's unmodified whole pipeline.
+
+The separate `createScreenSpaceAmbientOcclusionPostProcessTask` API added on
+`master` remains available, as documented in [module 52](52-screen-space-effects.md).
+It is independent of this XeGTAO task and its diffuse-only PBR integration.
 
 The runtime modules, internal symbols, and GPU labels use `xegtao`.
 The upstream license retains the DiligentFX name to identify the

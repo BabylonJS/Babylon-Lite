@@ -74,17 +74,17 @@ onContextRestored(engine, () => {
 });
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     if (!attributesBound) {
-        bindAttributes(engine, vertexBuffer, [{ name: "position", size: 2, offset: 0, divisor: 0 }], effect);
+        bindAttributes(vertexBuffer, [{ name: "position", size: 2, offset: 0, divisor: 0 }], effect);
         attributesBound = true;
     }
 
     resizeGLEngine(engine);
     setViewport(engine);
-    useEffect(engine, effect);
+    useEffect(effect);
     setCullState(engine, false);
 
     setColorMask(engine, true, true, true, true);
@@ -106,7 +106,7 @@ runRenderLoop(engine, () => {
     });
     setStencilOpSeparate(engine, gl.FRONT, { opZPass: gl.INCR_WRAP });
     setStencilOpSeparate(engine, gl.BACK, { opZPass: gl.DECR_WRAP });
-    drawIndexed(engine, indexBuffer, INDICES.length, 0);
+    drawIndexed(indexBuffer, INDICES.length, 0);
 
     // Front-facing coverage: stencil == 1.
     setColorMask(engine, true, true, true, true);
@@ -121,13 +121,13 @@ runRenderLoop(engine, () => {
         opZFail: gl.KEEP,
         opZPass: gl.KEEP,
     });
-    setEffectFloat4(engine, effect, "color", 0.94, 0.24, 0.18, 1);
-    drawIndexed(engine, indexBuffer, INDICES.length, 0);
+    setEffectFloat4(effect, "color", 0.94, 0.24, 0.18, 1);
+    drawIndexed(indexBuffer, INDICES.length, 0);
 
     // Back-facing coverage: stencil == 255 after DECR_WRAP from zero.
     setStencilState(engine, { ref: 0xff });
-    setEffectFloat4(engine, effect, "color", 0.13, 0.55, 0.96, 1);
-    drawIndexed(engine, indexBuffer, INDICES.length, 0);
+    setEffectFloat4(effect, "color", 0.13, 0.55, 0.96, 1);
+    drawIndexed(indexBuffer, INDICES.length, 0);
 
     if (restoredFramePending) {
         restoredFramePending = false;

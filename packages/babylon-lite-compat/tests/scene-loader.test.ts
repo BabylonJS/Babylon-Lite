@@ -15,7 +15,9 @@ import { addToScene, disposeScene, removeFromScene, setParent } from "babylon-li
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
+import { DirectionalLight } from "../src/lights/lights";
 import { AssetContainer } from "../src/loading/scene-loader";
+import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
 import { AbstractScene } from "../src/scene/abstract-scene";
 import { Scene } from "../src/scene/scene";
@@ -29,7 +31,8 @@ interface FakeMesh {
 }
 
 class TestScene extends AbstractScene {
-    public readonly _lite = {};
+    // `_disposables` is what `onSceneDispose` appends to, reached when a light publishes a mesh list.
+    public readonly _lite = { _disposables: [] as (() => void)[] };
     public readonly onDisposeObservable = new Observable<Scene>();
 
     public _surfaceLoadedCamera(): void {}
@@ -116,6 +119,31 @@ describe("AssetContainer.addAllToScene", () => {
         expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
         expect(disposed.every((observer) => observer.mock.calls.length === 1)).toBe(true);
         expect(container.meshes).toEqual(wrappers);
+    });
+
+    it("prunes container-retired meshes out of a light's filter lists", async () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+        const testScene = new TestScene();
+        const scene = testScene as unknown as Scene;
+        container.addAllToScene(scene);
+        const light = new DirectionalLight("rim", new Vector3(0, -1, 0), scene);
+        const [cube] = container.meshes;
+
+        light.includedOnlyMeshes = [cube!];
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        expect(light._lite.includedOnlyMeshes && [...light._lite.includedOnlyMeshes]).toEqual([cube!._lite]);
+
+        // Container teardown retires each wrapper through `_disposeWrapperOnly`, which skips
+        // `_disposeSelf`, so the prune has to hang off the retirement hook to run here at all.
+        container.dispose();
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        // An inclusion still naming the dead mesh would leave every surviving mesh unlit by this light.
+        expect(light.includedOnlyMeshes).toEqual([]);
+        expect(light._lite.includedOnlyMeshes).toBeUndefined();
     });
 
     it("finishes wrapper and USD teardown before rethrowing the first disposal observer error", () => {

@@ -1,5 +1,5 @@
 /**
- * Unit tests for the screen-space contact-shadow / global-illumination effects
+ * Unit tests for the screen-space ambient-occlusion, contact-shadow, and global-illumination effects
  * (see `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * Split into three groups:
@@ -11,13 +11,21 @@
  *   3. Task-lifecycle integration tests against a mock GPU device — validation errors,
  *      the disabled/enabled identity transitions, and same-size source-identity rebuilds.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
-import { getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
+import { getProjectionMatrix, getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
+import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { invertMat4 } from "../../../packages/babylon-lite/src/math/invert-mat4";
+import {
+    clampScreenSpaceAmbientOcclusionConfig,
+    createScreenSpaceAmbientOcclusionPostProcessTask,
+    screenSpaceAmbientOcclusionBlurWGSL,
+    screenSpaceAmbientOcclusionProducerWGSL,
+    SS_AO_PRODUCER_UNIFORM_FLOATS,
+} from "../../../packages/babylon-lite/src/post-process/screen-space-ambient-occlusion";
 import {
     createScreenSpaceContactShadowsPostProcessTask,
     clampScreenSpaceContactShadowsConfig,
@@ -274,6 +282,109 @@ describe("assertScreenSpaceTargetNotAliasingSource", () => {
     });
 });
 
+describe("ambient-occlusion nearest-depth reconstruction on a sloping plane", () => {
+    it.each([0.25, 0.5, 1])("keeps receiver and jittered samples coplanar at resolution scale %s", (scale) => {
+        const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+        const dims = [64, 36] as const;
+        const viewProjection = getViewProjectionMatrix(camera, dims[0] / dims[1]);
+        const inverse = invertMat4(viewProjection)!;
+        // World plane z = x + 0.4*y, facing the camera.
+        const normal = normalize([1, 0.4, -1]);
+        const dotNormal = (point: readonly [number, number, number]): number => point[0] * normal[0] + point[1] * normal[1] + point[2] * normal[2];
+        const loadPlane = (uv: readonly [number, number], snap: boolean): [number, number, number] => {
+            const texelUv: [number, number] = [(Math.floor(uv[0] * dims[0]) + 0.5) / dims[0], (Math.floor(uv[1] * dims[1]) + 0.5) / dims[1]];
+            const near = reconstructWorld(inverse, [...texelUv, 1]);
+            const far = reconstructWorld(inverse, [...texelUv, 0.01]);
+            const direction: [number, number, number] = [far[0] - near[0], far[1] - near[1], far[2] - near[2]];
+            const t = -dotNormal(near) / dotNormal(direction);
+            const point: [number, number, number] = [near[0] + t * direction[0], near[1] + t * direction[1], near[2] + t * direction[2]];
+            const depth = projectWorld(viewProjection, point)[2];
+            return reconstructWorld(inverse, [...(snap ? texelUv : uv), depth] as [number, number, number]);
+        };
+        const effectDims = computeScreenSpaceScaledSize(...dims, scale);
+        const receiverUv: [number, number] = [(Math.floor(effectDims.width / 2) + 0.5) / effectDims.width, (Math.floor(effectDims.height / 2) + 0.5) / effectDims.height];
+        const receiverDepthUv: [number, number] = [(Math.floor(receiverUv[0] * dims[0]) + 0.5) / dims[0], (Math.floor(receiverUv[1] * dims[1]) + 0.5) / dims[1]];
+        const receiver = loadPlane(receiverUv, true);
+        const unsnappedReceiver = loadPlane(receiverUv, false);
+        let unsnappedMaxCosine = 0;
+        for (let angle = 0; angle < 16; angle++) {
+            for (const distance of [1.1, 1.7, 2.3, 3.9]) {
+                const offset: [number, number] = [(Math.cos(angle) * distance) / dims[0], (Math.sin(angle) * distance) / dims[1]];
+                const sampleUv: [number, number] = [receiverDepthUv[0] + offset[0], receiverDepthUv[1] + offset[1]];
+                const sample = loadPlane(sampleUv, true);
+                const delta: [number, number, number] = [sample[0] - receiver[0], sample[1] - receiver[1], sample[2] - receiver[2]];
+                expect(Math.abs(dotNormal(sample))).toBeLessThan(1e-5);
+                expect(Math.abs(dotNormal(normalize(delta)))).toBeLessThan(1e-4);
+                const unsnappedSample = loadPlane([receiverUv[0] + offset[0], receiverUv[1] + offset[1]], false);
+                const unsnappedDelta = normalize([unsnappedSample[0] - unsnappedReceiver[0], unsnappedSample[1] - unsnappedReceiver[1], unsnappedSample[2] - unsnappedReceiver[2]]);
+                unsnappedMaxCosine = Math.max(unsnappedMaxCosine, dotNormal(unsnappedDelta));
+            }
+        }
+        expect(Math.abs(dotNormal(receiver))).toBeLessThan(1e-5);
+        expect(unsnappedMaxCosine).toBeGreaterThan(0.05);
+    });
+});
+
+describe("ambient-occlusion projection-ray normal orientation", () => {
+    const dot = (a: readonly number[], b: readonly number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+    const subtract = (a: readonly number[], b: readonly number[]): [number, number, number] => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!];
+
+    it("keeps an off-center orthographic sloped receiver facing parallel rays and accepting foreground occlusion", () => {
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        camera.nearPlane = 0.1;
+        camera.farPlane = 20;
+        enableOrthographicCamera(camera, { left: 8, right: 12, bottom: -2, top: 2 });
+        const projection = getProjectionMatrix(camera, 1);
+        const inverse = invertMat4(projection)!;
+        const receiver: [number, number, number] = [10, 0, 1];
+        const uv = projectWorld(projection, receiver);
+        expect(uv[0]).toBeCloseTo(0.5, 5);
+        expect(uv[1]).toBeCloseTo(0.5, 5);
+        const near = reconstructWorld(inverse, [uv[0], uv[1], 1]);
+        const far = reconstructWorld(inverse, [uv[0], uv[1], 0.5]);
+        const towardViewer = normalize(subtract(near, far));
+        expect(towardViewer[0]).toBeCloseTo(0, 5);
+        expect(towardViewer[1]).toBeCloseTo(0, 5);
+        expect(towardViewer[2]).toBeCloseTo(-1, 5);
+
+        // Screen-right/down derivatives on z = x - 9.
+        const normal = normalize(cross([0.1, 0, 0.1], [0, -0.1, 0]));
+        expect(
+            dot(
+                normal,
+                receiver.map((value) => -value)
+            )
+        ).toBeLessThan(0);
+        expect(dot(normal, towardViewer)).toBeGreaterThan(0);
+        const foreground = projectWorld(projection, [10.1, 0, 0.9]);
+        const sample = reconstructWorld(inverse, foreground);
+        const delta = normalize(subtract(sample, receiver));
+        for (const sign of [-1, 1]) {
+            const input = normal.map((value) => value * sign);
+            const oriented = input.map((value) => (dot(input, towardViewer) < 0 ? -value : value));
+            expect(dot(oriented, delta)).toBeCloseTo(1, 5);
+            expect(Math.abs(dot(oriented, normalize([0.1, 0, 0.1])))).toBeLessThan(1e-5);
+        }
+        const oldOrientation = normal.map((value) => -value);
+        expect(dot(oldOrientation, delta)).toBeLessThan(-0.99);
+    });
+
+    it.each([
+        [0.5, 0.5],
+        [0.1, 0.8],
+        [0.9, 0.2],
+    ])("preserves the perspective viewing direction at UV (%s, %s)", (u, v) => {
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const inverse = invertMat4(getProjectionMatrix(camera, 16 / 9))!;
+        const near = reconstructWorld(inverse, [u, v, 1]);
+        const far = reconstructWorld(inverse, [u, v, 0.5]);
+        const receiver = reconstructWorld(inverse, [u, v, 0.1]);
+        const towardViewer = normalize(subtract(near, far));
+        const towardOrigin = normalize([-receiver[0], -receiver[1], -receiver[2]]);
+        expect(dot(towardViewer, towardOrigin)).toBeCloseTo(1, 5);
+    });
+});
+
 describe("clampScreenSpaceContactShadowsConfig", () => {
     it("applies documented defaults", () => {
         const clamped = clampScreenSpaceContactShadowsConfig({} as never);
@@ -334,6 +445,50 @@ describe("clampScreenSpaceGlobalIlluminationConfig", () => {
         expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 0 } as never).rayCount).toBe(1);
         expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 99 } as never).rayCount).toBe(8);
         expect(clampScreenSpaceGlobalIlluminationConfig({ rayCount: 3.6 } as never).rayCount).toBe(4);
+    });
+});
+
+describe("clampScreenSpaceAmbientOcclusionConfig", () => {
+    it("applies documented defaults", () => {
+        const clamped = clampScreenSpaceAmbientOcclusionConfig({} as never);
+        expect(clamped.resolutionScale).toBe(0.5);
+        expect(clamped.intensity).toBe(1);
+        expect(clamped.radius).toBe(0.5);
+        expect(clamped.bias).toBe(0.05);
+        expect(clamped.power).toBe(1.5);
+        expect(clamped.sliceCount).toBe(3);
+        expect(clamped.stepCount).toBe(4);
+        expect(clamped.fadeStart).toBe(20);
+        expect(clamped.fadeEnd).toBe(60);
+        expect(clamped.temporalWeight).toBeCloseTo(1 / 32, 10);
+        expect(clamped.temporalSamples).toBe(64);
+    });
+
+    it("clamps numeric settings and keeps fadeEnd beyond fadeStart", () => {
+        const clamped = clampScreenSpaceAmbientOcclusionConfig({
+            resolutionScale: 0,
+            intensity: 8,
+            radius: 100,
+            bias: 2,
+            power: 0,
+            sliceCount: 99,
+            stepCount: 0,
+            fadeStart: 200000,
+            fadeEnd: 10,
+            temporalWeight: -1,
+            temporalSamples: 10000,
+        } as never);
+        expect(clamped.resolutionScale).toBe(0.25);
+        expect(clamped.intensity).toBe(4);
+        expect(clamped.radius).toBe(20);
+        expect(clamped.bias).toBe(0.99);
+        expect(clamped.power).toBe(0.1);
+        expect(clamped.sliceCount).toBe(8);
+        expect(clamped.stepCount).toBe(1);
+        expect(clamped.fadeStart).toBe(100000);
+        expect(clamped.fadeEnd).toBeCloseTo(100000.001, 8);
+        expect(clamped.temporalWeight).toBe(0);
+        expect(clamped.temporalSamples).toBe(256);
     });
 });
 
@@ -447,6 +602,76 @@ describe("screen-space-global-illumination producer WGSL", () => {
     });
 });
 
+describe("screen-space-ambient-occlusion producer and blur WGSL", () => {
+    const producer = screenSpaceAmbientOcclusionProducerWGSL();
+    const blur = screenSpaceAmbientOcclusionBlurWGSL();
+
+    it("uses only depth input and reconstructs view-space horizons", () => {
+        expect(producer).toContain("var ssAoDepth:texture_depth_2d;");
+        expect(producer).not.toContain("texture_2d<f32>");
+        expect(producer).toContain("ssNormalFromDepth(");
+        expect(producer).toContain("ssAo.sliceCount");
+        expect(producer).toContain("ssAo.stepCount");
+        expect(producer).toContain("let cosine=dot(normal,delta/distance);");
+        expect(producer).toContain("ssAo.bias");
+        expect(SS_AO_PRODUCER_UNIFORM_FLOATS).toBe(44);
+        expect((SS_AO_PRODUCER_UNIFORM_FLOATS * 4) % 16).toBe(0);
+    });
+
+    it("keeps separate UV radius axes, spatially offset jitter hashes, and radial attenuation in the shader contract", () => {
+        expect(producer).toContain("vec2f(ssAo.radius)/max(vec2f(worldPerUvX,worldPerUvY),vec2f(1e-4))");
+        expect(producer).toContain("signedDirection*radiusUv*fraction");
+        expect(producer).not.toContain("sqrt(max(worldPerUvX*worldPerUvY");
+        expect(producer).toContain("ssPhaseAngle(vec2f(coord)+vec2f(19.0,73.0),ssAo.phase)");
+        expect(producer).toContain("ssPhaseAngle(vec2f(coord),ssAo.phase)*6.28318530718");
+        expect(producer).toContain("let radialWeight=1.0-(distance/ssAo.radius)*(distance/ssAo.radius);");
+        expect(producer).toContain("*radialWeight");
+    });
+
+    it("reconstructs receiver and march depths at the loaded texel centers, including radius offsets", () => {
+        expect(producer).toContain("let depthCoord=ssUvToCoord(uv,ssAo.depthDims);");
+        expect(producer).toContain("let depth=textureLoad(ssAoDepth,depthCoord,0);");
+        expect(producer).toContain("let depthUv=ssTexelUv(depthCoord,ssAo.depthDims);");
+        expect(producer).toContain("let worldPos=ssWorldFromDepth(depthUv,depth,ssAo.invViewProj);");
+        expect(producer).toContain("ssNormalFromDepth(depthUv,ssAo.depthDims,ssAo.invViewProj,ssAoDepth)");
+        expect(producer).toContain("ssWorldFromDepth(depthUv+vec2f(1.0/ssAo.depthDims.x,0.0),depth,ssAo.invViewProj)");
+        expect(producer).toContain("ssWorldFromDepth(depthUv+vec2f(0.0,1.0/ssAo.depthDims.y),depth,ssAo.invViewProj)");
+        expect(producer).toContain("let sampleUv=depthUv+signedDirection*radiusUv*fraction;");
+        expect(producer).toContain("let sampleCoord=ssUvToCoord(sampleUv,ssAo.depthDims);");
+        expect(producer).toContain("let sampleDepth=textureLoad(ssAoDepth,sampleCoord,0);");
+        expect(producer).toContain("let sampleWorld=ssWorldFromDepth(ssTexelUv(sampleCoord,ssAo.depthDims),sampleDepth,ssAo.invViewProj);");
+    });
+
+    it("orients the normal with an unprojected viewing ray for both projection kinds", () => {
+        expect(producer).toContain("let rayNear=ssWorldFromDepth(depthUv,1.0,ssAo.invViewProj);");
+        expect(producer).toContain("let rayFar=ssWorldFromDepth(depthUv,0.5,ssAo.invViewProj);");
+        expect(producer).toContain("let towardViewer=(ssAo.view*vec4f(rayNear-rayFar,0.0)).xyz;");
+        expect(producer).toContain("if(dot(normal,towardViewer)<0.0){normal=-normal;}");
+        expect(producer).not.toContain("dot(normal,-viewPos)");
+    });
+
+    it("returns fully faded receivers before normal reconstruction and marching while preserving the transition fade", () => {
+        const fragment = producer.slice(producer.indexOf("@fragment fn ssAoFragment"));
+        const fade = fragment.indexOf("let fade=1.0-smoothstep(ssAo.fadeStart,ssAo.fadeEnd,abs(viewPos.z));");
+        const earlyReturn = fragment.indexOf("if(fade<=0.0){return vec4f(0.0);}");
+        expect(fade).toBeGreaterThan(fragment.indexOf("let viewPos="));
+        expect(earlyReturn).toBeGreaterThan(fade);
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("let rayNear="));
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("ssNormalFromDepth("));
+        expect(earlyReturn).toBeLessThan(fragment.indexOf("for(var slice"));
+        expect(fragment).toContain("return vec4f(shaped*fade,0.0,0.0,0.0);");
+        expect(fragment.match(/let fade=/g)).toHaveLength(1);
+    });
+
+    it("uses depth-aware separable taps and writes scalar occlusion", () => {
+        expect(blur).toContain("var ssAoBlurDepth:texture_depth_2d;");
+        expect(blur).toContain("var ssAoInput:texture_2d<f32>;");
+        expect(blur).toContain("let relativeDepth=abs(tapDistance-centerDistance)/max(centerDistance,0.001);");
+        expect(blur).toContain("let weight=spatialWeights[i]*depthWeight;");
+        expect(blur).toContain("textureLoad(ssAoInput,tapCoord,0).r");
+    });
+});
+
 describe("screen-space temporal resolve WGSL", () => {
     it("has a 288-byte uniform layout with separate effect and depth dimensions", () => {
         expect(SS_TEMPORAL_UNIFORM_FLOATS).toBe(72);
@@ -511,10 +736,11 @@ interface Capture {
 }
 
 function makeFakeTexture(): GPUTexture {
-    return {
-        createView: (opts?: GPUTextureViewDescriptor) => ({ aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
+    const texture = {
+        createView: (opts?: GPUTextureViewDescriptor) => ({ texture, aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
         destroy: () => undefined,
     } as unknown as GPUTexture;
+    return texture;
 }
 
 function makeMockEngine(capture: Capture): EngineContext {
@@ -538,13 +764,11 @@ function makeMockEngine(capture: Capture): EngineContext {
         createSampler: (d: GPUSamplerDescriptor) => d as unknown as GPUSampler,
         createBuffer: (d: GPUBufferDescriptor) => ({ descriptor: d, destroy: () => undefined }) as unknown as GPUBuffer,
         createTexture: (d: GPUTextureDescriptor) =>
-            ({
+            Object.assign(makeFakeTexture(), {
                 descriptor: d,
                 format: d.format,
                 sampleCount: d.sampleCount ?? 1,
-                createView: (opts?: GPUTextureViewDescriptor) => ({ aspect: opts?.aspect ?? "all" }) as unknown as GPUTextureView,
-                destroy: () => undefined,
-            }) as unknown as GPUTexture,
+            }),
         queue: { writeBuffer: () => undefined },
     } as unknown as GPUDevice;
 
@@ -708,5 +932,216 @@ describe("screen-space global illumination task lifecycle", () => {
         task.record();
         expect(() => task.execute!()).not.toThrow();
         expect(task.outputTexture).not.toBe(task.illuminationTexture);
+    });
+});
+
+describe("createScreenSpaceAmbientOcclusionPostProcessTask validation", () => {
+    it.each([
+        { x: 0.5, y: 0, width: 0.5, height: 1 },
+        { x: 0, y: 0.5, width: 1, height: 0.5 },
+        { x: 0, y: 0, width: 0.5, height: 1 },
+        { x: 0, y: 0, width: 1, height: 0.5 },
+        { x: Number.NaN, y: 0, width: 1, height: 1 },
+    ])("rejects a non-fullscreen viewport at creation: %o", (viewport) => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        camera.viewport = viewport;
+        const source = makeSceneColorDepthRT(64, 64);
+        const createBuffer = vi.spyOn(engine._device, "createBuffer");
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ name: "test-ao", sourceTexture: source, camera }, engine)).toThrow(
+            'ScreenSpaceAmbientOcclusionPostProcessTask "test-ao": camera.viewport must be fullscreen'
+        );
+        expect(createBuffer).not.toHaveBeenCalled();
+    });
+
+    it("requires single-sample color/depth inputs and a depth attachment", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const multisampled = createRenderTarget({ format: "bgra8unorm", dFormat: "depth24plus-stencil8", samples: 4, size: { width: 64, height: 64 } });
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: multisampled, camera }, engine)).toThrow(/single-sample/);
+
+        const noDepth = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 64, height: 64 } });
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: noDepth, camera }, engine)).toThrow(/depth attachment/);
+    });
+
+    it("accepts a separate depth target and rejects a composite target that aliases its source", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const color = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 64, height: 64 } });
+        const depth = makeSceneColorDepthRT(64, 64);
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: color, depthTexture: depth, camera, composition: "none" }, engine)).not.toThrow();
+        expect(() => createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: depth, camera, targetTexture: depth }, engine)).toThrow(/targetTexture must differ/);
+    });
+});
+
+describe("screen-space ambient-occlusion task lifecycle", () => {
+    it("rejects a viewport replaced before record without allocating GPU resources", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: makeSceneColorDepthRT(64, 64), camera, composition: "none" }, engine);
+        const createTexture = vi.spyOn(engine._device, "createTexture");
+        const createPipeline = vi.spyOn(engine._device, "createRenderPipeline");
+        camera.viewport = { x: 0.5, y: 0, width: 0.5, height: 1 };
+        expect(() => task.record()).toThrow(/camera.viewport must be fullscreen/);
+        expect(createTexture).not.toHaveBeenCalled();
+        expect(createPipeline).not.toHaveBeenCalled();
+        task.dispose();
+    });
+
+    it.each([true, false])("rejects in-place viewport mutations at record and execute while enabled=%s", (enabled) => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        camera.viewport = { x: 0, y: 0, width: 1, height: 1 };
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: makeSceneColorDepthRT(64, 64), camera }, engine);
+        task.record();
+        expect(task.execute!()).toBe(6);
+        task.enabled = enabled;
+        camera.viewport.width = 0.5;
+        const passes = capture.beginRenderPassCount;
+        expect(() => task.record()).toThrow(/camera.viewport must be fullscreen/);
+        expect(() => task.execute!()).toThrow(/camera.viewport must be fullscreen/);
+        expect(capture.beginRenderPassCount).toBe(passes);
+        camera.viewport.width = 1;
+        expect(task.execute!()).toBe(enabled ? 6 : 1);
+        task.dispose();
+    });
+
+    it("records producer, bilateral blur, and temporal resolve passes", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        expect(task.execute!()).toBe(5);
+        expect(task.outputTexture).toBe(task.occlusionTexture);
+        task.dispose();
+    });
+
+    it("rebuilds depth bindings when the depth GPUTexture identity changes at the same size", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const bindGroups = vi.spyOn(engine._device, "createBindGroup");
+
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        task.execute!();
+        bindGroups.mockClear();
+        source._depthTexture = makeFakeTexture();
+        task.execute!();
+        const depthGroups = bindGroups.mock.calls
+            .map(([descriptor]) => descriptor)
+            .filter((descriptor) => /-(producer|blur-horizontal|blur-vertical|resolve)-bind-group$/.test(descriptor.label ?? ""));
+        expect(depthGroups).toHaveLength(4);
+        for (const descriptor of depthGroups) {
+            const binding = descriptor.label?.endsWith("-resolve-bind-group") ? 1 : 0;
+            expect(Array.from(descriptor.entries).find((entry) => entry.binding === binding)?.resource).toHaveProperty("texture", source._depthTexture);
+        }
+        task.dispose();
+    });
+
+    it("clears scalar identity once when disabled and resumes all passes when re-enabled", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const passes = vi.spyOn(engine._currentEncoder, "beginRenderPass");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        expect(task.execute!()).toBe(5);
+
+        task.enabled = false;
+        passes.mockClear();
+        expect(task.execute!()).toBe(0);
+        expect(passes.mock.calls.map(([descriptor]) => descriptor.label)).toEqual(["screen-space-ambient-occlusion-clear-stable", "screen-space-ambient-occlusion-clear-history"]);
+        for (const [descriptor] of passes.mock.calls) {
+            expect(Array.from(descriptor.colorAttachments)[0]).toMatchObject({
+                loadOp: "clear",
+                clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            });
+        }
+        passes.mockClear();
+        expect(task.execute!()).toBe(0);
+        expect(passes).not.toHaveBeenCalled();
+
+        task.enabled = true;
+        expect(task.execute!()).toBe(5);
+        task.dispose();
+    });
+
+    it("reallocates AO targets and rebinds both blur inputs after a resize", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const textures = vi.spyOn(engine._device, "createTexture");
+        const bindGroups = vi.spyOn(engine._device, "createBindGroup");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, composition: "none" }, engine);
+        task.record();
+        task.execute!();
+        const oldTargets = textures.mock.results.slice(0, 3).map((result) => result.value as GPUTexture);
+        const destroySpies = oldTargets.map((texture) => vi.spyOn(texture, "destroy"));
+        const oldStable = task.occlusionTexture._colorTexture;
+        textures.mockClear();
+        bindGroups.mockClear();
+
+        source._width = 128;
+        source._height = 96;
+        task.record();
+        expect(task.execute!()).toBe(5);
+        const resizedTargets = textures.mock.calls.slice(0, 3);
+        expect(resizedTargets).toHaveLength(3);
+        for (const [descriptor] of resizedTargets) {
+            expect(descriptor.format).toBe("r8unorm");
+            expect(descriptor.size).toEqual({ width: 64, height: 48 });
+        }
+        for (const destroy of destroySpies) {
+            expect(destroy).toHaveBeenCalledOnce();
+        }
+        const blurGroups = bindGroups.mock.calls.map(([descriptor]) => descriptor).filter((descriptor) => /-blur-(horizontal|vertical)-bind-group$/.test(descriptor.label ?? ""));
+        expect(blurGroups).toHaveLength(2);
+        for (const [index, descriptor] of blurGroups.entries()) {
+            const texture = textures.mock.results[index]?.value as GPUTexture | undefined;
+            expect(texture).toBeDefined();
+            expect(oldTargets).not.toContain(texture);
+            expect(Array.from(descriptor.entries).find((entry) => entry.binding === 1)?.resource).toHaveProperty("texture", texture);
+        }
+        expect(task.occlusionTexture._colorTexture).not.toBe(oldStable);
+        expect(task.occlusionTexture._width).toBe(64);
+        expect(task.occlusionTexture._height).toBe(48);
+        task.dispose();
+    });
+
+    it("composites with multiply by default and keeps the color pass active while disabled", () => {
+        const capture: Capture = { beginRenderPassCount: 0, draws: 0 };
+        const engine = makeMockEngine(capture);
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const source = makeSceneColorDepthRT(64, 64);
+        const modules = vi.spyOn(engine._device, "createShaderModule");
+        const writes = vi.spyOn(engine._device.queue, "writeBuffer");
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera }, engine);
+        task.record();
+        expect(task.outputTexture).not.toBe(task.occlusionTexture);
+        expect(task.outputTexture).not.toBe(source);
+        expect(task.execute!()).toBe(6);
+        expect(modules.mock.calls.some(([descriptor]) => descriptor.code.includes("color.rgb*(1.0-amount)"))).toBe(true);
+
+        task.enabled = false;
+        expect(task.execute!()).toBe(1);
+        const uniformData = writes.mock.lastCall?.[2];
+        expect(uniformData).toBeInstanceOf(Float32Array);
+        expect(Array.from(uniformData as Float32Array).slice(0, 2)).toEqual([1, 0]);
+        const passesBefore = capture.beginRenderPassCount;
+        expect(task.execute!()).toBe(1);
+        expect(capture.beginRenderPassCount).toBe(passesBefore + 1);
+        task.dispose();
     });
 });

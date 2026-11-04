@@ -182,6 +182,8 @@ export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/s
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
+export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
+export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
 export { createSsaoTask } from "./post-process/ssao.js";
 export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
 export { enablePbrSsao } from "./post-process/ssao/ssao-pbr.js";

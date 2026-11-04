@@ -1,4 +1,22 @@
-import { createGLEngine, createEffect, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, useEffect, createIndexBuffer, createMeshVao, createVertexBuffer, drawMesh, type GLAttributeDescriptor, type GLMeshVao, clearEngine, setCullState, setDepthState } from "babylon-lite-gl";
+import {
+    createGLEngine,
+    createEffect,
+    isEffectReady,
+    resizeGLEngine,
+    runRenderLoop,
+    setViewport,
+    stopRenderLoop,
+    useEffect,
+    createIndexBuffer,
+    createMeshVao,
+    createVertexBuffer,
+    drawMesh,
+    type GLAttributeDescriptor,
+    type GLMeshVao,
+    clearEngine,
+    setCullState,
+    setDepthState,
+} from "babylon-lite-gl";
 
 /**
  * Scene 10 — Indexed Mesh + Instancing (the first lite-gl scene with REAL
@@ -46,10 +64,30 @@ const HALF = 0.3;
 // per-instance tint multiplies it so each instance reads distinctly.
 const QUAD_VERTICES = new Float32Array([
     // pos.x  pos.y  pos.z   col.r col.g col.b
-    -HALF, -HALF, 0.0, 0.65, 0.65, 0.65, // 0 bottom-left
-    HALF, -HALF, 0.0, 1.0, 1.0, 1.0, // 1 bottom-right
-    HALF, HALF, 0.0, 0.85, 0.85, 0.85, // 2 top-right
-    -HALF, HALF, 0.0, 0.55, 0.55, 0.55, // 3 top-left
+    -HALF,
+    -HALF,
+    0.0,
+    0.65,
+    0.65,
+    0.65, // 0 bottom-left
+    HALF,
+    -HALF,
+    0.0,
+    1.0,
+    1.0,
+    1.0, // 1 bottom-right
+    HALF,
+    HALF,
+    0.0,
+    0.85,
+    0.85,
+    0.85, // 2 top-right
+    -HALF,
+    HALF,
+    0.0,
+    0.55,
+    0.55,
+    0.55, // 3 top-left
 ]);
 
 // Two triangles, wound counter-clockwise as seen from +z (the viewer) → the
@@ -62,11 +100,36 @@ const QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 // occlude earlier ones under the LESS depth test.
 const INSTANCES = new Float32Array([
     // offset.x offset.y offset.z   tint.r tint.g tint.b
-    -0.36, -0.36, 0.5, 1.0, 0.35, 0.35, // far    — red
-    -0.18, -0.18, 0.3, 1.0, 0.8, 0.3, // amber
-    0.0, 0.0, 0.1, 0.45, 1.0, 0.5, // green
-    0.18, 0.18, -0.1, 0.4, 0.7, 1.0, // blue
-    0.36, 0.36, -0.3, 0.8, 0.45, 1.0, // near   — purple
+    -0.36,
+    -0.36,
+    0.5,
+    1.0,
+    0.35,
+    0.35, // far    — red
+    -0.18,
+    -0.18,
+    0.3,
+    1.0,
+    0.8,
+    0.3, // amber
+    0.0,
+    0.0,
+    0.1,
+    0.45,
+    1.0,
+    0.5, // green
+    0.18,
+    0.18,
+    -0.1,
+    0.4,
+    0.7,
+    1.0, // blue
+    0.36,
+    0.36,
+    -0.3,
+    0.8,
+    0.45,
+    1.0, // near   — purple
 ]);
 
 const INSTANCE_COUNT = 5;
@@ -146,7 +209,7 @@ let firstFrameDrawn = false;
 let meshVao: GLMeshVao | null = null;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     // Record the static mesh (both buffers' attribute layouts + the index binding)
@@ -173,11 +236,11 @@ runRenderLoop(engine, () => {
     // Opaque black colour clear + depth clear (to the default 1.0).
     clearEngine(engine, { color: { r: 0, g: 0, b: 0, a: 1 }, depth: true });
 
-    useEffect(engine, effect);
+    useEffect(effect);
 
     // Bind the recorded VAO and draw all five instances in ONE call — no per-frame
     // vertexAttribPointer/Divisor, no unbindInstanceAttributes.
-    drawMesh(engine, meshVao, INSTANCE_COUNT);
+    drawMesh(meshVao, INSTANCE_COUNT);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

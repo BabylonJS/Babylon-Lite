@@ -35,13 +35,14 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
-    it("exposes complete SSAO construction and stable mutable reconstruction controls", () => {
+    it("exposes both AO task families and keeps XeGTAO reconstruction controls distinct", () => {
         const probePath = resolve(BUILD_DIR, "ssao-reconstruction.probe.ts");
         try {
             writeFileSync(
                 probePath,
                 `import {
     createSsaoTask, resetSsaoTemporal, enableSsaoHalfResolution, enablePbrSsao,
+    createScreenSpaceAmbientOcclusionPostProcessTask, type ScreenSpaceAmbientOcclusionPostProcessTask,
     type EngineContext, type SceneContext, type Camera, type RenderTarget, type SsaoTemporalSettings,
 } from "./index.js";
 // @ts-expect-error The reconstruction initializer is internal.
@@ -53,6 +54,14 @@ declare const scene: SceneContext;
 declare const camera: Camera;
 declare const depth: RenderTarget;
 declare const velocity: RenderTarget;
+declare const source: RenderTarget;
+const postProcess: ScreenSpaceAmbientOcclusionPostProcessTask = createScreenSpaceAmbientOcclusionPostProcessTask({
+    sourceTexture: source, depthTexture: depth, camera, composition: "none",
+}, engine, scene);
+const postProcessOutput: RenderTarget = postProcess.occlusionTexture;
+void postProcessOutput;
+// @ts-expect-error XeGTAO enablers do not accept the separate screen-space post-process task.
+enableSsaoHalfResolution(postProcess);
 const ao = createSsaoTask({ depthTexture: depth, camera }, engine, scene);
 const settings: SsaoTemporalSettings = ao.temporal;
 settings.enabled = false;

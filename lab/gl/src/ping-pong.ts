@@ -25,17 +25,17 @@ export interface GLPingPong {
 }
 
 /**
- * Create a {@link GLPingPong}: two same-sized render targets (`options` applied to
- * both). If the second target fails to build, the first is disposed before
- * rethrowing (no leak).
+ * Create a {@link GLPingPong}: two `width`×`height` render targets (`options`
+ * applied to both). If the second target fails to build, the first is disposed
+ * before rethrowing (no leak).
  */
-export function createPingPong(engine: GLEngineContext, options: GLRenderTargetOptions): GLPingPong {
-    const a = createRenderTarget(engine, options);
+export function createPingPong(engine: GLEngineContext, width: number, height: number, options?: GLRenderTargetOptions): GLPingPong {
+    const a = createRenderTarget(engine, width, height, options);
     let b: GLRenderTarget;
     try {
-        b = createRenderTarget(engine, options);
+        b = createRenderTarget(engine, width, height, options);
     } catch (e) {
-        disposeRenderTarget(engine, a);
+        disposeRenderTarget(a);
         throw e;
     }
 
@@ -56,16 +56,16 @@ export function createPingPong(engine: GLEngineContext, options: GLRenderTargetO
             if (disposed) {
                 return;
             }
-            resizeRenderTarget(engine, a, width, height);
-            resizeRenderTarget(engine, b, width, height);
+            resizeRenderTarget(a, width, height);
+            resizeRenderTarget(b, width, height);
         },
         dispose(): void {
             if (disposed) {
                 return;
             }
             disposed = true;
-            disposeRenderTarget(engine, a);
-            disposeRenderTarget(engine, b);
+            disposeRenderTarget(a);
+            disposeRenderTarget(b);
         },
     };
 }

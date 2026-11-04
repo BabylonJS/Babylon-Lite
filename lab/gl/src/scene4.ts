@@ -134,10 +134,7 @@ const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
 const gl = engine.gl;
 
-const sheet = createRawTexture(engine, makeGlowDisc(), SHEET_SIZE, SHEET_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, {
-    minFilter: gl.LINEAR,
-    magFilter: gl.LINEAR,
-});
+const sheet = createRawTexture(engine, makeGlowDisc(), SHEET_SIZE, SHEET_SIZE, { minFilter: gl.LINEAR, magFilter: gl.LINEAR });
 
 const renderer = createSpriteRenderer(engine, {
     capacity: SPRITE_COUNT,
@@ -172,7 +169,7 @@ runRenderLoop(engine, (dt) => {
     // Gate on BOTH the background effect and the sprite renderer's effect (plus
     // the sheet) so the frozen capture always includes the sprites — matching
     // the BJS reference, whose sprite shaders also load before its first frame.
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, renderer._effect) || !sheet.isReady) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(renderer._effect) || !sheet.isReady) {
         return;
     }
     resizeGLEngine(engine);
