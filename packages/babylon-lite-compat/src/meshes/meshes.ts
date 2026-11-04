@@ -411,6 +411,16 @@ export class AbstractMesh extends TransformNode {
         return true;
     }
 
+    /**
+     * @internal Take this mesh out of every light's filter lists before it goes, as Babylon.js
+     * `AbstractMesh.dispose` does in its own `Lights` loop. Container-retired wrappers prune too.
+     */
+    protected override _retireFromScene(): void {
+        for (const light of this._scene?.lights ?? []) {
+            light._pruneDisposedMesh(this);
+        }
+    }
+
     public get material(): CompatMaterial | null {
         return this._material;
     }
@@ -1013,6 +1023,9 @@ export class Mesh extends AbstractMesh {
             lite.name = cloneName;
         }
         const isMesh = source instanceof Mesh || ("_gpu" in lite && "material" in lite);
+        if (isMesh) {
+            (lite as LiteMesh).id = undefined;
+        }
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
         wrapper._container = (source as TransformNode | undefined)?._container;
         if (wrapper instanceof Mesh) {
