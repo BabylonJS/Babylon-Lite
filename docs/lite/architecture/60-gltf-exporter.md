@@ -1275,7 +1275,7 @@ Three layers, mapped onto TESTING.md's categories:
 
 - Vitest unit tests over fabricated plain-data scenes (`tests/lite/unit/export-gltf/`).
 - Playwright plumbing tests over real exports (`tests/lite/plumbing/export-gltf.spec.ts`, with the lab page `lab/lite/export-gltf-test.html`).
-- Playwright visual parity scenes 321 to 325 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
+- Playwright visual parity scenes 348 to 352 (`tests/lite/parity/scenes/scene3NN-gltf-export-*.spec.ts`), ported from the Babylon.js serializer's visualization tests.
 
 The first two layers include ports of the Babylon.js serializer's unit and integration tests (Babylon.js test ports, below).
 
@@ -1436,11 +1436,11 @@ A test is kept only when its Lite page matches the golden closely. A test that w
 
 | Scene | Babylon.js test(s) · playground                                | Lite MAD | `maxMad` | Notes                                                                                                                                                                                                                            |
 | ----- | -------------------------------------------------------------- | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 321   | with Negative World Matrix (left handed, twice) · `#KX53VK#88` | 0.015    | 0.05     | the spec loads `?iterations=2`; the page enables `enableDeviceLostSceneRecovery` so the second export keeps vertex colors (Scope)                                                                                                |
-| 322   | Shared Buffer Conversions · `#KX53VK#85`                       | 0.015    | 0.05     | two meshes over one set of arrays                                                                                                                                                                                                |
-| 323   | Morph Target Animation · `#84M2SR#107`                         | 0.0006   | 0.05     | the influence animations are not authored (the exporter exports only glTF-clip animation groups); the frame-60 weights are applied after the reload. Upstream excludes this test on WebGPU, but the WebGPU reference page passes |
-| 324   | Rotation conversion, left-handed · `#UK7FLI#1`                 | 0.092    | 0.15     | Babylon.js's default material for material-less boxes is a Standard material, so the Lite boxes get `createStandardMaterial()`                                                                                                   |
-| 325   | Export GLTF Extension KHR_texture_transform · `#20OAV9#15148`  | 0.0003   | 0.05     | `wAng` maps to `uAng` with the opposite sign; the light and camera join after the export (no node filter)                                                                                                                        |
+| 348   | with Negative World Matrix (left handed, twice) · `#KX53VK#88` | 0.015    | 0.05     | the spec loads `?iterations=2`; the page enables `enableDeviceLostSceneRecovery` so the second export keeps vertex colors (Scope)                                                                                                |
+| 349   | Shared Buffer Conversions · `#KX53VK#85`                       | 0.015    | 0.05     | two meshes over one set of arrays                                                                                                                                                                                                |
+| 350   | Morph Target Animation · `#84M2SR#107`                         | 0.0006   | 0.05     | the influence animations are not authored (the exporter exports only glTF-clip animation groups); the frame-60 weights are applied after the reload. Upstream excludes this test on WebGPU, but the WebGPU reference page passes |
+| 351   | Rotation conversion, left-handed · `#UK7FLI#1`                 | 0.092    | 0.15     | Babylon.js's default material for material-less boxes is a Standard material, so the Lite boxes get `createStandardMaterial()`                                                                                                   |
+| 352   | Export GLTF Extension KHR_texture_transform · `#20OAV9#15148`  | 0.0003   | 0.05     | `wAng` maps to `uAng` with the opposite sign; the light and camera join after the export (no node filter)                                                                                                                        |
 
 Five of the 26 tests are ported, one per scene above. Merged (1 of 26):
 
@@ -1550,11 +1550,11 @@ The only production files outside `export-gltf/` are `index.ts` and `mesh/mesh.t
 | `tests/lite/unit/export-gltf/cameras.test.ts`                                                    | camera projection and placement                                                                                  |
 | `tests/lite/unit/export-gltf/lights.test.ts`                                                     | `KHR_lights_punctual`                                                                                            |
 | `tests/lite/unit/export-gltf/animations.test.ts`                                                 | animation channels, samplers and conversion                                                                      |
-| `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | visual parity scenes 321–325: Lite page and Babylon.js reference page                                            |
+| `lab/lite/{scene,bundle-scene,babylon-ref-scene}N.html`, `lab/lite/src/{lite,bjs}/sceneN.ts`     | visual parity scenes 348–352: Lite page and Babylon.js reference page                                            |
 | `lab/public/lite/export-gltf-fixtures.css`                                                       | shared canvas layout for the fifteen exporter fixture pages                                                      |
 | `tests/lite/parity/scenes/sceneN-gltf-export-*.spec.ts`                                          | visual parity specs                                                                                              |
 | `reference/lite/sceneN-gltf-export-*/babylon-ref-golden.png`, `lab/public/thumbnails/sceneN.jpg` | goldens and gallery thumbnails                                                                                   |
-| `scene-config.json`                                                                              | ids 321–325 with `maxMad` and `maxRawKB`                                                                         |
+| `scene-config.json`                                                                              | ids 348–352 with `maxMad` and `maxRawKB`                                                                         |
 | `lab/package.json`                                                                               | `@babylonjs/serializers` dev dependency for the reference pages                                                  |
 | `lab/lite/export-gltf-test.html`                                                                 | plumbing lab page                                                                                                |
 | `lab/lite/src/export-gltf-test.ts`                                                               | `window.exportGltfTest`: round trip for assets and a native scene; single export of a GLB                        |

@@ -1,4 +1,4 @@
-// Scene 322: glTF export, Shared Buffer Conversions. Babylon.js visualization test "GLTF Serializer Shared Buffer
+// Scene 349: glTF export, Shared Buffer Conversions. Babylon.js visualization test "GLTF Serializer Shared Buffer
 // Conversions" (playground #KX53VK#85, `meshCount = 2`). Two meshes share one vertex-colored geometry (the same typed
 // arrays), are exported with exportSceneAsGlb and reloaded with loadGltf.
 import {

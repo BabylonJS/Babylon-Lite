@@ -1,5 +1,5 @@
 /**
- * Scene 325 — glTF export: KHR_texture_transform
+ * Scene 352 — glTF export: KHR_texture_transform
  *
  * Babylon.js visualization test: "Export GLTF Extension KHR_texture_transform"
  * Playground: #20OAV9#15148. Reference image: exportGltfKHRTextureTransform.png (errorRatio 1.1).
@@ -13,18 +13,18 @@ import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(325);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene325-gltf-export-texture-transform");
+const sceneConfig = getSceneConfig(352);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene352-gltf-export-texture-transform");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 325 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 352 skipped via skipParity in scene-config.json");
 
-test("Scene 325 — Export GLTF Extension KHR_texture_transform matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 352 — Export GLTF Extension KHR_texture_transform matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 325, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 352, timeout: 90_000 });
 
-    await page.goto("/scene325.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 325 Lite", pollMs: 100 });
+    await page.goto("/scene352.html");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 352 Lite", pollMs: 100 });
     // The scene is static and `ready` follows its first rendered frame, so remove the loader overlay
     // instead of waiting out its fade.
     await page.evaluate(() => document.getElementById("loader-overlay")?.remove());

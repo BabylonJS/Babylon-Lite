@@ -1,5 +1,5 @@
 /**
- * Scene 322 — glTF export: shared buffer conversions
+ * Scene 349 — glTF export: shared buffer conversions
  *
  * Babylon.js visualization test: "GLTF Serializer Shared Buffer Conversions".
  * Playground: #KX53VK#85 (`meshCount = 2`). Reference image: glTFSerializerSharedBufferConversions.png (errorRatio 1.1).
@@ -12,18 +12,18 @@ import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(322);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene322-gltf-export-shared-buffers");
+const sceneConfig = getSceneConfig(349);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene349-gltf-export-shared-buffers");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 322 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 349 skipped via skipParity in scene-config.json");
 
-test("Scene 322 — GLTF Serializer Shared Buffer Conversions matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 349 — GLTF Serializer Shared Buffer Conversions matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 322, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 349, timeout: 90_000 });
 
-    await page.goto("/scene322.html");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 322 Lite", pollMs: 100 });
+    await page.goto("/scene349.html");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 349 Lite", pollMs: 100 });
     // The scene is static and `ready` follows its first rendered frame, so remove the loader overlay
     // instead of waiting out its fade.
     await page.evaluate(() => document.getElementById("loader-overlay")?.remove());

@@ -1,5 +1,5 @@
 /**
- * Scene 321 — glTF export: negative world matrix
+ * Scene 348 — glTF export: negative world matrix
  *
  * Babylon.js visualization test: "GLTF Serializer with Negative World Matrix (left handed, twice)", run as `?iterations=2`.
  * Playground: #KX53VK#88. Reference image: glTFSerializerNegativeWorldMatrix.png (errorRatio 1.1), shared by all variants.
@@ -15,18 +15,18 @@ import { expect, test } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig, waitForCanvasReady } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(321);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene321-gltf-export-negative-world-matrix");
+const sceneConfig = getSceneConfig(348);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene348-gltf-export-negative-world-matrix");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 321 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 348 skipped via skipParity in scene-config.json");
 
-test("Scene 321 — GLTF Serializer with Negative World Matrix (left handed, twice) matches Babylon.js", async ({ page }, testInfo) => {
+test("Scene 348 — GLTF Serializer with Negative World Matrix (left handed, twice) matches Babylon.js", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await captureGolden(page.context().browser()!, { sceneId: 321, timeout: 90_000 });
+    await captureGolden(page.context().browser()!, { sceneId: 348, timeout: 90_000 });
 
-    await page.goto("/scene321.html?iterations=2");
-    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 321 Lite", pollMs: 100 });
+    await page.goto("/scene348.html?iterations=2");
+    await waitForCanvasReady(page, { timeout: 90_000, label: "Scene 348 Lite", pollMs: 100 });
     // The scene is static and `ready` follows its first rendered frame, so remove the loader overlay
     // instead of waiting out its fade.
     await page.evaluate(() => document.getElementById("loader-overlay")?.remove());

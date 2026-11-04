@@ -1,4 +1,4 @@
-// Scene 323: glTF export of a textured sphere with two animated morph targets, reloaded and posed at frame 60 —
+// Scene 350: glTF export of a textured sphere with two animated morph targets, reloaded and posed at frame 60 —
 // matches Babylon.js playground #84M2SR#107 (visualization test "GLTF Serializer Morph Target Animation").
 //
 // The snippet passes `{ segments: 16, size: 2 }` to CreateSphere; `size` is not a sphere option, so the spheres keep the
