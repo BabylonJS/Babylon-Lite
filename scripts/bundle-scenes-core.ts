@@ -1380,11 +1380,19 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
 }
 
 /** Chromium flags for the measurement browser. SwiftShader under CI, or locally when the
- *  `--software` flag is passed; otherwise the real GPU. Select Dawn's adapter directly,
- *  rather than changing Chromium's ANGLE/Vulkan compositor and assuming WebGPU follows it.
+ *  `--software` flag is passed; otherwise the real GPU. Select Dawn's adapter directly.
+ *  Linux also needs the matching software compositor for external-image interoperability.
  *  See `DEVICE_DEPENDENT_NOTE`. */
 export function measurementBrowserArgs(): string[] {
-    const swiftShaderArgs = process.env.CI || softwareRenderRequested() ? ["--use-webgpu-adapter=swiftshader"] : [];
+    const swiftShaderArgs =
+        process.env.CI || softwareRenderRequested()
+            ? [
+                  "--use-webgpu-adapter=swiftshader",
+                  ...(process.platform === "linux"
+                      ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
+                      : []),
+              ]
+            : [];
     return ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs];
 }
 
@@ -1410,8 +1418,8 @@ function softwareRenderRequested(): boolean {
  *
  *      pnpm build:bundle-manifest:device
  *
- *  Software runs select Dawn's SwiftShader adapter directly and verify it before measuring;
- *  they do not depend on the browser's compositor selecting the same backend. */
+ *  Software runs select and verify Dawn's SwiftShader adapter directly. Linux retains its
+ *  software-compositor flags too, because image uploads must interoperate with that backend. */
 const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
 export async function buildBundleScenes(): Promise<void> {
@@ -1803,14 +1811,43 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
                 const architecture = await probe.evaluate(async () => {
                     if (!navigator.gpu) return null;
                     return Promise.race([
-                        navigator.gpu.requestAdapter().then((adapter) => adapter?.info.architecture ?? null),
-                        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+                        (async () => {
+                            const adapter = await navigator.gpu.requestAdapter();
+                            if (!adapter || adapter.info.architecture !== "swiftshader") return adapter?.info.architecture ?? null;
+                            const device = await adapter.requestDevice();
+                            let texture: GPUTexture | undefined;
+                            let bitmap: ImageBitmap | undefined;
+                            try {
+                                const response = await fetch("/brdf-lut.png");
+                                if (!response.ok) throw new Error(`Software measurement BRDF image fetch failed: HTTP ${response.status}.`);
+                                bitmap = await createImageBitmap(await response.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+                                const size = { width: bitmap.width, height: bitmap.height };
+                                texture = device.createTexture({
+                                    size,
+                                    format: "rgba8unorm",
+                                    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+                                });
+                                device.pushErrorScope("validation");
+                                device.queue.copyExternalImageToTexture({ source: bitmap, flipY: false }, { texture, premultipliedAlpha: false }, size);
+                                await device.queue.onSubmittedWorkDone();
+                                const error = await device.popErrorScope();
+                                if (error) throw new Error(`Software measurement image upload failed: ${error.message}`);
+                                return adapter.info.architecture;
+                            } finally {
+                                bitmap?.close();
+                                texture?.destroy();
+                                device.destroy();
+                            }
+                        })(),
+                        new Promise<never>((_resolve, reject) =>
+                            setTimeout(() => reject(new Error("Software measurement adapter/image upload probe timed out after 10s.")), 10_000)
+                        ),
                     ]);
                 });
                 if (architecture !== "swiftshader") {
                     throw new Error(`Software bundle measurement requires the SwiftShader WebGPU adapter, got ${architecture ?? "no adapter"}.`);
                 }
-                console.log(`Measurement WebGPU adapter: ${architecture}`);
+                console.log(`Measurement WebGPU adapter: ${architecture}; external-image upload verified`);
             } finally {
                 await probe.close();
             }

@@ -106,13 +106,13 @@ describe("bundle scene readiness timeout", () => {
         await expect(measurePage(f.browser, 4173, "scene8", "lite/bundle-scene8.html", "/bundle/", true)).rejects.toThrow("console errors: HDR failed");
     });
 
-    it("selects Dawn's software adapter without forcing the browser compositor on any platform", () => {
+    it("selects Dawn's software adapter and keeps Linux's required image-interoperability flags", () => {
         vi.stubEnv("CI", "");
         vi.stubEnv("BUNDLE_SOFTWARE_RENDER", "true");
         const args = measurementBrowserArgs();
         expect(args).toContain("--enable-unsafe-webgpu");
         expect(args).toContain("--use-webgpu-adapter=swiftshader");
-        expect(args).not.toContain("--enable-features=Vulkan");
-        expect(args).not.toContain("--use-angle=swiftshader");
+        expect(args.includes("--enable-features=Vulkan")).toBe(process.platform === "linux");
+        expect(args.includes("--use-angle=swiftshader")).toBe(process.platform === "linux");
     });
 });

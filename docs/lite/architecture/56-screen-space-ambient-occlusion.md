@@ -1250,7 +1250,9 @@ budget and rejects reported errors or missing readiness. This changes neither th
 177 KiB ceiling nor the rendering or reference pixels.
 Scene-bundle measurement selects Dawn's software adapter explicitly under CI or
 `--software`, and checks that its architecture is `swiftshader` before measuring.
-It does not force the browser's ANGLE/Vulkan compositor and assume WebGPU follows it.
+Linux also retains its ANGLE/Vulkan software-compositor flags for external-image
+interoperability. The default BRDF image upload is validated before measuring scenes, rather
+than assuming that adapter enumeration alone guarantees a working upload path.
 
 Without AO the two renders differ by a full-image MAD of 1.1. The AO algorithms
 and compositing differ (Lite occludes diffuse IBL before tone mapping; SSAO2
