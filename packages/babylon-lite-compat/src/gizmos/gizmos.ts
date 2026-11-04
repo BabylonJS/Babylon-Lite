@@ -174,7 +174,7 @@ export class UtilityLayerRenderer {
 
     public constructor(scene: Scene) {
         this._engine = scene.getEngine()._lite;
-        this._lite = createUtilityLayer(this._engine, scene._lite);
+        this._lite = createUtilityLayer(scene._lite);
         // Babylon Lite registers a utility layer *after* its gizmos are created and
         // after the main scene is registered. Gizmo creation is synchronous (all
         // gizmos exist by the time the engine starts), so defer registration to the
