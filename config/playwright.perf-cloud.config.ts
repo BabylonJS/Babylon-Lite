@@ -1,8 +1,10 @@
 /**
  * Playwright Config — Perf Tests via BrowserStack
  *
- * Runs Lite-vs-BJS performance regression tests on a BrowserStack macOS Chrome
+ * Runs current-vs-baseline performance regression tests on a BrowserStack macOS Chrome
  * instance with real GPU. Uses browserstack-node-sdk for connection & tunneling.
+ * Current/baseline bundle preparation owns model hydration; server startup must
+ * not download unrelated scene fixtures.
  *
  * Run:  npx browserstack-node-sdk playwright test --config playwright.perf-cloud.config.ts tests/lite/perf/perf-regression.spec.ts
  */
@@ -32,7 +34,7 @@ export default defineConfig({
         },
     },
     webServer: {
-        command: "pnpm --filter @babylon-lite/lab dev",
+        command: "pnpm --filter @babylon-lite/lab exec vite",
         port: 5174,
         reuseExistingServer: true,
         timeout: 180_000,
