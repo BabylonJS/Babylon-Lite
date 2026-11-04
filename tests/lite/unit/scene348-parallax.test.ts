@@ -12,10 +12,15 @@ import {
 describe("scene 348 comparison inputs", () => {
     it("uses identical default settings and round-trips shared URLs", () => {
         const defaults = readScene348Settings("");
-        expect(defaults).toEqual({ pom: true, depth: 0.06, view: "oblique", asset: "stone", quality: "medium", embed: false });
+        expect(defaults).toEqual({ pom: true, depth: 0.06, view: "grazing", asset: "stone", quality: "medium", embed: false });
         expect(readScene348Settings(scene348Query(defaults))).toEqual(defaults);
         expect(readScene348Settings(scene348Query(defaults, true)).embed).toBe(true);
         expect(SCENE348_PANEL_SIZE * defaults.depth).toBeCloseTo(0.144);
+    });
+
+    it("keeps explicitly selected front and oblique views available", () => {
+        expect(readScene348Settings("?view=front").view).toBe("front");
+        expect(readScene348Settings("?view=oblique").view).toBe("oblique");
     });
 
     it.each(["?pom=maybe", "?view=unknown", "?asset=unknown", "?quality=unknown", "?depth=NaN", "?depth=-0.1", "?depth=0.17"])("rejects invalid scene settings %s", (query) => {

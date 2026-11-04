@@ -12,7 +12,7 @@ test.use({ baseURL: `http://127.0.0.1:${process.env.LAB_TEST_PORT ?? 5179}` });
 // an inspectable comparison without inventing an equivalence threshold.
 test("Scene 348 - render independent POM for visual comparison", async ({ page }, testInfo) => {
     expect(existsSync(golden), "Scene 348's captured Babylon.js comparison reference must exist").toBe(true);
-    await page.goto("/scene348.html?embed=1");
+    await page.goto("/scene348.html?embed=1&view=oblique");
     await waitForCanvasReady(page, { timeout: 30_000, label: "scene348 Lite POM" });
     await expect(page.locator("#loader-overlay")).toHaveCount(0);
     await expect(page.locator("canvas")).toHaveAttribute("data-draw-calls", "4");

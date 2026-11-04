@@ -204,9 +204,14 @@ test("Scene 348 - comparison settings and orbit state stay synchronized", async 
     const babylonCanvas = page.frameLocator("#babylon-frame").locator("canvas");
     await expect(liteCanvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
     await expect(babylonCanvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+    await expect(liteCanvas).toHaveAttribute("data-view", "grazing");
+    await expect(babylonCanvas).toHaveAttribute("data-view", "grazing");
     await page.locator('select[name="asset"]').selectOption("wall");
     await expect(liteCanvas).toHaveAttribute("data-asset", "wall", { timeout: 30_000 });
     await expect(babylonCanvas).toHaveAttribute("data-asset", "wall", { timeout: 30_000 });
+    await page.locator('select[name="view"]').selectOption("front");
+    await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.front.alpha));
+    await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.front.alpha));
     await page.locator('select[name="view"]').selectOption("grazing");
     await expect(liteCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.grazing.alpha));
     await expect(babylonCanvas).toHaveAttribute("data-camera-alpha", String(SCENE348_CAMERAS.grazing.alpha));
@@ -262,7 +267,7 @@ test("Scene 348 - live comparison controls preserve documents, devices, canvases
     await page.mouse.down();
     await page.mouse.move(bounds.x + bounds.width / 2 - 90, bounds.y + bounds.height / 2 + 30, { steps: 8 });
     await page.mouse.up();
-    await expect.poll(async () => Math.abs((await scene348Pose(canvases[0]!))[0] - SCENE348_CAMERAS.oblique.alpha)).toBeGreaterThan(0.02);
+    await expect.poll(async () => Math.abs((await scene348Pose(canvases[0]!))[0] - SCENE348_CAMERAS.grazing.alpha)).toBeGreaterThan(0.02);
     await expect.poll(async () => Math.abs((await scene348Pose(canvases[0]!))[0] - (await scene348Pose(canvases[1]!))[0])).toBeLessThan(0.0001);
     const customPose = await scene348Pose(canvases[0]!);
 
@@ -347,6 +352,7 @@ for (const route of ["/scene348.html", "/babylon-ref-scene348.html", "/bundle-sc
         await page.goto(route);
         const canvas = page.locator("canvas");
         await expect(canvas).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
+        await expect(canvas).toHaveAttribute("data-view", "grazing");
         await canvas.evaluate((element) => {
             (element as HTMLCanvasElement).dataset.testIdentity = "standalone";
         });

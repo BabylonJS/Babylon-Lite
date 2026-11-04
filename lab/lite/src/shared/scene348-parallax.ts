@@ -48,7 +48,7 @@ export interface Scene348CameraPose {
 export function readScene348Settings(search: string): Scene348Settings {
     const query = new URLSearchParams(search);
     const pom = query.get("pom") ?? "on";
-    const view = query.get("view") ?? "oblique";
+    const view = query.get("view") ?? "grazing";
     const asset = query.get("asset") ?? "stone";
     const quality = query.get("quality") ?? "medium";
     const depth = Number(query.get("depth") ?? 0.06);

@@ -466,7 +466,7 @@ Settings are URL-addressable and shared by both engines:
 | --------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `pom`     | `on`      | `on`, `off`; controls the right column only                                                                            |
 | `depth`   | `0.06`    | Finite UV-space inset ratio in `[0, 0.16]`                                                                             |
-| `view`    | `oblique` | `front`, `oblique`, `grazing` camera presets                                                                           |
+| `view`    | `grazing` | `front`, `oblique`, `grazing` camera presets                                                                           |
 | `asset`   | `stone`   | `stone`, `wall`; selects the original diffuse/normal-height pair                                                       |
 | `quality` | `medium`  | Lite-only `low` (4/8/4), `medium` (8/32/8), `high` (16/64/16) front/grazing coarse budgets and refinement subdivisions |
 | `embed`   | off       | `1` hides the standalone toolbar for comparison/capture                                                                |
@@ -497,7 +497,9 @@ texture assets/filtering. Orbit/zoom is interactive; panning is disabled so
 synchronization has a fixed target. Resize behavior remains engine-native.
 
 The new BJS golden and its 1280x720 JPG thumbnail are captured once from the
-default embedded view. They are visual comparison assets, not a claim of
+original oblique embedded view (`?embed=1&view=oblique`), which the saved-reference
+comparison selects explicitly. Interactive pages default to Grazing to make the
+relief easier to see. These are visual comparison assets, not a claim of
 POM pixel equivalence. `scene-config.json` marks strict pixel parity skipped
 with an explicit reason, while the scene-specific browser spec still verifies
 that both pages render, both material families react to POM/depth, controls
