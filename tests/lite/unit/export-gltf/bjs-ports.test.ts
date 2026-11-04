@@ -7,8 +7,6 @@ import { createPointLight } from "../../../../packages/babylon-lite/src/light/po
 import { createSpotLight } from "../../../../packages/babylon-lite/src/light/spot-light";
 import { setParent } from "../../../../packages/babylon-lite/src/scene/set-parent";
 import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
-import { INTERP_LINEAR, PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "../../../../packages/babylon-lite/src/animation/types";
-import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
 
 describe("Babylon.js serializer behavior", () => {
     it("writes one binary geometry document with UTF-8 names, aligned JSON/BIN chunks and no external buffer", async () => {
@@ -84,39 +82,6 @@ describe("Babylon.js serializer behavior", () => {
                 }
             }
         }
-    });
-
-    it("serializes translation, scale and quaternion clips together, and excludes removed groups", async () => {
-        const target = createMesh("box");
-        const input = new Float32Array([0, 20 / 30, 40 / 30]);
-        const keys = [0.1, 0.1, 0.1, 1, 1, 1, 0.1, 0.1, 0.1];
-        const cases = [
-            { path: PATH_TRANSLATION, name: "translation", type: "VEC3", keys, expected: keys.map((v, i) => (i % 3 === 0 ? -v : v)) },
-            { path: PATH_SCALE, name: "scale", type: "VEC3", keys, expected: keys },
-            { path: PATH_ROTATION, name: "rotation", type: "VEC4", keys: [0.707, 0, 0, 0.707, 0, 0, 0, 1, 0.707, 0, 0, 0.707] },
-        ];
-        const groups = cases.map(({ path, name, keys }) => ({
-            name,
-            targetedAnimations: [{ target, path: "position" }],
-            _gltfMixer: [{ name, channels: [{ samplerIdx: 0, nodeIdx: 0, path }], samplers: [{ input, output: new Float32Array(keys), interpolation: INTERP_LINEAR }] }, [], []],
-        })) as unknown as SceneContext["animationGroups"];
-        const scene = createScene({ meshes: [target], animationGroups: groups });
-        const glb = await exportAndParse(scene);
-        expect(glb.json.animations).toHaveLength(3);
-        for (const [i, data] of cases.entries()) {
-            const animation = glb.json.animations[i];
-            expect(animation.channels).toEqual([{ sampler: 0, target: { node: 0, path: data.name } }]);
-            expect(animation.samplers).toHaveLength(1);
-            const sampler = animation.samplers[0];
-            expect(sampler.interpolation).toBeUndefined();
-            expect(glb.json.accessors[sampler.input]).toMatchObject({ componentType: 5126, count: 3, type: "SCALAR", min: [0] });
-            expect(glb.json.accessors[sampler.input].max[0]).toBeCloseTo(input[2]!, 6);
-            expect(glb.json.accessors[sampler.output]).toMatchObject({ componentType: 5126, count: 3, type: data.type });
-            expectClose(readAccessor(glb, sampler.input), Array.from(input));
-            expectClose(readAccessor(glb, sampler.output), data.expected ?? data.keys);
-        }
-        scene.animationGroups.length = 0;
-        expect((await exportAndParse(scene)).json.animations).toBeUndefined();
     });
 
     it("serializes point, spot and directional lights with stable node references", async () => {

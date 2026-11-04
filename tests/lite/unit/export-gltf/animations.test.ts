@@ -52,6 +52,37 @@ function morphMesh() {
 }
 
 describe("animations", () => {
+    it("serializes translation, scale and quaternion clips together, and excludes removed groups", async () => {
+        const target = createMesh("box");
+        const input = [0, 20 / 30, 40 / 30];
+        const keys = [0.1, 0.1, 0.1, 1, 1, 1, 0.1, 0.1, 0.1];
+        const cases: { path: Path; output: number[]; expected?: number[]; type: string }[] = [
+            { path: "translation", output: keys, expected: keys.map((v, i) => (i % 3 === 0 ? -v : v)), type: "VEC3" },
+            { path: "scale", output: keys, type: "VEC3" },
+            { path: "rotation", output: [0.707, 0, 0, 0.707, 0, 0, 0, 1, 0.707, 0, 0, 0.707], type: "VEC4" },
+        ];
+        const scene = createScene({
+            meshes: [target],
+            animationGroups: cases.map(({ path, output }) => group(path, [{ target, path, boundPath: "position" }], [{ input, output }])),
+        });
+        const glb = await exportAndParse(scene);
+        expect(glb.json.animations).toHaveLength(3);
+        for (const [i, data] of cases.entries()) {
+            const animation = glb.json.animations[i];
+            expect(animation.channels).toEqual([{ sampler: 0, target: { node: 0, path: data.path } }]);
+            expect(animation.samplers).toHaveLength(1);
+            const sampler = animation.samplers[0];
+            expect(sampler.interpolation).toBeUndefined();
+            expect(glb.json.accessors[sampler.input]).toMatchObject({ componentType: 5126, count: 3, type: "SCALAR", min: [0] });
+            expect(glb.json.accessors[sampler.input].max[0]).toBeCloseTo(input[2]!, 6);
+            expect(glb.json.accessors[sampler.output]).toMatchObject({ componentType: 5126, count: 3, type: data.type });
+            expectClose(readAccessor(glb, sampler.input), input);
+            expectClose(readAccessor(glb, sampler.output), data.expected ?? data.output);
+        }
+        scene.animationGroups.length = 0;
+        expect((await exportAndParse(scene)).json.animations).toBeUndefined();
+    });
+
     describe.each([false, true])("sampler values (pass-through: %s)", (passThrough) => {
         it.each<{ name: string; path: Path; interpolation: number; output: number[]; converted: number[]; normalized?: number[] }>([
             { name: "translation", path: "translation", interpolation: INTERP_LINEAR, output: [1, 2, 3], converted: [-1, 2, 3] },
