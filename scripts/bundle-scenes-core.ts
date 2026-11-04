@@ -34,6 +34,7 @@ import {
 } from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import ts from "typescript";
+import type { Browser } from "@playwright/test";
 import { fetchFlightHelmet } from "./fetch-flight-helmet";
 
 /**
@@ -1735,12 +1736,14 @@ function readyTimeoutForScene(scene: string): number {
  * silently under-counted: the render pipeline's lazily-imported chunks only load
  * once the scene renders. `measurePage(..., requireReady=true)` rejects such a
  * measurement rather than recording a truncated size, so we retry a few times to
- * absorb transient network flakiness before failing the build loudly.
+ * absorb transient failures before failing the build loudly. Each retry replaces
+ * the browser process so failed GPU initialization cannot poison every attempt.
  */
-async function measureLiteSceneWithRetry(
+export async function measureLiteSceneWithRetry(
     browser: any,
     port: number,
-    scene: string
+    scene: string,
+    restartBrowser: () => Promise<Browser>
 ): Promise<{ rawKB: number; rawBytes: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= LITE_MEASURE_ATTEMPTS; attempt++) {
@@ -1749,11 +1752,15 @@ async function measureLiteSceneWithRetry(
         } catch (err) {
             lastError = err;
             console.warn(`  ${scene}: measurement attempt ${attempt}/${LITE_MEASURE_ATTEMPTS} failed: ${err instanceof Error ? err.message : String(err)}`);
+            if (attempt < LITE_MEASURE_ATTEMPTS) {
+                console.warn(`  ${scene}: restarting the measurement browser before retrying.`);
+                browser = await restartBrowser();
+            }
         }
     }
     throw new Error(
-        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This usually indicates a transient failure ` +
-            `(e.g. rate-limit) fetching a remote asset during measurement, which would truncate the bundle. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+        `Failed to measure ${scene} after ${LITE_MEASURE_ATTEMPTS} attempts. This can indicate a browser/GPU initialization ` +
+            `or remote-asset failure; refusing to record an incomplete runtime size. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
     );
 }
 
@@ -1775,16 +1782,22 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
 
     const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
 
+    let browser: Browser | undefined;
+    const restartBrowser = async (): Promise<Browser> => {
+        await browser?.close();
+        browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+        return browser;
+    };
     try {
         const tBrowser = performance.now();
         console.log("Launching measurement browser...");
-        const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+        browser = await restartBrowser();
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
         // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
-            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
+            const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene, restartBrowser);
             manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1815,10 +1828,12 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
-
-        await browser.close();
     } finally {
-        server.close();
+        try {
+            await browser?.close();
+        } finally {
+            server.close();
+        }
     }
 
     if (pruneManifest) {
