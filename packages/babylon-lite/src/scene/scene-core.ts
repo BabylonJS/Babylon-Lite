@@ -220,8 +220,6 @@ export interface SceneContext extends RenderingContext {
     _beforeRender: ((deltaMs: number) => void)[];
     /** @internal Scene whose swapchain output this overlay scene composites onto; set only by `createOverlayScene`. */
     _overlayBase?: SceneContext;
-    /** @internal Whether this overlay scene's swapchain task has been configured to composite. */
-    _overlayConfigured?: boolean;
     /** @internal Particle discovery list, allocated lazily by registerNodeParticleSet. */
     _particleSystems?: ParticleSystem[];
     /** @internal Physics discovery list, allocated lazily by createHavokWorld. */

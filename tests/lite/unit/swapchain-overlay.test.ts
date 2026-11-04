@@ -66,9 +66,11 @@ describe("configureSwapchainOverlayScene", () => {
         const overlay = makeOverlay(makeSurface(swapchain, 1, [base]), overlayTask, base);
 
         configureSwapchainOverlayScene(overlay);
+        expect(overlayTask._config.clr).toBe(true);
+        expect(overlay._beforeRender).toHaveLength(1);
 
+        overlay._beforeRender[0]!(0);
         expect(overlayTask._config.clr).toBe(false);
-        expect(overlay._beforeRender).toHaveLength(0);
         expect(baseLookups).toBe(0);
     });
 
@@ -93,7 +95,7 @@ describe("configureSwapchainOverlayScene", () => {
         configureSwapchainOverlayScene(overlay);
 
         expect(overlayTask._config.clr).toBe(true);
-        expect(overlayTask.enabled).toBe(false);
+        expect(overlayTask.enabled).toBeUndefined();
         expect(overlay._beforeRender).toHaveLength(1);
         expect(baseLookups).toBe(0);
 
@@ -168,5 +170,43 @@ describe("configureSwapchainOverlayScene", () => {
         expect(childTask.enabled).toBeUndefined();
         expect(childTask._config.clr).toBe(false);
         expect(childTask._colorAttachment.view).toBe(baseView);
+    });
+
+    it.each([1, 4])("configures initially absent and replacement presentation tasks at MSAA %i", (samples) => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const baseView = {} as GPUTextureView;
+        const base = { _kind: "scene", _frameGraph: { _tasks: [makeSwapchainTask(swapchain, samples > 1 ? baseView : undefined)] } } as unknown as SceneContext;
+        const overlayTasks: RenderTask[] = [];
+        const overlay = {
+            surface: makeSurface(swapchain, samples, [base]),
+            _frameGraph: { _tasks: overlayTasks },
+            _beforeRender: [],
+            _overlayBase: base,
+        } as unknown as SceneContext;
+        const update = (): void => overlay._beforeRender.forEach((cb) => cb(0));
+
+        configureSwapchainOverlayScene(overlay);
+        update();
+
+        const firstView = {} as GPUTextureView;
+        const first = makeSwapchainTask(swapchain, samples > 1 ? firstView : undefined);
+        overlayTasks.push(first);
+        update();
+        expect(first._config.clr).toBe(false);
+        if (samples > 1) {
+            expect(first._colorAttachment.view).toBe(baseView);
+        }
+
+        const replacement = makeSwapchainTask(swapchain, samples > 1 ? ({} as GPUTextureView) : undefined);
+        overlayTasks[0] = replacement;
+        update();
+        expect(replacement._config.clr).toBe(false);
+        expect(replacement.enabled).toBeUndefined();
+        if (samples > 1) {
+            expect(replacement._colorAttachment.view).toBe(baseView);
+        }
+        expect(first._config.clr).toBe(true);
+        expect(first.enabled).toBeUndefined();
+        expect(overlay._beforeRender).toHaveLength(1);
     });
 });

@@ -63,16 +63,6 @@ function isSuspended(scene: SceneContext): boolean {
     return !!base;
 }
 
-/** Configure a newly inserted overlay once, then regroup the scene's overlay tree. */
-function sceneRegistered(scene: SceneContext): void {
-    const base = scene._overlayBase;
-    if (base && !scene._overlayConfigured) {
-        scene._overlayConfigured = true;
-        configureSwapchainOverlayScene(scene);
-    }
-    moveSwapchainOverlaysAfterBase(scene);
-}
-
 /**
  * Create a scene that composites over `baseScene` on the base scene's surface.
  *
@@ -89,7 +79,8 @@ export function createOverlayScene(baseScene: SceneContext): SceneContext {
     const scene = createSceneContext(baseScene.surface);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 0 };
     scene._overlayBase = baseScene;
-    _installOverlaySceneRegistration(sceneRegistered);
+    _installOverlaySceneRegistration(moveSwapchainOverlaysAfterBase);
+    configureSwapchainOverlayScene(scene);
 
     const update = scene._update;
     const record = scene._record;

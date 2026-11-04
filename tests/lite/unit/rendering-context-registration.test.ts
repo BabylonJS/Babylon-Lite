@@ -12,7 +12,8 @@ import {
 import { moveRenderingContext } from "../../../packages/babylon-lite/src/engine/rendering-context-order";
 import { createEffectRenderer, createEffectWrapper } from "../../../packages/babylon-lite/src/effect/effect-renderer";
 import { createFrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
-import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
+import { addTask, addTaskAtStart, removeTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
+import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { _installAsyncShaderPipelinePreparation, registerSceneWithShadowSupport } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -179,7 +180,7 @@ describe("registerScene / unregisterScene", () => {
         await Promise.all(registrations);
 
         expect(getRenderingContexts(engine)).toEqual([first, second]);
-        expect(second._beforeRender).toHaveLength(samples > 1 ? 1 : 0);
+        expect(second._beforeRender).toHaveLength(1);
         second._update();
         expect((second._frameGraph._tasks[0] as RenderTaskBase)._config.clr).toBe(false);
     });
@@ -255,7 +256,7 @@ describe("registerScene / unregisterScene", () => {
         for (let i = 0; i < 3; i++) {
             unregisterScene(second);
             await registerScene(second);
-            expect(second._beforeRender).toHaveLength(samples > 1 ? 1 : 0);
+            expect(second._beforeRender).toHaveLength(1);
             expect(second._disposables).toHaveLength(cleanupCount);
         }
 
@@ -263,6 +264,38 @@ describe("registerScene / unregisterScene", () => {
         expect(second._disposables).toHaveLength(0);
         expect(second._beforeRender).toHaveLength(0);
         disposeScene(first);
+    });
+
+    it.each([1, 4])("configures an overlay swapchain task replaced while unregistered at MSAA %i", async (samples) => {
+        const engine = makeMockEngine(samples);
+        const main = createSceneContext(engine);
+        const overlay = createOverlayScene(main);
+        await registerScene(main);
+        await registerScene(overlay);
+        overlay._update();
+        const original = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        const originalView = original._colorAttachment.view;
+
+        unregisterScene(overlay);
+        removeTask(overlay, original);
+        const { rt, rst, depth } = original._config;
+        const replacement = createRenderTask({ name: "scene", rt, rst, depth }, engine, overlay) as unknown as RenderTaskBase;
+        addTask(overlay, replacement as unknown as Task);
+        await registerScene(overlay);
+        overlay._update();
+
+        const mainView = (main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view;
+        expect(replacement._config.clr).toBe(false);
+        expect(replacement.enabled).toBeUndefined();
+        expect(original._config.clr).toBe(true);
+        expect(original.enabled).toBeUndefined();
+        if (samples > 1) {
+            expect(replacement._colorAttachment.view).toBe(mainView);
+            expect(original._colorAttachment.view).toBe(originalView);
+        }
+        expect(overlay._beforeRender).toHaveLength(1);
+        disposeScene(overlay);
+        disposeScene(main);
     });
 
     describe("utility layer registration", () => {
