@@ -1,6 +1,7 @@
 /**
- * Shared WGSL raymarch library for the screen-space contact-shadow and global-illumination
- * producers (see `docs/lite/architecture/52-screen-space-effects.md`).
+ * Shared WGSL depth-reconstruction library for the screen-space ambient-occlusion,
+ * contact-shadow, and global-illumination producers (see
+ * `docs/lite/architecture/52-screen-space-effects.md`).
  *
  * `screenSpaceRaymarchWGSL()` is a pure string factory: it allocates nothing at module
  * scope and has no side effects, so importing this module costs nothing unless a caller
