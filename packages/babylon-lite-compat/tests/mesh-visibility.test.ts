@@ -55,6 +55,7 @@ describe("automatic compat Mesh.visibility", () => {
         wrapper.visibility = raw;
         expect(wrapper.visibility).toBe(raw);
         expect(getMeshOpacity(lite)).toBe(rendered);
+        expect(Boolean(lite._skipColorDraw)).toBe(rendered === 0);
     });
 
     it.each([NaN, Infinity, -Infinity])("rejects %s without changing raw or native state", (invalid) => {
@@ -75,9 +76,11 @@ describe("automatic compat Mesh.visibility", () => {
         expect(wrapper.isVisible).toBe(true);
         expect(wrapper.isPickable).toBe(true);
         expect(lite.visible).toBe(true);
+        expect(lite._skipColorDraw).toBe(true);
         wrapper.isVisible = false;
         expect(wrapper.visibility).toBe(0);
         wrapper.visibility = 0.5;
+        expect(lite._skipColorDraw).toBe(false);
         expect(wrapper.isVisible).toBe(false);
         expect(lite.visible).toBe(false);
         wrapper.isVisible = true;
@@ -238,7 +241,7 @@ describe("automatic compat Mesh.visibility", () => {
         expect(second.visibility).toBe(0.5);
     });
 
-    it.each([-0.5, 0.4, 1.2])("copies raw visibility %s through the real clone path", (raw) => {
+    it.each([-0.5, 0, 0.4, 1.2])("copies raw visibility %s through the real clone path", (raw) => {
         const lite = liteMesh();
         const wrapper = Mesh._fromLite(lite);
         wrapper.visibility = raw;
@@ -246,7 +249,10 @@ describe("automatic compat Mesh.visibility", () => {
         expect(clone.visibility).toBe(raw);
         expect(getMeshOpacity(clone._lite)).toBe(getMeshOpacity(lite));
         expect(clone._lite.material).toBe(lite.material);
+        expect(clone._lite._skipColorDraw).toBe(lite._skipColorDraw);
         clone.visibility = 0.8;
+        expect(clone._lite._skipColorDraw).toBe(false);
+        expect(Boolean(lite._skipColorDraw)).toBe(raw <= 0);
         expect(wrapper.visibility).toBe(raw);
         expect(getMeshOpacity(clone._lite)).toBe(0.8);
     });

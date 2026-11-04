@@ -57,6 +57,8 @@ getMeshOpacity(lod);
 setMeshOpacity(mesh, "0.5");
 // @ts-expect-error Feature-local storage is not public mesh state.
 mesh._opacity;
+// @ts-expect-error The colour/geometry skip flag is internal.
+mesh._skipColorDraw;
 void [set, get, result, value];
 `
             );

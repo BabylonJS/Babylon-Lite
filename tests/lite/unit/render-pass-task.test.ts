@@ -280,8 +280,14 @@ function makeTransparentRenderable(id: string, initialCenter: [number, number, n
     return renderable;
 }
 
-function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "order" | "isTransparent" | "_transmissive" | "_direct">>, drawOrder: string[]): Renderable {
+function makeDrawOrderRenderable(
+    id: string,
+    flags: Partial<Pick<Renderable, "order" | "isTransparent" | "_transmissive" | "_direct">>,
+    drawOrder: string[],
+    mesh?: Mesh
+): Renderable {
     const renderable: Renderable = {
+        mesh,
         order: flags.order ?? 100,
         isTransparent: flags.isTransparent ?? false,
         _transmissive: flags._transmissive ?? false,
@@ -766,10 +772,15 @@ describe("RenderPassTask transparent sorting", () => {
         await geometry._preload!();
         geometry.record();
         let cached: GPURenderBundle | undefined;
+        let lastVis: number | undefined;
         for (const [index, value] of [0.5, 0, 0.5].entries()) {
             setMeshOpacity(faded, value);
+            expect(faded._skipColorDraw).toBe(value === 0);
+            expect(faded.visible).toBe(true);
             passDraws.length = 0;
             expect(task.execute!()).toBe(value ? 2 : 1);
+            lastVis ??= task._lastVis;
+            expect(task._lastVis).toBe(lastVis);
             expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer] : []);
             expect(task._opaqueBindings.map((binding) => binding.renderable.mesh)).toEqual([opaque]);
             expect(task._transparentBindings.map((binding) => binding.renderable.mesh)).toEqual([faded]);
@@ -785,6 +796,37 @@ describe("RenderPassTask transparent sorting", () => {
             expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer, opaque._gpu.positionBuffer] : [opaque._gpu.positionBuffer]);
         }
         geometry.dispose();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("ignores colour-only omission on opaque and direct shadow lists, without invalidating bundles", () => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine);
+        const draws: string[] = [];
+        // PCF/CSM no-colour and ESM colour casters are all non-transparent;
+        // the shader-route tests exercise that classification with real builders.
+        const target = initMeshTransform({ name: "caster", children: [], visible: true, material: createStandardMaterial(), _gpu: {} as Mesh["_gpu"] });
+        const casters = [makeDrawOrderRenderable("depth-caster", {}, draws, target), makeDrawOrderRenderable("direct-caster", { _direct: true }, draws, target)];
+        scene._renderables.push(...casters);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        setMeshOpacity(target, 0);
+        task.record();
+        expect(task._transparentBindings).toHaveLength(0);
+        expect(task._opaqueBindings).toHaveLength(1);
+        expect(task._directBindings).toHaveLength(1);
+        expect(task.execute!()).toBe(2);
+        expect(draws).toEqual(["depth-caster", "direct-caster"]);
+        const lastVis = task._lastVis;
+        for (const value of [0.5, 0, 1]) {
+            setMeshOpacity(target, value);
+            draws.length = 0;
+            expect(task.execute!()).toBe(2);
+            expect(draws).toEqual(["direct-caster"]);
+            expect(task._lastVis).toBe(lastVis);
+            expect(bundleDescriptors).toHaveLength(1);
+        }
         task.dispose();
         disposeGpuResourceRetirements(engine);
     });
@@ -1145,6 +1187,47 @@ describe("RenderPassTask transparent sorting", () => {
         await registerScene(everyScene);
         everyScene._record();
         expect(everyCopies).toBe(2);
+    });
+
+    it("filters transmission and renderOnTop opacity live, after texture updates, but not opaque/direct bindings", async () => {
+        let copies = 0;
+        const engine = makeMockEngine({ msaaSamples: 1, onCopy: () => copies++ });
+        const scene = createSceneContext(engine);
+        scene.camera = makeCamera();
+        const draws: string[] = [];
+        const target = (): Mesh => {
+            const target = initMeshTransform({ children: [], visible: true, material: createStandardMaterial(), _gpu: {} as Mesh["_gpu"] });
+            setMeshOpacity(target, 0);
+            return target;
+        };
+        const opaque = makeDrawOrderRenderable("opaque", {}, draws, target());
+        const direct = makeDrawOrderRenderable("direct", { _direct: true }, draws, target());
+        const glass = makeDrawOrderRenderable("glass", { isTransparent: true, _transmissive: true }, draws, target());
+        const overlay = makeDrawOrderRenderable("overlay", { isTransparent: true }, draws, target());
+        const ordinary = makeDrawOrderRenderable("ordinary", { isTransparent: true }, draws);
+        overlay.mesh!.renderOnTop = true;
+        scene._renderables.push(opaque, direct, glass, overlay, ordinary);
+        enableSceneTransmission(scene, engine);
+        await registerScene(scene);
+        scene._record();
+        // A skipped transmissive binding still refreshes the snapshot at the
+        // same point as a hidden binding; the visibility check must not move.
+        expect(copies).toBe(1);
+        expect(draws).toEqual(["opaque", "direct", "ordinary"]);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const lastVis = task._lastVis;
+        for (const value of [0.5, 0, 1]) {
+            setMeshOpacity(glass.mesh!, value);
+            setMeshOpacity(overlay.mesh!, value);
+            draws.length = 0;
+            copies = 0;
+            task.execute!();
+            expect(copies).toBe(1);
+            expect(draws).toEqual(value ? ["direct", "glass", "ordinary", "overlay"] : ["direct", "ordinary"]);
+            expect(task._lastVis).toBe(lastVis);
+        }
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("uses a repeat anisotropic sampler for the transmission refraction texture", async () => {

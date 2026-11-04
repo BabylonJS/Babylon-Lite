@@ -3,7 +3,6 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { Mesh } from "../mesh.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { _installMeshMaterialValidator, markMeshRenderableDirty } from "../../scene/mesh-scene-registry.js";
-import { _installMeshDrawWrap } from "../../render/mesh-draw-hook.js";
 import { _registerStdExt } from "../../material/standard/standard-flags.js";
 import { _registerPbrExt } from "../../material/pbr/pbr-flags.js";
 import { _installMeshFeatureExtra } from "../../material/mesh-features.js";
@@ -49,12 +48,6 @@ function ensureInstalled(): void {
     _installPbrBindingContext((context, _id, disposers) => {
         context._disposers = disposers;
     });
-    _installMeshDrawWrap((draw, mesh, colorOutput) => {
-        if (!colorOutput || getMeshOpacity(mesh) === 1) {
-            return draw;
-        }
-        return (pass, engine) => (getMeshOpacity(mesh) === 0 ? 0 : draw(pass, engine));
-    });
     _installMeshMaterialValidator((mesh, material) => validateMaterial(mesh, material, getMeshOpacity(mesh)));
     _installed = true;
 }
@@ -85,6 +78,7 @@ export function setMeshOpacity(mesh: Mesh, opacity: number): void {
         return;
     }
     mesh._opacity = value;
+    mesh._skipColorDraw = value === 0;
     if ((previous === 1) !== (value === 1)) {
         markMeshRenderableDirty(mesh);
     }

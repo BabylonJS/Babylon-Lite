@@ -24,7 +24,6 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
-import { _meshDrawWrap } from "../../render/mesh-draw-hook.js";
 import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
@@ -402,7 +401,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
                 renderable: r,
                 pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
-                draw: _meshDrawWrap?.(draw, mesh, true) ?? draw,
+                draw,
             };
         },
     };

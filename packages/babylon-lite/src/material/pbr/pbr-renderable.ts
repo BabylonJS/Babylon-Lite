@@ -14,7 +14,6 @@ import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
 import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
-import { _meshDrawWrap } from "../../render/mesh-draw-hook.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
@@ -614,7 +613,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                     pipeline,
                     ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
-                    draw: _meshDrawWrap?.((pass) => drawWith(pass, materialBindGroup, cb), mesh, !shadowOutput) ?? ((pass) => drawWith(pass, materialBindGroup, cb)),
+                    draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
             },
         };

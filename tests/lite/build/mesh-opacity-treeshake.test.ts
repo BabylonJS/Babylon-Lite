@@ -15,6 +15,8 @@ describe("native mesh-opacity opt-in boundary", () => {
         });
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
+        expect(result.code).not.toContain("_meshDrawWrap");
+        expect(result.code).not.toContain("_installMeshDrawWrap");
         for (const marker of markers) {
             expect(result.code).not.toContain(marker);
         }
@@ -28,6 +30,8 @@ describe("native mesh-opacity opt-in boundary", () => {
         });
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
+        expect(result.code).not.toContain("_meshDrawWrap");
+        expect(result.code).not.toContain("_installMeshDrawWrap");
         for (const marker of markers) {
             expect(result.code).toContain(marker);
         }

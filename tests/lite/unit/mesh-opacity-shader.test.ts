@@ -13,7 +13,6 @@ import { createDirectionalLight } from "../../../packages/babylon-lite/src/light
 import { addClusteredLightContainer, createClusteredLightContainer } from "../../../packages/babylon-lite/src/light/clustered";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
-import { _installMeshDrawWrap, _meshDrawWrap } from "../../../packages/babylon-lite/src/render/mesh-draw-hook";
 import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { _getStdExtsSorted, _registerStdExt, MATERIAL_ALPHA_BLEND, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
@@ -328,7 +327,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         expect(multiply).toBeLessThan(code.indexOf("alpha>0.4"));
     });
 
-    it.each(["standard", "pbr"] as const)("returns zero for actual %s colour/geometry draws, but not no-colour or ESM shadow draws", async (family) => {
+    it.each(["standard", "pbr"] as const)("leaves raw %s colour/geometry draws unwrapped and no-colour/ESM shadow routes opaque", async (family) => {
         const f = fixture();
         const standard = createStandardMaterial();
         const pbr = createPbrMaterial();
@@ -351,8 +350,9 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         setMeshOpacity(target, 0);
         for (const binding of bindings) {
             f.pass.drawIndexed.mockClear();
-            expect(binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine)).toBe(0);
-            expect(f.pass.drawIndexed).not.toHaveBeenCalled();
+            // Task loops, not binding wrappers, own the live zero-opacity filter.
+            expect(binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine)).toBe(1);
+            expect(f.pass.drawIndexed).toHaveBeenCalledTimes(1);
         }
         setMeshOpacity(target, 0.3);
         for (const binding of bindings) {
@@ -456,25 +456,5 @@ describe("mesh-opacity shader, binding and route contracts", () => {
                 expect(entries.some((entry) => (entry.resource as GPUBufferBinding).buffer === target.vat!.settingsBuffer)).toBe(true);
             }
         }
-    });
-
-    it("forwards both DrawBinding arguments, leaves non-colour/full-opacity draws unchanged, and chains another wrapper", () => {
-        const target = mesh(createStandardMaterial());
-        const draw = vi.fn<DrawBinding["draw"]>(() => 3);
-        setMeshOpacity(target, 1);
-        expect(_meshDrawWrap!(draw, target, true)).toBe(draw);
-        setMeshOpacity(target, 0.5);
-        expect(_meshDrawWrap!(draw, target, false)).toBe(draw);
-        const wrapped = _meshDrawWrap!(draw, target, true);
-        const f = fixture();
-        const pass = f.pass as unknown as GPURenderPassEncoder;
-        expect(wrapped(pass, f.engine)).toBe(3);
-        expect(draw).toHaveBeenCalledExactlyOnceWith(pass, f.engine);
-        setMeshOpacity(target, 0);
-        expect(wrapped(pass, f.engine)).toBe(0);
-        expect(draw).toHaveBeenCalledTimes(1);
-        _installMeshDrawWrap((previous) => (encoder, engine) => previous(encoder, engine) + 1);
-        expect(_meshDrawWrap!(draw, target, true)(pass, f.engine)).toBe(1);
-        expect(draw).toHaveBeenCalledTimes(1);
     });
 });

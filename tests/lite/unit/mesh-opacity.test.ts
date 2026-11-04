@@ -113,6 +113,47 @@ describe("native mesh-opacity public contract", () => {
         expect(await extensions()).toEqual(registered);
     });
 
+    it("owns the live skip flag, clears it at fraction/one, and preserves it on failed assignments", () => {
+        const target = mesh();
+        expect(target).not.toHaveProperty("_skipColorDraw");
+        for (const value of [0, 0.4, 0, 1]) {
+            opacity.setMeshOpacity(target, value);
+            expect(target._skipColorDraw).toBe(value === 0);
+            expect(() => opacity.setMeshOpacity(target, NaN)).toThrow(RangeError);
+            expect(target._skipColorDraw).toBe(value === 0);
+            expect(opacity.getMeshOpacity(target)).toBe(value);
+        }
+        opacity.setMeshOpacity(target, 0);
+        const clone = cloneTransformNode(target) as Mesh;
+        expect(clone._skipColorDraw).toBe(true);
+        opacity.setMeshOpacity(clone, 1);
+        expect(clone._skipColorDraw).toBe(false);
+        expect(target._skipColorDraw).toBe(true);
+        expect(opacity.getMeshOpacity(target)).toBe(0);
+    });
+
+    it("keeps an opacity-zero mesh visible to accessibility projection and picking eligibility", async () => {
+        const { createNullEngine } = await import("../../../packages/babylon-lite/src/engine/null-engine");
+        const { createSceneContext, disposeScene } = await import("../../../packages/babylon-lite/src/scene/scene-core");
+        const { createSceneAccessibility, getAccessibilityNode, setAccessibilityTag, updateSceneAccessibility } =
+            await import("../../../packages/babylon-lite/src/accessibility/scene-accessibility");
+        const target = mesh();
+        const owner = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        setAccessibilityTag(target, { name: "opacity-source" });
+        const projection = createSceneAccessibility(owner, { roots: [target] });
+        const node = getAccessibilityNode(projection, target)!;
+        for (const value of [0, 0.5, 1]) {
+            opacity.setMeshOpacity(target, value);
+            updateSceneAccessibility(projection);
+            expect(target.visible).toBe(true);
+            expect(target.pickable).toBe(true);
+            expect(getAccessibilityNode(projection, target)).toBe(node);
+            expect(node.hidden).toBe(false);
+            expect(node._selfHidden).toBe(false);
+        }
+        disposeScene(owner);
+    });
+
     describe("binding-owned mesh-opacity buffers", () => {
         it.each(["standard-main", "standard-geometry", "pbr-main", "pbr-geometry"] as const)("initializes and directly updates exactly one padded binding on %s", async (route) => {
             const target = mesh(route.startsWith("standard") ? createStandardMaterial() : createPbrMaterial());

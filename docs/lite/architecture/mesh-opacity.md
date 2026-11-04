@@ -42,8 +42,9 @@ The setter performs these operations in order:
    `setMeshOpacity: mesh "<name>" uses a "<family>" material; mesh opacity supports only "standard" and "pbr" materials.`
 6. Install the feature once. If the stored/default value already equals the new
    clamped value, return without storing, dirtying or writing.
-7. Store the value, enqueue a rebuild on crossing 1, and update live binding
-   uniforms whenever the new value is below 1.
+7. Store the value and synchronously set `mesh._skipColorDraw = value === 0`,
+   enqueue a rebuild on crossing 1, and update live binding uniforms whenever
+   the new value is below 1. Returning to 1 clears the flag before returning.
 
 A null material is permitted. An ordinary, non-disposed Mesh can reset to 1
 regardless of material family. Invalid calls must not install hooks/extensions,
@@ -72,7 +73,8 @@ A reusable one-element `Float32Array` supplies writes.
 Each active mesh bind-group creation creates a distinct 16-byte uniform buffer.
 Only its first four bytes contain the opacity `f32`. Main, geometry and
 signature-specific refraction bindings have separate records; no material owns
-this buffer. Native shallow mesh clones copy the scalar but never the records.
+this buffer. Native shallow mesh clones copy the scalar and its corresponding
+skip flag but never the records.
 
 ### Lazy installation and chained installers
 
@@ -83,8 +85,7 @@ The first successful setter call runs this once-guarded sequence:
 3. Install a mesh-feature encoder returning `1 << 22` iff opacity is below 1.
 4. Install a PBR binding-context augmenter that copies the binding's disposer
    array into `context._disposers`.
-5. Install the colour/geometry draw wrapper.
-6. Install material-transition validation using the mesh's live opacity.
+5. Install material-transition validation using the mesh's live opacity.
 
 Extension registration invalidates sorted-extension caches. No registration,
 map/set allocation or GPU work executes merely by importing the API.
@@ -95,7 +96,6 @@ The generic installers preserve earlier features in installation order:
 | ------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `_installMeshFeatureExtra`      | OR the previous encoder's result with the new encoder's result.                                        |
 | `_installPbrBindingContext`     | Invoke the previous augmenter, then the new augmenter, with the same context, scalar id and disposers. |
-| `_installMeshDrawWrap`          | Apply the previous wrapper to the draw first, then wrap its result.                                    |
 | `_installMeshMaterialValidator` | Run the previous validator, then the new validator, before mutation.                                   |
 
 This preserves mirrored-mesh encoding, rect-area binding context and indexed-indirect
@@ -201,42 +201,42 @@ the factory exists before geometry binds. The same array reaches the PBR context
 and geometry teardown. Standard passes its existing main/geometry binding-owned
 array through `StdExt._bind`.
 
-### Nullable module draw hook
+### Transparent and geometry loop skip
 
-`render/mesh-draw-hook.ts` owns the nullable module slot and its previous-first
-installer, not an engine field:
+The Mesh interface declares an optional `@internal _skipColorDraw?: boolean`.
+It has no factory initializer and is absent from public declarations. Only
+`setMeshOpacity` writes it, immediately after storing the clamped scalar. It is
+true exactly at opacity 0 and false at every other assigned value. It lives with
+the mesh and owns no resources, so no additional disposal hook is needed.
 
-```typescript
-type MeshDrawWrap = (draw: DrawBinding["draw"], mesh: Mesh, colorOutput: boolean) => DrawBinding["draw"];
+The general render loops read this generic flag alongside their existing
+`visible === false` test. For this feature, a plain internal-field read is an
+explicitly approved exception to GUIDANCE's engine-installed-seam requirement:
+it costs about 16–25 B in scenes that never use opacity, less than the
+alternative opt-in per-renderable draw-wrapper hook, which measured up to 148 B
+in the same scenes. No renderer imports opacity or reads the opacity scalar.
 
-let _meshDrawWrap: MeshDrawWrap | null = null;
-```
+| Loop                                      | Skip condition                                                               | Routing                                                                                                                                   |
+| ----------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `render-task-base.ts` `drawList`          | `mesh && (mesh.visible === false \|\| (transparent && mesh._skipColorDraw))` | Fourth optional boolean is true only for the transparent list and transmission overlay. Opaque bundle recording and direct lists omit it. |
+| `transmission.ts` transparent loop        | `mesh && (mesh.visible === false \|\| mesh._skipColorDraw)`                  | Checked at the existing position, after any transmissive texture update. The renderOnTop overlay uses `drawList(..., true)`.              |
+| `geometry-renderer-task.ts` geometry loop | `mesh.visible === false \|\| mesh._skipColorDraw`                            | Geometry bindings are colour/output bindings, never shadow casters.                                                                       |
 
-The slot is exported internally. General material builders import only this
-generic module, never the opacity implementation. This module-slot seam is the
-chosen alternative to an engine-installed seam. Callers pass a bound draw, mesh
-and already-computed boolean, not a material or branch-gating context object.
+Fading Standard/PBR colour bindings are forced into transparent lists by the
+existing feature folding. Shadow renderables are never transparent, so their
+opaque/direct lists ignore the skip flag and preserve full-strength casting.
+Opaque render-bundle recording and visibility epochs are unchanged.
 
-Apply `_meshDrawWrap?.(draw, mesh, colorOutput) ?? draw` to the binding's final
-draw function at these four sites:
+The loops read the flag every frame. A `0.5 → 0 → 0.5` transition skips and resumes
+without rebuilding or caching a stale skip. Opaque twins replay the same bundle.
+Public `visible`, compat `isVisible`, picking and accessibility are independent
+and never changed by opacity.
 
-| Site                            | `colorOutput`                                         |
-| ------------------------------- | ----------------------------------------------------- |
-| Standard forward `bind().draw`  | `!shadowOutput`                                       |
-| PBR forward `bind().draw`       | `!shadowOutput`, derived from features2 no-colour/ESM |
-| Standard geometry `bind().draw` | `true`                                                |
-| PBR geometry `bind().draw`      | `true`                                                |
-
-The opacity wrapper returns the original function for a non-colour route or
-opacity 1. Otherwise it returns a per-binding closure that reads opacity on every
-draw: return 0 at opacity 0; otherwise forward both original arguments and the
-return value. `DrawBinding["draw"]` takes
-`(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext)`
-and returns a number.
-
-This is CPU draw omission, not shader discard. The wrapper is not cached across
-bindings. Fading meshes stay on the transparent/direct path; opaque twins keep
-their independently recorded render bundles.
+This is CPU draw omission, not shader discard. Standard/PBR builders return
+their ordinary unwrapped draws; there is no mesh draw-hook module, wrapper or
+installer. Direct invocation of a raw binding bypasses task-level filtering.
+The diagnostic overdraw probe remains unchanged and may count opacity-0
+transparent bindings.
 
 ## Pipeline configuration
 
@@ -341,7 +341,7 @@ sub-1 direct writes are independent.
 settles, the retained transparent binding must receive 0.6, even though a rebuild
 was enqueued. A replacement binding initializes from the latest stored value.
 Transitions to 1 do not write old buffers. Zero/fraction changes require no
-rebuild because the wrapper reads the live scalar.
+rebuild because the loops read the synchronously updated skip flag.
 
 For each direct write, require
 `record._engine._device === record._device`. Skip stale-device records without
@@ -427,10 +427,13 @@ inventories.
 - Standard/PBR composition, fragment slots, original discard before multiplication,
   PBR saturate before multiplication, shadow-only dependency, refraction closing
   brace, geometry `> 0.4` gate and composer/bind-index equality.
-- All four forward/geometry routes skip colour draws at zero; no-colour/ESM
-  casters remain full strength. Wrapper tests forward both arguments and numeric
-  return values and read live opacity. Twin-bundle tests replay the same opaque
-  bundle while only the faded direct draw changes.
+- Transparent and geometry task loops skip colour draws at zero and resume live
+  when the flag clears. Opaque/direct lists ignore it, preserving no-colour/ESM
+  casters. Transmission and renderOnTop checks preserve texture-update ordering.
+  Raw bindings remain unwrapped. Twin-bundle tests replay the same opaque bundle
+  and preserve the visibility epoch while only the faded transparent draw changes.
+- Flag tests cover zero-to-fraction/one, invalid-call atomicity, clone isolation,
+  unchanged public visibility/pickability and accessibility projection.
 - Preserve Standard's live material-alpha classification, A2C plus blending,
   mirroring/VAT bindings, PBR generation identity and composed-key consistency.
 - Repeated rect-area emission installer calls register one context augmenter;
@@ -449,21 +452,21 @@ inventories.
 `src/` below means `packages/babylon-lite/src/`. Listed generic files contain
 transport or integration, not feature-owned opacity comparisons.
 
-| Area                      | Files                                                                                                                                                                 |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native API/feature        | `src/mesh/opacity/mesh-opacity.ts`, `mesh-opacity-standard.ts`, `mesh-opacity-pbr.ts`; root exports in `src/index.ts`                                                 |
-| Mesh transport            | `src/material/mesh-features.ts`                                                                                                                                       |
-| Standard integration      | `src/material/standard/standard-flags.ts`, `standard-renderable.ts`, `standard-geometry-renderable.ts`                                                                |
-| PBR integration           | `src/material/pbr/pbr-flags.ts`, `pbr-pipeline.ts`, `pbr-renderable.ts`, `pbr-geometry-renderable.ts`, `pbr-built-variant.ts`                                         |
-| Shadow-only predicate     | `src/material/pbr/fragments/shadow-only-fragment.ts`                                                                                                                  |
-| Draw/validation seams     | `src/render/mesh-draw-hook.ts`, `src/scene/mesh-scene-registry.ts`                                                                                                    |
-| Rect-area installer guard | `src/material/pbr/fragments/rect-area-light-emission-fragment.ts`                                                                                                     |
-| Compat                    | `packages/babylon-lite-compat/src/meshes/meshes.ts`, `README.md`, `COMPAT-STATUS.md`                                                                                  |
-| Architecture index        | `docs/lite/architecture/00-overview.md`                                                                                                                               |
-| Native unit tests         | `tests/lite/unit/mesh-opacity.test.ts`, `mesh-opacity-shader.test.ts`, `render-pass-task.test.ts`, `geometry-renderer-task.test.ts`, `pbr-forward-generation.test.ts` |
-| Rect-area regression      | `tests/lite/unit/area-light-emission-opt-in.test.ts`                                                                                                                  |
-| Build tests               | `tests/lite/build/mesh-opacity-treeshake.test.ts`, `public-api-types.test.ts`                                                                                         |
-| Compat tests              | `packages/babylon-lite-compat/tests/mesh-visibility.test.ts`, `mesh-clone.test.ts`                                                                                    |
-| Fixture                   | `lab/lite/scene348.html`, `bundle-scene348.html`, `babylon-ref-scene348.html`, `src/lite/scene348.ts`, `src/bjs/scene348.ts`, `src/shared/scene348-opacity.ts`        |
-| Registration              | `scene-config.json`; HTML inputs, gallery and bundle tests auto-discover entries                                                                                      |
-| Parity/assets             | `tests/lite/parity/scenes/scene348-mesh-opacity.spec.ts`, `reference/lite/scene348-mesh-opacity/babylon-ref-golden.png`, `lab/public/thumbnails/scene348.jpg`         |
+| Area                        | Files                                                                                                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native API/feature          | `src/mesh/opacity/mesh-opacity.ts`, `mesh-opacity-standard.ts`, `mesh-opacity-pbr.ts`; root exports in `src/index.ts`                                                 |
+| Mesh transport              | `src/material/mesh-features.ts`                                                                                                                                       |
+| Standard integration        | `src/material/standard/standard-flags.ts`, `standard-renderable.ts`, `standard-geometry-renderable.ts`                                                                |
+| PBR integration             | `src/material/pbr/pbr-flags.ts`, `pbr-pipeline.ts`, `pbr-renderable.ts`, `pbr-geometry-renderable.ts`, `pbr-built-variant.ts`                                         |
+| Shadow-only predicate       | `src/material/pbr/fragments/shadow-only-fragment.ts`                                                                                                                  |
+| Draw filtering / validation | `src/mesh/mesh.ts`, `src/frame-graph/render-task-base.ts`, `transmission.ts`, `geometry-renderer-task.ts`, `src/scene/mesh-scene-registry.ts`                         |
+| Rect-area installer guard   | `src/material/pbr/fragments/rect-area-light-emission-fragment.ts`                                                                                                     |
+| Compat                      | `packages/babylon-lite-compat/src/meshes/meshes.ts`, `README.md`, `COMPAT-STATUS.md`                                                                                  |
+| Architecture index          | `docs/lite/architecture/00-overview.md`                                                                                                                               |
+| Native unit tests           | `tests/lite/unit/mesh-opacity.test.ts`, `mesh-opacity-shader.test.ts`, `render-pass-task.test.ts`, `geometry-renderer-task.test.ts`, `pbr-forward-generation.test.ts` |
+| Rect-area regression        | `tests/lite/unit/area-light-emission-opt-in.test.ts`                                                                                                                  |
+| Build tests                 | `tests/lite/build/mesh-opacity-treeshake.test.ts`, `public-api-types.test.ts`                                                                                         |
+| Compat tests                | `packages/babylon-lite-compat/tests/mesh-visibility.test.ts`, `mesh-clone.test.ts`                                                                                    |
+| Fixture                     | `lab/lite/scene348.html`, `bundle-scene348.html`, `babylon-ref-scene348.html`, `src/lite/scene348.ts`, `src/bjs/scene348.ts`, `src/shared/scene348-opacity.ts`        |
+| Registration                | `scene-config.json`; HTML inputs, gallery and bundle tests auto-discover entries                                                                                      |
+| Parity/assets               | `tests/lite/parity/scenes/scene348-mesh-opacity.spec.ts`, `reference/lite/scene348-mesh-opacity/babylon-ref-golden.png`, `lab/public/thumbnails/scene348.jpg`         |
