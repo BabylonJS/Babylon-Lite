@@ -81,6 +81,11 @@ export class Vector2 {
         return new Vector2(this.x, this.y);
     }
 
+    /** Babylon.js `dot(otherVector)`. */
+    public dot(otherVector: Vector2): number {
+        return this.x * otherVector.x + this.y * otherVector.y;
+    }
+
     public equals(other: Vector2): boolean {
         return this.x === other.x && this.y === other.y;
     }
@@ -237,6 +242,11 @@ export class Vector3 {
 
     public clone(): Vector3 {
         return new Vector3(this.x, this.y, this.z);
+    }
+
+    /** Babylon.js `dot(otherVector)`. */
+    public dot(otherVector: Vector3): number {
+        return this.x * otherVector.x + this.y * otherVector.y + this.z * otherVector.z;
     }
 
     public equals(other: Vector3): boolean {
@@ -497,6 +507,11 @@ export class Vector4 {
 
     public clone(): Vector4 {
         return new Vector4(this.x, this.y, this.z, this.w);
+    }
+
+    /** Babylon.js `dot(otherVector)`. */
+    public dot(otherVector: Vector4): number {
+        return this.x * otherVector.x + this.y * otherVector.y + this.z * otherVector.z + this.w * otherVector.w;
     }
 
     public equals(other: Vector4): boolean {

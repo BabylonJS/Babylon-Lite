@@ -56,6 +56,7 @@ import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
 import { composePbrGeometryShader, _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -170,7 +171,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const receiveShadows = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
     const pluginIndex = source._pi ?? 0;
 
-    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh.id) ?? 0);
+    const sceneFeatures = ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh) ?? 0);
     const variantKey = `${sceneFeatures}:` + _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
     const res = _ensureViewResources(
         view,
@@ -603,6 +604,7 @@ function _getOrCreateGeometryPipeline(
     const primitive: GPUPrimitiveState = {
         cullMode: hasDoubleSided ? "none" : view._reverseCulling ? "front" : "back",
         ...res._composed._prim,
+        ...(_rightHanded && { frontFace: res._composed._prim?.frontFace === "cw" ? "ccw" : "cw" }),
     };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,

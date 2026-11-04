@@ -10,6 +10,7 @@ import { mipLevelCount } from "../texture/mip-count.js";
 import { prepareMipmaps, recordPreparedMipmaps, type PreparedMipmapLevel } from "../texture/mipmap-preparation.js";
 import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 import { wgsl } from "../shader/wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 const FACE_SIZE = 128;
 
@@ -344,6 +345,13 @@ export async function _computeProceduralSkyIrradiance(
     return polynomial;
 }
 
+/** @internal A right-handed engine samples the environment cube with Z negated (Babylon.js's reflection probe swaps its
+ *  ±Z faces), so the cube is generated around the mirrored sun to keep the sun at its world direction. */
+export function _toCubeSpaceSun<T extends ProceduralSkyEnvironmentOptions>(options: T): T {
+    const [x, y, z] = options.sunDirection;
+    return { ...options, sunDirection: [x, y, -z] };
+}
+
 function validateOptions(options: ProceduralSkyEnvironmentOptions): void {
     const directionLength = Math.hypot(options.sunDirection[0], options.sunDirection[1], options.sunDirection[2]);
     const sunY = options.sunDirection[1] / directionLength;
@@ -424,6 +432,9 @@ export async function updateProceduralSkyEnvironment(environment: ProceduralSkyE
     assertEnvironmentActive(environment);
     options = { ...options, sunDirection: [...options.sunDirection] };
     validateOptions(options);
+    if (_rightHanded !== null) {
+        options = _toCubeSpaceSun(options);
+    }
     const revision = ++environment._revision;
     const irradiance = await _computeProceduralSkyIrradiance(
         options,
@@ -474,6 +485,9 @@ export async function loadProceduralSkyEnvironment(scene: SceneContext, options:
     }
     options = { ...options, sunDirection: [...options.sunDirection] };
     validateOptions(options);
+    if (_rightHanded !== null) {
+        options = _toCubeSpaceSun(options);
+    }
     const generation: SkySceneGeneration = { _current: null, _disposed: false };
     states.set(scene, generation);
     const engine = scene.surface.engine;

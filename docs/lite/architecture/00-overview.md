@@ -67,6 +67,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [50-device-lost-recovery.md](50-device-lost-recovery.md)           | Device Lost Recovery     | Opt-in Scene, SpriteRenderer, and TextRenderer recovery after WebGPU device loss                          |
 | [51-flow-graph.md](51-flow-graph.md)                               | Flow Graph               | Pure-state visual scripting, stable glTF `KHR_interactivity`, and editor JSON compatibility               |
 | [60-gltf-exporter.md](60-gltf-exporter.md)                         | glTF Exporter            | `exportSceneAsGlb`: scene → GLB with LH→RH conversion, PBR/Standard materials, PNG image readback         |
+| [61-right-handed-system.md](61-right-handed-system.md)             | Right-Handed System      | Build-time `babylon-lite-rh` resolve condition; constant flag folded away, zero cost in both modes        |
 
 ---
 

@@ -28,6 +28,6 @@ export async function prepareRectAreaEmission(scene: SceneContext, lighting: Sce
     lighting._bindingId = id;
     lighting._single = rectAreaEmissionSingle;
     lighting._multi = rectAreaEmissionMulti;
-    lighting._pbrFeatures = (meshId) => (features?.(meshId) ?? 0) | RECT_AREA_PBR_EMISSION;
+    lighting._pbrFeatures = (mesh) => (features?.(mesh) ?? 0) | RECT_AREA_PBR_EMISSION;
     lighting._standard = rectAreaEmissionStandardContext;
 }

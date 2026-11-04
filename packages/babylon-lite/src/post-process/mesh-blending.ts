@@ -15,6 +15,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { createMeshBlendingBlueNoiseData } from "./mesh-blending-blue-noise.js";
 import { _installMeshBlendingPbrSupport } from "./mesh-blending-pbr-support.js";
 import { createMeshBlendingWGSL, getMeshBlendingQualitySettings } from "./mesh-blending-wgsl.js";
+import { _rightHanded } from "#coordinate-system";
 
 export enum MeshBlendQuality {
     Low = 0,
@@ -674,8 +675,24 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     if (!writeInverseProjection(data, projection, !!camera.ortho)) {
         throw new Error(`MeshBlendingPostProcessTask "${task.name}": camera projection matrix must be invertible.`);
     }
+    if (_rightHanded) {
+        // A right-handed VIEW_DEPTH is the signed (negative) camera-space z. Projecting it through P·Sz
+        // (Z column negated) lands on the same NDC depth as the engine's positive view z, so
+        // reconstruction through the unchanged inverse projection stays in the engine's view space —
+        // the frame the inverse view below expects. Only `dn` reads this column.
+        data[8] = -data[8]!;
+        data[9] = -data[9]!;
+        data[10] = -data[10]!;
+        data[11] = -data[11]!;
+    }
     if (task.debugMode === MeshBlendDebugMode.WorldPosition) {
         packMat4IntoF32(data, camera.worldMatrix, 32);
+        if (_rightHanded) {
+            // The view matrix mirrors Z (V = Sz·W⁻¹), so its inverse is W·Sz: negate W's Z column.
+            data[40] = -data[40]!;
+            data[41] = -data[41]!;
+            data[42] = -data[42]!;
+        }
         if (task.engine.useFloatingOrigin) {
             data.fill(0, 44, 47);
         }

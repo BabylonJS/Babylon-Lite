@@ -510,7 +510,7 @@ For WebGPU directional lights, `depthValues = (0, 1)`. For spot PCF receiver sam
 
 ### ESM Material Shadow View Fragment Output
 
-The caster material's normal fragment logic runs first, including alpha test, `DiscardBlock`, and clip-plane discard. Like the no-color view, the ESM shadow view drops the shading-only normal-map and spec-gloss features (see [06-pbr-material.md](06-pbr-material.md#material-views-and-rebuild)). The ESM shadow view then replaces the final color output with the fixed ESM encoding:
+The caster material's normal fragment logic runs first, including alpha test, `DiscardBlock`, and clip-plane discard. Like the no-color view, the ESM shadow view drops the shading-only normal-map and spec-gloss features and refraction (see [06-pbr-material.md](06-pbr-material.md#material-views-and-rebuild)). The ESM shadow view then replaces the final color output with the fixed ESM encoding:
 
 ```wgsl
 @fragment fn main(@location(0) vDepthMetricSM: f32) -> @location(0) vec4<f32> {

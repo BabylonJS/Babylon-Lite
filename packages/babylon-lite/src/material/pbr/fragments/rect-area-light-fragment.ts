@@ -7,7 +7,8 @@ import { COMPUTE_PBR_LIGHT, getMultiLightLoop, MULTI_LIGHT_STRUCTS } from "./mul
 import { wgsl } from "../../../shader/wgsl.js";
 import type { LightBase } from "../../../light/types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
-import { lightAffectsMeshId } from "../../../render/mesh-light-selection.js";
+import { lightAffectsMesh } from "../../../render/mesh-light-selection.js";
+import type { Mesh } from "../../../mesh/mesh.js";
 
 /** @internal Scene-feature bit, distinct from material feature bits. */
 export const RECT_AREA_PBR_SCENE = 1 << 6;
@@ -15,7 +16,7 @@ export const RECT_AREA_PBR_SCENE = 1 << 6;
 export const RECT_AREA_PBR_SELECTED = 1 << 7;
 
 /** @internal Mirror the actual packed mesh light selection without allocating an index array. */
-export function rectAreaPbrFeatures(lights: readonly LightBase[], meshId: string | undefined): number {
+export function rectAreaPbrFeatures(lights: readonly LightBase[], mesh: Mesh): number {
     let packed = 0;
     for (const light of lights) {
         if (packed >= MAX_LIGHTS) {
@@ -24,7 +25,7 @@ export function rectAreaPbrFeatures(lights: readonly LightBase[], meshId: string
         if (!light._writeLightUbo) {
             continue;
         }
-        if (light.lightType === "rectArea" && lightAffectsMeshId(light, meshId)) {
+        if (light.lightType === "rectArea" && lightAffectsMesh(light, mesh)) {
             return RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED;
         }
         packed++;

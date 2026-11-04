@@ -10,6 +10,7 @@ import { createUsdDraw } from "./usd-meshes.js";
 import { applyUsdFeatures } from "./usd-features.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { UsdExtraction, UsdAssetContainer } from "./usd-types.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** @internal Materialize into a caller-owned rollback collection, never directly into a Scene. */
 export async function materializeUsd(engine: EngineContext, extracted: UsdExtraction, container: UsdAssetContainer, signal?: AbortSignal): Promise<void> {
@@ -26,7 +27,13 @@ export async function materializeUsd(engine: EngineContext, extracted: UsdExtrac
     if (zUp > 1 || !(scale > 0) || !Number.isFinite(scale) || !(fps > 0) || !Number.isFinite(fps)) {
         throw new Error("Invalid USD stage metadata");
     }
-    const root = createSceneNodeFromMatrix("USD Root", usdMatrix([scale, 0, 0, 0, 0, zUp ? 0 : scale, zUp ? scale : 0, 0, 0, zUp ? scale : 0, zUp ? 0 : -scale, 0, 0, 0, 0, 1]));
+    // Left-handed: the RH→LH conversion root (a Z-up stage swaps Y/Z, which also mirrors). Right-handed: like
+    // Babylon.js, a pure scale plus the Z-up quarter turn about X; meshes keep their authored sign and the
+    // mirrored-mesh support restores their winding exactly as it does for glTF.
+    const root = createSceneNodeFromMatrix(
+        "USD Root",
+        usdMatrix([scale, 0, 0, 0, 0, zUp ? 0 : scale, zUp ? (_rightHanded ? -scale : scale) : 0, 0, 0, zUp ? scale : 0, zUp ? 0 : _rightHanded ? scale : -scale, 0, 0, 0, 0, 1])
+    );
     container.entities.push(root);
     const nodes = buildUsdNodes(
         records.filter((record) => record.op === UsdOp.Node),

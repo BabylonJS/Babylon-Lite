@@ -1,6 +1,7 @@
 import type { ArcRotateCamera } from "./arc-rotate.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { ArcRotateKeyboardOptions } from "./arc-rotate-keyboard-controls.js";
+import { _rightHanded } from "#coordinate-system";
 
 /** Camera gesture assigned to an arc-rotate pointer button. */
 export type ArcRotatePointerAction = "rotate" | "pan";
@@ -432,7 +433,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
         // --- Rotation inertia ---
         if (camera.inertialAlphaOffset !== 0 || camera.inertialBetaOffset !== 0) {
-            camera.alpha += camera.inertialAlphaOffset;
+            // Right-handed: the camera's right vector is reversed, so alpha and the horizontal pan run the other way
+            // to keep a drag screen-relative, like Babylon.js's handedness multiplier.
+            camera.alpha += _rightHanded ? -camera.inertialAlphaOffset : camera.inertialAlphaOffset;
             camera.beta += camera.inertialBetaOffset;
 
             const eps = 0.01;
@@ -457,7 +460,7 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             // The camera looks at its target with world up, so for sinβ < 0 (an unclamped β below 0 or above π) its right
             // and up vectors both flip. Fold that sign into the scale, except where the look-at degenerates (below).
             const panScale = camera.radius / (sinB <= -1e-10 ? -1000 : 1000);
-            const panX = camera.inertialPanningX * panScale;
+            const panX = (_rightHanded ? -camera.inertialPanningX : camera.inertialPanningX) * panScale;
             const panY = camera.inertialPanningY * panScale;
             // Mutate in-place via ObservableVec3 — avoids object allocation per frame.
             // Individual setters each call onDirty (just version++), but that's cheaper than reallocating.

@@ -8,6 +8,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import { onBeforeRender } from "../scene/scene-core.js";
+import { _rightHanded } from "#coordinate-system";
 
 export interface GizmoMaterialSet {
     colored: StandardMaterialProps;
@@ -101,9 +102,10 @@ export function attachFollowTarget(
             const ox = tx - cw[12]!;
             const oy = ty - cw[13]!;
             const oz = tz - cw[14]!;
-            const fx = cw[8]!,
-                fy = cw[9]!,
-                fz = cw[10]!;
+            // A right-handed camera looks down its local -Z, so its column 2 points backwards.
+            const fx = _rightHanded ? -cw[8]! : cw[8]!,
+                fy = _rightHanded ? -cw[9]! : cw[9]!,
+                fz = _rightHanded ? -cw[10]! : cw[10]!;
             const dist = (ox * fx + oy * fy + oz * fz) * scaleRatio;
             gizmoRoot.scaling.set(dist, dist, dist);
         }
