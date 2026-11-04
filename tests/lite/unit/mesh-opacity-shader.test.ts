@@ -1,0 +1,480 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { setThinInstances, setThinInstanceColors } from "../../../packages/babylon-lite/src/mesh/thin-instance";
+import { enableMirroredMeshes } from "../../../packages/babylon-lite/src/mesh/enable-mirrored-meshes";
+import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable";
+import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
+import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
+import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light";
+import { addClusteredLightContainer, createClusteredLightContainer } from "../../../packages/babylon-lite/src/light/clustered";
+import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
+import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
+import { _installMeshDrawWrap, _meshDrawWrap } from "../../../packages/babylon-lite/src/render/mesh-draw-hook";
+import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity";
+import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { _getStdExtsSorted, _registerStdExt, MATERIAL_ALPHA_BLEND, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import {
+    clearStandardPipelineCache,
+    _installStdVertexColorFragment,
+    composeStandardShader,
+    getOrCreateStandardBindings,
+    getOrCreateStandardPipeline,
+} from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
+import { buildStandardMeshRenderables } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
+import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
+import { createStandardGeometryMaterialView, preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import { createStandardNoColorMaterialView } from "../../../packages/babylon-lite/src/material/standard/no-color-view";
+import { createStandardEsmShadowMaterialView } from "../../../packages/babylon-lite/src/material/standard/esm-shadow-view";
+import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
+import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
+import { createStandardShadowContext } from "../../../packages/babylon-lite/src/material/standard/fragments/std-shadow-fragment";
+import { stdUvTransformExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-uv-transform-fragment";
+import { setStandardLightmapTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-lightmap";
+import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/shader/fragments/thin-instance-fragment";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
+import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
+import { buildPbrGeometryRenderable } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-renderable";
+import { createPbrGeometryMaterialView, isPbrForwardBuildCurrent } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
+import { createPbrNoColorMaterialView } from "../../../packages/babylon-lite/src/material/pbr/no-color-view";
+import { createPbrEsmShadowMaterialView } from "../../../packages/babylon-lite/src/material/pbr/esm-shadow-view";
+import { composePbrGeometryShader } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-output-shader";
+import { clearPbrPipelineCache, getOrCreatePbrBindings, getOrCreatePbrPipeline } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
+import { _registerPbrExt, PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { _computeMeshFeatures } from "../../../packages/babylon-lite/src/material/mesh-features";
+import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
+import { pbrExt as iblExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
+import { pbrExt as vatExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/vat-fragment";
+import { setPbrAlphaCutoff } from "../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff";
+import { setShadowOnly } from "../../../packages/babylon-lite/src/material/pbr/set-shadow-only";
+import { setAlphaToCoverage } from "../../../packages/babylon-lite/src/render/alpha-to-coverage";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+
+const signature: RenderTargetSignature = { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 4 };
+const compact = (source: string): string => source.replace(/\s+/g, "");
+
+function fixture() {
+    const device = {
+        createBindGroupLayout: vi.fn((descriptor) => descriptor),
+        createPipelineLayout: vi.fn((descriptor) => descriptor),
+        createBindGroup: vi.fn((descriptor) => descriptor),
+        createShaderModule: vi.fn((descriptor) => descriptor),
+        createRenderPipeline: vi.fn((descriptor) => descriptor),
+        createSampler: vi.fn((descriptor) => descriptor),
+        createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const storage = new ArrayBuffer(Number(descriptor.size));
+            return { size: descriptor.size, destroy: vi.fn(), getMappedRange: () => storage, unmap: vi.fn() };
+        }),
+        queue: { writeBuffer: vi.fn(), writeTexture: vi.fn() },
+        limits: { maxTextureDimension2D: 8192 },
+    } as unknown as GPUDevice;
+    const engine = { _device: device, _disposables: [], canvas: { width: 64, height: 64 }, format: "bgra8unorm", msaaSamples: 4 } as unknown as EngineContext;
+    Object.assign(engine, { engine });
+    const scene = createSceneContext(engine, { defaultRenderTask: false });
+    const pass = { setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), setBindGroup: vi.fn(), drawIndexed: vi.fn(), drawIndexedIndirect: vi.fn() };
+    return { engine, scene, pass };
+}
+
+function mesh(material: Mesh["material"]): Mesh {
+    const target = Object.assign(createTransformNode("opacity-shader"), {
+        material,
+        visible: true,
+        receiveShadows: false,
+        _gpu: { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint16" },
+    }) as Mesh;
+    return target;
+}
+
+function texture(): Texture2D {
+    return { texture: { createView: () => ({}), destroy: vi.fn() } as unknown as GPUTexture, view: {} as GPUTextureView, sampler: {} as GPUSampler, width: 1, height: 1 };
+}
+
+function shadowLight() {
+    const light = createDirectionalLight([0, -1, 0]);
+    light.shadowGenerator = {
+        _shadowType: "pcf",
+        _depthTexture: { createView: () => ({}) },
+        _depthSampler: {},
+        _shadowUBO: {},
+    } as unknown as ShadowGenerator;
+    return light;
+}
+
+function pipeline(binding: DrawBinding): GPURenderPipelineDescriptor {
+    return binding.pipeline as unknown as GPURenderPipelineDescriptor;
+}
+
+function fragment(binding: DrawBinding): string {
+    return (pipeline(binding).fragment!.module as unknown as GPUShaderModuleDescriptor).code;
+}
+
+function meshBinding(binding: DrawBinding, f: ReturnType<typeof fixture>): GPUBindGroupDescriptor {
+    f.pass.setBindGroup.mockClear();
+    binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine);
+    return f.pass.setBindGroup.mock.calls.find(([group]) => group === 1)![1] as unknown as GPUBindGroupDescriptor;
+}
+
+function assertOpacityBinding(binding: DrawBinding, f: ReturnType<typeof fixture>): void {
+    const code = compact(fragment(binding));
+    const declarations = [...code.matchAll(/@group\(1\)@binding\((\d+)\)var<uniform>meshOpacity:meshOpacityUniforms;/g)];
+    expect(declarations).toHaveLength(1);
+    expect(code.match(/structmeshOpacityUniforms/g)).toHaveLength(1);
+    const index = Number(declarations[0]![1]);
+    const group = meshBinding(binding, f);
+    const entries = [...group.entries];
+    expect(entries.filter((entry) => entry.binding === index)).toHaveLength(1);
+    const buffer = (entries.find((entry) => entry.binding === index)!.resource as GPUBufferBinding).buffer;
+    expect(buffer.size).toBe(16);
+    const layout = group.layout as unknown as GPUBindGroupLayoutDescriptor;
+    expect([...layout.entries].find((entry) => entry.binding === index)).toMatchObject({ visibility: 2, buffer: { type: "uniform" } });
+    expect(f.engine._device.queue.writeBuffer).toHaveBeenCalledWith(buffer, 0, expect.any(ArrayBuffer), 0, 4);
+}
+
+function composer() {
+    return createPbrComposer({
+        _singleLightWGSL: "",
+        _getSingleLightBlock: null,
+        _multiLightWGSL: "",
+        _multiLightLoop: "",
+        _fogHelper: "",
+        _fogBlock: "",
+        _createPbrTemplateExt: null,
+        _flatNormalWgsl: "",
+        _createPbrShadowFragment: null,
+        _shadowLights: [],
+        _createThinInstanceFragment: null,
+    });
+}
+
+beforeEach(() => {
+    clearStandardPipelineCache();
+    clearPbrPipelineCache();
+    clearSceneBGLCache();
+});
+
+describe("mesh-opacity shader, binding and route contracts", () => {
+    it("keeps opacity-1 WGSL, generation requests, pipeline state and binding counts identical to pre-installation", async () => {
+        const f = fixture();
+        const standard = mesh(createStandardMaterial());
+        const pbr = mesh(createPbrMaterial());
+        f.scene._groups.set(pbr.material!._buildGroup, [pbr]);
+        const build = async () => {
+            const std = buildStandardMeshRenderables(f.scene, [standard], {}).renderables[0]!;
+            const p = (await buildPbrRenderables(f.scene, [pbr], undefined)).renderables[0]!;
+            return [std, p].map((renderable) => {
+                const binding = renderable.bind(f.engine, signature);
+                return {
+                    code: fragment(binding),
+                    entries: [...meshBinding(binding, f).entries].map((entry) => entry.binding),
+                    depth: pipeline(binding).depthStencil,
+                    targets: pipeline(binding).fragment!.targets,
+                    multisample: pipeline(binding).multisample,
+                    transparent: renderable.isTransparent,
+                    generation: renderable._gen?.slice(1, 5),
+                };
+            });
+        };
+        const before = await build();
+        expect(before.every((state) => !state.code.includes("meshOpacity"))).toBe(true);
+        setMeshOpacity(standard, 1);
+        const after = await build();
+        expect(after).toEqual(before);
+    });
+
+    it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+    ])("orders Standard BC after cutoff and before fog/instance alpha (unlit=%s, fog=%s), with matching main/geometry bindings", async (unlit, fog) => {
+        const f = fixture();
+        const material = createStandardMaterial();
+        material.disableLighting = unlit;
+        material.diffuseTexture = texture();
+        material.diffuseTexture.uScale = 2;
+        material.alphaCutOff = 0.5;
+        material._hasUvTx = true;
+        material.lightmapCoordIndex = 0;
+        setStandardLightmapTexture(material, texture());
+        _registerStdExt(stdUvTransformExt);
+        _installStdVertexColorFragment(createStdVertexColorFragment);
+        const target = mesh(material);
+        target.receiveShadows = true;
+        target.hasVertexAlpha = true;
+        Object.assign(target._gpu, { colorBuffer: {} as GPUBuffer });
+        setThinInstances(target, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), 1);
+        setThinInstanceColors(target, new Float32Array([1, 1, 1, 0.8]));
+        f.scene.lights.push(shadowLight());
+        setMeshOpacity(target, 0.5);
+        const forward = buildStandardMeshRenderables(f.scene, [target], {
+            tiFragment: createThinInstanceFragment,
+            shadow: await createStandardShadowContext(f.engine, f.scene.lights),
+            sceneShader: fog ? { _features: STD_SCENE_FOG, _fragments: [createStandardFogFragment()] } : null,
+        }).renderables[0]!;
+        await preloadStandardGeometryFeatures([target], false);
+        const view = createStandardGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false });
+        const geometry = buildStandardGeometryRenderable(f.scene, target, view, { _lifetimeDisposers: [] });
+        const main = forward.bind(f.engine, signature);
+        const auxiliary = geometry.bind(f.engine, signature);
+        for (const binding of [main, auxiliary]) {
+            assertOpacityBinding(binding, f);
+            const code = compact(fragment(binding));
+            const multiply = code.indexOf("alpha=alpha*meshOpacity.value;");
+            expect(code.match(/alpha=alpha\*meshOpacity\.value;/g)).toHaveLength(1);
+            expect(code.match(/color\.a\*meshOpacity\.value/g)).toHaveLength(1);
+            expect(code.indexOf("discard;")).toBeGreaterThan(-1);
+            expect(multiply).toBeGreaterThan(code.indexOf("discard;"));
+            if (fog) {
+                expect(code.indexOf("mix(scene.vFogColor.rgb,color.rgb,fog)")).toBeGreaterThan(multiply);
+            }
+            expect(pipeline(binding).depthStencil!.depthWriteEnabled).toBe(false);
+            expect([...pipeline(binding).fragment!.targets][0]!.blend).toBeDefined();
+        }
+        const color = compact(fragment(main));
+        expect(color.indexOf("color.a*input.vInstanceColor.a")).toBeGreaterThan(color.indexOf("color.a*meshOpacity.value"));
+        expect(compact(fragment(auxiliary)).indexOf("alpha>0.4")).toBeGreaterThan(compact(fragment(auxiliary)).indexOf("alpha=alpha*meshOpacity.value;"));
+        expect([forward.isTransparent, forward.order, geometry.isTransparent, geometry.order]).toEqual([true, 200, true, 200]);
+    });
+
+    it("orders PBR FA after saturate and shadow-only, preserves cutoff order, and matches clustered main/geometry binding indices", async () => {
+        const f = fixture();
+        f.scene.camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
+        f.scene.lights.push(shadowLight());
+        const material = createPbrMaterial({ baseColorTexture: texture(), alphaBlend: false });
+        setPbrAlphaCutoff(material, 0.5);
+        setShadowOnly(material);
+        const target = mesh(material);
+        f.scene._groups.set(material._buildGroup, [target]);
+        target.receiveShadows = true;
+        f.scene.meshes.push(target);
+        addClusteredLightContainer(f.scene, createClusteredLightContainer({ horizontalTiles: 1, verticalTiles: 1, zSlices: 1 }));
+        setMeshOpacity(target, 0.5);
+        const forward = (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
+        const geometry = buildPbrGeometryRenderable(
+            f.scene,
+            target,
+            createPbrGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }),
+            { _lifetimeDisposers: [] }
+        );
+        const main = forward.bind(f.engine, signature);
+        const auxiliary = geometry.bind(f.engine, signature);
+        for (const binding of [main, auxiliary]) {
+            assertOpacityBinding(binding, f);
+            const code = compact(fragment(binding));
+            expect(code).toContain("clusteredLightParams");
+            const multiply = code.indexOf(binding === main ? "finalAlpha=finalAlpha*meshOpacity.value;" : "alpha=alpha*meshOpacity.value;");
+            expect(multiply).toBeGreaterThan(code.indexOf("discard;"));
+            expect(pipeline(binding).depthStencil!.depthWriteEnabled).toBe(false);
+            expect([...pipeline(binding).fragment!.targets][0]!.blend).toBeDefined();
+        }
+        const color = compact(fragment(main));
+        const multiply = color.indexOf("finalAlpha=finalAlpha*meshOpacity.value;");
+        expect(color.match(/finalAlpha=finalAlpha\*meshOpacity\.value;/g)).toHaveLength(1);
+        expect(multiply).toBeGreaterThan(color.indexOf("finalAlpha=saturate("));
+        expect(multiply).toBeGreaterThan(color.lastIndexOf("finalAlpha=alpha*material.materialAlpha;"));
+        expect(multiply).toBeLessThan(color.indexOf("returnvec4<f32>(color,finalAlpha);"));
+        const geo = compact(fragment(auxiliary));
+        expect(geo.indexOf("alpha=alpha*meshOpacity.value;")).toBeGreaterThan(geo.indexOf("alpha=saturate((1.0-so_shadowMin)"));
+        expect(geo.indexOf("alpha>0.4")).toBeGreaterThan(geo.indexOf("alpha=alpha*meshOpacity.value;"));
+        expect([forward.isTransparent, forward.order, geometry.isTransparent, geometry.order]).toEqual([true, 150, true, 200]);
+        expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(true);
+        setMeshOpacity(target, 0.4);
+        expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(true);
+        setMeshOpacity(target, 1);
+        expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(false);
+    });
+
+    it("puts geometry opacity outside the real linear-image-processing refraction brace", () => {
+        const material = createPbrMaterial({ _subsurface: { refraction: { intensity: 1 } }, _transmissive: true });
+        Object.assign(material, { _linearImageProcessing: true });
+        const refraction = makeRefractionRttExt();
+        _registerPbrExt(iblExt);
+        _registerPbrExt(refraction);
+        const detected = refraction.detect!(material);
+        const target = mesh(material);
+        setMeshOpacity(target, 0.5);
+        const meshFeatures = _computeMeshFeatures(target);
+        const composed = composePbrGeometryShader(
+            composer(),
+            detected.f | ((meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND),
+            detected.f2,
+            meshFeatures,
+            PBR_HAS_ENV,
+            0,
+            "",
+            "",
+            undefined,
+            "",
+            [GeometryTextureType.WORLD_POSITION],
+            false
+        );
+        expect(composed._fragmentKey).toContain("refraction");
+        const code = compact(composed._fragmentWGSL);
+        const start = code.indexOf("if(scene.vImageInfos.w>=0.0){");
+        expect(start).toBeGreaterThan(-1);
+        let depth = 1;
+        let end = code.indexOf("{", start) + 1;
+        for (; depth && end < code.length; end++) {
+            depth += code[end] === "{" ? 1 : code[end] === "}" ? -1 : 0;
+        }
+        const multiply = code.indexOf("alpha=alpha*meshOpacity.value;");
+        expect(depth).toBe(0);
+        expect(multiply).toBeGreaterThan(end - 1);
+        expect(multiply).toBeLessThan(code.indexOf("alpha>0.4"));
+    });
+
+    it.each(["standard", "pbr"] as const)("returns zero for actual %s colour/geometry draws, but not no-colour or ESM shadow draws", async (family) => {
+        const f = fixture();
+        const standard = createStandardMaterial();
+        const pbr = createPbrMaterial();
+        const target = mesh(family === "standard" ? standard : pbr);
+        f.scene._groups.set(target.material!._buildGroup, [target]);
+        setMeshOpacity(target, 0.6);
+        const forward = family === "standard" ? buildStandardMeshRenderables(f.scene, [target], {}) : await buildPbrRenderables(f.scene, [target], undefined);
+        const geometry =
+            family === "standard"
+                ? buildStandardGeometryRenderable(
+                      f.scene,
+                      target,
+                      createStandardGeometryMaterialView(standard, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }),
+                      { _lifetimeDisposers: [] }
+                  )
+                : buildPbrGeometryRenderable(f.scene, target, createPbrGeometryMaterialView(pbr, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }), {
+                      _lifetimeDisposers: [],
+                  });
+        const bindings = [forward.renderables[0]!, geometry].map((renderable) => renderable.bind(f.engine, signature));
+        setMeshOpacity(target, 0);
+        for (const binding of bindings) {
+            f.pass.drawIndexed.mockClear();
+            expect(binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine)).toBe(0);
+            expect(f.pass.drawIndexed).not.toHaveBeenCalled();
+        }
+        setMeshOpacity(target, 0.3);
+        for (const binding of bindings) {
+            f.pass.drawIndexed.mockClear();
+            expect(binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine)).toBe(1);
+            expect(f.pass.drawIndexed).toHaveBeenCalledTimes(1);
+        }
+        setMeshOpacity(target, 0);
+        const params = {} as GPUBuffer;
+        const views =
+            family === "standard"
+                ? [createStandardNoColorMaterialView(standard), createStandardEsmShadowMaterialView(standard, params)]
+                : [createPbrNoColorMaterialView(pbr), createPbrEsmShadowMaterialView(pbr, params)];
+        for (const [index, view] of views.entries()) {
+            const shadow = forward.rebuildSingle!(f.scene, target, view);
+            const binding = shadow.bind(f.engine, { _colorFormat: index ? "rgba16float" : undefined, _depthStencilFormat: "depth32float", _sampleCount: 1 });
+            expect(fragment(binding)).not.toContain("meshOpacity");
+            f.pass.drawIndexed.mockClear();
+            expect(binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine)).toBe(1);
+            expect(f.pass.drawIndexed).toHaveBeenCalledTimes(1);
+            expect(shadow.isTransparent).toBe(false);
+        }
+    });
+
+    it.each(["standard", "pbr"] as const)("keeps %s A2C and forced blend simultaneously in pipeline keys and descriptors", (family) => {
+        const f = fixture();
+        const standard = createStandardMaterial();
+        const pbr = createPbrMaterial();
+        const target = mesh(family === "standard" ? standard : pbr);
+        setAlphaToCoverage(target.material, true);
+        setMeshOpacity(target, 0.5);
+        let keys: string[];
+        let descriptor: GPURenderPipelineDescriptor;
+        if (family === "standard") {
+            const ext = _getStdExtsSorted().find((entry) => entry._id === "0-mesh-opacity")!;
+            const features = ext._meshFeatures!(_computeMeshFeatures(target), standard);
+            const bindings = getOrCreateStandardBindings(f.engine, features, 0, [ext._frag(features)]);
+            descriptor = getOrCreateStandardPipeline(f.engine, signature, bindings, standard) as unknown as GPURenderPipelineDescriptor;
+            keys = [...bindings._pipelines.keys()];
+            expect(features & MATERIAL_ALPHA_BLEND).not.toBe(0);
+            expect(composeStandardShader(features, 0, [ext._frag(features)])._fragmentWGSL).toContain("meshOpacity");
+        } else {
+            const meshFeatures = _computeMeshFeatures(target);
+            const features = (meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND;
+            const composed = composer()(features, 0, meshFeatures);
+            const bindings = getOrCreatePbrBindings(f.engine, features, 0, meshFeatures, 0, composed);
+            descriptor = getOrCreatePbrPipeline(f.engine, signature, bindings, pbr) as unknown as GPURenderPipelineDescriptor;
+            keys = [...bindings._pipelines.keys()];
+            expect(features & PBR_HAS_ALPHA_BLEND).not.toBe(0);
+        }
+        expect(keys).toHaveLength(1);
+        expect(keys[0]).toMatch(/:a2c$/);
+        expect(descriptor.multisample).toMatchObject({ count: 4, alphaToCoverageEnabled: true });
+        expect([...descriptor.fragment!.targets][0]!.blend).toBeDefined();
+        expect(descriptor.depthStencil!.depthWriteEnabled).toBe(false);
+    });
+
+    it.each(["standard", "pbr"] as const)("preserves mirrored %s winding and PBR VAT vertex bindings alongside main/geometry opacity", async (family) => {
+        const f = fixture();
+        await enableMirroredMeshes(f.scene);
+        const standard = createStandardMaterial();
+        const pbr = createPbrMaterial();
+        const target = mesh(family === "standard" ? standard : pbr);
+        target.scaling.x = -1;
+        if (family === "pbr") {
+            _registerPbrExt(vatExt);
+            const skin = { jointsBuffer: {} as GPUBuffer, weightsBuffer: {} as GPUBuffer, joints1Buffer: null, weights1Buffer: null };
+            const baked = texture().texture;
+            target.vat = {
+                ...skin,
+                boneCount: 1,
+                frameCount: 1,
+                texture: baked,
+                settingsBuffer: {} as GPUBuffer,
+                _textureResource: { texture: baked },
+                _skinBuffers: skin,
+            };
+        }
+        f.scene._groups.set(target.material!._buildGroup, [target]);
+        setMeshOpacity(target, 0.5);
+        const forward =
+            family === "standard" ? buildStandardMeshRenderables(f.scene, [target], {}).renderables[0]! : (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
+        const geometry =
+            family === "standard"
+                ? buildStandardGeometryRenderable(
+                      f.scene,
+                      target,
+                      createStandardGeometryMaterialView(standard, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }),
+                      { _lifetimeDisposers: [] }
+                  )
+                : buildPbrGeometryRenderable(f.scene, target, createPbrGeometryMaterialView(pbr, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }), {
+                      _lifetimeDisposers: [],
+                  });
+        for (const binding of [forward, geometry].map((renderable) => renderable.bind(f.engine, signature))) {
+            assertOpacityBinding(binding, f);
+            expect(pipeline(binding).primitive).toMatchObject({ frontFace: "cw", cullMode: "back" });
+            expect(pipeline(binding).depthStencil!.depthWriteEnabled).toBe(false);
+            if (family === "pbr") {
+                expect((pipeline(binding).vertex.module as unknown as GPUShaderModuleDescriptor).code).toContain("readMatrixFromVat");
+                const entries = [...meshBinding(binding, f).entries];
+                expect(entries.some((entry) => (entry.resource as GPUBufferBinding).buffer === target.vat!.settingsBuffer)).toBe(true);
+            }
+        }
+    });
+
+    it("forwards both DrawBinding arguments, leaves non-colour/full-opacity draws unchanged, and chains another wrapper", () => {
+        const target = mesh(createStandardMaterial());
+        const draw = vi.fn<DrawBinding["draw"]>(() => 3);
+        setMeshOpacity(target, 1);
+        expect(_meshDrawWrap!(draw, target, true)).toBe(draw);
+        setMeshOpacity(target, 0.5);
+        expect(_meshDrawWrap!(draw, target, false)).toBe(draw);
+        const wrapped = _meshDrawWrap!(draw, target, true);
+        const f = fixture();
+        const pass = f.pass as unknown as GPURenderPassEncoder;
+        expect(wrapped(pass, f.engine)).toBe(3);
+        expect(draw).toHaveBeenCalledExactlyOnceWith(pass, f.engine);
+        setMeshOpacity(target, 0);
+        expect(wrapped(pass, f.engine)).toBe(0);
+        expect(draw).toHaveBeenCalledTimes(1);
+        _installMeshDrawWrap((previous) => (encoder, engine) => previous(encoder, engine) + 1);
+        expect(_meshDrawWrap!(draw, target, true)(pass, f.engine)).toBe(1);
+        expect(draw).toHaveBeenCalledTimes(1);
+    });
+});

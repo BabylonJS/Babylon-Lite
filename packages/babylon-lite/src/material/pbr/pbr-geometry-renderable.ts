@@ -24,6 +24,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
+import { _meshDrawWrap } from "../../render/mesh-draw-hook.js";
 import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
@@ -401,7 +402,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
                 renderable: r,
                 pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
-                draw,
+                draw: _meshDrawWrap?.(draw, mesh, true) ?? draw,
             };
         },
     };
@@ -527,7 +528,7 @@ function _ensureViewResources(
     // The view's features have PBR_HAS_ALPHA_BLEND already stripped. Detect
     // alpha-blend from the SOURCE so transparent meshes get the right blend
     // pipeline state below.
-    const sourceFeatures = source._renderFeatures?.features ?? 0;
+    const sourceFeatures = (source._renderFeatures?.features ?? 0) | ((meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND);
     const alphaBlend = (sourceFeatures & PBR_HAS_ALPHA_BLEND) !== 0;
 
     const res: PbrGeometryViewResources = {

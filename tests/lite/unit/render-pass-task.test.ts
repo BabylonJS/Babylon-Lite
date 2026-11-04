@@ -25,6 +25,13 @@ import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/s
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setMeshVisible } from "../../../packages/babylon-lite/src/scene/scene";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { buildStandardMeshRenderables } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
+import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity";
+import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -77,13 +84,23 @@ function makeMockEngine(options?: {
     }[];
     onWriteBuffer?: (buffer: GPUBuffer, offset: number, data: AllowSharedBufferSource, dataOffset?: number, size?: number) => void;
     bufferCopies?: [GPUBuffer, number, GPUBuffer, number, number][];
+    onIndexedDraw?: (encoder: "pass" | "bundle", positionBuffer: GPUBuffer | undefined) => void;
+    onBundleReplay?: (bundles: Iterable<GPURenderBundle>) => void;
 }): EngineContext {
     let currentPipeline: GPURenderPipeline | null = null;
+    let positionBuffer: GPUBuffer | undefined;
     const pass = {
         setViewport: () => undefined,
         setScissorRect: () => undefined,
         setBindGroup: () => undefined,
-        executeBundles: () => undefined,
+        executeBundles: (bundles: Iterable<GPURenderBundle>) => options?.onBundleReplay?.(bundles),
+        setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
+            if (slot === 0) {
+                positionBuffer = buffer;
+            }
+        },
+        setIndexBuffer: () => undefined,
+        drawIndexed: () => options?.onIndexedDraw?.("pass", positionBuffer),
         setPipeline: (pipeline: GPURenderPipeline) => {
             currentPipeline = pipeline;
         },
@@ -121,13 +138,22 @@ function makeMockEngine(options?: {
         },
         createRenderBundleEncoder: (descriptor: GPURenderBundleEncoderDescriptor) => {
             options?.bundleDescriptors?.push(descriptor);
+            let positionBuffer: GPUBuffer | undefined;
             return {
                 setBindGroup: () => undefined,
                 setPipeline: () => undefined,
+                setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
+                    if (slot === 0) {
+                        positionBuffer = buffer;
+                    }
+                },
+                setIndexBuffer: () => undefined,
+                drawIndexed: () => options?.onIndexedDraw?.("bundle", positionBuffer),
                 finish: () => ({}) as GPURenderBundle,
             } as unknown as GPURenderBundleEncoder;
         },
         queue: {
+            writeTexture: () => undefined,
             writeBuffer: (buffer: GPUBuffer, offset: number, data: AllowSharedBufferSource, dataOffset?: number, size?: number) =>
                 options?.onWriteBuffer?.(buffer, offset, data, dataOffset, size),
         },
@@ -695,6 +721,72 @@ describe("RenderPassTask transparent sorting", () => {
         }
         expect(binds.length).toBe(3);
         expect(to._renderables).toEqual(renderables);
+    });
+
+    it.each(["standard", "pbr"] as const)("keeps %s opacity live through 0.5 → 0 → 0.5 outside the cached opaque bundle and in geometry", async (family) => {
+        const bundleDraws: (GPUBuffer | undefined)[] = [];
+        const passDraws: (GPUBuffer | undefined)[] = [];
+        const bundleReplays: GPURenderBundle[][] = [];
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({
+            bundleDescriptors,
+            onIndexedDraw: (encoder, buffer) => (encoder === "bundle" ? bundleDraws : passDraws).push(buffer),
+            onBundleReplay: (bundles) => bundleReplays.push([...bundles]),
+        });
+        const scene = createSceneContext(engine);
+        scene.camera = makeCamera();
+        const material = family === "standard" ? createStandardMaterial() : createPbrMaterial();
+        const meshes = ["faded", "opaque"].map((name) =>
+            initMeshTransform({
+                name,
+                children: [],
+                visible: true,
+                material,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint16",
+                    indexCount: 3,
+                },
+            })
+        );
+        const [faded, opaque] = meshes as [Mesh, Mesh];
+        setMeshOpacity(faded, 0.5);
+        scene._groups.set(material._buildGroup, meshes);
+        const built = family === "standard" ? buildStandardMeshRenderables(scene, meshes, {}) : await buildPbrRenderables(scene, meshes, undefined);
+        scene._groups.set(material._buildGroup, Object.assign(meshes, { r: built.rebuildSingle, o: built.renderables }));
+        scene.meshes.push(...meshes);
+        scene._renderables.push(...built.renderables);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        task.record();
+        const geometry = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }] }, engine, scene);
+        await geometry._preload!();
+        geometry.record();
+        let cached: GPURenderBundle | undefined;
+        for (const [index, value] of [0.5, 0, 0.5].entries()) {
+            setMeshOpacity(faded, value);
+            passDraws.length = 0;
+            expect(task.execute!()).toBe(value ? 2 : 1);
+            expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer] : []);
+            expect(task._opaqueBindings.map((binding) => binding.renderable.mesh)).toEqual([opaque]);
+            expect(task._transparentBindings.map((binding) => binding.renderable.mesh)).toEqual([faded]);
+            expect(bundleDraws).toEqual([opaque._gpu.positionBuffer]);
+            expect(bundleDescriptors).toHaveLength(1);
+            expect(task._ob).toHaveLength(1);
+            cached ??= task._ob[0];
+            expect(task._ob[0]).toBe(cached);
+            expect(bundleReplays).toHaveLength(index + 1);
+            expect(bundleReplays[index]).toEqual([cached]);
+            passDraws.length = 0;
+            geometry.execute!();
+            expect(passDraws).toEqual(value ? [faded._gpu.positionBuffer, opaque._gpu.positionBuffer] : [opaque._gpu.positionBuffer]);
+        }
+        geometry.dispose();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("re-records a cached bundle invalidated before scene registration", () => {

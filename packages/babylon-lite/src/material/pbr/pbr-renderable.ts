@@ -14,6 +14,7 @@ import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
 import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import { _meshDrawWrap } from "../../render/mesh-draw-hook.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
@@ -384,10 +385,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const lr = writeMeshLightSelection(mesh, s.lights);
         const sceneFeatures = geometryContext._sceneFeatures | (s._lighting?._pbrFeatures?.(mesh) ?? 0);
         const lightCount = lr > 0 ? 1 : -lr;
-        const features = renderFeatures.features;
         const features2 = renderFeatures.features2 ?? 0;
         const shadowOutput = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
+        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+        const features = renderFeatures.features | (!(features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) ? (meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND : 0);
         const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
         const singleLightType = lightMode === 1 ? getPackedSingleLightType(s.lights, lr - 1) : "";
         // The lazy glTF primitive feature's bits (topology index, uint32-strip flag, load-time mirror
@@ -396,7 +398,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // there cost every Standard-only scene ~11 bytes for a value that is always zero in it.
         // `_computeMeshFeatures` is evaluated first, so `enableMirroredMeshes` has already reconciled
         // the mirror bit against the live world matrix by the time it is read.
-        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
         const esmShadowDepthCode = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0 ? (mat as PbrMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
 
         // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
@@ -613,7 +614,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                     pipeline,
                     ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
-                    draw: (pass) => drawWith(pass, materialBindGroup, cb),
+                    draw: _meshDrawWrap?.((pass) => drawWith(pass, materialBindGroup, cb), mesh, !shadowOutput) ?? ((pass) => drawWith(pass, materialBindGroup, cb)),
                 };
             },
         };

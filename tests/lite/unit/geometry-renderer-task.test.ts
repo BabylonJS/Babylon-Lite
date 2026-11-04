@@ -1777,7 +1777,7 @@ describe("GeometryRendererTask", () => {
         _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
     };
 
-    type ForwardRenderable = { mesh?: LateMesh; _gen?: readonly [unknown, number, number, string, unknown] };
+    type ForwardRenderable = Pick<Renderable, "mesh" | "_gen">;
     type PbrContext = { _shadowLights: unknown[] };
     type PbrScene = { _pbrGeomContext?: PbrContext };
 

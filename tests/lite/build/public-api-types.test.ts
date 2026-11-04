@@ -35,6 +35,42 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes mesh opacity only on Mesh and keeps feature storage internal", () => {
+        const probePath = resolve(BUILD_DIR, "mesh-opacity.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { setMeshOpacity, getMeshOpacity, type Mesh, type MeshLoDInstance } from "./index.js";
+declare const mesh: Mesh;
+declare const lod: MeshLoDInstance;
+const set: (mesh: Mesh, opacity: number) => void = setMeshOpacity;
+const get: (mesh: Mesh) => number = getMeshOpacity;
+const result: void = setMeshOpacity(mesh, 0.5);
+const value: number = getMeshOpacity(mesh);
+// @ts-expect-error MeshLoD participants are not Lite Mesh targets.
+setMeshOpacity(lod, 0.5);
+// @ts-expect-error Reset to 1 does not make MeshLoD a supported target.
+setMeshOpacity(lod, 1);
+// @ts-expect-error The getter also rejects MeshLoD participants.
+getMeshOpacity(lod);
+// @ts-expect-error The public value contract is numeric.
+setMeshOpacity(mesh, "0.5");
+// @ts-expect-error Feature-local storage is not public mesh state.
+mesh._opacity;
+void [set, get, result, value];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes physics discovery and allocation-free inspection without internal state", () => {
         const probePath = resolve(BUILD_DIR, "p10a-physics.probe.ts");
         try {

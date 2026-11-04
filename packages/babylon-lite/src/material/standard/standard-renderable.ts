@@ -9,6 +9,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import { _meshDrawWrap } from "../../render/mesh-draw-hook.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
 import { _computeStandardMaterialFeatures } from "./standard-material-features.js";
@@ -209,7 +210,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const needsUV = (features & NEEDS_UV) !== 0;
         const needsUV2 = (features & NEEDS_UV2) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
-        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1 || colorAlphaBlend);
+        const isTransparent = !shadowOutput && ((features & (HAS_OPACITY_TEXTURE | MATERIAL_ALPHA_BLEND)) !== 0 || mat.alpha < 1);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
@@ -315,7 +316,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                     pipeline,
                     ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
-                    draw: (pass) => draw(pass, cb),
+                    draw: _meshDrawWrap?.((pass) => draw(pass, cb), mesh, !shadowOutput) ?? ((pass) => draw(pass, cb)),
                 };
             },
         };
