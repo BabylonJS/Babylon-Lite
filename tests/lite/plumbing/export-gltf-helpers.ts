@@ -1,0 +1,94 @@
+/** Node-side helpers for the glTF export plumbing specs: GLB framing in both directions, accessor
+ *  reading, and a hand-built triangle glTF fixture that tests extend with extra accessors. */
+
+import { PNG } from "pngjs";
+import type { GltfJson } from "../export-gltf-binary";
+export { parseGlb, readAccessor } from "../export-gltf-binary";
+export type { GltfJson, ParsedGlb } from "../export-gltf-binary";
+
+const GLB_MAGIC = 0x46546c67;
+const CHUNK_JSON = 0x4e4f534a;
+const CHUNK_BIN = 0x004e4942;
+
+/** Frame a glTF document and its binary payload as a GLB. The JSON chunk is padded with spaces and
+ *  the BIN chunk with zeros, both to 4 bytes. */
+export function buildGlb(json: GltfJson, bin: Uint8Array): Buffer {
+    const jsonBytes = Buffer.from(JSON.stringify(json), "utf8");
+    const jsonLength = (jsonBytes.length + 3) & ~3;
+    const binLength = (bin.length + 3) & ~3;
+    const out = Buffer.alloc(12 + 8 + jsonLength + 8 + binLength);
+    out.writeUInt32LE(GLB_MAGIC, 0);
+    out.writeUInt32LE(2, 4);
+    out.writeUInt32LE(out.length, 8);
+    out.writeUInt32LE(jsonLength, 12);
+    out.writeUInt32LE(CHUNK_JSON, 16);
+    out.fill(0x20, 20, 20 + jsonLength);
+    jsonBytes.copy(out, 20);
+    const binHeader = 20 + jsonLength;
+    out.writeUInt32LE(binLength, binHeader);
+    out.writeUInt32LE(CHUNK_BIN, binHeader + 4);
+    Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength).copy(out, binHeader + 8);
+    return out;
+}
+
+/** A glTF document under construction together with its BIN payload. */
+export interface GltfFixture {
+    json: GltfJson;
+    /** The BIN payload so far. */
+    bin: Buffer;
+    /** Append `data` to the BIN (4-byte aligned) as a new bufferView and accessor, and return the
+     *  accessor index. `view` adds bufferView members such as `byteStride`. */
+    addAccessor(data: ArrayBufferView, accessor: Record<string, unknown>, view?: Record<string, unknown>): number;
+    /** The finished GLB. */
+    toGlb(): Buffer;
+}
+
+/** A single triangle in the XY plane: one scene node "triangle" holding mesh 0, with POSITION
+ *  (0,0,0) (1,0,0) (0,1,0) (min/max set), NORMAL +Z, UNSIGNED_SHORT indices 0 1 2 and one
+ *  metallic-roughness material. Accessors 0, 1 and 2 are POSITION, NORMAL and the indices. */
+export function createTriangleFixture(): GltfFixture {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    const indices = new Uint16Array([0, 1, 2, 0]);
+    const bytes = (view: ArrayBufferView): Buffer => Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    const fixture: GltfFixture = {
+        json: {
+            asset: { version: "2.0" },
+            scene: 0,
+            scenes: [{ nodes: [0] }],
+            nodes: [{ name: "triangle", mesh: 0 }],
+            meshes: [{ name: "triangle", primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 0 }] }],
+            materials: [{ name: "material", pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1], metallicFactor: 0, roughnessFactor: 1 } }],
+            accessors: [
+                { bufferView: 0, componentType: 5126, count: 3, type: "VEC3", min: [0, 0, 0], max: [1, 1, 0] },
+                { bufferView: 1, componentType: 5126, count: 3, type: "VEC3" },
+                { bufferView: 2, componentType: 5123, count: 3, type: "SCALAR" },
+            ],
+            bufferViews: [
+                { buffer: 0, byteOffset: 0, byteLength: 36 },
+                { buffer: 0, byteOffset: 36, byteLength: 36 },
+                { buffer: 0, byteOffset: 72, byteLength: 6 },
+            ],
+            buffers: [{ byteLength: 80 }],
+        },
+        bin: Buffer.concat([bytes(positions), bytes(normals), bytes(indices)]),
+        addAccessor(data, accessor, view = {}) {
+            const offset = (fixture.bin.length + 3) & ~3;
+            const padded = Buffer.alloc(offset + data.byteLength);
+            fixture.bin.copy(padded);
+            bytes(data).copy(padded, offset);
+            fixture.bin = padded;
+            fixture.json.bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: data.byteLength, ...view });
+            fixture.json.accessors.push({ bufferView: fixture.json.bufferViews.length - 1, ...accessor });
+            fixture.json.buffers[0].byteLength = padded.length;
+            return fixture.json.accessors.length - 1;
+        },
+        toGlb: () => buildGlb(fixture.json, fixture.bin),
+    };
+    return fixture;
+}
+
+/** Decode exported pixels with an independent PNG implementation. */
+export function decodeExportedPng(png: Uint8Array): Uint8Array {
+    return new Uint8Array(PNG.sync.read(Buffer.from(png)).data);
+}

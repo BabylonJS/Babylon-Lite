@@ -1,0 +1,352 @@
+/** Test harness for the glTF exporter: a fake WebGPU device that supports the exporter's readback
+ *  paths, fabricated plain-data scenes, and a GLB parser. No real GPU is needed. */
+
+import { expect, vi } from "vitest";
+import { PNG } from "pngjs";
+import { parseGlb, readAccessor as readGlbAccessor } from "../../export-gltf-binary";
+import type { AssetContainer } from "../../../../packages/babylon-lite/src/asset-container";
+import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
+import { exportSceneAsGlb } from "../../../../packages/babylon-lite/src/export-gltf/export-gltf";
+import { loadGltf } from "../../../../packages/babylon-lite/src/loader-gltf/load-gltf";
+import { initMeshTransform } from "../../../../packages/babylon-lite/src/mesh/mesh";
+import type { Mesh, MeshGPU } from "../../../../packages/babylon-lite/src/mesh/mesh";
+import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, createSceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core";
+import type { SceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
+import { createTransformNode } from "../../../../packages/babylon-lite/src/scene/transform-node";
+import type { Texture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d";
+
+export { parseGlb };
+
+/** A fake GPUTexture carrying its mip-0 bytes in storage order (RGBA8 for every format, float formats included). */
+export interface FakeGpuTexture {
+    width: number;
+    height: number;
+    format: GPUTextureFormat;
+    usage: number;
+    dimension: GPUTextureDimension;
+    depthOrArrayLayers: number;
+    sampleCount?: number;
+    /** Storage-order bytes as the GPU holds them (BGRA order for bgra formats). */
+    __pixels: Uint8Array;
+    destroyed?: boolean;
+    destroy(): void;
+    createView(): { __texture: FakeGpuTexture };
+}
+
+/** Counters the tests can assert on. */
+export interface FakeDeviceStats {
+    copies: number;
+    blits: number;
+    buffersCreated: number;
+    buffersDestroyed: number;
+    texturesCreated: number;
+    texturesDestroyed: number;
+}
+
+/** A fake GPUDevice implementing exactly what the exporter's readback uses: command encoders with
+ *  `copyTextureToBuffer` and a one-draw blit render pass, staging buffers with `mapAsync`, transient
+ *  textures, shader modules, layouts and pipelines. `failMap` makes every `mapAsync` reject,
+ *  `failCreateBuffer` makes `createBuffer` throw synchronously and `maxBufferSize` sets `limits.maxBufferSize`. */
+export function createFakeDevice(options: { failMap?: boolean; maxBufferSize?: number; failCreateBuffer?: boolean } = {}): { device: GPUDevice; stats: FakeDeviceStats } {
+    const stats: FakeDeviceStats = { copies: 0, blits: 0, buffersCreated: 0, buffersDestroyed: 0, texturesCreated: 0, texturesDestroyed: 0 };
+    const device = {
+        ...(options.maxBufferSize !== undefined ? { limits: { maxBufferSize: options.maxBufferSize } } : {}),
+        createCommandEncoder() {
+            return {
+                copyTextureToBuffer(src: { texture: FakeGpuTexture }, dst: { buffer: { __data: Uint8Array }; bytesPerRow: number }, size: { width: number; height: number }) {
+                    stats.copies++;
+                    const rowBytes = size.width * 4;
+                    for (let y = 0; y < size.height; y++) {
+                        dst.buffer.__data.set(src.texture.__pixels.subarray(y * rowBytes, y * rowBytes + rowBytes), y * dst.bytesPerRow);
+                    }
+                },
+                beginRenderPass(desc: { colorAttachments: { view: { __texture: FakeGpuTexture } }[] }) {
+                    const target = desc.colorAttachments[0]!.view.__texture;
+                    let source: FakeGpuTexture | null = null;
+                    return {
+                        setPipeline() {},
+                        setBindGroup(_i: number, group: { __source: FakeGpuTexture }) {
+                            source = group.__source;
+                        },
+                        draw() {
+                            stats.blits++;
+                            // The blit copies texels verbatim; fake float sources store bytes already.
+                            target.__pixels.set(source!.__pixels.subarray(0, target.__pixels.length));
+                        },
+                        end() {},
+                    };
+                },
+                finish() {
+                    return {};
+                },
+            };
+        },
+        createBuffer(desc: { size: number }) {
+            if (options.failCreateBuffer) {
+                throw new Error("createBuffer failed");
+            }
+            stats.buffersCreated++;
+            const data = new Uint8Array(desc.size);
+            return {
+                __data: data,
+                mapAsync: () => (options.failMap ? Promise.reject(new Error("device lost")) : Promise.resolve()),
+                getMappedRange: () => data.buffer,
+                unmap() {},
+                destroy() {
+                    stats.buffersDestroyed++;
+                },
+            };
+        },
+        createTexture(desc: { size: { width: number; height: number }; format: GPUTextureFormat; usage: number }) {
+            stats.texturesCreated++;
+            const t = fakeGpuTexture(desc.size.width, desc.size.height, desc.format, desc.usage, new Uint8Array(desc.size.width * desc.size.height * 4));
+            const destroy = t.destroy;
+            t.destroy = () => {
+                stats.texturesDestroyed++;
+                destroy();
+            };
+            return t;
+        },
+        createBindGroupLayout: () => ({}),
+        createPipelineLayout: () => ({}),
+        createShaderModule: () => ({}),
+        createRenderPipeline: () => ({}),
+        createBindGroup(desc: { entries: { resource: { __texture: FakeGpuTexture } }[] }) {
+            return { __source: desc.entries[0]!.resource.__texture };
+        },
+        queue: { submit() {} },
+    };
+    return { device: device as unknown as GPUDevice, stats };
+}
+
+function fakeGpuTexture(width: number, height: number, format: GPUTextureFormat, usage: number, pixels: Uint8Array): FakeGpuTexture {
+    const t: FakeGpuTexture = {
+        width,
+        height,
+        format,
+        usage,
+        dimension: "2d",
+        depthOrArrayLayers: 1,
+        __pixels: pixels,
+        destroy() {
+            t.destroyed = true;
+        },
+        createView() {
+            return { __texture: t };
+        },
+    };
+    return t;
+}
+
+/** Options for {@link createTexture}. */
+export interface FakeTextureOptions {
+    format?: GPUTextureFormat;
+    /** GPUTextureUsage bits; defaults to COPY_SRC | TEXTURE_BINDING (a glTF-loader raster image). */
+    usage?: number;
+    invertY?: boolean;
+    /** Texture2D wrapper extras: uScale/vScale/uOffset/vOffset/uAng, `_hasTx`, `_texCoord`. */
+    wrapper?: Record<string, unknown>;
+    dimension?: GPUTextureDimension;
+    layers?: number;
+    sampleCount?: number;
+}
+
+/** A Texture2D over a fake GPU texture. `pixels` (RGBA bytes, row 0 first in storage order) is
+ *  repeated to fill `width × height` texels. */
+export function createTexture(width: number, height: number, pixels: readonly number[], options: FakeTextureOptions = {}): Texture2D {
+    const data = new Uint8Array(width * height * 4);
+    for (let i = 0; i < data.length; i++) {
+        data[i] = pixels[i % pixels.length]!;
+    }
+    const gpu = fakeGpuTexture(width, height, options.format ?? "rgba8unorm", options.usage ?? GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING, data);
+    gpu.dimension = options.dimension ?? "2d";
+    gpu.depthOrArrayLayers = options.layers ?? 1;
+    if (options.sampleCount !== undefined) {
+        gpu.sampleCount = options.sampleCount;
+    }
+    return {
+        texture: gpu as unknown as GPUTexture,
+        view: {} as GPUTextureView,
+        sampler: {} as GPUSampler,
+        width,
+        height,
+        ...(options.invertY !== undefined ? { invertY: options.invertY } : {}),
+        ...options.wrapper,
+    } as Texture2D;
+}
+
+/** Geometry for {@link createMesh}. Arrays default to a unit quad in the XY plane facing −Z. */
+export interface FakeMeshOptions {
+    positions?: Float32Array;
+    normals?: Float32Array | null;
+    uvs?: Float32Array | null;
+    uv2s?: Float32Array | null;
+    tangents?: Float32Array | null;
+    colors?: Float32Array | null;
+    indices?: Uint32Array | null;
+    gpuIndices?: Uint16Array | Uint32Array;
+    /** GPU-only attributes: present on `_gpu` without a CPU array. */
+    gpuOnly?: ("tangent" | "uv2" | "color")[];
+    authoredSign?: number;
+    material?: Mesh["material"];
+    extra?: Record<string, unknown>;
+}
+
+export const QUAD_POSITIONS = new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]);
+export const QUAD_NORMALS = new Float32Array([0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1]);
+export const QUAD_UVS = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+export const QUAD_INDICES = new Uint32Array([0, 1, 2, 0, 2, 3]);
+
+/** A plain-data Lite mesh with CPU geometry and a fake `_gpu` (no GPU allocation). Each call
+ *  creates fresh arrays unless the caller passes shared ones. */
+export function createMesh(name: string, options: FakeMeshOptions = {}): Mesh {
+    const gpu: Record<string, unknown> = {};
+    for (const kind of options.gpuOnly ?? []) {
+        gpu[`${kind}Buffer`] = {};
+    }
+    if (options.uv2s) {
+        gpu.uv2Buffer = {};
+    }
+    const mesh = initMeshTransform({
+        name,
+        material: options.material ?? (null as unknown as Mesh["material"]),
+        receiveShadows: false,
+        _gpu: gpu as unknown as MeshGPU,
+        _cpuPositions: options.positions ?? QUAD_POSITIONS.slice(),
+        _cpuNormals: options.normals === null ? undefined : (options.normals ?? QUAD_NORMALS.slice()),
+        _cpuUvs: options.uvs === null ? undefined : (options.uvs ?? QUAD_UVS.slice()),
+        _cpuUv2s: options.uv2s ?? null,
+        _cpuTangents: options.tangents ?? null,
+        _cpuColors: options.colors ?? null,
+        _cpuIndices: options.indices === null ? undefined : (options.indices ?? QUAD_INDICES.slice()),
+        ...(options.gpuIndices ? { _cpuGpuIndices: options.gpuIndices } : {}),
+        ...(options.authoredSign !== undefined ? { _authoredSign: options.authoredSign } : {}),
+        ...options.extra,
+    });
+    return mesh;
+}
+
+/** Parent `child` under `parent` the way `addToScene` leaves glTF hierarchies: `parent` set and the
+ *  child listed in `parent.children`. */
+export function attach<T extends { parent: unknown }>(child: T, parent: { children: unknown[] }): T {
+    child.parent = parent as T["parent"];
+    parent.children.push(child);
+    return child;
+}
+
+/** Options for {@link createScene}. */
+export interface FakeSceneOptions {
+    meshes?: Mesh[];
+    lights?: SceneContext["lights"];
+    camera?: SceneContext["camera"];
+    animationGroups?: SceneContext["animationGroups"];
+    /** A fake device for texture readback; omit for a null engine (no `_device`). */
+    device?: GPUDevice;
+    /** Canvas size for the camera aspect ratio; omit for no canvas. */
+    canvas?: { width: number; height: number };
+}
+
+/** A plain-object SceneContext exposing only what the exporter reads. */
+export function createScene(options: FakeSceneOptions = {}): SceneContext {
+    return {
+        surface: { engine: options.device ? { _device: options.device } : {}, ...(options.canvas ? { canvas: options.canvas } : {}) },
+        meshes: options.meshes ?? [],
+        lights: options.lights ?? [],
+        camera: options.camera ?? null,
+        animationGroups: options.animationGroups ?? [],
+    } as unknown as SceneContext;
+}
+
+/** A parsed GLB. */
+export interface ParsedGlb {
+    json: any;
+    bin: Uint8Array;
+    bytes: Uint8Array;
+    /** Messages passed to console.warn during the export (prefix stripped). */
+    warnings: string[];
+}
+
+const WARN_PREFIX = "[babylon-lite] glTF export: ";
+
+/** Export a scene and parse the resulting GLB, capturing warnings. */
+export async function exportAndParse(scene: SceneContext): Promise<ParsedGlb> {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+        const text = String(args[0]);
+        warnings.push(text.startsWith(WARN_PREFIX) ? text.slice(WARN_PREFIX.length) : text);
+    });
+    try {
+        const blob = await exportSceneAsGlb(scene);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        return { ...parseGlb(bytes), bytes, warnings };
+    } finally {
+        spy.mockRestore();
+    }
+}
+
+/** Reload an untextured export through the real loader with mocked GPU uploads. */
+export async function reloadUntexturedGlb(glb: ParsedGlb): Promise<AssetContainer> {
+    const device = {
+        createBuffer({ size }: GPUBufferDescriptor) {
+            const storage = new ArrayBuffer(size);
+            return { getMappedRange: () => storage, unmap() {}, destroy() {} };
+        },
+        createSampler: () => ({}),
+        createTexture: () => ({ createView: () => ({}), destroy() {} }),
+        queue: { writeTexture() {} },
+    } as unknown as GPUDevice;
+    const container = await loadGltf({ _device: device } as EngineContext, glb.bytes.slice().buffer);
+    const scene = createSceneContext(createScene({ device }).surface, { defaultRenderTask: false });
+    addToScene(scene, container);
+    return container;
+}
+
+/** Read an accessor's elements as plain numbers. */
+export function readAccessor(glb: { json: ParsedGlb["json"]; bin: Uint8Array }, index: number): number[] {
+    return readGlbAccessor(glb.json, glb.bin, index);
+}
+
+/** The bytes of a bufferView. */
+export function readBufferView(glb: { json: ParsedGlb["json"]; bin: Uint8Array }, index: number): Uint8Array {
+    const view = glb.json.bufferViews[index];
+    return glb.bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength);
+}
+
+/** Decode exported pixels with an independent PNG implementation. */
+export async function decodePng(png: Uint8Array): Promise<{ width: number; height: number; rgba: Uint8Array }> {
+    const image = await new Promise<PNG>((resolve, reject) => {
+        new PNG().parse(Buffer.from(png), (error, decoded) => (error ? reject(error) : resolve(decoded)));
+    });
+    return { width: image.width, height: image.height, rgba: new Uint8Array(image.data) };
+}
+
+/** Assert `actual` has `expected`'s length and each value matches to `digits` decimal places. */
+export function expectClose(actual: ArrayLike<number> | undefined, expected: readonly number[], digits = 5): void {
+    expect(actual).toBeDefined();
+    expect(actual!.length).toBe(expected.length);
+    for (let i = 0; i < expected.length; i++) {
+        expect(actual![i]).toBeCloseTo(expected[i]!, digits);
+    }
+}
+
+/** Rotate vector `v` by the unit quaternion `q` (xyzw). */
+export function rotate(q: ArrayLike<number>, v: number[]): number[] {
+    const [x, y, z, w] = [q[0]!, q[1]!, q[2]!, q[3]!];
+    const [vx, vy, vz] = v as [number, number, number];
+    // t = 2 * cross(q.xyz, v); v' = v + w * t + cross(q.xyz, t)
+    const tx = 2 * (y * vz - z * vy);
+    const ty = 2 * (z * vx - x * vz);
+    const tz = 2 * (x * vy - y * vx);
+    return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)];
+}
+
+/** The glTF loader's conversion root: `__root__` with scaling (−1, 1, 1). */
+export function loaderRoot(): SceneNode {
+    return createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
+}
+
+/** Set a parent link directly, for parents the typed API does not accept (cameras, lights, foreign objects). */
+export function setParent(object: object, parent: unknown): void {
+    (object as { parent: unknown }).parent = parent;
+}
