@@ -388,6 +388,14 @@ shader package, precomputed cone map, or engine feature flag is required.
   bindings and undisplaced geometric velocity.
 - Numerically check off-axis orthographic normal incidence and normal/oblique
   axial-camera-movement invariance, alongside the perspective cases.
+- For filtered ramps/ridges, measure the device sampler's error against the
+  ideal heightfield at the actual lookup coordinates, require it to stay below
+  one encoded 8-bit height unit, and propagate it through the reference ray's
+  contact equation. Preserve the existing solver/refinement tolerances and
+  exact sample-count bounds rather than widening a global UV tolerance.
+  Test-only FP16 sampling cases must reproduce the old ideal-filter assertion
+  failure while satisfying this measured-uncertainty model. Production shader
+  sampling is unchanged.
 - Compile actual composed vertex/fragment shaders on WebGPU without screenshots.
   Execute a numeric shader oracle for constant and linear-ramp heightfields,
   center/scale/view-direction cases, transformed height UVs, bounded sample

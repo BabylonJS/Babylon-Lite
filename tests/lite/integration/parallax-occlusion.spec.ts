@@ -222,6 +222,8 @@ interface NumericCase {
     pixelScale?: number;
     /** Exact height reads for cases whose march length is fully determined. */
     expectedSamples?: number;
+    /** Test-only reduced-precision filtering to exercise the cross-GPU reference budget. */
+    halfPrecisionSampling?: boolean;
 }
 
 const RIDGE_HEIGHTS = Array.from({ length: 64 }, (_, i) => Math.round(255 * (0.05 + 0.9 * Math.max(0, 1 - Math.abs((i + 0.5) / 64 - 0.3) / 0.14))));
@@ -263,6 +265,7 @@ const NUMERIC_CASES: readonly NumericCase[] = [
     { name: "linear height ramp", kind: "ramp-u" },
     { name: "reversed view direction", kind: "ramp-u", eye: [-0.8, 0.2, 1] },
     { name: "scaled height UVs", kind: "ramp-u", matrix: [0.7, 0, 0, 1], translation: [0.1, 0] },
+    { name: "scaled height UVs with reduced-precision filtering", kind: "ramp-u", matrix: [0.7, 0, 0, 1], translation: [0.1, 0], halfPrecisionSampling: true },
     { name: "mirrored height UVs", kind: "ramp-u", matrix: [-1, 0, 0, 1], translation: [1, 0] },
     { name: "rotated height UVs", kind: "ramp-u", matrix: [0, 1, -1, 0], translation: [0, 1] },
     { name: "invertY height UVs", kind: "ramp-v", matrix: [1, 0, 0, -1], translation: [0, 1] },
@@ -277,6 +280,17 @@ const NUMERIC_CASES: readonly NumericCase[] = [
         refinement: 16,
         contact: "last",
         depthTolerance: 0.00001,
+    },
+    {
+        name: "last ridge contact with reduced-precision filtering",
+        kind: "ridge",
+        scale: 0.8,
+        eye: [0.8, 0, 1],
+        steps: 4,
+        refinement: 16,
+        contact: "last",
+        depthTolerance: 0.00001,
+        halfPrecisionSampling: true,
     },
 ];
 
@@ -312,7 +326,10 @@ function referenceRidgeDepth(base: number, ray: number, center: number, contact:
         previous = current;
     }
     expect(hits.length, "The ridge fixture must expose multiple ray intersections").toBeGreaterThan(1);
-    return contact === "last" ? hits[hits.length - 1]! : hits[0]!;
+    const hit = contact === "last" ? hits[hits.length - 1]! : hits[0]!;
+    const slope = (error(hit + 0.000001) - error(hit - 0.000001)) / 0.000002;
+    expect(slope, "Selected ridge contacts must not amplify a height-sampling error").toBeGreaterThanOrEqual(1 - 0.000001);
+    return hit;
 }
 
 function referenceViewRay(input: NumericCase): readonly [number, number, number] {
@@ -322,6 +339,25 @@ function referenceViewRay(input: NumericCase): readonly [number, number, number]
     const eye = input.eye ?? [0.8, 0.2, 1];
     const position = input.position ?? [0, 0, 0];
     return [eye[0] - position[0], eye[1] - position[1], eye[2] - position[2]];
+}
+
+function referenceUvRay(input: NumericCase): readonly [number, number] {
+    const eye = referenceViewRay(input);
+    const scale = input.scale ?? 0.08;
+    const worldScale = input.worldScale ?? [1, 1];
+    return [(eye[0] * scale) / (Math.abs(eye[2]) * worldScale[0]), (eye[1] * scale) / (Math.abs(eye[2]) * worldScale[1])];
+}
+
+function filteringDepthError(input: NumericCase, heightError: number): number {
+    if (input.kind === "ramp-u" || input.kind === "ramp-v") {
+        const ray = referenceUvRay(input);
+        const matrix = input.matrix ?? [1, 0, 0, 1];
+        const row = input.kind === "ramp-u" ? 0 : 2;
+        const heightRay = matrix[row]! * ray[0] + matrix[row + 1]! * ray[1];
+        return heightError / Math.abs(1 - (256 / 255) * heightRay);
+    }
+    // The chosen ridge contacts are on rising or flat error segments, with depth-error slope >= 1.
+    return input.kind === "ridge" ? heightError : 0;
 }
 
 function expectedCoarseSteps(input: NumericCase): number {
@@ -343,8 +379,7 @@ function expectedUV(input: NumericCase): [number, number] {
     if (input.degenerate || scale === 0 || Math.hypot(...normal) === 0 || eyeLength === 0 || Math.abs(eye[2]) / eyeLength <= 0.0001) {
         return uv;
     }
-    const worldScale = input.worldScale ?? [1, 1];
-    const ray = [(eye[0] * scale) / (Math.abs(eye[2]) * worldScale[0]), (eye[1] * scale) / (Math.abs(eye[2]) * worldScale[1])];
+    const ray = referenceUvRay(input);
     const center = input.center ?? 0;
     let hitDepth: number;
     if (input.kind === "ridge") {
@@ -376,14 +411,14 @@ test("the WGSL heightfield solver matches numeric references and its sample boun
                 throw new Error("WebGPU adapter unavailable for the parallax numeric oracle.");
             }
             const device = await adapter.requestDevice();
-            const values: Array<{ name: string; uv: number[]; samples: number }> = [];
+            const values: Array<{ name: string; uv: number[]; samples: number; heightError: number }> = [];
             const vertex = device.createShaderModule({
                 code: `@vertex fn main(@builtin(vertex_index) index:u32)->@builtin(position) vec4f{
 let positions=array<vec2f,3>(vec2f(-1.0,-1.0),vec2f(3.0,-1.0),vec2f(-1.0,3.0));
 return vec4f(positions[index],0.0,1.0);}`,
             });
-            const counted = helper.replace(/(fn parallaxHeight\([^)]*\)->f32\{)/, "$1parallaxSampleCount+=1u;");
-            if (counted === helper) {
+            const sampled = helper.replace(/\bfn parallaxHeight\(/, "fn parallaxSampledHeight(");
+            if (sampled === helper) {
                 throw new Error("The numeric oracle failed to instrument the actual height lookup.");
             }
             try {
@@ -448,11 +483,33 @@ return vec4f(positions[index],0.0,1.0);}`,
                         const minSteps = input.minSteps ?? input.steps ?? 16;
                         const maxSteps = input.maxSteps ?? input.steps ?? 16;
                         const refinement = input.refinement ?? 8;
+                        const referenceHeight =
+                            rampU || rampV
+                                ? `clamp(uv.${rampU ? "x" : "y"},0.5/${rampU ? width : height}.0,1.0-0.5/${rampU ? width : height}.0)*(256.0/255.0)`
+                                : ridge
+                                  ? "parallaxReferenceRidge(uv.x)"
+                                  : "value";
+                        const ridgeReference = ridge
+                            ? `fn parallaxReferenceRidge(u:f32)->f32{
+let heights=array<f32,64>(${ridgeHeights.map((height) => height / 255).join(",")});
+let x=clamp(u*64.0-0.5,0.0,63.0);let i=u32(floor(x));
+return mix(heights[i],heights[min(i+1u,63u)],fract(x));
+}`
+                            : "";
                         const fragment = device.createShaderModule({
                             code: `@group(0) @binding(0) var parallaxHeightTexture:texture_2d<f32>;
 @group(0) @binding(1) var parallaxHeightSampler:sampler;
 var<private> parallaxSampleCount:u32;
-${counted}
+var<private> parallaxHeightError:f32;
+${sampled}
+${ridgeReference}
+fn parallaxHeight(uv:vec2f,lod:f32,mask:vec4f)->f32{
+parallaxSampleCount+=1u;
+let sampled=parallaxSampledHeight(uv,lod,mask);
+let value=${input.halfPrecisionSampling ? "unpack2x16float(pack2x16float(vec2f(sampled,0.0))).x" : "sampled"};
+parallaxHeightError=max(parallaxHeightError,abs(value-(${referenceHeight})));
+return value;
+}
 @fragment fn main()->@location(0) vec4f{
 let uv=vec2f(0.5);
 let dx=vec2f(${pixel},0.0);
@@ -462,7 +519,7 @@ let heightUV=parallaxTransformUV(uv,matrix,vec2f(${translation.join(",")}));
 let heightDx=vec2f(dot(matrix.xy,dx),dot(matrix.zw,dx));
 let heightDy=vec2f(dot(matrix.xy,dy),dot(matrix.zw,dy));
 let offset=parallaxOffset(vec3f(${position.join(",")}),vec3f(${normal.join(",")}),vec3f(${input.degenerate ? 0 : worldScale[0] * pixel},0.0,0.0),vec3f(0.0,${worldScale[1] * pixel},0.0),vec3f(${eye.join(",")}),mat4x4f(${viewProjection.join(",")}),heightUV,heightDx,heightDy,vec4f(${input.scale ?? 0.08},${input.center ?? 0},0.0,0.0),vec4f(${minSteps},${maxSteps},${refinement},${input.channel ?? 0}));
-return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
+return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),parallaxHeightError);
 }`,
                         });
                         const info = await fragment.getCompilationInfo();
@@ -493,7 +550,7 @@ return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
                         device.queue.submit([commands.finish()]);
                         await readback.mapAsync(GPUMapMode.READ);
                         const data = new Float32Array(readback.getMappedRange().slice(0, 16));
-                        values.push({ name: input.name, uv: [data[0]!, data[1]!], samples: data[2]! });
+                        values.push({ name: input.name, uv: [data[0]!, data[1]!], samples: data[2]!, heightError: data[3]! });
                         readback.unmap();
                         const error = await device.popErrorScope();
                         if (error) {
@@ -519,11 +576,24 @@ return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
         const result = results[i]!;
         const expected = expectedUV(input);
         expect(result.uv.every(Number.isFinite), input.name).toBe(true);
+        expect(Number.isFinite(result.heightError), input.name).toBe(true);
+        expect(result.heightError, input.name).toBeGreaterThanOrEqual(0);
+        expect(result.heightError, `${input.name}: measured filtering error must stay below one encoded height unit`).toBeLessThan(1 / 255);
+        const depthError = filteringDepthError(input, result.heightError);
+        expect(Number.isFinite(depthError), input.name).toBe(true);
+        if (input.halfPrecisionSampling) {
+            expect(result.heightError, input.name).toBeGreaterThan(0);
+        }
         if (input.depthTolerance !== undefined) {
-            const eye = referenceViewRay(input);
-            const ray = (eye[0] * (input.scale ?? 0.08)) / (Math.abs(eye[2]) * (input.worldScale?.[0] ?? 1));
-            expect(Math.abs((result.uv[0]! - expected[0]) / ray), input.name).toBeLessThanOrEqual(input.depthTolerance + 0.000001);
+            const ray = referenceUvRay(input)[0];
+            expect(Math.abs((result.uv[0]! - expected[0]) / ray), input.name).toBeLessThanOrEqual(input.depthTolerance + 0.000001 + depthError);
             expect(result.uv[1], input.name).toBeCloseTo(expected[1], 5);
+        } else if (input.kind === "ramp-u" || input.kind === "ramp-v") {
+            const ray = referenceUvRay(input);
+            for (const axis of [0, 1] as const) {
+                const error = Math.max(0, Math.abs(result.uv[axis]! - expected[axis]) - Math.abs(ray[axis]) * depthError);
+                expect(error, `${input.name}: solver error after measured height uncertainty ${result.heightError}`).toBeLessThan(0.000005);
+            }
         } else {
             expect(result.uv[0], input.name).toBeCloseTo(expected[0], 5);
             expect(result.uv[1], input.name).toBeCloseTo(expected[1], 5);
@@ -538,6 +608,11 @@ return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
             expect(result.samples, input.name).toBe(0);
         }
     }
+    const reducedRidge = NUMERIC_CASES.findIndex((input) => input.name === "last ridge contact with reduced-precision filtering");
+    const reducedDepthError = Math.abs((results[reducedRidge]!.uv[0]! - expectedUV(NUMERIC_CASES[reducedRidge]!)[0]) / referenceUvRay(NUMERIC_CASES[reducedRidge]!)[0]);
+    expect(reducedDepthError, "The reduced-precision fixture must expose the original ideal-filter assertion").toBeGreaterThan(
+        NUMERIC_CASES[reducedRidge]!.depthTolerance! + 0.000001
+    );
     const ortho = NUMERIC_CASES.findIndex((input) => input.name === "oblique orthographic camera");
     const movedOrtho = NUMERIC_CASES.findIndex((input) => input.name === "axially moved oblique orthographic camera");
     expect(results[movedOrtho]!.uv).toEqual(results[ortho]!.uv);
