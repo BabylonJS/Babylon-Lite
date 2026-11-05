@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { createTransformNode } from "babylon-lite";
+import { cloneTransformNode, createTransformNode } from "babylon-lite";
 
-import { TransformNode } from "../src/meshes/meshes";
+import { Mesh, TransformNode } from "../src/meshes/meshes";
 import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
 
@@ -100,5 +100,51 @@ describe("TransformNode Babylon.js rotation parity", () => {
         expect(node.rotation.y).toBeCloseTo(0.5, 6);
         expect(node.rotation.z).toBeCloseTo(0, 6);
         expectRotation(node, expected);
+    });
+});
+
+/**
+ * Mesh.clone uses the same hierarchy wrapper for transform-only descendants.
+ * Exercise that wrapper with real GPU-free Lite transform nodes so a clone can
+ * preserve its independent Babylon.js Euler state and quaternion precedence.
+ */
+function cloneCompatTransform(source: TransformNode): TransformNode {
+    const wrap = Mesh as unknown as {
+        _wrapCloneHierarchy(source: TransformNode, lite: TransformNode["_node"], scene: undefined, parent: null, skipChildren: boolean): TransformNode;
+    };
+    return wrap._wrapCloneHierarchy(source, cloneTransformNode(source._node), undefined, null, true);
+}
+
+describe("Cloned TransformNode rotation state", () => {
+    it("retains the explicitly selected quaternion mode without losing stored Euler angles", () => {
+        const source = new TransformNode("source");
+        source.rotation = new Vector3(0.3, 0.5, -0.2);
+        const explicit = Quaternion.FromEulerAngles(-0.6, 0.7, 0.1);
+        source.rotationQuaternion = explicit;
+
+        const clone = cloneCompatTransform(source);
+        expect(clone.rotationQuaternion).not.toBeNull();
+        expectRotation(clone, explicit);
+        expect(clone.rotation.asArray()).toEqual([0.3, 0.5, -0.2]);
+
+        clone.rotationQuaternion = null;
+        expectRotation(clone, Quaternion.FromEulerAngles(0.3, 0.5, -0.2));
+        expectRotation(source, explicit);
+        expect(source.rotationQuaternion).not.toBeNull();
+    });
+
+    it("preserves Euler values and isolates the clone's mutable state from its source", () => {
+        const source = new TransformNode("euler");
+        source.rotation = new Vector3(1.3, 0.4, -1.1);
+
+        const clone = cloneCompatTransform(source);
+        expect(clone.rotationQuaternion).toBeNull();
+        expect(clone.rotation.asArray()).toEqual([1.3, 0.4, -1.1]);
+        expectRotation(clone, Quaternion.FromEulerAngles(1.3, 0.4, -1.1));
+
+        clone.rotation.y = 0.2;
+        expect(source.rotation.y).toBe(0.4);
+        expectRotation(clone, Quaternion.FromEulerAngles(1.3, 0.2, -1.1));
+        expectRotation(source, Quaternion.FromEulerAngles(1.3, 0.4, -1.1));
     });
 });

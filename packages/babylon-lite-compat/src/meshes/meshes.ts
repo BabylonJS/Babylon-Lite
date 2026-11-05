@@ -357,6 +357,13 @@ export class TransformNode extends Node {
     /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
     private _useQuat = false;
 
+    /** @internal Copy the independent Babylon.js rotation state after Lite cloned the physical quaternion. */
+    public _copyRotationStateFrom(source: TransformNode): void {
+        this._useQuat = source._useQuat;
+        this._rotationEuler = source._rotationEuler?.clone() ?? null;
+        this._rotationVersion = this._node.rotationQuaternion.version;
+    }
+
     /**
      * Babylon.js `rotationQuaternion`. Lite drives a node's world matrix from
      * a quaternion, but compat keeps Euler rotation independent while an explicit
@@ -1149,6 +1156,11 @@ export class Mesh extends AbstractMesh {
             }
         }
         wrapper.parent = parent;
+        // Native cloning copies the physical quaternion, not compat's Euler/quaternion mode.
+        // Preserve that state for both the root and descendants without recomposing the clone.
+        if (source instanceof TransformNode && source._node) {
+            wrapper._copyRotationStateFrom(source);
+        }
         if (source) {
             wrapper.id = wrapper instanceof Mesh ? `${wrapper.name}.${source.id}` : wrapper.name;
             wrapper.metadata = source.metadata;
