@@ -913,9 +913,13 @@ export class AbstractMesh extends TransformNode {
         if (!this._bakeMatrix(matrix)) {
             return this;
         }
-        // Reset the node transform to identity (the geometry now carries it).
+        // Reset both compat Euler state and the physical quaternion. A direct write
+        // to Lite's Euler proxy leaves compat's independent Euler snapshot untouched
+        // in quaternion mode, so clearing rotationQuaternion would resurrect a
+        // rotation that is already baked into the geometry.
         node.position.set(0, 0, 0);
-        node.rotation.set(0, 0, 0);
+        this.rotation.set(0, 0, 0);
+        node.rotationQuaternion.set(0, 0, 0, 1);
         node.scaling.set(1, 1, 1);
         return this;
     }
