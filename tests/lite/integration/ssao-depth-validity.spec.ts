@@ -156,6 +156,37 @@ for (const kind of ["depth", "float"] as const) {
                         const count = new Uint16Array(await readPixel(state.counts[state.index]!))[0]!;
                         const geometry = new Uint32Array(await readPixel(state.geometry));
 
+                        const normalProbe = makeTexture("rgba32uint", GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC);
+                        const probeModule = device.createShaderModule({
+                            code: `${api.xegtaoOutputWGSL(kind)}
+@fragment fn normalInputProbe(@builtin(position) pixel:vec4f)->@location(0) vec4u{
+let p=vec2i(pixel.xy);let supplied=aoSuppliedNormal(p);
+let normal=normalize((inverseView*vec4f(aoNormalOf(p,supplied),0)).xyz);
+return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(normal),pack2x16snorm(-supplied.zz));
+}`,
+                        });
+                        const probePipeline = device.createRenderPipeline({
+                            layout: device.createPipelineLayout({ bindGroupLayouts: [state.outputPipeline.getBindGroupLayout(0)] }),
+                            vertex: { module: probeModule, entryPoint: "fullscreen" },
+                            fragment: {
+                                module: probeModule,
+                                entryPoint: "normalInputProbe",
+                                targets: [{ format: "rgba32uint" }],
+                                constants: { PROVIDED_NORMALS: 1, WORLD_NORMALS: 0 },
+                            },
+                        });
+                        encoder = device.createCommandEncoder();
+                        const output = state.stages[0].find((stage) => stage.pipeline === state.outputPipeline)!;
+                        const probePass = encoder.beginRenderPass({
+                            colorAttachments: [{ view: normalProbe.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 0] }],
+                        });
+                        probePass.setPipeline(probePipeline);
+                        probePass.setBindGroup(0, output.group);
+                        probePass.draw(3);
+                        probePass.end();
+                        device.queue.submit([encoder.finish()]);
+                        const normalInputs = Array.from(new Uint32Array(await readPixel(normalProbe)).subarray(0, 4));
+
                         encoder = device.createCommandEncoder();
                         clear(encoder, state.counts[1], 1);
                         for (let mip = 0; mip < state.convolution.mipLevelCount; mip++) {
@@ -251,6 +282,7 @@ for (const kind of ["depth", "float"] as const) {
                             history,
                             count,
                             geometry: Array.from(geometry.subarray(0, 2)),
+                            normalInputs,
                             repaired,
                             transport,
                             error: error?.message,
@@ -271,6 +303,7 @@ for (const kind of ["depth", "float"] as const) {
         for (const entry of result.cases) {
             const label = JSON.stringify(entry);
             expect(entry.error, label).toBeUndefined();
+            expect(entry.normalInputs, label).toEqual([0xbf800000, 0xbf800000, 0x7fff7fff, 0x7fff7fff]);
             if (entry.distance === null) {
                 expect(entry.history, label).toBe(255);
                 expect(entry.visibility, label).toBe(0x3c00);
