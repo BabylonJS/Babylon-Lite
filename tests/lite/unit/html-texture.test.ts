@@ -537,6 +537,31 @@ describe("disposeHtmlTexture", () => {
         expect(el.hasAttribute("drawable")).toBe(false);
         expect(el.inert).toBe(false);
     });
+
+    it("rejects sharing an element with a texture on another canvas", () => {
+        const hostA = makeHost();
+        const hostB = makeHost();
+        const capB = newCap();
+        const engineA = makeEngine(hostA, newCap());
+        const engineB = makeEngine(hostB, capB);
+        const el = makeElement();
+
+        const a = createHtmlTexture(engineA, el, {});
+        expect(() => createHtmlTexture(engineB, el, {})).toThrow(/another canvas/);
+
+        // Nothing was allocated or opted in on canvas B.
+        expect(capB.createDesc).toBeUndefined();
+        expect(hostB.content).toBe("fallback");
+        expect(hostB.attributes.has("content")).toBe(false);
+        expect(hostB.listeners.paint ?? []).toHaveLength(0);
+        expect(el.parentNode).toBe(hostA as unknown as Node);
+
+        // Once canvas A releases the element, canvas B can host it.
+        disposeHtmlTexture(a);
+        const b = createHtmlTexture(engineB, el, {});
+        expect(el.parentNode).toBe(hostB as unknown as Node);
+        disposeHtmlTexture(b);
+    });
 });
 
 describe("createHtmlTexture (no DOM canvas)", () => {

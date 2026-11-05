@@ -96,6 +96,8 @@ interface HtmlInCanvasHostRef {
 /** Hosting state of an element shared by every live HTML texture built from it. */
 interface HtmlTextureElementRef {
     count: number;
+    /** Canvas hosting the element; every texture sharing it must render there. */
+    host: HTMLCanvasElement;
     /** Original parent to restore the element to once no texture hosts it. */
     parent: Node | null;
     /** Original next sibling, to restore the element's position. */
@@ -189,6 +191,9 @@ export function isHtmlInCanvasSupported(engine: EngineContext): boolean {
  * per the HTML-in-Canvas spec those are separate drawable subtrees and are left
  * out of this texture.
  *
+ * Several textures may share one element only when they render into the same
+ * canvas; creating a texture from an element hosted by another canvas throws.
+ *
  * @param engine - Engine context (must render into a DOM canvas, not an `OffscreenCanvas`).
  * @param element - The DOM element to rasterise.
  * @param options - Size / sampler / update overrides.
@@ -199,6 +204,11 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
         throw new Error("createHtmlTexture: requires a DOM canvas rendering surface (HTML-in-Canvas is unavailable on OffscreenCanvas).");
     }
     const supportsNativeHtmlTexture = isHtmlInCanvasSupported(engine);
+    const hostsElement = supportsNativeHtmlTexture || (options.useSvgFallback ?? true);
+    const owner = htmlTextureElementRefs?.get(element)?.host;
+    if (hostsElement && owner && owner !== host) {
+        throw new Error("createHtmlTexture: the element is already hosted by another canvas; textures can share an element only within one canvas.");
+    }
 
     const width = options.width ?? (element.offsetWidth || 256);
     const height = options.height ?? (element.offsetHeight || 256);
@@ -235,7 +245,7 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._rejectReady = rejectReady;
     tex._readyState = "pending";
 
-    if (supportsNativeHtmlTexture || tex._useSvgFallback) {
+    if (hostsElement) {
         // Host the element only when an update path exists. The host opt-in lays
         // out the canvas's DOM descendants, `drawable` marks this element's subtree
         // for snapshotting, and `inert` stops it from stealing pointer/keyboard
@@ -442,7 +452,7 @@ function acquireHtmlTextureElement(host: HTMLCanvasElement, element: HTMLElement
     const refs = (htmlTextureElementRefs ??= new WeakMap());
     let ref = refs.get(element);
     if (!ref) {
-        ref = { count: 0, parent: element.parentNode, nextSibling: element.nextSibling, inert: element.inert, drawable: element.hasAttribute("drawable") };
+        ref = { count: 0, host, parent: element.parentNode, nextSibling: element.nextSibling, inert: element.inert, drawable: element.hasAttribute("drawable") };
         refs.set(element, ref);
         element.setAttribute("drawable", "");
         element.inert = true;
