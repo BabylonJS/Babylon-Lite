@@ -17,9 +17,15 @@ import type { SceneContext } from "./scene-core.js";
 let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
 let _materialValidator: ((mesh: Mesh, material: Mesh["material"]) => void) | null = null;
 
-/** @internal Install optional validation of material transitions for a borrowed consumer. */
+/** @internal Chain optional material-transition validation in installation order. */
 export function _installMeshMaterialValidator(validate: (mesh: Mesh, material: Mesh["material"]) => void): void {
-    _materialValidator = validate;
+    const previous = _materialValidator;
+    _materialValidator = previous
+        ? (mesh, material) => {
+              previous(mesh, material);
+              validate(mesh, material);
+          }
+        : validate;
 }
 
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.

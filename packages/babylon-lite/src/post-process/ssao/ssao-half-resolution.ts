@@ -98,7 +98,7 @@ if(any(id.xy>=(ao.size+1u)/2u)){return;}
 let p=vec2i(min(id.xy*2u+1u,ao.size-1u));let q=vec2i(id.xy);
 let d=aoRawDepth(p);
 textureStore(outDepth,q,vec4f(d,0,0,0));
-textureStore(outLinear,q,vec4f(clamp(ao.depthUnpack.x/(ao.depthUnpack.y-d),0.0,65504.0),0,0,0));
+textureStore(outLinear,q,vec4f(clamp(dZ(d),0.0,65504.0),0,0,0));
 ${normals ? wgsl`textureStore(outNormal,q,textureLoad(normalInput,p,0));` : wgsl`var n=vec3f(0,0,-1);if(d!=0.0){n=aoDepthNormal(p);}textureStore(outNormal,q,vec4f(n,0));`}
 ${velocity ? wgsl`textureStore(outVelocity,q,textureLoad(velocity,p,0));` : wgsl``}
 }`;

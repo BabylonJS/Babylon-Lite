@@ -33,7 +33,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension, _geometryColorTarget } from "../../frame-graph/geometry-types.js";
 import {
     _computeMeshFeatures,
     MSH_HAS_INSTANCE_COLOR,
@@ -553,7 +553,7 @@ function _ensureViewResources(
     // The view's features have PBR_HAS_ALPHA_BLEND already stripped. Detect
     // alpha-blend from the SOURCE so transparent meshes get the right blend
     // pipeline state below.
-    const sourceFeatures = source._renderFeatures?.features ?? 0;
+    const sourceFeatures = (source._renderFeatures?.features ?? 0) | ((meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND);
     const alphaBlend = (sourceFeatures & PBR_HAS_ALPHA_BLEND) !== 0;
 
     const res: PbrGeometryViewResources = {
@@ -619,7 +619,7 @@ function _getOrCreateGeometryPipeline(
         : undefined;
     const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const colorTargets: GPUColorTargetState[] = formats.map((format) =>
-        extension ? extension.colorTarget(format, blendState, device) : blendState ? { format, blend: blendState } : { format }
+        extension ? extension.colorTarget(format, blendState, device) : _geometryColorTarget(format, blendState, device)
     );
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;

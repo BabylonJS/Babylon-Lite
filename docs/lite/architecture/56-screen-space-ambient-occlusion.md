@@ -364,6 +364,10 @@ There is no camera-independent depth epsilon in accumulation, geometry-history
 validation, repair/output, transport, or motion masking. For example, near 0.01,
 far 20000 and view Z 10000 produce a valid float32 depth around `5e-7`; rejecting
 it as background would erase otherwise valid AO.
+The existing scalar device-to-view conversion helper `dZ` lives in the shared
+AO-parameter preamble and is reused by depth preparation, normal reconstruction,
+Half upsampling and temporal reconstruction. Existing view-depth clamps remain
+at their call sites; vectorized conversions stay vectorized.
 
 ## State Machine / Lifecycle
 

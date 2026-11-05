@@ -899,7 +899,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     let lastPipeline: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of task._bound) {
-        if (b._mesh.visible === false) {
+        if (b._mesh.visible === false || b._mesh._skipColorDraw) {
             continue;
         }
         const pipeline = b._binding.pipeline;

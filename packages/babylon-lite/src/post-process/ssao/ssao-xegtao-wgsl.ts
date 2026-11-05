@@ -9,7 +9,6 @@ return vec4f(uv*vec2f(2,-2)+vec2f(-1,1),0,1);
 
 const COMMON = wgsl`${SSAO_PARAMS_WGSL}
 ${XEGTAO_FULLSCREEN_WGSL}
-fn dZ(d:f32)->f32{return ao.depthUnpack.x/(ao.depthUnpack.y-d);}
 fn dGeom(a:vec3f,b:vec3f,n:vec3f)->f32{return clamp(1.0-abs(dot(b-a,n))*(10.0/(1.0+a.z)),0.0,1.0);}
 // Geometry history is RG32Uint: exact device-depth bits, then an octahedral world normal in two snorm16.
 fn geometryNormalBits(n:vec3f)->u32{

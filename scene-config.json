@@ -3175,5 +3175,16 @@
         "tags": ["pbr", "gltf", "ibl", "bent-normal", "right-handed"],
         "rightHanded": true,
         "skipPerf": true
+    },
+    {
+        "id": 354,
+        "slug": "scene354-mesh-opacity",
+        "name": "Scene 354 — Mesh Opacity",
+        "maxMad": 0.5,
+        "maxRawKB": 89,
+        "description": "Programmatic Standard/PBR direct visibility parity, a separately normalized glTF-style OPAQUE/MASK fade oracle with shared-material twins, full-strength shadow policy at half/zero opacity, and alpha-to-coverage plus blend.",
+        "note": "Direct BJS visibility parity covers programmatic Standard/PBR. Explicit OPAQUE/MASK fading, full-strength shadows and alpha-to-coverage plus blend use separately labelled normalized Lite-policy oracle regions.",
+        "tags": ["std", "pbr", "procedural", "shadow"],
+        "skipPerf": true
     }
 ]

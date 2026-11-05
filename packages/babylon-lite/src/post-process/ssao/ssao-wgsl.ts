@@ -11,6 +11,7 @@ extra:vec4f,view:mat4x4f
 @group(0) @binding(0) var<uniform> ao:AoParams;
 fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*z,z);}
 fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
+fn dZ(d:f32)->f32{return ao.depthUnpack.x/(ao.depthUnpack.y-d);}
 `;
 
 /**
@@ -30,7 +31,7 @@ ${ssaoDepthBindingWGSL(kind, 1)}
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
 if(any(id.xy>=ao.size)){return;}
 let d=aoRawDepth(vec2i(id.xy));
-let z=clamp(ao.depthUnpack.x/(ao.depthUnpack.y-d),0.0,65504.0);
+let z=clamp(dZ(d),0.0,65504.0);
 textureStore(outDepth,vec2i(id.xy),vec4f(z,0,0,0));
 }`;
 }
@@ -103,7 +104,7 @@ let centerDepth=${depthFunction}(p);
 let l=aoClamp(p+vec2i(-1,0),ao.size);let r=aoClamp(p+vec2i(1,0),ao.size);
 let t=aoClamp(p+vec2i(0,-1),ao.size);let b=aoClamp(p+vec2i(0,1),ao.size);
 let depth=vec4f(${depthFunction}(l),${depthFunction}(r),${depthFunction}(t),${depthFunction}(b));
-let centerZ=clamp(ao.depthUnpack.x/(ao.depthUnpack.y-centerDepth),0.0,65504.0);
+let centerZ=clamp(dZ(centerDepth),0.0,65504.0);
 let z=clamp(ao.depthUnpack.x/(vec4f(ao.depthUnpack.y)-depth),vec4f(0),vec4f(65504));
 var left=p.x==i32(ao.size.x)-1||(p.x>0&&abs(z.x-centerZ)<abs(z.y-centerZ));
 var top=p.y==i32(ao.size.y)-1||(p.y>0&&abs(z.z-centerZ)<abs(z.w-centerZ));
@@ -144,7 +145,7 @@ if(any(depth==vec4f(0))){
 let q=aoClamp(p+vec2i(select(1,-1,left),select(1,-1,top)),ao.size);
 let diagonalDepth=${depthFunction}(q);
 if(diagonalDepth>0.0){
-let diagonalZ=clamp(ao.depthUnpack.x/(ao.depthUnpack.y-diagonalDepth),0.0,65504.0);
+let diagonalZ=clamp(dZ(diagonalDepth),0.0,65504.0);
 let diagonal=aoPosition((vec2f(q)+0.5)*ao.invSize,diagonalZ);
 if(any(depth.xy==vec2f(0))){
 let row=aoPosition((vec2f(select(b,t,top))+0.5)*ao.invSize,select(z.w,z.z,top));

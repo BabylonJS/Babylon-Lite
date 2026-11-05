@@ -500,6 +500,7 @@ export {
     getStandardReflectionCubeTexture,
 } from "./material/standard/standard-material-accessors.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
+export { setMeshOpacity, getMeshOpacity } from "./mesh/opacity/mesh-opacity.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";

@@ -165,6 +165,21 @@ Alpha-blended meshes participate by default, matching Babylon.js geometry
 rendering. Callers that need an opaque-only pass provide a filtered `meshes`
 array. Alpha-tested materials remain supported because their existing material
 shader discards rejected fragments before any geometry output is written.
+BLEND materials and meshes faded via `setMeshOpacity` are blended geometry
+participants: every colour target must support blending. Default `VIEW_DEPTH`
+uses `r32float`, which requires the device feature `float32-blendable` for such
+participants; otherwise override it to `r16float`. Integer targets are never
+blended.
+
+PBR, Standard, and Node geometry pipeline creation validates blended targets
+through the internal `_geometryColorTarget` helper in `geometry-types.ts`.
+Without the required device feature, a blended 32-bit float target throws the
+existing error before pipeline creation:
+`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`
+Blending another integer target throws
+`Transparent geometry output cannot blend integer format "${format}".`
+The mesh-blending output extension keeps its `r8uint` tag target unblended and
+delegates validation of the other targets to the same helper.
 
 When more than two HDR (`rgba16float`) attachments are stacked the request can
 exceed WebGPU's default `maxColorAttachmentBytesPerSample` cap of 32 bytes.

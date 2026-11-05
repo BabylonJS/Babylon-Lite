@@ -24,6 +24,20 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { WgslSource } from "../shader/wgsl.js";
 
+/** @internal Validate blended geometry targets before pipeline creation. */
+export function _geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
+    if (!blend) {
+        return { format };
+    }
+    if (format.endsWith("uint") || format.endsWith("sint")) {
+        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
+    }
+    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
+        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
+    }
+    return { format, blend };
+}
+
 /** Identifies a single geometry texture supported by `createGeometryRendererTask`. */
 export enum GeometryTextureType {
     /** Half-float RGBA — diffuse irradiance accumulated at the surface. */

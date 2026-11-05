@@ -4,8 +4,9 @@ import type * as SsaoGpu from "../../../packages/babylon-lite/src/post-process/s
 import type * as TemporalGpu from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";
 import type * as TemporalWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";
 import type * as MotionMask from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";
+import type * as HalfWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";
 
-type TestApi = typeof SsaoGpu & typeof TemporalGpu & typeof TemporalWgsl & typeof MotionMask;
+type TestApi = typeof SsaoGpu & typeof TemporalGpu & typeof TemporalWgsl & typeof MotionMask & typeof HalfWgsl;
 let script: string;
 
 test.beforeAll(async () => {
@@ -16,6 +17,7 @@ test.beforeAll(async () => {
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";',
+                'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";',
             ].join("\n"),
             resolveDir: process.cwd(),
         },
@@ -336,6 +338,37 @@ return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(
         }
     });
 }
+
+test("SSAO Half upsampling compiles shared depth conversion with supplied and reconstructed normals", async ({ page }) => {
+    await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
+    await page.addScriptTag({ content: script });
+    const errors = await page.evaluate(async () => {
+        const api = (window as unknown as { ssaoDepthTest: TestApi }).ssaoDepthTest;
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw new Error("WebGPU adapter unavailable");
+        }
+        const device = await adapter.requestDevice();
+        device.pushErrorScope("validation");
+        try {
+            const errors: string[] = [];
+            for (const supplied of [false, true]) {
+                const module = device.createShaderModule({ code: api.ssaoHalfUpsampleWGSL(supplied) });
+                const info = await module.getCompilationInfo();
+                errors.push(...info.messages.filter((message) => message.type === "error").map((message) => message.message));
+                await device.createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint: "main" } });
+            }
+            const validation = await device.popErrorScope();
+            if (validation) {
+                errors.push(validation.message);
+            }
+            return errors;
+        } finally {
+            device.destroy();
+        }
+    });
+    expect(errors).toEqual([]);
+});
 
 test("SSAO normal history preserves snorm16 endpoints and both hemispheres on the GPU", async ({ page }) => {
     await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);

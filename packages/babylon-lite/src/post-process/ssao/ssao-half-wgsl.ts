@@ -58,7 +58,7 @@ let d=textureLoad(sparseDepth,q,0).r;
 var point=vec4f(0,0,0,-1);var n=vec3f(0,0,-1);
 if(d!=0.0){
 let p=aoClamp(q*2+vec2i(1),ao.size);
-point=vec4f(aoPosition((vec2f(p)+0.5)*ao.invSize,ao.depthUnpack.x/(ao.depthUnpack.y-d)),textureLoad(sparseVisibility,q,0).r);
+point=vec4f(aoPosition((vec2f(p)+0.5)*ao.invSize,dZ(d)),textureLoad(sparseVisibility,q,0).r);
 n=normalize(viewNormal(textureLoad(sparseNormal,q,0).xyz));
 }
 tapPoint[lane]=point;tapNormal[lane]=n;
@@ -74,7 +74,7 @@ workgroupBarrier();
 if(any(id.xy>=ao.size)){return;}let p=vec2i(id.xy);var value=1.0;
 let d=${sourceNormals ? "aoRawDepth(p)" : "aoCachedDepth(p)"};
 if(d!=0.0){
-let point=aoPosition((vec2f(p)+0.5)*ao.invSize,ao.depthUnpack.x/(ao.depthUnpack.y-d));
+let point=aoPosition((vec2f(p)+0.5)*ao.invSize,dZ(d));
 var grid=(vec2f(id.xy)-1.0)*0.5;
 if(id.x==ao.size.x-1u&&(ao.size.x&1u)!=0u){grid.x=f32(dims.x-1u);}
 if(id.y==ao.size.y-1u&&(ao.size.y&1u)!=0u){grid.y=f32(dims.y-1u);}
