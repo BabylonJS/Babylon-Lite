@@ -43,8 +43,8 @@ The setter performs these operations in order:
 6. Install the feature once. If the stored/default value already equals the new
    clamped value, return without storing, dirtying or writing.
 7. Store the value and synchronously set `mesh._skipColorDraw = value === 0`,
-   enqueue a rebuild on crossing 1, and update live binding uniforms whenever
-   the new value is below 1. Returning to 1 clears the flag before returning.
+   enqueue a rebuild on crossing 1, and update live binding uniforms with every
+   changed value, including 1.
 
 A null material is permitted. An ordinary, non-disposed Mesh can reset to 1
 regardless of material family. Invalid calls must not install hooks/extensions,
@@ -62,6 +62,7 @@ interface OpacityBinding {
     readonly _buffer: GPUBuffer;
     readonly _device: GPUDevice;
     readonly _engine: EngineContext;
+    readonly _disposers: (() => void)[];
 }
 ```
 
@@ -70,11 +71,12 @@ records. A lazily created `WeakMap<Mesh, Set<OpacityBinding>>` tracks live
 binding-owned buffers. Neither the map nor its sets are allocated at import time.
 A reusable one-element `Float32Array` supplies writes.
 
-Each active mesh bind-group creation creates a distinct 16-byte uniform buffer.
-Only its first four bytes contain the opacity `f32`. Main, geometry and
-signature-specific refraction bindings have separate records; no material owns
-this buffer. Native shallow mesh clones copy the scalar and its corresponding
-skip flag but never the records.
+Each mesh's binding lifetime and device pair owns one 16-byte uniform buffer.
+Only its first four bytes contain the opacity `f32`. Repeated binds with the same
+disposer-array identity and device reuse the existing buffer and record without
+another allocation, initial upload or disposer. Different lifetime arrays or
+devices create separate records; no material owns this buffer. Native shallow
+mesh clones copy the scalar and its corresponding skip flag but never the records.
 
 ### Lazy installation and chained installers
 
@@ -269,8 +271,9 @@ Each active opacity fragment contributes one structured declaration:
 Its helper is `struct meshOpacityUniforms{value:f32}`. The composer assigns the
 group-1 binding index from declarations; never parse emitted WGSL for an index.
 The bind hook pushes `{ binding, resource: { buffer } }` and returns
-`binding + 1`. It initializes the uniform from current mesh state, records the
-buffer and appends its disposer. Missing mesh/scene or lifetime transport throws
+`binding + 1`. It reuses a record with the same lifetime array and device when
+present; otherwise it initializes the uniform from current mesh state, records
+the buffer and appends its disposer. Missing mesh/scene or lifetime transport throws
 a route-specific internal invariant error rather than silently allocating a
 fallback collection.
 
@@ -327,30 +330,40 @@ or the geometry gate.
 
 | Transition          | Dirtying                                         | Existing uniform writes                       | Buffer lifecycle                     |
 | ------------------- | ------------------------------------------------ | --------------------------------------------- | ------------------------------------ |
-| 1 → 0.6             | Once per crossing; enqueue in every owning scene | Latest factor to any still-live records       | New binding allocates                |
+| 1 → 0.6             | Once per crossing; enqueue in every owning scene | Latest factor to any still-live records       | New lifetime allocates               |
 | 0.6 → 0.4 → 0 → 0.3 | None                                             | Four bytes per live binding per changed value | No setter allocation/destruction     |
-| 0.3 → 1             | Once per crossing; enqueue in every owning scene | None                                          | Old buffers retire with old bindings |
+| 0.3 → 1             | Once per crossing; enqueue in every owning scene | Write 1 to any still-live records             | Old buffers retire with old bindings |
 | Equal clamped value | None                                             | None                                          | None                                 |
 | Unregistered mesh   | No scene enqueue                                 | No records unless already bound               | First bind reads stored value        |
 
 Dirtying uses `markMeshRenderableDirty` and existing per-scene swap-queue
 deduplication; it never bumps the visibility epoch. Boundary enqueueing and
-sub-1 direct writes are independent.
+direct writes are independent.
+
+A mesh registered in no scene but drawn through an explicit geometry-task
+`meshes` list picks up opacity threshold crossings (`1 ↔ <1`, selecting a
+pipeline/blend variant) only at that task's next renderable sync. This is the same
+contract as material/topology changes on such meshes; the setter does not
+invalidate off-scene geometry tasks. Value updates below 1 and the opacity-0 skip
+apply immediately. Returning to 1 also writes 1 to retained binding buffers, so
+they do not retain the old opacity while waiting for that sync.
 
 **Rapid double crossing:** for `0.3 → 1 → 0.6` before asynchronous replacement
 settles, the retained transparent binding must receive 0.6, even though a rebuild
 was enqueued. A replacement binding initializes from the latest stored value.
-Transitions to 1 do not write old buffers. Zero/fraction changes require no
-rebuild because the loops read the synchronously updated skip flag.
+The intermediate transition to 1 writes 1 to still-live buffers. Zero/fraction
+changes require no rebuild because the loops read the synchronously updated skip flag.
 
 For each direct write, require
 `record._engine._device === record._device`. Skip stale-device records without
 destroying them in the setter. The binding disposer removes its record before
 destroying the buffer and is idempotent.
 
-Refraction rebinds create separate records and buffers, retained until their
-owning renderable retires. There is no new signature cache. Teardown of one
-scene removes only that scene's records when a mesh belongs to several scenes.
+Refraction rebinds reuse the opacity record and buffer associated with the same
+renderable lifetime array and device, even when other bind-group entries change.
+Each new lifetime or device gets a separate buffer. There is no new signature
+cache. Teardown of one scene removes only that scene's records when a mesh belongs
+to several scenes.
 The existing last-scene removal disposes mesh GPU resources and marks it
 disposed; opacity adds no mesh-disposal or retirement observer.
 
@@ -422,6 +435,9 @@ inventories.
   unchanged material/picking/visibility, MeshLoD rejection and null-material policy.
 - All boundary/non-boundary transition counts, multi-scene records, idempotent
   disposal, recovery/device mismatch and rapid-double-crossing buffer freshness.
+- Off-scene retained geometry bindings receive 1 on reset. Repeated binds on the
+  same device and lifetime allocate one buffer/disposer/record and write once per
+  update; different lifetime arrays or devices remain independent.
 - Atomic unsupported material swaps and both installation orders with the real
   indexed-indirect borrow validator; previous-first feature/context chains.
 - Standard/PBR composition, fragment slots, original discard before multiplication,

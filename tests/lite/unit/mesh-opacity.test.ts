@@ -73,9 +73,8 @@ function bindingEngine() {
     return { engine: { _device: device } as EngineContext, device, writes, contents };
 }
 
-async function bindOpacity(target: Mesh, engine: EngineContext, route: "standard-main" | "standard-geometry" | "pbr-main" | "pbr-geometry") {
+async function bindOpacity(target: Mesh, engine: EngineContext, route: "standard-main" | "standard-geometry" | "pbr-main" | "pbr-geometry", disposers: (() => void)[] = []) {
     const entries: GPUBindGroupEntry[] = [];
-    const disposers: (() => void)[] = [];
     let next: number;
     if (route.startsWith("standard")) {
         const standard = await import("../../../packages/babylon-lite/src/material/standard/standard-flags");
@@ -172,15 +171,15 @@ describe("native mesh-opacity public contract", () => {
                 [0, 2],
                 [0.3, 3],
                 [0.3, 3],
-                [1, 3],
+                [1, 4],
             ] as const) {
                 opacity.setMeshOpacity(target, value);
                 expect(fixture.device.queue.writeBuffer).toHaveBeenCalledTimes(writes);
             }
             expect(fixture.device.createBuffer).toHaveBeenCalledTimes(1);
             expect(binding.buffer.destroy).not.toHaveBeenCalled();
-            expect(fixture.writes.slice(1).map((write) => write.bytes)).toEqual([4, 4, 4]);
-            expect(fixture.writes.slice(1).map((write) => write.buffer)).toEqual([binding.buffer, binding.buffer, binding.buffer]);
+            expect(fixture.writes.slice(1).map((write) => write.bytes)).toEqual([4, 4, 4, 4]);
+            expect(fixture.writes.slice(1).map((write) => write.buffer)).toEqual([binding.buffer, binding.buffer, binding.buffer, binding.buffer]);
             for (const dispose of binding.disposers) {
                 dispose();
             }
@@ -200,13 +199,14 @@ describe("native mesh-opacity public contract", () => {
                 const dirty = vi.spyOn(registry, "markMeshRenderableDirty");
                 vi.mocked(fixture.device.queue.writeBuffer).mockClear();
                 opacity.setMeshOpacity(target, 1);
-                expect(fixture.contents.get(current.buffer)![0]).toBeCloseTo(0.3);
-                expect(fixture.device.queue.writeBuffer).not.toHaveBeenCalled();
+                expect(fixture.contents.get(current.buffer)![0]).toBe(1);
+                expect(fixture.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(current.buffer, 0, expect.any(Float32Array));
                 opacity.setMeshOpacity(target, 0.6);
                 opacity.setMeshOpacity(target, 0.6);
                 expect(dirty).toHaveBeenCalledTimes(2);
                 owners.forEach((owner) => expect(owner._materialSwapQueue).toEqual([target]));
-                expect(fixture.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(current.buffer, 0, expect.any(Float32Array));
+                expect(fixture.device.queue.writeBuffer).toHaveBeenCalledTimes(2);
+                expect(fixture.device.queue.writeBuffer).toHaveBeenLastCalledWith(current.buffer, 0, expect.any(Float32Array));
                 expect(fixture.contents.get(current.buffer)![0]).toBeCloseTo(0.6);
                 expect(fixture.device.createBuffer).toHaveBeenCalledTimes(1);
                 const replacement = await bindOpacity(target, fixture.engine, route);
@@ -216,6 +216,86 @@ describe("native mesh-opacity public contract", () => {
                 dirty.mockRestore();
             }
         );
+
+        it.each(["standard-geometry", "pbr-geometry"] as const)("writes 1 to a retained off-scene geometry binding on %s", async (route) => {
+            const target = mesh(route === "standard-geometry" ? createStandardMaterial() : createPbrMaterial());
+            const fixture = bindingEngine();
+            opacity.setMeshOpacity(target, 0.5);
+            const binding = await bindOpacity(target, fixture.engine, route);
+            vi.mocked(fixture.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 1);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(binding.buffer, 0, expect.any(Float32Array));
+            expect(fixture.contents.get(binding.buffer)![0]).toBe(1);
+            expect(fixture.writes.at(-1)!.bytes).toBe(4);
+            binding.disposers.forEach((dispose) => dispose());
+        });
+
+        it("reuses one PBR buffer and record for repeated binds with the same lifetime and device", async () => {
+            const target = mesh(createPbrMaterial());
+            const fixture = bindingEngine();
+            opacity.setMeshOpacity(target, 0.5);
+            const current = await bindOpacity(target, fixture.engine, "pbr-main");
+            for (let i = 0; i < 5; i++) {
+                const rebound = await bindOpacity(target, fixture.engine, "pbr-main", current.disposers);
+                expect(rebound.buffer).toBe(current.buffer);
+                expect(rebound.entries).toEqual([{ binding: 7, resource: { buffer: current.buffer } }]);
+                expect(rebound.next).toBe(8);
+            }
+            expect(fixture.device.createBuffer).toHaveBeenCalledTimes(1);
+            expect(current.disposers).toHaveLength(1);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledTimes(1);
+            vi.mocked(fixture.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 0.4);
+            opacity.setMeshOpacity(target, 0.2);
+            opacity.setMeshOpacity(target, 0.2);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledTimes(2);
+            expect(fixture.contents.get(current.buffer)![0]).toBeCloseTo(0.2);
+
+            const separate = await bindOpacity(target, fixture.engine, "pbr-main");
+            expect(separate.buffer).not.toBe(current.buffer);
+            expect(fixture.device.createBuffer).toHaveBeenCalledTimes(2);
+            expect(separate.disposers).toHaveLength(1);
+            expect(current.disposers).toHaveLength(1);
+            vi.mocked(fixture.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 0.1);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledTimes(2);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledWith(current.buffer, 0, expect.any(Float32Array));
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledWith(separate.buffer, 0, expect.any(Float32Array));
+            current.disposers[0]!();
+            current.disposers[0]!();
+            expect(current.buffer.destroy).toHaveBeenCalledTimes(1);
+            vi.mocked(fixture.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 0.05);
+            expect(fixture.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(separate.buffer, 0, expect.any(Float32Array));
+            separate.disposers[0]!();
+            separate.disposers[0]!();
+            expect(separate.buffer.destroy).toHaveBeenCalledTimes(1);
+            vi.mocked(fixture.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 0);
+            expect(fixture.device.queue.writeBuffer).not.toHaveBeenCalled();
+        });
+
+        it("does not reuse a replaced device's buffer even with the same lifetime array", async () => {
+            const target = mesh(createPbrMaterial());
+            const old = bindingEngine();
+            opacity.setMeshOpacity(target, 0.5);
+            const stale = await bindOpacity(target, old.engine, "pbr-main");
+            const replacement = bindingEngine();
+            old.engine._device = replacement.device;
+            const rebound = await bindOpacity(target, old.engine, "pbr-main", stale.disposers);
+            expect(rebound.buffer).not.toBe(stale.buffer);
+            expect(old.device.createBuffer).toHaveBeenCalledTimes(1);
+            expect(replacement.device.createBuffer).toHaveBeenCalledTimes(1);
+            expect(stale.disposers).toHaveLength(2);
+            vi.mocked(old.device.queue.writeBuffer).mockClear();
+            vi.mocked(replacement.device.queue.writeBuffer).mockClear();
+            opacity.setMeshOpacity(target, 0.4);
+            expect(old.device.queue.writeBuffer).not.toHaveBeenCalled();
+            expect(replacement.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(rebound.buffer, 0, expect.any(Float32Array));
+            stale.disposers.forEach((dispose) => dispose());
+            expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
+            expect(rebound.buffer.destroy).toHaveBeenCalledTimes(1);
+        });
 
         it("retires only the removed scene's records and keeps another scene's main and geometry writable", async () => {
             const target = mesh();

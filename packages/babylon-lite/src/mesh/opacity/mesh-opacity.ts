@@ -15,6 +15,7 @@ interface OpacityBinding {
     readonly _buffer: GPUBuffer;
     readonly _device: GPUDevice;
     readonly _engine: EngineContext;
+    readonly _disposers: (() => void)[];
 }
 
 let _installed = false;
@@ -82,9 +83,6 @@ export function setMeshOpacity(mesh: Mesh, opacity: number): void {
     if ((previous === 1) !== (value === 1)) {
         markMeshRenderableDirty(mesh);
     }
-    if (value === 1) {
-        return;
-    }
     const records = _bindings?.get(mesh);
     if (records) {
         _value[0] = value;
@@ -102,18 +100,25 @@ export function getMeshOpacity(mesh: Mesh): number {
     return mesh._opacity ?? 1;
 }
 
-/** @internal Create one binding-owned uniform and retirement record; never a material-owned resource. */
+/** @internal Reuse or create a binding-lifetime-owned uniform; never a material-owned resource. */
 export function _bindMeshOpacity(mesh: Mesh, engine: EngineContext, entries: GPUBindGroupEntry[], binding: number, disposers: (() => void)[] | undefined, route: string): number {
     if (!disposers) {
         throw new Error(`${route} mesh opacity binding requires binding-owned disposers.`);
     }
+    let records = _bindings?.get(mesh);
+    if (records) {
+        for (const record of records) {
+            if (record._disposers === disposers && record._device === engine._device) {
+                entries.push({ binding, resource: { buffer: record._buffer } });
+                return binding + 1;
+            }
+        }
+    }
     _value[0] = getMeshOpacity(mesh);
     const buffer = createUniformBuffer(engine, _value);
-    const record: OpacityBinding = { _buffer: buffer, _device: engine._device, _engine: engine };
-    const map = (_bindings ??= new WeakMap());
-    let records = map.get(mesh);
+    const record: OpacityBinding = { _buffer: buffer, _device: engine._device, _engine: engine, _disposers: disposers };
     if (!records) {
-        map.set(mesh, (records = new Set()));
+        (_bindings ??= new WeakMap()).set(mesh, (records = new Set()));
     }
     records.add(record);
     const liveRecords = records;
