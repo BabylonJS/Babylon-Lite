@@ -6,6 +6,8 @@ import { setThinInstances, setThinInstanceColors } from "../../../packages/babyl
 import { enableMirroredMeshes } from "../../../packages/babylon-lite/src/mesh/enable-mirrored-meshes";
 import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import { createSolidTexture2D } from "../../../packages/babylon-lite/src/texture/solid-texture";
+import { BU } from "../../../packages/babylon-lite/src/engine/gpu-flags";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
@@ -49,6 +51,7 @@ import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/materia
 import { pbrExt as iblExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
 import { pbrExt as vatExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/vat-fragment";
 import { setPbrAlphaCutoff } from "../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff";
+import { setPbrUnlit } from "../../../packages/babylon-lite/src/material/pbr/set-unlit";
 import { setShadowOnly } from "../../../packages/babylon-lite/src/material/pbr/set-shadow-only";
 import { setAlphaToCoverage } from "../../../packages/babylon-lite/src/render/alpha-to-coverage";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
@@ -157,6 +160,72 @@ beforeEach(() => {
 });
 
 describe("mesh-opacity shader, binding and route contracts", () => {
+    it.each([
+        [false, false],
+        [true, false],
+        [false, true],
+        [true, true],
+    ])("overrides OPAQUE texture/factor/vertex alpha in real forward and geometry variants (gamma: %s, unlit: %s)", async (gamma, unlit) => {
+        const f = fixture();
+        const material = createPbrMaterial({
+            baseColorTexture: createSolidTexture2D(f.engine, 0.4, 0.6, 0.8, 0.25),
+            baseColorFactor: [0.4, 0.6, 0.8, 0.6],
+            alphaBlend: false,
+            _gammaAlbedo: gamma,
+        });
+        if (unlit) {
+            setPbrUnlit(material);
+        }
+        const target = mesh(material);
+        const colours = new Float32Array([1, 1, 1, 0.5, 1, 1, 1, 0.5, 1, 1, 1, 0.5]);
+        const colorBuffer = f.engine._device.createBuffer({ size: colours.byteLength, usage: BU.VERTEX, mappedAtCreation: true });
+        new Float32Array(colorBuffer.getMappedRange()).set(colours);
+        colorBuffer.unmap();
+        Object.assign(target._gpu, { colorBuffer });
+        f.scene._groups.set(material._buildGroup, [target]);
+        setMeshOpacity(target, 0.5);
+        expect(_computeMeshFeatures(target) & (1 << 23)).toBe(1 << 23);
+        const forward = (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
+        expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(true);
+        const geometry = buildPbrGeometryRenderable(
+            f.scene,
+            target,
+            createPbrGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false }),
+            { _lifetimeDisposers: [] }
+        );
+        for (const renderable of [forward, geometry]) {
+            const binding = renderable.bind(f.engine, signature);
+            assertOpacityBinding(binding, f);
+            const code = compact(fragment(binding));
+            expect(code).toContain("varalpha=baseColorSample.a*material.baseColorFactor.a;");
+            expect(code).toContain("alpha*=input.vColor.a;");
+            expect(code.match(/alpha=meshOpacity\.value;/g)).toHaveLength(1);
+            expect(code).not.toContain("finalAlpha=finalAlpha*meshOpacity.value;");
+            expect(code).not.toContain("alpha=alpha*meshOpacity.value;");
+            const override = code.indexOf("alpha=meshOpacity.value;");
+            expect(override).toBeGreaterThan(code.indexOf("alpha*=input.vColor.a;"));
+            expect(override).toBeLessThan(code.indexOf(renderable === forward ? "varfinalAlpha=" : "alpha>0.4"));
+            expect(renderable.isTransparent).toBe(true);
+        }
+    });
+
+    it("keeps Standard output alpha independent of diffuse-texture alpha when faded", () => {
+        const f = fixture();
+        const material = createStandardMaterial();
+        Object.assign(material, { diffuseTexture: createSolidTexture2D(f.engine, 0.4, 0.6, 0.8, 0.25), alpha: 0.6 });
+        const target = mesh(material);
+        setMeshOpacity(target, 0.5);
+        const forward = buildStandardMeshRenderables(f.scene, [target], {}).renderables[0]!;
+        const binding = forward.bind(f.engine, signature);
+        assertOpacityBinding(binding, f);
+        const code = compact(fragment(binding));
+        expect(code).toContain("varalpha=mat.dc.a;");
+        expect(code).toContain("if(_ds.a<mat.aCut){discard;}");
+        expect(code.match(/_ds\.a/g)).toHaveLength(1);
+        expect(code).toContain("alpha=alpha*meshOpacity.value;");
+        expect(code).toContain("color=vec4<f32>(color.rgb,color.a*meshOpacity.value);");
+    });
+
     it("keeps opacity-1 WGSL, generation requests, pipeline state and binding counts identical to pre-installation", async () => {
         const f = fixture();
         const standard = mesh(createStandardMaterial());
@@ -288,8 +357,8 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(false);
     });
 
-    it("puts geometry opacity outside the real linear-image-processing refraction brace", () => {
-        const material = createPbrMaterial({ _subsurface: { refraction: { intensity: 1 } }, _transmissive: true });
+    it.each([false, true])("puts geometry opacity outside the real linear-image-processing refraction brace (BLEND: %s)", (alphaBlend) => {
+        const material = createPbrMaterial({ _subsurface: { refraction: { intensity: 1 } }, _transmissive: true, alphaBlend });
         Object.assign(material, { _linearImageProcessing: true });
         const refraction = makeRefractionRttExt();
         _registerPbrExt(iblExt);
@@ -321,7 +390,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         for (; depth && end < code.length; end++) {
             depth += code[end] === "{" ? 1 : code[end] === "}" ? -1 : 0;
         }
-        const multiply = code.indexOf("alpha=alpha*meshOpacity.value;");
+        const multiply = code.indexOf(alphaBlend ? "alpha=alpha*meshOpacity.value;" : "alpha=meshOpacity.value;");
         expect(depth).toBe(0);
         expect(multiply).toBeGreaterThan(end - 1);
         expect(multiply).toBeLessThan(code.indexOf("alpha>0.4"));

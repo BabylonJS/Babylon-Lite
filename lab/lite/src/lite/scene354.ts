@@ -20,7 +20,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { Material, Mesh, StandardMaterialProps } from "babylon-lite";
-import { createOpacityMaskPixels, MASK_HEIGHT, MASK_WIDTH, OPACITY_COLUMNS, OPACITY_ROWS, SHADOW_SAMPLES, waitOpacityFrames } from "../shared/scene348-opacity.js";
+import { createOpacityMaskPixels, MASK_HEIGHT, MASK_WIDTH, OPACITY_COLUMNS, OPACITY_ROWS, SHADOW_SAMPLES, waitOpacityFrames } from "../shared/scene354-opacity.js";
 
 function standardMaterial(color: readonly [number, number, number]): StandardMaterialProps {
     const material = createStandardMaterial();

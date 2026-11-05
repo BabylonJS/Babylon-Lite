@@ -6,6 +6,7 @@ import { wgsl } from "../../shader/wgsl.js";
 import { _bindMeshOpacity } from "./mesh-opacity.js";
 
 const MESH_OPACITY_MESH_BIT = 1 << 22;
+const MESH_OPACITY_OPAQUE_ALPHA_BIT = 1 << 23;
 
 /** @internal The trailing id keeps BC after refraction's closing brace and alpha after shadow-only. */
 export const meshOpacityPbrExt: PbrExt = {
@@ -20,7 +21,12 @@ export const meshOpacityPbrExt: PbrExt = {
             _dependencies: ctx._features2 & PBR2_HAS_SHADOW_ONLY ? ["shadow-only"] : undefined,
             _bindings: [{ _name: "meshOpacity", _type: { _kind: "uniform-buffer" }, _visibility: SS.FRAGMENT }],
             _helperFunctions: wgsl`struct meshOpacityUniforms{value:f32}`,
-            _fragmentSlots: ctx._features & PBR_HAS_ALPHA_BLEND ? { FA: wgsl`finalAlpha = finalAlpha * meshOpacity.value;` } : { BC: wgsl`alpha = alpha * meshOpacity.value;` },
+            _fragmentSlots:
+                ctx._meshFeatures & MESH_OPACITY_OPAQUE_ALPHA_BIT
+                    ? { BC: wgsl`alpha = meshOpacity.value;` }
+                    : ctx._features & PBR_HAS_ALPHA_BLEND
+                      ? { FA: wgsl`finalAlpha = finalAlpha * meshOpacity.value;` }
+                      : { BC: wgsl`alpha = alpha * meshOpacity.value;` },
         };
     },
     bind(ctx, entries, binding) {

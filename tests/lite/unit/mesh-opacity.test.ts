@@ -518,6 +518,72 @@ describe("native mesh-opacity public contract", () => {
         }
     });
 
+    it.each(["OPAQUE", "BLEND", "MASK", "material-alpha"] as const)("encodes the live PBR %s alpha policy without changing the forward/geometry MASK slots", async (policy) => {
+        const material = createPbrMaterial({
+            alphaBlend: policy === "BLEND",
+            alpha: policy === "material-alpha" ? 0.6 : 1,
+            _alphaCutOff: policy === "MASK" ? 0.5 : undefined,
+            baseColorFactor: [0.4, 0.6, 0.8, 0.6],
+        });
+        const target = mesh(material);
+        opacity.setMeshOpacity(target, 0.5);
+        const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+        const { _getPbrExtsSorted, PBR_HAS_ALPHA_BLEND, PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        const features = _computeMeshFeatures(target);
+        expect(features & (1 << 22)).toBe(1 << 22);
+        expect(features & (1 << 23)).toBe(policy === "OPAQUE" ? 1 << 23 : 0);
+        const ext = _getPbrExtsSorted().find((entry) => entry.id === "z-mesh-opacity")!;
+        for (const geometry of [false, true]) {
+            const context = {
+                _sceneFeatures: 0,
+                _lightMode: 0,
+                _features: geometry ? 0 : (features >>> 16) & PBR_HAS_ALPHA_BLEND,
+                _features2: 0,
+                _pi: 0,
+                _meshFeatures: features,
+                _uv2Mask: 0,
+                _hasIbl: false,
+                _hasAnyNormal: true,
+                _hasSpecularAA: false,
+            };
+            expect(ext.frag!(context)!._fragmentSlots).toEqual(
+                policy === "OPAQUE"
+                    ? { BC: "alpha = meshOpacity.value;" }
+                    : geometry
+                      ? { BC: "alpha = alpha * meshOpacity.value;" }
+                      : { FA: "finalAlpha = finalAlpha * meshOpacity.value;" }
+            );
+            for (const output of [PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT]) {
+                expect(ext.frag!({ ...context, _features2: output })).toBeNull();
+            }
+        }
+        opacity.setMeshOpacity(target, 1);
+        expect(_computeMeshFeatures(target) & ((1 << 22) | (1 << 23))).toBe(0);
+    });
+
+    it("flips the OPAQUE policy bit on registered OPAQUE/BLEND material swaps and never sets it for Standard", async () => {
+        const opaque = createPbrMaterial({ alphaBlend: false });
+        const blended = createPbrMaterial({ alphaBlend: true });
+        const target = mesh(opaque);
+        const owner = scene();
+        const { registerMeshScene } = await import("../../../packages/babylon-lite/src/scene/mesh-scene-registry");
+        const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+        registerMeshScene(owner, target);
+        opacity.setMeshOpacity(target, 0.5);
+        for (const [material, expected] of [
+            [opaque, 1 << 23],
+            [blended, 0],
+            [opaque, 1 << 23],
+            [createStandardMaterial(), 0],
+        ] as const) {
+            target.material = material;
+            expect(_computeMeshFeatures(target) & (1 << 23)).toBe(expected);
+            expect(_computeMeshFeatures(target) & (1 << 22)).toBe(1 << 22);
+            expect(opacity.getMeshOpacity(target)).toBe(0.5);
+            expect(owner._materialSwapQueue).toEqual([target]);
+        }
+    });
+
     it("does not make a shared opaque PBR material ineligible for a MeshLoD batch", () => {
         const material = createPbrMaterial({ alpha: 1, alphaBlend: false });
         const before = { ...material };

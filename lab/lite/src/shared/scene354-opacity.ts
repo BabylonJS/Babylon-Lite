@@ -1,4 +1,4 @@
-/** Scene 348 has one layout: direct visibility rows, normalized glTF-style rows, and policy samples. */
+/** Scene 354 has one layout: direct visibility rows, normalized glTF-style rows, and policy samples. */
 export const OPACITY_COLUMNS = [
     { x: -4.5, opacity: 1 },
     { x: -1.5, opacity: 0.5 },

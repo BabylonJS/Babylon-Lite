@@ -15,7 +15,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import type { Effect } from "@babylonjs/core/Materials/effect";
-import { createOpacityMaskPixels, MASK_HEIGHT, MASK_WIDTH, OPACITY_COLUMNS, OPACITY_ROWS, SHADOW_SAMPLES, waitOpacityFrames } from "../shared/scene348-opacity.js";
+import { createOpacityMaskPixels, MASK_HEIGHT, MASK_WIDTH, OPACITY_COLUMNS, OPACITY_ROWS, SHADOW_SAMPLES, waitOpacityFrames } from "../shared/scene354-opacity.js";
 
 interface PipelineInternals {
     _alphaToCoverageEnabled: boolean;

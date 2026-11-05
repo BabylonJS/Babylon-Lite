@@ -107,12 +107,22 @@ must guard their own one-time installation: opacity does so, and
 augmenter. Binding ids and disposer arrays remain per invocation, not captured from
 the first prepare.
 
-### Bit-22 transport and Standard folding
+### Mesh-bit transport and Standard folding
 
-`material/mesh-features.ts` reserves mesh bit 22 with a comment. The opacity
+`material/mesh-features.ts` reserves mesh bits 22–23 with a comment. The opacity
 encoder owns its meaning; it does not add a shared opacity constant or read opacity
-from core code. PBR's feature module declares the local
-`MESH_OPACITY_MESH_BIT = 1 << 22`.
+from core code. The installed encoder returns 0 at opacity 1 and sets bit 22
+below 1. It also sets bit 23 below 1 when the mesh's material has
+`_buildGroup._materialFamily === "pbr"` and no alpha policy of its own:
+`alphaBlend` is false/unset, `_alphaCutOff` is not greater than 0, and `alpha`
+is not below 1. These are live plain-field reads inside the opt-in module;
+there is no static runtime import of PBR material construction.
+
+PBR's opacity fragment declares the feature-local
+`MESH_OPACITY_MESH_BIT = 1 << 22` and
+`MESH_OPACITY_OPAQUE_ALPHA_BIT = 1 << 23`. Bit 23 selects only its OPAQUE
+alpha override, never queue routing. A material swap recomputes the policy bit
+alongside the other mesh features.
 
 Standard uses its existing extension hook:
 
@@ -143,7 +153,8 @@ transport is:
 
 Mesh bit 22 maps to material alpha-blend bit 6. The feature bit remains in the
 mesh word for the opacity PBR fragment; the generic fold supplies routing, blend
-state and compose-key identity.
+state and compose-key identity. Bit 23 survives in the full mesh word and
+composed key but is masked out of this alpha-blend transport.
 
 The three consumers are:
 
@@ -302,17 +313,30 @@ changing their original discard threshold.
 ### PBR
 
 Return no fragment unless mesh bit 22 is set and features2 is neither no-colour
-nor ESM. Select exactly one alpha slot:
+nor ESM. Select exactly one alpha slot, with the bit-23 branch taking precedence:
 
-| Composed features                               | Slot | Statement                                      |
-| ----------------------------------------------- | ---- | ---------------------------------------------- |
-| `PBR_HAS_ALPHA_BLEND` set                       | `FA` | `finalAlpha = finalAlpha * meshOpacity.value;` |
-| Geometry composition with blend branch stripped | `BC` | `alpha = alpha * meshOpacity.value;`           |
+| Alpha policy / composed features                           | Slot | Statement                                      |
+| ---------------------------------------------------------- | ---- | ---------------------------------------------- |
+| Bit 23: PBR OPAQUE without an own alpha policy             | `BC` | `alpha = meshOpacity.value;`                   |
+| Otherwise, `PBR_HAS_ALPHA_BLEND` set                       | `FA` | `finalAlpha = finalAlpha * meshOpacity.value;` |
+| Otherwise, geometry composition with blend branch stripped | `BC` | `alpha = alpha * meshOpacity.value;`           |
 
-Main colour computes
-`saturate(alpha * materialAlpha + luminanceOverAlpha²) * opacity`, not a
-multiply inside the saturate. The original alpha-test discard precedes the
-multiplier.
+**OPAQUE alpha policy:** without material blending, positive cutoff, or material
+alpha below 1, source alpha is treated as 1 even if the base-colour texture,
+base-colour factor or vertex colours carry alpha. `BC` replaces the decoded
+`alpha` with `meshOpacity.value`; the normal PBR output-alpha block then runs,
+without a second `FA` multiply. Texture/factor/vertex-colour decoding precedes
+`BC`, which precedes that output block. Gamma-albedo and unlit paths still
+declare `alpha`, so they use the same override. Forward, geometry and composed
+variant lookup retain the same policy bit and extension.
+
+**Own alpha policies:** BLEND and material alpha below 1 retain the existing
+forward `FA` multiply after the normal output-alpha calculation:
+`saturate(alpha * materialAlpha + luminanceOverAlpha²) * opacity`. Geometry
+strips the blend branch and retains `BC` multiplication. MASK also keeps its
+existing forward `FA` / geometry `BC` behavior. Both occur **after** the original
+`AT` cutoff, so that cutoff tests the material's own alpha, not mesh opacity.
+Mesh opacity does not change which MASK fragments survive.
 
 The shadow-only fragment owns and internally exports
 `PBR2_HAS_SHADOW_ONLY = 1 << 30`. The lazy opacity fragment imports it from
@@ -322,9 +346,9 @@ the dependency. This places opacity after shadow-only's alpha writes without a
 missing-dependency error.
 
 Refraction opens its conditional in `NI` and closes it in `BC`. The `"z-"` id
-places the geometry multiplier after that closing brace. Transmission/refraction
-write colour, not alpha. Opacity is the final alpha multiplication before output
-or the geometry gate.
+places the geometry alpha override or multiplier after that closing brace.
+Transmission/refraction write colour, not alpha. The selected opacity slot
+runs before output or the geometry gate.
 
 ## State machine and lifecycle
 
@@ -339,6 +363,35 @@ or the geometry gate.
 Dirtying uses `markMeshRenderableDirty` and existing per-scene swap-queue
 deduplication; it never bumps the visibility epoch. Boundary enqueueing and
 direct writes are independent.
+
+### Explicit render tasks
+
+An `autoMirror: false` render task normally retains the renderables resolved by
+`addMeshToTask`. A crossing of 1 changes the opaque/transparent pipeline variant
+only when the task opts into `enableRenderTaskMeshRefresh` before recording,
+and the entry is a scene-owned mesh added **without** a per-task material
+override. As with material swaps, the owning scene first drains its rebuild
+queue; the enabled task follows the resulting renderable version on execute.
+It rebuilds its own auxiliary renderable and retires the old lifetime disposers
+after submitted GPU work drains. See
+[Frame Graph — explicit-task mesh refresh](28-frame-graph.md).
+
+```typescript
+const task = createRenderTask({ name: "fading", rt, autoMirror: false }, engine, scene);
+enableRenderTaskMeshRefresh(task);
+addMeshToTask(task, mesh);
+```
+
+Once a transparent binding is current, updates below 1 and the 0 skip are live;
+they require no task rebuild. A plain explicit task retains its old renderable
+across crossings, so callers must deliberately synchronize/re-record it if they
+do not enable refresh. Opaque lists do not check the opacity-0 flag: those lists
+also serve shadow tasks, where opacity must not remove casters, and opaque
+render bundles cache draws. Skipping there would break the shadow gate and
+cached-bundle replay contract. The flag is read only on transparent/transmission
+colour lists and geometry paths.
+
+### Unregistered meshes and retained bindings
 
 A mesh registered in no scene but drawn through an explicit geometry-task
 `meshes` list picks up opacity threshold crossings (`1 ↔ <1`, selecting a
@@ -440,14 +493,21 @@ inventories.
   update; different lifetime arrays or devices remain independent.
 - Atomic unsupported material swaps and both installation orders with the real
   indexed-indirect borrow validator; previous-first feature/context chains.
-- Standard/PBR composition, fragment slots, original discard before multiplication,
-  PBR saturate before multiplication, shadow-only dependency, refraction closing
-  brace, geometry `> 0.4` gate and composer/bind-index equality.
+- PBR bit-23 OPAQUE override with alpha-bearing texture/factor/vertex colours,
+  gamma/unlit scope, live OPAQUE/BLEND swaps and coherent forward/geometry keys.
+  BLEND/material-alpha multiplication and MASK forward `FA` / geometry `BC`
+  remain after the original cutoff. Standard output alpha ignores diffuse-texture
+  alpha. Verify shadow-only dependencies, refraction closing braces, geometry
+  `> 0.4` gates and composer/bind-index equality.
 - Transparent and geometry task loops skip colour draws at zero and resume live
   when the flag clears. Opaque/direct lists ignore it, preserving no-colour/ESM
   casters. Transmission and renderOnTop checks preserve texture-update ordering.
   Raw bindings remain unwrapped. Twin-bundle tests replay the same opaque bundle
   and preserve the visibility epoch while only the faded transparent draw changes.
+- Scene-owned non-override explicit entries follow opacity crossings only with
+  mesh refresh. Drain the real scene rebuild queue and execute the real task:
+  1 → 0.5 selects transparent, 0.5 → 0 skips live, and 0.5 → 1 restores opaque
+  and retires auxiliary lifetimes. Plain explicit tasks retain their renderables.
 - Flag tests cover zero-to-fraction/one, invalid-call atomicity, clone isolation,
   unchanged public visibility/pickability and accessibility projection.
 - Preserve Standard's live material-alpha classification, A2C plus blending,
@@ -459,7 +519,7 @@ inventories.
 - Build probes: unused entries contain no feature body markers; opted-in entries
   retain them. Root declaration trimming and root-only exports hold;
   MeshLoDInstance is a compile-time-invalid opacity target.
-- Scene348 supplies static Standard/PBR 1/0.5/0 and opaque twins, normalized
+- Scene354 supplies static Standard/PBR 1/0.5/0 and opaque twins, normalized
   OPAQUE/MASK cases, full-strength shadows and A2C. Its BJS golden is immutable;
   pixel/MAD coverage belongs to the existing scene parity infrastructure.
 
@@ -483,6 +543,6 @@ transport or integration, not feature-owned opacity comparisons.
 | Rect-area regression        | `tests/lite/unit/area-light-emission-opt-in.test.ts`                                                                                                                  |
 | Build tests                 | `tests/lite/build/mesh-opacity-treeshake.test.ts`, `public-api-types.test.ts`                                                                                         |
 | Compat tests                | `packages/babylon-lite-compat/tests/mesh-visibility.test.ts`, `mesh-clone.test.ts`                                                                                    |
-| Fixture                     | `lab/lite/scene348.html`, `bundle-scene348.html`, `babylon-ref-scene348.html`, `src/lite/scene348.ts`, `src/bjs/scene348.ts`, `src/shared/scene348-opacity.ts`        |
+| Fixture                     | `lab/lite/scene354.html`, `bundle-scene354.html`, `babylon-ref-scene354.html`, `src/lite/scene354.ts`, `src/bjs/scene354.ts`, `src/shared/scene354-opacity.ts`        |
 | Registration                | `scene-config.json`; HTML inputs, gallery and bundle tests auto-discover entries                                                                                      |
-| Parity/assets               | `tests/lite/parity/scenes/scene348-mesh-opacity.spec.ts`, `reference/lite/scene348-mesh-opacity/babylon-ref-golden.png`, `lab/public/thumbnails/scene348.jpg`         |
+| Parity/assets               | `tests/lite/parity/scenes/scene354-mesh-opacity.spec.ts`, `reference/lite/scene354-mesh-opacity/babylon-ref-golden.png`, `lab/public/thumbnails/scene354.jpg`         |

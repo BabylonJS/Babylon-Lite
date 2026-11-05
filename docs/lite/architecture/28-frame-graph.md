@@ -880,8 +880,8 @@ explicit recording share target, descriptor, and dimension preparation; the expl
 updates the task-owned context only after binding and scene-BG refresh succeed.
 
 An explicit task normally keeps the renderables resolved by `addMeshToTask()`. Applications that replace
-mesh geometry or change mesh materials at runtime can opt a task into following the corresponding
-scene-renderable rebuilds:
+mesh geometry, change mesh materials, or change mesh opacity across 1 (`1 ↔ <1`) at runtime can opt
+a task into following the corresponding scene-renderable rebuilds:
 
 ```typescript
 const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);

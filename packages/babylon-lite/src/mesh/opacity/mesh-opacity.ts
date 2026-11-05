@@ -1,6 +1,7 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Mesh } from "../mesh.js";
+import type { PbrMaterialProps } from "../../material/pbr/pbr-material.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { _installMeshMaterialValidator, markMeshRenderableDirty } from "../../scene/mesh-scene-registry.js";
 import { _registerStdExt } from "../../material/standard/standard-flags.js";
@@ -45,7 +46,17 @@ function ensureInstalled(): void {
     }
     _registerStdExt(meshOpacityStandardExt);
     _registerPbrExt(meshOpacityPbrExt);
-    _installMeshFeatureExtra((mesh) => (getMeshOpacity(mesh) < 1 ? 1 << 22 : 0));
+    _installMeshFeatureExtra((mesh) => {
+        if (!(getMeshOpacity(mesh) < 1)) {
+            return 0;
+        }
+        let features = 1 << 22;
+        const material = mesh.material as PbrMaterialProps | null;
+        if (material?._buildGroup._materialFamily === "pbr" && !material.alphaBlend && !((material._alphaCutOff ?? 0) > 0) && !((material.alpha ?? 1) < 1)) {
+            features |= 1 << 23;
+        }
+        return features;
+    });
     _installPbrBindingContext((context, _id, disposers) => {
         context._disposers = disposers;
     });
@@ -59,6 +70,13 @@ function ensureInstalled(): void {
  * Finite values are clamped to [0, 1]. Values below 1 select sorted blending with
  * depth writes disabled; zero omits colour and geometry draws. Shadows, picking
  * and mesh visibility are unchanged. Thin instances share their mesh's opacity.
+ *
+ * Scene-owned meshes in autoMirror: false tasks follow crossings of 1 only with
+ * enableRenderTaskMeshRefresh, for entries added without a material override,
+ * matching material swaps. Unregistered meshes in an explicit geometry-task
+ * meshes list change pipeline/blend variants only at that task's next renderable
+ * sync, as with material/topology changes; updates below 1 and geometry's zero
+ * skip are immediate. Existing binding values, including 1, update immediately.
  *
  * @throws RangeError - The value is not a finite number.
  * @throws Error - The target is not a Mesh, is disposed, or uses an unsupported material below 1.
