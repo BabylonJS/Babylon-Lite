@@ -122,6 +122,16 @@ fragment-visible uniform buffer and releases it through the binding's existing
 disposer list. Both bind one `texture_2d<f32>` and one filtering sampler and
 enumerate the height texture through the existing acquire/release hooks.
 
+The public `getMaterialTextures()` enumeration also appends the active height
+texture after the existing slots. PBR includes it even for a factor-only
+material. Standard includes it only when a UV-mapped surface texture activates
+POM, using the same feature-owned accessor as its fragment detection and
+ownership collector. Both families use the default height scale of `0.05` when
+omitted and exclude the height slot at zero scale or after settings removal.
+Material views enumerate their source; shared normal/height maps retain both
+slot entries rather than being deduplicated. The enumeration imports no POM
+shader or extension registry.
+
 The height texture uses the mesh's first UV set. Its matrix follows the existing
 texture convention:
 
@@ -343,6 +353,11 @@ shader package, precomputed cone map, or engine feature flag is required.
   remain untouched.
 - Verify no-color/ESM variants omit parallax code/bindings and Standard UBO
   disposal and texture acquire/release enumeration are balanced.
+- Verify public texture enumeration for both families with a separate height
+  map, default/explicit/zero scale, material views, and shared normal/height
+  slots. Cover factor-only PBR and inactive Standard materials with no
+  UV-mapped surface textures, including reflection-only materials. Importing
+  `getMaterialTextures` alone must retain neither POM shader nor extension.
 - Compile actual composed vertex/fragment shaders on WebGPU without screenshots.
   Execute a numeric shader oracle for constant and linear-ramp heightfields,
   center/scale/view-direction cases, transformed height UVs, bounded sample
@@ -377,7 +392,8 @@ references or ceilings are changed.
 
 ## File Manifest
 
-- `material/parallax/parallax-occlusion.ts`: props, validation, uniform writing.
+- `material/parallax/parallax-occlusion.ts`: props, validation, uniform writing,
+  and feature-owned height-texture accessors.
 - `material/parallax/parallax-occlusion-wgsl.ts`: shared WGSL solver and sampler.
 - `material/parallax/parallax-occlusion-shader.ts`: shader sampling transforms.
 - `material/pbr/set-parallax-occlusion.ts`: public PBR setter.
@@ -385,6 +401,7 @@ references or ceilings are changed.
 - `material/standard/set-std-parallax-occlusion.ts`: public Standard setter.
 - `material/standard/fragments/std-parallax-occlusion-fragment.ts`: Standard extension.
 - Existing material type modules and root `index.ts`: typed state and exports.
+- `material/material-textures.ts`: public enumeration of active height slots.
 - Focused unit/build specs: API, composition, lifecycle, GPU oracle, tree-shaking.
 
 ## Lab comparison: Scene 349

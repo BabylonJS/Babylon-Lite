@@ -3,7 +3,7 @@ import type { PbrExt } from "../pbr-flags.js";
 import { PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "../pbr-flag-bits.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import { MSH_FLAT_NORMAL } from "../../mesh-features.js";
-import { _PARALLAX_UBO_FIELDS, _writeParallaxUniforms } from "../../parallax/parallax-occlusion.js";
+import { _getParallaxHeightTexture, _PARALLAX_UBO_FIELDS, _writeParallaxUniforms } from "../../parallax/parallax-occlusion.js";
 import { _PARALLAX_WGSL } from "../../parallax/parallax-occlusion-wgsl.js";
 import { _patchParallaxShader } from "../../parallax/parallax-occlusion-shader.js";
 
@@ -89,9 +89,9 @@ export const pbrParallaxOcclusionExt: PbrExt = {
         return binding;
     },
     textures(material, out) {
-        const props = (material as PbrMaterialProps)._parallaxOcclusion;
-        if (props && (props.heightScale ?? 0.05) !== 0) {
-            out.push(props.heightTexture);
+        const height = _getParallaxHeightTexture(material as PbrMaterialProps);
+        if (height) {
+            out.push(height);
         }
     },
 };

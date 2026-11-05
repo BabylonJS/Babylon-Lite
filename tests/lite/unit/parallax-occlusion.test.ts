@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { MaterialView } from "../../../packages/babylon-lite/src/material/material.js";
+import { getMaterialTextures } from "../../../packages/babylon-lite/src/material/material-textures.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 import { _copyParallaxOcclusionProps, _writeParallaxUniforms } from "../../../packages/babylon-lite/src/material/parallax/parallax-occlusion.js";
 import { _patchParallaxShader } from "../../../packages/babylon-lite/src/material/parallax/parallax-occlusion-shader.js";
@@ -87,20 +88,28 @@ describe("parallax occlusion settings", () => {
         setPbrParallaxOcclusion(pbr, props);
         expect(pbr._parallaxOcclusion).not.toBe(props);
         expect(pbr._parallaxOcclusion?.heightTexture).toBe(props.heightTexture);
+        expect(getMaterialTextures(pbr)).toEqual([props.heightTexture]);
         props.heightScale = 0.2;
         expect(pbr._parallaxOcclusion?.heightScale).toBe(0.1);
         const active = _computePbrMaterialFeatures(pbr).features;
         setPbrParallaxOcclusion(pbr, { ...props, heightScale: 0 });
         expect(_computePbrMaterialFeatures(pbr).features).not.toBe(active);
+        expect(getMaterialTextures(pbr)).toEqual([]);
         setPbrParallaxOcclusion(pbr, null);
         expect(pbr._parallaxOcclusion).toBeUndefined();
+        expect(getMaterialTextures(pbr)).toEqual([]);
 
         const standard = createStandardMaterial();
         standard.diffuseTexture = props.heightTexture;
         setStandardParallaxOcclusion(standard, props);
         expect(stdParallaxOcclusionExt._detect!(standard)).not.toBe(0);
+        expect(getMaterialTextures(standard)).toEqual([props.heightTexture, props.heightTexture]);
+        setStandardParallaxOcclusion(standard, { ...props, heightScale: 0 });
+        expect(stdParallaxOcclusionExt._detect!(standard)).toBe(0);
+        expect(getMaterialTextures(standard)).toEqual([props.heightTexture]);
         setStandardParallaxOcclusion(standard, null);
         expect(stdParallaxOcclusionExt._detect!(standard)).toBe(0);
+        expect(getMaterialTextures(standard)).toEqual([props.heightTexture]);
     });
 
     it("does not activate Standard displacement without a surface texture", () => {

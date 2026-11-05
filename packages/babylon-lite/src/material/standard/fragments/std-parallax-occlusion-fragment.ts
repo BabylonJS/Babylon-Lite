@@ -1,8 +1,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
-import type { StandardMaterialProps } from "../standard-material.js";
 import { ESM_SHADOW_OUTPUT, HAS_BUMP_TEXTURE, NO_COLOR_OUTPUT, type StdExt } from "../standard-flags.js";
 import { createUniformBuffer } from "../../../resource/uniform-buffer.js";
-import { _writeParallaxUniforms } from "../../parallax/parallax-occlusion.js";
+import { _getStandardParallaxHeightTexture, _writeParallaxUniforms } from "../../parallax/parallax-occlusion.js";
 import { _PARALLAX_WGSL } from "../../parallax/parallax-occlusion-wgsl.js";
 import { _patchParallaxShader } from "../../parallax/parallax-occlusion-shader.js";
 import { wgsl } from "../../../shader/wgsl.js";
@@ -12,28 +11,12 @@ const CASTER_FLAGS = NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT;
 const STAGE_FRAGMENT = 0x2;
 const SURFACE_TEXTURES = ["dT", "eT", "bT", "sT", "aT", "lT", "oT"];
 
-function usesParallax(material: StandardMaterialProps): boolean {
-    return (
-        !!material._parallaxOcclusion &&
-        (material._parallaxOcclusion.heightScale ?? 0.05) !== 0 &&
-        !!(
-            material.diffuseTexture ||
-            material._emissiveTexture ||
-            material._bumpTexture ||
-            material._specularTexture ||
-            material._ambientTexture ||
-            material._lightmapTexture ||
-            material._opacityTexture
-        )
-    );
-}
-
 /** @internal Opt-in Standard parallax extension; no registration at module load. */
 export const stdParallaxOcclusionExt: StdExt = {
     _id: "parallax-occlusion",
     _phase: "mesh",
     _feature: STD_HAS_PARALLAX_OCCLUSION,
-    _detect: (material) => (usesParallax(material) ? STD_HAS_PARALLAX_OCCLUSION : 0),
+    _detect: (material) => (_getStandardParallaxHeightTexture(material) ? STD_HAS_PARALLAX_OCCLUSION : 0),
     _frag(features): ShaderFragment {
         if (features & CASTER_FLAGS) {
             return { _id: "parallax-occlusion" };
@@ -88,8 +71,9 @@ ${_PARALLAX_WGSL}`,
         return binding;
     },
     _textures(material, out) {
-        if (usesParallax(material)) {
-            out.push(material._parallaxOcclusion!.heightTexture);
+        const height = _getStandardParallaxHeightTexture(material);
+        if (height) {
+            out.push(height);
         }
     },
 };

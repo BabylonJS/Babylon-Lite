@@ -1,5 +1,6 @@
 import type { UboField } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { StandardMaterialProps } from "../standard/standard-material.js";
 
 /** Independently implemented contact-refinement parallax occlusion mapping.
  * Displaces surface texture coordinates, not mesh geometry or fragment depth. */
@@ -18,6 +19,27 @@ export interface ParallaxOcclusionProps {
     readonly maxSteps?: number;
     /** Maximum subdivisions of the first contact interval, reached by bisection and stopped once it spans one pixel. Integer [1, 32]. Default 8. */
     readonly refinementSteps?: number;
+}
+
+/** @internal */
+export function _getParallaxHeightTexture(material: { readonly _parallaxOcclusion?: ParallaxOcclusionProps }): Texture2D | undefined {
+    const props = material._parallaxOcclusion;
+    return props && (props.heightScale ?? 0.05) !== 0 ? props.heightTexture : undefined;
+}
+
+/** @internal */
+export function _getStandardParallaxHeightTexture(material: StandardMaterialProps): Texture2D | undefined {
+    const height = _getParallaxHeightTexture(material);
+    return height &&
+        (material.diffuseTexture ||
+            material._emissiveTexture ||
+            material._bumpTexture ||
+            material._specularTexture ||
+            material._ambientTexture ||
+            material._lightmapTexture ||
+            material._opacityTexture)
+        ? height
+        : undefined;
 }
 
 /** @internal */

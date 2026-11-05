@@ -8,6 +8,7 @@ describe("parallax occlusion opt-in boundaries", () => {
     it.each([
         ["createPbrMaterial", false, false],
         ["createStandardMaterial", false, false],
+        ["getMaterialTextures", false, false],
         ["createPbrMaterial, setPbrParallaxOcclusion", true, false],
         ["createStandardMaterial, setStandardParallaxOcclusion", false, true],
     ] as const)("retains only the requested material extension for %s", async (imports, pbr, standard) => {
