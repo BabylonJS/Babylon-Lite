@@ -162,7 +162,7 @@ for (const kind of ["depth", "float"] as const) {
 @fragment fn normalInputProbe(@builtin(position) pixel:vec4f)->@location(0) vec4u{
 let p=vec2i(pixel.xy);let supplied=aoSuppliedNormal(p);
 let normal=normalize((inverseView*vec4f(aoNormalOf(p,supplied),0)).xyz);
-return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(normal),pack2x16snorm(-supplied.zz));
+return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(normal),bitcast<u32>(aoRawDepth(p)));
 }`,
                         });
                         const probePipeline = device.createRenderPipeline({
@@ -303,7 +303,7 @@ return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(
         for (const entry of result.cases) {
             const label = JSON.stringify(entry);
             expect(entry.error, label).toBeUndefined();
-            expect(entry.normalInputs, label).toEqual([0xbf800000, 0xbf800000, 0x7fff7fff, 0x7fff7fff]);
+            expect(entry.normalInputs, label).toEqual([0xbf800000, 0xbf800000, 0x7fff7fff, new Uint32Array(new Float32Array([entry.depth]).buffer)[0]]);
             if (entry.distance === null) {
                 expect(entry.history, label).toBe(255);
                 expect(entry.visibility, label).toBe(0x3c00);
@@ -336,3 +336,102 @@ return vec4u(bitcast<u32>(supplied.z),bitcast<u32>(normal.z),geometryNormalBits(
         }
     });
 }
+
+test("SSAO normal history preserves snorm16 endpoints and both hemispheres on the GPU", async ({ page }) => {
+    await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
+    await page.addScriptTag({ content: script });
+    const result = await page.evaluate(async () => {
+        const api = (window as unknown as { ssaoDepthTest: TestApi }).ssaoDepthTest;
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw new Error("WebGPU adapter unavailable");
+        }
+        const device = await adapter.requestDevice();
+        const normals = [
+            [0, 0, -1],
+            [0, 0, 1],
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [1, 2, -4],
+            [-1, 2, -4],
+            [1, -2, -4],
+            [-1, -2, -4],
+            [1, 2, 4],
+            [-1, -2, 4],
+        ];
+        const inputData = new Float32Array(normals.length * 4);
+        normals.forEach((normal, index) => {
+            const length = Math.hypot(...normal);
+            inputData.set(
+                normal.map((value) => value / length),
+                index * 4
+            );
+        });
+        const input = device.createBuffer({ size: inputData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+        const output = device.createBuffer({ size: inputData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+        const readback = device.createBuffer({ size: inputData.byteLength, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const errors: string[] = [];
+        device.addEventListener("uncapturederror", (event) => errors.push(event.error.message));
+        device.pushErrorScope("validation");
+        try {
+            const module = device.createShaderModule({
+                code: `${api.xegtaoOutputWGSL("float")}
+@group(0) @binding(6) var<storage,read> inputNormals:array<vec4f>;
+@group(0) @binding(7) var<storage,read_write> outputNormals:array<vec4u>;
+@compute @workgroup_size(1) fn codecProbe(@builtin(global_invocation_id) id:vec3u){
+let bits=geometryNormalBits(inputNormals[id.x].xyz);
+outputNormals[id.x]=vec4u(bits,bitcast<vec3u>(geometryNormal(bits)));
+}`,
+            });
+            const pipeline = device.createComputePipeline({ layout: "auto", compute: { module, entryPoint: "codecProbe" } });
+            const group = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 6, resource: { buffer: input } },
+                    { binding: 7, resource: { buffer: output } },
+                ],
+            });
+            device.queue.writeBuffer(input, 0, inputData);
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, group);
+            pass.dispatchWorkgroups(normals.length);
+            pass.end();
+            encoder.copyBufferToBuffer(output, 0, readback, 0, inputData.byteLength);
+            device.queue.submit([encoder.finish()]);
+            await readback.mapAsync(GPUMapMode.READ);
+            const bytes = readback.getMappedRange().slice(0);
+            readback.unmap();
+            const words = new Uint32Array(bytes);
+            const decoded = new Float32Array(bytes);
+            const cases = normals.map((_, index) => {
+                const normal = Array.from(inputData.subarray(index * 4, index * 4 + 3));
+                const sum = normal.reduce((total, value) => total + Math.abs(value), 0);
+                let x = normal[0]! / sum,
+                    y = normal[1]! / sum;
+                if (normal[2]! < 0) {
+                    [x, y] = [(1 - Math.abs(y)) * (x >= 0 ? 1 : -1), (1 - Math.abs(x)) * (y >= 0 ? 1 : -1)];
+                }
+                const expected = ((Math.round(x * 32767) & 65535) | ((Math.round(y * 32767) & 65535) << 16)) >>> 0;
+                const dot = normal.reduce((total, value, axis) => total + value * decoded[index * 4 + axis + 1]!, 0);
+                return { normal, expected, actual: words[index * 4]!, dot };
+            });
+            const validation = await device.popErrorScope();
+            return { cases, errors, validation: validation?.message };
+        } finally {
+            input.destroy();
+            output.destroy();
+            readback.destroy();
+            device.destroy();
+        }
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.validation).toBeUndefined();
+    for (const entry of result.cases) {
+        expect(entry.actual, JSON.stringify(entry)).toBe(entry.expected);
+        expect(entry.dot, JSON.stringify(entry)).toBeGreaterThan(0.99999);
+    }
+});

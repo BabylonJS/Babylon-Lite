@@ -667,6 +667,13 @@ Geometry is RG32_UINT: the exact bits of raw device depth, then the signed world
 normal in octahedral form as two snorm16 values (about 5e-5 rad). Device depth is
 never quantized, and the normal error is far below the 0.9 agreement cosine and
 the 1e-4 plane allowance, so the normal-rejection contract is unchanged.
+Encode each octahedral lane explicitly as `round(clamp(e, -1, 1) * 32767)`,
+bitcast the signed integers, then combine the low 16-bit X lane and shifted Y
+lane. This preserves the snorm16 representation without calling
+`pack2x16snorm`: a cloud GPU backend returned zero for runtime `(1, 1)`
+despite correct normal and inverse-view inputs, causing valid history to be
+rejected. Keep the endpoint/hemisphere GPU round-trip regression and the
+strict two-frame history-count check; do not mask this with looser assertions.
 Only one geometry texture is necessary: transport and temporal accumulation
 read previous geometry, then the existing final-output pass overwrites it with
 current depth/world normals for the next frame. Geometry is never sampled by

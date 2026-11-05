@@ -15,7 +15,9 @@ fn dGeom(a:vec3f,b:vec3f,n:vec3f)->f32{return clamp(1.0-abs(dot(b-a,n))*(10.0/(1
 fn geometryNormalBits(n:vec3f)->u32{
 var e=n.xy/max(abs(n.x)+abs(n.y)+abs(n.z),1e-20);
 if(n.z<0.0){e=(1.0-abs(e.yx))*select(vec2f(-1),vec2f(1),e>=vec2f(0));}
-return pack2x16snorm(e);
+// Explicit snorm16 lanes avoid backend-dependent pack2x16snorm endpoint results.
+let lanes=bitcast<vec2u>(vec2i(round(clamp(e,vec2f(-1),vec2f(1))*32767.0)));
+return (lanes.x&65535u)|(lanes.y<<16u);
 }
 fn geometryNormal(bits:u32)->vec3f{
 let e=unpack2x16snorm(bits);var n=vec3f(e,1.0-abs(e.x)-abs(e.y));
