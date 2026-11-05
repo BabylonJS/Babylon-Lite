@@ -11,7 +11,7 @@
  * `MaterialHelperGeometryRendering.GeometryTextureDescriptions`. The
  * following BJS types are excluded by design:
  *   - `ALBEDO_SQRT`           — we only expose `ALBEDO`.
- *   - `VELOCITY` (vec2 SS)    — we only expose `LINEAR_VELOCITY` (vec3 WS).
+ *   - `VELOCITY`             — we expose the `LINEAR_VELOCITY` contract below.
  *   - `IRRADIANCE_LEGACY`     — we only expose `IRRADIANCE`.
  *   - `COLOR`                 — handled separately via the geometry task's
  *                               optional `targetTexture` color attachment
@@ -60,7 +60,7 @@ export enum GeometryTextureType {
     WORLD_NORMAL = 8,
     /** Unorm8 RGBA — surface albedo (diffuse colour, no lighting). */
     ALBEDO = 9,
-    /** Half-float RGBA — per-pixel linear world-space velocity in units / frame. */
+    /** Previous-minus-current NDC XY / 2 (Y up). Optional perspective previous depth in Z. */
     LINEAR_VELOCITY = 10,
     /** Unsigned byte R — packed mesh-blending group/radius tag. */
     MESH_BLEND_TAG = 11,

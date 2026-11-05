@@ -241,7 +241,7 @@ stages:
                   displayName: "Install dependencies"
 
                 - script: bash scripts/browserstack-wait.sh pnpm test:integration-cloud
-                  displayName: "Run nonvisual point-splatting WebGPU tests"
+                  displayName: "Run nonvisual WebGPU integration tests"
                   env:
                       CI: "true"
                       LAB_TEST_PORT: "5179"

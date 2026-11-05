@@ -59,8 +59,10 @@ import { isStandardUvInverted, writeStandardUvTransformData, writeStdMaterialDat
 import { composeStandardGeometryShader } from "./standard-geometry-output-shader.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
-import { _getStandardGeometrySkeletonVelocityFactory, _getStandardGeometryThinInstanceHelpers } from "./geometry-view.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_HAS_VERTEX_COLOR, MSH_VAT } from "../mesh-features.js";
+import { _getStandardGeometryThinInstanceHelpers } from "./geometry-view.js";
+import { getGeometryDeformationVelocity } from "../geometry-deformation-hooks.js";
+import type { GeometryDeformationVelocity } from "../geometry-deformation-velocity.js";
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 import type { StandardGeometryContext } from "./standard-renderable.js";
 import { wgsl } from "../../shader/wgsl.js";
@@ -108,7 +110,7 @@ interface StandardGeometryViewResources {
     _extFragments: readonly { _ext: ReturnType<typeof _getStdExtsSorted>[number] }[];
     _vertexBufferBinders: readonly NonNullable<StdExt["_bindVertexBuffers"]>[];
     _needsVelocity: boolean;
-    _hasSkeletonVelocity: boolean;
+    _hasDeformationVelocity: boolean;
     _alphaBlend: boolean;
     /** Shared material UBO and dirty-version state (one per source material in this view). */
     _matUBO: GPUBuffer;
@@ -209,10 +211,10 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         extensionValue = extension.value(mesh);
         meshUboU32![16] = meshUboU32![16]! | (extensionValue << 8);
     }
-    const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
+    const deformationFeature = res._hasDeformationVelocity ? getGeometryDeformationVelocity() : null;
     const meshUBO = createUniformBuffer(engine, meshUboData);
     const bindingDisposers: (() => void)[] = [];
-    let skeletonVelocity: ReturnType<NonNullable<typeof skeletonVelocityFactory>> | null = null;
+    let deformationVelocity: GeometryDeformationVelocity | null = null;
     let boundTextures: ReturnType<typeof collectStdBoundTextures> = [];
     // Codes of the shared modules this renderable holds. Only a successful acquisition is recorded, so a
     // candidate rolled back after a failed compile releases exactly what it acquired.
@@ -225,7 +227,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         _perMeshDisposed = true;
         _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
-        skeletonVelocity?._dispose();
+        deformationVelocity?._dispose();
         for (const dispose of bindingDisposers) {
             dispose();
         }
@@ -237,8 +239,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const vertModule = _acquireShaderModule(device, res._composed._vertexWGSL, heldModules);
     const fragModule = _acquireShaderModule(device, res._composed._fragmentWGSL, heldModules);
 
-    if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
-        throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
+    if (res._hasDeformationVelocity && !deformationFeature) {
+        throw new Error("standard-geometry: deformation velocity feature was not preloaded");
     }
     // Acquire all textures the standard shader references so the GPU-pool
     // doesn't release them while the geometry pass holds bind groups on
@@ -247,11 +249,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     for (const t of boundTextures) {
         acquireTexture(t);
     }
-    skeletonVelocity =
-        skeletonVelocityFactory && mesh.skeleton
-            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, texture, bindingDisposers))
-            : null;
-    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, null, bindingDisposers);
+    deformationVelocity = deformationFeature?.createGeometryDeformationVelocity(engine, mesh, (features & HAS_SKELETON) !== 0) ?? null;
+    const meshBindGroup = _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, deformationVelocity, bindingDisposers);
     let velocityReady = false;
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
@@ -273,7 +272,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     let thinDrawArgs: GPUBuffer | null = null;
 
     const _baseUpdate = (): void => {
-        const velocityEnabled = res._needsVelocity && velocityReady && !view._velocityExclusions?.has(mesh);
+        const tracked = mesh.visible !== false && !view._velocityExclusions?.has(mesh);
+        const velocityEnabled = res._needsVelocity && velocityReady && tracked;
         const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
         if (
             mesh.worldMatrixVersion !== _lastWorldVersion ||
@@ -301,14 +301,12 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             _lastWorldVersion = mesh.worldMatrixVersion;
             _lastLightsCount = scene.lights.length;
         }
-        if (skeletonVelocity) {
-            meshBindGroup = skeletonVelocity._update();
-        }
+        deformationVelocity?._update(!velocityEnabled);
         if (previousWorld) {
             // Snapshot the current world relative to the *current* origin so next
             // frame's previous-world matches next frame's previous view-projection.
             _packMeshWorld(previousWorld, mesh.worldMatrix, 0, 0);
-            velocityReady = true;
+            velocityReady = tracked;
         }
         if (source._uboVersion !== res._lastUboVersion) {
             res._lastUboVersion = source._uboVersion;
@@ -566,7 +564,11 @@ function _ensureViewResources(
         _extFragments: usedExts,
         _vertexBufferBinders: vertexBufferBinders,
         _needsVelocity: needsVelocity,
-        _hasSkeletonVelocity: needsVelocity && (features & HAS_SKELETON) !== 0,
+        // Mirrors composition: morph-only previous weights apply only once the shared feature is loaded.
+        _hasDeformationVelocity:
+            needsVelocity &&
+            !(meshFeatures & (MSH_HAS_THIN_INSTANCES | MSH_VAT)) &&
+            ((features & HAS_SKELETON) !== 0 || ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 && getGeometryDeformationVelocity() !== null)),
         _alphaBlend: alphaBlend,
         _matUBO: matUBO,
         _matData: matData,
@@ -609,7 +611,7 @@ function _createGeometryMeshBindGroup(
     res: StandardGeometryViewResources,
     mesh: Mesh,
     meshUBO: GPUBuffer,
-    previousBoneTexture: GPUTexture | null,
+    deformationVelocity: GeometryDeformationVelocity | null,
     disposers: (() => void)[]
 ): GPUBindGroup {
     const engine = scene.surface.engine;
@@ -642,11 +644,8 @@ function _createGeometryMeshBindGroup(
     if (view._gpUBO) {
         entries.push({ binding: nextBinding++, resource: { buffer: view._gpUBO } });
     }
-    if (res._hasSkeletonVelocity) {
-        if (!previousBoneTexture) {
-            throw new Error("standard-geometry: skeletal velocity requires a previous-bone texture");
-        }
-        entries.push({ binding: nextBinding++, resource: previousBoneTexture.createView() });
+    if (deformationVelocity) {
+        nextBinding = deformationVelocity._bind(entries, nextBinding);
     }
     return engine._device.createBindGroup({ layout: res._meshBGL, entries });
 }

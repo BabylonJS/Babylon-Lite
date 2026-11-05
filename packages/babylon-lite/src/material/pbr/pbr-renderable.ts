@@ -13,7 +13,8 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import type { Renderable, DrawBinding, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
+import { pbrBindingDecorator } from "./pbr-binding-decorator.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
@@ -443,6 +444,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
+        if (pbrBindingDecorator) {
+            pbrBindingDecorator._prepare(mat._preparedPlugins, s);
+        }
         const materialBindGroupStatic = needsTaskRefraction
             ? null
             : createPbrMeshBindGroup(
@@ -590,6 +594,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             mesh,
             _gen: [geometryContext, meshFeatures, lightMode, singleLightType, renderFeatures],
             bind(eng, sig) {
+                if (pbrBindingDecorator) {
+                    pbrBindingDecorator._prepare(mat._preparedPlugins, s);
+                }
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(
@@ -608,13 +615,41 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                     : materialBindGroupStatic!;
                 // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
                 const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update, sig);
-                return {
+                const binding: DrawBinding = {
                     renderable: r,
                     pipeline,
                     ...(cb ? { _updateBatches: [cb._updateBatch] } : {}),
                     update: cb ? cb.update : update,
                     draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
+                if (!pbrBindingDecorator) {
+                    return binding;
+                }
+                return pbrBindingDecorator(
+                    binding,
+                    engine,
+                    mat._preparedPlugins,
+                    composed._fragmentKey,
+                    features,
+                    features2,
+                    () =>
+                        createPbrMeshBindGroup(
+                            engine,
+                            bindings,
+                            composed,
+                            meshUBO,
+                            materialUBO,
+                            mat,
+                            envTextures ?? null,
+                            mesh,
+                            sig._transmissionTexture,
+                            _pbrBindingIdentity?.(s._lighting?._bindingId),
+                            disposers
+                        ),
+                    (pass, group) => drawWith(pass, group, cb),
+                    disposers,
+                    s
+                );
             },
         };
         if (sortCenter) {
