@@ -83,6 +83,17 @@ export interface PbrMaterialProps extends Material {
     /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
      *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
     occlusionTexture?: Texture2D;
+    /** Tangent-space bent normal map (linear RGB, same encoding as a normal map) sampled with UV1.
+     *  Replaces the analytic specular occlusion of the environment reflection with a
+     *  spherical-Gaussian visibility-cone estimate driven by the bent normal and ambient occlusion.
+     *  Only active on lit materials with an environment (IBL) and an occlusion texture
+     *  (`ormTexture` or `occlusionTexture`, with `occlusionStrength > 0`).
+     *  Maps to BJS PBRMaterial.bentNormalTexture. Explicit opt-in: call `enableBentNormals()`
+     *  before `registerScene` (otherwise ignored; keeps other bundles free of bent-normal code). */
+    bentNormalTexture?: Texture2D;
+    /** Blend factor of the bent normal occlusion (clamped to [0,1]). Default 1.0.
+     *  Maps to BJS `bentNormalTexture.level`. */
+    bentNormalStrength?: number;
     /** Baked lightmap texture. Added to the shaded color by default, or multiplied
      *  when `useLightmapAsShadowmap` is true. Set via {@link setPbrLightmap}. */
     lightmapTexture?: Texture2D;

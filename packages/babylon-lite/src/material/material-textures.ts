@@ -105,6 +105,7 @@ function getPbrTextures(material: PbrMaterialProps): readonly Texture2D[] {
     pushTexture(textures, subsurface?.translucency?.intensityTexture);
     pushTexture(textures, subsurface?.thickness?.texture);
     pushTexture(textures, getPbrTransmission(material)?.texture);
+    pushTexture(textures, material.bentNormalTexture);
     return textures;
 }
 

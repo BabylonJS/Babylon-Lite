@@ -2132,6 +2132,17 @@
         "skipPerf": true
     },
     {
+        "id": 230,
+        "slug": "scene230-bent-normals",
+        "name": "Scene 230 — Bent Normals",
+        "maxMad": 1,
+        "maxRegionMad": 2,
+        "maxRawKB": 79.5,
+        "description": "Bent normal reflection occlusion (Babylon.js PG #ZH5HB3#3). The same glTF is loaded twice; only the right copy gets a tangent-space `bentNormalTexture`, replacing the default specular occlusion with the spherical-Gaussian bent-normal visibility term in the IBL specular lobe.",
+        "tags": ["pbr", "gltf", "ibl", "bent-normal"],
+        "skipPerf": true
+    },
+    {
         "id": 231,
         "slug": "scene231-standard-deform-features",
         "name": "Scene 231 — StandardMaterial Deform Features",
@@ -3154,6 +3165,18 @@
         "tags": ["material", "parallax", "pom", "standard", "pbr", "texture", "comparison"],
         "skipParity": true,
         "skipParityReason": "The user selected comparison of the existing algorithms, not pixel parity. Scene349's browser spec validates POM behavior and synchronized native reference rendering without a permissive MAD gate.",
+        "skipPerf": true
+    },
+    {
+        "id": 353,
+        "slug": "scene353-rh-bent-normals",
+        "name": "Scene 353 — Bent Normals (right-handed)",
+        "maxMad": 1,
+        "maxRegionMad": 2,
+        "maxRawKB": 83.3,
+        "description": "Right-handed twin of scene 230: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Bent normal reflection occlusion on the right copy of the same glTF.",
+        "tags": ["pbr", "gltf", "ibl", "bent-normal", "right-handed"],
+        "rightHanded": true,
         "skipPerf": true
     }
 ]

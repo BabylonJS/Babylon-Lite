@@ -103,7 +103,7 @@ With `Sz = diag(1, 1, -1)`:
   rotation, like Babylon.js's `REFLECTIONMAP_OPPOSITEZ`, for radiance, irradiance, clearcoat and local
   cubemaps.
 - **Normal mapping without tangents** — the PBR cotangent frames (base normal map, clearcoat normal
-  map, mesh-LoD copy) reverse both their tangent and bitangent, like Babylon.js's
+  map, bent normal map, mesh-LoD copy) reverse both their tangent and bitangent, like Babylon.js's
   glTF loader, which ties `invertNormalMapX/Y` to the handedness. Standard and node materials keep
   their frames: Babylon.js flips those only on explicit options.
 
