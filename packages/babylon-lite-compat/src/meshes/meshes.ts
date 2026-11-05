@@ -5,9 +5,9 @@
  * `Mesh → AbstractMesh → TransformNode → Node`. Geometry is built through the
  * Babylon Lite mesh factories (which take the engine, not the scene) and
  * registered with `addToScene`. Transform properties (`position`, `rotation`,
- * `scaling`) are live views over Lite's observable vectors, so
- * `mesh.position.x = 1` and `mesh.rotation.y += 0.01` propagate; reassignment
- * (`mesh.position = new Vector3(...)`) also works.
+ * `scaling`) are live views: position/scaling write through to Lite's observable
+ * vectors, while rotation translates Babylon.js yaw-pitch-roll Euler angles to
+ * Lite's canonical quaternion. In-place edits and whole-vector assignment work.
  */
 
 import {
@@ -235,6 +235,11 @@ export class TransformNode extends Node {
     public readonly _node: SceneNode;
     public physicsBody: PhysicsBody | null = null;
 
+    /** Babylon.js keeps Euler rotation independent from an explicit rotationQuaternion. */
+    private _rotationEuler: Vector3 | null = null;
+    private _rotationView: Vector3 | null = null;
+    private _rotationVersion = -1;
+
     /**
      * @internal The Lite asset container this node was loaded from, when produced
      * by a loader. Used by the `KHR_materials_variants` helpers (which key off the
@@ -285,11 +290,55 @@ export class TransformNode extends Node {
         this._node.position.set(value.x, value.y, value.z);
     }
 
+    /** Keep Euler values stable through component edits, but observe external Lite quaternion writes. */
+    private _getRotationEuler(): Vector3 {
+        const q = this._node.rotationQuaternion;
+        if (!this._rotationEuler || (!this._useQuat && q.version !== this._rotationVersion)) {
+            this._rotationEuler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+            this._rotationVersion = q.version;
+        }
+        return this._rotationEuler;
+    }
+
+    private _applyRotationEuler(): void {
+        if (this._useQuat) {
+            return; // Babylon.js ignores rotation while rotationQuaternion is active.
+        }
+        const euler = this._rotationEuler!;
+        const q = Quaternion.FromEulerAngles(euler.x, euler.y, euler.z);
+        this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+        this._rotationVersion = this._node.rotationQuaternion.version;
+    }
+
     public get rotation(): Vector3 {
-        return liteBackedVector3(this._node.rotation);
+        if (!this._rotationView) {
+            // The cached Vector3 preserves Babylon.js identity and live in-place mutations.
+            // Reads detect a quaternion update made by Lite (e.g. an animation).
+            const thisNode = this;
+            const backing = {
+                get x() { return thisNode._getRotationEuler().x; },
+                set x(value: number) {
+                    thisNode._getRotationEuler().x = value;
+                    thisNode._applyRotationEuler();
+                },
+                get y() { return thisNode._getRotationEuler().y; },
+                set y(value: number) {
+                    thisNode._getRotationEuler().y = value;
+                    thisNode._applyRotationEuler();
+                },
+                get z() { return thisNode._getRotationEuler().z; },
+                set z(value: number) {
+                    thisNode._getRotationEuler().z = value;
+                    thisNode._applyRotationEuler();
+                },
+            };
+            this._rotationView = liteBackedVector3(backing);
+        }
+        return this._rotationView;
     }
     public set rotation(value: Vector3) {
-        this._node.rotation.set(value.x, value.y, value.z);
+        this._getRotationEuler().set(value.x, value.y, value.z);
+        this._applyRotationEuler();
     }
 
     public get scaling(): Vector3 {
@@ -317,10 +366,12 @@ export class TransformNode extends Node {
     }
     public set rotationQuaternion(value: Quaternion | null) {
         if (value) {
+            this._getRotationEuler(); // Snapshot the independent Euler state before quaternion mode.
             this._useQuat = true;
             this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
-        } else {
+        } else if (this._useQuat) {
             this._useQuat = false;
+            this._applyRotationEuler(); // Re-activate the stored Euler rotation.
         }
     }
 
