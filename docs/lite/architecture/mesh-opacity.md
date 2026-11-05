@@ -289,15 +289,19 @@ fallback collection.
 
 `_bindMeshOpacity` accepts a final optional numeric `policy = 0` argument.
 Only creation initializes both floats; a reused record never rewrites them.
-PBR computes the policy from the **rendered binding material**, unwrapping its
-`source` when it is a view. Set policy 1 iff that source has `_renderFeatures`
-and its own pre-fold `features` contain neither `PBR_HAS_ALPHA_BLEND` nor
+PBR chooses the classifier with the same post-fold
+`ctx._features & PBR_HAS_ALPHA_BLEND` discriminator as its fragment slots.
+Forward bindings use the **rendered binding material's own `_renderFeatures`**:
+a public material view's declared flags, not its source's flags. Otherwise,
+geometry bindings use `(material.source ?? material)._renderFeatures`, because
+the geometry view strips the blend branch. Set policy 1 iff the chosen features
+exist and their pre-fold `features` contain neither `PBR_HAS_ALPHA_BLEND` nor
 `PBR_HAS_ALPHA_TEST`; otherwise set 0, including when features are absent.
 This uses only a type-only material-view import and plain fields, adding no
 runtime module dependency to Standard-only opacity scenes.
 
 Overrides therefore use the override's own policy, not `mesh.material`.
-Material swaps and renderable rebuilds follow the new source policy through
+Material swaps and renderable rebuilds follow the new material/view policy through
 new lifetime-owned bindings. Rebinding the same lifetime/device retains its
 creation-time policy, consistent with its already-prepared pipeline variant.
 
@@ -370,7 +374,7 @@ share a compose key when their other features match. A distinguishing key bit
 would require shared transport/key changes and add bytes to unrelated scenes.
 Policy derived from cached mesh/material features can also go stale or describe
 the wrong material for an override. The binding uniform follows the rendered
-source and its lifetime instead; no shared shader-key or render-loop change is
+material/view classifier and its lifetime instead; no shared shader-key or render-loop change is
 needed.
 
 ## State machine and lifecycle
@@ -519,8 +523,10 @@ inventories.
   indexed-indirect borrow validator; previous-first feature/context chains.
 - PBR per-binding OPAQUE policy with alpha-bearing texture/factor/vertex colours,
   gamma/unlit forward/geometry matrix, large luminance and coherent compose keys.
-  Explicit overrides in both directions and geometry views use the rendered
-  source's own policy; OPAQUE/BLEND/OPAQUE/Standard swaps create new bindings.
+  Explicit overrides in both directions use the rendered binding's policy:
+  forward public views use their own flags when adding or stripping blend,
+  while geometry views use the source's flags. Plain OPAQUE forward bindings
+  retain policy 1; OPAQUE/BLEND/OPAQUE/Standard swaps create new bindings.
   Live writes preserve the policy while changing only four bytes at offset 0;
   same-lifetime reuse preserves creation-time policy. Shadow-only initializes
   `[opacity, 0]` and retains its mask.

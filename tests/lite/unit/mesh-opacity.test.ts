@@ -633,6 +633,35 @@ describe("native mesh-opacity public contract", () => {
         expect(first.buffer.destroy).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        ["BLEND", "OPAQUE", 0],
+        ["OPAQUE", "BLEND", 1],
+    ] as const)("uses a forward %s view's own flags over its %s source", async (viewPolicy, sourcePolicy, expected) => {
+        const { PBR_HAS_ALPHA_BLEND } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        const { createMaterialView } = await import("../../../packages/babylon-lite/src/material/material-view");
+        const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+        const source = createPbrMaterial({ alphaBlend: sourcePolicy === "BLEND" });
+        source._renderFeatures = { features: sourcePolicy === "BLEND" ? PBR_HAS_ALPHA_BLEND : 0, features2: 0 };
+        const view = createMaterialView(source, {
+            features: viewPolicy === "BLEND" ? source._renderFeatures.features | PBR_HAS_ALPHA_BLEND : source._renderFeatures.features & ~PBR_HAS_ALPHA_BLEND,
+            features2: source._renderFeatures.features2,
+        });
+        expect(Object.hasOwn(view, "_renderFeatures")).toBe(true);
+        expect(view.source).toBe(source);
+        const target = mesh(source);
+        opacity.setMeshOpacity(target, 0.5);
+        expect((_computeMeshFeatures(target) >>> 16) & PBR_HAS_ALPHA_BLEND).toBe(PBR_HAS_ALPHA_BLEND);
+        const fixture = bindingEngine();
+        const own = await bindOpacity(target, fixture.engine, "pbr-main");
+        const forward = await bindOpacity(target, fixture.engine, "pbr-main", [], view);
+        expect(fixture.contents.get(forward.buffer)![1]).toBe(expected);
+        expect(fixture.contents.get(own.buffer)![1]).toBe(sourcePolicy === "OPAQUE" ? 1 : 0);
+        expect(forward.buffer).not.toBe(own.buffer);
+        for (const bound of [own, forward]) {
+            bound.disposers.forEach((dispose) => dispose());
+        }
+    });
+
     it("uses a geometry view's BLEND source rather than its stripped blend flags, and defaults missing source features to policy zero", async () => {
         const material = createPbrMaterial({ alphaBlend: true });
         const { PBR_HAS_ALPHA_BLEND } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");

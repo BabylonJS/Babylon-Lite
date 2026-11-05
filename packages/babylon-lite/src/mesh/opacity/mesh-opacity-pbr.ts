@@ -32,8 +32,8 @@ export const meshOpacityPbrExt: PbrExt = {
             throw new Error("PBR mesh opacity binding requires its mesh.");
         }
         const material = ctx._material as Partial<MaterialView>;
-        const source = material.source ?? material;
-        const features = source._renderFeatures;
+        // Forward views own their alpha flags; geometry views strip blend, so classify their source.
+        const features = (ctx._features & PBR_HAS_ALPHA_BLEND ? material : (material.source ?? material))._renderFeatures;
         const policy = features && !(features.features & (PBR_HAS_ALPHA_BLEND | PBR_HAS_ALPHA_TEST)) ? 1 : 0;
         return _bindMeshOpacity(ctx._mesh, ctx._engine, entries, binding, ctx._disposers, "PBR", policy);
     },
