@@ -7,6 +7,9 @@ export const PBR_HAS_TONEMAP = 1 << 4;
  *  sceneFeatures), gating the PBR fog blend + calcFogFactor helper into the shader.
  *  Compile-time gated so non-fog PBR scenes stay byte-identical. */
 export const PBR_HAS_FOG = 1 << 5;
+// PBR_HAS_ENV / PBR_HAS_TONEMAP / PBR_HAS_FOG live only in `sceneFeatures`, so material
+// `features` bits 1<<2, 1<<4 and 1<<5 are free for extension-local use:
+//   1<<4  PBR_HAS_BENT_NORMAL  (bent-normal-fragment.ts)
 // Scene bits 1<<6 and 1<<7 are rect-area-light-local (rect-area-light-fragment.ts).
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;

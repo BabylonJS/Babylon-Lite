@@ -103,9 +103,10 @@ describe("getMaterialTextures", () => {
                 refraction: { texture: textures[20] },
             },
             _transmissive: true,
+            bentNormalTexture: textures[21],
         };
 
-        expect(getMaterialTextures(material)).toEqual(textures.slice(0, 21));
+        expect(getMaterialTextures(material)).toEqual(textures.slice(0, 22));
     });
 
     it("uses Shader declaration order and Node own-property insertion order", () => {

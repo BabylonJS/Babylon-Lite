@@ -206,6 +206,13 @@ exports[`right-handed drift guard > material/pbr/cubemap-skybox-material.ts: rig
 }
 `;
 
+exports[`right-handed drift guard > material/pbr/fragments/bent-normal-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
+{
+  "frame ?:": "" «» → «- (» bnDp2p * … * bnDuv2.x «» → «)» "",
+  "frame ?: #2": "" «- (» → «» bnDp2p * … * bnDuv2.y «)» → «» "",
+}
+`;
+
 exports[`right-handed drift guard > material/pbr/fragments/clearcoat-fragment.ts: right-handed branches still differ from their left-handed twins only by the reviewed port 1`] = `
 {
   "CC_NORMAL_COMPUTE ?:": "" «» → «- (» cc_dp2perp * … * cc_duv2.x «» → «)» "",

@@ -1424,11 +1424,44 @@ void [current, ready];
 
         expect(dts).toMatch(/getRenderingContextKind\(context: RenderingContext(?:_\d+)?\): string/);
         expect(dts).toMatch(/getRenderingContexts\(surface: SurfaceContext\): readonly RenderingContext(?:_\d+)?\[\]/);
+        expect(dts).toMatch(/moveRenderingContext\(surface: SurfaceContext, context: RenderingContext(?:_\d+)?, index: number\): boolean/);
         expect(dts).not.toMatch(/\btype RenderingContextKind\b/);
         expect(dts).not.toMatch(/declare interface RenderingContext(?:_\d+)? \{[^}]*\bkind:/s);
         expect(dts).not.toContain("_renderingContextKind");
         expect(dts).not.toMatch(/^\s*_renderingContexts:/m);
+        expect(dts).not.toMatch(/^\s*_overlayBase\??:/m);
+        expect(dts).not.toContain("_installOverlaySceneRegistration");
         expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
+    });
+
+    it("exposes the overlay-scene and utility-layer factories without an engine argument", () => {
+        const probePath = resolve(BUILD_DIR, "utility-layer-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { createOverlayScene, createUtilityLayer, type EngineContext, type SceneContext, type UtilityLayer } from "./index.js";
+declare const engine: EngineContext;
+declare const scene: SceneContext;
+const layer: UtilityLayer = createUtilityLayer(scene);
+const overlay: SceneContext = createOverlayScene(scene);
+createUtilityLayer(overlay);
+// @ts-expect-error Overlay scenes derive their surface from the base scene.
+createOverlayScene(engine);
+createUtilityLayer(scene, { addDefaultLight: false, lightIntensity: 0.5 });
+// @ts-expect-error The utility layer derives its engine from the main scene.
+createUtilityLayer(engine, scene);
+void layer;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("exposes readonly material texture introspection without internal slots", () => {

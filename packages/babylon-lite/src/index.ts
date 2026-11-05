@@ -23,6 +23,7 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { moveRenderingContext } from "./engine/rendering-context-order.js";
 export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
 export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
 // Device-level signals and capabilities, so applications never need the GPUDevice itself.
@@ -60,6 +61,8 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+// Opt-in scene overlays: composite a scene onto an explicit base scene on the same surface.
+export { createOverlayScene } from "./scene/overlay-scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
@@ -531,6 +534,7 @@ export {
 } from "./material/pbr/pbr-material-accessors.js";
 export type { PbrShadowOnly } from "./material/pbr/pbr-material-accessors.js";
 export { enablePbrLightmap, setPbrLightmap } from "./material/pbr/enable-pbr-lightmap.js";
+export { enableBentNormals } from "./material/pbr/fragments/bent-normal-fragment.js";
 export type { PbrLightmapOptions } from "./material/pbr/enable-pbr-lightmap.js";
 export {
     clearPbrLocalEnvironment,
