@@ -316,17 +316,23 @@ export class TransformNode extends Node {
             // Reads detect a quaternion update made by Lite (e.g. an animation).
             const thisNode = this;
             const backing = {
-                get x() { return thisNode._getRotationEuler().x; },
+                get x() {
+                    return thisNode._getRotationEuler().x;
+                },
                 set x(value: number) {
                     thisNode._getRotationEuler().x = value;
                     thisNode._applyRotationEuler();
                 },
-                get y() { return thisNode._getRotationEuler().y; },
+                get y() {
+                    return thisNode._getRotationEuler().y;
+                },
                 set y(value: number) {
                     thisNode._getRotationEuler().y = value;
                     thisNode._applyRotationEuler();
                 },
-                get z() { return thisNode._getRotationEuler().z; },
+                get z() {
+                    return thisNode._getRotationEuler().z;
+                },
                 set z(value: number) {
                     thisNode._getRotationEuler().z = value;
                     thisNode._applyRotationEuler();
@@ -352,10 +358,9 @@ export class TransformNode extends Node {
     private _useQuat = false;
 
     /**
-     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
-     * matrix from a quaternion (its euler `rotation` is a proxy over the same
-     * quaternion), so this reads/writes that quaternion. Returns `null` until
-     * explicitly assigned, matching Babylon.js's euler-by-default convention.
+     * Babylon.js `rotationQuaternion`. Lite drives a node's world matrix from
+     * a quaternion, but compat keeps Euler rotation independent while an explicit
+     * quaternion is active. Returns `null` until explicitly assigned.
      */
     public get rotationQuaternion(): Quaternion | null {
         if (!this._useQuat) {
