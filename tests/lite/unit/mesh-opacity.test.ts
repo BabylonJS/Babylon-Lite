@@ -53,7 +53,7 @@ async function extensions(): Promise<readonly [readonly string[], readonly strin
 }
 
 function bindingEngine() {
-    const writes: { buffer: GPUBuffer; value: number; bytes: number }[] = [];
+    const writes: { buffer: GPUBuffer; value: number; bytes: number; offset: number }[] = [];
     const contents = new Map<GPUBuffer, Float32Array>();
     const device = {
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
@@ -62,18 +62,24 @@ function bindingEngine() {
             return buffer;
         }),
         queue: {
-            writeBuffer: vi.fn((buffer: GPUBuffer, _offset: number, data: ArrayBuffer | ArrayBufferView, offset = 0, size?: number) => {
+            writeBuffer: vi.fn((buffer: GPUBuffer, destinationOffset: number, data: ArrayBuffer | ArrayBufferView, offset = 0, size?: number) => {
                 const view = ArrayBuffer.isView(data) ? data : new Uint8Array(data, offset, size);
-                const value = new Float32Array(view.buffer, view.byteOffset, 1)[0]!;
-                contents.get(buffer)![0] = value;
-                writes.push({ buffer, value, bytes: view.byteLength });
+                const values = new Float32Array(view.buffer, view.byteOffset, view.byteLength / 4);
+                contents.get(buffer)!.set(values, destinationOffset / 4);
+                writes.push({ buffer, value: values[0]!, bytes: view.byteLength, offset: destinationOffset });
             }),
         },
     } as unknown as GPUDevice;
     return { engine: { _device: device } as EngineContext, device, writes, contents };
 }
 
-async function bindOpacity(target: Mesh, engine: EngineContext, route: "standard-main" | "standard-geometry" | "pbr-main" | "pbr-geometry", disposers: (() => void)[] = []) {
+async function bindOpacity(
+    target: Mesh,
+    engine: EngineContext,
+    route: "standard-main" | "standard-geometry" | "pbr-main" | "pbr-geometry",
+    disposers: (() => void)[] = [],
+    material: Mesh["material"] = target.material
+) {
     const entries: GPUBindGroupEntry[] = [];
     let next: number;
     if (route.startsWith("standard")) {
@@ -88,7 +94,7 @@ async function bindOpacity(target: Mesh, engine: EngineContext, route: "standard
         next = ext.bind!(
             {
                 _engine: engine,
-                _material: target.material,
+                _material: material,
                 _mesh: target,
                 _features: route === "pbr-main" ? (meshFeatures >>> 16) & pbr.PBR_HAS_ALPHA_BLEND : 0,
                 _features2: 0,
@@ -164,7 +170,7 @@ describe("native mesh-opacity public contract", () => {
             expect(binding.buffer.size).toBe(16);
             expect(fixture.writes).toHaveLength(1);
             expect(fixture.writes[0]!.value).toBeCloseTo(0.6);
-            expect(fixture.writes[0]!.bytes).toBe(4);
+            expect(fixture.writes[0]!.bytes).toBe(8);
             vi.mocked(fixture.device.queue.writeBuffer).mockClear();
             for (const [value, writes] of [
                 [0.4, 1],
@@ -518,7 +524,7 @@ describe("native mesh-opacity public contract", () => {
         }
     });
 
-    it.each(["OPAQUE", "BLEND", "MASK", "material-alpha"] as const)("encodes the live PBR %s alpha policy without changing the forward/geometry MASK slots", async (policy) => {
+    it.each(["OPAQUE", "BLEND", "MASK", "material-alpha"] as const)("initializes per-binding PBR %s policy while mesh transport contains only bit 22", async (policy) => {
         const material = createPbrMaterial({
             alphaBlend: policy === "BLEND",
             alpha: policy === "material-alpha" ? 0.6 : 1,
@@ -528,10 +534,15 @@ describe("native mesh-opacity public contract", () => {
         const target = mesh(material);
         opacity.setMeshOpacity(target, 0.5);
         const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+        const { _computePbrMaterialFeatures } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material-features");
         const { _getPbrExtsSorted, PBR_HAS_ALPHA_BLEND, PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        if (policy === "MASK") {
+            const { setPbrAlphaCutoff } = await import("../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff");
+            setPbrAlphaCutoff(material, 0.5);
+        }
+        material._renderFeatures = _computePbrMaterialFeatures(material);
         const features = _computeMeshFeatures(target);
-        expect(features & (1 << 22)).toBe(1 << 22);
-        expect(features & (1 << 23)).toBe(policy === "OPAQUE" ? 1 << 23 : 0);
+        expect(features).toBe(1 << 22);
         const ext = _getPbrExtsSorted().find((entry) => entry.id === "z-mesh-opacity")!;
         for (const geometry of [false, true]) {
             const context = {
@@ -547,40 +558,99 @@ describe("native mesh-opacity public contract", () => {
                 _hasSpecularAA: false,
             };
             expect(ext.frag!(context)!._fragmentSlots).toEqual(
-                policy === "OPAQUE"
-                    ? { BC: "alpha = meshOpacity.value;" }
-                    : geometry
-                      ? { BC: "alpha = alpha * meshOpacity.value;" }
-                      : { FA: "finalAlpha = finalAlpha * meshOpacity.value;" }
+                geometry
+                    ? { BC: "alpha = select(alpha, 1.0, meshOpacity.policy > 0.5) * meshOpacity.value;" }
+                    : { BC: "if (meshOpacity.policy > 0.5) { alpha = 1.0; }", FA: "finalAlpha = finalAlpha * meshOpacity.value;" }
             );
             for (const output of [PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT]) {
                 expect(ext.frag!({ ...context, _features2: output })).toBeNull();
             }
+            const fixture = bindingEngine();
+            const bound = await bindOpacity(target, fixture.engine, geometry ? "pbr-geometry" : "pbr-main");
+            expect(Array.from(fixture.contents.get(bound.buffer)!.slice(0, 2))).toEqual([0.5, policy === "OPAQUE" ? 1 : 0]);
+            bound.disposers.forEach((dispose) => dispose());
         }
         opacity.setMeshOpacity(target, 1);
-        expect(_computeMeshFeatures(target) & ((1 << 22) | (1 << 23))).toBe(0);
+        expect(_computeMeshFeatures(target)).toBe(0);
     });
 
-    it("flips the OPAQUE policy bit on registered OPAQUE/BLEND material swaps and never sets it for Standard", async () => {
+    it("follows OPAQUE → BLEND → OPAQUE → Standard material swaps through new bindings, not mesh features", async () => {
         const opaque = createPbrMaterial({ alphaBlend: false });
         const blended = createPbrMaterial({ alphaBlend: true });
         const target = mesh(opaque);
         const owner = scene();
         const { registerMeshScene } = await import("../../../packages/babylon-lite/src/scene/mesh-scene-registry");
         const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+        const { PBR_HAS_ALPHA_BLEND } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        opaque._renderFeatures = { features: 0 };
+        blended._renderFeatures = { features: PBR_HAS_ALPHA_BLEND };
+        const fixture = bindingEngine();
+        const bindings: Awaited<ReturnType<typeof bindOpacity>>[] = [];
         registerMeshScene(owner, target);
         opacity.setMeshOpacity(target, 0.5);
         for (const [material, expected] of [
-            [opaque, 1 << 23],
+            [opaque, 1],
             [blended, 0],
-            [opaque, 1 << 23],
+            [opaque, 1],
             [createStandardMaterial(), 0],
         ] as const) {
             target.material = material;
-            expect(_computeMeshFeatures(target) & (1 << 23)).toBe(expected);
-            expect(_computeMeshFeatures(target) & (1 << 22)).toBe(1 << 22);
+            expect(_computeMeshFeatures(target)).toBe(1 << 22);
             expect(opacity.getMeshOpacity(target)).toBe(0.5);
             expect(owner._materialSwapQueue).toEqual([target]);
+            const bound = await bindOpacity(target, fixture.engine, material._buildGroup._materialFamily === "pbr" ? "pbr-main" : "standard-main");
+            expect(fixture.contents.get(bound.buffer)![1]).toBe(expected);
+            expect(bindings.every((previous) => previous.buffer !== bound.buffer)).toBe(true);
+            bindings.push(bound);
+        }
+        expect(bindings.map((bound) => fixture.contents.get(bound.buffer)![1])).toEqual([1, 0, 1, 0]);
+        bindings.forEach((bound) => bound.disposers.forEach((dispose) => dispose()));
+    });
+
+    it("preserves creation-time policy on reuse and writes only four opacity bytes at offset zero, including reset to 1", async () => {
+        const material = createPbrMaterial();
+        material._renderFeatures = { features: 0 };
+        const target = mesh(material);
+        const fixture = bindingEngine();
+        opacity.setMeshOpacity(target, 0.5);
+        const first = await bindOpacity(target, fixture.engine, "pbr-main");
+        expect(Array.from(fixture.contents.get(first.buffer)!.slice(0, 2))).toEqual([0.5, 1]);
+        const { PBR_HAS_ALPHA_BLEND } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        material._renderFeatures = { features: PBR_HAS_ALPHA_BLEND };
+        const reused = await bindOpacity(target, fixture.engine, "pbr-main", first.disposers);
+        expect(reused.buffer).toBe(first.buffer);
+        expect(first.disposers).toHaveLength(1);
+        expect(fixture.device.createBuffer).toHaveBeenCalledTimes(1);
+        expect(fixture.writes).toHaveLength(1);
+        for (const value of [0.3, 1]) {
+            opacity.setMeshOpacity(target, value);
+            expect(fixture.writes.at(-1)).toMatchObject({ buffer: first.buffer, offset: 0, bytes: 4 });
+            expect(fixture.contents.get(first.buffer)![0]).toBeCloseTo(value);
+            expect(fixture.contents.get(first.buffer)![1]).toBe(1);
+        }
+        expect(fixture.writes).toHaveLength(3);
+        first.disposers.forEach((dispose) => dispose());
+        expect(first.buffer.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses a geometry view's BLEND source rather than its stripped blend flags, and defaults missing source features to policy zero", async () => {
+        const material = createPbrMaterial({ alphaBlend: true });
+        const { PBR_HAS_ALPHA_BLEND } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-flags");
+        const { createPbrGeometryMaterialView } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view");
+        const { GeometryTextureType } = await import("../../../packages/babylon-lite/src/frame-graph/geometry-types");
+        material._renderFeatures = { features: PBR_HAS_ALPHA_BLEND };
+        const target = mesh(material);
+        opacity.setMeshOpacity(target, 0.5);
+        const fixture = bindingEngine();
+        const view = createPbrGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_POSITION], emitColor: false });
+        expect(view._renderFeatures.features & PBR_HAS_ALPHA_BLEND).toBe(0);
+        const geometry = await bindOpacity(target, fixture.engine, "pbr-geometry", [], view);
+        const missing = createPbrMaterial();
+        expect(missing._renderFeatures).toBeUndefined();
+        const absent = await bindOpacity(target, fixture.engine, "pbr-main", [], missing);
+        for (const bound of [geometry, absent]) {
+            expect(fixture.contents.get(bound.buffer)![1]).toBe(0);
+            bound.disposers.forEach((dispose) => dispose());
         }
     });
 

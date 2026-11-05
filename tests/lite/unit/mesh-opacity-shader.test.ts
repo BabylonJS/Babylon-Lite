@@ -60,6 +60,7 @@ const signature: RenderTargetSignature = { _colorFormat: "bgra8unorm", _depthSte
 const compact = (source: string): string => source.replace(/\s+/g, "");
 
 function fixture() {
+    const contents = new Map<GPUBuffer, Uint8Array>();
     const device = {
         createBindGroupLayout: vi.fn((descriptor) => descriptor),
         createPipelineLayout: vi.fn((descriptor) => descriptor),
@@ -70,16 +71,24 @@ function fixture() {
         createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             const storage = new ArrayBuffer(Number(descriptor.size));
-            return { size: descriptor.size, destroy: vi.fn(), getMappedRange: () => storage, unmap: vi.fn() };
+            const buffer = { size: descriptor.size, destroy: vi.fn(), getMappedRange: () => storage, unmap: vi.fn() } as unknown as GPUBuffer;
+            contents.set(buffer, new Uint8Array(storage));
+            return buffer;
         }),
-        queue: { writeBuffer: vi.fn(), writeTexture: vi.fn() },
+        queue: {
+            writeBuffer: vi.fn((buffer: GPUBuffer, offset: number, data: ArrayBuffer | ArrayBufferView, dataOffset = 0, size?: number) => {
+                const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data, dataOffset, size);
+                contents.get(buffer)!.set(bytes, offset);
+            }),
+            writeTexture: vi.fn(),
+        },
         limits: { maxTextureDimension2D: 8192 },
     } as unknown as GPUDevice;
     const engine = { _device: device, _disposables: [], canvas: { width: 64, height: 64 }, format: "bgra8unorm", msaaSamples: 4 } as unknown as EngineContext;
     Object.assign(engine, { engine });
     const scene = createSceneContext(engine, { defaultRenderTask: false });
     const pass = { setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), setBindGroup: vi.fn(), drawIndexed: vi.fn(), drawIndexedIndirect: vi.fn() };
-    return { engine, scene, pass };
+    return { engine, scene, pass, contents };
 }
 
 function mesh(material: Mesh["material"]): Mesh {
@@ -121,7 +130,7 @@ function meshBinding(binding: DrawBinding, f: ReturnType<typeof fixture>): GPUBi
     return f.pass.setBindGroup.mock.calls.find(([group]) => group === 1)![1] as unknown as GPUBindGroupDescriptor;
 }
 
-function assertOpacityBinding(binding: DrawBinding, f: ReturnType<typeof fixture>): void {
+function assertOpacityBinding(binding: DrawBinding, f: ReturnType<typeof fixture>): GPUBuffer {
     const code = compact(fragment(binding));
     const declarations = [...code.matchAll(/@group\(1\)@binding\((\d+)\)var<uniform>meshOpacity:meshOpacityUniforms;/g)];
     expect(declarations).toHaveLength(1);
@@ -134,7 +143,8 @@ function assertOpacityBinding(binding: DrawBinding, f: ReturnType<typeof fixture
     expect(buffer.size).toBe(16);
     const layout = group.layout as unknown as GPUBindGroupLayoutDescriptor;
     expect([...layout.entries].find((entry) => entry.binding === index)).toMatchObject({ visibility: 2, buffer: { type: "uniform" } });
-    expect(f.engine._device.queue.writeBuffer).toHaveBeenCalledWith(buffer, 0, expect.any(ArrayBuffer), 0, 4);
+    expect(f.engine._device.queue.writeBuffer).toHaveBeenCalledWith(buffer, 0, expect.any(ArrayBuffer), 0, 8);
+    return buffer;
 }
 
 function composer() {
@@ -165,7 +175,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         [true, false],
         [false, true],
         [true, true],
-    ])("overrides OPAQUE texture/factor/vertex alpha in real forward and geometry variants (gamma: %s, unlit: %s)", async (gamma, unlit) => {
+    ])("preserves OPAQUE opacity after luminance in real forward and geometry variants (gamma: %s, unlit: %s)", async (gamma, unlit) => {
         const f = fixture();
         const material = createPbrMaterial({
             baseColorTexture: createSolidTexture2D(f.engine, 0.4, 0.6, 0.8, 0.25),
@@ -183,8 +193,8 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         colorBuffer.unmap();
         Object.assign(target._gpu, { colorBuffer });
         f.scene._groups.set(material._buildGroup, [target]);
-        setMeshOpacity(target, 0.5);
-        expect(_computeMeshFeatures(target) & (1 << 23)).toBe(1 << 23);
+        setMeshOpacity(target, 0.1);
+        expect(_computeMeshFeatures(target) & ~(1 << 6)).toBe(1 << 22);
         const forward = (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
         expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(true);
         const geometry = buildPbrGeometryRenderable(
@@ -195,16 +205,26 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         );
         for (const renderable of [forward, geometry]) {
             const binding = renderable.bind(f.engine, signature);
-            assertOpacityBinding(binding, f);
+            const buffer = assertOpacityBinding(binding, f);
+            const [opacity, policy] = new Float32Array(f.contents.get(buffer)!.buffer, 0, 2);
+            expect(opacity).toBeCloseTo(0.1);
+            expect(policy).toBe(1);
             const code = compact(fragment(binding));
             expect(code).toContain("varalpha=baseColorSample.a*material.baseColorFactor.a;");
             expect(code).toContain("alpha*=input.vColor.a;");
-            expect(code.match(/alpha=meshOpacity\.value;/g)).toHaveLength(1);
-            expect(code).not.toContain("finalAlpha=finalAlpha*meshOpacity.value;");
-            expect(code).not.toContain("alpha=alpha*meshOpacity.value;");
-            const override = code.indexOf("alpha=meshOpacity.value;");
-            expect(override).toBeGreaterThan(code.indexOf("alpha*=input.vColor.a;"));
-            expect(override).toBeLessThan(code.indexOf(renderable === forward ? "varfinalAlpha=" : "alpha>0.4"));
+            const policyStatement = renderable === forward ? "if(meshOpacity.policy>0.5){alpha=1.0;}" : "alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;";
+            const normalization = code.indexOf(policyStatement);
+            expect(normalization).toBeGreaterThan(code.indexOf("alpha*=input.vColor.a;"));
+            expect(code.split(policyStatement)).toHaveLength(2);
+            expect(normalization).toBeLessThan(code.indexOf(renderable === forward ? "varfinalAlpha=" : "alpha>0.4"));
+            if (renderable === forward) {
+                expect(code.match(/finalAlpha=finalAlpha\*meshOpacity\.value;/g)).toHaveLength(1);
+                expect(code.indexOf("finalAlpha=finalAlpha*meshOpacity.value;")).toBeGreaterThan(code.indexOf("finalAlpha=saturate("));
+                const normalizedAlpha = policy! > 0.5 ? 1 : 0.25 * 0.6 * 0.5;
+                expect(Math.min(1, normalizedAlpha + 10 ** 2) * opacity!).toBeCloseTo(0.1);
+            } else {
+                expect(code).not.toContain("finalAlpha=finalAlpha*meshOpacity.value;");
+            }
             expect(renderable.isTransparent).toBe(true);
         }
     });
@@ -309,6 +329,30 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         expect([forward.isTransparent, forward.order, geometry.isTransparent, geometry.order]).toEqual([true, 200, true, 200]);
     });
 
+    it("fades a shadow-only material at 0.5 with policy zero without replacing its shadow mask", async () => {
+        const f = fixture();
+        f.scene.camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
+        f.scene.lights.push(shadowLight());
+        addClusteredLightContainer(f.scene, createClusteredLightContainer({ horizontalTiles: 1, verticalTiles: 1, zSlices: 1 }));
+        const material = createPbrMaterial({ alphaBlend: false });
+        setShadowOnly(material);
+        const target = mesh(material);
+        target.receiveShadows = true;
+        f.scene._groups.set(material._buildGroup, [target]);
+        setMeshOpacity(target, 0.5);
+        const forward = (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
+        const binding = forward.bind(f.engine, signature);
+        const buffer = assertOpacityBinding(binding, f);
+        expect(Array.from(new Float32Array(f.contents.get(buffer)!.buffer, 0, 2))).toEqual([0.5, 0]);
+        const code = compact(fragment(binding));
+        const policyBC = "if(meshOpacity.policy>0.5){alpha=1.0;}";
+        expect(code.split(policyBC)).toHaveLength(2);
+        expect(code.indexOf(policyBC)).toBeGreaterThan(code.indexOf("alpha=saturate((1.0-so_shadowMin)"));
+        expect(code.indexOf(policyBC)).toBeLessThan(code.indexOf("varfinalAlpha="));
+        expect(code.match(/finalAlpha=finalAlpha\*meshOpacity\.value;/g)).toHaveLength(1);
+        expect(code.indexOf("finalAlpha=finalAlpha*meshOpacity.value;")).toBeGreaterThan(code.lastIndexOf("finalAlpha=alpha*material.materialAlpha;"));
+    });
+
     it("orders PBR FA after saturate and shadow-only, preserves cutoff order, and matches clustered main/geometry binding indices", async () => {
         const f = fixture();
         f.scene.camera = createArcRotateCamera(0, 1, 5, { x: 0, y: 0, z: 0 });
@@ -335,7 +379,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
             assertOpacityBinding(binding, f);
             const code = compact(fragment(binding));
             expect(code).toContain("clusteredLightParams");
-            const multiply = code.indexOf(binding === main ? "finalAlpha=finalAlpha*meshOpacity.value;" : "alpha=alpha*meshOpacity.value;");
+            const multiply = code.indexOf(binding === main ? "finalAlpha=finalAlpha*meshOpacity.value;" : "alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;");
             expect(multiply).toBeGreaterThan(code.indexOf("discard;"));
             expect(pipeline(binding).depthStencil!.depthWriteEnabled).toBe(false);
             expect([...pipeline(binding).fragment!.targets][0]!.blend).toBeDefined();
@@ -347,8 +391,8 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         expect(multiply).toBeGreaterThan(color.lastIndexOf("finalAlpha=alpha*material.materialAlpha;"));
         expect(multiply).toBeLessThan(color.indexOf("returnvec4<f32>(color,finalAlpha);"));
         const geo = compact(fragment(auxiliary));
-        expect(geo.indexOf("alpha=alpha*meshOpacity.value;")).toBeGreaterThan(geo.indexOf("alpha=saturate((1.0-so_shadowMin)"));
-        expect(geo.indexOf("alpha>0.4")).toBeGreaterThan(geo.indexOf("alpha=alpha*meshOpacity.value;"));
+        expect(geo.indexOf("alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;")).toBeGreaterThan(geo.indexOf("alpha=saturate((1.0-so_shadowMin)"));
+        expect(geo.indexOf("alpha>0.4")).toBeGreaterThan(geo.indexOf("alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;"));
         expect([forward.isTransparent, forward.order, geometry.isTransparent, geometry.order]).toEqual([true, 150, true, 200]);
         expect(isPbrForwardBuildCurrent(f.scene, forward, target)).toBe(true);
         setMeshOpacity(target, 0.4);
@@ -390,7 +434,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         for (; depth && end < code.length; end++) {
             depth += code[end] === "{" ? 1 : code[end] === "}" ? -1 : 0;
         }
-        const multiply = code.indexOf(alphaBlend ? "alpha=alpha*meshOpacity.value;" : "alpha=meshOpacity.value;");
+        const multiply = code.indexOf("alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;");
         expect(depth).toBe(0);
         expect(multiply).toBeGreaterThan(end - 1);
         expect(multiply).toBeLessThan(code.indexOf("alpha>0.4"));

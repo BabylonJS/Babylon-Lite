@@ -1,7 +1,6 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Mesh } from "../mesh.js";
-import type { PbrMaterialProps } from "../../material/pbr/pbr-material.js";
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { _installMeshMaterialValidator, markMeshRenderableDirty } from "../../scene/mesh-scene-registry.js";
 import { _registerStdExt } from "../../material/standard/standard-flags.js";
@@ -22,6 +21,7 @@ interface OpacityBinding {
 let _installed = false;
 let _bindings: WeakMap<Mesh, Set<OpacityBinding>> | null = null;
 const _value = new F32(1);
+const _initialValue = new F32(2);
 
 function assertMesh(mesh: Mesh, api: string): asserts mesh is OpacityMesh {
     if (!mesh || typeof mesh !== "object" || !("_gpu" in mesh)) {
@@ -46,17 +46,7 @@ function ensureInstalled(): void {
     }
     _registerStdExt(meshOpacityStandardExt);
     _registerPbrExt(meshOpacityPbrExt);
-    _installMeshFeatureExtra((mesh) => {
-        if (!(getMeshOpacity(mesh) < 1)) {
-            return 0;
-        }
-        let features = 1 << 22;
-        const material = mesh.material as PbrMaterialProps | null;
-        if (material?._buildGroup._materialFamily === "pbr" && !material.alphaBlend && !((material._alphaCutOff ?? 0) > 0) && !((material.alpha ?? 1) < 1)) {
-            features |= 1 << 23;
-        }
-        return features;
-    });
+    _installMeshFeatureExtra((mesh) => (getMeshOpacity(mesh) < 1 ? 1 << 22 : 0));
     _installPbrBindingContext((context, _id, disposers) => {
         context._disposers = disposers;
     });
@@ -118,8 +108,16 @@ export function getMeshOpacity(mesh: Mesh): number {
     return mesh._opacity ?? 1;
 }
 
-/** @internal Reuse or create a binding-lifetime-owned uniform; never a material-owned resource. */
-export function _bindMeshOpacity(mesh: Mesh, engine: EngineContext, entries: GPUBindGroupEntry[], binding: number, disposers: (() => void)[] | undefined, route: string): number {
+/** @internal Reuse or create a binding-lifetime-owned uniform with creation-time policy. */
+export function _bindMeshOpacity(
+    mesh: Mesh,
+    engine: EngineContext,
+    entries: GPUBindGroupEntry[],
+    binding: number,
+    disposers: (() => void)[] | undefined,
+    route: string,
+    policy = 0
+): number {
     if (!disposers) {
         throw new Error(`${route} mesh opacity binding requires binding-owned disposers.`);
     }
@@ -132,8 +130,9 @@ export function _bindMeshOpacity(mesh: Mesh, engine: EngineContext, entries: GPU
             }
         }
     }
-    _value[0] = getMeshOpacity(mesh);
-    const buffer = createUniformBuffer(engine, _value);
+    _initialValue[0] = getMeshOpacity(mesh);
+    _initialValue[1] = policy;
+    const buffer = createUniformBuffer(engine, _initialValue);
     const record: OpacityBinding = { _buffer: buffer, _device: engine._device, _engine: engine, _disposers: disposers };
     if (!records) {
         (_bindings ??= new WeakMap()).set(mesh, (records = new Set()));

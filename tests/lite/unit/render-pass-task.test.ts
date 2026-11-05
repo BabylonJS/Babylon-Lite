@@ -731,6 +731,92 @@ describe("RenderPassTask transparent sorting", () => {
         expect(to._renderables).toEqual(renderables);
     });
 
+    it.each([
+        ["opaque", "blend", 1, 0],
+        ["blend", "opaque", 0, 1],
+        ["standard", "opaque", 0, 1],
+    ] as const)(
+        "uses rendered PBR policy for explicit %s → %s overrides without changing the non-override binding",
+        async (sourceKind, overrideKind, ownPolicy, overridePolicy) => {
+            const initial = new Map<GPUBuffer, number[]>();
+            const engine = makeMockEngine({
+                onWriteBuffer: (buffer, offset, data, dataOffset = 0, size) => {
+                    if (offset === 0 && size === 8) {
+                        const storage = ArrayBuffer.isView(data) ? data.buffer : data;
+                        const start = ArrayBuffer.isView(data) ? data.byteOffset + dataOffset : dataOffset;
+                        initial.set(buffer, Array.from(new Float32Array(storage, start, 2)));
+                    }
+                },
+            });
+            const scene = createSceneContext(engine, { defaultRenderTask: false });
+            scene.camera = makeCamera();
+            const material = sourceKind === "standard" ? createStandardMaterial() : createPbrMaterial({ alphaBlend: sourceKind === "blend" });
+            const override = createPbrMaterial({ alphaBlend: overrideKind === "blend" });
+            const target = initMeshTransform({
+                name: "override-policy",
+                children: [],
+                material,
+                visible: true,
+                receiveShadows: false,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    normalBuffer: {} as GPUBuffer,
+                    uvBuffer: {} as GPUBuffer,
+                    indexBuffer: {} as GPUBuffer,
+                    indexFormat: "uint16",
+                    indexCount: 3,
+                },
+            });
+            setMeshOpacity(target, 0.5);
+            const probe = initMeshTransform({ ...target, name: "prepared-override", material: override });
+            const pbrMeshes = sourceKind === "standard" ? [probe] : [target, probe];
+            scene._groups.set(override._buildGroup, pbrMeshes);
+            const pbr = await buildPbrRenderables(scene, pbrMeshes, undefined);
+            scene._groups.set(override._buildGroup, Object.assign(pbrMeshes, { r: pbr.rebuildSingle, o: pbr.renderables }));
+            if (sourceKind === "standard") {
+                const meshes = [target];
+                scene._groups.set(material._buildGroup, meshes);
+                const standard = buildStandardMeshRenderables(scene, meshes, {});
+                scene._groups.set(material._buildGroup, Object.assign(meshes, { r: standard.rebuildSingle, o: standard.renderables }));
+                scene._renderables.push(...standard.renderables);
+            } else {
+                scene._renderables.push(...pbr.renderables.filter((renderable) => renderable.mesh === target));
+            }
+            scene.meshes.push(target);
+            registerMeshScene(scene, target);
+            const own = createRenderTask({ name: "own-policy", rt: engine.scRT, autoMirror: false }, engine, scene);
+            const alternate = createRenderTask({ name: "override-policy", rt: engine.scRT, autoMirror: false }, engine, scene);
+            addMeshToTask(own, target);
+            addMeshToTask(alternate, target, { material: override });
+            own.record();
+            alternate.record();
+            const buffers: GPUBuffer[] = [];
+            for (const [task, policy] of [
+                [own, ownPolicy],
+                [alternate, overridePolicy],
+            ] as const) {
+                expect(task.execute!()).toBe(1);
+                const binding = task._transparentBindings[0]!;
+                expect(binding.renderable.mesh).toBe(target);
+                const pass = { setBindGroup: vi.fn(), setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), drawIndexed: vi.fn() };
+                binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+                const group = pass.setBindGroup.mock.calls.find(([index]) => index === 1)![1] as GPUBindGroupDescriptor;
+                const opacity = [...group.entries].map((entry) => (entry.resource as GPUBufferBinding).buffer).filter((buffer) => initial.has(buffer));
+                expect(opacity).toHaveLength(1);
+                expect(initial.get(opacity[0]!)).toEqual([0.5, policy]);
+                buffers.push(opacity[0]!);
+            }
+            expect(buffers[0]).not.toBe(buffers[1]);
+            expect(initial.get(buffers[0]!)).toEqual([0.5, ownPolicy]);
+            own.dispose();
+            alternate.dispose();
+            disposeGpuResourceRetirements(engine);
+            for (const disposers of scene._meshDisposables.values()) {
+                disposers.forEach((dispose) => dispose());
+            }
+        }
+    );
+
     it.each([false, true])("follows explicit-task opacity crossings only with mesh refresh, including live zero skip and lifetime retirement (refresh: %s)", async (refresh) => {
         const passDraws: (GPUBuffer | undefined)[] = [];
         const engine = makeMockEngine({ onIndexedDraw: (encoder, buffer) => encoder === "pass" && passDraws.push(buffer) });

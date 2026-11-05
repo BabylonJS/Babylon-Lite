@@ -18,7 +18,7 @@ export const MSH_FLAT_NORMAL = 1 << 10;
 // The PBR renderables fold those in themselves — they exist only to key the composed shader variant,
 // which the Standard path has no equivalent of — so nothing here has to read them, except the
 // winding bit in a right-handed build (see the end of `_computeMeshFeatures`).
-// Bits 22–23 are reserved by mesh/opacity (feature-local constants).
+// Bit 22 is reserved by mesh/opacity (feature-local constant).
 
 /** Extra mesh-feature encoder installed only by runtime opt-ins such as mirrored procedural meshes. */
 let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;

@@ -69,12 +69,17 @@ interface OpacityBinding {
 `mesh-opacity.ts` owns validation, the scalar, installation, transitions and GPU
 records. A lazily created `WeakMap<Mesh, Set<OpacityBinding>>` tracks live
 binding-owned buffers. Neither the map nor its sets are allocated at import time.
-A reusable one-element `Float32Array` supplies writes.
+A reusable one-element `Float32Array` supplies live writes; a separate two-element
+array supplies binding initialization.
 
 Each mesh's binding lifetime and device pair owns one 16-byte uniform buffer.
-Only its first four bytes contain the opacity `f32`. Repeated binds with the same
+Its first two `f32` values are `[opacity, policy]`, at byte offsets 0 and 4.
+Standard ignores the second value (initialized to 0); PBR uses it as an immutable
+per-binding OPAQUE policy. Live setters write only four bytes at offset 0, never
+the policy. Repeated binds with the same
 disposer-array identity and device reuse the existing buffer and record without
-another allocation, initial upload or disposer. Different lifetime arrays or
+another allocation, initial upload or disposer, preserving its creation-time
+policy even if a later bind supplies a different policy. Different lifetime arrays or
 devices create separate records; no material owns this buffer. Native shallow
 mesh clones copy the scalar and its corresponding skip flag but never the records.
 
@@ -109,20 +114,14 @@ the first prepare.
 
 ### Mesh-bit transport and Standard folding
 
-`material/mesh-features.ts` reserves mesh bits 22–23 with a comment. The opacity
+`material/mesh-features.ts` reserves mesh bit 22 with a comment. The opacity
 encoder owns its meaning; it does not add a shared opacity constant or read opacity
 from core code. The installed encoder returns 0 at opacity 1 and sets bit 22
-below 1. It also sets bit 23 below 1 when the mesh's material has
-`_buildGroup._materialFamily === "pbr"` and no alpha policy of its own:
-`alphaBlend` is false/unset, `_alphaCutOff` is not greater than 0, and `alpha`
-is not below 1. These are live plain-field reads inside the opt-in module;
-there is no static runtime import of PBR material construction.
+below 1. It does not encode material alpha policy.
 
 PBR's opacity fragment declares the feature-local
-`MESH_OPACITY_MESH_BIT = 1 << 22` and
-`MESH_OPACITY_OPAQUE_ALPHA_BIT = 1 << 23`. Bit 23 selects only its OPAQUE
-alpha override, never queue routing. A material swap recomputes the policy bit
-alongside the other mesh features.
+`MESH_OPACITY_MESH_BIT = 1 << 22`. OPAQUE alpha policy lives in the uniform,
+not a shader-variant bit.
 
 Standard uses its existing extension hook:
 
@@ -153,8 +152,7 @@ transport is:
 
 Mesh bit 22 maps to material alpha-blend bit 6. The feature bit remains in the
 mesh word for the opacity PBR fragment; the generic fold supplies routing, blend
-state and compose-key identity. Bit 23 survives in the full mesh word and
-composed key but is masked out of this alpha-blend transport.
+state and compose-key identity.
 
 The three consumers are:
 
@@ -279,7 +277,8 @@ Each active opacity fragment contributes one structured declaration:
 }
 ```
 
-Its helper is `struct meshOpacityUniforms{value:f32}`. The composer assigns the
+Standard's helper is `struct meshOpacityUniforms{value:f32}`; PBR's is
+`struct meshOpacityUniforms{value:f32,policy:f32}`. The composer assigns the
 group-1 binding index from declarations; never parse emitted WGSL for an index.
 The bind hook pushes `{ binding, resource: { buffer } }` and returns
 `binding + 1`. It reuses a record with the same lifetime array and device when
@@ -287,6 +286,20 @@ present; otherwise it initializes the uniform from current mesh state, records
 the buffer and appends its disposer. Missing mesh/scene or lifetime transport throws
 a route-specific internal invariant error rather than silently allocating a
 fallback collection.
+
+`_bindMeshOpacity` accepts a final optional numeric `policy = 0` argument.
+Only creation initializes both floats; a reused record never rewrites them.
+PBR computes the policy from the **rendered binding material**, unwrapping its
+`source` when it is a view. Set policy 1 iff that source has `_renderFeatures`
+and its own pre-fold `features` contain neither `PBR_HAS_ALPHA_BLEND` nor
+`PBR_HAS_ALPHA_TEST`; otherwise set 0, including when features are absent.
+This uses only a type-only material-view import and plain fields, adding no
+runtime module dependency to Standard-only opacity scenes.
+
+Overrides therefore use the override's own policy, not `mesh.material`.
+Material swaps and renderable rebuilds follow the new source policy through
+new lifetime-owned bindings. Rebinding the same lifetime/device retains its
+creation-time policy, consistent with its already-prepared pipeline variant.
 
 Standard's leading `"0-mesh-opacity"` extension/fragment id aligns registry and
 composer ordering before `"0-std-uv-transform"`. PBR uses
@@ -313,28 +326,28 @@ changing their original discard threshold.
 ### PBR
 
 Return no fragment unless mesh bit 22 is set and features2 is neither no-colour
-nor ESM. Select exactly one alpha slot, with the bit-23 branch taking precedence:
+nor ESM. Forward composition includes both policy normalization and the final
+opacity multiply; geometry combines them in one slot:
 
-| Alpha policy / composed features                           | Slot | Statement                                      |
-| ---------------------------------------------------------- | ---- | ---------------------------------------------- |
-| Bit 23: PBR OPAQUE without an own alpha policy             | `BC` | `alpha = meshOpacity.value;`                   |
-| Otherwise, `PBR_HAS_ALPHA_BLEND` set                       | `FA` | `finalAlpha = finalAlpha * meshOpacity.value;` |
-| Otherwise, geometry composition with blend branch stripped | `BC` | `alpha = alpha * meshOpacity.value;`           |
+| Composed features                   | Slot | Statement                                                                   |
+| ----------------------------------- | ---- | --------------------------------------------------------------------------- |
+| `PBR_HAS_ALPHA_BLEND` set (forward) | `BC` | `if (meshOpacity.policy > 0.5) { alpha = 1.0; }`                            |
+| Same forward composition            | `FA` | `finalAlpha = finalAlpha * meshOpacity.value;`                              |
+| Geometry with blend branch stripped | `BC` | `alpha = select(alpha, 1.0, meshOpacity.policy > 0.5) * meshOpacity.value;` |
 
-**OPAQUE alpha policy:** without material blending, positive cutoff, or material
-alpha below 1, source alpha is treated as 1 even if the base-colour texture,
-base-colour factor or vertex colours carry alpha. `BC` replaces the decoded
-`alpha` with `meshOpacity.value`; the normal PBR output-alpha block then runs,
-without a second `FA` multiply. Texture/factor/vertex-colour decoding precedes
-`BC`, which precedes that output block. Gamma-albedo and unlit paths still
-declare `alpha`, so they use the same override. Forward, geometry and composed
-variant lookup retain the same policy bit and extension.
+**OPAQUE alpha policy:** policy 1 treats source alpha as 1 even if the
+base-colour texture, base-colour factor or vertex colours carry alpha. Forward
+`BC` runs after decoding/vertex-colour alpha and before `var finalAlpha=`.
+The usual luminance fold saturates normalized alpha to 1; `FA` multiplies
+**after** that fold. Thus final alpha equals mesh opacity, not opacity plus
+luminance. Geometry normalizes and multiplies together before `alpha > 0.4`.
+Gamma-albedo and unlit paths declare `alpha` and use the same policy.
 
 **Own alpha policies:** BLEND and material alpha below 1 retain the existing
 forward `FA` multiply after the normal output-alpha calculation:
 `saturate(alpha * materialAlpha + luminanceOverAlpha²) * opacity`. Geometry
-strips the blend branch and retains `BC` multiplication. MASK also keeps its
-existing forward `FA` / geometry `BC` behavior. Both occur **after** the original
+strips the blend branch and uses the combined `BC` with policy 0. MASK also
+uses policy 0 and keeps its forward `FA` / geometry `BC` behavior. Both occur **after** the original
 `AT` cutoff, so that cutoff tests the material's own alpha, not mesh opacity.
 Mesh opacity does not change which MASK fragments survive.
 
@@ -342,13 +355,23 @@ The shadow-only fragment owns and internally exports
 `PBR2_HAS_SHADOW_ONLY = 1 << 30`. The lazy opacity fragment imports it from
 `fragments/shadow-only-fragment.ts`, not shared flags or the public root. When
 that features2 bit is set, declare dependency `["shadow-only"]`; otherwise omit
-the dependency. This places opacity after shadow-only's alpha writes without a
-missing-dependency error.
+the dependency. Shadow-only's own features force alpha blending, so its policy
+is 0. The policy `BC` runs after shadow-only's `BC` and leaves that mask intact;
+opacity `FA` runs after shadow-only's final-alpha write and scales the mask,
+without a missing-dependency error or luminance bleed.
 
 Refraction opens its conditional in `NI` and closes it in `BC`. The `"z-"` id
 places the geometry alpha override or multiplier after that closing brace.
 Transmission/refraction write colour, not alpha. The selected opacity slot
 runs before output or the geometry gate.
+
+**Why not a variant bit?** The blend fold makes faded OPAQUE and BLEND materials
+share a compose key when their other features match. A distinguishing key bit
+would require shared transport/key changes and add bytes to unrelated scenes.
+Policy derived from cached mesh/material features can also go stale or describe
+the wrong material for an override. The binding uniform follows the rendered
+source and its lifetime instead; no shared shader-key or render-loop change is
+needed.
 
 ## State machine and lifecycle
 
@@ -457,16 +480,17 @@ material replacement. Pending NodeMaterial handles are rejected below 1 before
 their native material exists. Clone copies the raw value without a redundant
 setter. `isVisible` and `_syncVisibility` are unchanged.
 
-| Behavior                                                         | Equivalence/deviation                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| Programmatic Standard/PBR with no explicit BJS transparency mode | Visibility/blend parity                                      |
-| Native glTF OPAQUE/MASK fading                                   | Intentional Lite policy; compare against a normalized oracle |
-| Finite out-of-range values                                       | Raw compat getter, clamped rendering                         |
-| NaN/Infinity                                                     | RangeError deviation                                         |
-| Node/shader materials below 1                                    | Explicit unsupported error                                   |
-| Shadows                                                          | Full strength even at zero                                   |
-| Picking, hierarchy and clones                                    | Picking unchanged, no inheritance, scalar copied             |
-| InstancedMesh/submeshes                                          | No new support                                               |
+| Behavior                                                         | Equivalence/deviation                                      |
+| ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| Programmatic Standard/PBR with no explicit BJS transparency mode | Visibility/blend parity                                    |
+| Native glTF OPAQUE fading                                        | Source alpha normalized to 1; final alpha equals opacity   |
+| MASK / shadow-only fading                                        | Preserve original cutoff / shadow mask, then scale opacity |
+| Finite out-of-range values                                       | Raw compat getter, clamped rendering                       |
+| NaN/Infinity                                                     | RangeError deviation                                       |
+| Node/shader materials below 1                                    | Explicit unsupported error                                 |
+| Shadows                                                          | Full strength even at zero                                 |
+| Picking, hierarchy and clones                                    | Picking unchanged, no inheritance, scalar copied           |
+| InstancedMesh/submeshes                                          | No new support                                             |
 
 ## Dependencies
 
@@ -493,8 +517,13 @@ inventories.
   update; different lifetime arrays or devices remain independent.
 - Atomic unsupported material swaps and both installation orders with the real
   indexed-indirect borrow validator; previous-first feature/context chains.
-- PBR bit-23 OPAQUE override with alpha-bearing texture/factor/vertex colours,
-  gamma/unlit scope, live OPAQUE/BLEND swaps and coherent forward/geometry keys.
+- PBR per-binding OPAQUE policy with alpha-bearing texture/factor/vertex colours,
+  gamma/unlit forward/geometry matrix, large luminance and coherent compose keys.
+  Explicit overrides in both directions and geometry views use the rendered
+  source's own policy; OPAQUE/BLEND/OPAQUE/Standard swaps create new bindings.
+  Live writes preserve the policy while changing only four bytes at offset 0;
+  same-lifetime reuse preserves creation-time policy. Shadow-only initializes
+  `[opacity, 0]` and retains its mask.
   BLEND/material-alpha multiplication and MASK forward `FA` / geometry `BC`
   remain after the original cutoff. Standard output alpha ignores diffuse-texture
   alpha. Verify shadow-only dependencies, refraction closing braces, geometry
