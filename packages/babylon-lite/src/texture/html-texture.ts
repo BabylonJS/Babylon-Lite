@@ -175,6 +175,11 @@ export function isHtmlInCanvasSupported(engine: EngineContext): boolean {
  * attached so the texture tracks the element. Reads as transparent black until
  * the first paint uploads.
  *
+ * The element is marked `drawable`, so on the native path its whole subtree is
+ * captured except descendants that the application itself marks `drawable`:
+ * per the HTML-in-Canvas spec those are separate drawable subtrees and are left
+ * out of this texture.
+ *
  * @param engine - Engine context (must render into a DOM canvas, not an `OffscreenCanvas`).
  * @param element - The DOM element to rasterise.
  * @param options - Size / sampler / update overrides.
