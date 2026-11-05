@@ -48,6 +48,30 @@ The separate `createScreenSpaceAmbientOcclusionPostProcessTask` API added on
 `master` remains available, as documented in [module 52](52-screen-space-effects.md).
 It is independent of this XeGTAO task and its diffuse-only PBR integration.
 
+Choose `createSsaoTask` when visibility should affect **PBR diffuse IBL only**:
+
+```ts
+const ao = createSsaoTask({ depthTexture, normalTexture, camera }, engine, scene);
+await enablePbrSsao(scene, ao);
+```
+
+Schedule the depth/normal producer before `ao`, and the consuming PBR pass after it.
+Choose the separate post-process API when the desired effect is a **final-color
+multiply**, including direct/specular/emissive contributions in the source:
+
+```ts
+const ao = createScreenSpaceAmbientOcclusionPostProcessTask(
+    { sourceTexture: litColor, depthTexture, camera, composition: "multiply" },
+    engine,
+    scene
+);
+```
+
+Schedule that task after the source color/depth producer. These are alternatives,
+not two stages to stack for the same AO: the post-process `occlusionTexture.r`
+stores an occlusion amount, whereas XeGTAO's `outputTexture.r` stores visibility.
+Do not pass one API's output/settings to the other API's enablers.
+
 The runtime modules, internal symbols, and GPU labels use `xegtao`.
 The upstream license retains the DiligentFX name to identify the
 actual source implementation.
@@ -107,7 +131,11 @@ not changed by mutating the original config object.
 
 No temporal GPU history or temporal-owner passes are allocated/executed while
 initially disabled. The controller and its small CPU state remain available
-for an explicit live re-enable. Floating-origin reprojection is unsupported:
+for an explicit live re-enable. Consequently, `temporal: false` is a runtime
+disable, not a promise to tree-shake reconstruction code out of the bundle.
+Leaving the entire SSAO feature unused does tree-shake it; selecting spatial-only
+output retains the code needed for `ao.temporal.enabled = true`.
+Floating-origin reprojection is unsupported:
 default enabled construction fails explicitly there, and enabling a previously
 disabled controller also fails before allocating temporal GPU resources.
 Spatial-only operation requires an explicit opt-out in that environment.
@@ -149,6 +177,11 @@ pipeline per owner. An unchanged frame allocates no new
 pipeline/cache key/container. Full and Half owners receive the same preset;
 Half evaluates the reduced geometry grid with the original camera projection.
 Changing quality resets temporal history without reallocating the public output.
+The first execution of an uncached quality uses synchronous `createComputePipeline`;
+the API does not expose an asynchronous quality-warmup operation. Changing to an
+already cached quality reuses its pipeline. Applications sensitive to first-use
+hitches should account for this setup cost rather than assuming a quality switch
+is always allocation-free.
 Unsupported preset strings fail explicitly at the task boundary, before any dispatch.
 Mutable
 settings are validated at the API boundary and sampled before each dispatch.
@@ -325,6 +358,12 @@ No physical-quality change is disguised as a port correction.
 
 Background is neutral visibility 1. Disabled tasks clear the
 output to white once instead of continuing all AO work.
+Depth follows the producer's reverse-Z contract: zero is the clear/background
+value, and every positive device depth in the supported range is geometry.
+There is no camera-independent depth epsilon in accumulation, geometry-history
+validation, repair/output, transport, or motion masking. For example, near 0.01,
+far 20000 and view Z 10000 produce a valid float32 depth around `5e-7`; rejecting
+it as background would erase otherwise valid AO.
 
 ## State Machine / Lifecycle
 
@@ -602,6 +641,11 @@ History/phase reset on allocation, resize, device or input identity changes,
 projection/clip-plane changes, radius/intensity changes,
 enable transitions, sample-limit changes, explicit reset, and large camera cuts.
 Ordinary camera motion reprojects rather than resetting every frame.
+The automatic camera-cut heuristic compares translation against
+`max(1, radius * 8)` world units and the current/previous forward-vector dot
+against `0.7`. It is fixed, not a public tuning parameter; scene scale and AO
+radius therefore affect when it resets. Use `resetSsaoTemporal(ao.temporal)`
+for known cuts instead of relying on this heuristic to recognize every one.
 If `executionEnabled` skips the AO task while its velocity producer continues,
 explicitly reset before resuming; `enabled` is the supported neutral-output gate.
 Disable clears neutral output and invalidates history; disposal releases
@@ -1307,6 +1351,10 @@ separately and are not dependencies of the public build or CI.
 - `tests/lite/unit/ssao-pbr.test.ts`: lighting scope and texture/binding ownership contracts.
 - `tests/lite/unit/ssao-temporal.test.ts`: temporal settings, phase/reset, input validation, and lifetime contracts.
 - `tests/lite/unit/ssao-xegtao.test.ts`: final temporal GPU resource and dispatch contracts.
+- `tests/lite/integration/ssao-depth-validity.spec.ts`: nonvisual GPU readback of estimation,
+  accumulation/history, repair/output, transport and motion masking for zero and small positive
+  reverse-Z depths, using both depth32float and R32float inputs. Included in the WebGPU integration
+  CI job; it uses no golden images or performance assertions.
 - `tests/lite/unit/ssao-half-resolution.test.ts`: reduced-resolution input and history ownership.
 - `lab/lite/src/demos/ambient-occlusion.ts`, `lab/lite/demo-ambient-occlusion.html`: lit procedural demonstration.
 - `lab/lite/src/lite/scene348.ts`, `lab/lite/src/bjs/scene348.ts`: final Kitchen comparison against Babylon.js SSAO2.

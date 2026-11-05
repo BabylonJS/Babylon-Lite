@@ -15,7 +15,7 @@ fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
 
 /**
  * Raw depth always has the AoParams size, so clamping to it avoids a texture-size query ahead of
- * every depth fetch.
+ * every depth fetch. Reverse-Z clears to zero; positive device depths remain geometry at any distance.
  */
 export function ssaoDepthBindingWGSL(kind: "depth" | "float", binding: number): WgslSource {
     return wgsl`@group(0) @binding(${binding}) var rawDepth:${kind === "depth" ? "texture_depth_2d" : "texture_2d<f32>"};

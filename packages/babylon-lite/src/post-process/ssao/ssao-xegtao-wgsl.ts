@@ -71,7 +71,7 @@ let current=textureLoad(currentAO,p,0).r;let suppliedNormal=aoSuppliedNormal(p);
 var receiverMotion=vec4f(0);
 if(HAS_VELOCITY!=0u){if(t.control.w!=0.0){receiverMotion=textureLoad(suppliedVelocity,p,0);}else{receiverMotion=textureLoad(velocity,p,0);}}
 var warp=vec4f(0);if(HAS_TRANSPORT!=0u){warp=textureLoad(transport,p,0);}
-if(depth<1e-6){return Output(1,1,depth);}
+if(depth<=0.0){return Output(1,1,depth);}
 let worldNormal=normalize((t.invView*vec4f(aoNormalOf(p,suppliedNormal),0)).xyz);
 let uv=pixel.xy*ao.invSize;
 var previousZ=0.0;var oldPixel=vec2f(0);var motion=vec2f(0);
@@ -112,7 +112,7 @@ let q=aoClamp(base+vec2i(x,y),ao.size);
 // History and counts are fetched with the geometry so their latency overlaps the rejection tests.
 let previousGeometry=textureLoad(geometry,q,0).xy;let previousVisibility=textureLoad(history,q,0).r;let previousCount=textureLoad(counts,q,0).r;
 let storedDepth=bitcast<f32>(previousGeometry.x);let oldZ=dZ(storedDepth);
-if(!(previousZ>0.0)||storedDepth<1e-6){continue;}
+if(!(previousZ>0.0)||storedDepth<=0.0){continue;}
 let storedNormal=geometryNormal(previousGeometry.y);
 if(!(dot(worldNormal,storedNormal)>=0.9)){continue;}
 let delta=aoPosition((vec2f(q)+0.5)*ao.invSize,oldZ)-previousPosition;
@@ -177,7 +177,7 @@ var sum=0.0;var total=0.0;
 for(var i=0;i<4;i++){
 let offset=vec2i(i&1,i>>1);
 let g=textureLoad(previousDepth,aoClamp(b+offset,ao.size),0).xy;let stored=bitcast<f32>(g.x);
-if(stored<1e-6||dot(geometryNormal(g.y),normal)<0.9){continue;}
+if(stored<=0.0||dot(geometryNormal(g.y),normal)<0.9){continue;}
 let weight=select(1.0-f.x,f.x,(i&1)==1)*select(1.0-f.y,f.y,i>=2);
 sum+=stored*weight;total+=weight;
 }
@@ -187,7 +187,7 @@ if(total<0.5){return 0.0;}return sum/total;
 let p=vec2i(pixel.xy);let depth=aoRawDepth(p);
 // The unoccluded test's inputs are fetched with depth.
 let currentVisibility=textureLoad(currentAO,p,0).r;let previousVisibility=textureLoad(history,p,0).r;
-if(t.control.x!=0.0||depth<1e-6){return vec4f(0);}
+if(t.control.x!=0.0||depth<=0.0){return vec4f(0);}
 if(currentVisibility>=0.999&&previousVisibility>=0.999){return vec4f(0);}
 let uv=pixel.xy*ao.invSize;let receiver=world(uv,depth);
 let receiverClip=t.previousVP*vec4f(receiver,1);
@@ -205,7 +205,7 @@ if(t.control.w!=0.0){
 if(!(receiverVelocity.z>0.0)){return vec4f(0);}
 oldDepth=ao.depthUnpack.y-ao.depthUnpack.x/receiverVelocity.z;
 }else{oldDepth=previousDeviceDepth(receiverOldUv,normal);}
-if(oldDepth<1e-6){return vec4f(0);}
+if(oldDepth<=0.0){return vec4f(0);}
 previousReceiver=previousWorld(receiverOldUv,oldDepth);
 }
 let receiverShift=receiver-previousReceiver;
@@ -221,7 +221,7 @@ let ringRadius=projected*f32(ring)/3.0;
 for(var direction=0;direction<12;direction++){
 let angle=f32(direction)*0.5235987755982988;let offset=ringRadius*vec2f(cos(angle),sin(angle));
 let q=aoClamp(vec2i(pixel.xy+offset),ao.size);let sampledDepth=aoRawDepth(q);
-if(sampledDepth<1e-6){continue;}
+if(sampledDepth<=0.0){continue;}
 let sampleUv=(vec2f(q)+0.5)*ao.invSize;let position=world(sampleUv,sampledDepth);
 let delta=position-receiver;let height=dot(delta,normal);
 if(height<0.005){continue;}
@@ -245,7 +245,7 @@ oldDepth=ao.depthUnpack.y-ao.depthUnpack.x/supplied.z;
 let sampleNormal=normalize((t.invView*vec4f(aoNormal(q),0)).xyz);
 oldDepth=previousDeviceDepth(oldUv,sampleNormal);
 }
-if(oldDepth<1e-6){continue;}
+if(oldDepth<=0.0){continue;}
 let shift=position-previousWorld(oldUv,oldDepth);
 let projectedShift=length((oldUv-sampleCameraUv)*ao.tanHalfFov*2.0)*dZ(sampledDepth);
 if(length(shift)>min(radius*0.1,projectedShift*2.0)){continue;}
@@ -319,7 +319,7 @@ let p=vec2i(pixel.xy);let depth=aoRawDepth(p);let h=textureLoad(temporalCounts,p
 // Converged and background receivers keep their own value; it is fetched with the tests.
 let own=textureLoad(mipsAO,p,0).r;
 let factor=(h-1.0)/4.0;
-if(depth<1e-6||factor>=1.0){return own;}
+if(depth<=0.0||factor>=1.0){return own;}
 let position=aoPosition(pixel.xy*ao.invSize,dZ(depth));let n=dNormal(p);
 var mip=i32(4.0*(1.0-clamp(factor,0.0,1.0)));mip=min(mip,i32(textureNumLevels(mipsAO))-1);
 var sum=0.0;var total=0.0;
@@ -354,7 +354,7 @@ let p=vec2i(pixel.xy);let depth=aoRawDepth(p);let h=textureLoad(temporalCounts,p
 let factor=pow(abs((h-1.0)/8.0),0.2);
 var result=textureLoad(repaired,p,0).r;let suppliedNormal=aoSuppliedNormal(p);
 var normal=vec3f(0);
-if(depth>=1e-6){
+if(depth>0.0){
 normal=normalize((inverseView*vec4f(aoNormalOf(p,suppliedNormal),0)).xyz);
 if(factor<1.0){
 let poisson=array<vec3f,8>(

@@ -218,6 +218,12 @@ shared feature when a skinned or morph mesh is present at task preload. Skinned
 Standard velocity requires it, as before; a morph-only Standard mesh bound before
 it has loaded (for example, one added after registration) keeps the historical
 current-morph previous position instead of failing the pass.
+This is also a behavior change for **non-SSAO Standard velocity consumers**:
+a pass that preloads a morph mesh now uses its previous morph weights rather
+than the current morphed position for both frames. Motion blur or another
+temporal consumer therefore receives morph-deformation motion even when no
+SSAO task exists. Color-only rendering is unchanged; the late-added morph-only
+fallback described above remains available.
 Implementation installation alone does not activate another task: the enabler
 decorates only its task's PBR view factory after preload, tags those views (with
 the task's velocity exclusions), and

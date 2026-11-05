@@ -79,7 +79,7 @@ var<workgroup> moved:atomic<u32>;
 if(all(id.xy<ao.size)&&t.control.x==0.0){
 // Velocity is fetched with depth rather than after the background test.
 let p=vec2i(id.xy);let depth=aoRawDepth(p);let supplied=textureLoad(velocity,p,0);
-if(!(depth<1e-6)){
+if(depth>0.0){
 let uv=(vec2f(id.xy)+0.5)*ao.invSize;
 let h=t.invVP*vec4f(uv*vec2f(2,-2)+vec2f(-1,1),depth,1);
 let clip=t.previousVP*vec4f(h.xyz/h.w,1);
