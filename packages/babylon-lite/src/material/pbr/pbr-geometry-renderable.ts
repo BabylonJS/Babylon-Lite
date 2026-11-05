@@ -33,7 +33,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
+import { _geometryOutputExtension, _geometryColorTarget } from "../../frame-graph/geometry-types.js";
 import {
     _computeMeshFeatures,
     MSH_HAS_INSTANCE_COLOR,
@@ -593,7 +593,7 @@ function _getOrCreateGeometryPipeline(
         : undefined;
     const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const colorTargets: GPUColorTargetState[] = formats.map((format) =>
-        extension ? extension.colorTarget(format, blendState, device) : blendState ? { format, blend: blendState } : { format }
+        extension ? extension.colorTarget(format, blendState, device) : _geometryColorTarget(format, blendState, device)
     );
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;

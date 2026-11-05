@@ -264,6 +264,12 @@ Fading a mesh in a geometry task makes it a blended participant. Every colour
 target must be blendable: default `VIEW_DEPTH` (`r32float`) requires the device
 feature `float32-blendable`, or an `r16float` format override. Integer tag targets
 are never blended. This is the same requirement as a material's own BLEND policy.
+PBR, Standard, and Node geometry pipeline creation enforces the format contract
+through `_geometryColorTarget`. A blended 32-bit float target without the feature
+throws the existing error:
+`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`
+Validation also rejects blended integer formats; the mesh-blending tag target
+remains explicitly unblended.
 
 Faded cutouts discard geometry fragments whose post-opacity `alpha <= 0.4`,
 before any data or mesh-blending tag write. They therefore preserve underlying

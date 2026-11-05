@@ -2653,6 +2653,57 @@ describe("GeometryRendererTask", () => {
 });
 
 describe("Mesh-blending geometry shader contracts", () => {
+    describe.each(["standard", "pbr"] as const)("%s geometry blendability validation", (family) => {
+        it.each([
+            ["opaque", 1, false, false, false, false],
+            ["faded", 0.5, false, false, false, true],
+            ["BLEND", 1, true, false, false, true],
+            ["r16float override", 0.5, false, true, false, false],
+            ["float32-blendable", 0.5, false, false, true, false],
+        ] as const)("validates default VIEW_DEPTH for %s", async (_name, opacity, blend, override, feature, fails) => {
+            const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
+            const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+            const { createTransformNode } = await import("../../../packages/babylon-lite/src/scene/transform-node");
+            const { setMeshOpacity } = await import("../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity");
+            const engine = makeMockEngine();
+            Object.assign(engine._device.queue, { writeTexture: vi.fn() });
+            if (feature) {
+                (engine._device.features as Set<GPUFeatureName>).add("float32-blendable");
+            }
+            const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+            const material = family === "standard" ? Object.assign(createStandardMaterial(), { alpha: blend ? 0.5 : 1 }) : createPbrMaterial({ alphaBlend: blend });
+            const mesh = Object.assign(createTransformNode("geometry-format"), {
+                material,
+                visible: true,
+                receiveShadows: false,
+                _gpu: { positionBuffer: {}, normalBuffer: {}, uvBuffer: {}, indexBuffer: {}, indexCount: 3, indexFormat: "uint16" },
+            }) as Mesh;
+            setMeshOpacity(mesh, opacity);
+            scene._groups.set(material._buildGroup, [mesh]);
+            if (family === "pbr") {
+                const { buildPbrRenderables } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-renderable");
+                await buildPbrRenderables(scene, [mesh], undefined);
+            }
+            const task = createGeometryRendererTask(
+                { textureDescriptions: [{ type: GeometryTextureType.VIEW_DEPTH, ...(override ? { format: "r16float" as const } : {}) }], meshes: [mesh] },
+                engine,
+                scene
+            ) as unknown as { _preload(): Promise<void>; record(): void; dispose(): void };
+            try {
+                await task._preload();
+                if (fails) {
+                    expect(() => task.record()).toThrow(
+                        'Transparent geometry output format "r32float" requires the float32-blendable WebGPU feature or a blendable format override.'
+                    );
+                } else {
+                    expect(() => task.record()).not.toThrow();
+                }
+            } finally {
+                task.dispose();
+            }
+        });
+    });
+
     it("emits a u32 Standard tag output after the existing alpha/discard path", () => {
         const composed = composeStandardGeometryShader(HAS_DIFFUSE_TEXTURE, 0, [], [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.MESH_BLEND_TAG]);
 
