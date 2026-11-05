@@ -1,5 +1,5 @@
 /**
- * Nonvisual WebGPU readback tests on the same BrowserStack CDP/tunnel
+ * Nonvisual WebGPU pipeline/readback tests on the same BrowserStack CDP/tunnel
  * infrastructure as parity. No scene bundles, golden captures, or perf runs.
  */
 import { config as loadEnv } from "dotenv";
@@ -19,7 +19,7 @@ const swiftShaderArgs =
 
 export default defineConfig({
     testDir: "../tests/lite/integration",
-    testMatch: ["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts"],
+    testMatch: ["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts"],
     timeout: 90_000,
     retries: isCI ? 1 : 0,
     workers: 1,

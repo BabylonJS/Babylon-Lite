@@ -80,7 +80,7 @@ export function _patchParallaxShader(composed: ComposedShader, config: _Parallax
     }
     const uniform = config._uniform;
     const initialization = wgsl`let parallaxHeightUV=parallaxTransformUV(${config._uv},${uniform}.parallaxUVm,${uniform}.parallaxUVt.xy);
-let parallaxScreenOffset=parallaxOffset(${config._position},${config._normal},dpdx(${config._position}),dpdy(${config._position}),scene.vEyePosition.xyz,parallaxHeightUV,dpdx(parallaxHeightUV),dpdy(parallaxHeightUV),${uniform}.parallaxHeight,${uniform}.parallaxSampling);`;
+let parallaxScreenOffset=parallaxOffset(${config._position},${config._normal},dpdx(${config._position}),dpdy(${config._position}),scene.vEyePosition.xyz,scene.viewProjection,parallaxHeightUV,dpdx(parallaxHeightUV),dpdy(parallaxHeightUV),${uniform}.parallaxHeight,${uniform}.parallaxSampling);`;
     return {
         ...composed,
         _fragmentWGSL: wgsl`${source.slice(0, body + 1)}${initialization}${source.slice(body + 1)}`,

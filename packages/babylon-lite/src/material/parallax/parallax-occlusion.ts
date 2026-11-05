@@ -107,7 +107,7 @@ export function _copyParallaxOcclusionProps(props: ParallaxOcclusionProps): Para
     return { ...props };
 }
 
-/** @internal Write four vec4 fields at float offsets, without allocating per update. */
+/** @internal Write four vec4 fields at float offsets. The base transform may alias data; no per-update allocations. */
 export function _writeParallaxUniforms(
     data: Float32Array,
     props: ParallaxOcclusionProps,
@@ -115,9 +115,13 @@ export function _writeParallaxUniforms(
     samplingOffset: number,
     matrixOffset: number,
     translationOffset: number,
-    baseScale?: readonly [number, number],
-    baseOffset?: readonly [number, number]
+    baseTransform?: ArrayLike<number>,
+    invertY = false
 ): void {
+    const baseScaleX = baseTransform?.[0] ?? 1;
+    const baseScaleY = baseTransform?.[1] ?? 1;
+    const baseOffsetX = baseTransform?.[2] ?? 0;
+    const baseOffsetY = baseTransform?.[3] ?? 0;
     data[heightOffset] = props.heightScale ?? 0.05;
     data[heightOffset + 1] = props.heightCenter ?? 0;
     data[heightOffset + 2] = 0;
@@ -136,15 +140,15 @@ export function _writeParallaxUniforms(
     const m01 = s * sy;
     const m10 = -s * sx;
     const m11 = c * sy;
-    data[matrixOffset] = m00 * (baseScale?.[0] ?? 1);
-    data[matrixOffset + 1] = m01 * (baseScale?.[1] ?? 1);
-    data[matrixOffset + 2] = m10 * (baseScale?.[0] ?? 1);
-    data[matrixOffset + 3] = m11 * (baseScale?.[1] ?? 1);
-    data[translationOffset] = m00 * (baseOffset?.[0] ?? 0) + m01 * (baseOffset?.[1] ?? 0) + (texture.uOffset ?? 0);
-    data[translationOffset + 1] = m10 * (baseOffset?.[0] ?? 0) + m11 * (baseOffset?.[1] ?? 0) + (texture.vOffset ?? 0);
+    data[matrixOffset] = m00 * baseScaleX;
+    data[matrixOffset + 1] = m01 * baseScaleY;
+    data[matrixOffset + 2] = m10 * baseScaleX;
+    data[matrixOffset + 3] = m11 * baseScaleY;
+    data[translationOffset] = m00 * baseOffsetX + m01 * baseOffsetY + (texture.uOffset ?? 0);
+    data[translationOffset + 1] = m10 * baseOffsetX + m11 * baseOffsetY + (texture.vOffset ?? 0);
     data[translationOffset + 2] = 0;
     data[translationOffset + 3] = 0;
-    if (texture.invertY) {
+    if (invertY) {
         data[matrixOffset + 2] = -data[matrixOffset + 2]!;
         data[matrixOffset + 3] = -data[matrixOffset + 3]!;
         data[translationOffset + 1] = 1 - data[translationOffset + 1]!;

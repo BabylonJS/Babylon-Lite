@@ -141,11 +141,22 @@ M = [ c*uScale, s*vScale; -s*uScale, c*vScale ]
 T = [ uOffset, vOffset ]
 ```
 
-For Standard, compose the material's `uvScale` and `uvOffset` before the height
-texture's matrix. If `heightTexture.invertY`, negate the second matrix row and
-replace the V translation with `1 - translationV`. Raster upload-flips and
-codec-side `invertY` retain their existing meanings; there is no additional
-orientation convention.
+Height orientation follows the actual material-family surface convention:
+
+- PBR composes the height texture's matrix without an `invertY` adjustment,
+  matching its ordinary and per-texture-transformed surface sampling.
+- Default Standard reuses `writeStandardUvTransformData` for the base
+  transform. This honors the `enableStandardUvOffset()` gate and applies the
+  height texture's codec flip before material scale/offset:
+  `baseV = scaleV * (1 - v) + offsetV`. The height texture's own matrix follows.
+- Per-texture-transformed Standard composes material scale and offset
+  unconditionally before the height matrix, like its surface-channel writer.
+  If the height texture has `invertY`, negate the final second matrix row and
+  replace the final V translation with `1 - translationV`.
+
+The shared writer accepts the base transform as four scalar entries and
+captures them before writing its output, allowing Standard to reuse its
+existing feature-UBO array as scratch without another allocation.
 
 PBR already carries raw `input.uv`. Standard adds a `parallaxBaseUV` varying,
 assigned from the existing raw vertex `uv` attribute, avoiding dependence on
@@ -166,8 +177,8 @@ original mesh and original alpha-mask coordinates.
 Only native UV-mapped surface texture samples are transformed. PBR includes
 base color, ORM, normal, emissive, specular/glossiness, independent occlusion,
 lightmap, clearcoat maps, sheen maps, reflectance maps, anisotropy, iridescence
-maps, and thickness/translucency maps. Standard includes diffuse, emissive,
-bump, specular, ambient, lightmap, and opacity. Environment/BRDF/reflection maps,
+maps, thickness/translucency maps, and native bent normals. Standard includes
+diffuse, emissive, bump, specular, ambient, lightmap, and opacity. Environment/BRDF/reflection maps,
 screen-space refraction, shadow maps, and arbitrary plugin-owned samplers are
 not UV-displaced.
 
@@ -195,8 +206,17 @@ are appended late.
 ### Direction-aware projection
 
 Evaluate world-position and height-UV derivatives before ray marching, at
-uniform fragment-entry control flow. Normalize the geometric normal and the
-surface-to-eye vector; orient the normal toward the eye for two-sided surfaces.
+uniform fragment-entry control flow. Perspective uses `eye - P` for the view
+ray. Orthographic projection is identified by the zero XYZ entries in the
+homogeneous W row of the existing scene view-projection matrix; its Z row is
+the world-space gradient of reverse-Z depth and points back toward the camera.
+Use that parallel direction instead of the point-to-eye vector, so normal
+incidence has no lateral offset and axial camera movement does not change
+relief. This needs no new scene uniforms or camera/renderer feature hook and
+works with the existing left-/right-handed view convention.
+
+Normalize the geometric normal and selected view vector; orient the normal
+toward the eye for two-sided surfaces.
 
 For `Px = dpdx(P)`, `Py = dpdy(P)`, normal `N`, and view direction `V`:
 
@@ -358,6 +378,16 @@ shader package, precomputed cone map, or engine feature flag is required.
   slots. Cover factor-only PBR and inactive Standard materials with no
   UV-mapped surface textures, including reflection-only materials. Importing
   `getMaterialTextures` alone must retain neither POM shader nor extension.
+- Compare height UVs with the actual PBR/Standard surface UBO writers for
+  codec-flipped textures, non-integer scale/offset and rotation, default and
+  transformed paths, and an absent/present Standard offset enabler.
+- Compose native bent normals with all supported normal-frame variants and
+  verify their lookup is displaced too.
+- Compile Standard POM with transformed bump/reflectivity sampling and
+  simultaneous geometry normals/velocity outputs, retaining previous-pose
+  bindings and undisplaced geometric velocity.
+- Numerically check off-axis orthographic normal incidence and normal/oblique
+  axial-camera-movement invariance, alongside the perspective cases.
 - Compile actual composed vertex/fragment shaders on WebGPU without screenshots.
   Execute a numeric shader oracle for constant and linear-ramp heightfields,
   center/scale/view-direction cases, transformed height UVs, bounded sample
@@ -389,6 +419,13 @@ The user explicitly authorized mathematical/shader/non-visual validation in
 place of unavailable Spector.GPU captures for this independent feature.
 Visual/parity and performance validation remain user/CI-owned; no golden
 references or ceilings are changed.
+
+The existing WebGPU integration CI job explicitly selects
+`parallax-occlusion.spec.ts` alongside the two point-splatting specs. It compiles
+the actual minified material/geometry/caster shaders and executes the numerical
+heightfield readbacks; screenshots, videos, traces, and performance runs remain
+disabled in that job. The image-based comparison/UI specs are separate from
+this numeric/pipeline selection.
 
 ## File Manifest
 

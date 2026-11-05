@@ -15,6 +15,7 @@ import { _computePbrMaterialFeatures } from "../../../packages/babylon-lite/src/
 import { PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR_HAS_ENV } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits.js";
 import { _registerPbrExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags.js";
 import { pbrExt as iblExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment.js";
+import { enableBentNormals } from "../../../packages/babylon-lite/src/material/pbr/fragments/bent-normal-fragment.js";
 import { setPbrParallaxOcclusion } from "../../../packages/babylon-lite/src/material/pbr/set-parallax-occlusion.js";
 import { setPbrEmissive } from "../../../packages/babylon-lite/src/material/pbr/set-emissive.js";
 import { setPbrClearCoat } from "../../../packages/babylon-lite/src/material/pbr/set-clearcoat.js";
@@ -63,6 +64,8 @@ export function minifyParallaxTestWgsl(source: string): WgslSource {
 }
 
 interface FixtureOptions {
+    texture?: Texture2D;
+    bentNormals?: boolean;
     enabled?: boolean;
     normal?: "none" | "cotangent" | "tangent";
     transforms?: boolean;
@@ -95,13 +98,18 @@ interface ParallaxStandardFixture {
 }
 
 export function makeParallaxPbrFixture(options: FixtureOptions = {}): ParallaxPbrFixture {
-    const texture = makeParallaxTexture();
+    const texture = options.texture ?? makeParallaxTexture();
     const material = createPbrMaterial({ baseColorTexture: texture, ormTexture: texture });
     if (options.normal && options.normal !== "none") {
         material.normalTexture = texture;
     }
     if (options.specGloss) {
         material.specGlossTexture = texture;
+    }
+    if (options.bentNormals) {
+        enableBentNormals();
+        _registerPbrExt(iblExt);
+        material.bentNormalTexture = texture;
     }
     if (options.optionalTextures) {
         _registerPbrExt(iblExt);
@@ -144,7 +152,7 @@ export function makeParallaxPbrFixture(options: FixtureOptions = {}): ParallaxPb
         detected.features,
         features2,
         meshFeatures,
-        options.optionalTextures ? PBR_HAS_ENV : 0,
+        options.optionalTextures || options.bentNormals ? PBR_HAS_ENV : 0,
         0,
         "",
         options.caster === "esm" ? ESM_DEPTH_CODE : "",
@@ -156,7 +164,7 @@ export function makeParallaxPbrFixture(options: FixtureOptions = {}): ParallaxPb
 }
 
 export async function makeParallaxStandardFixture(options: FixtureOptions = {}): Promise<ParallaxStandardFixture> {
-    const texture = makeParallaxTexture();
+    const texture = options.texture ?? makeParallaxTexture();
     const material = createStandardMaterial();
     material.diffuseTexture = texture;
     if (options.normal && options.normal !== "none") {

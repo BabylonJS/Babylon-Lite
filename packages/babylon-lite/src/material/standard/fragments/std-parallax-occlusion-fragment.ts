@@ -5,6 +5,7 @@ import { _getStandardParallaxHeightTexture, _writeParallaxUniforms } from "../..
 import { _PARALLAX_WGSL } from "../../parallax/parallax-occlusion-wgsl.js";
 import { _patchParallaxShader } from "../../parallax/parallax-occlusion-shader.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { writeStandardUvTransformData } from "../standard-pipeline.js";
 
 const STD_HAS_PARALLAX_OCCLUSION = 1 << 30;
 const CASTER_FLAGS = NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT;
@@ -60,7 +61,16 @@ ${_PARALLAX_WGSL}`,
             throw new Error("Standard parallax settings changed after compilation; rebuild the material before rendering.");
         }
         const data = new Float32Array(16);
-        _writeParallaxUniforms(data, props, 0, 4, 8, 12, material.uvScale, material.uvOffset);
+        // Reuse the feature UBO's first vec4 as scratch for the surface's base transform.
+        if (material._hasUvTx) {
+            data[0] = material.uvScale[0];
+            data[1] = material.uvScale[1];
+            data[2] = material.uvOffset?.[0] ?? 0;
+            data[3] = material.uvOffset?.[1] ?? 0;
+        } else {
+            writeStandardUvTransformData(data, material, props.heightTexture.invertY === true);
+        }
+        _writeParallaxUniforms(data, props, 0, 4, 8, 12, data, material._hasUvTx === true && props.heightTexture.invertY === true);
         const buffer = createUniformBuffer(scene.surface.engine, data);
         disposers.push(() => buffer.destroy());
         entries.push(

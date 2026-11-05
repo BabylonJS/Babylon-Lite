@@ -5,15 +5,20 @@ import { wgsl } from "../../shader/wgsl.js";
  * Height reads use one explicit mip chosen per pixel (footprint anisotropy capped at 2), so the
  * march never pays for gradient payloads or multi-tap anisotropic filtering. The coarse search
  * stops sampling more densely than one step per height texel at that mip, and refinement bisects
- * only until the contact bracket spans at most one pixel. */
+ * only until the contact bracket spans at most one pixel.
+ * Orthographic rays follow the world-space gradient of Lite's reverse-Z clip depth;
+ * an affine view-projection has no world-position terms in its homogeneous W row. */
 export const _PARALLAX_WGSL = wgsl`fn parallaxTransformUV(uv:vec2f,m:vec4f,t:vec2f)->vec2f{
 return vec2f(dot(m.xy,uv),dot(m.zw,uv))+t;
 }
 fn parallaxHeight(uv:vec2f,lod:f32,mask:vec4f)->f32{
 return clamp(dot(textureSampleLevel(parallaxHeightTexture,parallaxHeightSampler,uv,lod),mask),0.0,1.0);
 }
-fn parallaxOffset(position:vec3f,normal:vec3f,positionDx:vec3f,positionDy:vec3f,eye:vec3f,heightUV:vec2f,heightDx:vec2f,heightDy:vec2f,heightParams:vec4f,sampling:vec4f)->vec2f{
-let eyeVector=eye-position;
+fn parallaxOffset(position:vec3f,normal:vec3f,positionDx:vec3f,positionDy:vec3f,eye:vec3f,viewProjection:mat4x4f,heightUV:vec2f,heightDx:vec2f,heightDy:vec2f,heightParams:vec4f,sampling:vec4f)->vec2f{
+var eyeVector=eye-position;
+if(all(vec3f(viewProjection[0].w,viewProjection[1].w,viewProjection[2].w)==vec3f(0.0))){
+eyeVector=vec3f(viewProjection[0].z,viewProjection[1].z,viewProjection[2].z);
+}
 if(heightParams.x==0.0||dot(normal,normal)==0.0||dot(eyeVector,eyeVector)==0.0){return vec2f(0.0);}
 let view=normalize(eyeVector);
 var n=normalize(normal);

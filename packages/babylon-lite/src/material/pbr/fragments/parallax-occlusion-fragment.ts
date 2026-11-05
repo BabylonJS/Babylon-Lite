@@ -33,6 +33,7 @@ const SURFACE_TEXTURES = [
     "refractionMapTexture",
     "translucencyColorTexture_",
     "translucencyIntensityTexture_",
+    "bentNormalTexture_",
 ];
 
 /** @internal Opt-in PBR parallax extension; no registration at module load. */

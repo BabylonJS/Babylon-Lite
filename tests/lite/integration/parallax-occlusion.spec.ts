@@ -98,6 +98,7 @@ test("parallax material variants compile into real WebGPU pipelines without scre
     const cases: ShaderCase[] = [];
     for (const normal of ["none", "cotangent", "tangent"] as const) {
         cases.push(shaderCase(`PBR ${normal}`, makeParallaxPbrFixture({ normal }).shader));
+        cases.push(shaderCase(`PBR bent normals ${normal}`, makeParallaxPbrFixture({ normal, bentNormals: true }).shader));
     }
     cases.push(shaderCase("PBR transformed UV2 surface layers", makeParallaxPbrFixture({ normal: "cotangent", optionalTextures: true, transforms: true, uv2: true }).shader));
     cases.push(shaderCase("PBR specular/glossiness UV2", makeParallaxPbrFixture({ normal: "cotangent", specGloss: true, transforms: true, uv2: true }).shader));
@@ -113,13 +114,14 @@ test("parallax material variants compile into real WebGPU pipelines without scre
     const standard = await makeParallaxStandardFixture({ normal: "cotangent", optionalTextures: true, transforms: true });
     cases.push(
         shaderCase(
-            "Standard geometry reflectivity",
+            "Standard geometry reflectivity, normals and velocity",
             composeStandardGeometryShader(standard.features, standard.meshFeatures, standard.fragments, [
                 GeometryTextureType.REFLECTIVITY,
                 GeometryTextureType.WORLD_NORMAL,
                 GeometryTextureType.ALBEDO,
+                GeometryTextureType.LINEAR_VELOCITY,
             ]),
-            3
+            4
         )
     );
     const pbr = makeParallaxPbrFixture({ normal: "cotangent" });
@@ -202,6 +204,9 @@ interface NumericCase {
     maxSteps?: number;
     refinement?: number;
     eye?: readonly [number, number, number];
+    position?: readonly [number, number, number];
+    orthographic?: boolean;
+    parallelRay?: readonly [number, number, number];
     normal?: readonly [number, number, number];
     worldScale?: readonly [number, number];
     matrix?: readonly [number, number, number, number];
@@ -244,6 +249,10 @@ const NUMERIC_CASES: readonly NumericCase[] = [
     { name: "single-step search", rgba: [64, 0, 0, 255], steps: 1, refinement: 1 },
     { name: "maximum configured subdivisions", rgba: [64, 0, 0, 255], steps: 64, refinement: 32 },
     { name: "normal incidence does not sample", eye: [0, 0, 1] },
+    { name: "off-axis orthographic normal incidence does not sample", orthographic: true, position: [1, 0, 0], eye: [0, 0, 1], scale: 0.05, expectedSamples: 0 },
+    { name: "axially moved orthographic camera does not sample", orthographic: true, position: [1, 0, 0], eye: [0, 0, 2], scale: 0.05, expectedSamples: 0 },
+    { name: "oblique orthographic camera", orthographic: true, position: [1, 0, 0], eye: [0.8, 0.2, 1], parallelRay: [0.8, 0.2, 1] },
+    { name: "axially moved oblique orthographic camera", orthographic: true, position: [1, 0, 0], eye: [1.6, 0.4, 2], parallelRay: [0.8, 0.2, 1] },
     { name: "zero scale does not sample", scale: 0 },
     { name: "degenerate frame stays finite", degenerate: true },
     { name: "zero normal stays finite", normal: [0, 0, 0] },
@@ -306,8 +315,17 @@ function referenceRidgeDepth(base: number, ray: number, center: number, contact:
     return contact === "last" ? hits[hits.length - 1]! : hits[0]!;
 }
 
-function expectedCoarseSteps(input: NumericCase): number {
+function referenceViewRay(input: NumericCase): readonly [number, number, number] {
+    if (input.orthographic) {
+        return input.parallelRay ?? [0, 0, 1];
+    }
     const eye = input.eye ?? [0.8, 0.2, 1];
+    const position = input.position ?? [0, 0, 0];
+    return [eye[0] - position[0], eye[1] - position[1], eye[2] - position[2]];
+}
+
+function expectedCoarseSteps(input: NumericCase): number {
+    const eye = referenceViewRay(input);
     const normal = input.normal ?? [0, 0, 1];
     const length = Math.hypot(...eye) * Math.hypot(...normal);
     const angle = length === 0 ? 0 : Math.min(1, Math.abs(eye[0] * normal[0] + eye[1] * normal[1] + eye[2] * normal[2]) / length);
@@ -318,7 +336,7 @@ function expectedCoarseSteps(input: NumericCase): number {
 
 function expectedUV(input: NumericCase): [number, number] {
     const uv: [number, number] = [0.5, 0.5];
-    const eye = input.eye ?? [0.8, 0.2, 1];
+    const eye = referenceViewRay(input);
     const scale = input.scale ?? 0.08;
     const normal = input.normal ?? [0, 0, 1];
     const eyeLength = Math.hypot(...eye);
@@ -400,6 +418,33 @@ return vec4f(positions[index],0.0,1.0);}`,
                         const worldScale = input.worldScale ?? [1, 1];
                         const normal = input.normal ?? [0, 0, 1];
                         const eye = input.eye ?? [0.8, 0.2, 1];
+                        const position = input.position ?? [0, 0, 0];
+                        let viewProjection = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -0.01, 1, 0, 0, 0.1, 0];
+                        if (input.orthographic) {
+                            const back = input.parallelRay ?? [0, 0, 1];
+                            const right = [back[2], 0, -back[0]];
+                            const up = [-back[0] * back[1], back[0] * back[0] + back[2] * back[2], -back[1] * back[2]];
+                            const dotEye = (axis: readonly number[]) => axis[0]! * eye[0] + axis[1]! * eye[1] + axis[2]! * eye[2];
+                            // Reverse-Z orthographic projection of a view with these orthogonal axes.
+                            viewProjection = [
+                                right[0]!,
+                                up[0]!,
+                                back[0] / 10,
+                                0,
+                                right[1]!,
+                                up[1]!,
+                                back[1] / 10,
+                                0,
+                                right[2]!,
+                                up[2]!,
+                                back[2] / 10,
+                                0,
+                                -dotEye(right),
+                                -dotEye(up),
+                                1 - dotEye(back) / 10,
+                                1,
+                            ];
+                        }
                         const minSteps = input.minSteps ?? input.steps ?? 16;
                         const maxSteps = input.maxSteps ?? input.steps ?? 16;
                         const refinement = input.refinement ?? 8;
@@ -416,7 +461,7 @@ let matrix=vec4f(${matrix.join(",")});
 let heightUV=parallaxTransformUV(uv,matrix,vec2f(${translation.join(",")}));
 let heightDx=vec2f(dot(matrix.xy,dx),dot(matrix.zw,dx));
 let heightDy=vec2f(dot(matrix.xy,dy),dot(matrix.zw,dy));
-let offset=parallaxOffset(vec3f(0.0),vec3f(${normal.join(",")}),vec3f(${input.degenerate ? 0 : worldScale[0] * pixel},0.0,0.0),vec3f(0.0,${worldScale[1] * pixel},0.0),vec3f(${eye.join(",")}),heightUV,heightDx,heightDy,vec4f(${input.scale ?? 0.08},${input.center ?? 0},0.0,0.0),vec4f(${minSteps},${maxSteps},${refinement},${input.channel ?? 0}));
+let offset=parallaxOffset(vec3f(${position.join(",")}),vec3f(${normal.join(",")}),vec3f(${input.degenerate ? 0 : worldScale[0] * pixel},0.0,0.0),vec3f(0.0,${worldScale[1] * pixel},0.0),vec3f(${eye.join(",")}),mat4x4f(${viewProjection.join(",")}),heightUV,heightDx,heightDy,vec4f(${input.scale ?? 0.08},${input.center ?? 0},0.0,0.0),vec4f(${minSteps},${maxSteps},${refinement},${input.channel ?? 0}));
 return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
 }`,
                         });
@@ -475,7 +520,7 @@ return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
         const expected = expectedUV(input);
         expect(result.uv.every(Number.isFinite), input.name).toBe(true);
         if (input.depthTolerance !== undefined) {
-            const eye = input.eye ?? [0.8, 0.2, 1];
+            const eye = referenceViewRay(input);
             const ray = (eye[0] * (input.scale ?? 0.08)) / (Math.abs(eye[2]) * (input.worldScale?.[0] ?? 1));
             expect(Math.abs((result.uv[0]! - expected[0]) / ray), input.name).toBeLessThanOrEqual(input.depthTolerance + 0.000001);
             expect(result.uv[1], input.name).toBeCloseTo(expected[1], 5);
@@ -493,6 +538,9 @@ return vec4f(uv+dx*offset.x+dy*offset.y,f32(parallaxSampleCount),1.0);
             expect(result.samples, input.name).toBe(0);
         }
     }
+    const ortho = NUMERIC_CASES.findIndex((input) => input.name === "oblique orthographic camera");
+    const movedOrtho = NUMERIC_CASES.findIndex((input) => input.name === "axially moved oblique orthographic camera");
+    expect(results[movedOrtho]!.uv).toEqual(results[ortho]!.uv);
     const coarseIndex = NUMERIC_CASES.findIndex((input) => input.name === "coarse-only ridge interpolation");
     const refinedIndex = NUMERIC_CASES.findIndex((input) => input.name === "refined first ridge contact");
     const coarseError = Math.abs(results[coarseIndex]!.uv[0]! - expectedUV(NUMERIC_CASES[coarseIndex]!)[0]);

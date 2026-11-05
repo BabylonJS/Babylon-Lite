@@ -118,11 +118,11 @@ describe("parallax occlusion settings", () => {
         expect(stdParallaxOcclusionExt._detect!(material)).toBe(0);
     });
 
-    it("composes material scale/offset, rotation, and invertY in the existing order", () => {
+    it("composes transformed Standard scale/offset, rotation, and the explicit final invertY", () => {
         const heightTexture = makeParallaxTexture();
         Object.assign(heightTexture, { uScale: 2, vScale: -3, uOffset: 0.2, vOffset: 0.4, uAng: 0.6, invertY: true });
         const data = new Float32Array(16);
-        _writeParallaxUniforms(data, { heightTexture }, 0, 4, 8, 12, [4, 5], [0.1, 0.3]);
+        _writeParallaxUniforms(data, { heightTexture }, 0, 4, 8, 12, [4, 5, 0.1, 0.3], true);
         const c = Math.cos(0.6);
         const s = Math.sin(0.6);
         expect(data[8]).toBeCloseTo(c * 8);
@@ -191,6 +191,13 @@ describe("parallax shader integration", () => {
         expect(shader._fragmentWGSL).toContain("parallaxSample(specGlossTexture,specGlossSampler,specGlossUV,parallaxScreenOffset)");
     });
 
+    it.each(["none", "cotangent", "tangent"] as const)("displaces native bent normals alongside %s normal mapping", (normal) => {
+        const { shader } = makeParallaxPbrFixture({ normal, bentNormals: true });
+        expect(shader._fragmentWGSL).toContain("parallaxSample(bentNormalTexture_,bentNormalSampler_,input.uv,parallaxScreenOffset)");
+        expect(shader._fragmentWGSL).not.toContain("textureSample(bentNormalTexture_");
+        expect(shader._fragmentWGSL).toContain("environmentBentNormalOcclusion(bentNormalW");
+    });
+
     it("displaces every Standard surface map without changing the normal frame", async () => {
         const { shader } = await makeParallaxStandardFixture({ normal: "cotangent", optionalTextures: true, transforms: true, uv2: true });
         for (const texture of ["dT", "eT", "bT", "sT", "aT", "lT", "oT"]) {
@@ -207,12 +214,16 @@ describe("parallax shader integration", () => {
             GeometryTextureType.REFLECTIVITY,
             GeometryTextureType.WORLD_NORMAL,
             GeometryTextureType.WORLD_POSITION,
+            GeometryTextureType.LINEAR_VELOCITY,
         ]);
         const output = shader._fragmentWGSL.slice(shader._fragmentWGSL.indexOf("var out: FragmentOutput"));
         expect(output).toContain("parallaxSample(sT,sS,input.vs,parallaxScreenOffset).rgb");
         expect(output).toContain("parallaxSample(sT,sS,input.vs,parallaxScreenOffset).a");
         expect(output).toContain("input.vp");
         expect(output).not.toContain("textureSample(sT");
+        expect(shader._vertexWGSL).toContain("mesh.previousWorld");
+        expect(shader._vertexWGSL).toContain("gp.previousViewProjection");
+        expect(output).toContain("input.vPreviousClip");
     });
 
     it("preserves PBR geometry outputs while displacing their material samples", () => {
