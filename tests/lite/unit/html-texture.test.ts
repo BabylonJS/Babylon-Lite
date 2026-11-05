@@ -62,6 +62,10 @@ interface FakeHost {
     appendChild(el: HTMLElement): HTMLElement;
     removeChild(el: HTMLElement): void;
     insertBefore(el: HTMLElement, ref: Node | null): void;
+    attributes: Map<string, string>;
+    getAttribute(name: string): string | null;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
     dispatchPaint(changedElements?: readonly unknown[]): void;
 }
 
@@ -101,6 +105,16 @@ function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): 
         insertBefore(el) {
             writable(el).parentNode = this as unknown as Node;
         },
+        attributes: new Map(),
+        getAttribute(name) {
+            return this.attributes.get(name) ?? null;
+        },
+        setAttribute(name, value) {
+            this.attributes.set(name, value);
+        },
+        removeAttribute(name) {
+            this.attributes.delete(name);
+        },
         dispatchPaint(changedElements) {
             const ev = { type: "paint", changedElements } as unknown as Event;
             (this.listeners.paint ?? []).slice().forEach((cb) => cb(ev));
@@ -109,7 +123,12 @@ function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): 
     if (opts.legacy) {
         host.layoutSubtree = false;
     } else {
-        host.content = "fallback";
+        // Chrome 155+ reflects the `content` attribute; a missing attribute reads "fallback".
+        Object.defineProperty(host, "content", {
+            enumerable: true,
+            get: () => host.attributes.get("content") ?? "fallback",
+            set: (value: string) => host.attributes.set("content", value),
+        });
     }
     if (opts.withRequestPaint ?? true) {
         host.requestPaint = (): void => {
@@ -477,6 +496,46 @@ describe("disposeHtmlTexture", () => {
 
         disposeHtmlTexture(b);
         expect(host.content).toBe("fallback"); // restored to the pre-feature value
+        expect(host.attributes.has("content")).toBe(false); // no attribute left behind
+    });
+
+    it("restores a content attribute the canvas already had", () => {
+        const host = makeHost();
+        host.setAttribute("content", "fallback");
+        const engine = makeEngine(host, newCap());
+
+        disposeHtmlTexture(createHtmlTexture(engine, makeElement(), {}));
+        expect(host.getAttribute("content")).toBe("fallback");
+    });
+
+    it("keeps a shared element hosted until the last texture using it is disposed", () => {
+        const host = makeHost();
+        const cap = newCap();
+        const engine = makeEngine(host, cap);
+        const el = makeElement();
+        const origParent = {
+            insertBefore: vi.fn(),
+            removeChild: vi.fn(),
+        };
+        writable(el).parentNode = origParent as unknown as Node;
+
+        const a = createHtmlTexture(engine, el, {});
+        const b = createHtmlTexture(engine, el, {});
+        disposeHtmlTexture(a);
+
+        // The second texture still captures the element.
+        expect(el.parentNode).toBe(host as unknown as Node);
+        expect(el.hasAttribute("drawable")).toBe(true);
+        expect(el.inert).toBe(true);
+        expect(origParent.insertBefore).not.toHaveBeenCalled();
+        const count = cap.copyElementCalls.length;
+        host.dispatchPaint([el]);
+        expect(cap.copyElementCalls.length).toBeGreaterThan(count);
+
+        disposeHtmlTexture(b);
+        expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
+        expect(el.hasAttribute("drawable")).toBe(false);
+        expect(el.inert).toBe(false);
     });
 });
 

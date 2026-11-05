@@ -77,6 +77,9 @@ interface HtmlInCanvasHost {
     /** Legacy opt-in (Chrome 150–154). */
     layoutSubtree?: boolean;
     requestPaint?: () => void;
+    getAttribute(name: string): string | null;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
     addEventListener(type: "paint", listener: (ev: Event) => void): void;
     removeEventListener(type: "paint", listener: (ev: Event) => void): void;
 }
@@ -85,8 +88,22 @@ interface HtmlInCanvasHostRef {
     count: number;
     /** Opt-in property the host supports. */
     key: "content" | "layoutSubtree";
-    /** Host value before the first HTML texture opted it in. */
-    previous: string | boolean | undefined;
+    /** Host state before the first HTML texture opted it in: the raw `content`
+     *  attribute (null when absent), or the legacy `layoutSubtree` value. */
+    previous: string | boolean | null | undefined;
+}
+
+/** Hosting state of an element shared by every live HTML texture built from it. */
+interface HtmlTextureElementRef {
+    count: number;
+    /** Original parent to restore the element to once no texture hosts it. */
+    parent: Node | null;
+    /** Original next sibling, to restore the element's position. */
+    nextSibling: Node | null;
+    /** Original `inert` state. */
+    inert: boolean;
+    /** Whether the element already had the `drawable` attribute. */
+    drawable: boolean;
 }
 
 /** A `paint` event carrying the set of elements that changed since the last paint. @internal */
@@ -106,14 +123,6 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     _element: HTMLElement;
     /** @internal The rendering canvas hosting the element for capture. */
     _host: HTMLCanvasElement;
-    /** @internal Original parent to restore the element to on dispose. */
-    _prevParent: Node | null;
-    /** @internal Original next-sibling to restore the element's position. */
-    _prevNextSibling: Node | null;
-    /** @internal Original `inert` state to restore on dispose. */
-    _prevInert: boolean;
-    /** @internal Whether the element already had the `drawable` attribute. */
-    _prevDrawable: boolean;
     /** @internal Attached `paint` listener (native path), or null. */
     _paint: ((ev: Event) => void) | null;
     /** @internal Desired upright orientation (Y-up) of the sampled result. */
@@ -212,10 +221,6 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
 
     tex._element = element;
     tex._host = host;
-    tex._prevParent = element.parentNode;
-    tex._prevNextSibling = element.nextSibling;
-    tex._prevInert = element.inert;
-    tex._prevDrawable = false;
     tex._paint = null;
     tex._invertY = options.invertY ?? true;
     tex._autoUpdate = options.autoUpdate ?? true;
@@ -234,12 +239,10 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
         // Host the element only when an update path exists. The host opt-in lays
         // out the canvas's DOM descendants, `drawable` marks this element's subtree
         // for snapshotting, and `inert` stops it from stealing pointer/keyboard
-        // input from the camera controls.
+        // input from the camera controls. Both opt-ins are reference-counted, so
+        // textures sharing a canvas or an element keep them until the last dispose.
         acquireHtmlInCanvasHost(host as unknown as HtmlInCanvasHost);
-        tex._prevDrawable = element.hasAttribute("drawable");
-        element.setAttribute("drawable", "");
-        element.inert = true;
-        host.appendChild(element);
+        acquireHtmlTextureElement(host, element);
         tex._hosted = true;
     }
 
@@ -346,8 +349,9 @@ export function requestHtmlTextureUpdate(engine: EngineContext, tex: HtmlTexture
 }
 
 /**
- * Detach the paint listener, restore the hosted element to its original DOM
- * position and `inert` state, and release the GPU texture.
+ * Detach the paint listener and release the GPU texture. Once no other live
+ * HTML texture uses the element, restore its original DOM position, `inert`
+ * state and `drawable` attribute.
  *
  * @param tex - Target texture from {@link createHtmlTexture}.
  */
@@ -364,18 +368,7 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
     }
 
     if (tex._hosted) {
-        const element = tex._element;
-        if (element.parentNode === tex._host) {
-            if (tex._prevParent) {
-                tex._prevParent.insertBefore(element, tex._prevNextSibling);
-            } else {
-                tex._host.removeChild(element);
-            }
-        }
-        element.inert = tex._prevInert;
-        if (!tex._prevDrawable) {
-            element.removeAttribute("drawable");
-        }
+        releaseHtmlTextureElement(tex._host, tex._element);
         releaseHtmlInCanvasHost(tex._host as unknown as HtmlInCanvasHost);
         tex._hosted = false;
     }
@@ -388,6 +381,7 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
 }
 
 let htmlInCanvasHostRefs: WeakMap<HtmlInCanvasHost, HtmlInCanvasHostRef> | null = null;
+let htmlTextureElementRefs: WeakMap<HTMLElement, HtmlTextureElementRef> | null = null;
 
 /** Draw the element's latest paint snapshot into `texture`, using the current
  *  `drawElementImageToTexture` or the legacy `copyElementImageToTexture` shape. */
@@ -405,8 +399,10 @@ function acquireHtmlInCanvasHost(host: HtmlInCanvasHost): void {
     let ref = refs.get(host);
     if (!ref) {
         // Chrome 155+ reflects `content` on the canvas; older builds use `layoutSubtree`.
+        // Save the raw `content` attribute: its reflected value reads "fallback"
+        // even when the attribute is absent.
         const key = "content" in host ? "content" : "layoutSubtree";
-        ref = { count: 0, key, previous: host[key] };
+        ref = { count: 0, key, previous: key === "content" ? host.getAttribute("content") : host.layoutSubtree };
         refs.set(host, ref);
     }
     ref.count++;
@@ -428,13 +424,52 @@ function releaseHtmlInCanvasHost(host: HtmlInCanvasHost): void {
     }
 
     // Restore the host's paint-capture mode when the last HTML texture is gone.
-    const props = host as unknown as Record<string, unknown>;
-    if (ref.previous === undefined) {
-        delete props[ref.key];
+    if (ref.key === "content") {
+        if (ref.previous === null) {
+            host.removeAttribute("content");
+        } else {
+            host.setAttribute("content", ref.previous as string);
+        }
+    } else if (ref.previous === undefined) {
+        delete host.layoutSubtree;
     } else {
-        props[ref.key] = ref.previous;
+        host.layoutSubtree = ref.previous as boolean;
     }
     htmlInCanvasHostRefs?.delete(host);
+}
+
+function acquireHtmlTextureElement(host: HTMLCanvasElement, element: HTMLElement): void {
+    const refs = (htmlTextureElementRefs ??= new WeakMap());
+    let ref = refs.get(element);
+    if (!ref) {
+        ref = { count: 0, parent: element.parentNode, nextSibling: element.nextSibling, inert: element.inert, drawable: element.hasAttribute("drawable") };
+        refs.set(element, ref);
+        element.setAttribute("drawable", "");
+        element.inert = true;
+        host.appendChild(element);
+    }
+    ref.count++;
+}
+
+function releaseHtmlTextureElement(host: HTMLCanvasElement, element: HTMLElement): void {
+    const ref = htmlTextureElementRefs?.get(element);
+    if (!ref || --ref.count > 0) {
+        return;
+    }
+
+    // Restore the element's DOM position and opt-ins when the last texture using it is gone.
+    if (element.parentNode === host) {
+        if (ref.parent) {
+            ref.parent.insertBefore(element, ref.nextSibling);
+        } else {
+            host.removeChild(element);
+        }
+    }
+    element.inert = ref.inert;
+    if (!ref.drawable) {
+        element.removeAttribute("drawable");
+    }
+    htmlTextureElementRefs?.delete(element);
 }
 
 /** Rasterise the element via an SVG `<foreignObject>` snapshot and upload it.
