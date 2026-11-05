@@ -7,11 +7,13 @@
  * browser to lay out and paint an arbitrary styled DOM subtree — a `<div>`, a
  * form, an SVG — directly into the texture.
  *
- * The native path is a single GPU copy with no CPU readback:
- * `device.queue.copyElementImageToTexture({ source: element }, …)`. It requires
- * the source element to be a **direct child of the rendering canvas**, the canvas
- * to have `layoutSubtree = true`, and the copy to run inside a `paint` event — so
- * updates are paint-event-driven, never a `requestAnimationFrame` loop.
+ * The native path is a single GPU draw with no CPU readback:
+ * `device.queue.drawElementImageToTexture({ source: element }, { texture, size })`.
+ * It requires the source element to be a `drawable` descendant of the rendering
+ * canvas, the canvas to opt into drawable content (`content="drawable"`), and the
+ * draw to run inside a `paint` event — so updates are paint-event-driven, never a
+ * `requestAnimationFrame` loop. Chrome 150–154 builds (legacy
+ * `copyElementImageToTexture` + `layoutSubtree`) are still detected and used.
  *
  * @example
  * ```ts
@@ -33,7 +35,7 @@
  * disposeHtmlTexture(tex);
  * ```
  *
- * The HTML-in-Canvas API is Chrome-Canary-only (behind
+ * The HTML-in-Canvas API is experimental in Chrome (origin trial, or
  * `chrome://flags/#canvas-draw-element`). When it is unavailable, an optional
  * SVG `<foreignObject>` fallback rasterises a *static* snapshot instead — enough
  * for text/label panels — unless `useSvgFallback: false` is set.
@@ -54,23 +56,26 @@ import { wgsl } from "../shader/wgsl.js";
 declare const htmlTexture2DBrand: unique symbol;
 
 /**
- * Minimal surface of the experimental WICG HTML-in-Canvas GPU-upload call. The
+ * Minimal surface of the experimental WICG HTML-in-Canvas GPU-upload calls. The
  * IDL is mid-flight, so it is declared locally (not as an ambient/global
  * augmentation) to keep the feature self-contained and add no project-wide types.
  * @internal
  */
 interface HtmlInCanvasQueue {
-    copyElementImageToTexture(
-        source: { source: Element; sx?: number; sy?: number; swidth?: number; sheight?: number },
-        destination: { destination: { texture: GPUTexture }; width?: number; height?: number }
-    ): void;
+    /** Current shape (Chrome 155+). */
+    drawElementImageToTexture?(source: { source: Element }, destination: { texture: GPUTexture; size: { width: number; height: number } }): void;
+    /** Legacy shape (Chrome 150–154), removed by later builds. */
+    copyElementImageToTexture?(source: { source: Element }, destination: { destination: { texture: GPUTexture }; width: number; height: number }): void;
 }
 
 /** A rendering canvas that opts its DOM subtree into layout + paint capture. The
  *  WICG surface is declared structurally (not as an `HTMLCanvasElement` extension)
  *  so it stays self-contained regardless of the ambient DOM lib. @internal */
 interface HtmlInCanvasHost {
-    layoutSubtree: boolean;
+    /** Current opt-in (Chrome 155+): `"fallback"` (default) or `"drawable"`. */
+    content?: string;
+    /** Legacy opt-in (Chrome 150–154). */
+    layoutSubtree?: boolean;
     requestPaint?: () => void;
     addEventListener(type: "paint", listener: (ev: Event) => void): void;
     removeEventListener(type: "paint", listener: (ev: Event) => void): void;
@@ -78,7 +83,10 @@ interface HtmlInCanvasHost {
 
 interface HtmlInCanvasHostRef {
     count: number;
-    previousLayoutSubtree: HtmlInCanvasHost["layoutSubtree"] | undefined;
+    /** Opt-in property the host supports. */
+    key: "content" | "layoutSubtree";
+    /** Host value before the first HTML texture opted it in. */
+    previous: string | boolean | undefined;
 }
 
 /** A `paint` event carrying the set of elements that changed since the last paint. @internal */
@@ -104,6 +112,8 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     _prevNextSibling: Node | null;
     /** @internal Original `inert` state to restore on dispose. */
     _prevInert: boolean;
+    /** @internal Whether the element already had the `drawable` attribute. */
+    _prevDrawable: boolean;
     /** @internal Attached `paint` listener (native path), or null. */
     _paint: ((ev: Event) => void) | null;
     /** @internal Desired upright orientation (Y-up) of the sampled result. */
@@ -154,7 +164,8 @@ export interface HtmlTexture2DOptions extends DynamicTexture2DOptions {
 
 /** True if the engine's WebGPU device exposes the native HTML-in-Canvas upload. */
 export function isHtmlInCanvasSupported(engine: EngineContext): boolean {
-    return typeof (engine._device.queue as unknown as Partial<HtmlInCanvasQueue>).copyElementImageToTexture === "function";
+    const queue = engine._device.queue as unknown as HtmlInCanvasQueue;
+    return typeof queue.drawElementImageToTexture === "function" || typeof queue.copyElementImageToTexture === "function";
 }
 
 /**
@@ -199,6 +210,7 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._prevParent = element.parentNode;
     tex._prevNextSibling = element.nextSibling;
     tex._prevInert = element.inert;
+    tex._prevDrawable = false;
     tex._paint = null;
     tex._invertY = options.invertY ?? true;
     tex._autoUpdate = options.autoUpdate ?? true;
@@ -214,10 +226,13 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._readyState = "pending";
 
     if (supportsNativeHtmlTexture || tex._useSvgFallback) {
-        // Host the element only when an update path exists. `layoutSubtree` opts
-        // the canvas's DOM descendants into layout + paint; `inert` stops the
-        // subtree from stealing pointer/keyboard input from the camera controls.
+        // Host the element only when an update path exists. The host opt-in lays
+        // out the canvas's DOM descendants, `drawable` marks this element's subtree
+        // for snapshotting, and `inert` stops it from stealing pointer/keyboard
+        // input from the camera controls.
         acquireHtmlInCanvasHost(host as unknown as HtmlInCanvasHost);
+        tex._prevDrawable = element.hasAttribute("drawable");
+        element.setAttribute("drawable", "");
         element.inert = true;
         host.appendChild(element);
         tex._hosted = true;
@@ -269,7 +284,7 @@ export function whenHtmlTextureReady(tex: HtmlTexture2D): Promise<void> {
 
 /**
  * Upload the current pixels of the hosted element into the texture. On the native
- * path this is a single `copyElementImageToTexture` and **must run inside a paint
+ * path this is a single `drawElementImageToTexture` and **must run inside a paint
  * event** — normally the internal paint listener calls it; call
  * {@link requestHtmlTextureUpdate} to trigger a refresh from application code.
  * When the native API is unavailable it rasterises the SVG fallback (async).
@@ -282,18 +297,15 @@ export function updateHtmlTexture(engine: EngineContext, tex: HtmlTexture2D, inv
     if (tex._disposed) {
         return;
     }
-    const queue = engine._device.queue as unknown as Partial<HtmlInCanvasQueue>;
-    if (typeof queue.copyElementImageToTexture === "function") {
-        // `copyElementImageToTexture` captures the element top-row-first, which is
-        // upside-down under Lite's Y-up UV convention. When an upright result is
-        // wanted (the default) the capture goes into a staging texture and is
-        // V-flipped into the final texture; otherwise it is copied straight in.
+    if (isHtmlInCanvasSupported(engine)) {
+        // The native draw captures the element top-row-first, which is upside-down
+        // under Lite's Y-up UV convention. When an upright result is wanted (the
+        // default) the capture goes into a staging texture and is V-flipped into
+        // the final texture; otherwise it is drawn straight in.
+        const target = invertY ? ensureFlipSource(engine, tex) : tex.texture;
+        drawElementToTexture(engine, tex._element, target, tex.width, tex.height);
         if (invertY) {
-            const src = ensureFlipSource(engine, tex);
-            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: src }, width: tex.width, height: tex.height });
-            flipVertical(engine, src, tex.texture);
-        } else {
-            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: tex.texture }, width: tex.width, height: tex.height });
+            flipVertical(engine, target, tex.texture);
         }
         if (tex.texture.mipLevelCount > 1) {
             generateMipmaps(engine, tex.texture);
@@ -356,6 +368,9 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
             }
         }
         element.inert = tex._prevInert;
+        if (!tex._prevDrawable) {
+            element.removeAttribute("drawable");
+        }
         releaseHtmlInCanvasHost(tex._host as unknown as HtmlInCanvasHost);
         tex._hosted = false;
     }
@@ -369,15 +384,32 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
 
 let htmlInCanvasHostRefs: WeakMap<HtmlInCanvasHost, HtmlInCanvasHostRef> | null = null;
 
+/** Draw the element's latest paint snapshot into `texture`, using the current
+ *  `drawElementImageToTexture` or the legacy `copyElementImageToTexture` shape. */
+function drawElementToTexture(engine: EngineContext, element: Element, texture: GPUTexture, width: number, height: number): void {
+    const queue = engine._device.queue as unknown as HtmlInCanvasQueue;
+    if (typeof queue.drawElementImageToTexture === "function") {
+        queue.drawElementImageToTexture({ source: element }, { texture, size: { width, height } });
+    } else {
+        queue.copyElementImageToTexture!({ source: element }, { destination: { texture }, width, height });
+    }
+}
+
 function acquireHtmlInCanvasHost(host: HtmlInCanvasHost): void {
     const refs = (htmlInCanvasHostRefs ??= new WeakMap());
     let ref = refs.get(host);
     if (!ref) {
-        ref = { count: 0, previousLayoutSubtree: (host as Partial<HtmlInCanvasHost>).layoutSubtree };
+        // Chrome 155+ reflects `content` on the canvas; older builds use `layoutSubtree`.
+        const key = "content" in host ? "content" : "layoutSubtree";
+        ref = { count: 0, key, previous: host[key] };
         refs.set(host, ref);
     }
     ref.count++;
-    host.layoutSubtree = true;
+    if (ref.key === "content") {
+        host.content = "drawable";
+    } else {
+        host.layoutSubtree = true;
+    }
 }
 
 function releaseHtmlInCanvasHost(host: HtmlInCanvasHost): void {
@@ -391,10 +423,11 @@ function releaseHtmlInCanvasHost(host: HtmlInCanvasHost): void {
     }
 
     // Restore the host's paint-capture mode when the last HTML texture is gone.
-    if (ref.previousLayoutSubtree === undefined) {
-        delete (host as Partial<HtmlInCanvasHost>).layoutSubtree;
+    const props = host as unknown as Record<string, unknown>;
+    if (ref.previous === undefined) {
+        delete props[ref.key];
     } else {
-        host.layoutSubtree = ref.previousLayoutSubtree;
+        props[ref.key] = ref.previous;
     }
     htmlInCanvasHostRefs?.delete(host);
 }
@@ -463,7 +496,7 @@ function loadSvgSnapshot(element: HTMLElement, width: number, height: number): P
 }
 
 // ── Native-path vertical flip ───────────────────────────────────────────────
-// `copyElementImageToTexture` has no `flipY` option, so an upright result is baked
+// `drawElementImageToTexture` has no `flipY` option, so an upright result is baked
 // with a fullscreen-triangle render pass that samples the staging capture with an
 // inverted V. Resources are lazily built and cached per device (mirrors
 // generate-mipmaps), so an app that never creates an HTML texture bundles none of it.

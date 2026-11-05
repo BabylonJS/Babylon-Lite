@@ -17,7 +17,11 @@ interface FakeElement {
     parentNode: Node | null;
     nextSibling: Node | null;
     inert: boolean;
+    attributes: Map<string, string>;
     contains(other: unknown): boolean;
+    hasAttribute(name: string): boolean;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
 }
 
 function makeElement(width = 256, height = 128): HTMLElement {
@@ -27,7 +31,15 @@ function makeElement(width = 256, height = 128): HTMLElement {
         parentNode: null,
         nextSibling: null,
         inert: false,
+        attributes: new Map(),
         contains: (other) => other === (el as unknown),
+        hasAttribute: (name) => el.attributes.has(name),
+        setAttribute: (name, value) => {
+            el.attributes.set(name, value);
+        },
+        removeAttribute: (name) => {
+            el.attributes.delete(name);
+        },
     };
     return el as unknown as HTMLElement;
 }
@@ -39,7 +51,8 @@ function writable(el: HTMLElement): FakeElement {
 
 interface FakeHost {
     clientWidth: number;
-    layoutSubtree: boolean;
+    content?: string;
+    layoutSubtree?: boolean;
     requestPaint?: () => void;
     paintRequests: number;
     children: HTMLElement[];
@@ -53,11 +66,11 @@ interface FakeHost {
 }
 
 /** Fake rendering canvas. `clientWidth` makes `isDomCanvas` return true.
- *  `requestPaint` synchronously dispatches a `paint` event for deterministic tests. */
-function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
+ *  `requestPaint` synchronously dispatches a `paint` event for deterministic tests.
+ *  `legacy` models a Chrome < 155 canvas (`layoutSubtree`) instead of `content`. */
+function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): FakeHost {
     const host: FakeHost = {
         clientWidth: 800,
-        layoutSubtree: false,
         paintRequests: 0,
         children: [],
         listeners: {},
@@ -93,6 +106,11 @@ function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
             (this.listeners.paint ?? []).slice().forEach((cb) => cb(ev));
         },
     };
+    if (opts.legacy) {
+        host.layoutSubtree = false;
+    } else {
+        host.content = "fallback";
+    }
     if (opts.withRequestPaint ?? true) {
         host.requestPaint = (): void => {
             host.paintRequests++;
@@ -103,7 +121,7 @@ function makeHost(opts: { withRequestPaint?: boolean } = {}): FakeHost {
 }
 
 interface Captured {
-    copyElementCalls: Array<{ source: unknown; texture: GPUTexture; width?: number; height?: number }>;
+    copyElementCalls: Array<{ api: "draw" | "legacy"; source: unknown; texture: GPUTexture; width?: number; height?: number }>;
     copyExternalCalls: number;
     blitBindGroups: number;
     blitPasses: number;
@@ -112,8 +130,10 @@ interface Captured {
     destroyed: boolean;
 }
 
-function makeEngine(host: FakeHost, cap: Captured, opts: { native?: boolean } = {}): EngineContext {
-    const native = opts.native ?? true;
+/** `native`: `"draw"` (Chrome 155+ `drawElementImageToTexture`), `"legacy"`
+ *  (Chrome 150–154 `copyElementImageToTexture`), or `false` (unsupported). */
+function makeEngine(host: FakeHost, cap: Captured, opts: { native?: "draw" | "legacy" | false } = {}): EngineContext {
+    const native = opts.native ?? "draw";
     const queue: Record<string, unknown> = {
         copyExternalImageToTexture: () => {
             cap.copyExternalCalls++;
@@ -122,9 +142,13 @@ function makeEngine(host: FakeHost, cap: Captured, opts: { native?: boolean } = 
             cap.submits++;
         },
     };
-    if (native) {
+    if (native === "draw") {
+        queue.drawElementImageToTexture = (source: { source: unknown }, dest: { texture: GPUTexture; size: { width: number; height: number } }) => {
+            cap.copyElementCalls.push({ api: "draw", source: source.source, texture: dest.texture, width: dest.size.width, height: dest.size.height });
+        };
+    } else if (native === "legacy") {
         queue.copyElementImageToTexture = (source: { source: unknown }, dest: { destination: { texture: GPUTexture }; width?: number; height?: number }) => {
-            cap.copyElementCalls.push({ source: source.source, texture: dest.destination.texture, width: dest.width, height: dest.height });
+            cap.copyElementCalls.push({ api: "legacy", source: source.source, texture: dest.destination.texture, width: dest.width, height: dest.height });
         };
     }
     const device = {
@@ -177,8 +201,9 @@ afterEach(() => {
 });
 
 describe("isHtmlInCanvasSupported", () => {
-    it("reflects presence of copyElementImageToTexture on the device queue", () => {
-        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: true }))).toBe(true);
+    it("reflects presence of drawElementImageToTexture or the legacy copyElementImageToTexture", () => {
+        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: "draw" }))).toBe(true);
+        expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: "legacy" }))).toBe(true);
         expect(isHtmlInCanvasSupported(makeEngine(makeHost(), newCap(), { native: false }))).toBe(false);
     });
 });
@@ -194,13 +219,16 @@ describe("createHtmlTexture (native path)", () => {
 
         expect(tex.width).toBe(200);
         expect(tex.height).toBe(100);
-        // Element re-parented under the host with layout opted in and inert set.
-        expect(host.layoutSubtree).toBe(true);
+        // Element re-parented under the host with drawable content opted in and inert set.
+        expect(host.content).toBe("drawable");
+        expect(host.layoutSubtree).toBeUndefined();
         expect(host.children).toContain(el);
+        expect(el.hasAttribute("drawable")).toBe(true);
         expect(el.inert).toBe(true);
-        // requestPaint fired once, and the paint uploaded via copyElementImageToTexture.
+        // requestPaint fired once, and the paint uploaded via drawElementImageToTexture.
         expect(host.paintRequests).toBe(1);
         expect(cap.copyElementCalls).toHaveLength(1);
+        expect(cap.copyElementCalls[0]!.api).toBe("draw");
         expect(cap.copyElementCalls[0]!.source).toBe(el);
         expect(cap.copyElementCalls[0]!.width).toBe(200);
         expect(cap.copyElementCalls[0]!.height).toBe(100);
@@ -231,9 +259,9 @@ describe("createHtmlTexture (native path)", () => {
         const host = makeHost({ withRequestPaint: false });
         const cap = newCap();
         const engine = makeEngine(host, cap);
-        const queue = engine._device.queue as unknown as { copyElementImageToTexture: () => void };
+        const queue = engine._device.queue as unknown as { drawElementImageToTexture: () => void };
         const failure = new Error("native upload failed");
-        queue.copyElementImageToTexture = (): void => {
+        queue.drawElementImageToTexture = (): void => {
             throw failure;
         };
         const tex = createHtmlTexture(engine, makeElement(), { invertY: false });
@@ -247,13 +275,33 @@ describe("createHtmlTexture (native path)", () => {
         await Promise.resolve();
         expect(settled).toBe(false);
 
-        queue.copyElementImageToTexture = (): void => {
+        queue.drawElementImageToTexture = (): void => {
             cap.copyExternalCalls++;
         };
         host.dispatchPaint();
         await ready;
         expect(settled).toBe(true);
         expect(cap.copyExternalCalls).toBe(1);
+    });
+
+    it("uses the legacy copyElementImageToTexture and layoutSubtree on Chrome 150–154", () => {
+        const host = makeHost({ legacy: true });
+        const cap = newCap();
+        const engine = makeEngine(host, cap, { native: "legacy" });
+        const el = makeElement(200, 100);
+
+        const tex = createHtmlTexture(engine, el, {});
+
+        expect(host.layoutSubtree).toBe(true);
+        expect(host.content).toBeUndefined();
+        expect(cap.copyElementCalls).toHaveLength(1);
+        expect(cap.copyElementCalls[0]!.api).toBe("legacy");
+        expect(cap.copyElementCalls[0]!.texture).toBe(tex._flipSrc);
+        expect(cap.copyElementCalls[0]!.width).toBe(200);
+        expect(cap.copyElementCalls[0]!.height).toBe(100);
+
+        disposeHtmlTexture(tex);
+        expect(host.layoutSubtree).toBe(false);
     });
 
     it("copies straight into the texture (no flip blit) when invertY:false", () => {
@@ -356,6 +404,7 @@ describe("disposeHtmlTexture", () => {
         expect(cap.destroyed).toBe(true); // GPU texture freed (creation ref → 0)
         expect(host.children).not.toContain(el); // element removed from host
         expect(el.inert).toBe(false); // inert restored
+        expect(el.hasAttribute("drawable")).toBe(false); // drawable restored
         expect(host.listeners.paint ?? []).toHaveLength(0); // listener detached
 
         // Further paints / updates are inert after dispose.
@@ -395,6 +444,16 @@ describe("disposeHtmlTexture", () => {
         expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
     });
 
+    it("keeps a drawable attribute the element already had", () => {
+        const host = makeHost();
+        const engine = makeEngine(host, newCap());
+        const el = makeElement();
+        el.setAttribute("drawable", "");
+
+        disposeHtmlTexture(createHtmlTexture(engine, el, {}));
+        expect(el.hasAttribute("drawable")).toBe(true);
+    });
+
     it("is idempotent", () => {
         const host = makeHost();
         const cap = newCap();
@@ -404,20 +463,20 @@ describe("disposeHtmlTexture", () => {
         expect(() => disposeHtmlTexture(tex)).not.toThrow();
     });
 
-    it("restores host.layoutSubtree once the last hosted texture on it is disposed", () => {
+    it("restores host.content once the last hosted texture on it is disposed", () => {
         const host = makeHost();
         const engine = makeEngine(host, newCap());
-        expect(host.layoutSubtree).toBe(false);
+        expect(host.content).toBe("fallback");
 
         const a = createHtmlTexture(engine, makeElement(), {});
         const b = createHtmlTexture(engine, makeElement(), {});
-        expect(host.layoutSubtree).toBe(true);
+        expect(host.content).toBe("drawable");
 
         disposeHtmlTexture(a);
-        expect(host.layoutSubtree).toBe(true); // still one live texture on the host
+        expect(host.content).toBe("drawable"); // still one live texture on the host
 
         disposeHtmlTexture(b);
-        expect(host.layoutSubtree).toBe(false); // restored to the pre-feature value
+        expect(host.content).toBe("fallback"); // restored to the pre-feature value
     });
 });
 
@@ -490,7 +549,8 @@ describe("SVG fallback path", () => {
         expect(cap.copyExternalCalls).toBe(0);
         // With no update path the element must not be hosted or the DOM mutated.
         expect(host.children).not.toContain(el);
-        expect(host.layoutSubtree).toBe(false);
+        expect(host.content).toBe("fallback");
+        expect(el.hasAttribute("drawable")).toBe(false);
         expect(writable(el).inert).toBe(false);
     });
 
