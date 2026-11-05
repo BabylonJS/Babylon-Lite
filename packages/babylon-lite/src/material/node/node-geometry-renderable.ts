@@ -29,7 +29,7 @@ import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../r
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Material } from "../material.js";
-import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension, _geometryColorTarget } from "../../frame-graph/geometry-types.js";
 import type { NodeExpr, NodeBuildState, NodeGraph, NodeMeshFeatureWriter } from "./node-types.js";
 import { emitGraph } from "./node-emitter.js";
 import { findBlockByClassName } from "./node-parser.js";
@@ -89,19 +89,6 @@ interface NodeGeometryViewResources {
 }
 
 const ZERO = (wg: string): string => wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
-
-function geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
-    if (!blend) {
-        return { format };
-    }
-    if (format.endsWith("uint") || format.endsWith("sint")) {
-        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
-    }
-    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
-        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
-    }
-    return { format, blend };
-}
 
 /** Build the per-attachment WGSL write for one geometry texture type, reading a
  *  connected graph input when present and falling back to the engine default. @internal Exported for tests. */
@@ -251,7 +238,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
             label: "node-material-geometry",
             layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
             vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
-            fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((format) => geometryColorTarget(format, blend, device)) },
+            fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((format) => _geometryColorTarget(format, blend, device)) },
             depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
             multisample: { count: a._msaaSamples },
             primitive: { topology: "triangle-list", cullMode, frontFace: _rightHanded ? "cw" : "ccw" },

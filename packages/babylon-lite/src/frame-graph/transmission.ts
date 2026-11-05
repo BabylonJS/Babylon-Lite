@@ -420,7 +420,7 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
             lastPipeline = null;
         }
         const mesh = binding.renderable.mesh;
-        if (mesh && mesh.visible === false) {
+        if (mesh && (mesh.visible === false || mesh._skipColorDraw)) {
             continue;
         }
         if (binding.pipeline !== lastPipeline) {
@@ -430,7 +430,7 @@ export function executePassWithTransmission(task: RenderTaskBase, engine: Engine
         draws += binding.draw(pass, engine);
     }
     if (overlay) {
-        draws += drawList(pass, overlay, engine);
+        draws += drawList(pass, overlay, engine, true);
     }
     pass.end();
     return draws;

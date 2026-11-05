@@ -209,7 +209,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const needsUV = (features & NEEDS_UV) !== 0;
         const needsUV2 = (features & NEEDS_UV2) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
-        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1 || colorAlphaBlend);
+        const isTransparent = !shadowOutput && ((features & (HAS_OPACITY_TEXTURE | MATERIAL_ALPHA_BLEND)) !== 0 || mat.alpha < 1);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {

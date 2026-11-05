@@ -112,6 +112,10 @@ export interface Mesh extends SceneNode {
     id?: string;
     material: Material;
     receiveShadows: boolean;
+    /** @internal When true, colour and geometry draws of this mesh are omitted.
+     *  Shadow casting, picking and `visible` are unaffected.
+     *  Written only by opt-in features (mesh opacity). */
+    _skipColorDraw?: boolean;
     /** OBJECT-LOCAL axis-aligned bounding box of this mesh's own geometry — the box the vertex
      *  buffer occupies BEFORE `worldMatrix`, and before any thin-instance matrix. Every reader
      *  composes it the same way the shaders do:

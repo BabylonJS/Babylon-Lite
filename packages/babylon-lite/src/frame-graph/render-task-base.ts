@@ -574,7 +574,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
     // executeBundles invalidates pass bind-group state — rebind group 0 before further draws.
     pass.setBindGroup(0, sceneBG);
     draws += drawList(pass, task._directBindings, eng);
-    draws += drawList(pass, task._transparentBindings, eng);
+    draws += drawList(pass, task._transparentBindings, eng, true);
     return draws;
 }
 
@@ -648,13 +648,15 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
     }
 }
 
-/** @internal Iterate DrawBindings, deduping setPipeline. */
-export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
+/** @internal Iterate DrawBindings, deduping setPipeline.
+ *  Pass `transparent` only for transparent lists: shadow bindings are never
+ *  transparent, so their opaque/direct lists ignore colour-only draw omission. */
+export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext, transparent?: boolean): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {
         const mesh = b.renderable.mesh;
-        if (mesh && mesh.visible === false) {
+        if (mesh && (mesh.visible === false || (transparent && mesh._skipColorDraw))) {
             continue;
         }
         if (b.pipeline !== lp) {
