@@ -346,7 +346,7 @@ describe("native mesh-opacity public contract", () => {
             expect(fixture.device.queue.writeBuffer).not.toHaveBeenCalled();
         });
 
-        it("skips replaced-device records until retirement and initializes recovery bindings from the latest scalar", async () => {
+        it("immediately retires replaced-device records and initializes recovery bindings from the latest scalar", async () => {
             const target = mesh(createPbrMaterial());
             const old = bindingEngine();
             opacity.setMeshOpacity(target, 0.6);
@@ -357,7 +357,7 @@ describe("native mesh-opacity public contract", () => {
             opacity.setMeshOpacity(target, 1);
             opacity.setMeshOpacity(target, 0.4);
             expect(old.device.queue.writeBuffer).not.toHaveBeenCalled();
-            expect(stale.buffer.destroy).not.toHaveBeenCalled();
+            expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
             const rebuilt = await bindOpacity(target, old.engine, "pbr-main");
             expect(replacement.writes[0]!.value).toBeCloseTo(0.4);
             stale.disposers.forEach((dispose) => dispose());
@@ -366,6 +366,78 @@ describe("native mesh-opacity public contract", () => {
             expect(replacement.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(rebuilt.buffer, 0, expect.any(Float32Array));
             expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
             rebuilt.disposers.forEach((dispose) => dispose());
+        });
+
+        it.each([
+            ["standard-main", "faded"],
+            ["pbr-main", "faded"],
+            ["standard-main", "reset-before"],
+            ["pbr-main", "reset-before"],
+            ["standard-main", "reset-after"],
+            ["pbr-main", "reset-after"],
+        ] as const)("retires lost %s records through rebuildRegisteredScenes (%s)", async (route, transition) => {
+            const { rebuildRegisteredScenes } = await import("../../../packages/babylon-lite/src/engine/recovery-rebuild");
+            const { registerMeshScene } = await import("../../../packages/babylon-lite/src/scene/mesh-scene-registry");
+            const { _computeMeshFeatures } = await import("../../../packages/babylon-lite/src/material/mesh-features");
+            const target = mesh(route === "pbr-main" ? createPbrMaterial() : createStandardMaterial());
+            const old = bindingEngine();
+            opacity.setMeshOpacity(target, 0.6);
+            const stale = await bindOpacity(target, old.engine, route);
+            const owner = Object.assign(scene(), {
+                _kind: "scene",
+                lights: [],
+                shadowGenerators: [],
+                meshes: [target],
+                _renderables: [],
+                _uniformUpdaters: [],
+                _meshDisposables: new Map([[target, stale.disposers]]),
+                _renderableVersion: 0,
+                _frameGraph: { _tasks: [], build: vi.fn() },
+            });
+            let current: Awaited<ReturnType<typeof bindOpacity>> | undefined;
+            const build = vi.fn(async () => {
+                const features = _computeMeshFeatures(target);
+                expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
+                if (features & (1 << 22)) {
+                    current = await bindOpacity(target, old.engine, route);
+                    owner._meshDisposables.set(target, current.disposers);
+                }
+                return { rebuildSingle: vi.fn(), renderables: [] };
+            });
+            Object.assign(owner, { _groups: new Map([[build, [target]]]) });
+            Object.assign(old.engine, { surfaces: [{ _renderingContexts: [owner] }] });
+            registerMeshScene(owner, target);
+            if (transition === "reset-before") {
+                opacity.setMeshOpacity(target, 1);
+            }
+            const replacement = bindingEngine();
+            old.engine._device = replacement.device;
+            vi.mocked(old.device.queue.writeBuffer).mockClear();
+            if (transition === "reset-after") {
+                opacity.setMeshOpacity(target, 1);
+                expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
+            }
+            await rebuildRegisteredScenes(old.engine);
+            expect(build).toHaveBeenCalledOnce();
+            expect(owner._frameGraph.build).toHaveBeenCalledOnce();
+            stale.disposers.forEach((dispose) => dispose());
+            expect(stale.buffer.destroy).toHaveBeenCalledTimes(1);
+            owner._materialSwapQueue.length = 0;
+            vi.mocked(replacement.device.queue.writeBuffer).mockClear();
+            if (transition === "faded") {
+                expect(current).toBeDefined();
+                expect(replacement.device.createBuffer).toHaveBeenCalledTimes(1);
+                opacity.setMeshOpacity(target, 0.2);
+                expect(replacement.device.queue.writeBuffer).toHaveBeenCalledExactlyOnceWith(current!.buffer, 0, expect.any(Float32Array));
+                current!.disposers.forEach((dispose) => dispose());
+            } else {
+                expect(current).toBeUndefined();
+                expect(replacement.device.createBuffer).not.toHaveBeenCalled();
+                opacity.setMeshOpacity(target, 0.5);
+                expect(replacement.device.queue.writeBuffer).not.toHaveBeenCalled();
+                expect(owner._materialSwapQueue).toEqual([target]);
+            }
+            expect(old.device.queue.writeBuffer).not.toHaveBeenCalled();
         });
 
         it("copies scalar state but never source binding records into a clone", async () => {

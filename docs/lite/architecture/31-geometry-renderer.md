@@ -161,6 +161,11 @@ Alpha-blended meshes participate by default, matching Babylon.js geometry
 rendering. Callers that need an opaque-only pass provide a filtered `meshes`
 array. Alpha-tested materials remain supported because their existing material
 shader discards rejected fragments before any geometry output is written.
+BLEND materials and meshes faded via `setMeshOpacity` are blended geometry
+participants: every colour target must support blending. Default `VIEW_DEPTH`
+uses `r32float`, which requires the device feature `float32-blendable` for such
+participants; otherwise override it to `r16float`. Integer targets are never
+blended.
 
 When more than two HDR (`rgba16float`) attachments are stacked the request can
 exceed WebGPU's default `maxColorAttachmentBytesPerSample` cap of 32 bytes.

@@ -24,7 +24,9 @@ export const meshOpacityPbrExt: PbrExt = {
             _fragmentSlots:
                 ctx._features & PBR_HAS_ALPHA_BLEND
                     ? { BC: wgsl`if (meshOpacity.policy > 0.5) { alpha = 1.0; }`, FA: wgsl`finalAlpha = finalAlpha * meshOpacity.value;` }
-                    : { BC: wgsl`alpha = select(alpha, 1.0, meshOpacity.policy > 0.5) * meshOpacity.value;` },
+                    : {
+                          BC: wgsl`alpha = select(alpha, 1.0, meshOpacity.policy > 0.5) * meshOpacity.value;${ctx._features & PBR_HAS_ALPHA_TEST ? " if (alpha <= 0.4) { discard; }" : ""}`,
+                      },
         };
     },
     bind(ctx, entries, binding) {

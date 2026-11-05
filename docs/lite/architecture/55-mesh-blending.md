@@ -107,6 +107,7 @@ Geometry tag invariants:
 - all other attachments retain their existing geometry blend behavior;
 - transparent meshes are included by default; callers can pass a filtered `meshes` array for opaque-only tags;
 - Standard and PBR alpha-tested geometry preserves discard coverage, but blended transparent tags remain order-dependent and can overwrite an underlying tag with zero;
+- cutouts faded via `setMeshOpacity` emit no tag when post-opacity `alpha <= 0.4`: geometry-only discard runs before tag/data writes, also suppressing the extra emit-colour slot for that sample;
 - alpha-blended geometry attachments must use a blendable format; 32-bit float attachments require `float32-blendable`, so callers without that feature should override `VIEW_DEPTH` to `r16float` or pass a filtered mesh list;
 - transparent Node materials are rejected when `MESH_BLEND_TAG` is requested because the graph's fragment alpha is not available to the geometry terminal; callers must filter them out;
 - ordinary transparent Node geometry always uses opacity/replacement blending for data attachments, even when the forward material uses additive color blending;

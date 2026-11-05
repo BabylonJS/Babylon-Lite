@@ -260,6 +260,17 @@ transparent bindings.
 | Picking, culling, bounds and `visible` | Unchanged                 | Unchanged                                              | Unchanged            |
 | Transmission opaque capture/GPS depth  | Existing classification   | Transparent, excluded from opaque/depth capture        | Transparent, no draw |
 
+Fading a mesh in a geometry task makes it a blended participant. Every colour
+target must be blendable: default `VIEW_DEPTH` (`r32float`) requires the device
+feature `float32-blendable`, or an `r16float` format override. Integer tag targets
+are never blended. This is the same requirement as a material's own BLEND policy.
+
+Faded cutouts discard geometry fragments whose post-opacity `alpha <= 0.4`,
+before any data or mesh-blending tag write. They therefore preserve underlying
+tags rather than writing a cutout's raw tag through a suppressed data sample.
+The trade-off is that these samples also stop contributing to an extra
+emit-colour slot. Forward cutout coverage is unchanged.
+
 PBR main transparent order is 150; Standard main and both geometry routes use 200. Existing material-level alpha-to-coverage and `:a2c` pipeline identity
 remain; A2C and blending both see final alpha. No material alpha, alpha-test cutoff,
 alphaBlend flag or visible flag is mutated. Mirroring, VAT, thin instances and
@@ -322,6 +333,10 @@ color = vec4<f32>(color.rgb, color.a * meshOpacity.value);
 ```
 
 The original `AT` alpha-test discard has already run; fog `BA` has not.
+Geometry compositions (`features & GEOMETRY_OUTPUT`) append
+`if (mat.aCut > 0.0 && alpha <= 0.4) { discard; }` to this `BC`. `mat` is in scope,
+and `alpha` is the same running value used by the geometry data gate. Forward
+`BC` remains exactly the two statements above.
 Colour returns `color.a`, while geometry gates on `alpha > 0.4`, so both alpha
 representations must be multiplied. No-colour/ESM templates return without this
 fragment. OPAQUE and surviving MASK fragments can therefore fade without
@@ -353,7 +368,14 @@ forward `FA` multiply after the normal output-alpha calculation:
 strips the blend branch and uses the combined `BC` with policy 0. MASK also
 uses policy 0 and keeps its forward `FA` / geometry `BC` behavior. Both occur **after** the original
 `AT` cutoff, so that cutoff tests the material's own alpha, not mesh opacity.
-Mesh opacity does not change which MASK fragments survive.
+Forward mesh opacity does not change which MASK fragments survive.
+In geometry only, PBR variants with `PBR_HAS_ALPHA_TEST` append
+`if (alpha <= 0.4) { discard; }` after the combined opacity `BC`, before the first
+data/tag write. Thus faded cutouts also obey the geometry data gate, while
+opacity-1 variants keep their original raw MASK tag and Standard aCut select.
+Non-cutout geometry and forward paths do not gain this discard. The opacity
+extension intentionally does not import geometry attachment state; a rejected
+sample also omits any extra emit-colour output.
 
 The shadow-only fragment owns and internally exports
 `PBR2_HAS_SHADOW_ONLY = 1 << 30`. The lazy opacity fragment imports it from
@@ -447,9 +469,16 @@ to several scenes.
 The existing last-scene removal disposes mesh GPU resources and marks it
 disposed; opacity adds no mesh-disposal or retirement observer.
 
-Recovery retires old bindings and rebuilds on the replacement device using the
-latest scalar. Setters during recovery skip mismatched records and are safe
-before replacement bindings exist. Opacity owns no device-scoped cache.
+Recovery's material-group rebuild computes mesh features even at opacity 1.
+The installed opacity feature encoder, when the binding map exists, retires
+records whose engine's current device differs from their captured device.
+The setter uses the same helper before writing live records. Retirement removes
+the record before destroying its lost-device buffer; a later old disposer sees
+that deletion already happened and does nothing. Recovery clears the scene's
+disposer map without invoking it, so encoder retirement is required even if
+opacity was reset to 1 and no replacement binding is created. Faded meshes
+rebuild bindings from the latest scalar; live updates reach only matched-device
+records. Opacity owns no device-scoped cache.
 
 ### Material replacement and target exclusion
 

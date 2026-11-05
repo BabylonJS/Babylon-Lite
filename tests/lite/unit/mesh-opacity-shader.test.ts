@@ -210,6 +210,7 @@ describe("mesh-opacity shader, binding and route contracts", () => {
             expect(opacity).toBeCloseTo(0.1);
             expect(policy).toBe(1);
             const code = compact(fragment(binding));
+            expect(code).not.toContain("if(alpha<=0.4){discard;}");
             expect(code).toContain("varalpha=baseColorSample.a*material.baseColorFactor.a;");
             expect(code).toContain("alpha*=input.vColor.a;");
             const policyStatement = renderable === forward ? "if(meshOpacity.policy>0.5){alpha=1.0;}" : "alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;";
@@ -244,6 +245,63 @@ describe("mesh-opacity shader, binding and route contracts", () => {
         expect(code.match(/_ds\.a/g)).toHaveLength(1);
         expect(code).toContain("alpha=alpha*meshOpacity.value;");
         expect(code).toContain("color=vec4<f32>(color.rgb,color.a*meshOpacity.value);");
+        expect(code).not.toContain("if(mat.aCut>0.0&&alpha<=0.4){discard;}");
+        expect(
+            _getStdExtsSorted()
+                .find((ext) => ext._id === "0-mesh-opacity")!
+                ._frag(0)!._fragmentSlots!.BC
+        ).toBe("alpha = alpha * meshOpacity.value; color = vec4<f32>(color.rgb, color.a * meshOpacity.value);");
+    });
+
+    it.each(["standard", "pbr"] as const)("discards faded %s cutouts before geometry data/tag and emit-colour writes, leaving opacity-1 tags unchanged", async (family) => {
+        const { _installMeshBlendingGeometrySupport } = await import("../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending");
+        _installMeshBlendingGeometrySupport();
+        const f = fixture();
+        const standard = createStandardMaterial();
+        standard.diffuseTexture = texture();
+        standard.alphaCutOff = 0.5;
+        const pbr = createPbrMaterial({ baseColorTexture: texture() });
+        setPbrAlphaCutoff(pbr, 0.5);
+        const material = family === "standard" ? standard : pbr;
+        const target = mesh(material);
+        target.meshBlendingTag = 1;
+        f.scene._groups.set(material._buildGroup, [target]);
+        const attachments = [GeometryTextureType.MESH_BLEND_TAG, GeometryTextureType.WORLD_POSITION];
+        for (const opacity of [1, 0.5]) {
+            setMeshOpacity(target, opacity);
+            const forward =
+                family === "standard"
+                    ? buildStandardMeshRenderables(f.scene, [target], {}).renderables[0]!
+                    : (await buildPbrRenderables(f.scene, [target], undefined)).renderables[0]!;
+            await preloadStandardGeometryFeatures([target], false);
+            const resources = { _lifetimeDisposers: [] as (() => void)[] };
+            const geometry =
+                family === "standard"
+                    ? buildStandardGeometryRenderable(f.scene, target, createStandardGeometryMaterialView(standard, { attachments, emitColor: true }), resources)
+                    : buildPbrGeometryRenderable(f.scene, target, createPbrGeometryMaterialView(pbr, { attachments, emitColor: true }), resources);
+            const color = compact(fragment(forward.bind(f.engine, signature)));
+            const code = compact(fragment(geometry.bind(f.engine, signature)));
+            const discard = family === "standard" ? "if(mat.aCut>0.0&&alpha<=0.4){discard;}" : "if(alpha<=0.4){discard;}";
+            expect(color).not.toContain(discard);
+            expect(code).toContain(
+                family === "standard" ? "out.meshBlendTag0=select(select(0u,mesh.lc>>8u,alpha>0.4),mesh.lc>>8u,mat.aCut>0.0);" : "out.meshBlendTag0=mesh.lc>>8u;"
+            );
+            if (opacity < 1) {
+                const multiply = family === "standard" ? "alpha=alpha*meshOpacity.value;" : "alpha=select(alpha,1.0,meshOpacity.policy>0.5)*meshOpacity.value;";
+                const cutoff = code.indexOf(discard);
+                expect(cutoff).toBeGreaterThan(code.indexOf(multiply));
+                expect(cutoff).toBeLessThan(code.indexOf("out.meshBlendTag0="));
+                expect(cutoff).toBeLessThan(code.indexOf("out.f1="));
+                expect(cutoff).toBeLessThan(code.indexOf("out.color="));
+                if (family === "standard") {
+                    expect(code.indexOf("var<uniform>mat:")).toBeGreaterThan(-1);
+                }
+            } else {
+                expect(code).not.toContain("meshOpacity");
+                expect(code).not.toContain(discard);
+            }
+            resources._lifetimeDisposers.forEach((dispose) => dispose());
+        }
     });
 
     it("keeps opacity-1 WGSL, generation requests, pipeline state and binding counts identical to pre-installation", async () => {

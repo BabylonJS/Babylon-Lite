@@ -40,13 +40,31 @@ function validateMaterial(mesh: Mesh, material: Mesh["material"], opacity: numbe
     }
 }
 
+function retireStaleBindings(mesh: Mesh): Set<OpacityBinding> | undefined {
+    const records = _bindings?.get(mesh);
+    if (records) {
+        for (const record of records) {
+            if (record._engine._device !== record._device) {
+                records.delete(record);
+                record._buffer.destroy();
+            }
+        }
+    }
+    return records;
+}
+
 function ensureInstalled(): void {
     if (_installed) {
         return;
     }
     _registerStdExt(meshOpacityStandardExt);
     _registerPbrExt(meshOpacityPbrExt);
-    _installMeshFeatureExtra((mesh) => (getMeshOpacity(mesh) < 1 ? 1 << 22 : 0));
+    _installMeshFeatureExtra((mesh) => {
+        if (_bindings) {
+            retireStaleBindings(mesh);
+        }
+        return getMeshOpacity(mesh) < 1 ? 1 << 22 : 0;
+    });
     _installPbrBindingContext((context, _id, disposers) => {
         context._disposers = disposers;
     });
@@ -91,13 +109,11 @@ export function setMeshOpacity(mesh: Mesh, opacity: number): void {
     if ((previous === 1) !== (value === 1)) {
         markMeshRenderableDirty(mesh);
     }
-    const records = _bindings?.get(mesh);
+    const records = retireStaleBindings(mesh);
     if (records) {
         _value[0] = value;
         for (const record of records) {
-            if (record._engine._device === record._device) {
-                record._device.queue.writeBuffer(record._buffer, 0, _value);
-            }
+            record._device.queue.writeBuffer(record._buffer, 0, _value);
         }
     }
 }
