@@ -131,6 +131,18 @@ describe("TransformNode rotation", () => {
         expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.6, -0.2));
     });
 
+    it("resynchronizes a retained Euler vector after native quaternion writes", () => {
+        const node = new TransformNode("node");
+        const rotation = node.rotation;
+        const native = Quaternion.FromEulerAngles(0.3, 0.5, -0.2);
+
+        node._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+        rotation.y += 0.1;
+
+        expect(node.rotation).toBe(rotation);
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.6, -0.2));
+    });
+
     it("keeps the assigned quaternion live while Euler writes remain inactive", () => {
         const node = new TransformNode("node");
         const quaternion = Quaternion.FromEulerAngles(-0.4, 0.2, 0.7);
@@ -150,6 +162,19 @@ describe("TransformNode rotation", () => {
         expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.5, 0));
     });
 
+    it("resynchronizes an assigned quaternion after native writes", () => {
+        const node = new TransformNode("node");
+        const quaternion = Quaternion.Identity();
+        const native = Quaternion.FromEulerAngles(0.3, 0.5, -0.2);
+        node.rotationQuaternion = quaternion;
+
+        node._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+        quaternion.z += 0.1;
+
+        expect(node.rotationQuaternion).toBe(quaternion);
+        expect(nodeRotation(node).asArray()).toEqual(quaternion.asArray());
+    });
+
     it("clears rotationQuaternion when the rotation vector is assigned", () => {
         const node = new TransformNode("node");
         node.rotationQuaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
@@ -158,6 +183,59 @@ describe("TransformNode rotation", () => {
 
         expect(node.rotationQuaternion).toBeNull();
         expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(-0.3, 0.6, 0.2));
+    });
+
+    it("copies stored Euler edits when cloning quaternion mode", () => {
+        const source = new TransformNode("source");
+        source.rotationQuaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        source.rotation.set(0.3, 0.5, -0.2);
+        const clone = new TransformNode("clone", undefined, source._node);
+
+        clone._copyRotationMode(source);
+        clone.rotationQuaternion = null;
+
+        expectSameRotation(nodeRotation(clone), Quaternion.FromEulerAngles(0.3, 0.5, -0.2));
+    });
+
+    it("keeps shared Euler bindings active when one node replaces its vector", () => {
+        const shared = new Vector3(0.1, 0.2, 0.3);
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        first.rotation = shared;
+        second.rotation = shared;
+
+        first.rotation = new Vector3();
+        shared.y = 0.6;
+
+        expectSameRotation(nodeRotation(second), Quaternion.FromEulerAngles(0.1, 0.6, 0.3));
+    });
+
+    it("keeps shared quaternion bindings active when one node replaces its quaternion", () => {
+        const shared = Quaternion.FromEulerAngles(0.1, 0.2, 0.3);
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        first.rotationQuaternion = shared;
+        second.rotationQuaternion = shared;
+
+        first.rotationQuaternion = Quaternion.Identity();
+        shared.y += 0.1;
+
+        expect(nodeRotation(second).asArray()).toEqual(shared.asArray());
+    });
+
+    it("unbinds retained rotation values when disposed", () => {
+        const rotation = new Vector3(0.1, 0.2, 0.3);
+        const quaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        const node = new TransformNode("node");
+        node.rotation = rotation;
+        node.rotationQuaternion = quaternion;
+        const before = nodeRotation(node);
+
+        node.dispose();
+        rotation.set(0.7, 0.8, 0.9);
+        quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
+
+        expectSameRotation(nodeRotation(node), before);
     });
 
     it("replaces the active quaternion when a bake resets rotation", () => {

@@ -74,47 +74,98 @@ interface ComponentBinding3 {
     unbind(): void;
 }
 
+interface ComponentBinding4 {
+    setSilently(x: number, y: number, z: number, w: number): void;
+    unbind(): void;
+}
+
 interface NumberPropertyBinding {
     setSilently(value: number): void;
     unbind(): void;
 }
 
-function bindNumberProperty(target: object, key: string, onChange: () => void): NumberPropertyBinding {
-    const descriptor = Object.getOwnPropertyDescriptor(target, key);
-    let stored = (target as Record<string, number>)[key]!;
-    const read = descriptor?.get ? () => descriptor.get!.call(target) as number : () => stored;
-    const write = descriptor?.set ? (value: number) => descriptor.set!.call(target, value) : (value: number) => (stored = value);
-    Object.defineProperty(target, key, {
-        enumerable: descriptor?.enumerable ?? true,
-        configurable: true,
-        get: read,
-        set: (value: number) => {
-            write(value);
-            onChange();
-        },
-    });
+interface NumberPropertySubscription {
+    onAccess: () => void;
+    onChange: () => void;
+}
+
+interface NumberPropertyState {
+    descriptor: PropertyDescriptor | undefined;
+    read: () => number;
+    write: (value: number) => void;
+    subscriptions: Set<NumberPropertySubscription>;
+}
+
+let numberPropertyStates: WeakMap<object, Map<string, NumberPropertyState>> | undefined;
+
+function bindNumberProperty(target: object, key: string, onAccess: () => void, onChange: () => void): NumberPropertyBinding {
+    const states = (numberPropertyStates ??= new WeakMap());
+    let properties = states.get(target);
+    if (!properties) {
+        properties = new Map();
+        states.set(target, properties);
+    }
+    let state = properties.get(key);
+    if (!state) {
+        const descriptor = Object.getOwnPropertyDescriptor(target, key);
+        let stored = (target as Record<string, number>)[key]!;
+        const read = descriptor?.get ? () => descriptor.get!.call(target) as number : () => stored;
+        const write = descriptor?.set ? (value: number) => descriptor.set!.call(target, value) : (value: number) => (stored = value);
+        state = { descriptor, read, write, subscriptions: new Set() };
+        properties.set(key, state);
+        Object.defineProperty(target, key, {
+            enumerable: descriptor?.enumerable ?? true,
+            configurable: true,
+            get: () => {
+                for (const subscription of [...state!.subscriptions]) {
+                    subscription.onAccess();
+                }
+                return state!.read();
+            },
+            set: (value: number) => {
+                for (const subscription of [...state!.subscriptions]) {
+                    subscription.onAccess();
+                }
+                state!.write(value);
+                for (const subscription of [...state!.subscriptions]) {
+                    subscription.onChange();
+                }
+            },
+        });
+    }
+    const subscription = { onAccess, onChange };
+    state.subscriptions.add(subscription);
     return {
-        setSilently: write,
+        setSilently: state.write,
         unbind() {
-            if (descriptor?.get || descriptor?.set) {
-                Object.defineProperty(target, key, descriptor);
-            } else {
-                Object.defineProperty(target, key, {
-                    ...descriptor,
-                    enumerable: descriptor?.enumerable ?? true,
-                    configurable: descriptor?.configurable ?? true,
-                    writable: descriptor?.writable ?? true,
-                    value: read(),
-                });
+            state!.subscriptions.delete(subscription);
+            if (state!.subscriptions.size !== 0) {
+                return;
             }
+            const value = state!.read();
+            const descriptor = state!.descriptor;
+            Object.defineProperty(
+                target,
+                key,
+                descriptor?.get || descriptor?.set
+                    ? descriptor
+                    : {
+                          ...descriptor,
+                          enumerable: descriptor?.enumerable ?? true,
+                          configurable: descriptor?.configurable ?? true,
+                          writable: descriptor?.writable ?? true,
+                          value,
+                      }
+            );
+            properties!.delete(key);
         },
     };
 }
 
-function bindVector3(value: Vector3, onChange: () => void): ComponentBinding3 {
-    const x = bindNumberProperty(value, "x", onChange);
-    const y = bindNumberProperty(value, "y", onChange);
-    const z = bindNumberProperty(value, "z", onChange);
+function bindVector3(value: Vector3, onAccess: () => void, onChange: () => void): ComponentBinding3 {
+    const x = bindNumberProperty(value, "x", onAccess, onChange);
+    const y = bindNumberProperty(value, "y", onAccess, onChange);
+    const z = bindNumberProperty(value, "z", onAccess, onChange);
     return {
         setSilently(nextX, nextY, nextZ) {
             x.setSilently(nextX);
@@ -129,16 +180,24 @@ function bindVector3(value: Vector3, onChange: () => void): ComponentBinding3 {
     };
 }
 
-function bindQuaternion(value: Quaternion, onChange: () => void): () => void {
-    const x = bindNumberProperty(value, "x", onChange);
-    const y = bindNumberProperty(value, "y", onChange);
-    const z = bindNumberProperty(value, "z", onChange);
-    const w = bindNumberProperty(value, "w", onChange);
-    return () => {
-        x.unbind();
-        y.unbind();
-        z.unbind();
-        w.unbind();
+function bindQuaternion(value: Quaternion, onAccess: () => void, onChange: () => void): ComponentBinding4 {
+    const x = bindNumberProperty(value, "x", onAccess, onChange);
+    const y = bindNumberProperty(value, "y", onAccess, onChange);
+    const z = bindNumberProperty(value, "z", onAccess, onChange);
+    const w = bindNumberProperty(value, "w", onAccess, onChange);
+    return {
+        setSilently(nextX, nextY, nextZ, nextW) {
+            x.setSilently(nextX);
+            y.setSilently(nextY);
+            z.setSilently(nextZ);
+            w.setSilently(nextW);
+        },
+        unbind() {
+            x.unbind();
+            y.unbind();
+            z.unbind();
+            w.unbind();
+        },
     };
 }
 
@@ -311,7 +370,9 @@ export class TransformNode extends Node {
     private _rotation: Vector3;
     private _rotationBinding: ComponentBinding3;
     private _rotationQuaternion: Quaternion | null = null;
-    private _unbindRotationQuaternion?: () => void;
+    private _rotationQuaternionBinding?: ComponentBinding4;
+    private _nativeRotationVersion: number | undefined;
+    private _nativeRotationValues: [number, number, number, number] | undefined;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -352,11 +413,17 @@ export class TransformNode extends Node {
         }
         const q = this._node.rotationQuaternion;
         this._rotation = q ? new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles() : new Vector3();
-        this._rotationBinding = bindVector3(this._rotation, () => {
-            if (!this._rotationQuaternion) {
-                this._applyEulerRotation();
+        this._nativeRotationVersion = q?.version;
+        this._nativeRotationValues = q ? [q.x, q.y, q.z, q.w] : [0, 0, 0, 1];
+        this._rotationBinding = bindVector3(
+            this._rotation,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
             }
-        });
+        );
     }
 
     public override getClassName(): string {
@@ -371,16 +438,21 @@ export class TransformNode extends Node {
     }
 
     public get rotation(): Vector3 {
+        this._syncRotationFromNative();
         return this._rotation;
     }
     public set rotation(value: Vector3) {
         this._rotationBinding.unbind();
         this._rotation = value;
-        this._rotationBinding = bindVector3(value, () => {
-            if (!this._rotationQuaternion) {
-                this._applyEulerRotation();
+        this._rotationBinding = bindVector3(
+            value,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
             }
-        });
+        );
         this.rotationQuaternion = null;
     }
 
@@ -393,15 +465,20 @@ export class TransformNode extends Node {
 
     /** Babylon.js `rotationQuaternion`, kept live while Lite receives translated component writes. */
     public get rotationQuaternion(): Quaternion | null {
+        this._syncRotationFromNative();
         return this._rotationQuaternion;
     }
     public set rotationQuaternion(value: Quaternion | null) {
-        this._unbindRotationQuaternion?.();
-        this._unbindRotationQuaternion = undefined;
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
         this._rotationQuaternion = value;
         if (value) {
             this._rotation.setAll(0);
-            this._unbindRotationQuaternion = bindQuaternion(value, () => this._applyQuaternionRotation());
+            this._rotationQuaternionBinding = bindQuaternion(
+                value,
+                () => this._syncRotationFromNative(),
+                () => this._applyQuaternionRotation()
+            );
             this._applyQuaternionRotation();
         } else {
             this._applyEulerRotation();
@@ -411,13 +488,44 @@ export class TransformNode extends Node {
     private _applyEulerRotation(): void {
         const q = Quaternion.FromEulerAngles(this._rotation.x, this._rotation.y, this._rotation.z);
         this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+        this._markNativeRotationSynced();
     }
 
     private _applyQuaternionRotation(): void {
         const q = this._rotationQuaternion;
         if (q) {
             this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+            this._markNativeRotationSynced();
         }
+    }
+
+    private _markNativeRotationSynced(): void {
+        const q = this._node?.rotationQuaternion;
+        if (!q) {
+            return;
+        }
+        this._nativeRotationVersion = q.version;
+        this._nativeRotationValues = [q.x, q.y, q.z, q.w];
+    }
+
+    private _syncRotationFromNative(): void {
+        const q = this._node?.rotationQuaternion;
+        const previous = this._nativeRotationValues;
+        if (!q || !previous) {
+            return;
+        }
+        const valuesChanged = q.x !== previous[0] || q.y !== previous[1] || q.z !== previous[2] || q.w !== previous[3];
+        if (q.version === this._nativeRotationVersion && !valuesChanged) {
+            return;
+        }
+        if (this._rotationQuaternion) {
+            this._rotationQuaternionBinding?.setSilently(q.x, q.y, q.z, q.w);
+        } else {
+            const euler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+            this._rotationBinding.setSilently(euler.x, euler.y, euler.z);
+        }
+        this._nativeRotationVersion = q.version;
+        this._nativeRotationValues = [q.x, q.y, q.z, q.w];
     }
 
     /** @internal Preserve the source node's active rotation representation on a clone. */
@@ -428,21 +536,29 @@ export class TransformNode extends Node {
             return;
         }
         this._rotationBinding.unbind();
-        this._unbindRotationQuaternion?.();
-        this._unbindRotationQuaternion = undefined;
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
+        this._rotation = rotation.clone();
         if (q) {
-            this._rotation = new Vector3();
             this._rotationQuaternion = q.clone();
-            this._unbindRotationQuaternion = bindQuaternion(this._rotationQuaternion, () => this._applyQuaternionRotation());
+            this._rotationQuaternionBinding = bindQuaternion(
+                this._rotationQuaternion,
+                () => this._syncRotationFromNative(),
+                () => this._applyQuaternionRotation()
+            );
         } else {
-            this._rotation = rotation.clone();
             this._rotationQuaternion = null;
         }
-        this._rotationBinding = bindVector3(this._rotation, () => {
-            if (!this._rotationQuaternion) {
-                this._applyEulerRotation();
+        this._rotationBinding = bindVector3(
+            this._rotation,
+            () => this._syncRotationFromNative(),
+            () => {
+                if (!this._rotationQuaternion) {
+                    this._applyEulerRotation();
+                }
             }
-        });
+        );
+        this._markNativeRotationSynced();
     }
 
     /** @internal Synchronize compat state after baking resets the Lite transform directly. */
@@ -507,6 +623,13 @@ export class TransformNode extends Node {
         this._node.children.length = 0;
         removeFromScene(this._scene._lite, this._node);
     }
+
+    protected override _retireFromScene(): void {
+        this._rotationBinding.unbind();
+        this._rotationQuaternionBinding?.unbind();
+        this._rotationQuaternionBinding = undefined;
+        super._retireFromScene();
+    }
 }
 
 /**
@@ -559,6 +682,7 @@ export class AbstractMesh extends TransformNode {
      * `AbstractMesh.dispose` does in its own `Lights` loop. Container-retired wrappers prune too.
      */
     protected override _retireFromScene(): void {
+        super._retireFromScene();
         for (const light of this._scene?.lights ?? []) {
             light._pruneDisposedMesh(this);
         }
