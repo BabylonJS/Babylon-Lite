@@ -1181,6 +1181,18 @@ graph.
 ## Lit Demonstration
 
 `demo-ambient-occlusion.html` uses high-level root exports exclusively.
+The BRDF LUT is resolved beside the bundled module through `demoAssetUrl`,
+not from the site root, so standalone deployment beneath `/lite-demos/`
+works without the lab server's root asset routes. A single-demo debug build
+also refreshes the generated gallery and copies its available thumbnails.
+Both the standalone gallery and the lab Demos tab honor an optional
+`thumbnailUrl` in `demos-config.json`, HTML-escaped when rendered, and otherwise
+keep their existing relative JPG paths. The AO thumbnail is hosted in
+BabylonJS/Assets and pinned to an immutable commit URL.
+The **Direct light** toggle adds a directional light to demonstrate that AO
+does not attenuate direct illumination. Its runtime intensity changes use
+`setLightIntensity` so the shared light UBO is invalidated. It has no visible
+effect in the AO-only view, which displays visibility rather than scene lighting.
 A procedural room contains a ground, two walls, contacting boxes, a sphere,
 and a thin occluder. A loaded environment supplies diffuse IBL, with a separate
 toggleable directional light and an emissive material for lighting isolation.
