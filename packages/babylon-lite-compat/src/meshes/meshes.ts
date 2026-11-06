@@ -69,6 +69,79 @@ import { MorphTargetManager } from "../morph/morph.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial | GridMaterial | LinesMaterial;
 
+interface ComponentBinding3 {
+    setSilently(x: number, y: number, z: number): void;
+    unbind(): void;
+}
+
+interface NumberPropertyBinding {
+    setSilently(value: number): void;
+    unbind(): void;
+}
+
+function bindNumberProperty(target: object, key: string, onChange: () => void): NumberPropertyBinding {
+    const descriptor = Object.getOwnPropertyDescriptor(target, key);
+    let stored = (target as Record<string, number>)[key]!;
+    const read = descriptor?.get ? () => descriptor.get!.call(target) as number : () => stored;
+    const write = descriptor?.set ? (value: number) => descriptor.set!.call(target, value) : (value: number) => (stored = value);
+    Object.defineProperty(target, key, {
+        enumerable: descriptor?.enumerable ?? true,
+        configurable: true,
+        get: read,
+        set: (value: number) => {
+            write(value);
+            onChange();
+        },
+    });
+    return {
+        setSilently: write,
+        unbind() {
+            if (descriptor?.get || descriptor?.set) {
+                Object.defineProperty(target, key, descriptor);
+            } else {
+                Object.defineProperty(target, key, {
+                    ...descriptor,
+                    enumerable: descriptor?.enumerable ?? true,
+                    configurable: descriptor?.configurable ?? true,
+                    writable: descriptor?.writable ?? true,
+                    value: read(),
+                });
+            }
+        },
+    };
+}
+
+function bindVector3(value: Vector3, onChange: () => void): ComponentBinding3 {
+    const x = bindNumberProperty(value, "x", onChange);
+    const y = bindNumberProperty(value, "y", onChange);
+    const z = bindNumberProperty(value, "z", onChange);
+    return {
+        setSilently(nextX, nextY, nextZ) {
+            x.setSilently(nextX);
+            y.setSilently(nextY);
+            z.setSilently(nextZ);
+        },
+        unbind() {
+            x.unbind();
+            y.unbind();
+            z.unbind();
+        },
+    };
+}
+
+function bindQuaternion(value: Quaternion, onChange: () => void): () => void {
+    const x = bindNumberProperty(value, "x", onChange);
+    const y = bindNumberProperty(value, "y", onChange);
+    const z = bindNumberProperty(value, "z", onChange);
+    const w = bindNumberProperty(value, "w", onChange);
+    return () => {
+        x.unbind();
+        y.unbind();
+        z.unbind();
+        w.unbind();
+    };
+}
+
 class LinesMaterial extends CompatMaterialBase {
     public readonly _lite: LiteLineMaterial;
 
@@ -235,6 +308,10 @@ export class TransformNode extends Node {
     /** @internal The Lite scene node that carries this transform. */
     public readonly _node: SceneNode;
     public physicsBody: PhysicsBody | null = null;
+    private _rotation: Vector3;
+    private _rotationBinding: ComponentBinding3;
+    private _rotationQuaternion: Quaternion | null = null;
+    private _unbindRotationQuaternion?: () => void;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -273,6 +350,13 @@ export class TransformNode extends Node {
                 addToScene(scene._lite, this._node);
             }
         }
+        const q = this._node.rotationQuaternion;
+        this._rotation = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+        this._rotationBinding = bindVector3(this._rotation, () => {
+            if (!this._rotationQuaternion) {
+                this._applyEulerRotation();
+            }
+        });
     }
 
     public override getClassName(): string {
@@ -287,10 +371,17 @@ export class TransformNode extends Node {
     }
 
     public get rotation(): Vector3 {
-        return liteBackedVector3(this._node.rotation);
+        return this._rotation;
     }
     public set rotation(value: Vector3) {
-        this._node.rotation.set(value.x, value.y, value.z);
+        this._rotationBinding.unbind();
+        this._rotation = value;
+        this._rotationBinding = bindVector3(value, () => {
+            if (!this._rotationQuaternion) {
+                this._applyEulerRotation();
+            }
+        });
+        this.rotationQuaternion = null;
     }
 
     public get scaling(): Vector3 {
@@ -300,28 +391,50 @@ export class TransformNode extends Node {
         this._node.scaling.set(value.x, value.y, value.z);
     }
 
-    /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
-    private _useQuat = false;
-
-    /**
-     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
-     * matrix from a quaternion (its euler `rotation` is a proxy over the same
-     * quaternion), so this reads/writes that quaternion. Returns `null` until
-     * explicitly assigned, matching Babylon.js's euler-by-default convention.
-     */
+    /** Babylon.js `rotationQuaternion`, kept live while Lite receives translated component writes. */
     public get rotationQuaternion(): Quaternion | null {
-        if (!this._useQuat) {
-            return null;
-        }
-        const q = this._node.rotationQuaternion;
-        return new Quaternion(q.x, q.y, q.z, q.w);
+        return this._rotationQuaternion;
     }
     public set rotationQuaternion(value: Quaternion | null) {
+        this._unbindRotationQuaternion?.();
+        this._unbindRotationQuaternion = undefined;
+        this._rotationQuaternion = value;
         if (value) {
-            this._useQuat = true;
-            this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
+            this._rotation.setAll(0);
+            this._unbindRotationQuaternion = bindQuaternion(value, () => this._applyQuaternionRotation());
+            this._applyQuaternionRotation();
         } else {
-            this._useQuat = false;
+            this._applyEulerRotation();
+        }
+    }
+
+    private _applyEulerRotation(): void {
+        const q = Quaternion.FromEulerAngles(this._rotation.x, this._rotation.y, this._rotation.z);
+        this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+    }
+
+    private _applyQuaternionRotation(): void {
+        const q = this._rotationQuaternion;
+        if (q) {
+            this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+        }
+    }
+
+    /** @internal Preserve the source node's active rotation representation on a clone. */
+    public _copyRotationMode(source: TransformNode): void {
+        const q = source.rotationQuaternion;
+        if (q) {
+            this.rotationQuaternion = q.clone();
+        } else {
+            this.rotation = source.rotation.clone();
+        }
+    }
+
+    /** @internal Synchronize compat state after baking resets the Lite transform directly. */
+    protected _resetRotationAfterBake(): void {
+        this._rotationBinding?.setSilently(0, 0, 0);
+        if (this._rotationQuaternion) {
+            this.rotationQuaternion = Quaternion.Identity();
         }
     }
 
@@ -855,6 +968,7 @@ export class AbstractMesh extends TransformNode {
         node.position.set(0, 0, 0);
         node.rotation.set(0, 0, 0);
         node.scaling.set(1, 1, 1);
+        this._resetRotationAfterBake();
         return this;
     }
 
@@ -1132,6 +1246,9 @@ export class Mesh extends AbstractMesh {
             (lite as LiteMesh).id = undefined;
         }
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
+        if (source instanceof TransformNode) {
+            wrapper._copyRotationMode(source);
+        }
         wrapper._container = (source as TransformNode | undefined)?._container;
         if (wrapper instanceof Mesh) {
             wrapper._scene = scene;

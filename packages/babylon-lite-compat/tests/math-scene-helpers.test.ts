@@ -17,6 +17,11 @@ function expectSameRotation(actual: Quaternion, expected: Quaternion): void {
     expect(Math.abs(dot)).toBeCloseTo(1, 6);
 }
 
+function nodeRotation(node: TransformNode): Quaternion {
+    const q = node._node.rotationQuaternion;
+    return new Quaternion(q.x, q.y, q.z, q.w);
+}
+
 /** The rows of `q`'s rotation matrix: the X, Y and Z axes the rotation maps the basis to. */
 function rotatedAxes(q: Quaternion): [Vector3, Vector3, Vector3] {
     const m = q.toRotationMatrix(new Matrix()).m;
@@ -92,6 +97,85 @@ describe("Quaternion.RotationQuaternionFromAxis", () => {
 
         expectSameRotation(ref, q);
         expect(axes.map((axis) => axis.asArray())).toEqual(before);
+    });
+});
+
+describe("TransformNode rotation", () => {
+    it("reads a pre-rotated Lite node as Babylon.js Euler angles", () => {
+        const liteNode = new TransformNode("source")._node;
+        const quaternion = Quaternion.FromEulerAngles(0.3, 0.5, -0.2);
+        liteNode.rotationQuaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+        const node = new TransformNode("wrapped", undefined, liteNode);
+
+        expect(node.rotationQuaternion).toBeNull();
+        expect(node.rotation.x).toBeCloseTo(0.3, 6);
+        expect(node.rotation.y).toBeCloseTo(0.5, 6);
+        expect(node.rotation.z).toBeCloseTo(-0.2, 6);
+    });
+
+    it("keeps the assigned Euler vector live and composes it with Babylon.js yaw-pitch-roll semantics", () => {
+        const node = new TransformNode("node");
+        const previous = node.rotation;
+        const rotation = new Vector3(0.3, 0.5, -0.2);
+        const expected = Quaternion.FromEulerAngles(0.3, 0.5, -0.2);
+
+        node.rotation = rotation;
+
+        expect(node.rotation).toBe(rotation);
+        expectSameRotation(nodeRotation(node), expected);
+
+        rotation.y += 0.1;
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.6, -0.2));
+
+        previous.set(1, 1, 1);
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.6, -0.2));
+    });
+
+    it("keeps the assigned quaternion live while Euler writes remain inactive", () => {
+        const node = new TransformNode("node");
+        const quaternion = Quaternion.FromEulerAngles(-0.4, 0.2, 0.7);
+
+        node.rotation = new Vector3(0.1, 0.2, 0.3);
+        node.rotationQuaternion = quaternion;
+
+        expect(node.rotationQuaternion).toBe(quaternion);
+        expect(node.rotation.asArray()).toEqual([0, 0, 0]);
+        node.rotation.set(0.3, 0.5, 0);
+        expectSameRotation(nodeRotation(node), quaternion);
+
+        quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
+        expect(nodeRotation(node).asArray()).toEqual(quaternion.asArray());
+
+        node.rotationQuaternion = null;
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.5, 0));
+    });
+
+    it("clears rotationQuaternion when the rotation vector is assigned", () => {
+        const node = new TransformNode("node");
+        node.rotationQuaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+
+        node.rotation = new Vector3(-0.3, 0.6, 0.2);
+
+        expect(node.rotationQuaternion).toBeNull();
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(-0.3, 0.6, 0.2));
+    });
+
+    it("replaces the active quaternion when a bake resets rotation", () => {
+        class BakeResetNode extends TransformNode {
+            public resetAfterBake(): void {
+                this._node.rotation.set(0, 0, 0);
+                this._resetRotationAfterBake();
+            }
+        }
+        const node = new BakeResetNode("node");
+        const original = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        node.rotationQuaternion = original;
+
+        node.resetAfterBake();
+
+        expect(node.rotationQuaternion).not.toBe(original);
+        expect(node.rotationQuaternion?.asArray()).toEqual([0, 0, 0, 1]);
+        expectSameRotation(original, Quaternion.FromEulerAngles(0.4, -0.2, 0.1));
     });
 });
 
