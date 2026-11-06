@@ -351,7 +351,7 @@ export class TransformNode extends Node {
             }
         }
         const q = this._node.rotationQuaternion;
-        this._rotation = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+        this._rotation = q ? new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles() : new Vector3();
         this._rotationBinding = bindVector3(this._rotation, () => {
             if (!this._rotationQuaternion) {
                 this._applyEulerRotation();
@@ -423,11 +423,26 @@ export class TransformNode extends Node {
     /** @internal Preserve the source node's active rotation representation on a clone. */
     public _copyRotationMode(source: TransformNode): void {
         const q = source.rotationQuaternion;
-        if (q) {
-            this.rotationQuaternion = q.clone();
-        } else {
-            this.rotation = source.rotation.clone();
+        const rotation = source.rotation;
+        if (!q && !rotation) {
+            return;
         }
+        this._rotationBinding.unbind();
+        this._unbindRotationQuaternion?.();
+        this._unbindRotationQuaternion = undefined;
+        if (q) {
+            this._rotation = new Vector3();
+            this._rotationQuaternion = q.clone();
+            this._unbindRotationQuaternion = bindQuaternion(this._rotationQuaternion, () => this._applyQuaternionRotation());
+        } else {
+            this._rotation = rotation.clone();
+            this._rotationQuaternion = null;
+        }
+        this._rotationBinding = bindVector3(this._rotation, () => {
+            if (!this._rotationQuaternion) {
+                this._applyEulerRotation();
+            }
+        });
     }
 
     /** @internal Synchronize compat state after baking resets the Lite transform directly. */
