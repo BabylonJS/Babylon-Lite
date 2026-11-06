@@ -133,6 +133,28 @@ describe("Cloned TransformNode rotation state", () => {
         expect(source.rotationQuaternion).not.toBeNull();
     });
 
+    it("refreshes cached Euler angles when Lite updated the source quaternion before cloning", () => {
+        const source = new TransformNode("animated-source");
+        source.rotation = new Vector3(0.3, 0.5, -0.2);
+
+        // An external update (for example, an animation frame) bypasses the
+        // compat Euler proxy and invalidates its cached values.
+        const animated = Quaternion.FromEulerAngles(-0.4, 0.2, 0.7);
+        source._node.rotationQuaternion.set(animated.x, animated.y, animated.z, animated.w);
+
+        // Crucially, do not read source.rotation before cloning: the clone must
+        // refresh stale Euler values itself rather than mark them current.
+        const clone = cloneCompatTransform(source);
+        expect(clone.rotation.x).toBeCloseTo(-0.4, 6);
+        expect(clone.rotation.y).toBeCloseTo(0.2, 6);
+        expect(clone.rotation.z).toBeCloseTo(0.7, 6);
+        expectRotation(clone, animated);
+
+        clone.rotation.y += 0.1;
+        expectRotation(clone, Quaternion.FromEulerAngles(-0.4, 0.3, 0.7));
+        expectRotation(source, animated);
+    });
+
     it("preserves Euler values and isolates the clone's mutable state from its source", () => {
         const source = new TransformNode("euler");
         source.rotation = new Vector3(1.3, 0.4, -1.1);

@@ -360,7 +360,11 @@ export class TransformNode extends Node {
     /** @internal Copy the independent Babylon.js rotation state after Lite cloned the physical quaternion. */
     public _copyRotationStateFrom(source: TransformNode): void {
         this._useQuat = source._useQuat;
-        this._rotationEuler = source._rotationEuler?.clone() ?? null;
+        // A Lite animation may have changed the source quaternion since its last
+        // Euler read. Refresh the cached angles before treating them as current on
+        // the clone, otherwise its next component edit can jump to stale values.
+        // Quaternion mode deliberately preserves the independent Euler snapshot.
+        this._rotationEuler = source._rotationEuler ? source._getRotationEuler().clone() : null;
         this._rotationVersion = this._node.rotationQuaternion.version;
     }
 
