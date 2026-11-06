@@ -17,6 +17,8 @@ import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { setMeshOpacity } from "../../../packages/babylon-lite/src/mesh/opacity/mesh-opacity";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { setStandardParallaxOcclusion } from "../../../packages/babylon-lite/src/material/standard/set-std-parallax-occlusion";
+import { stdParallaxOcclusionExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-parallax-occlusion-fragment";
 import { _getStdExtsSorted, _registerStdExt, MATERIAL_ALPHA_BLEND, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import {
     clearStandardPipelineCache,
@@ -55,6 +57,7 @@ import { setPbrUnlit } from "../../../packages/babylon-lite/src/material/pbr/set
 import { setShadowOnly } from "../../../packages/babylon-lite/src/material/pbr/set-shadow-only";
 import { setAlphaToCoverage } from "../../../packages/babylon-lite/src/render/alpha-to-coverage";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+import { makeParallaxTexture } from "./parallax-occlusion-fixtures";
 
 const signature: RenderTargetSignature = { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 4 };
 const compact = (source: string): string => source.replace(/\s+/g, "");
@@ -170,6 +173,33 @@ beforeEach(() => {
 });
 
 describe("mesh-opacity shader, binding and route contracts", () => {
+    it("binds Standard POM and mesh opacity independently while isolating opacity-only materials", () => {
+        const f = fixture();
+        const height = makeParallaxTexture();
+        const material = createStandardMaterial();
+        material.diffuseTexture = height;
+        setStandardParallaxOcclusion(material, { heightTexture: height });
+        const target = mesh(material);
+        setMeshOpacity(target, 0.5);
+        const opacity = _getStdExtsSorted().find((ext) => ext._id === "0-mesh-opacity")!;
+        expect(opacity._feature & stdParallaxOcclusionExt._feature).toBe(0);
+
+        const forward = buildStandardMeshRenderables(f.scene, [target], {}).renderables[0]!;
+        const binding = forward.bind(f.engine, signature);
+        assertOpacityBinding(binding, f);
+        expect(fragment(binding)).toContain("fn parallaxOffset(");
+        const group = meshBinding(binding, f);
+        expect([...group.entries].some((entry) => entry.resource === height.view)).toBe(true);
+
+        const plain = createStandardMaterial();
+        plain.diffuseTexture = height;
+        const opacityOnly = mesh(plain);
+        setMeshOpacity(opacityOnly, 0.5);
+        const plainBinding = buildStandardMeshRenderables(f.scene, [opacityOnly], {}).renderables[0]!.bind(f.engine, signature);
+        assertOpacityBinding(plainBinding, f);
+        expect(fragment(plainBinding)).not.toContain("parallaxOffset");
+    });
+
     it.each([
         [false, false],
         [true, false],

@@ -1,5 +1,5 @@
 /**
- * Nonvisual WebGPU readback tests on the same BrowserStack CDP/tunnel
+ * Nonvisual WebGPU pipeline/readback tests on the same BrowserStack CDP/tunnel
  * infrastructure as parity. No scene bundles, golden captures, or perf runs.
  */
 import { config as loadEnv } from "dotenv";
@@ -19,7 +19,7 @@ const swiftShaderArgs =
 
 export default defineConfig({
     testDir: "../tests/lite/integration",
-    testMatch: ["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "ssao-depth-validity.spec.ts"],
+    testMatch: ["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts", "ssao-depth-validity.spec.ts"],
     timeout: 90_000,
     retries: isCI ? 1 : 0,
     workers: 1,
@@ -43,7 +43,8 @@ export default defineConfig({
               }),
     },
     webServer: {
-        command: "pnpm --filter @babylon-lite/lab dev",
+        // These synthetic readback fixtures do not need the lab's model-download preflight.
+        command: "pnpm --filter @babylon-lite/lab exec vite",
         port: labTestPort,
         env: { LAB_DEV_PORT: String(labTestPort) },
         reuseExistingServer: !isCI,

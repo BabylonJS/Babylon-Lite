@@ -11,16 +11,15 @@
  *     slot), opacity-texture alpha modulation, alpha-cutout discard,
  *     instancing, thin-instance colour, etc. None of that needs to be
  *     re-implemented.
- *  2. Post-process the resulting fragment WGSL: change the entry signature
- *     to return a `FragmentOutput` MRT struct, prepend the struct
- *     declaration, and replace `return color;` with code that writes each
- *     requested geometry attachment from the already-in-scope intermediate
+ *  2. Contribute MRT output through a geometry ShaderFragment before material
+ *     post-composition, so texture-sampling transforms also cover geometry
+ *     lookups. Its BA slot writes the attachments from the in-scope intermediate
  *     variables (`normalW`, `baseColor`, `specularColor`, `alpha`,
  *     `input.vp`, …).
- *  3. Add a small `geometryParams` ShaderFragment that contributes a `gp`
- *     UBO binding (camera near/far + previous viewProjection) only when the
+ *  3. That same fragment contributes a `gp` UBO binding (camera near/far +
+ *     previous viewProjection) only when the
  *     requested attachment list needs it (NORMALIZED_VIEW_DEPTH /
- *     LINEAR_VELOCITY).
+ *     LINEAR_VELOCITY). Patch only the entry return type and terminating return.
  *
  *  The lighting / fog block still runs and produces a dead `color` value
  *  the WGSL compiler folds away. Acceptable cost for the architectural
@@ -118,17 +117,16 @@ export function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecula
     return wgsl``;
 }
 
-/** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-position varyings.
- *
- *  Only included in the fragment list when an attachment actually needs it,
- *  so opaque-only / WORLD_POSITION-only configs add zero bytes vs the bare
- *  standard shader. */
-function createGeometryParamsFragment(
+/** Geometry output plus optional `gp` UBO and velocity/local-position varyings. */
+function createGeometryFragment(
     needsParamsUbo: boolean,
     needsVelocityVaryings: boolean,
     needsLocalPosVarying: boolean,
     features: number,
-    meshFeatures: number
+    meshFeatures: number,
+    outputStruct: WgslSource,
+    outputWrites: WgslSource,
+    dependencies: readonly string[]
 ): ShaderFragment {
     const bindings: NonNullable<ShaderFragment["_bindings"]>[number][] = [];
     if (needsParamsUbo) {
@@ -179,6 +177,7 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
     return {
         _id: "~geometry-params",
+        _dependencies: dependencies,
         _uboFields: needsVelocityVaryings
             ? [
                   { _name: "previousWorld", _type: "mat4x4<f32>" },
@@ -186,12 +185,13 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
               ]
             : [],
         _bindings: bindings,
-        _helperFunctions: helpers,
+        _helperFunctions: wgsl`${helpers}${outputStruct}`,
         // gp UBO is also visible to the vertex stage when present, so the
         // struct declaration must be available there too.
         _vertexHelperFunctions: helpers,
         _varyings: varyings,
         _vertexSlots: slots,
+        _fragmentSlots: { BA: outputWrites },
     };
 }
 
@@ -225,24 +225,8 @@ export function composeStandardGeometryShader(
     const wantsGp = wantsVelocity || attachments.includes(GeometryTextureType.NORMALIZED_VIEW_DEPTH);
     const wantsLocalPos = attachments.includes(GeometryTextureType.LOCAL_POSITION);
     const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
-    const params = wantsGp || wantsLocalPos ? createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures) : null;
-    const fragments = params ? [...extFragments, params] : extFragments;
-    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
-
     const hasSpecular = !!(features & HAS_SPECULAR_TEXTURE);
     const specularUv = features & STD_HAS_UV_TRANSFORM ? "input.vs" : features & SPECULAR_USES_UV2 ? "input.vv" : "input.vu";
-
-    // ── Post-process the fragment WGSL ────────────────────────────────────
-
-    // 1) Replace the return type. `composeStandardShader` always emits
-    //    `-> @location(0) vec4<f32>` for the color path (no _noColorOutput
-    //    in our flow).
-    const fragmentSignatureFrom = "-> @location(0) vec4<f32>";
-    const fragmentSignatureTo = "-> FragmentOutput";
-    if (!base._fragmentWGSL.includes(fragmentSignatureFrom)) {
-        throw new Error("composeStandardGeometryShader: standard fragment signature mismatch — bypass active?");
-    }
-    let frag = base._fragmentWGSL.replace(fragmentSignatureFrom, fragmentSignatureTo);
 
     // 2) Inject FragmentOutput struct right before `@fragment fn main`. When
     //    `emitColor` is set, append an extra slot at @location(N) for the
@@ -254,9 +238,7 @@ export function composeStandardGeometryShader(
 ${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`)).join("\n")}${extraColorLine}
 };
 `;
-    frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
-
-    // 3) Replace `return color;` with MRT writes + `return out;`. We use
+    // Contribute MRT writes before material post-composition. We use
     //    `alpha` (the standard fragment's running alpha) for the
     //    writeGeometryInfo gate so opacity-texture and material-alpha
     //    materials get a correct binary mask under the per-attachment
@@ -266,13 +248,30 @@ ${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : 
         .map((type, i) => (type === extension?.type ? extension.standardWrite(i, features) : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`))
         .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
-    const replacement = wgsl`var out: FragmentOutput;
-${writes}${extraColorWrite}
-return out;`;
+    const fragments = [
+        ...extFragments,
+        createGeometryFragment(
+            wantsGp,
+            wantsVelocity,
+            wantsLocalPos,
+            stdFeatures,
+            meshFeatures,
+            outputStruct,
+            wgsl`var out: FragmentOutput;
+${writes}${extraColorWrite}`,
+            extFragments.map((fragment) => fragment._id)
+        ),
+    ];
+    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
+    const fragmentSignatureFrom = "-> @location(0) vec4<f32>";
+    if (!base._fragmentWGSL.includes(fragmentSignatureFrom)) {
+        throw new Error("composeStandardGeometryShader: standard fragment signature mismatch — bypass active?");
+    }
+    let frag = base._fragmentWGSL.replace(fragmentSignatureFrom, "-> FragmentOutput");
     if (!frag.includes("return color;")) {
         throw new Error("composeStandardGeometryShader: 'return color;' not found in composed fragment — template changed?");
     }
-    frag = frag.replace("return color;", replacement);
+    frag = frag.replace("return color;", "return out;");
 
     return { ...base, _fragmentWGSL: wgsl`${frag}` };
 }
