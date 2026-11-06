@@ -73,6 +73,15 @@ function walkTsFiles(root: string): string[] {
 function liteErrorFileRank(root: string, file: string): number {
     const relative = path.relative(root, file).replace(/\\/g, "/");
     // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
+    if (
+        relative === "frame-graph/enable-geometry-velocity.ts" ||
+        relative.startsWith("post-process/ssao") ||
+        relative.startsWith("material/geometry-deformation") ||
+        relative.startsWith("material/pbr/pbr-geometry-velocity") ||
+        relative === "material/plugin/dynamic-pbr-bindings.ts"
+    ) {
+        return 3;
+    }
     if (relative.startsWith("accessibility/") || relative === "scene/scene-change.ts") {
         return 2;
     }

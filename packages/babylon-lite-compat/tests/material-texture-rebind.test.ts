@@ -302,7 +302,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
 
     it("ensures the renderable, adopts the scene, and rebinds when the mesh is live", () => {
         const { scene, engineLite } = fakeScene(true);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -318,7 +318,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
 
     it("adopts the scene and rebinds, without GPU finalization, before the engine has started", () => {
         const { scene } = fakeScene(false);
-        const liteMesh: { material: unknown } = { material: null };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: null, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;
@@ -338,7 +338,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const defaultMaterial = fakeMaterial();
         Object.defineProperty(scene, "defaultMaterial", { value: defaultMaterial });
         const previousMaterial = fakeMaterial();
-        const liteMesh: { material: unknown } = { material: previousMaterial._lite };
+        const liteMesh: { material: unknown; children: unknown[] } = { material: previousMaterial._lite, children: [] };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
         mesh._lite = liteMesh;
         mesh._scene = scene;

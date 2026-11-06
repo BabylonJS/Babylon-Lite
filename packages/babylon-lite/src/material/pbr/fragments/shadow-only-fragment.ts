@@ -45,7 +45,8 @@ import { wgsl } from "../../../shader/wgsl.js";
 
 // Feature2 bit local to this lazy module (see pbr-flag-bits.ts): never retained
 // in the entry/shared chunk for scenes that don't load this fragment.
-const PBR2_HAS_SHADOW_ONLY = 1 << 30;
+/** @internal Shared with extensions that must order after shadow-only alpha. */
+export const PBR2_HAS_SHADOW_ONLY = 1 << 30;
 
 /**
  * Create a shadow-only fragment that overrides color/alpha at the BC injection point.

@@ -7,7 +7,7 @@ import { _patchParallaxShader } from "../../parallax/parallax-occlusion-shader.j
 import { wgsl } from "../../../shader/wgsl.js";
 import { writeStandardUvTransformData } from "../standard-pipeline.js";
 
-const STD_HAS_PARALLAX_OCCLUSION = 1 << 30;
+const STD_HAS_PARALLAX_OCCLUSION = 1 << 31;
 const CASTER_FLAGS = NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT;
 const STAGE_FRAGMENT = 0x2;
 const SURFACE_TEXTURES = ["dT", "eT", "bT", "sT", "aT", "lT", "oT"];

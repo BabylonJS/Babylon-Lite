@@ -135,11 +135,12 @@ describe("parallax occlusion settings", () => {
 });
 
 describe("parallax shader integration", () => {
-    it("keeps the Standard parallax bit distinct from area-light receiver and emission bits", async () => {
+    it("keeps signed Standard parallax bit 31 distinct from area-light and mesh-opacity bits", async () => {
         const fixture = await makeParallaxStandardFixture();
         const parallax = stdParallaxOcclusionExt._feature;
         expect(fixture.features & parallax).toBe(parallax);
-        expect(parallax & ((1 << 28) | (1 << 29))).toBe(0);
+        expect(parallax >>> 0).toBe(0x80000000);
+        expect(parallax & ((1 << 28) | (1 << 29) | (1 << 30))).toBe(0);
     });
 
     it("keeps unopted PBR and Standard shaders free of parallax code", async () => {

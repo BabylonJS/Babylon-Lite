@@ -6,7 +6,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import { resolveMeshBlendingTag } from "../mesh/mesh-blending-tag.js";
 import type { ShaderFragment } from "../shader/fragment-types.js";
 import { wgsl } from "../shader/wgsl.js";
-import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType, _installGeometryOutputExtension, type GeometryOutputExtension } from "./geometry-types.js";
+import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType, _installGeometryOutputExtension, _geometryColorTarget, type GeometryOutputExtension } from "./geometry-types.js";
 
 let _extension: GeometryOutputExtension | null = null;
 
@@ -15,16 +15,7 @@ function value(mesh: Mesh): number {
 }
 
 function colorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
-    if (!blend || format === "r8uint") {
-        return { format };
-    }
-    if (format.endsWith("uint") || format.endsWith("sint")) {
-        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
-    }
-    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
-        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
-    }
-    return { format, blend };
+    return format === "r8uint" ? { format } : _geometryColorTarget(format, blend, device);
 }
 
 function isZeroColor(value: GPUColor): boolean {

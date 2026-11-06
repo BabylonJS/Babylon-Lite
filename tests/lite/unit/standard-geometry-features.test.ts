@@ -23,6 +23,11 @@ import type { PbrGeometryMaterialView } from "../../../packages/babylon-lite/src
 import { createNodeGeometryMaterialView } from "../../../packages/babylon-lite/src/material/node/node-geometry-view";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
+import { createMorphFragment } from "../../../packages/babylon-lite/src/shader/fragments/morph-fragment-core";
+import { getGeometryDeformationVelocity } from "../../../packages/babylon-lite/src/material/geometry-deformation-hooks";
+import { MSH_HAS_MORPH_TARGETS } from "../../../packages/babylon-lite/src/material/mesh-features";
+import { HAS_SKELETON } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 
 const gpuGlobals = globalThis as typeof globalThis & { GPUBufferUsage?: unknown; GPUShaderStage?: unknown; GPUTextureUsage?: unknown };
 gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8, STORAGE: 0x80 } as unknown as GPUBufferUsage;
@@ -240,6 +245,19 @@ describe("Standard geometry thin-instance injection", () => {
         expect(helpers!._fragment).toBe(createThinInstanceFragment);
         expect(helpers!._syncBuffers).toBe(syncThinInstanceBuffers);
         expect(helpers!._syncForDraw).toBe(syncThinInstanceForDraw);
+    });
+});
+
+describe("Standard geometry velocity before the shared deformation feature loads", () => {
+    it("keeps the historical current-morph velocity for a morph-only mesh instead of failing", () => {
+        expect(getGeometryDeformationVelocity()).toBeNull();
+        const composed = composeStandardGeometryShader(0, MSH_HAS_MORPH_TARGETS, [createMorphFragment()], [GeometryTextureType.LINEAR_VELOCITY]);
+        expect(composed._vertexWGSL).toContain("mesh.previousWorld * vec4<f32>(morphedPos, 1.0)");
+        expect(composed._vertexWGSL).not.toContain("previousMorph");
+    });
+
+    it("still requires the preloaded feature for skinned velocity", () => {
+        expect(() => composeStandardGeometryShader(HAS_SKELETON, 0, [], [GeometryTextureType.LINEAR_VELOCITY])).toThrow("not preloaded");
     });
 });
 

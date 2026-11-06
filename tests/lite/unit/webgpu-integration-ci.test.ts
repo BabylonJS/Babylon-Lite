@@ -24,10 +24,10 @@ async function loadConfig() {
 }
 
 describe("nonvisual WebGPU integration CI", () => {
-    it("selects point-splatting and POM numeric/pipeline GPU specs without enabling media capture", async () => {
+    it("selects point-splatting, POM and SSAO GPU specs without enabling media capture", async () => {
         const config = await loadConfig();
         expect(config.testDir).toBe("../tests/lite/integration");
-        expect(config.testMatch).toEqual(["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts"]);
+        expect(config.testMatch).toEqual(["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts", "ssao-depth-validity.spec.ts"]);
         expect(config.workers).toBe(1);
         expect(config.forbidOnly).toBe(true);
         expect(config.use).toMatchObject({

@@ -155,6 +155,12 @@ export interface GeometryRendererTask extends Task {
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
     readonly geometryMeshBlendTagTexture: RenderTarget | null;
+    /** @internal Persistent task parameters; explicit velocity features may initialize reserved fields. */
+    _paramsData: Float32Array | null;
+    /** @internal Optional feature validation at the effective camera boundary. */
+    _validateCamera?: (camera: Camera) => void;
+    /** @internal Task-local PBR factory, optionally decorated by an explicit geometry feature. */
+    _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     /** Skip a mesh from the velocity attachment's previous-world tracking. */
     excludeFromVelocity(mesh: Mesh): void;
     /** Re-include a mesh in velocity tracking. */
@@ -218,9 +224,7 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     /** Optional UBO holding `previousViewProjection` + `cameraNearFar`. Allocated
      *  when at least one attachment needs it (LINEAR_VELOCITY or NORMALIZED_VIEW_DEPTH). */
     _paramsUBO: GPUBuffer | null;
-    _paramsData: Float32Array | null;
     _previousViewProjection: Float32Array;
-    _viewProjectionScratch: Float32Array;
     _renderPassDescriptor: GPURenderPassDescriptor;
     _colorAttachments: GPURenderPassColorAttachment[];
     /** Meshes explicitly removed from this scene. Needed only for caller-supplied
@@ -252,7 +256,6 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
      *  scene never pays for the PBR runtime chunk (and vice-versa). */
     _createStandardGeometryView: ((src: StandardMaterialProps, cfg: StandardGeometryViewConfig) => StandardGeometryMaterialView) | null;
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
-    _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
     _isPbrForwardCurrent: ((scene: SceneContext, forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
@@ -394,7 +397,6 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _paramsUBO: paramsUBO,
         _paramsData: paramsData,
         _previousViewProjection: new F32(16),
-        _viewProjectionScratch: new F32(16),
         _renderPassDescriptor: renderPassDescriptor,
         _colorAttachments: colorAttachments,
         _removedMeshes: null,
@@ -735,13 +737,11 @@ function ensureView(
         // previous-world packing + floating-origin invalidation share the same
         // origin as the task's view/projection + positional lights.
         camera: config.camera ?? null,
+        velocityExclusions: task._excludedFromVelocity,
     };
     const view: GeometryView =
         resolved._family === "standard"
-            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, {
-                  ...viewConfig,
-                  velocityExclusions: task._excludedFromVelocity,
-              })
+            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, viewConfig)
             : resolved._family === "pbr"
               ? task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, viewConfig)
               : task._createNodeGeometryView!(resolved._mat as NodeMaterial, viewConfig);
@@ -851,6 +851,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (!camera) {
         return 0;
     }
+    task._validateCamera?.(camera);
     const mrt = task._mrt;
     if (mrt._width === 0 || mrt._height === 0) {
         return 0;
@@ -898,7 +899,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     let lastPipeline: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of task._bound) {
-        if (b._mesh.visible === false) {
+        if (b._mesh.visible === false || b._mesh._skipColorDraw) {
             continue;
         }
         const pipeline = b._binding.pipeline;
@@ -910,7 +911,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     }
     pass.end();
     if (task._needsVelocity) {
-        task._previousViewProjection.set(task._viewProjectionScratch);
+        task._previousViewProjection.set(task._sceneData.subarray(0, 16));
     }
     return draws;
 }
@@ -928,12 +929,10 @@ function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, s
     }
     // Force the view/view-projection origin-relative to the EFFECTIVE camera under
     // floating origin (handles a `config.camera` override that never carried the
-    // scene's FO flag). Must run before capturing `_viewProjectionScratch` so the
-    // previous-frame VP used for velocity is also origin-relative.
+    // scene's FO flag). Velocity captures these same task-owned values after drawing.
     if (eng.useFloatingOrigin) {
         _forceFoView(data, camera, aspect);
     }
-    task._viewProjectionScratch.set(data.subarray(0, 16));
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
@@ -942,8 +941,6 @@ function writeParamsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, 
     data.set(task._previousViewProjection, 0);
     data[16] = camera.nearPlane;
     data[17] = camera.farPlane;
-    data[18] = 0;
-    data[19] = 0;
     eng._device.queue.writeBuffer(task._paramsUBO!, 0, data as Float32Array<ArrayBuffer>);
 }
 

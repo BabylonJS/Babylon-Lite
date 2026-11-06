@@ -128,6 +128,8 @@ export type { GenerateMipMapsTask, GenerateMipMapsTaskConfig } from "./frame-gra
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
 export type { DepthResolveTaskConfig } from "./frame-graph/depth-resolve-task.js";
 export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
+export { enableGeometryVelocity } from "./frame-graph/enable-geometry-velocity.js";
+export type { GeometryVelocityOptions } from "./frame-graph/enable-geometry-velocity.js";
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
@@ -185,6 +187,15 @@ export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-proce
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
 export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
 export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
+export { createSsaoTask } from "./post-process/ssao.js";
+export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
+export { enablePbrSsao } from "./post-process/ssao/ssao-pbr.js";
+export { resetSsaoTemporal } from "./post-process/ssao/ssao-temporal.js";
+export type { SsaoTemporalOptions, SsaoTemporalSettings } from "./post-process/ssao/ssao-temporal.js";
+export { enableSsaoMotionPruning } from "./post-process/ssao/ssao-motion-pruning.js";
+export type { SsaoMotionPruningSettings } from "./post-process/ssao/ssao-motion-pruning.js";
+export { enableSsaoHalfResolution } from "./post-process/ssao/ssao-half-resolution.js";
+export type { SsaoHalfResolutionSettings } from "./post-process/ssao/ssao-half-resolution.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -490,6 +501,7 @@ export {
     getStandardReflectionCubeTexture,
 } from "./material/standard/standard-material-accessors.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
+export { setMeshOpacity, getMeshOpacity } from "./mesh/opacity/mesh-opacity.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";

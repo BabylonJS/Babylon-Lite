@@ -33,7 +33,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension, _geometryColorTarget } from "../../frame-graph/geometry-types.js";
 import {
     _computeMeshFeatures,
     MSH_HAS_INSTANCE_COLOR,
@@ -56,6 +56,8 @@ import { _writeMaterialData } from "./pbr-renderable.js";
 import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
 import { composePbrGeometryShader, _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
+import { pbrGeometryVelocity } from "./pbr-geometry-velocity-hooks.js";
+import type { PbrGeometryVelocity } from "./pbr-geometry-velocity.js";
 import { _rightHanded } from "#coordinate-system";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
@@ -215,6 +217,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         meshUboU32![16] = meshUboU32![16]! | (extensionValue << 8);
     }
     const meshUBO = createUniformBuffer(engine, meshUboData);
+    let velocity: PbrGeometryVelocity | null = null;
     let materialUBO: GPUBuffer | null = null;
     let boundTextures: ReturnType<typeof collectPbrBoundTextures> = [];
     // Codes of the shared modules this renderable holds. Only a successful acquisition is recorded, so a
@@ -230,6 +233,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         bindingDisposers?.splice(0).forEach((dispose) => dispose());
         _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
+        if (pbrGeometryVelocity) {
+            velocity?._dispose();
+            velocity = null;
+        }
         materialUBO?.destroy();
         for (const texture of boundTextures) {
             releaseTexture(texture);
@@ -239,6 +246,13 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     resources._lifetimeDisposers.push(_disposePerMesh);
     const vertModule = _acquireShaderModule(device, composed._vertexWGSL, heldModules);
     const fragModule = _acquireShaderModule(device, composed._fragmentWGSL, heldModules);
+    let bindingView = view;
+    if (pbrGeometryVelocity && view._geometryVelocity && view._geometryAttachments.includes(GeometryTextureType.LINEAR_VELOCITY)) {
+        velocity = pbrGeometryVelocity.createPbrGeometryVelocity(engine, mesh, meshUboData.subarray(0, 16), view._velocityExclusions);
+        bindingView = Object.create(view) as PbrGeometryMaterialView;
+        Object.defineProperty(bindingView, "_previousWorldUBO", { value: velocity._previousWorldUBO });
+        Object.defineProperty(bindingView, "_deformationVelocity", { value: velocity._deformationVelocity });
+    }
 
     // ── Material UBO ───────────────────────────────────────────────────
     const materialSpec = composed._materialUboSpec!;
@@ -256,6 +270,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     //    composePbr cache miss inside `createPbrMeshBindGroup` (none expected
     //    here, but defensive) sees the right attachments.
     const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
+    const previousVelocityView = pbrGeometryVelocity?.setActiveGeometryVelocityView(view);
     let materialBindGroupStatic: GPUBindGroup;
     try {
         materialBindGroupStatic = createPbrMeshBindGroup(
@@ -264,7 +279,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             composed,
             meshUBO,
             materialUBO,
-            view as unknown as PbrMaterialProps,
+            bindingView as unknown as PbrMaterialProps,
             ctx._envTextures,
             mesh,
             undefined,
@@ -273,6 +288,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);
+        if (pbrGeometryVelocity) {
+            pbrGeometryVelocity.setActiveGeometryVelocityView(previousVelocityView ?? null);
+        }
     }
 
     // ── Shadow bind group (group 2) ────────────────────────────────────
@@ -311,8 +329,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matScratch = new F32(materialSpec._totalBytes / 4);
 
     const _baseUpdate = (): void => {
+        const worldChanged = mesh.worldMatrixVersion !== _lastWorldVersion;
         const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
-        if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount || nextExtensionValue !== extensionValue) {
+        if (worldChanged || scene.lights.length !== _lastLightsCount || nextExtensionValue !== extensionValue) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
             sortCenter[2] = mesh.worldMatrix[14]!;
@@ -325,6 +344,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;
             _lastLightsCount = scene.lights.length;
+        }
+        if (pbrGeometryVelocity) {
+            velocity?._update(worldChanged);
         }
         if (source._uboVersion !== _lastUboVersion) {
             _lastUboVersion = source._uboVersion;
@@ -495,6 +517,7 @@ function _ensureViewResources(
     // Compose with the active-attachment scope set so the registered ext
     // sees the right list when contributing the geometry-params fragment.
     const prev = _setActivePbrGeometryAttachments(view._geometryAttachments);
+    const previousVelocityView = pbrGeometryVelocity?.setActiveGeometryVelocityView(view);
     let composed: ComposedShader;
     try {
         composed = composePbrGeometryShader(
@@ -515,6 +538,9 @@ function _ensureViewResources(
         );
     } finally {
         _setActivePbrGeometryAttachments(prev);
+        if (pbrGeometryVelocity) {
+            pbrGeometryVelocity.setActiveGeometryVelocityView(previousVelocityView ?? null);
+        }
     }
 
     const device = engine._device;
@@ -527,7 +553,7 @@ function _ensureViewResources(
     // The view's features have PBR_HAS_ALPHA_BLEND already stripped. Detect
     // alpha-blend from the SOURCE so transparent meshes get the right blend
     // pipeline state below.
-    const sourceFeatures = source._renderFeatures?.features ?? 0;
+    const sourceFeatures = (source._renderFeatures?.features ?? 0) | ((meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND);
     const alphaBlend = (sourceFeatures & PBR_HAS_ALPHA_BLEND) !== 0;
 
     const res: PbrGeometryViewResources = {
@@ -593,7 +619,7 @@ function _getOrCreateGeometryPipeline(
         : undefined;
     const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const colorTargets: GPUColorTargetState[] = formats.map((format) =>
-        extension ? extension.colorTarget(format, blendState, device) : blendState ? { format, blend: blendState } : { format }
+        extension ? extension.colorTarget(format, blendState, device) : _geometryColorTarget(format, blendState, device)
     );
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;

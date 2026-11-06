@@ -97,10 +97,11 @@ Registration occurs at setter-call time, never at module import time.
 The PBR fragment owns material `features` bit 5. This does not collide with
 `PBR_HAS_FOG`: that constant is used exclusively in the separate `sceneFeatures`
 bank. The reservation is recorded in `pbr-flag-bits.ts`; the material-feature
-constant is defined only in the opt-in fragment. Standard owns bit 30, likewise
+constant is defined only in the opt-in fragment. Standard owns bit 31, likewise
 defined only in its opt-in fragment.
 Bits 28 and 29 remain reserved for the existing rectangular-area-light receiver
-and emission extensions. The projection uses covariant world derivatives and
+and emission extensions; bit 30 belongs to mesh opacity. Bitwise feature tests
+preserve Standard's signed bit-31 value. The projection uses covariant world derivatives and
 orients its normal toward the eye, so it needs no coordinate-handedness seam.
 
 Standard detects the feature only when at least one UV-mapped surface texture
@@ -429,7 +430,8 @@ Visual/parity and performance validation remain user/CI-owned; no golden
 references or ceilings are changed.
 
 The existing WebGPU integration CI job explicitly selects
-`parallax-occlusion.spec.ts` alongside the two point-splatting specs. It compiles
+`parallax-occlusion.spec.ts` alongside the two point-splatting specs and SSAO
+depth-validity checks. It compiles
 the actual minified material/geometry/caster shaders and executes the numerical
 heightfield readbacks; screenshots, videos, traces, and performance runs remain
 disabled in that job. The image-based comparison/UI specs are separate from
