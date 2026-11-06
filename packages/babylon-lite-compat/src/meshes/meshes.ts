@@ -81,6 +81,7 @@ interface ComponentBinding4 {
 
 interface NumberPropertyBinding {
     setSilently(value: number): void;
+    notifyOtherSubscribers(): void;
     unbind(): void;
 }
 
@@ -117,17 +118,17 @@ function bindNumberProperty(target: object, key: string, onAccess: () => void, o
             enumerable: descriptor?.enumerable ?? true,
             configurable: true,
             get: () => {
-                for (const subscription of [...state!.subscriptions]) {
+                for (const subscription of state!.subscriptions) {
                     subscription.onAccess();
                 }
                 return state!.read();
             },
             set: (value: number) => {
-                for (const subscription of [...state!.subscriptions]) {
+                for (const subscription of state!.subscriptions) {
                     subscription.onAccess();
                 }
                 state!.write(value);
-                for (const subscription of [...state!.subscriptions]) {
+                for (const subscription of state!.subscriptions) {
                     subscription.onChange();
                 }
             },
@@ -137,6 +138,13 @@ function bindNumberProperty(target: object, key: string, onAccess: () => void, o
     state.subscriptions.add(subscription);
     return {
         setSilently: state.write,
+        notifyOtherSubscribers() {
+            for (const other of state!.subscriptions) {
+                if (other !== subscription) {
+                    other.onChange();
+                }
+            }
+        },
         unbind() {
             state!.subscriptions.delete(subscription);
             if (state!.subscriptions.size !== 0) {
@@ -171,6 +179,7 @@ function bindVector3(value: Vector3, onAccess: () => void, onChange: () => void)
             x.setSilently(nextX);
             y.setSilently(nextY);
             z.setSilently(nextZ);
+            x.notifyOtherSubscribers();
         },
         unbind() {
             x.unbind();
@@ -191,6 +200,7 @@ function bindQuaternion(value: Quaternion, onAccess: () => void, onChange: () =>
             y.setSilently(nextY);
             z.setSilently(nextZ);
             w.setSilently(nextW);
+            x.notifyOtherSubscribers();
         },
         unbind() {
             x.unbind();
@@ -372,7 +382,9 @@ export class TransformNode extends Node {
     private _rotationQuaternion: Quaternion | null = null;
     private _rotationQuaternionBinding?: ComponentBinding4;
     private _nativeRotationVersion: number | undefined;
-    private _nativeRotationValues: [number, number, number, number] | undefined;
+    private readonly _nativeRotationValues: [number, number, number, number];
+    private _isSyncingRotationFromNative = false;
+    private _sceneDisposeObserver?: (scene: Scene) => void;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -393,6 +405,7 @@ export class TransformNode extends Node {
         }
         this._scene = scene;
         scene._registerMesh(this, this._node);
+        this._bindRotationSceneDisposal(scene);
     }
 
     /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
@@ -424,6 +437,9 @@ export class TransformNode extends Node {
                 }
             }
         );
+        if (scene) {
+            this._bindRotationSceneDisposal(scene);
+        }
     }
 
     public override getClassName(): string {
@@ -442,6 +458,7 @@ export class TransformNode extends Node {
         return this._rotation;
     }
     public set rotation(value: Vector3) {
+        this._markNativeRotationSynced();
         this._rotationBinding.unbind();
         this._rotation = value;
         this._rotationBinding = bindVector3(
@@ -469,6 +486,7 @@ export class TransformNode extends Node {
         return this._rotationQuaternion;
     }
     public set rotationQuaternion(value: Quaternion | null) {
+        this._markNativeRotationSynced();
         this._rotationQuaternionBinding?.unbind();
         this._rotationQuaternionBinding = undefined;
         this._rotationQuaternion = value;
@@ -505,27 +523,41 @@ export class TransformNode extends Node {
             return;
         }
         this._nativeRotationVersion = q.version;
-        this._nativeRotationValues = [q.x, q.y, q.z, q.w];
+        this._nativeRotationValues[0] = q.x;
+        this._nativeRotationValues[1] = q.y;
+        this._nativeRotationValues[2] = q.z;
+        this._nativeRotationValues[3] = q.w;
     }
 
     private _syncRotationFromNative(): void {
+        if (this._isSyncingRotationFromNative) {
+            return;
+        }
         const q = this._node?.rotationQuaternion;
         const previous = this._nativeRotationValues;
-        if (!q || !previous) {
+        if (!q) {
             return;
         }
         const valuesChanged = q.x !== previous[0] || q.y !== previous[1] || q.z !== previous[2] || q.w !== previous[3];
         if (q.version === this._nativeRotationVersion && !valuesChanged) {
             return;
         }
-        if (this._rotationQuaternion) {
-            this._rotationQuaternionBinding?.setSilently(q.x, q.y, q.z, q.w);
-        } else {
-            const euler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
-            this._rotationBinding.setSilently(euler.x, euler.y, euler.z);
+        this._isSyncingRotationFromNative = true;
+        try {
+            if (this._rotationQuaternion) {
+                this._rotationQuaternionBinding?.setSilently(q.x, q.y, q.z, q.w);
+            } else {
+                const euler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+                this._rotationBinding.setSilently(euler.x, euler.y, euler.z);
+            }
+        } finally {
+            this._isSyncingRotationFromNative = false;
         }
         this._nativeRotationVersion = q.version;
-        this._nativeRotationValues = [q.x, q.y, q.z, q.w];
+        previous[0] = q.x;
+        previous[1] = q.y;
+        previous[2] = q.z;
+        previous[3] = q.w;
     }
 
     /** @internal Preserve the source node's active rotation representation on a clone. */
@@ -624,10 +656,21 @@ export class TransformNode extends Node {
         removeFromScene(this._scene._lite, this._node);
     }
 
-    protected override _retireFromScene(): void {
+    /** @internal Release component bindings when either the node or its scene retires this wrapper. */
+    public _releaseRotationBindings(): void {
+        this._scene?.onDisposeObservable?.remove(this._sceneDisposeObserver);
+        this._sceneDisposeObserver = undefined;
         this._rotationBinding.unbind();
         this._rotationQuaternionBinding?.unbind();
         this._rotationQuaternionBinding = undefined;
+    }
+
+    private _bindRotationSceneDisposal(scene: Scene): void {
+        this._sceneDisposeObserver = scene.onDisposeObservable?.addOnce(() => this._releaseRotationBindings());
+    }
+
+    protected override _retireFromScene(): void {
+        this._releaseRotationBindings();
         super._retireFromScene();
     }
 }

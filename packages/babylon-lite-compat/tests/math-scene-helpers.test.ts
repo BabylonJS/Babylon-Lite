@@ -185,6 +185,31 @@ describe("TransformNode rotation", () => {
         expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(-0.3, 0.6, 0.2));
     });
 
+    it("keeps an explicit Euler assignment authoritative after a native write", () => {
+        const node = new TransformNode("node");
+        const native = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        const rotation = new Vector3(-0.3, 0.6, 0.2);
+        node._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+
+        node.rotation = rotation;
+
+        expect(rotation.asArray()).toEqual([-0.3, 0.6, 0.2]);
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(-0.3, 0.6, 0.2));
+    });
+
+    it("restores stored Euler edits when clearing quaternion mode after a native write", () => {
+        const node = new TransformNode("node");
+        const native = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        node.rotationQuaternion = Quaternion.Identity();
+        node.rotation.set(-0.3, 0.6, 0.2);
+        node._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+
+        node.rotationQuaternion = null;
+
+        expect(node.rotation.asArray()).toEqual([-0.3, 0.6, 0.2]);
+        expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(-0.3, 0.6, 0.2));
+    });
+
     it("copies stored Euler edits when cloning quaternion mode", () => {
         const source = new TransformNode("source");
         source.rotationQuaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
@@ -223,6 +248,34 @@ describe("TransformNode rotation", () => {
         expect(nodeRotation(second).asArray()).toEqual(shared.asArray());
     });
 
+    it("propagates native Euler readback to every node sharing the vector", () => {
+        const shared = new Vector3(0.1, 0.2, 0.3);
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        const native = Quaternion.FromEulerAngles(-0.3, 0.6, 0.2);
+        first.rotation = shared;
+        second.rotation = shared;
+        first._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+
+        expect(first.rotation).toBe(shared);
+
+        expectSameRotation(nodeRotation(second), native);
+    });
+
+    it("propagates native quaternion readback to every node sharing the quaternion", () => {
+        const shared = Quaternion.Identity();
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        const native = Quaternion.FromEulerAngles(-0.3, 0.6, 0.2);
+        first.rotationQuaternion = shared;
+        second.rotationQuaternion = shared;
+        first._node.rotationQuaternion.set(native.x, native.y, native.z, native.w);
+
+        expect(first.rotationQuaternion).toBe(shared);
+
+        expectSameRotation(nodeRotation(second), native);
+    });
+
     it("unbinds retained rotation values when disposed", () => {
         const rotation = new Vector3(0.1, 0.2, 0.3);
         const quaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
@@ -232,6 +285,22 @@ describe("TransformNode rotation", () => {
         const before = nodeRotation(node);
 
         node.dispose();
+        rotation.set(0.7, 0.8, 0.9);
+        quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
+
+        expectSameRotation(nodeRotation(node), before);
+    });
+
+    it("unbinds retained rotation values when the scene is disposed", () => {
+        const scene = new Scene(new NullEngine());
+        const rotation = new Vector3(0.1, 0.2, 0.3);
+        const quaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        const node = new TransformNode("node", scene);
+        node.rotation = rotation;
+        node.rotationQuaternion = quaternion;
+        const before = nodeRotation(node);
+
+        scene.dispose();
         rotation.set(0.7, 0.8, 0.9);
         quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
 
