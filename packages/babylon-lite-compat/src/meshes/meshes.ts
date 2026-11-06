@@ -14,6 +14,9 @@ import {
     addToScene,
     removeFromScene,
     setMeshVisible,
+    setMeshOpacity,
+    getMeshOpacity,
+    getMaterialFamily,
     createBox,
     createSphere,
     createGround,
@@ -45,7 +48,7 @@ import {
     setLineMaterialColor,
     shareMeshMorphTargets,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
+import type { Material as LiteMaterial, Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
 import type { Vector4 } from "../math/vector.js";
@@ -117,6 +120,15 @@ function liteNodeOf(node: Node | null): SceneNode | null {
     }
     const n = node as { _node?: SceneNode; _lite?: SceneNode };
     return n._node ?? n._lite ?? null;
+}
+
+function validateOpacityMaterial(api: string, name: string, material: LiteMaterial | null | undefined): void {
+    if (material) {
+        const family = getMaterialFamily(material);
+        if (family !== "standard" && family !== "pbr") {
+            unsupported(api, `Mesh "${name}" uses a "${family}" material; visibility below 1 supports only Standard and PBR materials.`);
+        }
+    }
 }
 
 // A degenerate single-triangle placeholder so an empty `new Mesh(name, scene)`
@@ -385,12 +397,14 @@ export class AbstractMesh extends TransformNode {
      */
     public _liteOnlyMaterial = false;
     private _meshBlendingTag = 0;
+    protected _visibilityValue = 1;
     protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
         super(name, scene, lite);
         this._lite = lite;
         this._lite.name = name;
+        this._visibilityValue = "_gpu" in lite ? getMeshOpacity(lite) : 1;
         // Babylon Lite requires every mesh to carry a material to render, whereas
         // Babylon.js falls back to a shared `scene.defaultMaterial`. Mirror BJS by
         // assigning that default now; an explicit `mesh.material = …` overrides it.
@@ -412,14 +426,27 @@ export class AbstractMesh extends TransformNode {
         return true;
     }
 
+    /**
+     * @internal Take this mesh out of every light's filter lists before it goes, as Babylon.js
+     * `AbstractMesh.dispose` does in its own `Lights` loop. Container-retired wrappers prune too.
+     */
+    protected override _retireFromScene(): void {
+        for (const light of this._scene?.lights ?? []) {
+            light._pruneDisposedMesh(this);
+        }
+    }
+
     public get material(): CompatMaterial | null {
         return this._material;
     }
     public set material(value: CompatMaterial | null) {
-        this._material = value;
-        this._liteOnlyMaterial = false;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
+        if (renderMaterial && (this._visibilityValue < 1 || this._opacityTargets().some((target) => getMeshOpacity(target) < 1))) {
+            this._validateCompatOpacityMaterial("Mesh.material", renderMaterial);
+        }
+        this._material = value;
+        this._liteOnlyMaterial = false;
         if (renderMaterial && scene) {
             if (scene._hasStarted) {
                 // The mesh already entered the scene, so the boot-time build (which
@@ -450,6 +477,47 @@ export class AbstractMesh extends TransformNode {
     public set isVisible(value: boolean) {
         this._visible = value;
         this._syncVisibility(this.isEnabled());
+    }
+
+    /** Raw finite Babylon visibility; rendering clamps it to [0, 1]. Independent of isVisible. */
+    public get visibility(): number {
+        return this._visibilityValue;
+    }
+    public set visibility(value: number) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+            throw new RangeError("Mesh.visibility must be a finite number.");
+        }
+        const targets = this._opacityTargets();
+        if (value < 1 && this._material) {
+            this._validateCompatOpacityMaterial("Mesh.visibility", this._material);
+        }
+        // Validate the entire primitive fan-out before any native setter can install,
+        // mutate a scalar, queue a rebuild, or write a live binding.
+        for (const target of targets) {
+            if (target._disposed) {
+                throw new Error(`Mesh "${target.name}" cannot set opacity: it was disposed when it left its last scene. Create a new mesh instead.`);
+            }
+            if (value < 1) {
+                validateOpacityMaterial("Mesh.visibility", target.name ?? this.name, target.material);
+            }
+        }
+        for (const target of targets) {
+            setMeshOpacity(target, value);
+        }
+        this._visibilityValue = value;
+    }
+
+    private _validateCompatOpacityMaterial(api: string, material: CompatMaterial): void {
+        if (!material._lite) {
+            unsupported(api, `Mesh "${this.name}" cannot fade a deferred ${material.getClassName()} material; visibility below 1 supports only Standard and PBR materials.`);
+        }
+        validateOpacityMaterial(api, this.name, material._lite);
+    }
+
+    /** A glTF node owns its immediate primitive meshes, never a child glTF node's primitives. */
+    private _opacityTargets(): LiteMesh[] {
+        const node: SceneNode = this._lite;
+        return "_gpu" in node ? [node as LiteMesh] : node.children.filter((child): child is LiteMesh => "_gpu" in child);
     }
 
     public get isPickable(): boolean {
@@ -1060,6 +1128,9 @@ export class Mesh extends AbstractMesh {
             lite.name = cloneName;
         }
         const isMesh = source instanceof Mesh || ("_gpu" in lite && "material" in lite);
+        if (isMesh) {
+            (lite as LiteMesh).id = undefined;
+        }
         const wrapper = isMesh ? new Mesh(lite.name ?? "", lite as LiteMesh) : new TransformNode(lite.name ?? "", scene, lite);
         wrapper._container = (source as TransformNode | undefined)?._container;
         if (wrapper instanceof Mesh) {
@@ -1074,6 +1145,8 @@ export class Mesh extends AbstractMesh {
             wrapper.metadata = source.metadata;
             wrapper.setEnabled(source.isEnabled(false));
             if (wrapper instanceof Mesh && source instanceof Mesh) {
+                // Native cloning already copied each mesh's scalar, not its binding records.
+                wrapper._visibilityValue = source._visibilityValue;
                 // The Lite clone already shares a Lite-only material; assigning the source's `null` would
                 // replace it with `scene.defaultMaterial`.
                 if (source._liteOnlyMaterial) {

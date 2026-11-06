@@ -104,7 +104,7 @@ describe("area lighting auxiliary passes, selection and material tracking", () =
         setPbrClearCoat(material, { isEnabled: true, intensity: 1, roughness: 0.2 });
         const receiver = mesh(material, "receiver");
         scene._groups.set(material._buildGroup, [receiver]);
-        expect(rectAreaPbrFeatures(scene.lights, receiver.id)).toBe(RECT_AREA_PBR_SCENE);
+        expect(rectAreaPbrFeatures(scene.lights, receiver)).toBe(RECT_AREA_PBR_SCENE);
         await expect(buildPbrRenderables(scene, [receiver], undefined)).resolves.toMatchObject({ renderables: expect.any(Array) });
         scene._disposables.forEach((dispose) => dispose());
     });
@@ -120,7 +120,7 @@ describe("area lighting auxiliary passes, selection and material tracking", () =
         setPbrClearCoat(material, { isEnabled: true, intensity: 1 });
         const receiver = mesh(material, "receiver");
         scene._groups.set(material._buildGroup, [receiver]);
-        expect(rectAreaPbrFeatures(scene.lights, receiver.id)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
+        expect(rectAreaPbrFeatures(scene.lights, receiver)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
         await expect(buildPbrRenderables(scene, [receiver], undefined)).rejects.toThrow(/layered PBR/);
         scene._disposables.forEach((dispose) => dispose());
     });
@@ -129,12 +129,28 @@ describe("area lighting auxiliary passes, selection and material tracking", () =
         const area = createRectAreaLight([0, 1, 2], 2, 3);
         const points = Array.from({ length: MAX_LIGHTS }, () => createPointLight([0, 0, 0]));
         const writerless = createRectAreaLight([0, 0, 0], 2, 3);
+        const receiver = mesh(createPbrMaterial(), "receiver");
         Object.defineProperty(writerless, "_writeLightUbo", { value: undefined });
-        expect(rectAreaPbrFeatures([...points, area], "receiver")).toBe(RECT_AREA_PBR_SCENE);
-        expect(rectAreaPbrFeatures([...points.slice(1), area], "receiver")).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
-        expect(rectAreaPbrFeatures([...points.slice(1), writerless, area], "receiver")).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
+        expect(rectAreaPbrFeatures([...points, area], receiver)).toBe(RECT_AREA_PBR_SCENE);
+        expect(rectAreaPbrFeatures([...points.slice(1), area], receiver)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
+        expect(rectAreaPbrFeatures([...points.slice(1), writerless, area], receiver)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
         area.includedOnlyMeshIds = new Set(["receiver"]);
-        expect(rectAreaPbrFeatures([area], undefined)).toBe(RECT_AREA_PBR_SCENE);
+        expect(rectAreaPbrFeatures([area], mesh(createPbrMaterial(), ""))).toBe(RECT_AREA_PBR_SCENE);
+    });
+
+    it("mirrors the object-identity mesh lists, so the area permutation matches the packed selection", () => {
+        const area = createRectAreaLight([0, 1, 2], 2, 3);
+        const receiver = mesh(createPbrMaterial(), "receiver");
+        const other = mesh(createPbrMaterial(), "receiver");
+        expect(rectAreaPbrFeatures([area], receiver)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
+        area.excludedMeshes = new Set([receiver]);
+        expect(rectAreaPbrFeatures([area], receiver)).toBe(RECT_AREA_PBR_SCENE);
+        // Same loader id, different object: the mirror must not exclude a mesh the caller never listed.
+        expect(rectAreaPbrFeatures([area], other)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
+        area.excludedMeshes = undefined;
+        area.includedOnlyMeshes = new Set([other]);
+        expect(rectAreaPbrFeatures([area], receiver)).toBe(RECT_AREA_PBR_SCENE);
+        expect(rectAreaPbrFeatures([area], other)).toBe(RECT_AREA_PBR_SCENE | RECT_AREA_PBR_SELECTED);
     });
 
     it("keeps selected-area rejection in the cache key for meshes sharing one layered material and multi-light mode", async () => {

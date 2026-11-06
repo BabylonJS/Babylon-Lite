@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type * as Lite from "babylon-lite";
 
 /**
  * `Mesh.clone(name, newParent?, doNotCloneChildren?)` (issue #473) forwards to
@@ -8,7 +9,8 @@ import { describe, expect, it, vi } from "vitest";
  * wrapper. The real clone needs a GPU device, so these tests mock the Lite scene
  * functions and assert the pure forwarding/translation contract.
  */
-vi.mock("babylon-lite", () => {
+vi.mock("babylon-lite", async (importOriginal) => {
+    const { getMeshOpacity } = await importOriginal<typeof Lite>();
     const createTransformNode = (name: string) => ({
         name,
         children: [],
@@ -51,6 +53,7 @@ vi.mock("babylon-lite", () => {
         updateMeshUvs: vi.fn(),
         createGroundFromHeightMap: vi.fn(),
         computeAabb: vi.fn(),
+        getMeshOpacity,
     };
 });
 
@@ -103,6 +106,7 @@ function sourceMesh(scene: ReturnType<typeof fakeScene>, material: unknown, lite
         _enabled: true,
         _parentEnabled: true,
         _visible: true,
+        _visibilityValue: 1,
     });
     cloneTransformNodeMock.mockImplementation((src: unknown) => {
         const s = src as { name: string; material?: unknown };
@@ -235,6 +239,17 @@ describe("Mesh.clone", () => {
         expect(clone.meshBlendingTag).toBe(145);
         expect(clone.isEnabled(false)).toBe(false);
         expect(clone.isVisible).toBe(false);
+    });
+
+    it("does not carry the source's light-filter id onto the clone", () => {
+        const scene = fakeScene();
+        const src = sourceMesh(scene, fakeMaterial());
+        (src as unknown as { _lite: { id?: string } })._lite.id = "floor-node-7";
+
+        const clone = src.clone("copy");
+
+        expect((src as unknown as { _lite: { id?: string } })._lite.id).toBe("floor-node-7");
+        expect((clone as unknown as { _lite: { id?: string } })._lite.id).toBeUndefined();
     });
 
     it("uses the Babylon.js empty default name and derives the clone ID", () => {

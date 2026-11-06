@@ -127,12 +127,7 @@ const engine = createGLEngine(canvas, { alpha: false });
 const gl = engine.gl;
 
 // (a) Raw checkerboard — crisp cells via NEAREST filtering + REPEAT wrapping.
-const texA = createRawTexture(engine, makeCheckerboard(), CHECKER_SIZE, CHECKER_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, {
-    minFilter: gl.NEAREST,
-    magFilter: gl.NEAREST,
-    wrapS: gl.REPEAT,
-    wrapT: gl.REPEAT,
-});
+const texA = createRawTexture(engine, makeCheckerboard(), CHECKER_SIZE, CHECKER_SIZE, { minFilter: gl.NEAREST, magFilter: gl.NEAREST, wrapS: gl.REPEAT, wrapT: gl.REPEAT });
 
 // (b) Async PNG decode — usable immediately (1x1 placeholder), swaps in the
 // decoded image once ready while keeping the same texture handle.
@@ -149,7 +144,7 @@ const wrapper = createEffectWrapper(engine, {
 });
 const effect = wrapper.effect;
 
-executeWhenCompiled(engine, effect, () => {
+executeWhenCompiled(effect, () => {
     console.log("scene3: textured-quad effect compiled — two samplers ready");
 });
 
@@ -159,7 +154,7 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, effect)) {
+    if (!isEffectReady(effect)) {
         return;
     }
     resizeGLEngine(engine);
@@ -167,10 +162,10 @@ runRenderLoop(engine, () => {
     applyEffectWrapper(wrapper);
     // Frozen capture pins uTime to seekTime; otherwise advance on the wall clock.
     const uTime = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
-    setEffectFloat(engine, effect, "uTime", uTime);
-    setEffectFloat2(engine, effect, "uResolution", canvas.width, canvas.height);
-    setEffectTexture(engine, effect, "uTexA", texA);
-    setEffectTexture(engine, effect, "uTexB", texB);
+    setEffectFloat(effect, "uTime", uTime);
+    setEffectFloat2(effect, "uResolution", canvas.width, canvas.height);
+    setEffectTexture(effect, "uTexA", texA);
+    setEffectTexture(effect, "uTexB", texB);
     drawEffect(engine);
     // Hold readiness until the async PNG (texB) has decoded so the captured
     // frame includes it — the deterministic freeze must match the BJS reference,

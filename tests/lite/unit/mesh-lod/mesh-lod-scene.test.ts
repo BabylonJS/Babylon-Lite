@@ -284,6 +284,15 @@ describe("MeshLoD scene registry — material gate", () => {
         );
     });
 
+    it("rejects bent normals, which MeshLoD's shader path cannot render", () => {
+        const { engine } = createMockEngine();
+        const scene = fakeScene(engine);
+        const material = createPbrMaterial({ bentNormalTexture: createSolidTexture2D(engine, 1, 1, 1) });
+        expect(() => addMeshLoDInstanceToScene(scene, createMeshLoDInstance(fakeAsset(scene), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "bent normals" })
+        );
+    });
+
     it.each<MetallicReflectanceOptions>([{ f0Factor: 0 }, { specularWeight: 0 }, { color: [0.2, 0.4, 0.6] }, { useOnlyMetallicFromTexture: false }])(
         "rejects explicit dielectric-reflectance state including zero/false (%j)",
         (options) => {

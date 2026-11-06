@@ -2,6 +2,7 @@
  * Scene loader overlay — shows a spinner while WebGPU initializes.
  * Automatically fades out when canvas[data-ready="true"] is set.
  * Include via <script src="/loader.js"></script> before the scene script.
+ * Caught startup failures can dispatch scene-load-error with a string detail.
  */
 (function () {
   var style = document.createElement('style');
@@ -79,12 +80,15 @@
 
   // Show errors
   function showError(msg) {
+    clearInterval(poll);
+    if (observer) observer.disconnect();
     var box = overlay.querySelector('.loader-error');
     box.textContent = msg;
     box.style.display = 'block';
-    overlay.querySelector('.loader-ring').style.borderTopColor = '#f85149';
+    overlay.querySelector('.loader-ring').style.display = 'none';
     overlay.querySelector('.loader-text').innerHTML = '<span style="color:#f85149">Error</span>';
   }
+  window.addEventListener('scene-load-error', function (e) { showError(e.detail); });
   window.addEventListener('error', function (e) { showError(e.message || 'An error occurred'); });
   window.addEventListener('unhandledrejection', function (e) {
     showError(e.reason && e.reason.message || String(e.reason) || 'An error occurred');

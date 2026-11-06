@@ -82,6 +82,7 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 
 /** Build deferred GPU resources, build the frame graph, and register the scene for rendering.
+ *  Every ordinary scene clears its target; use `createOverlayScene` to composite one scene over another.
  *  Rebuilds the scene first when its light/shadow topology changed since the initial build. */
 export function registerScene(scene: SceneContext): Promise<void>;
 

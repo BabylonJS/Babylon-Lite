@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build, normalizePath, type Plugin } from "vite";
+import ts from "typescript";
 
 import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
 import { createLiteCodeSplitting, litePackageResolverPlugin, resolveLitePackageSpecifier, terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
 import { compareLiteErrorFiles, isDeferredLiteErrorFile } from "../../../scripts/lite-error-plugin";
+import { enumerateLibEntries } from "../../../packages/babylon-lite/vite.config";
 
 const tempDirs: string[] = [];
 
@@ -18,6 +20,81 @@ afterEach(() => {
 });
 
 describe("bundle tooling correctness", () => {
+    it("keeps short ESM export names without aliases or binding collisions", async () => {
+        const root = mkdtempSync(join(tmpdir(), "lite-mangle-export-bindings-"));
+        tempDirs.push(root);
+        const outDir = join(root, "out");
+        writeFileSync(
+            join(root, "entry.js"),
+            `
+import { amount } from "./value.js";
+const x = amount + 1;
+const y = amount + 2;
+const reservedExport = amount + 3;
+function calculate() { const z = 2; return x * 100 + y * z; }
+export { x as a, y as b, calculate as c, calculate as alias, reservedExport as if };
+`
+        );
+        writeFileSync(join(root, "value.js"), "export const amount = globalThis.Number('40');");
+        await build({
+            root,
+            configFile: false,
+            publicDir: false,
+            logLevel: "silent",
+            plugins: [terserPropertyManglePlugin()],
+            build: {
+                outDir,
+                minify: false,
+                rollupOptions: {
+                    input: join(root, "entry.js"),
+                    preserveEntrySignatures: "strict",
+                    output: { format: "es", entryFileNames: "entry.mjs" },
+                },
+            },
+        });
+        const entry = (await import(pathToFileURL(join(outDir, "entry.mjs")).href)) as { a: number; b: number; if: number; c(): number; alias(): number };
+        expect([entry.a, entry.b, entry.c(), entry.alias(), entry.if]).toEqual([41, 42, 4184, 4184, 43]);
+        const source = ts.createSourceFile("entry.mjs", readFileSync(join(outDir, "entry.mjs"), "utf8"), ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+        const exports = source.statements
+            .filter(ts.isExportDeclaration)
+            .flatMap((statement) => (statement.exportClause && ts.isNamedExports(statement.exportClause) ? statement.exportClause.elements : []));
+        for (const name of ["a", "b", "c"]) {
+            const exported = exports.find((item) => item.name.text === name);
+            expect(exported).toBeDefined();
+            expect(exported!.propertyName).toBeUndefined();
+        }
+    });
+
+    it("appends optional SSAO library entries without reordering established module traversal", () => {
+        const keys = Object.keys(enumerateLibEntries());
+        expect(keys.filter((key) => key.startsWith("post-process/ssao") && !key.startsWith("post-process/ssao/"))).toEqual(["post-process/ssao"]);
+        expect(keys.filter((key) => key.startsWith("post-process/ssao/"))).toHaveLength(10);
+        const established = ["material/standard/standard-renderable", "material/standard/standard-pipeline", "shader/fragments/skeleton-fragment", "xr/xr-teleport"];
+        for (const key of established) expect(keys).toContain(key);
+        const lastEstablished = Math.max(...established.map((key) => keys.indexOf(key)));
+        const optional = [
+            "frame-graph/enable-geometry-velocity",
+            "material/geometry-deformation-hooks",
+            "material/geometry-deformation-velocity",
+            "material/pbr/pbr-binding-decorator",
+            "material/pbr/pbr-diffuse-occlusion",
+            "material/pbr/pbr-geometry-velocity",
+            "material/pbr/pbr-geometry-velocity-hooks",
+            "material/plugin/dynamic-pbr-bindings",
+            "material/plugin/pbr-plugin-decorator",
+            "material/plugin/pbr-plugin-passes",
+            "shader/binding-extension",
+            "shader/read-only-storage-binding",
+            "math/invert-mat4-to-ref",
+            "render/draw-binding-lifecycle",
+            ...keys.filter((key) => key.startsWith("post-process/ssao")),
+        ];
+        expect(optional.length).toBeGreaterThan(10);
+        for (const key of optional) {
+            expect(keys.indexOf(key), `${key} must not change the traversal/import order of ordinary modules`).toBeGreaterThan(lastEstablished);
+        }
+    });
+
     it("assigns optional accessibility error codes after core errors", () => {
         const root = join(tmpdir(), "lite-error-order");
         const core = join(root, "scene/scene-core.ts");
@@ -32,6 +109,17 @@ describe("bundle tooling correctness", () => {
         expect(isDeferredLiteErrorFile(root, sceneChange)).toBe(true);
         expect(isDeferredLiteErrorFile(root, core)).toBe(false);
         expect([tree, core, twin, sceneChange, compute].sort((a, b) => compareLiteErrorFiles(root, a, b))).toEqual([core, compute, tree, twin, sceneChange]);
+        for (const relative of [
+            "frame-graph/enable-geometry-velocity.ts",
+            "post-process/ssao.ts",
+            "material/geometry-deformation-velocity.ts",
+            "material/pbr/pbr-geometry-velocity.ts",
+            "material/plugin/dynamic-pbr-bindings.ts",
+        ]) {
+            const optional = join(root, relative);
+            expect(isDeferredLiteErrorFile(root, optional)).toBe(true);
+            expect(compareLiteErrorFiles(root, sceneChange, optional)).toBeLessThan(0);
+        }
     });
 
     it("keeps a loaded chunk byte-identical when an unrelated chunk is minified first", async () => {

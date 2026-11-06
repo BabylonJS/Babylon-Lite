@@ -24,10 +24,10 @@ async function loadConfig() {
 }
 
 describe("nonvisual WebGPU integration CI", () => {
-    it("selects only the two GPU readback specs without enabling media capture", async () => {
+    it("selects point-splatting, POM and SSAO GPU specs without enabling media capture", async () => {
         const config = await loadConfig();
         expect(config.testDir).toBe("../tests/lite/integration");
-        expect(config.testMatch).toEqual(["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts"]);
+        expect(config.testMatch).toEqual(["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts", "ssao-depth-validity.spec.ts"]);
         expect(config.workers).toBe(1);
         expect(config.forbidOnly).toBe(true);
         expect(config.use).toMatchObject({
@@ -41,10 +41,11 @@ describe("nonvisual WebGPU integration CI", () => {
         });
         expect(config.reporter).toEqual([["list"], ["junit", { outputFile: "../test-results/webgpu-integration-junit.xml" }]]);
         expect(config.webServer).toMatchObject({
-            command: "pnpm --filter @babylon-lite/lab dev",
+            command: "pnpm --filter @babylon-lite/lab exec vite",
             port: 5179,
             env: { LAB_DEV_PORT: "5179" },
             reuseExistingServer: false,
+            timeout: 30_000,
         });
     });
 
@@ -58,6 +59,11 @@ describe("nonvisual WebGPU integration CI", () => {
         expect(config.use?.channel).toBeUndefined();
         expect(config.use?.launchOptions).toBeUndefined();
         expect(config.workers).toBe(1);
+        expect(config.webServer).toMatchObject({
+            command: "pnpm --filter @babylon-lite/lab exec vite",
+            timeout: 30_000,
+        });
+        expect(config.use).toMatchObject({ trace: "off", screenshot: "off", video: "off" });
     });
 
     it("keeps the server port and navigation origin aligned for overrides", async () => {

@@ -1,5 +1,6 @@
 import type { StandardSceneShaderContext } from "../material/standard/standard-material.js";
 import type { ShaderFragment } from "../shader/fragment-types.js";
+import type { Mesh } from "../mesh/mesh.js";
 
 /** @internal Material-owned single-light shader contribution. */
 export interface SingleLightShaderSource {
@@ -26,7 +27,7 @@ export interface SceneLightingExtension {
     /** @internal */
     _multi?(): MultiLightShaderSource;
     /** @internal */
-    _pbrFeatures?(meshId: string | undefined): number;
+    _pbrFeatures?(mesh: Mesh): number;
     /** @internal */
     _standard?(fog: ShaderFragment | null): StandardSceneShaderContext;
     /** @internal */

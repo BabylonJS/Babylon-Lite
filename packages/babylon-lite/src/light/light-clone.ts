@@ -19,6 +19,8 @@ export function copyLightBase(source: LightBase, clone: LightBase): void {
     clone.metadata = source.metadata;
     clone.excludedMeshIds = source.excludedMeshIds;
     clone.includedOnlyMeshIds = source.includedOnlyMeshIds;
+    clone.excludedMeshes = source.excludedMeshes;
+    clone.includedOnlyMeshes = source.includedOnlyMeshes;
     if (source._localMatrix) {
         clone._localMatrix = (source._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4;
     }

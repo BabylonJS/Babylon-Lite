@@ -96,7 +96,7 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(engine, scene);
+    const utilityLayer = createUtilityLayer(scene);
     const bbox = createBoundingBoxGizmo(engine, utilityLayer, { color: [1, 1, 0.4] });
     attachBoundingBoxGizmoToNode(bbox, root);
 

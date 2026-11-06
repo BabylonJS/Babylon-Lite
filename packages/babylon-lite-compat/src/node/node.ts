@@ -379,6 +379,11 @@ export abstract class Node {
         // Base nodes own no external resources.
     }
 
+    /** @internal Drop scene-side references that hold this node by identity. */
+    protected _retireFromScene(): void {
+        // Base nodes are held by nothing but their parent.
+    }
+
     /** @internal Dispose this compat wrapper tree in post-order. */
     public _disposeWrapperTree(doNotRecurse = false): void {
         this._disposeWrapperTreeInternal(doNotRecurse, true);
@@ -406,6 +411,10 @@ export abstract class Node {
                 child._disposeWrapperTreeInternal(false, disposeSelf);
             }
         }
+        // Runs even for wrapper-only retirement: an asset container tears its native nodes down right
+        // after, so the node is gone either way and anything holding it by identity has to let go.
+        // `_disposeSelf` stays for the native teardown that container ownership does itself.
+        this._retireFromScene();
         if (disposeSelf) {
             this._disposeSelf(doNotRecurse);
         }

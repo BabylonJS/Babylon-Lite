@@ -965,8 +965,8 @@ export function updateTextData(data: GLTextData, update: GLTextDataUpdate): void
 export function disposeTextData(data: GLTextData): void {
     const gpu = data._gpu;
     if (gpu) {
-        disposeBuffer(gpu._engine, gpu._instanceBuf);
-        disposeTexture(gpu._engine, gpu._styleTex);
+        disposeBuffer(gpu._instanceBuf);
+        disposeTexture(gpu._styleTex);
         data._gpu = null;
     }
     data._groups = [];

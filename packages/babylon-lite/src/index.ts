@@ -23,6 +23,7 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { moveRenderingContext } from "./engine/rendering-context-order.js";
 export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
 export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
 // Device-level signals and capabilities, so applications never need the GPUDevice itself.
@@ -60,6 +61,8 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+// Opt-in scene overlays: composite a scene onto an explicit base scene on the same surface.
+export { createOverlayScene } from "./scene/overlay-scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
@@ -125,6 +128,8 @@ export type { GenerateMipMapsTask, GenerateMipMapsTaskConfig } from "./frame-gra
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
 export type { DepthResolveTaskConfig } from "./frame-graph/depth-resolve-task.js";
 export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
+export { enableGeometryVelocity } from "./frame-graph/enable-geometry-velocity.js";
+export type { GeometryVelocityOptions } from "./frame-graph/enable-geometry-velocity.js";
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
@@ -180,6 +185,17 @@ export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/s
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
+export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
+export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
+export { createSsaoTask } from "./post-process/ssao.js";
+export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
+export { enablePbrSsao } from "./post-process/ssao/ssao-pbr.js";
+export { resetSsaoTemporal } from "./post-process/ssao/ssao-temporal.js";
+export type { SsaoTemporalOptions, SsaoTemporalSettings } from "./post-process/ssao/ssao-temporal.js";
+export { enableSsaoMotionPruning } from "./post-process/ssao/ssao-motion-pruning.js";
+export type { SsaoMotionPruningSettings } from "./post-process/ssao/ssao-motion-pruning.js";
+export { enableSsaoHalfResolution } from "./post-process/ssao/ssao-half-resolution.js";
+export type { SsaoHalfResolutionSettings } from "./post-process/ssao/ssao-half-resolution.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -466,6 +482,7 @@ export { createStandardNoColorMaterialView } from "./material/standard/no-color-
 export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
+export { setStandardParallaxOcclusion } from "./material/standard/set-std-parallax-occlusion.js";
 export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
 export { setStandardSpecularTexture } from "./material/standard/set-std-specular.js";
 export { setStandardAmbientTexture } from "./material/standard/set-std-ambient.js";
@@ -484,10 +501,13 @@ export {
     getStandardReflectionCubeTexture,
 } from "./material/standard/standard-material-accessors.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
+export { setMeshOpacity, getMeshOpacity } from "./mesh/opacity/mesh-opacity.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
 export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrParallaxOcclusion } from "./material/pbr/set-parallax-occlusion.js";
+export type { ParallaxOcclusionProps } from "./material/parallax/parallax-occlusion.js";
 export { setPbrSheen } from "./material/pbr/set-sheen.js";
 export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
 export { setPbrUnlit } from "./material/pbr/set-unlit.js";
@@ -518,6 +538,7 @@ export {
 } from "./material/pbr/pbr-material-accessors.js";
 export type { PbrShadowOnly } from "./material/pbr/pbr-material-accessors.js";
 export { enablePbrLightmap, setPbrLightmap } from "./material/pbr/enable-pbr-lightmap.js";
+export { enableBentNormals } from "./material/pbr/fragments/bent-normal-fragment.js";
 export type { PbrLightmapOptions } from "./material/pbr/enable-pbr-lightmap.js";
 export {
     clearPbrLocalEnvironment,

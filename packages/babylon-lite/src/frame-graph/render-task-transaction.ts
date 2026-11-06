@@ -3,6 +3,7 @@ import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
 import type { MeshRebuildResources, Renderable } from "../render/renderable.js";
 import type { RenderTask } from "./render-task.js";
 import { _buildBindings, type RenderTaskPopulation } from "./render-task-base.js";
+import { drawBindingLifecycle } from "../render/draw-binding-lifecycle.js";
 
 /** @internal Resolve queued auxiliary meshes only within a candidate generation. */
 export function resolvePendingTaskMeshes(candidate: RenderTaskPopulation, created: MeshRebuildResources[] = []): MeshRebuildResources[] {
@@ -77,6 +78,12 @@ export function transactRenderTask(task: RenderTask, record = false): void {
         task._config.autoMirror = false;
     }
     task._pendingMeshes = candidate._pendingMeshes;
+    if (drawBindingLifecycle) {
+        drawBindingLifecycle._retire(
+            [task._opaqueBindings, task._directBindings, task._transparentBindings],
+            [generation._opaqueBindings, generation._directBindings, generation._transparentBindings]
+        );
+    }
     Object.assign(task, generation);
     previousBatchState?._release(task.engine, [generation._batchState]);
 }

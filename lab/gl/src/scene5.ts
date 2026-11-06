@@ -123,7 +123,7 @@ const startMs = performance.now();
 let firstFrameDrawn = false;
 
 runRenderLoop(engine, () => {
-    if (!isEffectReady(engine, bgEffect) || !isEffectReady(engine, discEffect)) {
+    if (!isEffectReady(bgEffect) || !isEffectReady(discEffect)) {
         return;
     }
     resizeGLEngine(engine);
@@ -138,17 +138,17 @@ runRenderLoop(engine, () => {
     // animation clock to seekTime; otherwise advance on the wall clock.
     const t = seekTime !== null ? seekTime : (performance.now() - startMs) / 1000;
     applyEffectWrapper(discs);
-    setEffectFloat2(engine, discEffect, "uResolution", canvas.width, canvas.height);
+    setEffectFloat2(discEffect, "uResolution", canvas.width, canvas.height);
     for (const cluster of CLUSTERS) {
-        setEffectFloat3(engine, discEffect, "uColor", cluster.r, cluster.g, cluster.b);
-        setEffectFloat(engine, discEffect, "uAlpha", DISC_ALPHA);
-        setEffectFloat(engine, discEffect, "uPremul", cluster.premultiply);
+        setEffectFloat3(discEffect, "uColor", cluster.r, cluster.g, cluster.b);
+        setEffectFloat(discEffect, "uAlpha", DISC_ALPHA);
+        setEffectFloat(discEffect, "uPremul", cluster.premultiply);
         setBlendMode(engine, cluster.mode);
         for (let k = 0; k < DISCS_PER_CLUSTER; k++) {
             const angle = t * 0.5 + (k / DISCS_PER_CLUSTER) * TAU;
             const cx = cluster.x + RING_RADIUS * Math.cos(angle);
             const cy = cluster.y + RING_RADIUS * Math.sin(angle);
-            setEffectFloat2(engine, discEffect, "uCenter", cx, cy);
+            setEffectFloat2(discEffect, "uCenter", cx, cy);
             drawEffect(engine);
         }
     }

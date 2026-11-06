@@ -10,7 +10,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import { _pbrMeshRequest } from "./pbr-geometry-renderable.js";
 import { _pbrComposeKey } from "./pbr-compose.js";
-import { PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
+import { PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 
 /**
  * @internal Whether every one of `meshes` (the PBR meshes of a material being rebuilt) can be rebuilt on its own through
@@ -43,10 +43,10 @@ export function _pbrRebuildsComposed(scene: SceneContext, meshes: readonly Mesh[
             const [ctx, meshFeatures, lightMode, singleLightType] = _pbrMeshRequest(scene, mesh, features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT));
             return !!ctx?._b?.has(
                 _pbrComposeKey(
-                    features.features,
+                    features.features | (!(features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) ? (meshFeatures >>> 16) & PBR_HAS_ALPHA_BLEND : 0),
                     features2,
                     meshFeatures,
-                    ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh.id) ?? 0),
+                    ctx._sceneFeatures | (scene._lighting?._pbrFeatures?.(mesh) ?? 0),
                     lightMode,
                     singleLightType,
                     mesh._gpu._vbKey ?? "",

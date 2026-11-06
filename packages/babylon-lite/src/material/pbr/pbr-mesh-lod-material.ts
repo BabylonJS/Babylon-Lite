@@ -27,6 +27,10 @@ export function validateMeshLoDMaterial(material: PbrMaterialProps): void {
     if (material.lightmapTexture) {
         reject("lightmaps");
     }
+    // MeshLoD's dedicated shader path does not run the IBL extension that enableBentNormals() augments.
+    if (material.bentNormalTexture) {
+        reject("bent normals");
+    }
     if (getPbrMetallicReflectance(material) !== undefined) {
         reject("dielectric-reflectance extensions");
     }

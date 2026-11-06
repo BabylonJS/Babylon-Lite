@@ -2132,6 +2132,17 @@
         "skipPerf": true
     },
     {
+        "id": 230,
+        "slug": "scene230-bent-normals",
+        "name": "Scene 230 — Bent Normals",
+        "maxMad": 1,
+        "maxRegionMad": 2,
+        "maxRawKB": 79.5,
+        "description": "Bent normal reflection occlusion (Babylon.js PG #ZH5HB3#3). The same glTF is loaded twice; only the right copy gets a tangent-space `bentNormalTexture`, replacing the default specular occlusion with the spherical-Gaussian bent-normal visibility term in the IBL specular lobe.",
+        "tags": ["pbr", "gltf", "ibl", "bent-normal"],
+        "skipPerf": true
+    },
+    {
         "id": 231,
         "slug": "scene231-standard-deform-features",
         "name": "Scene 231 — StandardMaterial Deform Features",
@@ -3141,6 +3152,52 @@
         "description": "Right-handed twin of scene 9: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Protects .babylon scene with Standard reflections. Sponza palace loaded from .babylon format. Standard materials with diffuse textures, point lights.",
         "tags": ["std", "babylon", "right-handed"],
         "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 348,
+        "slug": "scene348-ssao",
+        "name": "Scene 348 — Screen-Space Ambient Occlusion (Kitchen)",
+        "maxMad": 7,
+        "maxRawKB": 177,
+        "description": "The Diligent Kitchen (Apache-2.0, hosted in BabylonJS/Assets) lit by the environment only, with temporally filtered XeGTAO (Half pipeline, medium quality) applied to PBR diffuse environment lighting and frozen 128 frames after an explicit history reset, compared against Babylon.js SSAO2RenderingPipeline. The AO algorithms differ, so the MAD ceiling is deliberately wide.",
+        "tags": ["pbr", "ssao", "post-process", "ibl", "gltf", "frame-graph", "temporal"],
+        "skipPerf": true
+    },
+    {
+        "id": 349,
+        "slug": "scene349-parallax-occlusion",
+        "name": "Scene 349 - Parallax Occlusion Mapping",
+        "maxMad": 0,
+        "maxRawKB": 100,
+        "description": "Standard and PBR panels use the original stone and brick-wall diffuse/normal-height assets from Playground 10I31V revision 408. Includes synchronized native Babylon.js / Lite views, normal-map-only controls, texture selection, depth calibration, and Lite-quality controls.",
+        "note": "Visual/behavior comparison: Babylon.js native marching and Lite contact refinement are intentionally not pixel-identical.",
+        "tags": ["material", "parallax", "pom", "standard", "pbr", "texture", "comparison"],
+        "skipParity": true,
+        "skipParityReason": "The user selected comparison of the existing algorithms, not pixel parity. Scene349's browser spec validates POM behavior and synchronized native reference rendering without a permissive MAD gate.",
+        "skipPerf": true
+    },
+    {
+        "id": 353,
+        "slug": "scene353-rh-bent-normals",
+        "name": "Scene 353 — Bent Normals (right-handed)",
+        "maxMad": 1,
+        "maxRegionMad": 2,
+        "maxRawKB": 83.3,
+        "description": "Right-handed twin of scene 230: the same Lite code built with the babylon-lite-rh resolve condition, against Babylon.js with useRightHandedSystem = true. Bent normal reflection occlusion on the right copy of the same glTF.",
+        "tags": ["pbr", "gltf", "ibl", "bent-normal", "right-handed"],
+        "rightHanded": true,
+        "skipPerf": true
+    },
+    {
+        "id": 354,
+        "slug": "scene354-mesh-opacity",
+        "name": "Scene 354 — Mesh Opacity",
+        "maxMad": 0.5,
+        "maxRawKB": 89,
+        "description": "Programmatic Standard/PBR direct visibility parity, a separately normalized glTF-style OPAQUE/MASK fade oracle with shared-material twins, full-strength shadow policy at half/zero opacity, and alpha-to-coverage plus blend.",
+        "note": "Direct BJS visibility parity covers programmatic Standard/PBR. Explicit OPAQUE/MASK fading, full-strength shadows and alpha-to-coverage plus blend use separately labelled normalized Lite-policy oracle regions.",
+        "tags": ["std", "pbr", "procedural", "shadow"],
         "skipPerf": true
     }
 ]

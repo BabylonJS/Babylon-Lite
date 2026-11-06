@@ -49,9 +49,9 @@ export function createTextProgram(engine: GLEngineContext, shader?: ComposedSlug
 }
 
 /** @internal Skip unchanged projection work and uploads; relink always invalidates the cache. */
-export function uploadTextUniforms(engine: GLEngineContext, program: TextProgram, layer: GLTextLayer, width: number, height: number): void {
+export function uploadTextUniforms(program: TextProgram, layer: GLTextLayer, width: number, height: number): void {
     const effect = program._effect;
-    useEffect(engine, effect);
+    useEffect(effect);
     const inputs = program._mvpInputs;
     const px = layer.positionPx.x;
     const py = layer.positionPx.y;
@@ -78,7 +78,7 @@ export function uploadTextUniforms(engine: GLEngineContext, program: TextProgram
         mvp[10] = mvp[15] = 1;
         mvp[12] = (2 * px) / width - 1;
         mvp[13] = 1 - (2 * py) / height;
-        setEffectMatrix(engine, effect, "mvp", mvp);
+        setEffectMatrix(effect, "mvp", mvp);
         inputs[0] = px;
         inputs[1] = py;
         inputs[2] = rotation;
@@ -87,6 +87,6 @@ export function uploadTextUniforms(engine: GLEngineContext, program: TextProgram
         inputs[5] = height;
         program._uploadedProgram = effect.program;
     }
-    setEffectFloat4(engine, effect, "viewport", width, height, 0, 0);
-    setEffectFloat4(engine, effect, "color", layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1, 1, 1, layer.opacity);
+    setEffectFloat4(effect, "viewport", width, height, 0, 0);
+    setEffectFloat4(effect, "color", layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1, 1, 1, layer.opacity);
 }
