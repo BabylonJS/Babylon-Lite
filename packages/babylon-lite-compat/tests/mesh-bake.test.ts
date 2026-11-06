@@ -175,6 +175,9 @@ describe("Mesh transform bake (issue #475)", () => {
         const euler = new Vector3(0.3, 0.5, -0.2);
         mesh.rotation = euler;
         mesh.rotationQuaternion = Quaternion.FromEulerAngles(0.1, 0.6, 0.2);
+        expect(mesh.rotation.asArray()).toEqual([0, 0, 0]);
+        // Euler edits made after enabling quaternion mode must also be reset by a bake.
+        mesh.rotation.set(euler.x, euler.y, euler.z);
         expect(mesh.rotation.asArray()).toEqual(euler.asArray());
 
         mesh.bakeCurrentTransformIntoVertices();

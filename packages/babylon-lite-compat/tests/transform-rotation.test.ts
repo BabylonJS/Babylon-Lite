@@ -60,29 +60,60 @@ describe("TransformNode Babylon.js rotation parity", () => {
         expectRotation(node, Quaternion.FromEulerAngles(-0.3, 0.2, 0.7));
     });
 
-    it("does not let rotation edits override an explicit rotationQuaternion", () => {
-        const node = new TransformNode("quat-mode");
+    it("resets prior Euler state when setting an explicit quaternion", () => {
+        const node = new TransformNode("reset-on-quaternion");
         node.rotation.set(0.1, 0.2, 0.3);
-        const live = node.rotation;
-
         const explicit = Quaternion.FromEulerAngles(-0.6, 0.7, -0.2);
         node.rotationQuaternion = explicit;
-        expect(node.rotationQuaternion).not.toBeNull();
-        expectRotation(node, explicit);
 
-        live.set(0.5, -0.4, 0.3);
-        node.rotation = new Vector3(-0.3, 0.2, 0.8);
+        expect(node.rotationQuaternion).not.toBeNull();
+        expect(node.rotation.asArray()).toEqual([0, 0, 0]);
         expectRotation(node, explicit);
 
         node.rotationQuaternion = null;
         expect(node.rotationQuaternion).toBeNull();
+        expectRotation(node, Quaternion.Identity());
+    });
+
+    it("keeps in-place Euler edits independent while an explicit quaternion is active", () => {
+        const node = new TransformNode("quaternion-precedence");
+        const live = node.rotation;
+        const explicit = Quaternion.FromEulerAngles(-0.6, 0.7, -0.2);
+        node.rotationQuaternion = explicit;
+
+        live.set(0.5, -0.4, 0.3);
+        expectRotation(node, explicit);
+        expect(node.rotation.asArray()).toEqual([0.5, -0.4, 0.3]);
+
+        node.rotationQuaternion = null;
+        expect(node.rotationQuaternion).toBeNull();
+        expectRotation(node, Quaternion.FromEulerAngles(0.5, -0.4, 0.3));
+    });
+
+    it("switches to Euler mode on whole-vector assignment, even with quaternion active", () => {
+        const node = new TransformNode("full-vector");
+        node.rotationQuaternion = Quaternion.Identity();
+
+        node.rotation = new Vector3(-0.3, 0.2, 0.8);
+        expect(node.rotationQuaternion).toBeNull();
+        expect(node.rotation.asArray()).toEqual([-0.3, 0.2, 0.8]);
         expectRotation(node, Quaternion.FromEulerAngles(-0.3, 0.2, 0.8));
+
+        // Assigning the previously obtained live view also snapshots its values.
+        const live = node.rotation;
+        node.rotationQuaternion = Quaternion.Identity();
+        live.set(0.2, -0.1, 0.4);
+        node.rotation = live;
+        expect(node.rotationQuaternion).toBeNull();
+        expectRotation(node, Quaternion.FromEulerAngles(0.2, -0.1, 0.4));
     });
 
     it("keeps Euler state independent while the underlying quaternion is edited in quaternion mode", () => {
         const node = new TransformNode("independent");
         node.rotation = new Vector3(0.1, 0.2, 0.3);
         node.rotationQuaternion = Quaternion.Identity();
+        // Babylon.js clears pre-existing Euler values on quaternion assignment.
+        node.rotation.set(0.1, 0.2, 0.3);
 
         const other = Quaternion.FromEulerAngles(0.8, 0.9, 0.1);
         node._node.rotationQuaternion.set(other.x, other.y, other.z, other.w);
@@ -121,6 +152,8 @@ describe("Cloned TransformNode rotation state", () => {
         source.rotation = new Vector3(0.3, 0.5, -0.2);
         const explicit = Quaternion.FromEulerAngles(-0.6, 0.7, 0.1);
         source.rotationQuaternion = explicit;
+        // Stored after switching to quaternion mode, not before it.
+        source.rotation.set(0.3, 0.5, -0.2);
 
         const clone = cloneCompatTransform(source);
         expect(clone.rotationQuaternion).not.toBeNull();

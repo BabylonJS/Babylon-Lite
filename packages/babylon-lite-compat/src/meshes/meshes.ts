@@ -343,7 +343,12 @@ export class TransformNode extends Node {
         return this._rotationView;
     }
     public set rotation(value: Vector3) {
-        this._getRotationEuler().set(value.x, value.y, value.z);
+        // Replacing the full Vector3 selects Euler mode in Babylon.js. Editing
+        // rotation.x/y/z in place does not switch away from an explicit quaternion.
+        // Snapshot values before switching to support assigning our own live view.
+        const { x, y, z } = value;
+        this._rotationEuler = new Vector3(x, y, z);
+        this._useQuat = false;
         this._applyRotationEuler();
     }
 
@@ -382,9 +387,13 @@ export class TransformNode extends Node {
     }
     public set rotationQuaternion(value: Quaternion | null) {
         if (value) {
-            this._getRotationEuler(); // Snapshot the independent Euler state before quaternion mode.
+            // Babylon.js clears Euler rotation when an explicit quaternion is
+            // assigned. Subsequent component edits can store new Euler values
+            // independently, and are restored when quaternion mode is cleared.
+            this._rotationEuler = new Vector3(0, 0, 0);
             this._useQuat = true;
             this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
+            this._rotationVersion = this._node.rotationQuaternion.version;
         } else if (this._useQuat) {
             this._useQuat = false;
             this._applyRotationEuler(); // Re-activate the stored Euler rotation.
