@@ -10,18 +10,35 @@ import type * as Lite from "babylon-lite";
  * functions and assert the pure forwarding/translation contract.
  */
 vi.mock("babylon-lite", async (importOriginal) => {
-    const { getMeshOpacity } = await importOriginal<typeof Lite>();
-    const createTransformNode = (name: string) => ({
-        name,
-        children: [],
-        position: { x: 0, y: 0, z: 0, set: vi.fn() },
-        rotationQuaternion: { x: 0, y: 0, z: 0, w: 1, set: vi.fn() },
-        rotation: { x: 0, y: 0, z: 0, set: vi.fn() },
-        scaling: { x: 1, y: 1, z: 1, set: vi.fn() },
-        parent: null,
-        worldMatrix: new Float32Array(16),
-        worldMatrixVersion: 0,
-    });
+    const { getMeshOpacity, createTransformNode } = await importOriginal<typeof Lite>();
+    // Keep the GPU calls mocked while using real CPU-only observable transforms.
+    // This models the quaternion version and independent rotation values required
+    // by cloned Lite scene nodes, without weakening production assertions.
+    type MockLiteNode = ReturnType<typeof createTransformNode> & {
+        material?: unknown;
+        _gpu?: object;
+        visible?: boolean;
+    };
+    const cloneLite = (source: MockLiteNode, root = true): MockLiteNode => {
+        const q = source.rotationQuaternion;
+        const cloned = Object.assign(
+            createTransformNode(
+                (root ? source.name + "_clone" : source.name),
+                source.position.x, source.position.y, source.position.z,
+                q.x, q.y, q.z, q.w,
+                source.scaling.x, source.scaling.y, source.scaling.z
+            ),
+            { visible: true }
+        ) as MockLiteNode;
+        if ("_gpu" in source) {
+            cloned._gpu = source._gpu;
+        }
+        if ("material" in source) {
+            cloned.material = source.material;
+        }
+        cloned.children = source.children.map((child) => cloneLite(child as MockLiteNode, false));
+        return cloned;
+    };
     return {
         addToScene: vi.fn(),
         removeFromScene: vi.fn(),
@@ -39,12 +56,7 @@ vi.mock("babylon-lite", async (importOriginal) => {
         createTube: vi.fn(),
         createExtrudeShape: vi.fn(),
         createTransformNode,
-        cloneTransformNode: vi.fn((src: { name: string; material?: unknown }, children: unknown[] = []) => ({
-            name: src.name + "_clone",
-            material: src.material,
-            children,
-            visible: true,
-        })),
+        cloneTransformNode: vi.fn(cloneLite),
         setParent: vi.fn(),
         setThinInstances: vi.fn(),
         setThinInstanceColors: vi.fn(),
@@ -57,8 +69,10 @@ vi.mock("babylon-lite", async (importOriginal) => {
     };
 });
 
-import { cloneTransformNode, addToScene, removeFromScene } from "babylon-lite";
+import { cloneTransformNode, addToScene, removeFromScene, createTransformNode } from "babylon-lite";
 import { Mesh, TransformNode } from "../src/meshes/meshes";
+import { Quaternion } from "../src/math/quaternion";
+import { Vector3 } from "../src/math/vector";
 
 const cloneTransformNodeMock = vi.mocked(cloneTransformNode);
 const addToSceneMock = vi.mocked(addToScene);
@@ -94,12 +108,18 @@ function fakeMaterial(): { _lite: object; _ensureRenderable: () => void } {
 /** Build a source `Mesh` wrapper without the GPU-backed constructor path. */
 function sourceMesh(scene: ReturnType<typeof fakeScene>, material: unknown, liteChildren: unknown[] = []): Mesh {
     const mesh = Object.create(Mesh.prototype) as Mesh;
-    const lite = { name: "source", material: (material as { _lite: unknown })._lite, _gpu: {}, children: liteChildren, visible: true };
+    const lite = Object.assign(createTransformNode("source"), {
+        material: (material as { _lite: unknown })._lite,
+        _gpu: {},
+        children: liteChildren,
+        visible: true,
+    });
     Object.assign(mesh as unknown as Record<string, unknown>, {
         name: "source",
         id: "source-id",
         metadata: null,
         _lite: lite,
+        _node: lite,
         _scene: scene,
         _material: material,
         _children: [],
@@ -108,20 +128,14 @@ function sourceMesh(scene: ReturnType<typeof fakeScene>, material: unknown, lite
         _visible: true,
         _visibilityValue: 1,
     });
-    cloneTransformNodeMock.mockImplementation((src: unknown) => {
-        const s = src as { name: string; material?: unknown };
-        return {
-            ...s,
-            name: s.name + "_clone",
-            visible: true,
-            children: liteChildren.map((child) => ({ ...(child as object), children: [] })),
-        } as never;
-    });
+    // Preserve the real observable quaternion contract for both the root and
+    // its descendants. The GPU-free mock installed above already deep-clones it.
+    cloneTransformNodeMock.mockClear();
     return mesh;
 }
 
 function liteMesh(name: string): object {
-    return { name, material: {}, _gpu: {}, visible: true };
+    return Object.assign(createTransformNode(name), { material: {}, _gpu: {}, visible: true });
 }
 
 describe("Mesh.clone", () => {
@@ -168,10 +182,10 @@ describe("Mesh.clone", () => {
     it("wraps non-mesh descendants as TransformNode rather than Mesh", () => {
         const scene = fakeScene();
         const sourceMaterial = fakeMaterial();
-        const litePivot = { name: "pivot" };
+        const litePivot = createTransformNode("pivot");
         const liteChildMesh = liteMesh("childMesh");
         const src = sourceMesh(scene, fakeMaterial(), [litePivot, liteChildMesh]);
-        const unrelated = new TransformNode("unrelated", undefined, { name: "unrelated" } as never);
+        const unrelated = new TransformNode("unrelated");
         const sourcePivot = new TransformNode("pivot", undefined, litePivot as never);
         const sourceChildMesh = new Mesh("childMesh", liteChildMesh as never);
         sourcePivot.metadata = { kind: "pivot" };
@@ -197,11 +211,35 @@ describe("Mesh.clone", () => {
         expect(scene.registered).toContain(children[1]);
     });
 
+    it("preserves the public Mesh.clone rotation contract for the root and transform descendants", () => {
+        const scene = fakeScene();
+        const pivot = createTransformNode("pivot");
+        const src = sourceMesh(scene, fakeMaterial(), [pivot]);
+        const sourcePivot = new TransformNode("pivot", undefined, pivot);
+        sourcePivot.parent = src;
+        src.rotation = new Vector3(0.2, 0.3, -0.1);
+        src.rotationQuaternion = Quaternion.FromEulerAngles(0.4, 0.5, 0.6);
+        src.rotation.set(0.1, -0.2, 0.3);
+        sourcePivot.rotation = new Vector3(0.3, -0.2, 0.1);
+
+        const clone = src.clone("copy");
+        expect(clone.rotationQuaternion).not.toBeNull();
+        expect(clone.rotation.asArray()).toEqual([0.1, -0.2, 0.3]);
+        const clonedPivot = clone.getChildren()[0] as TransformNode;
+        expect(clonedPivot).toBeInstanceOf(TransformNode);
+        expect(clonedPivot.rotationQuaternion).toBeNull();
+        expect(clonedPivot.rotation.asArray()).toEqual([0.3, -0.2, 0.1]);
+
+        clone.rotationQuaternion = null;
+        expect(clone.rotation.asArray()).toEqual([0.1, -0.2, 0.3]);
+        expect(src.rotationQuaternion).not.toBeNull();
+    });
+
     it("prunes the cloned descendants when doNotCloneChildren is true", () => {
         removeFromSceneMock.mockClear();
         const scene = fakeScene();
-        const childA = { name: "childA" };
-        const childB = { name: "childB" };
+        const childA = liteMesh("childA");
+        const childB = liteMesh("childB");
         const src = sourceMesh(scene, fakeMaterial(), [childA, childB]);
         const clone = src.clone("copy", null, true);
 

@@ -5,9 +5,9 @@
  * `Mesh → AbstractMesh → TransformNode → Node`. Geometry is built through the
  * Babylon Lite mesh factories (which take the engine, not the scene) and
  * registered with `addToScene`. Transform properties (`position`, `rotation`,
- * `scaling`) are live views over Lite's observable vectors, so
- * `mesh.position.x = 1` and `mesh.rotation.y += 0.01` propagate; reassignment
- * (`mesh.position = new Vector3(...)`) also works.
+ * `scaling`) are live views: position/scaling write through to Lite's observable
+ * vectors, while rotation translates Babylon.js yaw-pitch-roll Euler angles to
+ * Lite's canonical quaternion. In-place edits and whole-vector assignment work.
  */
 
 import {
@@ -235,6 +235,11 @@ export class TransformNode extends Node {
     public readonly _node: SceneNode;
     public physicsBody: PhysicsBody | null = null;
 
+    /** Babylon.js keeps Euler rotation independent from an explicit rotationQuaternion. */
+    private _rotationEuler: Vector3 | null = null;
+    private _rotationView: Vector3 | null = null;
+    private _rotationVersion = -1;
+
     /**
      * @internal The Lite asset container this node was loaded from, when produced
      * by a loader. Used by the `KHR_materials_variants` helpers (which key off the
@@ -285,11 +290,66 @@ export class TransformNode extends Node {
         this._node.position.set(value.x, value.y, value.z);
     }
 
+    /** Keep Euler values stable through component edits, but observe external Lite quaternion writes. */
+    private _getRotationEuler(): Vector3 {
+        const q = this._node.rotationQuaternion;
+        if (!this._rotationEuler || (!this._useQuat && q.version !== this._rotationVersion)) {
+            this._rotationEuler = new Quaternion(q.x, q.y, q.z, q.w).toEulerAngles();
+            this._rotationVersion = q.version;
+        }
+        return this._rotationEuler;
+    }
+
+    private _applyRotationEuler(): void {
+        if (this._useQuat) {
+            return; // Babylon.js ignores rotation while rotationQuaternion is active.
+        }
+        const euler = this._rotationEuler!;
+        const q = Quaternion.FromEulerAngles(euler.x, euler.y, euler.z);
+        this._node.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+        this._rotationVersion = this._node.rotationQuaternion.version;
+    }
+
     public get rotation(): Vector3 {
-        return liteBackedVector3(this._node.rotation);
+        if (!this._rotationView) {
+            // The cached Vector3 preserves Babylon.js identity and live in-place mutations.
+            // Reads detect a quaternion update made by Lite (e.g. an animation).
+            const thisNode = this;
+            const backing = {
+                get x() {
+                    return thisNode._getRotationEuler().x;
+                },
+                set x(value: number) {
+                    thisNode._getRotationEuler().x = value;
+                    thisNode._applyRotationEuler();
+                },
+                get y() {
+                    return thisNode._getRotationEuler().y;
+                },
+                set y(value: number) {
+                    thisNode._getRotationEuler().y = value;
+                    thisNode._applyRotationEuler();
+                },
+                get z() {
+                    return thisNode._getRotationEuler().z;
+                },
+                set z(value: number) {
+                    thisNode._getRotationEuler().z = value;
+                    thisNode._applyRotationEuler();
+                },
+            };
+            this._rotationView = liteBackedVector3(backing);
+        }
+        return this._rotationView;
     }
     public set rotation(value: Vector3) {
-        this._node.rotation.set(value.x, value.y, value.z);
+        // Replacing the full Vector3 selects Euler mode in Babylon.js. Editing
+        // rotation.x/y/z in place does not switch away from an explicit quaternion.
+        // Snapshot values before switching to support assigning our own live view.
+        const { x, y, z } = value;
+        this._rotationEuler = new Vector3(x, y, z);
+        this._useQuat = false;
+        this._applyRotationEuler();
     }
 
     public get scaling(): Vector3 {
@@ -302,11 +362,21 @@ export class TransformNode extends Node {
     /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
     private _useQuat = false;
 
+    /** @internal Copy the independent Babylon.js rotation state after Lite cloned the physical quaternion. */
+    public _copyRotationStateFrom(source: TransformNode): void {
+        this._useQuat = source._useQuat;
+        // A Lite animation may have changed the source quaternion since its last
+        // Euler read. Refresh the cached angles before treating them as current on
+        // the clone, otherwise its next component edit can jump to stale values.
+        // Quaternion mode deliberately preserves the independent Euler snapshot.
+        this._rotationEuler = source._rotationEuler ? source._getRotationEuler().clone() : null;
+        this._rotationVersion = this._node.rotationQuaternion.version;
+    }
+
     /**
-     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
-     * matrix from a quaternion (its euler `rotation` is a proxy over the same
-     * quaternion), so this reads/writes that quaternion. Returns `null` until
-     * explicitly assigned, matching Babylon.js's euler-by-default convention.
+     * Babylon.js `rotationQuaternion`. Lite drives a node's world matrix from
+     * a quaternion, but compat keeps Euler rotation independent while an explicit
+     * quaternion is active. Returns `null` until explicitly assigned.
      */
     public get rotationQuaternion(): Quaternion | null {
         if (!this._useQuat) {
@@ -317,10 +387,16 @@ export class TransformNode extends Node {
     }
     public set rotationQuaternion(value: Quaternion | null) {
         if (value) {
+            // Babylon.js clears Euler rotation when an explicit quaternion is
+            // assigned. Subsequent component edits can store new Euler values
+            // independently, and are restored when quaternion mode is cleared.
+            this._rotationEuler = new Vector3(0, 0, 0);
             this._useQuat = true;
             this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
-        } else {
+            this._rotationVersion = this._node.rotationQuaternion.version;
+        } else if (this._useQuat) {
             this._useQuat = false;
+            this._applyRotationEuler(); // Re-activate the stored Euler rotation.
         }
     }
 
@@ -850,9 +926,13 @@ export class AbstractMesh extends TransformNode {
         if (!this._bakeMatrix(matrix)) {
             return this;
         }
-        // Reset the node transform to identity (the geometry now carries it).
+        // Reset both compat Euler state and the physical quaternion. A direct write
+        // to Lite's Euler proxy leaves compat's independent Euler snapshot untouched
+        // in quaternion mode, so clearing rotationQuaternion would resurrect a
+        // rotation that is already baked into the geometry.
         node.position.set(0, 0, 0);
-        node.rotation.set(0, 0, 0);
+        this.rotation.set(0, 0, 0);
+        node.rotationQuaternion.set(0, 0, 0, 1);
         node.scaling.set(1, 1, 1);
         return this;
     }
@@ -1093,6 +1173,11 @@ export class Mesh extends AbstractMesh {
             }
         }
         wrapper.parent = parent;
+        // Native cloning copies the physical quaternion, not compat's Euler/quaternion mode.
+        // Preserve that state for both the root and descendants without recomposing the clone.
+        if (source instanceof TransformNode && source._node) {
+            wrapper._copyRotationStateFrom(source);
+        }
         if (source) {
             wrapper.id = wrapper instanceof Mesh ? `${wrapper.name}.${source.id}` : wrapper.name;
             wrapper.metadata = source.metadata;
