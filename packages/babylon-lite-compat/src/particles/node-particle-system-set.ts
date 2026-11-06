@@ -22,11 +22,11 @@
  * (`ParticleSystemSet.systems[i]`) are backed — see {@link ParticleSystem}.
  */
 
-import { parseNodeParticleSetFromSnippet, registerNodeParticleSet, stopParticleSystem } from "babylon-lite";
+import { parseNodeParticleSetFromSnippet, registerNodeParticleSet } from "babylon-lite";
 import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
-import { ParticleSystem } from "./particle-system.js";
+import type { ParticleSystem } from "./particle-system.js";
 import { unsupported } from "../error.js";
 
 /**
@@ -62,7 +62,7 @@ export class ParticleSystemSet {
         if (!this._systems) {
             const scene = this._scene;
             this._systems = this._lite.systems.map((s) => {
-                const system = ParticleSystem._fromLite(s, scene);
+                const system = scene._wrapParticleSystem(s);
                 // Wrappers materialized after set-level registration must not build a
                 // second billboard for a system Lite already renders.
                 if (this._started) {
@@ -98,6 +98,7 @@ export class ParticleSystemSet {
         // build (from `systems[i].start()`) is skipped when the deferred adds flush.
         for (const system of this._systems ?? []) {
             system._releaseBillboardToSet();
+            system._markStartedBySet();
         }
         scene._deferAdd(() => {
             for (const system of this._systems ?? []) {
@@ -117,9 +118,11 @@ export class ParticleSystemSet {
         if (!this._lite) {
             return;
         }
-        for (const system of this._lite.systems) {
-            stopParticleSystem(system);
+        const systems = this.systems;
+        for (const system of systems) {
+            system.dispose();
         }
+        systems.length = 0;
     }
 }
 
@@ -160,6 +163,7 @@ export class NodeParticleSystemSet {
         const set = new ParticleSystemSet();
         set._lite = liteSet;
         set._scene = scene;
+        void set.systems;
         return set;
     }
 

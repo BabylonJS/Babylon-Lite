@@ -62,6 +62,18 @@ export abstract class Camera extends Node {
         return "Camera";
     }
 
+    /**
+     * Babylon.js `Camera.resetViewHistory()` invalidates temporal history owned by
+     * every render pass using this camera. Lite's TAA/history state is owned by
+     * independently-created frame-graph tasks, with no camera-to-task registry.
+     */
+    public resetViewHistory(): never {
+        return unsupported(
+            "Camera.resetViewHistory",
+            "Babylon Lite's temporal history is owned by independent frame-graph tasks and exposes no camera-to-task registry through which a camera can invalidate every pass."
+        );
+    }
+
     public get fov(): number {
         return this._lite.fov;
     }

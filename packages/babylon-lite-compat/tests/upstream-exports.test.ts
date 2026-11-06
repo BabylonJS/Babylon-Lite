@@ -76,6 +76,11 @@ describe("upstream export coverage", () => {
         expect(() => GLTF2.CreateKHRInteractivityDocument({})).toThrow(/GLTF2\.CreateKHRInteractivityDocument/);
     });
 
+    it("exposes KHR_materials_scatter through the GLTF2 namespace", () => {
+        expect(GLTF2.KHR_materials_scatter).toBeTypeOf("function");
+        expect(GLTF2.RegisterKHR_materials_scatter).toBeTypeOf("function");
+    });
+
     it("preserves the optional KHR_interactivity mapping hooks", () => {
         const validation = (node: UpstreamNode, graph: UpstreamGraph, gltf?: UpstreamGltf) => ({
             valid: !!node.values && !!graph.types && !!gltf?.nodes,
