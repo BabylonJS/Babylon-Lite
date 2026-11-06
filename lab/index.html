@@ -3233,8 +3233,10 @@
                             renderHideBtn(demoKey) +
                             '<div class="card-image">' +
                             '<img src="' +
-                            escapeAttr(d.thumbnailUrl ?? expBasePath() + "/thumbnails/demo-" + d.slug + ".jpg") +
-                            '" onerror="this.style.display=\'none\'" alt="' +
+                            expBasePath() +
+                            '/thumbnails/demo-' +
+                            d.slug +
+                            '.jpg" onerror="this.style.display=\'none\'" alt="' +
                             escapeAttr(d.name) +
                             '" loading="lazy" decoding="async" />' +
                             "</div>" +

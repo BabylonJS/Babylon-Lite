@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
+import { ScriptTarget, transpileModule } from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildSingleDemo } from "../../../scripts/bundle-demos-core";
 import { startStaticServer } from "../../../scripts/bundle-scenes-core";
@@ -10,7 +11,6 @@ import { startStaticServer } from "../../../scripts/bundle-scenes-core";
 const root = resolve(__dirname, "../../..");
 const output = resolve(root, "lab/public/bundle/demos");
 const basePaths = ["/lite-demos/", "/nested/lite-demos/"];
-const thumbnailUrl = "https://raw.githubusercontent.com/BabylonJS/Assets/6d2691d223b46b0218c51b159ee5a5ccbe0123bc/textures/lite/demo-ambient-occlusion.jpg";
 let site: string;
 let server: Server | undefined;
 let origin: string;
@@ -20,13 +20,13 @@ beforeAll(async () => {
     site = mkdtempSync(join(tmpdir(), "lite-ao-demo-site-"));
     for (const basePath of basePaths) {
         const destination = join(site, basePath);
-        mkdirSync(destination, { recursive: true });
+        mkdirSync(join(destination, "thumbnails"), { recursive: true });
         for (const file of readdirSync(output)) {
             if (file.startsWith("ambient-occlusion") && file.endsWith(".js")) {
                 cpSync(join(output, file), join(destination, file));
             }
         }
-        for (const file of ["demo-ambient-occlusion.html", "index.html", "brdf-lut.png"]) {
+        for (const file of ["demo-ambient-occlusion.html", "index.html", "brdf-lut.png", "thumbnails/demo-ambient-occlusion.jpg"]) {
             cpSync(join(output, file), join(destination, file));
         }
     }
@@ -61,7 +61,7 @@ describe("Ambient Occlusion standalone deployment", () => {
         expect(code).not.toContain("sun.intensity = direct.checked");
     });
 
-    it.each(basePaths)("serves the demo, BRDF and hosted gallery reference under %s", async (basePath) => {
+    it.each(basePaths)("serves the demo, BRDF and local gallery thumbnail under %s", async (basePath) => {
         const pageUrl = `${origin}${basePath}demo-ambient-occlusion.html`;
         const page = await fetch(pageUrl);
         expect(page.status).toBe(200);
@@ -78,13 +78,18 @@ describe("Ambient Occlusion standalone deployment", () => {
         const html = await index.text();
         const card = html.match(/<article\b[\s\S]*?<\/article>/g)?.find((article) => article.includes('href="./demo-ambient-occlusion.html"'));
         expect(card).toBeDefined();
-        expect(card!.match(/<img src="([^"]+)"/)?.[1]).toBe(thumbnailUrl);
+        const thumbnail = card!.match(/<img src="([^"]+)"/)?.[1];
+        expect(thumbnail).toBe("thumbnails/demo-ambient-occlusion.jpg");
+        const image = await fetch(new URL(thumbnail!, index.url));
+        expect(image.status).toBe(200);
+        expect(image.headers.get("content-type")).toBe("image/jpeg");
+        expect(Buffer.from(await image.arrayBuffer())).toEqual(readFileSync(join(root, "lab/public/thumbnails/demo-ambient-occlusion.jpg")));
         expect(html).toContain('<img src="thumbnails/demo-ocean.jpg"');
     });
 });
 
 describe("lab demo gallery thumbnails", () => {
-    function renderLabCard(override?: string): string {
+    it("uses the demo's local thumbnail in the lab Demos tab", () => {
         const html = readFileSync(join(root, "lab/index.html"), "utf8");
         const escapeAttr = html.slice(html.indexOf("function escapeAttr(s)"), html.indexOf("function normalizeSearchText(s)"));
         const initDemosGrid = html.slice(html.indexOf("function initDemosGrid(demos)"), html.indexOf("// Build the Demos-tab filter pills"));
@@ -93,7 +98,7 @@ describe("lab demo gallery thumbnails", () => {
             `${escapeAttr}\n${initDemosGrid}\ninitDemosGrid(demos);`,
             {
                 document: { getElementById: () => grid },
-                demos: [{ slug: "ambient-occlusion", name: "Ambient Occlusion", description: "", thumbnailUrl: override }],
+                demos: [{ slug: "ambient-occlusion", name: "Ambient Occlusion", description: "" }],
                 expBasePath: () => "/lite",
                 normalizeSearchText: (s: string) => s,
                 renderHideBtn: () => "",
@@ -103,21 +108,26 @@ describe("lab demo gallery thumbnails", () => {
             },
             { timeout: 1000 }
         );
-        return grid.innerHTML;
-    }
-
-    it("uses the same immutable Assets thumbnail as the standalone gallery", () => {
-        const demos = JSON.parse(readFileSync(join(root, "demos-config.json"), "utf8")) as { slug: string; thumbnailUrl?: string }[];
-        const ao = demos.find((demo) => demo.slug === "ambient-occlusion");
-        expect(ao?.thumbnailUrl).toBe(thumbnailUrl);
-        expect(renderLabCard(ao?.thumbnailUrl)).toContain(`<img src="${thumbnailUrl}"`);
+        expect(grid.innerHTML).toContain('<img src="/lite/thumbnails/demo-ambient-occlusion.jpg"');
     });
+});
 
-    it("preserves the lab-relative thumbnail fallback", () => {
-        expect(renderLabCard()).toContain('<img src="/lite/thumbnails/demo-ambient-occlusion.jpg"');
-    });
-
-    it("HTML-escapes hosted thumbnail URLs", () => {
-        expect(renderLabCard('https://example.test/ao.jpg?a=1&b="<ao>"')).toContain('<img src="https://example.test/ao.jpg?a=1&amp;b=&quot;&lt;ao&gt;&quot;"');
+describe("/pages development preview thumbnails", () => {
+    it("uses the demo's local root-relative thumbnail", () => {
+        const config = readFileSync(join(root, "lab/vite.config.ts"), "utf8");
+        const escapeHtml = config.slice(config.indexOf("function escapeHtml("), config.indexOf("/**", config.indexOf("function escapeHtml(")));
+        const renderCard = config.slice(config.indexOf("function renderPagesDemoCard("), config.indexOf("function renderPagesDemoFilters("));
+        const { outputText } = transpileModule(`${escapeHtml}\n${renderCard}\nrenderPagesDemoCard(demo, undefined);`, {
+            compilerOptions: { target: ScriptTarget.ESNext },
+        });
+        const card = runInNewContext(
+            outputText,
+            {
+                demo: { slug: "ambient-occlusion", name: "Ambient Occlusion", description: "" },
+                DEMO_SOURCE_BASE_URL: "https://github.com/BabylonJS/Babylon-Lite/blob/master/lab/lite/src/demos/",
+            },
+            { timeout: 1000 }
+        ) as string;
+        expect(card).toContain('<img src="/thumbnails/demo-ambient-occlusion.jpg"');
     });
 });
