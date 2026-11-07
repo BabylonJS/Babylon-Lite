@@ -1185,10 +1185,11 @@ The BRDF LUT is resolved beside the bundled module through `demoAssetUrl`,
 not from the site root, so standalone deployment beneath `/lite-demos/`
 works without the lab server's root asset routes. A single-demo debug build
 also refreshes the generated gallery and copies its available thumbnails.
-The AO thumbnail follows the other demos' local JPG convention at
-`lab/public/thumbnails/demo-ambient-occlusion.jpg`. The standalone gallery,
-lab Demos tab, and `/pages/` development preview use their existing local
-thumbnail paths; the standalone build copies the JPEG into its `thumbnails/`.
+The AO gallery thumbnail is hosted in BabylonJS/Assets and pinned to an immutable
+commit URL through `thumbnailUrl` in `demos-config.json`. The standalone gallery,
+lab Demos tab, and `/pages/` development preview HTML-escape this optional override
+and preserve their existing local JPG paths for demos without one. New gallery
+images belong in Assets, not in Lite's visual regression baseline locations.
 The **Direct light** toggle adds a directional light to demonstrate that AO
 does not attenuate direct illumination. Its runtime intensity changes use
 `setLightIntensity` so the shared light UBO is invalidated. It has no visible
