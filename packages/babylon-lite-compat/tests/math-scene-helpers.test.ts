@@ -143,6 +143,19 @@ describe("TransformNode rotation", () => {
         expectSameRotation(nodeRotation(node), Quaternion.FromEulerAngles(0.3, 0.6, -0.2));
     });
 
+    it("resynchronizes a retained Euler vector after reparenting", () => {
+        const parent = new TransformNode("parent");
+        const child = new TransformNode("child");
+        parent.rotation.y = 0.5;
+
+        child.setParent(parent);
+        const worldBeforeEdit = Array.from(child._node.worldMatrix);
+        child.rotation.y += 0;
+
+        expect(child.rotation.y).toBeCloseTo(-0.5, 6);
+        expect(Array.from(child._node.worldMatrix)).toEqual(worldBeforeEdit);
+    });
+
     it("keeps the assigned quaternion live while Euler writes remain inactive", () => {
         const node = new TransformNode("node");
         const quaternion = Quaternion.FromEulerAngles(-0.4, 0.2, 0.7);
@@ -173,6 +186,21 @@ describe("TransformNode rotation", () => {
 
         expect(node.rotationQuaternion).toBe(quaternion);
         expect(nodeRotation(node).asArray()).toEqual(quaternion.asArray());
+    });
+
+    it("resynchronizes an assigned quaternion after reparenting", () => {
+        const parent = new TransformNode("parent");
+        const child = new TransformNode("child");
+        const quaternion = Quaternion.Identity();
+        parent.rotation.y = 0.5;
+        child.rotationQuaternion = quaternion;
+
+        child.setParent(parent);
+        const worldBeforeEdit = Array.from(child._node.worldMatrix);
+        quaternion.y += 0;
+
+        expect(quaternion.y).not.toBe(0);
+        expect(Array.from(child._node.worldMatrix)).toEqual(worldBeforeEdit);
     });
 
     it("clears rotationQuaternion when the rotation vector is assigned", () => {
@@ -235,6 +263,19 @@ describe("TransformNode rotation", () => {
         expectSameRotation(nodeRotation(second), Quaternion.FromEulerAngles(0.1, 0.6, 0.3));
     });
 
+    it("keeps shared Euler bindings active when the later subscriber replaces its vector", () => {
+        const shared = new Vector3(0.1, 0.2, 0.3);
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        first.rotation = shared;
+        second.rotation = shared;
+
+        second.rotation = new Vector3();
+        shared.y = 0.6;
+
+        expectSameRotation(nodeRotation(first), Quaternion.FromEulerAngles(0.1, 0.6, 0.3));
+    });
+
     it("keeps shared quaternion bindings active when one node replaces its quaternion", () => {
         const shared = Quaternion.FromEulerAngles(0.1, 0.2, 0.3);
         const first = new TransformNode("first");
@@ -246,6 +287,19 @@ describe("TransformNode rotation", () => {
         shared.y += 0.1;
 
         expect(nodeRotation(second).asArray()).toEqual(shared.asArray());
+    });
+
+    it("keeps shared quaternion bindings active when the later subscriber replaces its quaternion", () => {
+        const shared = Quaternion.FromEulerAngles(0.1, 0.2, 0.3);
+        const first = new TransformNode("first");
+        const second = new TransformNode("second");
+        first.rotationQuaternion = shared;
+        second.rotationQuaternion = shared;
+
+        second.rotationQuaternion = Quaternion.Identity();
+        shared.y += 0.1;
+
+        expect(nodeRotation(first).asArray()).toEqual(shared.asArray());
     });
 
     it("propagates native Euler readback to every node sharing the vector", () => {
@@ -285,6 +339,21 @@ describe("TransformNode rotation", () => {
         const before = nodeRotation(node);
 
         node.dispose();
+        rotation.set(0.7, 0.8, 0.9);
+        quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
+
+        expectSameRotation(nodeRotation(node), before);
+    });
+
+    it("unbinds retained rotation values when a wrapper is retired", () => {
+        const rotation = new Vector3(0.1, 0.2, 0.3);
+        const quaternion = Quaternion.FromEulerAngles(0.4, -0.2, 0.1);
+        const node = new TransformNode("node");
+        node.rotation = rotation;
+        node.rotationQuaternion = quaternion;
+        const before = nodeRotation(node);
+
+        node._disposeWrapperOnly();
         rotation.set(0.7, 0.8, 0.9);
         quaternion.set(0, 0, Math.SQRT1_2, Math.SQRT1_2);
 
