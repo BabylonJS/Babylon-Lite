@@ -35,6 +35,7 @@ import { DirectionalLight } from "../src/lights/lights";
 import { AssetContainer } from "../src/loading/scene-loader";
 import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
+import type { AbstractMesh } from "../src/meshes/meshes";
 import { AbstractScene } from "../src/scene/abstract-scene";
 import { Scene } from "../src/scene/scene";
 
@@ -74,8 +75,8 @@ describe("AssetContainer.addAllToScene", () => {
 
         const first = container.instantiateModelsToScene((name) => `${name}0`, true, { doNotInstantiate: true });
         const second = container.instantiateModelsToScene((name) => `${name}1`, true, { doNotInstantiate: true });
-        const firstMesh = first.rootNodes[0]!.getChildMeshes()[0]!;
-        const secondMesh = second.rootNodes[0]!.getChildMeshes()[0]!;
+        const firstMesh = first.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const secondMesh = second.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
 
         expect(first.rootNodes[0]!.name).toBe("__root__0");
         expect(second.rootNodes[0]!.name).toBe("__root__1");
@@ -93,7 +94,7 @@ describe("AssetContainer.addAllToScene", () => {
 
         const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
 
-        expect(result.rootNodes[0]!.getChildMeshes()[0]!.material?.name).toBe("Clone of Stone");
+        expect((result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh).material?.name).toBe("Clone of Stone");
     });
 
     it("registers the canonical loaded wrappers in scene.meshes", () => {

@@ -531,7 +531,6 @@ export class Scene extends AbstractScene {
         this._pendingGroundBakes.length = 0;
     }
 
-
     /**
      * @internal Register a mesh's compat `MorphTargetManager` to be built at engine
      * start. Building is deferred so the mesh's base CPU geometry (set by primitive

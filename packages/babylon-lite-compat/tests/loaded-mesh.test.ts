@@ -66,6 +66,7 @@ function fakeScene(): { scene: Scene; registered: unknown[] } {
         },
         _deferAdd: (add: () => void) => add(),
         _registerMesh: (mesh: unknown) => registered.push(mesh),
+        _wrapLoadedMaterial: () => null,
         _unregisterNode: (mesh: unknown) => {
             const index = registered.indexOf(mesh);
             if (index !== -1) {

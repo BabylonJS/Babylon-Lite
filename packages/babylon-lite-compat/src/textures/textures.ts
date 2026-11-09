@@ -79,6 +79,7 @@ function loadCompatTexture(engine: EngineContext, url: string, opts: Texture2DOp
 
 export abstract class BaseTexture {
     public name = "";
+    public level = 1;
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
 
@@ -605,7 +606,6 @@ export class CubeTexture extends BaseTexture {
     /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
     public coordinatesMode = 0;
     public gammaSpace = true;
-    public level = 1;
     /**
      * @internal Which Lite environment loader the scene should route this handle
      * through at engine start. Plain `.env`/`.dds` cube maps load via
@@ -691,7 +691,6 @@ export class HDRCubeTexture extends BaseTexture {
     /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
     public coordinatesMode = 0;
     public gammaSpace = true;
-    public level = 1;
     /** @internal Selects Lite's `loadHdrEnvironment` in the scene's env loader. */
     public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
     /** Fires when the HDR environment is "ready" (resolved on a microtask). */

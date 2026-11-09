@@ -55,6 +55,8 @@ describe("StandardMaterial texture proxies", () => {
         const tex = fakeTexture();
         mat.bentNormalTexture = tex;
         mat._lite.bentNormalTexture = undefined;
+        mat._lite.baseColorTexture = {} as never;
+        mat._lite.ormTexture = {} as never;
 
         mat._ensureRenderable({} as never);
 

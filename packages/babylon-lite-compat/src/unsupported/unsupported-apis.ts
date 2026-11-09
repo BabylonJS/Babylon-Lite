@@ -92,15 +92,37 @@ export class DefaultKTX2EncoderOptions {
     private _etc1sCompressionLevel: number | undefined;
     private _uastcQualityLevel: number | undefined;
     private _zstandard: boolean | undefined;
-    public get isDirty(): boolean { return this._dirty; }
-    public get etc1sQualityLevel(): number | undefined { return this._etc1sQualityLevel; }
-    public set etc1sQualityLevel(value: number | undefined) { this._etc1sQualityLevel = value; this._dirty = true; }
-    public get etc1sCompressionLevel(): number | undefined { return this._etc1sCompressionLevel; }
-    public set etc1sCompressionLevel(value: number | undefined) { this._etc1sCompressionLevel = value; this._dirty = true; }
-    public get uastcQualityLevel(): number | undefined { return this._uastcQualityLevel; }
-    public set uastcQualityLevel(value: number | undefined) { this._uastcQualityLevel = value; this._dirty = true; }
-    public get zstandard(): boolean | undefined { return this._zstandard; }
-    public set zstandard(value: boolean | undefined) { this._zstandard = value; this._dirty = true; }
+    public get isDirty(): boolean {
+        return this._dirty;
+    }
+    public get etc1sQualityLevel(): number | undefined {
+        return this._etc1sQualityLevel;
+    }
+    public set etc1sQualityLevel(value: number | undefined) {
+        this._etc1sQualityLevel = value;
+        this._dirty = true;
+    }
+    public get etc1sCompressionLevel(): number | undefined {
+        return this._etc1sCompressionLevel;
+    }
+    public set etc1sCompressionLevel(value: number | undefined) {
+        this._etc1sCompressionLevel = value;
+        this._dirty = true;
+    }
+    public get uastcQualityLevel(): number | undefined {
+        return this._uastcQualityLevel;
+    }
+    public set uastcQualityLevel(value: number | undefined) {
+        this._uastcQualityLevel = value;
+        this._dirty = true;
+    }
+    public get zstandard(): boolean | undefined {
+        return this._zstandard;
+    }
+    public set zstandard(value: boolean | undefined) {
+        this._zstandard = value;
+        this._dirty = true;
+    }
 }
 
 let defaultKtx2EncoderOptions: DefaultKTX2EncoderOptions | null = null;
@@ -147,12 +169,7 @@ export function MapSRGBToLinear(format: number): number | null {
     }
 }
 
-export type WebGPURenderPassCommandStreamDisableReason =
-    | "protocol-mismatch"
-    | "atomic-recording-unsupported"
-    | "recorder-missing"
-    | "recording-rejected"
-    | "recording-threw";
+export type WebGPURenderPassCommandStreamDisableReason = "protocol-mismatch" | "atomic-recording-unsupported" | "recorder-missing" | "recording-rejected" | "recording-threw";
 export const WebGPURenderPassCommandStreamProtocolVersion = 1;
 export const WebGPURenderPassCommandStreamMaxDrawsPerBatch = 1024;
 export class WebGPURenderPassCommandStream {

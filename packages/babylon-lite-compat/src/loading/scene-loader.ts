@@ -9,14 +9,23 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, cloneTransformNode, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon, loadUsd, disposeUsd, removeFromScene, setParent as setLiteParent } from "babylon-lite";
+import {
+    addToScene,
+    cloneTransformNode,
+    enableBoneControlForSkinnedAssets,
+    loadGltf,
+    loadBabylon,
+    loadUsd,
+    disposeUsd,
+    removeFromScene,
+    setParent as setLiteParent,
+} from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
 import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
-import type { Material } from "../materials/materials.js";
 import { Skeleton } from "../bones/skeleton.js";
 import type { USDFileLoaderOptions } from "./usd-file-loader.js";
 import { SPLATFileLoader, type SPLATLoadingOptions } from "./splat-file-loader.js";
@@ -116,10 +125,7 @@ export class AssetContainer {
             );
         }
         if (options?.doNotInstantiate === false) {
-            unsupported(
-                "AssetContainer.instantiateModelsToScene",
-                "Lite exposes hierarchy cloning but no Babylon.js InstancedMesh ownership model; pass doNotInstantiate: true."
-            );
+            unsupported("AssetContainer.instantiateModelsToScene", "Lite exposes hierarchy cloning but no Babylon.js InstancedMesh ownership model; pass doNotInstantiate: true.");
         }
         const lite: LiteAssetContainer = {
             entities: this._lite.entities.map((entity) => cloneTransformNode(entity as never)),
@@ -134,11 +140,17 @@ export class AssetContainer {
             }
         }
         if (cloneMaterials) {
-            const materials = new Map<Material, Material>();
+            const materials = new Map<object, { name: string; clone(name: string): object }>();
             for (const mesh of meshes) {
                 const material = mesh.material;
                 if (!material) {
                     continue;
+                }
+                if (!("clone" in material) || typeof material.clone !== "function") {
+                    unsupported(
+                        "AssetContainer.instantiateModelsToScene",
+                        "The assigned compat material has no Babylon.js clone contract, so Lite cannot create an independent material for the cloned hierarchy."
+                    );
                 }
                 let cloned = materials.get(material);
                 if (!cloned) {

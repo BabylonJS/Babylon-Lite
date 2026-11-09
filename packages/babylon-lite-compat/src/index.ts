@@ -58,12 +58,6 @@ export { DualShockInput, DualSenseInput, SwitchInput, XboxInput } from "./events
 
 // ─── Cameras ─────────────────────────────────────────────────────────
 export {
-    DefaultKTX2EncoderOptions,
-    KhronosTextureContainer2Encoder,
-    MapSRGBToLinear,
-    WebGPURenderPassCommandStream,
-    WebGPURenderPassCommandStreamProtocolVersion,
-    WebGPURenderPassCommandStreamMaxDrawsPerBatch,
     Camera,
     ArcRotateCamera,
     TargetCamera,
@@ -438,6 +432,12 @@ export {
     ValidateFlowGraphWithBlockList,
     RemoveFlowGraphAnimationGroupObservers,
     defaultValueParseFunction,
+    DefaultKTX2EncoderOptions,
+    KhronosTextureContainer2Encoder,
+    MapSRGBToLinear,
+    WebGPURenderPassCommandStream,
+    WebGPURenderPassCommandStreamProtocolVersion,
+    WebGPURenderPassCommandStreamMaxDrawsPerBatch,
 } from "./unsupported/unsupported-apis.js";
 export type { IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
