@@ -40,6 +40,12 @@
  * SVG `<foreignObject>` fallback rasterises a *static* snapshot instead — enough
  * for text/label panels — unless `useSvgFallback: false` is set.
  *
+ * For live, interactive HTML textures in browsers without native support, load the
+ * {@link https://www.npmjs.com/package/@underglass/html-in-canvas-polyfill | @underglass/html-in-canvas-polyfill}
+ * before creating the texture. It installs the current API shape, so the native
+ * path is used unchanged (no-op where the browser is already native). Polyfilled
+ * snapshots are asynchronous and may trail DOM changes by a few frames.
+ *
  * Every export is a free function with zero module-level side effects, so an app
  * that never creates an HTML texture strips the whole feature (and its fallback).
  */
