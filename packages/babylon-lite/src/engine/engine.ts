@@ -13,7 +13,7 @@ import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Renderable } from "../render/renderable.js";
-import { _assertDeviceAvailable, createDevice } from "./device.js";
+import { createDevice } from "./device.js";
 import type { DeviceContext } from "./device.js";
 
 export { _getAdapterOptions, _installAdapterOptions, _installDeviceFeaturesResolver } from "./device.js";
@@ -432,7 +432,9 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // Forward the engine options whole: `requiredLimits` is the only acquisition setting they carry, and an installed
     // feature resolver (`createEngineWithFeatures`) reads its extra fields from the same object.
     const deviceContext = options?.device ?? (await createDevice(options));
-    _assertDeviceAvailable(deviceContext);
+    if (deviceContext._claimed) {
+        throw new Error("A DeviceContext can be used by only one engine and not after disposeDevice.");
+    }
     // eslint-disable-next-line no-console
     console.log(`${_ENGINE_TAG} - WebGPU engine`);
     // The engine extends `SurfaceContext`, so we need to assemble both the engine-only

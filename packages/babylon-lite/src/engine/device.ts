@@ -50,13 +50,6 @@ const OPTIONAL_DEVICE_FEATURES = [
     "primitive-index",
 ] as const satisfies readonly GPUFeatureName[];
 
-/** @internal Reject a device already owned by an engine or disposed. */
-export function _assertDeviceAvailable(device: DeviceContext): void {
-    if (device._claimed) {
-        throw new Error("A DeviceContext can be used by only one engine and not after disposeDevice.");
-    }
-}
-
 /** Acquire a GPU device without a canvas or engine, e.g. while the rest of the app downloads.
  *  A successful `createEngine` call takes ownership and destroys it on engine disposal.
  *  Use `disposeDevice` if no engine takes ownership. */
