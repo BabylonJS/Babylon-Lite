@@ -684,6 +684,8 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    /** @internal Lite material identity currently represented by `_material`. */
+    private _wrappedLiteMaterial: LiteMaterial | undefined;
     /**
      * @internal The mesh renders a material that exists only on its Lite node: a natively loaded glTF
      * material has no compat wrapper, so `material` reads `null`. Clones keep that Lite material, and the
@@ -732,12 +734,12 @@ export class AbstractMesh extends TransformNode {
     }
 
     public get material(): CompatMaterial | null {
-        if (!this._material && this._liteOnlyMaterial && this._scene && this._lite.material) {
+        const liteMaterial = this._lite.material;
+        if (this._scene && liteMaterial && (this._liteOnlyMaterial || (!!this._wrappedLiteMaterial && liteMaterial !== this._wrappedLiteMaterial))) {
             const loaded = this._scene._wrapLoadedMaterial(this._lite.material);
-            if (loaded) {
-                this._material = loaded as CompatMaterial;
-                this._liteOnlyMaterial = false;
-            }
+            this._material = loaded as CompatMaterial | null;
+            this._liteOnlyMaterial = !loaded;
+            this._wrappedLiteMaterial = liteMaterial;
         }
         return this._material;
     }
@@ -748,6 +750,7 @@ export class AbstractMesh extends TransformNode {
             this._validateCompatOpacityMaterial("Mesh.material", renderMaterial);
         }
         this._material = value;
+        this._wrappedLiteMaterial = renderMaterial?._lite;
         this._liteOnlyMaterial = false;
         if (renderMaterial && scene) {
             if (scene._hasStarted) {

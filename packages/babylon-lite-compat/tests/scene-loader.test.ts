@@ -27,7 +27,7 @@ vi.mock("babylon-lite", async (importActual) => {
     };
 });
 
-import { addToScene, createPbrMaterial, disposeScene, removeFromScene, setParent } from "babylon-lite";
+import { addToScene, createPbrMaterial, createStandardMaterial, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
@@ -95,6 +95,81 @@ describe("AssetContainer.addAllToScene", () => {
         const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
 
         expect((result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh).material?.name).toBe("Clone of Stone");
+    });
+
+    it("preserves loader-owned PBR semantics and loaded culling state when cloning", () => {
+        const material = createPbrMaterial({
+            name: "Masked unlit",
+            doubleSided: true,
+            _alphaCutOff: 0.35,
+            _unlit: true,
+            _unlitColor: [0.2, 0.4, 0.6],
+            _uv2Mask: 32,
+            _transmissive: true,
+        });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const source = container.meshes[1]!;
+        container.addAllToScene(scene);
+        expect(source.material?.backFaceCulling).toBe(false);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const cloned = clone.material!._lite as typeof material;
+
+        expect(cloned).not.toBe(material);
+        expect(cloned.doubleSided).toBe(true);
+        expect(cloned._alphaCutOff).toBe(0.35);
+        expect(cloned._unlit).toBe(true);
+        expect(cloned._unlitColor).toEqual([0.2, 0.4, 0.6]);
+        expect(cloned._uv2Mask).toBe(32);
+        expect(cloned._transmissive).toBe(true);
+    });
+
+    it("clones loaded Standard materials instead of silently sharing them", () => {
+        const material = createStandardMaterial();
+        material.name = "Standard";
+        material.diffuseColor = [0.2, 0.3, 0.4];
+        material.alphaCutOff = 0.45;
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+
+        expect(clone.material?._lite).not.toBe(material);
+        expect(clone.material?._lite).toMatchObject({
+            diffuseColor: [0.2, 0.3, 0.4],
+            alphaCutOff: 0.45,
+            disableLighting: true,
+            backFaceCulling: false,
+        });
+    });
+
+    it("keeps detached source wrappers out of scene.meshes while instantiating clones into the destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const originals = container.meshes;
+        expect(scene.meshes).toEqual([]);
+
+        const result = container.instantiateModelsToScene((name) => `${name} clone`, false, { doNotInstantiate: true });
+
+        expect(scene.meshes).toEqual(expect.arrayContaining(result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes)));
+        expect(scene.meshes.some((candidate) => originals.includes(candidate as never))).toBe(false);
     });
 
     it("registers the canonical loaded wrappers in scene.meshes", () => {

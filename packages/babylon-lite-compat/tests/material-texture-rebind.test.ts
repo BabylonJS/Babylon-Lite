@@ -27,6 +27,7 @@ const liteMocks = vi.hoisted(() => ({
     createTexture3DFromPixels: vi.fn(),
     createDynamicTexture: vi.fn(),
     updateDynamicTexture: vi.fn(),
+    enableBentNormals: vi.fn(),
     // The opt-in PBR feature setters compat routes through instead of writing the backing
     // fields directly (the setter is what registers the feature's shader ext). They must
     // apply the same field write here, since the material paths under test read it back.
@@ -199,6 +200,24 @@ describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
         expect((mat._lite as { baseColorTexture?: unknown }).baseColorTexture).toBe(handle);
         expect((mat._lite as { _gammaAlbedo?: unknown })._gammaAlbedo).toBe(true);
         expect(liteMocks.createSolidTexture2D).toHaveBeenCalledWith(engineLite, 1, 1, 1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+
+    it("rebuilds a started material when bent normals are removed", () => {
+        const { scene } = fakeScene(true);
+        const mat = new PBRMaterial("m", scene);
+        const texture = {
+            _lite: { id: "bent" },
+            level: 1,
+            _onReady: (listener: () => void) => listener(),
+            _onLevelChanged: vi.fn(() => vi.fn()),
+        } as unknown as Texture;
+
+        mat.bentNormalTexture = texture;
+        liteMocks.rebuildMaterial.mockClear();
+        mat.bentNormalTexture = null;
+
+        expect(mat._lite.bentNormalTexture).toBeUndefined();
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
     });
 });

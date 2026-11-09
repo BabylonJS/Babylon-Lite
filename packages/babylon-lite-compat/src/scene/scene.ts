@@ -50,6 +50,8 @@ import type {
     PickingInfo as LitePickingInfo,
     Mat4,
     Material as LiteMaterial,
+    PbrMaterialProps,
+    StandardMaterialProps,
     EngineContext,
     Skeleton as LiteSkeleton,
     ParticleSystem as LiteParticleSystem,
@@ -251,7 +253,7 @@ export class Scene extends AbstractScene {
     private readonly _skeletonCache = new Map<LiteSkeleton, Skeleton>();
     private readonly _skeletons: Skeleton[] = [];
     private readonly _particleSystemCache = new Map<LiteParticleSystem, ParticleSystem>();
-    private readonly _loadedMaterialCache = new Map<LiteMaterial, Material>();
+    private readonly _loadedMaterialCache = new WeakMap<LiteMaterial, Material>();
     private readonly _particleSystems: ParticleSystem[] = [];
     private readonly _retiredParticleSystems = new Set<LiteParticleSystem>();
     private _disposed = false;
@@ -599,10 +601,14 @@ export class Scene extends AbstractScene {
         if (wrapper) {
             return wrapper;
         }
-        if (getMaterialFamily(lite) !== "pbr") {
+        const family = getMaterialFamily(lite);
+        if (family === "standard") {
+            wrapper = StandardMaterial._fromLite(lite.name ?? "loaded material", lite as StandardMaterialProps, this);
+        } else if (family === "pbr") {
+            wrapper = PBRMaterial._fromLite(lite.name ?? "loaded material", lite as PbrMaterialProps, this);
+        } else {
             return null;
         }
-        wrapper = PBRMaterial._fromLite(lite.name ?? "loaded material", lite as import("babylon-lite").PbrMaterialProps, this);
         this._loadedMaterialCache.set(lite, wrapper);
         return wrapper;
     }

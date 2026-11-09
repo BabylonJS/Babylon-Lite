@@ -5,8 +5,18 @@ import { Material, StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, 
 import { NodeMaterial } from "../src/materials/node-material";
 import { Color3 } from "../src/math/color";
 import type { Scene } from "../src/scene/scene";
-import { CubeTexture } from "../src/textures/textures";
-import type { BaseTexture } from "../src/textures/textures";
+import { BaseTexture, CubeTexture } from "../src/textures/textures";
+
+class TestTexture extends BaseTexture {
+    public resolve(lite: object): void {
+        this._lite = lite as never;
+        this._notifyReady();
+    }
+
+    public whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+}
 
 /** Minimal stand-in for a resolved compat texture (only `_lite` is read by the setters). */
 function fakeTexture(): BaseTexture {
@@ -176,9 +186,31 @@ describe("Material.clone", () => {
         expect(mat.clearCoat.intensity).toBeCloseTo(0.4);
     });
 
-    // Emissive lives on the opt-in `_emissiveColor` backing field, which the generic
-    // data copy skips (it ignores `_`-prefixed keys), so the clone has to restore it
-    // explicitly through the setter — otherwise the clone renders non-emissive.
+    it("PBRMaterial.clone subscribes independently to pending bent-normal readiness and level changes", () => {
+        const tex = new TestTexture();
+        tex.level = 0.4;
+        const source = new PBRMaterial("source");
+        source.bentNormalTexture = tex;
+
+        const clone = source.clone("clone");
+        tex.level = 0.6;
+        expect(source._lite.bentNormalStrength).toBe(0.6);
+        expect(clone._lite.bentNormalStrength).toBe(0.6);
+
+        source.dispose();
+        tex.resolve({ id: "bent" });
+        clone._lite.baseColorTexture = {} as never;
+        clone._lite.ormTexture = {} as never;
+        clone._ensureRenderable({} as never);
+
+        expect(clone._lite.bentNormalTexture).toBe(tex._lite);
+        tex.level = 0.7;
+        expect(clone._lite.bentNormalStrength).toBe(0.7);
+        expect(source._lite.bentNormalStrength).toBe(0.6);
+    });
+
+    // Emissive is restored through its setter so the clone registers the corresponding
+    // Lite extension rather than only copying the loader-owned backing field.
     it("PBRMaterial.clone carries emissive colour without aliasing the source", () => {
         const mat = new PBRMaterial("src");
         mat.emissiveColor = new Color3(0.3, 0.6, 0.9);

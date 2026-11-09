@@ -65,8 +65,10 @@ export class AssetContainer {
 
     /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
     private readonly _meshRegistry: LoadedMeshRegistry = new Map();
-    /** @internal The compat scene this container was added to, if any (drives scene-aware wrappers). */
+    /** @internal The compat scene this container was added to, if any (drives registry membership). */
     private _scene: Scene | undefined;
+    /** @internal Destination supplied at load time for later instantiation, even while the container stays detached. */
+    private readonly _destinationScene: Scene | undefined;
     /** @internal Canonical loaded-skeleton wrappers. */
     private _skeletons: Skeleton[] | undefined;
 
@@ -80,7 +82,7 @@ export class AssetContainer {
         this._lite = lite;
         this._dispose = dispose;
         this._ownedMeshes = ownedMeshes ? [...ownedMeshes] : undefined;
-        this._scene = scene;
+        this._destinationScene = scene;
     }
 
     public get animationGroups(): AnimationGroup[] {
@@ -114,7 +116,7 @@ export class AssetContainer {
         cloneMaterials = false,
         options?: { doNotInstantiate?: boolean }
     ): { rootNodes: TransformNode[]; skeletons: Skeleton[]; animationGroups: AnimationGroup[] } {
-        const scene = this._scene;
+        const scene = this._destinationScene ?? this._scene;
         if (!scene) {
             throw new Error("AssetContainer.instantiateModelsToScene requires a Scene.");
         }
