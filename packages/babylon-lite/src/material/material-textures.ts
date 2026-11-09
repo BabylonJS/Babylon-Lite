@@ -6,6 +6,7 @@ import type { StandardMaterialProps } from "./standard/standard-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { getMaterialFamily } from "./material-family.js";
 import { getMaterialSource } from "./material-view.js";
+import { _getParallaxHeightTexture, _getStandardParallaxHeightTexture } from "./parallax/parallax-occlusion.js";
 import {
     getPbrAnisotropy,
     getPbrClearCoat,
@@ -106,6 +107,7 @@ function getPbrTextures(material: PbrMaterialProps): readonly Texture2D[] {
     pushTexture(textures, subsurface?.thickness?.texture);
     pushTexture(textures, getPbrTransmission(material)?.texture);
     pushTexture(textures, material.bentNormalTexture);
+    pushTexture(textures, _getParallaxHeightTexture(material));
     return textures;
 }
 
@@ -119,6 +121,7 @@ function getStandardTextures(material: StandardMaterialProps): readonly Texture2
     pushTexture(textures, getStandardLightmapTexture(material));
     pushTexture(textures, getStandardOpacityTexture(material));
     pushTexture(textures, getStandardReflectionTexture(material));
+    pushTexture(textures, _getStandardParallaxHeightTexture(material));
     return textures;
 }
 

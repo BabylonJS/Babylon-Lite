@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadUsdOptions } from "babylon-lite";
 
-const { addToScene, disposeUsd, loadGltf, loadSplat, loadUsd, removeFromScene } = vi.hoisted(() => ({
+const { addToScene, disposeUsd, enableUnsupportedGltfMaterialExtension, loadGltf, loadSplat, loadUsd, removeFromScene } = vi.hoisted(() => ({
     addToScene: vi.fn(),
     disposeUsd: vi.fn(),
+    enableUnsupportedGltfMaterialExtension: vi.fn(),
     loadGltf: vi.fn(async () => ({ animationGroups: [] })),
     loadSplat: vi.fn(async () => ({
         name: "loaded",
@@ -20,6 +21,7 @@ vi.mock("babylon-lite", async (importOriginal) => ({
     ...(await importOriginal<typeof import("babylon-lite")>()),
     addToScene,
     disposeUsd,
+    enableUnsupportedGltfMaterialExtension,
     loadGltf,
     loadSplat,
     loadUsd,
@@ -65,6 +67,9 @@ describe("function-style scene loader options", () => {
         await LoadAssetContainerAsync("model.glb", loaderScene, { rootUrl: "https://cdn.example/assets/" });
 
         expect(loadGltf).toHaveBeenCalledWith({}, "https://cdn.example/assets/model.glb");
+        expect(enableUnsupportedGltfMaterialExtension).toHaveBeenCalledWith("KHR_materials_scatter", expect.any(Function));
+        const rejectScatter = enableUnsupportedGltfMaterialExtension.mock.calls[0]![1] as () => never;
+        expect(rejectScatter).toThrow(/screen-space subsurface-scattering prepass/);
     });
 
     it("dispatches USD URLs and forwards plugin runtime options", async () => {

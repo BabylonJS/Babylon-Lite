@@ -166,9 +166,9 @@ describe("Mesh transform bake (issue #475)", () => {
     });
 
     it("does not resurrect a quaternion-mode rotation when the mode is cleared after baking", () => {
-        const mesh = makeMesh();
         const node = createTransformNode("quaternion-bake");
-        (mesh as unknown as { _node: unknown })._node = node;
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("quaternion-bake", node as never);
         const bakeSpy = vi.fn((_matrix: Matrix) => true);
         (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = bakeSpy;
 
@@ -193,9 +193,9 @@ describe("Mesh transform bake (issue #475)", () => {
     });
 
     it("keeps the Euler-mode cached angle and physical quaternion at identity after baking", () => {
-        const mesh = makeMesh();
         const node = createTransformNode("euler-bake");
-        (mesh as unknown as { _node: unknown })._node = node;
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("euler-bake", node as never);
         const bakeSpy = vi.fn((_matrix: Matrix) => true);
         (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = bakeSpy;
 
@@ -203,19 +203,22 @@ describe("Mesh transform bake (issue #475)", () => {
         mesh.bakeCurrentTransformIntoVertices();
 
         expect(mesh.rotationQuaternion).toBeNull();
-        expect(mesh.rotation.asArray()).toEqual([0, 0, 0]);
+        // The angles are re-derived from the identity quaternion, which may yield signed zeros.
+        expect(mesh.rotation.asArray().map(Math.abs)).toEqual([0, 0, 0]);
         expect([node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w]).toEqual([0, 0, 0, 1]);
     });
 
     it("leaves both Euler and quaternion rotation state untouched if baking fails", () => {
-        const mesh = makeMesh();
         const node = createTransformNode("failed-bake");
-        (mesh as unknown as { _node: unknown })._node = node;
+        // Construct through TransformNode so the compat rotation bindings are initialized.
+        const mesh = new Mesh("failed-bake", node as never);
         (mesh as unknown as { _bakeMatrix: unknown })._bakeMatrix = vi.fn(() => false);
 
         mesh.rotation = new Vector3(0.2, 0.4, 0.6);
         const q = Quaternion.FromEulerAngles(-0.3, 0.5, -0.1);
         mesh.rotationQuaternion = q;
+        // Assigning a quaternion clears Euler rotation (Babylon.js); later Euler edits are stored independently.
+        mesh.rotation.set(0.2, 0.4, 0.6);
 
         mesh.bakeCurrentTransformIntoVertices();
 

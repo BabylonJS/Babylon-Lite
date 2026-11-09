@@ -114,6 +114,17 @@ function mirrorSplatRowY(buffer: ArrayBuffer): ArrayBuffer {
  * cloud's `position` / `rotation` / `scaling` proxy onto the Lite splat node.
  */
 export class GaussianSplattingMesh extends TransformNode {
+    private static _useGpuSort = false;
+    public static GpuSortMinFrameInterval = 1;
+
+    public static get UseGpuSort(): boolean {
+        return this._useGpuSort;
+    }
+
+    public static set UseGpuSort(value: boolean) {
+        this._useGpuSort = value;
+    }
+
     /** @internal The loaded Lite splat node (undefined until `loadFileAsync` resolves). */
     private _gs?: LiteGsMesh;
     /** @internal The constructor's deferred URL, loaded by `loadFileAsync()` with no argument. */
@@ -132,6 +143,15 @@ export class GaussianSplattingMesh extends TransformNode {
     private _pointSplattingRenderMode = false;
     /** @internal Requested BJS depth-pass ownership, retained before the splat loads. */
     private _pointSplattingDepthRenderMode = false;
+    private _useGpuSort: boolean | null = null;
+
+    public get useGpuSort(): boolean | null {
+        return this._useGpuSort;
+    }
+
+    public set useGpuSort(value: boolean | null) {
+        this._useGpuSort = value;
+    }
 
     /**
      * Babylon.js `gs.safeOrbitCameraLimits` — safe-orbit camera limits parsed from the source

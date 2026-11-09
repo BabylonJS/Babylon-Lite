@@ -9,6 +9,12 @@ The StandardMaterial module implements a Blinn-Phong shading model with point/di
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`standard-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules (in `fragments/`) inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken. The old `standard-textured-material.ts` was merged into this unified system.
 
+`setStandardParallaxOcclusion(material, props)` opts into independently
+implemented height-map UV displacement across existing surface textures,
+including the bump map, while retaining their original texture gradients and
+normal-map frames. See [Parallax Occlusion Mapping](parallax-occlusion-mapping.md)
+for the complete API and pass behavior.
+
 ## ShaderFragment Composition System
 
 Standard material shaders are built using the same `ShaderComposer` architecture as PBR (defined in `src/shader/shader-composer.ts`):

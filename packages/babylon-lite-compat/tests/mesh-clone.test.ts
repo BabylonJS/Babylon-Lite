@@ -23,10 +23,17 @@ vi.mock("babylon-lite", async (importOriginal) => {
         const q = source.rotationQuaternion;
         const cloned = Object.assign(
             createTransformNode(
-                (root ? source.name + "_clone" : source.name),
-                source.position.x, source.position.y, source.position.z,
-                q.x, q.y, q.z, q.w,
-                source.scaling.x, source.scaling.y, source.scaling.z
+                root ? source.name + "_clone" : source.name,
+                source.position.x,
+                source.position.y,
+                source.position.z,
+                q.x,
+                q.y,
+                q.z,
+                q.w,
+                source.scaling.x,
+                source.scaling.y,
+                source.scaling.z
             ),
             { visible: true }
         ) as MockLiteNode;
@@ -107,13 +114,14 @@ function fakeMaterial(): { _lite: object; _ensureRenderable: () => void } {
 
 /** Build a source `Mesh` wrapper without the GPU-backed constructor path. */
 function sourceMesh(scene: ReturnType<typeof fakeScene>, material: unknown, liteChildren: unknown[] = []): Mesh {
-    const mesh = Object.create(Mesh.prototype) as Mesh;
     const lite = Object.assign(createTransformNode("source"), {
         material: (material as { _lite: unknown })._lite,
         _gpu: {},
         children: liteChildren,
         visible: true,
     });
+    // Construct through TransformNode so the compat rotation bindings are initialized.
+    const mesh = new Mesh("source", lite as never);
     Object.assign(mesh as unknown as Record<string, unknown>, {
         name: "source",
         id: "source-id",

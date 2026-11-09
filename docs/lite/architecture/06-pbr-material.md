@@ -16,6 +16,13 @@ The PBR Material module implements a physically-based rendering material with GG
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`pbr-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken.
 
+`setPbrParallaxOcclusion(material, props)` opts into independently implemented
+height-map UV displacement with texel-limited adaptive marching, bisection
+contact refinement, single-level height reads, and explicit-gradient surface
+samples. It preserves existing normal maps and mesh depth.
+See [Parallax Occlusion Mapping](parallax-occlusion-mapping.md) for the complete
+API, solver, pass behavior, and limitations.
+
 ## ShaderFragment Composition System
 
 PBR shaders are built using the `ShaderComposer` architecture defined in `src/shader/shader-composer.ts`:

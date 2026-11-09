@@ -26,6 +26,7 @@ import {
     loadEnvironment,
     onBeforeRender,
     registerScene,
+    setLightIntensity,
     setPbrEmissive,
     setRenderTaskGpuTimingEnabled,
     startEngine,
@@ -34,6 +35,7 @@ import {
 } from "babylon-lite";
 import type { PbrMaterialProps, SsaoQuality } from "babylon-lite";
 import { createAoDeformationExamples } from "./ambient-occlusion-deformation.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
     deforming.addEventListener("change", animateDeformation);
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
-        brdfUrl: "/brdf-lut.png",
+        brdfUrl: demoAssetUrl("./brdf-lut.png", import.meta.url),
         skipSkybox: true,
         skipGround: true,
     });
@@ -333,7 +335,7 @@ async function main(): Promise<void> {
     });
     const direct = document.getElementById("direct") as HTMLInputElement;
     direct.addEventListener("change", () => {
-        sun.intensity = direct.checked ? 1.2 : 0;
+        setLightIntensity(sun, direct.checked ? 1.2 : 0);
     });
     for (const name of ["radius", "intensity"] as const) {
         const input = document.getElementById(name) as HTMLInputElement;

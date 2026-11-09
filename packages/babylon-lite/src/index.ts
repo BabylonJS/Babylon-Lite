@@ -482,6 +482,7 @@ export { createStandardNoColorMaterialView } from "./material/standard/no-color-
 export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
+export { setStandardParallaxOcclusion } from "./material/standard/set-std-parallax-occlusion.js";
 export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
 export { setStandardSpecularTexture } from "./material/standard/set-std-specular.js";
 export { setStandardAmbientTexture } from "./material/standard/set-std-ambient.js";
@@ -505,6 +506,8 @@ export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
 export type { ShadowOnlyOptions } from "./material/pbr/set-shadow-only.js";
 export { setPbrClearCoat } from "./material/pbr/set-clearcoat.js";
+export { setPbrParallaxOcclusion } from "./material/pbr/set-parallax-occlusion.js";
+export type { ParallaxOcclusionProps } from "./material/parallax/parallax-occlusion.js";
 export { setPbrSheen } from "./material/pbr/set-sheen.js";
 export { setPbrIridescence } from "./material/pbr/set-iridescence.js";
 export { setPbrUnlit } from "./material/pbr/set-unlit.js";
@@ -850,6 +853,7 @@ export {
 } from "./skeleton/bone-control.js";
 export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { enableBoneControlForSkinnedAssets } from "./skeleton/bone-control-hooks.js";
+export { resetSkeletonToRest } from "./skeleton/compat-skeleton.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { runFrameInterpolation } from "./animation/frame-interpolation.js";
 export type { FrameInterpolationStep } from "./animation/frame-interpolation.js";
@@ -876,7 +880,9 @@ export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimat
 export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
+export { adoptMeshMorphTargets, releaseMorphTargets, retainMorphTargets, shareMeshMorphTargets, setMorphTargetWeight } from "./morph/compat-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
+export { enableUnsupportedGltfMaterialExtension } from "./loader-gltf/gltf-feature-unsupported-extension.js";
 export { bakeVat, bakeVatMany, prepareVat, prepareVatMany, createVatBakeResult, createVatBakeResults, attachVat } from "./vat/vat-baker.js";
 export { setVatInstanceStorage, setVatTime } from "./vat/vat-baker.js";
 export type { VatBakeResult, PreparedVatBakeResult, VatBakeOptions, VatBakeTarget, VatClip, VatHandle } from "./vat/vat-baker.js";
@@ -1076,6 +1082,26 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
 export type { GpuPicker, PickDiscardRule, PickIgnore, PickOptions, PickVertexDataAttribute } from "./picking/gpu-picker.js";
+export {
+    clampGaussianSplattingGpuSortKeyBits,
+    getGaussianSplattingGpuSortPassCount,
+    getGaussianSplattingGpuSortPaddedCount,
+    packGaussianSplattingGpuSortIntervals,
+    computeGaussianSplattingGpuSortDepthCoefficients,
+    computeGaussianSplattingGpuSortDepthRange,
+    computeGaussianSplattingGpuSortKeyScale,
+    decodeGaussianSplattingGpuSortSogMean,
+    getGaussianSplattingGpuSorterMaxSplatCount,
+} from "./compat/gaussian-splatting-gpu-sort-helpers.js";
+export {
+    divideTextureProcessConstants,
+    transmissionFractionConstants,
+    transmissionScatterToSingleScatterAlbedoConstants,
+    multiScatterToSingleScatterAlbedoConstants,
+    singleScatterToMultiScatterAlbedoConstants,
+    thinWalledScatterWeightConstants,
+} from "./compat/texture-processing-constants.js";
+export type { CompatColor4 } from "./compat/texture-processing-constants.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";

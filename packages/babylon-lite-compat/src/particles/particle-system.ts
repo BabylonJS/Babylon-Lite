@@ -22,7 +22,15 @@
  * throwing constructor (mirroring `AnimationGroup._fromLite`).
  */
 
-import { startParticleSystem, animateParticleSystem, stopParticleSystem, createParticleBillboard, syncParticleBillboard, addFacingBillboardSystem } from "babylon-lite";
+import {
+    startParticleSystem,
+    animateParticleSystem,
+    stopParticleSystem,
+    isParticleSystemStarted,
+    createParticleBillboard,
+    syncParticleBillboard,
+    addFacingBillboardSystem,
+} from "babylon-lite";
 import type { ParticleSystem as LiteParticleSystem, Texture2D } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
@@ -55,6 +63,7 @@ export class ParticleSystem {
     private _texture: Texture | null = null;
     private _billboardScheduled = false;
     private _billboardOwnedBySet = false;
+    private _started = false;
 
     /**
      * Babylon.js `new ParticleSystem(name, capacity, scene)`. The imperative
@@ -77,13 +86,14 @@ export class ParticleSystem {
      */
     public static _fromLite(lite: LiteParticleSystem, scene: Scene): ParticleSystem {
         const system = Object.create(ParticleSystem.prototype) as ParticleSystem;
-        system.name = "";
+        system.name = lite.name ?? "";
         system._lite = lite;
         system._scene = scene;
         system.preWarmStepOffset = 1;
         system._texture = null;
         system._billboardScheduled = false;
         system._billboardOwnedBySet = false;
+        system._started = isParticleSystemStarted(lite) === true;
         return system;
     }
 
@@ -126,6 +136,7 @@ export class ParticleSystem {
             return;
         }
         startParticleSystem(this._lite);
+        this._started = true;
         this._scheduleBillboard();
     }
 
@@ -148,9 +159,17 @@ export class ParticleSystem {
         }
     }
 
+    /** Babylon.js `ParticleSystem.isStarted()` — whether the system is currently emitting. */
+    public isStarted(): boolean {
+        return this._started;
+    }
+
     /** Babylon.js `ParticleSystem.dispose()` — stop the system. */
     public dispose(): void {
         this.stop();
+        if (this._lite) {
+            this._scene?._unregisterParticleSystem(this._lite);
+        }
     }
 
     /**
@@ -176,6 +195,11 @@ export class ParticleSystem {
      */
     public _releaseBillboardToSet(): void {
         this._billboardOwnedBySet = true;
+    }
+
+    /** @internal Synchronize Babylon.js lifecycle state when the owning set starts this system. */
+    public _markStartedBySet(): void {
+        this._started = true;
     }
 
     /**

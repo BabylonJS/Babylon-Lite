@@ -17,12 +17,7 @@ vi.mock("babylon-lite", async (importActual) => {
             // the source preserves its reference and masks rotation-mode bugs.
             const q = src.rotationQuaternion;
             const result = Object.assign(
-                actual.createTransformNode(
-                    src.name + "_clone",
-                    src.position.x, src.position.y, src.position.z,
-                    q.x, q.y, q.z, q.w,
-                    src.scaling.x, src.scaling.y, src.scaling.z
-                ),
+                actual.createTransformNode(src.name + "_clone", src.position.x, src.position.y, src.position.z, q.x, q.y, q.z, q.w, src.scaling.x, src.scaling.y, src.scaling.z),
                 { visible: src.visible }
             ) as FakeLite;
             if ("_gpu" in src) {
