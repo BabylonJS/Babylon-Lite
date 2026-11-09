@@ -111,9 +111,16 @@ export function disposeEngine(engine: EngineContext): void;
 export function renderFrame(engine: EngineContext, delta: number, surfaces?: readonly [SurfaceContext, ...SurfaceContext[]]): void;
 
 export interface EngineOptions extends SurfaceOptions {
+    readonly device?: never;
     readonly requiredLimits?: Record<string, GPUSize64 | undefined>;
     readonly useHighPrecisionMatrix?: boolean;
     readonly useFloatingOrigin?: boolean;
+}
+
+export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
+    device: DeviceContext;
+    requiredLimits?: never;
+    requiredFeatures?: never;
 }
 
 export interface EngineFeatureOptions extends EngineOptions {
@@ -124,6 +131,7 @@ export function createEngineWithFeatures(canvas: RenderCanvas, options: EngineFe
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
+export function createEngine(canvas: RenderCanvas, options: EngineDeviceOptions): Promise<EngineContext>;
 ```
 
 ### Internal Types (not exported)
@@ -148,11 +156,39 @@ interface EngineContextInternal extends EngineContext {
 ### Initialization Sequence (`createEngine`)
 
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
-2. **Device request**: `createEngine` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. The opt-in `createEngineWithFeatures` wrapper additionally validates and requests explicit adapter-supported features such as `shader-f16`, without retaining feature-selection logic in ordinary engine bundles.
+2. **Device request**: `createDevice` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. `createEngineWithFeatures` installs an internal feature resolver that validates and adds explicit features such as `shader-f16`; bundles that never call it fold the resolver check away.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
 6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
+
+### Preparing a Device
+
+`createDevice()` performs steps 1-2 independently of a canvas. Import it from the
+package root into a small bootstrap bundle to overlap GPU initialization with
+downloading application code:
+
+```typescript
+const [device, app] = await Promise.all([createDevice(), import("./app.js")]);
+const engine = await createEngine(canvas, { device });
+await app.start(engine);
+```
+
+An engine created with `{ device }` skips acquisition; without it, `createEngine` calls
+`createDevice` itself. Configure limits when creating the device; its adapter and optional
+features are selected during acquisition. `EngineDeviceOptions` rejects conflicting
+acquisition options, including explicit features. `engine.device` exposes the context but
+never its native handle.
+
+A device context backs exactly one engine, which owns it: `disposeEngine` destroys the
+device, and passing the same context to a second engine throws. Ownership transfers only
+after initialization succeeds. If initialization fails, the caller can dispose or retry
+with a supplied context that remains unclaimed. A partially initialized canvas is not
+automatically unconfigured, matching existing failure behavior.
+
+Opt-in recovery requests a replacement with the context's original limits and updates
+the context in place.
+See [Device Context](device-context.md) for the full ownership and recovery specification.
 
 ### Rendering-Context Introspection
 

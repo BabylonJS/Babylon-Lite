@@ -110,7 +110,7 @@ export interface XrSessionContext {
  * Requires the **draft** WebXR/WebGPU binding (`XRGPUBinding`), which no browser
  * implements yet — call {@link isXrSessionSupported} first and gate your UI on it.
  * The engine's adapter **must** be XR-compatible — call {@link enableXrCompatibleAdapter}
- * before `createEngine`; otherwise the binding throws and this rejects.
+ * before `createDevice` (or `createEngine` when it creates its own device); otherwise the binding throws and this rejects.
  * The normal canvas render loop is stopped for the session's duration and resumed
  * when it ends.
  *
@@ -163,9 +163,12 @@ export async function enterXr(scene: SceneContext, options: XrSessionOptions = {
         } catch (e) {
             // The draft binding throws InvalidStateError when the device's adapter was not
             // requested with `xrCompatible: true`. WebGPU can't upgrade an existing device,
-            // so `enableXrCompatibleAdapter()` must have been called before `createEngine`.
+            // so `enableXrCompatibleAdapter()` must have been called before device creation.
             const detail = e instanceof Error ? e.message : String(e);
-            throw new Error(`Failed to construct XRGPUBinding: ${detail}. Call enableXrCompatibleAdapter() before createEngine so its GPU adapter is XR-compatible.`, { cause: e });
+            throw new Error(
+                `Failed to construct XRGPUBinding: ${detail}. Call enableXrCompatibleAdapter() before createDevice (or createEngine with a private device) so its GPU adapter is XR-compatible.`,
+                { cause: e }
+            );
         }
         const colorFormat = options.colorFormat ?? binding.getPreferredColorFormat();
         const depthFormat = options.depthStencilFormat === undefined ? "depth24plus" : options.depthStencilFormat;

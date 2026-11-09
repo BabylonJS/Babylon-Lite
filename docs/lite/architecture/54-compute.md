@@ -557,7 +557,7 @@ if (!(await isComputeF16Supported())) {
 const engine = await createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
 ```
 
-Calling `isComputeF16Supported()` before engine creation queries the adapter selected with the same adapter options as `createEngine`. Passing an existing engine checks whether its device actually enabled the feature. Request `shader-f16` per engine through `createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] })`; engine creation validates the requested feature in case adapter availability changes between the capability query and creation.
+Calling `isComputeF16Supported()` before engine creation queries the adapter selected with the same adapter options as `createEngine`. Passing an existing engine checks whether its device actually enabled the feature. Request `shader-f16` per engine through `createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] })`; engine creation rejects through WebGPU if adapter availability changes between the capability query and creation.
 
 The `compute-uniform-f16` module owns the capability query, conversion code, and retained scratch `DataView`. Layouts containing f16 fields use `createComputeUniformF16Writer`. Scenes that never import these APIs retain none of the conversion implementation; explicit device feature selection remains behind the opt-in engine factory.
 
