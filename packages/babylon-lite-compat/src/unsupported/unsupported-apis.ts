@@ -75,6 +75,95 @@ export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlo
     return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
 }
 
+export type KTX2EncoderUsage = "color" | "data" | "normal";
+export interface IKTX2EncoderOptions {
+    usage: KTX2EncoderUsage;
+    generateMipmaps?: boolean;
+    flipY?: boolean;
+    etc1sQualityLevel?: number;
+    etc1sCompressionLevel?: number;
+    uastcQualityLevel?: number;
+    zstandard?: boolean;
+}
+
+export class DefaultKTX2EncoderOptions {
+    private _dirty = true;
+    private _etc1sQualityLevel: number | undefined;
+    private _etc1sCompressionLevel: number | undefined;
+    private _uastcQualityLevel: number | undefined;
+    private _zstandard: boolean | undefined;
+    public get isDirty(): boolean { return this._dirty; }
+    public get etc1sQualityLevel(): number | undefined { return this._etc1sQualityLevel; }
+    public set etc1sQualityLevel(value: number | undefined) { this._etc1sQualityLevel = value; this._dirty = true; }
+    public get etc1sCompressionLevel(): number | undefined { return this._etc1sCompressionLevel; }
+    public set etc1sCompressionLevel(value: number | undefined) { this._etc1sCompressionLevel = value; this._dirty = true; }
+    public get uastcQualityLevel(): number | undefined { return this._uastcQualityLevel; }
+    public set uastcQualityLevel(value: number | undefined) { this._uastcQualityLevel = value; this._dirty = true; }
+    public get zstandard(): boolean | undefined { return this._zstandard; }
+    public set zstandard(value: boolean | undefined) { this._zstandard = value; this._dirty = true; }
+}
+
+let defaultKtx2EncoderOptions: DefaultKTX2EncoderOptions | null = null;
+export class KhronosTextureContainer2Encoder {
+    public static get URLConfig(): { jsEncoderModule: string; jsBasisEncoder: string; wasmBasisEncoder: string } {
+        return unsupported(
+            "KhronosTextureContainer2Encoder.URLConfig",
+            "The URLs configure the out-of-scope @babylonjs/ktx2encoder worker/WASM package, which Lite does not ship or own."
+        );
+    }
+    public static DefaultNumWorkers = 1;
+    public static get DefaultEncoderOptions(): DefaultKTX2EncoderOptions {
+        return (defaultKtx2EncoderOptions ??= new DefaultKTX2EncoderOptions());
+    }
+    public constructor() {
+        unsupported(
+            "KhronosTextureContainer2Encoder",
+            "KTX2 encoding depends on the out-of-scope @babylonjs/ktx2encoder worker/WASM package and its worker-pool ownership lifecycle."
+        );
+    }
+}
+
+export function MapSRGBToLinear(format: number): number | null {
+    if (format >= 37840 && format <= 37853) {
+        return format - 32;
+    }
+    switch (format) {
+        case 35916:
+            return 33776;
+        case 35918:
+            return 33778;
+        case 35919:
+            return 33779;
+        case 37493:
+            return 37492;
+        case 37497:
+            return 37496;
+        case 37495:
+            return 37494;
+        case 36493:
+            return 36492;
+        default:
+            return null;
+    }
+}
+
+export type WebGPURenderPassCommandStreamDisableReason =
+    | "protocol-mismatch"
+    | "atomic-recording-unsupported"
+    | "recorder-missing"
+    | "recording-rejected"
+    | "recording-threw";
+export const WebGPURenderPassCommandStreamProtocolVersion = 1;
+export const WebGPURenderPassCommandStreamMaxDrawsPerBatch = 1024;
+export class WebGPURenderPassCommandStream {
+    public constructor() {
+        unsupported(
+            "WebGPURenderPassCommandStream",
+            "This API records Babylon Native render-pass command batches through host-specific resource IDs; Lite exposes no native-host recorder contract."
+        );
+    }
+}
+
 export interface FlowGraphPlayAnimationBlock {
     getClassName(): string;
 }

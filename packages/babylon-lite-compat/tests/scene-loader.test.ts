@@ -2,16 +2,32 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
+    const cloneNode = (node: { name?: string; children?: unknown[]; material?: unknown; _gpu?: unknown }): unknown => {
+        const clone: { name?: string; children: unknown[]; material?: unknown; _gpu?: unknown; parent: null } = {
+            name: node.name,
+            children: [],
+            material: node.material,
+            _gpu: node._gpu,
+            parent: null,
+        };
+        clone.children = (node.children ?? []).map((child) => {
+            const childClone = cloneNode(child as never) as { parent: unknown };
+            childClone.parent = clone;
+            return childClone;
+        });
+        return clone;
+    };
     return {
         ...actual,
         addToScene: vi.fn(),
+        cloneTransformNode: vi.fn(cloneNode),
         disposeScene: vi.fn(actual.disposeScene),
         removeFromScene: vi.fn(),
         setParent: vi.fn((mesh: { parent: unknown }, parent: unknown) => (mesh.parent = parent)),
     };
 });
 
-import { addToScene, disposeScene, removeFromScene, setParent } from "babylon-lite";
+import { addToScene, createPbrMaterial, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
@@ -48,6 +64,38 @@ function captureThrown(callback: () => void): { threw: boolean; value: unknown }
 }
 
 describe("AssetContainer.addAllToScene", () => {
+    it("clones a hierarchy and gives cloned models independent PBR materials", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const first = container.instantiateModelsToScene((name) => `${name}0`, true, { doNotInstantiate: true });
+        const second = container.instantiateModelsToScene((name) => `${name}1`, true, { doNotInstantiate: true });
+        const firstMesh = first.rootNodes[0]!.getChildMeshes()[0]!;
+        const secondMesh = second.rootNodes[0]!.getChildMeshes()[0]!;
+
+        expect(first.rootNodes[0]!.name).toBe("__root__0");
+        expect(second.rootNodes[0]!.name).toBe("__root__1");
+        expect(firstMesh.material).not.toBe(secondMesh.material);
+        expect(firstMesh.material?._lite).not.toBe(secondMesh.material?._lite);
+    });
+
+    it("uses Babylon.js default cloned-material names without a name function", () => {
+        const material = createPbrMaterial({ name: "Stone" });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+
+        expect(result.rootNodes[0]!.getChildMeshes()[0]!.material?.name).toBe("Clone of Stone");
+    });
+
     it("registers the canonical loaded wrappers in scene.meshes", () => {
         const mesh = { name: "Cube", children: [], _gpu: {} };
         const root = { name: "__root__", children: [mesh] };

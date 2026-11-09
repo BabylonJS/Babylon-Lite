@@ -185,6 +185,13 @@ describe("compat engine startup ordering", () => {
         expect(() => new WebGPUEngine(canvas, { canvasColorSpace: "display-p3" })).toThrow(/surface configuration hot path/);
     });
 
+    it("exposes maxFramesInFlight while rejecting unsupported nonzero scheduling", () => {
+        const canvas = {} as ConstructorParameters<typeof WebGPUEngine>[0];
+        const engine = new WebGPUEngine(canvas);
+        expect(engine.maxFramesInFlight).toBe(0);
+        expect(() => (engine.maxFramesInFlight = 2)).toThrow(/scheduling and lifetime policy/);
+    });
+
     it("starts the main engine before awaiting utility-layer work", async () => {
         const order: string[] = [];
         startEngineMock.mockImplementation(async () => {

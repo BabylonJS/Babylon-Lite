@@ -124,6 +124,19 @@ export abstract class AbstractEngine {
      * configuration internally, so this is a settable no-op kept for API shape.
      */
     public useReverseDepthBuffer = false;
+    private _maxFramesInFlight = 0;
+    public get maxFramesInFlight(): number {
+        return this._maxFramesInFlight;
+    }
+    public set maxFramesInFlight(value: number) {
+        if (value !== 0) {
+            unsupported(
+                "WebGPUEngine.maxFramesInFlight",
+                "Lite's frame graph owns command submission and GPU-resource retirement; a nonzero limit needs a renderer-wide scheduling and lifetime policy in existing hot paths."
+            );
+        }
+        this._maxFramesInFlight = value;
+    }
 
     /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
     public readonly onResizeObservable = new Observable<AbstractEngine>();
@@ -548,6 +561,7 @@ export abstract class AbstractEngine {
             scene._buildShadowGenerators();
             await scene._parseNodeMaterials();
             await scene._awaitPendingTextures();
+            scene._ensureRegisteredMaterialsRenderable();
             scene._bakeGroundUvs();
             scene._flushPendingAdds();
             scene._buildMorphTargets();

@@ -38,6 +38,7 @@ import {
     onPhysicsAfterStep,
     getMeshSkeleton,
     getParticleSystems,
+    getMaterialFamily,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -61,7 +62,8 @@ import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera, FreeCamera } from "../cameras/cameras.js";
-import { StandardMaterial } from "../materials/materials.js";
+import { PBRMaterial, StandardMaterial } from "../materials/materials.js";
+import type { Material } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
@@ -249,6 +251,7 @@ export class Scene extends AbstractScene {
     private readonly _skeletonCache = new Map<LiteSkeleton, Skeleton>();
     private readonly _skeletons: Skeleton[] = [];
     private readonly _particleSystemCache = new Map<LiteParticleSystem, ParticleSystem>();
+    private readonly _loadedMaterialCache = new Map<LiteMaterial, Material>();
     private readonly _particleSystems: ParticleSystem[] = [];
     private readonly _retiredParticleSystems = new Set<LiteParticleSystem>();
     private _disposed = false;
@@ -501,6 +504,14 @@ export class Scene extends AbstractScene {
         }
     }
 
+    /** @internal Rebind resolved textures for loaded materials that entered Lite outside compat's deferred mesh-add path. */
+    public _ensureRegisteredMaterialsRenderable(): void {
+        const engine = this._engine._lite;
+        for (const material of this.materials) {
+            material._ensureRenderable(engine);
+        }
+    }
+
     /**
      * @internal Register a deferred ground-UV bake (for `CreateGroundFromHeightMap` with a
      * PBR `albedoTexture` whose `uScale`/`vScale` tiling must be baked into the geometry,
@@ -519,6 +530,7 @@ export class Scene extends AbstractScene {
         }
         this._pendingGroundBakes.length = 0;
     }
+
 
     /**
      * @internal Register a mesh's compat `MorphTargetManager` to be built at engine
@@ -579,6 +591,20 @@ export class Scene extends AbstractScene {
             this._particleSystemCache.set(lite, wrapper);
             this._particleSystems.push(wrapper);
         }
+        return wrapper;
+    }
+
+    /** @internal Return the canonical compat wrapper for a loader-produced material when its family is adaptable. */
+    public _wrapLoadedMaterial(lite: LiteMaterial): Material | null {
+        let wrapper = this._loadedMaterialCache.get(lite);
+        if (wrapper) {
+            return wrapper;
+        }
+        if (getMaterialFamily(lite) !== "pbr") {
+            return null;
+        }
+        wrapper = PBRMaterial._fromLite(lite.name ?? "loaded material", lite as import("babylon-lite").PbrMaterialProps, this);
+        this._loadedMaterialCache.set(lite, wrapper);
         return wrapper;
     }
 

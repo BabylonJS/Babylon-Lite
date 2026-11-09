@@ -732,6 +732,13 @@ export class AbstractMesh extends TransformNode {
     }
 
     public get material(): CompatMaterial | null {
+        if (!this._material && this._liteOnlyMaterial && this._scene && this._lite.material) {
+            const loaded = this._scene._wrapLoadedMaterial(this._lite.material);
+            if (loaded) {
+                this._material = loaded as CompatMaterial;
+                this._liteOnlyMaterial = false;
+            }
+        }
         return this._material;
     }
     public set material(value: CompatMaterial | null) {

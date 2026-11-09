@@ -21,6 +21,7 @@ import {
     setPbrAnisotropy,
     setPbrIridescence,
     setPbrGammaAlbedo,
+    enableBentNormals,
     setStandardBumpTexture,
     setStandardEmissiveTexture,
 } from "babylon-lite";
@@ -648,7 +649,7 @@ export class PBRIridescenceConfiguration {
 
 export class PBRMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite PBR-material props. */
-    public readonly _lite: PbrMaterialProps;
+    public _lite: PbrMaterialProps;
     private _albedoFactor: Tuple4 = [1, 1, 1, 1];
 
     public constructor(name: string, scene?: Scene) {
@@ -661,6 +662,17 @@ export class PBRMaterial extends PushMaterial {
 
     public override getClassName(): string {
         return "PBRMaterial";
+    }
+
+    /** @internal Wrap a loader-produced Lite PBR material without replacing its GPU state. */
+    public static _fromLite(name: string, lite: PbrMaterialProps, scene: Scene): PBRMaterial {
+        const material = new PBRMaterial(name);
+        material._lite = lite;
+        const factor = lite.baseColorFactor ?? [1, 1, 1, 1];
+        material._albedoFactor = [factor[0], factor[1], factor[2], factor[3]];
+        material._scene = scene;
+        scene._registerMaterial(material);
+        return material;
     }
 
     public get albedoColor(): Color3 {
@@ -687,6 +699,22 @@ export class PBRMaterial extends PushMaterial {
     }
 
     private _albedoTexture: BaseTexture | null = null;
+    private _bentNormalTexture: BaseTexture | null = null;
+
+    /** Babylon.js `PBRMaterial.bentNormalTexture` over Lite's native IBL occlusion extension. */
+    public get bentNormalTexture(): BaseTexture | null {
+        return this._bentNormalTexture;
+    }
+    public set bentNormalTexture(texture: BaseTexture | null) {
+        this._bentNormalTexture = texture;
+        if (texture) {
+            enableBentNormals();
+        }
+        this._lite.bentNormalTexture = (texture?._lite as Texture2D | undefined) ?? undefined;
+        this._lite.bentNormalStrength = texture?.level ?? 1;
+        this._watchTexture(texture);
+        this._markDirty();
+    }
 
     /**
      * Enumerate every bound PBR texture slot, including extension sub-configurations
@@ -696,6 +724,9 @@ export class PBRMaterial extends PushMaterial {
         const textures: BaseTexture[] = [];
         if (this._albedoTexture) {
             textures.push(this._albedoTexture);
+        }
+        if (this._bentNormalTexture) {
+            textures.push(this._bentNormalTexture);
         }
         const environmentTexture = this.environmentTexture;
         if (environmentTexture) {
@@ -860,6 +891,12 @@ export class PBRMaterial extends PushMaterial {
                 lite._gammaAlbedo = false;
             }
         }
+        const bent = this._bentNormalTexture as { _lite?: Texture2D; level?: number } | null;
+        if (bent?._lite) {
+            enableBentNormals();
+            lite.bentNormalTexture = bent._lite;
+            lite.bentNormalStrength = bent.level ?? 1;
+        }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
         // 1×1 solid textures. Keep those NEUTRAL (white) and leave the values in the factors.
@@ -900,6 +937,7 @@ export class PBRMaterial extends PushMaterial {
         target.forceIrradianceInFragment = this.forceIrradianceInFragment;
         target._albedoFactor = [...this._albedoFactor];
         target._albedoTexture = this._albedoTexture;
+        target._bentNormalTexture = this._bentNormalTexture;
         const src = this._lite;
         const dst = target._lite;
         // Route each sub-feature through its setter so the clone's copy also registers the
@@ -921,6 +959,11 @@ export class PBRMaterial extends PushMaterial {
         }
         if (src._iridescence) {
             setPbrIridescence(dst, { ...src._iridescence });
+        }
+        if (src.bentNormalTexture) {
+            enableBentNormals();
+            dst.bentNormalTexture = src.bentNormalTexture;
+            dst.bentNormalStrength = src.bentNormalStrength;
         }
     }
 }

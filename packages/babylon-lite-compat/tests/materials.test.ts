@@ -34,6 +34,33 @@ describe("StandardMaterial texture proxies", () => {
         expect(mat._lite._emissiveTexture).toBeNull();
     });
 
+    it("forwards PBR bent-normal textures and their level", () => {
+        const mat = new PBRMaterial("dog");
+        const tex = fakeTexture();
+        tex.level = 0.4;
+
+        mat.bentNormalTexture = tex;
+
+        expect(mat.bentNormalTexture).toBe(tex);
+        expect(mat._lite.bentNormalTexture).toBe(tex._lite);
+        expect(mat._lite.bentNormalStrength).toBe(0.4);
+        expect(mat.getActiveTextures()).toContain(tex);
+
+        mat.bentNormalTexture = null;
+        expect(mat._lite.bentNormalTexture).toBeUndefined();
+    });
+
+    it("rebinds a bent-normal texture independently of albedo readiness", () => {
+        const mat = new PBRMaterial("dog");
+        const tex = fakeTexture();
+        mat.bentNormalTexture = tex;
+        mat._lite.bentNormalTexture = undefined;
+
+        mat._ensureRenderable({} as never);
+
+        expect(mat._lite.bentNormalTexture).toBe(tex._lite);
+    });
+
     describe("PBRMaterial late texture binding", () => {
         it("restores the logical albedo tint when a pending texture resolves", () => {
             const mat = new PBRMaterial("dog");
