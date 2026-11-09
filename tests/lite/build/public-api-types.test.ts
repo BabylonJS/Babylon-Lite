@@ -52,6 +52,7 @@ const options: DeviceOptions = { requiredLimits: { maxBufferSize: 4096 } };
 const prepared: Promise<DeviceContext> = createDevice(options);
 const attached: Promise<EngineContext> = createEngine(canvas, { device, msaaSamples: 1 });
 const engineOptions: EngineDeviceOptions = { device, useHighPrecisionMatrix: true };
+const conflictingFeatures = { device, requiredFeatures: ["shader-f16"] as GPUFeatureName[] };
 createEngine(canvas, engineOptions);
 createEngine(canvas);
 createEngine(canvas, { requiredLimits: { maxBufferSize: 4096 } });
@@ -72,6 +73,8 @@ createDevice({ powerPreference: "low-power" });
 createEngine(canvas, { device, requiredLimits: { maxBufferSize: 4096 } });
 // @ts-expect-error Configure features before device creation.
 createEngine(canvas, { device, requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Non-literal options cannot silently ignore requested features either.
+createEngine(canvas, conflictingFeatures);
 // @ts-expect-error Legacy explicit-feature factory creates its own device.
 createEngineWithFeatures(canvas, { device, requiredFeatures: ["shader-f16"] });
 // @ts-expect-error Native handles and structural lookalikes are not Lite device contexts.

@@ -120,6 +120,7 @@ export interface EngineOptions extends SurfaceOptions {
 export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
     device: DeviceContext;
     requiredLimits?: never;
+    requiredFeatures?: never;
 }
 
 export interface EngineFeatureOptions extends EngineOptions {

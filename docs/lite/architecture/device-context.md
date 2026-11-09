@@ -20,6 +20,7 @@ function disposeDevice(device: DeviceContext): void;
 interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
     device: DeviceContext;
     requiredLimits?: never;
+    requiredFeatures?: never;
 }
 function createEngine(canvas: RenderCanvas, options: EngineDeviceOptions): Promise<EngineContext>;
 function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;

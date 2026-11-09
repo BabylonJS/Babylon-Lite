@@ -371,6 +371,7 @@ export interface EngineOptions extends SurfaceOptions {
 export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits" | "device"> {
     device: DeviceContext;
     requiredLimits?: never;
+    requiredFeatures?: never;
 }
 
 /** Create an engine that takes ownership of a device from `createDevice`. A device backs only one engine. */
