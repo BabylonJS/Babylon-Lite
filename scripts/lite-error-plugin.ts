@@ -20,10 +20,10 @@
  * Rewrite rules:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
  *     subclasses and non-string args are left untouched.
- *   - Every qualifying file is rewritten, even one with a single short throw. The injected
- *     `import { ThrowLiteError }` line costs nothing in a consumer bundle (bundlers drop import
- *     statements), and the ~60 B helper is shared by every rewritten module, so skipping a file only
- *     ships its full message text for nothing.
+ *   - Every qualifying file is rewritten, even one with a single short throw. In a consumer
+ *     bundle, Rollup can combine module imports and share the helper, so source-level import
+ *     length does not reliably predict shipped bytes. Module-granular output can retain the
+ *     imports, and a bundle that otherwise did not need the helper can grow.
  *   - `transform` re-parses the module Vite hands it and zips throws (in source order) with the
  *     codes assigned in `buildStart`, so it never relies on cross-pass byte offsets.
  */
