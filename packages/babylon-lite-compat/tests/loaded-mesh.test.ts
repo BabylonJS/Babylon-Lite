@@ -13,39 +13,52 @@ vi.mock("babylon-lite", async (importActual) => {
         ...actual,
         addToScene: vi.fn(),
         cloneTransformNode: vi.fn(function clone(src: FakeLite): FakeLite {
-            const result: FakeLite = { ...src, name: src.name + "_clone", children: [], visible: src.visible };
+            // A clone must own a new observable quaternion; shallowly spreading
+            // the source preserves its reference and masks rotation-mode bugs.
+            const q = src.rotationQuaternion;
+            const result = Object.assign(
+                actual.createTransformNode(src.name + "_clone", src.position.x, src.position.y, src.position.z, q.x, q.y, q.z, q.w, src.scaling.x, src.scaling.y, src.scaling.z),
+                { visible: src.visible }
+            ) as FakeLite;
+            if ("_gpu" in src) {
+                result._gpu = src._gpu;
+            }
+            if ("material" in src) {
+                result.material = src.material;
+            }
             result.children = src.children.map((child) => clone(child));
             return result;
         }),
     };
 });
 
-import { addToScene, cloneTransformNode } from "babylon-lite";
+import { addToScene, cloneTransformNode, createTransformNode } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer } from "babylon-lite";
 
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "../src/loading/loaded-mesh";
 import { Mesh } from "../src/meshes/meshes";
+import { Quaternion } from "../src/math/quaternion";
+import { Vector3 } from "../src/math/vector";
 import type { Scene } from "../src/scene/scene";
 
 const addToSceneMock = vi.mocked(addToScene);
 const cloneTransformNodeMock = vi.mocked(cloneTransformNode);
 
-interface FakeLite {
-    name: string;
+type FakeLite = ReturnType<typeof createTransformNode> & {
     children: FakeLite[];
     visible?: boolean;
     _gpu?: object;
     material?: object;
-}
+};
 
 /** A renderable Lite mesh node (carries `_gpu`). */
 function liteMesh(name: string): FakeLite {
-    return { name, children: [], visible: true, _gpu: {}, material: {} };
+    return Object.assign(createTransformNode(name), { visible: true, _gpu: {}, material: {} });
 }
 
 /** The loader's synthetic `__root__` transform node (no `_gpu`, parents the meshes). */
 function liteRoot(children: FakeLite[]): FakeLite {
-    return { name: "__root__", children, visible: true };
+    return Object.assign(createTransformNode("__root__"), { children, visible: true });
 }
 
 /** A minimal compat `Scene` stand-in exposing only what the wrappers touch. */
@@ -199,6 +212,46 @@ describe("Mesh.clone", () => {
         expect(cloneTransformNodeMock).toHaveBeenCalledWith((source as unknown as { _lite: unknown })._lite);
         const cloneLite = cloneTransformNodeMock.mock.results[0]!.value;
         expect(addToSceneMock).toHaveBeenCalledWith((scene as unknown as { _lite: unknown })._lite, cloneLite);
+    });
+
+    it("preserves public Mesh.clone Euler state after direct native animation writes", () => {
+        const { scene } = fakeScene();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([liteMesh("Cube")])), new Map(), scene)[1] as Mesh;
+        source.rotation = new Vector3(0.3, 0.5, -0.2);
+        const animated = Quaternion.FromEulerAngles(-0.4, 0.2, 0.7);
+        source._node.rotationQuaternion.set(animated.x, animated.y, animated.z, animated.w);
+
+        const clone = source.clone("AnimatedCopy");
+        expect(clone.rotationQuaternion).toBeNull();
+        expect(clone.rotation.x).toBeCloseTo(-0.4, 6);
+        expect(clone.rotation.y).toBeCloseTo(0.2, 6);
+        expect(clone.rotation.z).toBeCloseTo(0.7, 6);
+
+        clone.rotation.y += 0.1;
+        const q = Quaternion.FromEulerAngles(-0.4, 0.3, 0.7);
+        const native = clone._node.rotationQuaternion;
+        const dot = Math.abs(native.x * q.x + native.y * q.y + native.z * q.z + native.w * q.w);
+        expect(dot).toBeCloseTo(1, 6);
+        // A clone must never edit its source's transform.
+        expect(source._node.rotationQuaternion.x).toBeCloseTo(animated.x, 6);
+    });
+
+    it("keeps quaternion mode and edits made after switching modes across public Mesh.clone", () => {
+        const { scene } = fakeScene();
+        const source = collectLoadedMeshes(fakeContainer(liteRoot([liteMesh("Cube")])), new Map(), scene)[1] as Mesh;
+        source.rotation = new Vector3(0.1, 0.2, 0.3);
+        const explicit = Quaternion.FromEulerAngles(0.4, -0.2, 0.6);
+        source.rotationQuaternion = explicit;
+        expect(source.rotation.asArray()).toEqual([0, 0, 0]);
+        source.rotation.set(0.3, 0.5, -0.2);
+
+        const clone = source.clone("QuaternionCopy");
+        expect(clone.rotationQuaternion).not.toBeNull();
+        expect(clone.rotation.asArray()).toEqual([0.3, 0.5, -0.2]);
+        clone.rotationQuaternion = null;
+        expect(clone.rotationQuaternion).toBeNull();
+        expect(clone.rotation.asArray()).toEqual([0.3, 0.5, -0.2]);
+        expect(source.rotationQuaternion).not.toBeNull();
     });
 
     it("wraps and registers cloned descendants", () => {
