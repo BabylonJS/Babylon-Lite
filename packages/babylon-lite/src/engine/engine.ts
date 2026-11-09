@@ -13,7 +13,7 @@ import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { EngineGpuEvents } from "./engine-gpu-events.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Renderable } from "../render/renderable.js";
-import { _claimDevice, createDevice } from "./device.js";
+import { _assertDeviceAvailable, createDevice } from "./device.js";
 import type { DeviceContext } from "./device.js";
 
 export { _getAdapterOptions, _installAdapterOptions, _installDeviceFeaturesResolver } from "./device.js";
@@ -119,8 +119,6 @@ export interface EngineContext extends SurfaceContext {
 
     /** @internal */
     _device: GPUDevice;
-    /** @internal Original creation options retained for optional subsystems such as recovery. */
-    _options?: EngineOptions | EngineDeviceOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
     _storageBuffers?: Set<StorageBuffer>;
     /** @internal Installed lazily by the storage-buffer module. */
@@ -374,7 +372,8 @@ export interface EngineDeviceOptions extends Omit<EngineOptions, "requiredLimits
     requiredFeatures?: never;
 }
 
-/** Create an engine that takes ownership of a device from `createDevice`. A device backs only one engine. */
+/** Create an engine that takes ownership of a device from `createDevice`. A device backs only one engine;
+ *  if initialization fails before ownership transfers, the caller retains an unclaimed device. */
 export function createEngine(canvas: RenderCanvas, options: EngineDeviceOptions): Promise<EngineContext>;
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
@@ -433,7 +432,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // Forward the engine options whole: `requiredLimits` is the only acquisition setting they carry, and an installed
     // feature resolver (`createEngineWithFeatures`) reads its extra fields from the same object.
     const deviceContext = options?.device ?? (await createDevice(options));
-    _claimDevice(deviceContext);
+    _assertDeviceAvailable(deviceContext);
     // eslint-disable-next-line no-console
     console.log(`${_ENGINE_TAG} - WebGPU engine`);
     // The engine extends `SurfaceContext`, so we need to assemble both the engine-only
@@ -441,17 +440,16 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // reads `engine._device` at call time, so we seed the object with `_device` up front;
     // `Object.assign` then evaluates both source expressions (the engine-only literal and
     // the `_buildSurface` result) before copying, letting us merge both in one call. The
-    // `surfaces` field is the same array as `_surfaces`, exposed publicly as a readonly tuple.
+    // surface supplies the engine's self-reference, and `surfaces` exposes `_surfaces`
+    // as a readonly tuple.
     const engine = { _device: deviceContext._device } as EngineContext;
     const surfaces: [EngineContext, ...SurfaceContext[]] = [engine];
     Object.assign(
         engine,
         {
-            engine, // self-reference: the engine IS its primary surface
             surfaces, // public readonly view of `_surfaces` (same underlying array)
             _surfaces: surfaces,
             device: deviceContext,
-            _options: options,
             drawCallCount: 0,
             gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
@@ -474,6 +472,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // `_colorView`/`_width`/`_height` are non-null before the frame graph builds.
     resizeSurface(engine);
     _refreshScRT(engine);
+    // Ownership transfers only after initialization succeeds, so a failed call leaves the device disposable.
+    deviceContext._claimed = true;
 
     return engine;
 }

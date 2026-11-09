@@ -68,11 +68,17 @@ share one acquisition implementation. With `device`, the engine skips acquisitio
 feature/limit options are rejected by the `EngineDeviceOptions` type rather than at
 runtime.
 
-`createEngine` sets `_claimed` before configuring the canvas and throws if the context
-is already claimed, either by another engine or by `disposeDevice`. `disposeEngine`
-destroys the owned device. `disposeDevice` is only for a context that never reached an
-engine; it is idempotent and a no-op once an engine owns the device. Dropping an unused
-context without disposing it leaves the native device to garbage collection.
+`createEngine` rejects a context already owned by an engine or disposed before configuring
+the canvas. It claims the context only after initialization succeeds. If initialization
+fails, a supplied context remains the caller's responsibility: it can be disposed with
+`disposeDevice` or used in another attempt. `disposeDevice` is idempotent and a no-op
+after an engine owns the context; `disposeEngine` destroys the owned device.
+
+Failure does not automatically unconfigure a partially initialized canvas or destroy an
+internally acquired device, matching the existing engine-initialization behavior. A configured
+canvas can retain a device until the canvas is unconfigured, reconfigured, or released.
+Dropping an unused context without disposing it leaves reclamation to garbage collection
+once no references remain.
 
 Device loss is coordinated only when recovery is enabled, exactly as before the device
 context existed: the engine requests a replacement using its enabled features, the
@@ -102,8 +108,10 @@ Recovery: existing opt-in recovery, storage recovery, and engine lifecycle.
   `createDevice` with the engine options object.
 - A context already owned by an engine or disposed with `disposeDevice` is rejected
   before the canvas is configured.
-- Engine-level acquisition options and `createDevice({ requiredFeatures })` are rejected
-  by emitted type probes.
+- Initialization failure leaves a supplied device available for disposal or retry;
+  rejecting an already-owned context leaves its original engine's device intact.
+- Engine-level acquisition options, including non-literal `requiredFeatures`, and
+  `createDevice({ requiredFeatures })` are rejected by emitted type probes.
 - Recovery reuses the context's limits and updates the context.
 
 ## File Manifest

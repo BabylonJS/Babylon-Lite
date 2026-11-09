@@ -175,13 +175,16 @@ await app.start(engine);
 ```
 
 An engine created with `{ device }` skips acquisition; without it, `createEngine` calls
-`createDevice` itself. Features, limits, and adapter selection must already have been
-configured on `createDevice`; the `EngineDeviceOptions` type rejects conflicting engine
-options. `engine.device` exposes the context but never its native handle.
+`createDevice` itself. Configure limits when creating the device; its adapter and optional
+features are selected during acquisition. `EngineDeviceOptions` rejects conflicting
+acquisition options, including explicit features. `engine.device` exposes the context but
+never its native handle.
 
 A device context backs exactly one engine, which owns it: `disposeEngine` destroys the
-device, and passing the same context to a second engine throws. Use `disposeDevice`
-only for a context that never reaches an engine.
+device, and passing the same context to a second engine throws. Ownership transfers only
+after initialization succeeds. If initialization fails, the caller can dispose or retry
+with a supplied context that remains unclaimed. A partially initialized canvas is not
+automatically unconfigured, matching existing failure behavior.
 
 Opt-in recovery requests a replacement with the context's original limits and updates
 the context in place.

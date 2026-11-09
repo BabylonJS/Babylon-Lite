@@ -50,17 +50,16 @@ const OPTIONAL_DEVICE_FEATURES = [
     "primitive-index",
 ] as const satisfies readonly GPUFeatureName[];
 
-/** @internal Transfer ownership to an engine; a context backs one engine and never one after disposeDevice. */
-export function _claimDevice(device: DeviceContext): void {
+/** @internal Reject a device already owned by an engine or disposed. */
+export function _assertDeviceAvailable(device: DeviceContext): void {
     if (device._claimed) {
         throw new Error("A DeviceContext can be used by only one engine and not after disposeDevice.");
     }
-    device._claimed = true;
 }
 
 /** Acquire a GPU device without a canvas or engine, e.g. while the rest of the app downloads.
- *  Pass it to exactly one `createEngine` call; that engine owns it and destroys it on disposal.
- *  Use `disposeDevice` only for a device that never reaches an engine. */
+ *  A successful `createEngine` call takes ownership and destroys it on engine disposal.
+ *  Use `disposeDevice` if no engine takes ownership. */
 export async function createDevice(options?: DeviceOptions): Promise<DeviceContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ..._getAdapterOptions() });
     if (!adapter) {

@@ -107,6 +107,7 @@ describe("engine device ownership", () => {
         const target = canvas();
         const engine = await createEngine(target.element, { device, msaaSamples: 1 });
         expect(engine.device).toBe(device);
+        expect(engine.engine).toBe(engine);
         expect(engine._device).toBe(mock.device);
         expect(mock.requestAdapter).toHaveBeenCalledOnce();
         disposeDevice(device);
@@ -128,12 +129,13 @@ describe("engine device ownership", () => {
     });
 
     it("rejects a device that already backs an engine or was disposed, before configuring the canvas", async () => {
-        gpu();
+        const mock = gpu();
         const device = await createDevice();
         const engine = await createEngine(canvas().element, { device });
         const second = canvas();
         await expect(createEngine(second.element, { device })).rejects.toThrow(/only one engine/);
         expect(second.context.configure).not.toHaveBeenCalled();
+        expect(mock.destroy).not.toHaveBeenCalled();
         disposeEngine(engine);
 
         const unused = await createDevice();
@@ -143,20 +145,69 @@ describe("engine device ownership", () => {
         expect(third.context.configure).not.toHaveBeenCalled();
     });
 
+    it("leaves a supplied device disposable if the canvas has no WebGPU context", async () => {
+        const mock = gpu();
+        const device = await createDevice();
+        const unavailable = { getContext: vi.fn(() => null) } as unknown as OffscreenCanvas;
+
+        await expect(createEngine(unavailable, { device })).rejects.toThrow("WebGPU context not available");
+        expect(mock.destroy).not.toHaveBeenCalled();
+        disposeDevice(device);
+        expect(mock.destroy).toHaveBeenCalledOnce();
+        await expect(createEngine(canvas().element, { device })).rejects.toThrow(/only one engine/);
+    });
+
+    it("allows retrying with a supplied device when configuring the canvas fails", async () => {
+        const mock = gpu();
+        const device = await createDevice();
+        const target = canvas();
+        target.context.configure.mockImplementationOnce(() => {
+            throw new Error("configure failed");
+        });
+
+        await expect(createEngine(target.element, { device })).rejects.toThrow("configure failed");
+        expect(mock.destroy).not.toHaveBeenCalled();
+        const engine = await createEngine(target.element, { device });
+        expect(engine.device).toBe(device);
+        disposeEngine(engine);
+        expect(mock.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("leaves a supplied device disposable if swapchain initialization fails", async () => {
+        const mock = gpu();
+        const device = await createDevice();
+        const target = canvas();
+        target.context.getCurrentTexture.mockImplementationOnce(() => {
+            throw new Error("swapchain failed");
+        });
+
+        await expect(createEngine(target.element, { device })).rejects.toThrow("swapchain failed");
+        expect(target.context.configure).toHaveBeenCalledOnce();
+        expect(mock.destroy).not.toHaveBeenCalled();
+        disposeDevice(device);
+        expect(mock.destroy).toHaveBeenCalledOnce();
+    });
+
     it("rejects conflicting acquisition option types and invalid precision", async () => {
         const mock = gpu();
         const device = await createDevice();
         // Acquisition options belong to createDevice; the overload rejects them at compile time.
         const typeOnly = () => {
+            const conflictingFeatures = { device, requiredFeatures: ["shader-f16"] as GPUFeatureName[] };
             // @ts-expect-error Limits must be configured on createDevice.
             void createEngine(canvas().element, { device, requiredLimits: { maxBufferSize: 1024 } });
             // @ts-expect-error Explicit features require createEngineWithFeatures.
             void createEngine(canvas().element, { device, requiredFeatures: ["shader-f16"] });
+            // @ts-expect-error Non-literal options cannot silently ignore requested features either.
+            void createEngine(canvas().element, conflictingFeatures);
         };
         void typeOnly;
         await expect(createEngine(canvas().element, { useFloatingOrigin: true })).rejects.toThrow(/useHighPrecisionMatrix/);
+        await expect(createEngine(canvas().element, { device, useFloatingOrigin: true })).rejects.toThrow(/useHighPrecisionMatrix/);
         expect(mock.requestAdapter).toHaveBeenCalledOnce();
+        expect(mock.destroy).not.toHaveBeenCalled();
         disposeDevice(device);
+        expect(mock.destroy).toHaveBeenCalledOnce();
     });
 });
 
