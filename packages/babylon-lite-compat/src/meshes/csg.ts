@@ -152,9 +152,12 @@ export class CSG2 {
         const engine = scene.getEngine()._lite;
         // Build a slot-indexed Lite material array (sparse; only referenced slots are read).
         const materials: LiteMaterial[] = [];
+        const materialByLite = new Map<LiteMaterial, CompatMaterial>();
         for (const [slot, material] of this._materials) {
             attachMaterialToScene(material, scene);
-            materials[slot] = material._lite as never;
+            const liteMaterial = material._lite as LiteMaterial;
+            materials[slot] = liteMaterial;
+            materialByLite.set(liteMaterial, material);
         }
         const liteMeshes = createMeshesFromCsg2(engine, this._lite, materials, name);
         // `createMeshesFromCsg2` already assigned each sub-mesh its Lite material; wrapping
@@ -162,7 +165,12 @@ export class CSG2 {
         const savedMaterials = liteMeshes.map((m) => m.material);
         const root = new Mesh(name, liteMeshes[0]!, scene);
         const wrapped = root.material;
-        root._lite.material = savedMaterials[0] as never;
+        const rootMaterial = savedMaterials[0] ? materialByLite.get(savedMaterials[0]) : undefined;
+        if (rootMaterial) {
+            root.material = rootMaterial;
+        } else {
+            root._lite.material = savedMaterials[0] as never;
+        }
         scene._deferAdd(() => {
             // The result renders with its source materials unless the app gave the returned mesh one of its
             // own before startup; that one is finalized and bound here like any other pre-start assignment.

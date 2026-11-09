@@ -176,8 +176,10 @@ describe("scene-less material on the specialized mesh builders", () => {
         const pending = pendingScene();
         const material = sceneLessUnlitColour();
 
-        CSG2.FromMesh({ _lite: { name: "source" }, material } as never).toMesh("result", pending.scene);
+        const result = CSG2.FromMesh({ _lite: { name: "source" }, material } as never).toMesh("result", pending.scene);
+        expect(result.material).toBe(material);
         expect(pending.registerMaterial).toHaveBeenCalledWith(material);
+        expect(pending.registerMaterial).toHaveBeenCalledTimes(1);
 
         pending.start();
         expectLiveRebuild(material, pending);
