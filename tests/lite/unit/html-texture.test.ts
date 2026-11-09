@@ -15,9 +15,11 @@ interface FakeElement {
     offsetWidth: number;
     offsetHeight: number;
     parentNode: Node | null;
+    parentElement: Element | null;
     nextSibling: Node | null;
     inert: boolean;
     attributes: Map<string, string>;
+    remove(): void;
     contains(other: unknown): boolean;
     hasAttribute(name: string): boolean;
     setAttribute(name: string, value: string): void;
@@ -29,9 +31,13 @@ function makeElement(width = 256, height = 128): HTMLElement {
         offsetWidth: width,
         offsetHeight: height,
         parentNode: null,
+        parentElement: null,
         nextSibling: null,
         inert: false,
         attributes: new Map(),
+        remove: () => {
+            (el.parentNode as unknown as { removeChild(child: unknown): void } | null)?.removeChild(el);
+        },
         contains: (other) => other === (el as unknown),
         hasAttribute: (name) => el.attributes.has(name),
         setAttribute: (name, value) => {
@@ -92,11 +98,13 @@ function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): 
         },
         appendChild(el) {
             writable(el).parentNode = this as unknown as Node;
+            writable(el).parentElement = this as unknown as Element;
             this.children.push(el);
             return el;
         },
         removeChild(el) {
             writable(el).parentNode = null;
+            writable(el).parentElement = null;
             const i = this.children.indexOf(el);
             if (i >= 0) {
                 this.children.splice(i, 1);
@@ -104,6 +112,7 @@ function makeHost(opts: { withRequestPaint?: boolean; legacy?: boolean } = {}): 
         },
         insertBefore(el) {
             writable(el).parentNode = this as unknown as Node;
+            writable(el).parentElement = this as unknown as Element;
         },
         attributes: new Map(),
         getAttribute(name) {
@@ -461,6 +470,31 @@ describe("disposeHtmlTexture", () => {
         const tex = createHtmlTexture(engine, el, {});
         disposeHtmlTexture(tex);
         expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
+    });
+
+    it("restores an element a polyfill relocated into a sibling host element", () => {
+        // @underglass/html-in-canvas-polyfill moves canvas children into a sibling
+        // `div[data-hic-host]` but keeps reporting the canvas as their parentElement.
+        const relocate = (el: HTMLElement, relocatedHost: { removeChild(child: unknown): void }): void => {
+            writable(el).parentNode = relocatedHost as unknown as Node;
+        };
+
+        const host = makeHost();
+        const engine = makeEngine(host, newCap());
+        const el = makeElement();
+        const origParent = { insertBefore: vi.fn(), removeChild: vi.fn() };
+        writable(el).parentNode = origParent as unknown as Node;
+        const tex = createHtmlTexture(engine, el, {});
+        relocate(el, { removeChild: vi.fn() });
+        disposeHtmlTexture(tex);
+        expect(origParent.insertBefore).toHaveBeenCalledWith(el, null);
+
+        const detached = makeElement();
+        const relocatedHost = { removeChild: vi.fn() };
+        const tex2 = createHtmlTexture(engine, detached, {});
+        relocate(detached, relocatedHost);
+        disposeHtmlTexture(tex2);
+        expect(relocatedHost.removeChild).toHaveBeenCalledWith(detached);
     });
 
     it("keeps a drawable attribute the element already had", () => {
