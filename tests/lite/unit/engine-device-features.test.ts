@@ -1,19 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { _getSupportedDeviceFeatures } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { createDevice } from "../../../packages/babylon-lite/src/engine/device.js";
+
+async function requestedFeatures(adapterFeatures: GPUFeatureName[]): Promise<Iterable<GPUFeatureName> | undefined> {
+    const requestDevice = vi.fn(async (_descriptor: GPUDeviceDescriptor) => ({}) as GPUDevice);
+    const adapter = { features: new Set(adapterFeatures), requestDevice };
+    vi.stubGlobal("navigator", { gpu: { requestAdapter: async () => adapter } });
+    await createDevice();
+    return requestDevice.mock.calls[0]?.[0].requiredFeatures;
+}
+
+afterEach(() => {
+    vi.unstubAllGlobals();
+});
 
 describe("engine optional device features", () => {
-    it("requests unaligned compressed-texture support when the adapter offers it", () => {
-        const adapter = {
-            features: new Set<GPUFeatureName>(["texture-compression-bc", "texture-compression-unaligned" as GPUFeatureName, "timestamp-query"]),
-        } as unknown as GPUAdapter;
+    it("requests unaligned compressed-texture support when the adapter offers it", async () => {
+        const features = ["texture-compression-bc", "texture-compression-unaligned" as GPUFeatureName, "timestamp-query"] as GPUFeatureName[];
 
-        expect(_getSupportedDeviceFeatures(adapter)).toEqual(["texture-compression-bc", "texture-compression-unaligned", "timestamp-query"]);
+        expect(await requestedFeatures(features)).toEqual(["texture-compression-bc", "texture-compression-unaligned", "timestamp-query"]);
     });
 
-    it("does not request unsupported optional features", () => {
-        const adapter = { features: new Set<GPUFeatureName>() } as unknown as GPUAdapter;
-
-        expect(_getSupportedDeviceFeatures(adapter)).toEqual([]);
+    it("does not request unsupported optional features", async () => {
+        expect(await requestedFeatures([])).toEqual([]);
     });
 });

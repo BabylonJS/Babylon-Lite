@@ -925,7 +925,7 @@ drive the render loop.
 **Init sequence**:
 
 1. `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })`
-2. `adapter.requestDevice({ requiredFeatures })` — ordinary creation enables Lite's opportunistic feature set; `createEngineWithFeatures` adds explicitly required features
+2. `adapter.requestDevice({ requiredFeatures })` — ordinary creation enables Lite's opportunistic feature set; `createEngineWithFeatures` adds explicitly required features. `createEngine(canvas, { device })` skips both acquisition steps when using a prepared `DeviceContext`.
 3. `canvas.getContext('webgpu')` → configure with `options?.alphaMode ?? 'opaque'`
 4. Store engine render state (`msaaSamples`, registered contexts, transient encoder/swapchain view)
 

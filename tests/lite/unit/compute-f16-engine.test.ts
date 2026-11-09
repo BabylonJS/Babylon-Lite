@@ -33,9 +33,16 @@ describe("compute f16 engine opt-in", () => {
     });
 
     it("requests explicitly required WebGPU features and rejects unsupported ones", async () => {
-        const requestDevice = vi.fn(async () => device);
+        const adapterFeatures = new Set<GPUFeatureName>(["texture-formats-tier1"]);
+        const requestDevice = vi.fn(async (descriptor: GPUDeviceDescriptor) => {
+            const missing = [...(descriptor.requiredFeatures ?? [])].find((feature) => !adapterFeatures.has(feature));
+            if (missing) {
+                throw new TypeError(`Unsupported feature: ${missing}`);
+            }
+            return device;
+        });
         const adapter = {
-            features: new Set<GPUFeatureName>(["texture-formats-tier1"]),
+            features: adapterFeatures,
             requestDevice,
         };
         const texture = {
@@ -50,6 +57,7 @@ describe("compute f16 engine opt-in", () => {
         };
         const device = {
             features: new Set<GPUFeatureName>(["texture-formats-tier1"]),
+            lost: new Promise<GPUDeviceLostInfo>(() => undefined),
             destroy: vi.fn(),
         } as unknown as GPUDevice;
         const canvas = {
@@ -76,7 +84,9 @@ describe("compute f16 engine opt-in", () => {
             gpu: {
                 requestAdapter: vi.fn(async () => ({
                     features: new Set<GPUFeatureName>(),
-                    requestDevice: vi.fn(),
+                    requestDevice: vi.fn(async () => {
+                        throw new TypeError("Unsupported feature: shader-f16");
+                    }),
                 })),
             },
         });
@@ -102,6 +112,7 @@ describe("compute f16 engine opt-in", () => {
         };
         const device = {
             features: new Set<GPUFeatureName>(["shader-f16"]),
+            lost: new Promise<GPUDeviceLostInfo>(() => undefined),
             destroy: vi.fn(),
         } as unknown as GPUDevice;
         const canvas = {

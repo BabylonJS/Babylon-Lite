@@ -35,6 +35,61 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes device preparation and typed engine ownership without native handles", () => {
+        const probePath = resolve(BUILD_DIR, "device-context.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createDevice, disposeDevice, createEngine, createEngineWithFeatures,
+    type DeviceContext, type DeviceOptions, type EngineContext, type EngineDeviceOptions,
+} from "./index.js";
+declare const canvas: HTMLCanvasElement;
+declare const device: DeviceContext;
+declare const engine: EngineContext;
+declare const nativeDevice: GPUDevice;
+const options: DeviceOptions = { requiredLimits: { maxBufferSize: 4096 } };
+const prepared: Promise<DeviceContext> = createDevice(options);
+const attached: Promise<EngineContext> = createEngine(canvas, { device, msaaSamples: 1 });
+const engineOptions: EngineDeviceOptions = { device, useHighPrecisionMatrix: true };
+createEngine(canvas, engineOptions);
+createEngine(canvas);
+createEngine(canvas, { requiredLimits: { maxBufferSize: 4096 } });
+createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
+const sameDevice: DeviceContext = engine.device;
+disposeDevice(device);
+// @ts-expect-error Native handles remain internal.
+device._device;
+// @ts-expect-error Engine ownership state remains internal.
+device._claimed;
+// @ts-expect-error Device identity is readonly.
+engine.device = device;
+// @ts-expect-error Explicit features use createEngineWithFeatures, not createDevice.
+createDevice({ requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Power preference is not configurable.
+createDevice({ powerPreference: "low-power" });
+// @ts-expect-error Configure limits before device creation, not when attaching an engine.
+createEngine(canvas, { device, requiredLimits: { maxBufferSize: 4096 } });
+// @ts-expect-error Configure features before device creation.
+createEngine(canvas, { device, requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Legacy explicit-feature factory creates its own device.
+createEngineWithFeatures(canvas, { device, requiredFeatures: ["shader-f16"] });
+// @ts-expect-error Native handles and structural lookalikes are not Lite device contexts.
+createEngine(canvas, { device: nativeDevice });
+void [prepared, attached, sameDevice];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes typed parallax setters only through the root API", () => {
         const probePath = resolve(BUILD_DIR, "parallax-occlusion-api.probe.ts");
         try {
