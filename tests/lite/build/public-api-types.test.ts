@@ -35,6 +35,52 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes texture readback through root APIs without native handles", () => {
+        const probePath = resolve(BUILD_DIR, "texture-readback.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    readTexturePixelsRGBA8, getTextureReadbackInfo,
+    type EngineContext, type Texture2D, type Texture2DArray, type Texture3D, type CubeTexture,
+    type TextureReadbackInfo, type TextureReadbackOptions, type TextureReadbackResult,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const texture: Texture2D;
+declare const array: Texture2DArray;
+declare const volume: Texture3D;
+declare const cube: CubeTexture;
+declare const native: GPUTexture;
+const options: TextureReadbackOptions = { mipLevel: 1, flipY: true };
+const info: TextureReadbackInfo = getTextureReadbackInfo(cube);
+const pixels: Promise<TextureReadbackResult> = readTexturePixelsRGBA8(engine, texture, options);
+readTexturePixelsRGBA8(engine, array, { layer: 1 });
+readTexturePixelsRGBA8(engine, volume, { slice: 1 });
+readTexturePixelsRGBA8(engine, cube, { face: 5 });
+// @ts-expect-error Native handles cannot stand in for public wrappers.
+readTexturePixelsRGBA8(engine, native);
+// @ts-expect-error Cubes remain opaque.
+cube._texture;
+// @ts-expect-error Engine device stays internal.
+engine._device;
+// @ts-expect-error Internal staging copy is not public.
+import { readTexturePixels } from "./index.js";
+// @ts-expect-error Results do not expose GPU textures.
+info.texture;
+void [pixels, info];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [TSC_JS, "--ignoreConfig", "--noEmit", "--strict", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", "--skipLibCheck", probePath],
+                { cwd: BUILD_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes device preparation and typed engine ownership without native handles", () => {
         const probePath = resolve(BUILD_DIR, "device-context.probe.ts");
         try {

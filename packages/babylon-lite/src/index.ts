@@ -783,6 +783,8 @@ export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadCubeTexture } from "./texture/cube-texture.js";
 export type { CubeTexture } from "./texture/cube-texture.js";
+export { getTextureReadbackInfo, readTexturePixelsRGBA8 } from "./texture/texture-pixel-readback.js";
+export type { TextureReadbackInfo, TextureReadbackOptions, TextureReadbackResult } from "./texture/texture-pixel-readback.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
