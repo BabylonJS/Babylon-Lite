@@ -569,6 +569,7 @@ export class PBRSheenConfiguration {
         return this._texture;
     }
     public set texture(value: BaseTexture | null) {
+        this._textureAssigned = true;
         this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
@@ -580,6 +581,7 @@ export class PBRSheenConfiguration {
     }
 
     private _texture: BaseTexture | null = null;
+    private _textureAssigned = false;
 
     /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
     public getActiveTextures(): BaseTexture[] {
@@ -588,10 +590,20 @@ export class PBRSheenConfiguration {
 
     /** @internal Rebind a replaced or newly-ready texture handle. */
     public _ensureRenderable(): void {
+        if (!this._textureAssigned) {
+            return;
+        }
         if (this._texture?._lite) {
             this._props.texture = this._texture._lite;
         } else {
             delete this._props.texture;
+        }
+    }
+
+    /** @internal Copy an explicit facade texture assignment without disturbing loader-owned state. */
+    public _copyTextureTo(target: PBRSheenConfiguration): void {
+        if (this._textureAssigned) {
+            target.texture = this._texture;
         }
     }
 }
@@ -1004,7 +1016,7 @@ export class PBRMaterial extends PushMaterial {
         if (src._sheen) {
             setPbrSheen(dst, { ...src._sheen });
             if (this._sheen) {
-                target.sheen.texture = this._sheen.texture;
+                this._sheen._copyTextureTo(target.sheen);
             }
         }
         if (src._anisotropy) {

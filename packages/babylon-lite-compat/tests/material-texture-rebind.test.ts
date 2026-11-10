@@ -210,13 +210,17 @@ describe("Texture.replaceImage", () => {
         expect(target.clone().name).toBe("ground");
     });
 
-    it("preserves a loader-produced sheen texture when cloning PBR materials", () => {
+    it("preserves a loader-produced sheen texture after facade access, finalization, and cloning", () => {
         const { scene } = fakeScene(true);
         const sheenTexture = { id: "loaded-sheen" };
         const loaded = PBRMaterial._fromLite("loaded", { _sheen: { isEnabled: true, texture: sheenTexture } } as never, scene);
 
+        expect(loaded.sheen.intensity).toBe(1);
         const clone = loaded.clone("clone");
+        loaded._ensureRenderable(scene.getEngine()._lite);
+        clone._ensureRenderable(scene.getEngine()._lite);
 
+        expect((loaded._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
         expect((clone._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
     });
 
@@ -249,6 +253,20 @@ describe("Texture.replaceImage", () => {
         expect(target.replaceImage(inverted)).toBe(false);
         expect(engineOnly.replaceImage(target)).toBe(false);
         expect(target.replaceImage(target)).toBe(true);
+    });
+
+    it("rejects a same-engine source whose effective upload flip differs", async () => {
+        const { scene, engineLite } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene, false, false);
+        const source = new Texture("source.png", { _lite: engineLite as import("babylon-lite").EngineContext }, false, false);
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(false);
     });
 });
 

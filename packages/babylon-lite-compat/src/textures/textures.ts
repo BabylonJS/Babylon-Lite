@@ -289,6 +289,8 @@ export class Texture extends BaseTexture {
     private readonly _engine: EngineContext;
     /** @internal The owning scene; Babylon.js rejects image replacement on engine-only textures. */
     private readonly _scene: Scene | undefined;
+    /** @internal Upload flip actually passed to Lite; engine-only loads use Lite's default. */
+    private readonly _effectiveInvertY: boolean;
 
     public constructor(
         url: string,
@@ -339,6 +341,7 @@ export class Texture extends BaseTexture {
         const nearest = this.samplingMode === Texture.NEAREST_SAMPLINGMODE || this.samplingMode === Texture.NEAREST_NEAREST;
         const filterOpts: { minFilter?: "nearest" | "linear"; magFilter?: "nearest" | "linear" } = nearest ? { minFilter: "nearest", magFilter: "nearest" } : {};
         const loadOpts = scene ? { invertY: this._invertY, mipMaps: !this._noMipmap, ...filterOpts } : {};
+        this._effectiveInvertY = scene ? this._invertY : true;
 
         this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
@@ -402,7 +405,7 @@ export class Texture extends BaseTexture {
             !this._lite ||
             !source._lite ||
             this._engine !== source._engine ||
-            this._invertY !== source._invertY
+            this._effectiveInvertY !== source._effectiveInvertY
         ) {
             return false;
         }
