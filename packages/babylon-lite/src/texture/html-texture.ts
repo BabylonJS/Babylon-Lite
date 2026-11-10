@@ -476,12 +476,14 @@ function releaseHtmlTextureElement(host: HTMLCanvasElement, element: HTMLElement
     // Restore the element's DOM position and opt-ins when the last texture using it is gone.
     // HTML-in-Canvas polyfills may relocate canvas children into a sibling host
     // element while still reporting the canvas as their `parentElement`, so test
-    // that (not `parentNode`) and detach via `remove()` rather than `host.removeChild`.
+    // that (not `parentNode`) and detach through the physical `parentNode` rather than
+    // the canvas. `element.remove()` is avoided: a `<form>` control named "remove"
+    // shadows it.
     if (element.parentElement === host) {
         if (ref.parent) {
             ref.parent.insertBefore(element, ref.nextSibling);
         } else {
-            element.remove();
+            element.parentNode?.removeChild(element);
         }
     }
     element.inert = ref.inert;

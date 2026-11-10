@@ -19,7 +19,6 @@ interface FakeElement {
     nextSibling: Node | null;
     inert: boolean;
     attributes: Map<string, string>;
-    remove(): void;
     contains(other: unknown): boolean;
     hasAttribute(name: string): boolean;
     setAttribute(name: string, value: string): void;
@@ -35,9 +34,6 @@ function makeElement(width = 256, height = 128): HTMLElement {
         nextSibling: null,
         inert: false,
         attributes: new Map(),
-        remove: () => {
-            (el.parentNode as unknown as { removeChild(child: unknown): void } | null)?.removeChild(el);
-        },
         contains: (other) => other === (el as unknown),
         hasAttribute: (name) => el.attributes.has(name),
         setAttribute: (name, value) => {
@@ -495,6 +491,23 @@ describe("disposeHtmlTexture", () => {
         relocate(detached, relocatedHost);
         disposeHtmlTexture(tex2);
         expect(relocatedHost.removeChild).toHaveBeenCalledWith(detached);
+    });
+
+    it("detaches a form whose named control shadows Element.remove", () => {
+        const host = makeHost();
+        const removeChild = vi.spyOn(host, "removeChild");
+        const engine = makeEngine(host, newCap());
+        // `<form><button name="remove"></button></form>` exposes the button as `form.remove`.
+        const form = makeElement();
+        (form as unknown as { remove: unknown }).remove = { name: "remove" };
+        const tex = createHtmlTexture(engine, form, {});
+        expect(form.inert).toBe(true);
+
+        expect(() => disposeHtmlTexture(tex)).not.toThrow();
+        expect(removeChild).toHaveBeenCalledWith(form);
+        expect(form.parentNode).toBeNull();
+        expect(form.inert).toBe(false);
+        expect(form.hasAttribute("drawable")).toBe(false);
     });
 
     it("keeps a drawable attribute the element already had", () => {
