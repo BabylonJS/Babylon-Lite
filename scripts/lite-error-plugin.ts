@@ -17,11 +17,13 @@
  * and source position. This is independent of Vite's parallel per-module `transform` ordering,
  * so the same source always yields the same codes and table.
  *
- * Safety guards:
+ * Rewrite rules:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
  *     subclasses and non-string args are left untouched.
- *   - A per-file byte guard skips files whose total rewrite savings would not cover the one-time
- *     `import { ThrowLiteError }` cost, so the transform never makes a module larger.
+ *   - Every qualifying file is rewritten, even one with a single short throw. In a consumer
+ *     bundle, Rollup can combine module imports and share the helper, so source-level import
+ *     length does not reliably predict shipped bytes. Module-granular output can retain the
+ *     imports, and a bundle that otherwise did not need the helper can grow.
  *   - `transform` re-parses the module Vite hands it and zips throws (in source order) with the
  *     codes assigned in `buildStart`, so it never relies on cross-pass byte offsets.
  */
@@ -38,10 +40,6 @@ interface Candidate {
     tableFnSource: string;
     /** Argument expression source texts forwarded at the call site. */
     argTexts: string[];
-    /** Replacement length excluding the code number. */
-    rewrittenLenSansCode: number;
-    /** Original `throw new Error(...)` expression length. */
-    originalLen: number;
 }
 
 interface FilePlan {
@@ -135,10 +133,8 @@ function candidateFor(node: ts.ThrowStatement, sf: ts.SourceFile): Candidate | n
 
     const start = node.getStart(sf);
     const end = expr.getEnd();
-    const callArgs = argTexts.length ? ", " + argTexts.join(", ") : "";
-    const rewrittenLenSansCode = "ThrowLiteError(".length + callArgs.length + ")".length;
 
-    return { start, end, tableFnSource, argTexts, rewrittenLenSansCode, originalLen: end - start };
+    return { start, end, tableFnSource, argTexts };
 }
 
 /** Collect rewrite candidates from a module's source, in source order. */
@@ -194,17 +190,6 @@ export function liteErrorPlugin(): Plugin {
                 if (!rel.startsWith(".")) {
                     rel = "./" + rel;
                 }
-                const importLen = `import { ThrowLiteError } from "${rel}";\n`.length;
-
-                const codeWidth = String(nextCode + candidates.length).length;
-                let totalSavings = 0;
-                for (const c of candidates) {
-                    totalSavings += c.originalLen - (c.rewrittenLenSansCode + codeWidth);
-                }
-                if (totalSavings <= importLen) {
-                    continue;
-                }
-
                 const codes = candidates.map((c) => {
                     const code = nextCode++;
                     tableEntries.push(`/*${code}*/ ${c.tableFnSource},`);

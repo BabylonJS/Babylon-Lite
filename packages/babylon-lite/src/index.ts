@@ -10,6 +10,9 @@ export { readGamepad } from "./input/gamepad-input.js";
 export type { GamepadState, GamepadButtonState } from "./input/gamepad-input.js";
 
 // ─── Core ────────────────────────────────────────────────────────────
+export { createDevice } from "./engine/device.js";
+export { disposeDevice } from "./engine/device-dispose.js";
+export type { DeviceContext, DeviceOptions } from "./engine/device.js";
 export {
     createEngine,
     startEngine,
@@ -32,7 +35,7 @@ export type { EngineGpuErrorCallback, EngineDeviceLostCallback } from "./engine/
 export { disposeEngine } from "./engine/engine-dispose.js";
 export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
-export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
+export type { EngineContext, EngineOptions, EngineDeviceOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";

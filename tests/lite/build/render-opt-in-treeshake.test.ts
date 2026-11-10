@@ -253,6 +253,23 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         });
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("function createEngineWithFeatures")).toBe(retained);
         expect(result.code.includes("_installDeviceFeaturesResolver")).toBe(retained);
+    });
+
+    it("keeps device-only bootstrap independent of engine and surface initialization", async () => {
+        const result = await runRollup({
+            entrySource: `import { createDevice } from ${JSON.stringify(LIB_ENTRY)};\nvoid createDevice();\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).toContain("requestAdapter");
+        expect(result.code).toContain("requestDevice");
+        expect(result.code).not.toContain("getContext");
+        expect(result.code).not.toContain("getPreferredCanvasFormat");
+        expect(result.code).not.toContain("requestAnimationFrame");
+        expect(result.code).not.toContain("GPU resource retirement failed.");
     });
 });
