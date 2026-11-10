@@ -9,7 +9,17 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon, loadUsd, disposeUsd, removeFromScene, setParent as setLiteParent } from "babylon-lite";
+import {
+    addToScene,
+    cloneTransformNode,
+    enableBoneControlForSkinnedAssets,
+    loadGltf,
+    loadBabylon,
+    loadUsd,
+    disposeUsd,
+    removeFromScene,
+    setParent as setLiteParent,
+} from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
@@ -55,8 +65,10 @@ export class AssetContainer {
 
     /** @internal Canonical loaded-mesh wrappers, cached per Lite node for stable identity. */
     private readonly _meshRegistry: LoadedMeshRegistry = new Map();
-    /** @internal The compat scene this container was added to, if any (drives scene-aware wrappers). */
+    /** @internal The compat scene this container was added to, if any (drives registry membership). */
     private _scene: Scene | undefined;
+    /** @internal Destination supplied at load time for later instantiation, even while the container stays detached. */
+    private readonly _destinationScene: Scene | undefined;
     /** @internal Canonical loaded-skeleton wrappers. */
     private _skeletons: Skeleton[] | undefined;
 
@@ -66,10 +78,11 @@ export class AssetContainer {
     private _sceneDisposeObserver: ((scene: Scene) => void) | undefined;
     private _disposed = false;
 
-    public constructor(lite: LiteAssetContainer, dispose?: () => void, ownedMeshes?: readonly LiteMesh[]) {
+    public constructor(lite: LiteAssetContainer, dispose?: () => void, ownedMeshes?: readonly LiteMesh[], scene?: Scene) {
         this._lite = lite;
         this._dispose = dispose;
         this._ownedMeshes = ownedMeshes ? [...ownedMeshes] : undefined;
+        this._destinationScene = scene;
     }
 
     public get animationGroups(): AnimationGroup[] {
@@ -86,11 +99,75 @@ export class AssetContainer {
         if (this._disposed) {
             return [...this._meshRegistry.values()];
         }
-        return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
+        const scene = this._scene ?? this._destinationScene;
+        return collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
     }
 
     public get skeletons(): Skeleton[] {
         return (this._skeletons ??= (this._lite.skeletons ?? []).map((skeleton, index) => this._scene?._wrapSkeleton(skeleton) ?? Skeleton._fromLite(skeleton, index)));
+    }
+
+    /**
+     * Babylon.js `AssetContainer.instantiateModelsToScene` for clone-backed Lite
+     * hierarchies. Materials can be cloned independently; animation/skeleton
+     * retargeting remains outside Lite's clone contract.
+     */
+    public instantiateModelsToScene(
+        nameFunction?: (sourceName: string) => string,
+        cloneMaterials = false,
+        options?: { doNotInstantiate?: boolean }
+    ): { rootNodes: TransformNode[]; skeletons: Skeleton[]; animationGroups: AnimationGroup[] } {
+        const scene = this._scene ?? this._destinationScene;
+        if (!scene) {
+            throw new Error("AssetContainer.instantiateModelsToScene requires a Scene.");
+        }
+        if ((this._lite.animationGroups?.length ?? 0) > 0 || (this._lite.skeletons?.length ?? 0) > 0) {
+            unsupported(
+                "AssetContainer.instantiateModelsToScene",
+                "Lite can clone loaded node hierarchies, but cloned animation-group and skeleton binding/retargeting needs a loader-owned clone policy."
+            );
+        }
+        if (options?.doNotInstantiate === false) {
+            unsupported("AssetContainer.instantiateModelsToScene", "Lite exposes hierarchy cloning but no Babylon.js InstancedMesh ownership model; pass doNotInstantiate: true.");
+        }
+        const lite: LiteAssetContainer = {
+            entities: this._lite.entities.map((entity) => cloneTransformNode(entity as never)),
+        };
+        const clone = new AssetContainer(lite, undefined, undefined, scene);
+        clone.addAllToScene(scene);
+        const meshes = clone.meshes;
+        if (nameFunction) {
+            const sources = this.meshes;
+            for (let index = 0; index < meshes.length; index++) {
+                meshes[index]!.name = nameFunction(sources[index]?.name ?? meshes[index]!.name);
+            }
+        }
+        if (cloneMaterials) {
+            const materials = new Map<object, { name: string; clone(name: string): object }>();
+            for (const mesh of meshes) {
+                const material = mesh.material;
+                if (!material) {
+                    continue;
+                }
+                if (!("clone" in material) || typeof material.clone !== "function") {
+                    unsupported(
+                        "AssetContainer.instantiateModelsToScene",
+                        "The assigned compat material has no Babylon.js clone contract, so Lite cannot create an independent material for the cloned hierarchy."
+                    );
+                }
+                let cloned = materials.get(material);
+                if (!cloned) {
+                    cloned = material.clone(nameFunction ? nameFunction(material.name) : `Clone of ${material.name}`);
+                    materials.set(material, cloned);
+                }
+                mesh.material = cloned as never;
+            }
+        }
+        return {
+            rootNodes: meshes.filter((mesh) => mesh.parent === null),
+            skeletons: [],
+            animationGroups: [],
+        };
     }
 
     /** Add every entity, animation group, camera, and clear colour to the scene. */
@@ -267,14 +344,14 @@ async function load(rootUrl: string, fileName: string, scene: Scene, usdOptions?
         enableBoneControlForSkinnedAssets();
     }
     if (isUsdUrl(url)) {
-        return loadUsdContainer(engine, url, usdOptions);
+        return loadUsdContainer(engine, url, usdOptions, undefined, scene);
     }
     if (isBabylonUrl(url)) {
-        return new AssetContainer(await loadBabylon(engine, url));
+        return new AssetContainer(await loadBabylon(engine, url), undefined, undefined, scene);
     }
     RegisterKHR_materials_scatter();
     const lite = await loadGltf(engine, url);
-    return new AssetContainer(lite);
+    return new AssetContainer(lite, undefined, undefined, scene);
 }
 
 /** Babylon.js `SceneLoader` — async glTF/.babylon loading into a compat scene. */
@@ -386,24 +463,25 @@ async function loadFromSource(
         enableBoneControlForSkinnedAssets();
     }
     if (isUsdUrl(source)) {
-        return loadUsdContainer(engine, source, usdOptions, onProgress);
+        return loadUsdContainer(engine, source, usdOptions, onProgress, scene);
     }
     if (isBabylonUrl(source)) {
-        return new AssetContainer(await loadBabylon(engine, source));
+        return new AssetContainer(await loadBabylon(engine, source), undefined, undefined, scene);
     }
     RegisterKHR_materials_scatter();
     const lite = await loadGltf(engine, source);
-    return new AssetContainer(lite);
+    return new AssetContainer(lite, undefined, undefined, scene);
 }
 
 async function loadUsdContainer(
     engine: Parameters<typeof loadUsd>[0],
     source: string,
     options: Partial<USDFileLoaderOptions> = {},
-    onProgress?: (event: ISceneLoaderProgressEvent) => void
+    onProgress?: (event: ISceneLoaderProgressEvent) => void,
+    scene?: Scene
 ): Promise<AssetContainer> {
     const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options), undefined, onProgress));
-    const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes);
+    const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes, scene);
     try {
         options.onComplete?.(lite.diagnostics);
         return container;

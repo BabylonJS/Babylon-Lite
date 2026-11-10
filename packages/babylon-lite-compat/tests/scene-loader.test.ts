@@ -2,23 +2,41 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
+    const cloneNode = (node: { name?: string; children?: unknown[]; material?: unknown; _gpu?: unknown }): unknown => {
+        const clone: { name?: string; children: unknown[]; material?: unknown; _gpu?: unknown; parent: null } = {
+            name: node.name,
+            children: [],
+            material: node.material,
+            _gpu: node._gpu,
+            parent: null,
+        };
+        clone.children = (node.children ?? []).map((child) => {
+            const childClone = cloneNode(child as never) as { parent: unknown };
+            childClone.parent = clone;
+            return childClone;
+        });
+        return clone;
+    };
     return {
         ...actual,
         addToScene: vi.fn(),
+        cloneTransformNode: vi.fn(cloneNode),
         disposeScene: vi.fn(actual.disposeScene),
         removeFromScene: vi.fn(),
         setParent: vi.fn((mesh: { parent: unknown }, parent: unknown) => (mesh.parent = parent)),
     };
 });
 
-import { addToScene, disposeScene, removeFromScene, setParent } from "babylon-lite";
+import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
 import { AssetContainer } from "../src/loading/scene-loader";
+import { PBRMaterial } from "../src/materials/materials";
 import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
+import type { AbstractMesh } from "../src/meshes/meshes";
 import { AbstractScene } from "../src/scene/abstract-scene";
 import { Scene } from "../src/scene/scene";
 
@@ -48,6 +66,158 @@ function captureThrown(callback: () => void): { threw: boolean; value: unknown }
 }
 
 describe("AssetContainer.addAllToScene", () => {
+    it("clones a hierarchy and gives cloned models independent PBR materials", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const first = container.instantiateModelsToScene((name) => `${name}0`, true, { doNotInstantiate: true });
+        const second = container.instantiateModelsToScene((name) => `${name}1`, true, { doNotInstantiate: true });
+        const firstMesh = first.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const secondMesh = second.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+
+        expect(first.rootNodes[0]!.name).toBe("__root__0");
+        expect(second.rootNodes[0]!.name).toBe("__root__1");
+        expect(firstMesh.material).not.toBe(secondMesh.material);
+        expect(firstMesh.material?._lite).not.toBe(secondMesh.material?._lite);
+    });
+
+    it("uses Babylon.js default cloned-material names without a name function", () => {
+        const material = createPbrMaterial({ name: "Stone" });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+
+        expect((result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh).material?.name).toBe("Clone of Stone");
+    });
+
+    it("preserves loader-owned PBR semantics and loaded culling state when cloning", () => {
+        const material = createPbrMaterial({
+            name: "Masked unlit",
+            doubleSided: true,
+            _alphaCutOff: 0.35,
+            _unlit: true,
+            _unlitColor: [0.2, 0.4, 0.6],
+            _uv2Mask: 32,
+            _transmissive: true,
+        });
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const source = container.meshes[1]!;
+        container.addAllToScene(scene);
+        expect(source.material?.backFaceCulling).toBe(false);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+        const cloned = clone.material!._lite as typeof material;
+
+        expect(cloned).not.toBe(material);
+        expect(cloned.doubleSided).toBe(true);
+        expect(cloned._alphaCutOff).toBe(0.35);
+        expect(cloned._unlit).toBe(true);
+        expect(cloned._unlitColor).toEqual([0.2, 0.4, 0.6]);
+        expect(cloned._uv2Mask).toBe(32);
+        expect(cloned._transmissive).toBe(true);
+    });
+
+    it("clones loaded Standard materials instead of silently sharing them", () => {
+        const material = createStandardMaterial();
+        material.name = "Standard";
+        material.diffuseColor = [0.2, 0.3, 0.4];
+        material.alphaCutOff = 0.45;
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const result = container.instantiateModelsToScene(undefined, true, { doNotInstantiate: true });
+        const clone = result.rootNodes[0]!.getChildMeshes()[0]! as AbstractMesh;
+
+        expect(clone.material?._lite).not.toBe(material);
+        expect(clone.material?._lite).toMatchObject({
+            diffuseColor: [0.2, 0.3, 0.4],
+            alphaCutOff: 0.45,
+            disableLighting: true,
+            backFaceCulling: false,
+        });
+    });
+
+    it("keeps detached source wrappers out of scene.meshes while instantiating clones into the destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const scene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
+
+        const originals = container.meshes;
+        const sourceMaterial = originals[1]!.material;
+        expect(sourceMaterial).toBeInstanceOf(PBRMaterial);
+        if (!(sourceMaterial instanceof PBRMaterial)) {
+            throw new Error("Expected a loaded PBR material wrapper.");
+        }
+        sourceMaterial.roughness = 0.42;
+        expect(sourceMaterial._lite.roughnessFactor).toBe(0.42);
+        expect(scene.meshes).toEqual([]);
+
+        const result = container.instantiateModelsToScene((name) => `${name} clone`, false, { doNotInstantiate: true });
+
+        expect(scene.meshes).toEqual(expect.arrayContaining(result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes)));
+        expect(scene.meshes.some((candidate) => originals.includes(candidate as never))).toBe(false);
+    });
+
+    it("instantiates into the adopted scene instead of the load-time destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+
+        expect(container.meshes[1]!.getScene()).toBe(loadScene);
+        expect(loadScene.meshes).toEqual([]);
+
+        container.addAllToScene(adoptedScene);
+        const result = container.instantiateModelsToScene(undefined, false, { doNotInstantiate: true });
+        const clones = result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes);
+
+        expect(adoptedScene.meshes).toEqual(expect.arrayContaining(clones));
+        expect(loadScene.meshes).toEqual([]);
+    });
+
+    it("keeps loaded rotation bindings after adoption when the load-time scene is disposed", () => {
+        const mesh = Object.assign(createTransformNode("Cube"), { _gpu: {} });
+        const root = createTransformNode("__root__");
+        root.children.push(mesh);
+        mesh.parent = root;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+        const loadedMesh = container.meshes[1]!;
+
+        container.addAllToScene(adoptedScene);
+        loadScene.dispose();
+        loadedMesh.rotation.y = Math.PI / 2;
+
+        expect(loadedMesh._node.rotationQuaternion.y).toBeCloseTo(Math.SQRT1_2, 6);
+        expect(loadedMesh._node.rotationQuaternion.w).toBeCloseTo(Math.SQRT1_2, 6);
+    });
+
     it("registers the canonical loaded wrappers in scene.meshes", () => {
         const mesh = { name: "Cube", children: [], _gpu: {} };
         const root = { name: "__root__", children: [mesh] };

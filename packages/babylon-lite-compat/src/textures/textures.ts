@@ -79,6 +79,22 @@ function loadCompatTexture(engine: EngineContext, url: string, opts: Texture2DOp
 
 export abstract class BaseTexture {
     public name = "";
+    private _level = 1;
+    /** @internal Listeners used by material adapters whose Lite strength is derived from `level`. */
+    private _levelListeners: Array<(level: number) => void> | undefined;
+
+    public get level(): number {
+        return this._level;
+    }
+    public set level(value: number) {
+        if (value === this._level) {
+            return;
+        }
+        this._level = value;
+        for (const listener of this._levelListeners ?? []) {
+            listener(value);
+        }
+    }
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
 
@@ -101,6 +117,17 @@ export abstract class BaseTexture {
             return;
         }
         (this._readyListeners ??= []).push(listener);
+    }
+
+    /** @internal Observe runtime `level` changes. Returns an unsubscribe callback. */
+    public _onLevelChanged(listener: (level: number) => void): () => void {
+        (this._levelListeners ??= []).push(listener);
+        return () => {
+            const index = this._levelListeners?.indexOf(listener) ?? -1;
+            if (index !== -1) {
+                this._levelListeners!.splice(index, 1);
+            }
+        };
     }
 
     /** @internal Fire and clear the readiness listeners (called by subclasses once `_lite` resolves). */
@@ -126,6 +153,7 @@ export abstract class BaseTexture {
     public abstract whenReadyAsync(): Promise<void>;
 
     public dispose(): void {
+        this._levelListeners = undefined;
         // Lite texture lifetimes are managed by the GPU resource pool; explicit
         // disposal is a no-op in the compat layer.
     }
@@ -605,7 +633,6 @@ export class CubeTexture extends BaseTexture {
     /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
     public coordinatesMode = 0;
     public gammaSpace = true;
-    public level = 1;
     /**
      * @internal Which Lite environment loader the scene should route this handle
      * through at engine start. Plain `.env`/`.dds` cube maps load via
@@ -691,7 +718,6 @@ export class HDRCubeTexture extends BaseTexture {
     /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
     public coordinatesMode = 0;
     public gammaSpace = true;
-    public level = 1;
     /** @internal Selects Lite's `loadHdrEnvironment` in the scene's env loader. */
     public readonly _envLoaderKind: "cube" | "hdr" = "hdr";
     /** Fires when the HDR environment is "ready" (resolved on a microtask). */

@@ -432,7 +432,14 @@ export {
     ValidateFlowGraphWithBlockList,
     RemoveFlowGraphAnimationGroupObservers,
     defaultValueParseFunction,
+    DefaultKTX2EncoderOptions,
+    KhronosTextureContainer2Encoder,
+    MapSRGBToLinear,
+    WebGPURenderPassCommandStream,
+    WebGPURenderPassCommandStreamProtocolVersion,
+    WebGPURenderPassCommandStreamMaxDrawsPerBatch,
 } from "./unsupported/unsupported-apis.js";
+export type { IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";
@@ -490,7 +497,6 @@ export {
     DepthOfFieldEffect,
     DefaultRenderingPipeline,
     FxaaPostProcess,
-    SSAO2RenderingPipeline,
     FSR1RenderingPipeline,
     ThinFSR1UpscalePostProcess,
     ThinFSR1SharpenPostProcess,
@@ -512,6 +518,7 @@ export {
     SpritePackedManager,
     VirtualJoystick,
     SceneOptimizer,
+    SSAO2RenderingPipeline,
 } from "./unsupported/unsupported-extended.js";
 export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "./loading/khr-materials-scatter.js";
 export type {

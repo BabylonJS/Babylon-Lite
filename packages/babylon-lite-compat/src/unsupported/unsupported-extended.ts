@@ -207,7 +207,10 @@ export class FxaaPostProcess {
 
 export class SSAO2RenderingPipeline {
     public constructor() {
-        unsupported("SSAO2RenderingPipeline", "SSAO is not implemented in Babylon Lite.");
+        unsupported(
+            "SSAO2RenderingPipeline",
+            "Lite's SSAO uses preset sampling, bounded intensity, temporal reconstruction, and optional half-resolution geometry; BJS exposes exact sample counts, unbounded totalStrength, and independent blur ratios. A faithful adapter needs a Lite-owned BJS-compatible SSAO configuration contract."
+        );
     }
 }
 

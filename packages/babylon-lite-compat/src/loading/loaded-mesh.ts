@@ -42,7 +42,7 @@ export type LoadedMeshRegistry = Map<unknown, Mesh>;
  * meshes, so we prepend that root at index 0 to mirror Babylon.js — as a real,
  * non-renderable `Mesh`, exactly as Babylon.js's `__root__` is a `Mesh`.
  */
-export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene): Mesh[] {
+export function collectLoadedMeshes(container: LiteAssetContainer, registry: LoadedMeshRegistry, scene?: Scene, register = true): Mesh[] {
     const result: Mesh[] = [];
     const visited = new Set<unknown>();
     const visit = (node: unknown, parent: Mesh | null): void => {
@@ -56,7 +56,9 @@ export function collectLoadedMeshes(container: LiteAssetContainer, registry: Loa
         visited.add(node);
         let wrapper = registry.get(node);
         if (!wrapper || (scene && wrapper.getScene() !== scene)) {
-            wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent);
+            wrapper = Mesh._fromLiteHierarchy(node as LiteMesh, container, scene, registry, parent, register);
+        } else if (scene) {
+            wrapper._bindLoadedScene(scene, register);
         }
         result.push(wrapper);
         for (const child of lite.children ?? []) {
