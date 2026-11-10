@@ -438,6 +438,7 @@ export {
     WebGPURenderPassCommandStream,
     WebGPURenderPassCommandStreamProtocolVersion,
     WebGPURenderPassCommandStreamMaxDrawsPerBatch,
+    SubMesh,
 } from "./unsupported/unsupported-apis.js";
 export type { IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";

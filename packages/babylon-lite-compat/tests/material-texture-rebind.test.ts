@@ -81,14 +81,22 @@ function fakeScene(started: boolean): {
     unregisterMaterial: ReturnType<typeof vi.fn>;
 } {
     const engineLite = { id: "engine-lite" };
-    const registerMaterial = vi.fn();
-    const unregisterMaterial = vi.fn();
+    const materials: object[] = [];
+    const registerMaterial = vi.fn((material: object) => materials.push(material));
+    const unregisterMaterial = vi.fn((material: object) => {
+        const index = materials.indexOf(material);
+        if (index !== -1) {
+            materials.splice(index, 1);
+        }
+    });
     const scene = {
         _hasStarted: started,
         _lite: { id: "scene-lite" },
+        materials,
         getEngine: () => ({ _lite: engineLite }),
         _registerMaterial: registerMaterial,
         _unregisterMaterial: unregisterMaterial,
+        _trackTextureLoad: vi.fn(),
     } as unknown as Scene;
     return { scene, engineLite, registerMaterial, unregisterMaterial };
 }
@@ -131,6 +139,134 @@ describe("BaseTexture._onReady", () => {
         let fired = 0;
         (texture as unknown as { _onReady(cb: () => void): void })._onReady(() => fired++);
         expect(fired).toBe(1);
+    });
+});
+
+describe("Texture.replaceImage", () => {
+    it("reuses a ready source handle and rebuilds materials that reference the target", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("https://h/target.png", scene);
+        const source = new Texture("https://h/source.png", scene);
+        const targetHandle = { id: "target" };
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve(targetHandle);
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const mat = new StandardMaterial("m", scene);
+        mat.diffuseTexture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.getInternalTexture()).toBe(sourceHandle);
+        expect(target.name).toBe(source.name);
+        expect(mat._lite.diffuseTexture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+
+    it("rebinds cloned Standard materials and PBR sheen textures", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        const sourceHandle = { id: "source" };
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve(sourceHandle);
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        const original = new StandardMaterial("original", scene);
+        original.diffuseTexture = target;
+        const clone = original.clone("clone");
+        const pbr = new PBRMaterial("pbr", scene);
+        pbr.sheen.texture = target;
+        liteMocks.rebuildMaterial.mockClear();
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(original._lite.diffuseTexture).toBe(sourceHandle);
+        expect(clone._lite.diffuseTexture).toBe(sourceHandle);
+        expect((pbr._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sourceHandle);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(3);
+    });
+
+    it("preserves a custom target name while replacing its image source", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise).mockResolvedValueOnce({ id: "clone" });
+        const target = new Texture("target.png", scene);
+        const source = new Texture("source.png", scene);
+        target.name = "ground";
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(true);
+        expect(target.name).toBe("ground");
+        expect(target.clone().name).toBe("ground");
+    });
+
+    it("preserves a loader-produced sheen texture after facade access, finalization, and cloning", () => {
+        const { scene } = fakeScene(true);
+        const sheenTexture = { id: "loaded-sheen" };
+        const loaded = PBRMaterial._fromLite("loaded", { _sheen: { isEnabled: true, texture: sheenTexture } } as never, scene);
+
+        expect(loaded.sheen.intensity).toBe(1);
+        const clone = loaded.clone("clone");
+        loaded._ensureRenderable(scene.getEngine()._lite);
+        clone._ensureRenderable(scene.getEngine()._lite);
+
+        expect((loaded._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+        expect((clone._lite as { _sheen?: { texture?: unknown } })._sheen?.texture).toBe(sheenTexture);
+    });
+
+    it("rejects engine-only, unready, cross-engine, and differently oriented sources", async () => {
+        const { scene } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const pendingLoad = deferred<object>();
+        const otherLoad = deferred<object>();
+        const invertedLoad = deferred<object>();
+        const engineOnlyLoad = deferred<object>();
+        liteMocks.loadTexture2D
+            .mockReturnValueOnce(targetLoad.promise)
+            .mockReturnValueOnce(pendingLoad.promise)
+            .mockReturnValueOnce(otherLoad.promise)
+            .mockReturnValueOnce(invertedLoad.promise)
+            .mockReturnValueOnce(engineOnlyLoad.promise);
+        const target = new Texture("target.png", scene, false, true);
+        const pending = new Texture("pending.png", scene, false, true);
+        const otherEngine = new Texture("other.png", engineWrapper(), false, true);
+        const inverted = new Texture("inverted.png", scene, false, false);
+        const engineOnly = new Texture("engine-only.png", engineWrapper(), false, true);
+        targetLoad.resolve({ id: "target" });
+        otherLoad.resolve({ id: "other" });
+        invertedLoad.resolve({ id: "inverted" });
+        engineOnlyLoad.resolve({ id: "engine-only" });
+        await Promise.all([target.whenReadyAsync(), otherEngine.whenReadyAsync(), inverted.whenReadyAsync(), engineOnly.whenReadyAsync()]);
+
+        expect(target.replaceImage(pending)).toBe(false);
+        expect(target.replaceImage(otherEngine)).toBe(false);
+        expect(target.replaceImage(inverted)).toBe(false);
+        expect(engineOnly.replaceImage(target)).toBe(false);
+        expect(target.replaceImage(target)).toBe(true);
+    });
+
+    it("rejects a same-engine source whose effective upload flip differs", async () => {
+        const { scene, engineLite } = fakeScene(true);
+        const targetLoad = deferred<object>();
+        const sourceLoad = deferred<object>();
+        liteMocks.loadTexture2D.mockReturnValueOnce(targetLoad.promise).mockReturnValueOnce(sourceLoad.promise);
+        const target = new Texture("target.png", scene, false, false);
+        const source = new Texture("source.png", { _lite: engineLite as import("babylon-lite").EngineContext }, false, false);
+        targetLoad.resolve({ id: "target" });
+        sourceLoad.resolve({ id: "source" });
+        await Promise.all([target.whenReadyAsync(), source.whenReadyAsync()]);
+
+        expect(target.replaceImage(source)).toBe(false);
     });
 });
 

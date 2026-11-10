@@ -82,6 +82,7 @@ import {
     GaussianPointSplattingRenderer,
     GaussianPointSplattingBlitMaterial,
     GaussianPointSplattingDepthBlitMaterial,
+    SubMesh,
 } from "../src/unsupported/unsupported-apis";
 import { AddGaussianSplattingStreamPart, AddGaussianSplattingStreamPartAsync, GaussianSplattingStream } from "../src/meshes/gaussian-splatting-stream";
 import {
@@ -217,6 +218,7 @@ describe("Unsupported API stubs throw on construction", () => {
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
+        ["SubMesh", () => new SubMesh(0, 0, 0, 0, 0, {} as Mesh)],
         ["HtmlInteractionManager", () => new HtmlInteractionManager()],
         ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],

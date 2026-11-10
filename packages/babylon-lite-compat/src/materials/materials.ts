@@ -473,6 +473,9 @@ export class StandardMaterial extends PushMaterial {
         cloned._diffuseTexture = this._diffuseTexture;
         cloned._bumpTexture = this._bumpTexture;
         cloned._emissiveTexture = this._emissiveTexture;
+        cloned._watchTexture(cloned._diffuseTexture);
+        cloned._watchTexture(cloned._bumpTexture);
+        cloned._watchTexture(cloned._emissiveTexture);
         return cloned;
     }
 }
@@ -524,7 +527,8 @@ export class PBRClearCoatConfiguration {
 export class PBRSheenConfiguration {
     public constructor(
         private readonly _props: SheenProps,
-        private readonly _markDirty: () => void
+        private readonly _markDirty: () => void,
+        private readonly _watchTexture: (texture: BaseTexture | null) => void
     ) {}
 
     public get isEnabled(): boolean {
@@ -565,20 +569,42 @@ export class PBRSheenConfiguration {
         return this._texture;
     }
     public set texture(value: BaseTexture | null) {
+        this._textureAssigned = true;
         this._texture = value;
         if (value?._lite) {
             this._props.texture = value._lite;
         } else {
             delete this._props.texture;
         }
+        this._watchTexture(value);
         this._markDirty();
     }
 
     private _texture: BaseTexture | null = null;
+    private _textureAssigned = false;
 
     /** Enumerate the sheen texture slot for `Material.getActiveTextures`. */
     public getActiveTextures(): BaseTexture[] {
         return this._texture ? [this._texture] : [];
+    }
+
+    /** @internal Rebind a replaced or newly-ready texture handle. */
+    public _ensureRenderable(): void {
+        if (!this._textureAssigned) {
+            return;
+        }
+        if (this._texture?._lite) {
+            this._props.texture = this._texture._lite;
+        } else {
+            delete this._props.texture;
+        }
+    }
+
+    /** @internal Copy an explicit facade texture assignment without disturbing loader-owned state. */
+    public _copyTextureTo(target: PBRSheenConfiguration): void {
+        if (this._textureAssigned) {
+            target.texture = this._texture;
+        }
     }
 }
 
@@ -848,7 +874,11 @@ export class PBRMaterial extends PushMaterial {
     public get sheen(): PBRSheenConfiguration {
         if (!this._sheen) {
             setPbrSheen(this._lite, this._lite._sheen ?? { isEnabled: false });
-            this._sheen = new PBRSheenConfiguration(this._lite._sheen!, () => this._markDirty());
+            this._sheen = new PBRSheenConfiguration(
+                this._lite._sheen!,
+                () => this._markDirty(),
+                (texture) => this._watchTexture(texture)
+            );
         }
         return this._sheen;
     }
@@ -927,6 +957,7 @@ export class PBRMaterial extends PushMaterial {
             lite.bentNormalTexture = bent._lite;
             lite.bentNormalStrength = bent.level ?? 1;
         }
+        this._sheen?._ensureRenderable();
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
         // 1×1 solid textures. Keep those NEUTRAL (white) and leave the values in the factors.
@@ -984,6 +1015,9 @@ export class PBRMaterial extends PushMaterial {
         }
         if (src._sheen) {
             setPbrSheen(dst, { ...src._sheen });
+            if (this._sheen) {
+                this._sheen._copyTextureTo(target.sheen);
+            }
         }
         if (src._anisotropy) {
             setPbrAnisotropy(dst, { ...src._anisotropy });
