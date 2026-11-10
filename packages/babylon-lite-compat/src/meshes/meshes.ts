@@ -402,6 +402,10 @@ export class TransformNode extends Node {
      */
     public _bindLoadedScene(scene: Scene, register = true): boolean {
         if (this._scene !== scene) {
+            if (this._sceneDisposeObserver) {
+                this._scene?.onDisposeObservable?.remove(this._sceneDisposeObserver);
+                this._sceneDisposeObserver = undefined;
+            }
             this._scene = scene;
             this._loadedSceneRegistered = false;
             this._bindRotationSceneDisposal(scene);

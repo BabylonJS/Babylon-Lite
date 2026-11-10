@@ -27,7 +27,7 @@ vi.mock("babylon-lite", async (importActual) => {
     };
 });
 
-import { addToScene, createPbrMaterial, createStandardMaterial, disposeScene, removeFromScene, setParent } from "babylon-lite";
+import { addToScene, createPbrMaterial, createStandardMaterial, createTransformNode, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
@@ -198,6 +198,24 @@ describe("AssetContainer.addAllToScene", () => {
 
         expect(adoptedScene.meshes).toEqual(expect.arrayContaining(clones));
         expect(loadScene.meshes).toEqual([]);
+    });
+
+    it("keeps loaded rotation bindings after adoption when the load-time scene is disposed", () => {
+        const mesh = Object.assign(createTransformNode("Cube"), { _gpu: {} });
+        const root = createTransformNode("__root__");
+        root.children.push(mesh);
+        mesh.parent = root;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+        const loadedMesh = container.meshes[1]!;
+
+        container.addAllToScene(adoptedScene);
+        loadScene.dispose();
+        loadedMesh.rotation.y = Math.PI / 2;
+
+        expect(loadedMesh._node.rotationQuaternion.y).toBeCloseTo(Math.SQRT1_2, 6);
+        expect(loadedMesh._node.rotationQuaternion.w).toBeCloseTo(Math.SQRT1_2, 6);
     });
 
     it("registers the canonical loaded wrappers in scene.meshes", () => {
