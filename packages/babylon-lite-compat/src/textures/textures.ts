@@ -280,9 +280,15 @@ export class Texture extends BaseTexture {
     public hasAlpha = false;
     public coordinatesIndex = 0;
     /** Babylon.js sampling mode passed at construction (`NEAREST_SAMPLINGMODE` = 1, etc.). */
-    public readonly samplingMode: number;
+    public samplingMode: number;
     /** @internal The Scene or engine this texture was created against (for `clone`). */
     private readonly _source: Scene | { _lite: import("babylon-lite").EngineContext };
+    /** @internal The image URL, kept separate from the public name so custom names survive replacement. */
+    private _url: string;
+    /** @internal The owning Lite engine, used to reject cross-engine image replacement. */
+    private readonly _engine: EngineContext;
+    /** @internal The owning scene; Babylon.js rejects image replacement on engine-only textures. */
+    private readonly _scene: Scene | undefined;
 
     public constructor(
         url: string,
@@ -294,6 +300,7 @@ export class Texture extends BaseTexture {
     ) {
         super();
         this.name = url;
+        this._url = url;
         // Babylon.js `Texture(url, scene, noMipmapOrOptions?, invertY?, samplingMode?)`.
         // The third argument is either a `noMipmap` boolean or an options object; parse
         // both shapes so the load matches what the ported code asked for.
@@ -318,8 +325,10 @@ export class Texture extends BaseTexture {
         // a bare engine is passed (e.g. the scene-less `SpriteRenderer` path), there
         // is no scene to track against, so the caller awaits readiness itself.
         const scene = (sceneOrEngine as Scene).getEngine ? (sceneOrEngine as Scene) : undefined;
+        this._scene = scene;
         const engineWrapper = scene ? undefined : (sceneOrEngine as { _lite: import("babylon-lite").EngineContext; _registerStartupWork?: (w: () => Promise<void>) => void });
         const engine = scene ? scene.getEngine()._lite : engineWrapper!._lite;
+        this._engine = engine;
         // Honour `invertY` / `noMipmap` only on the material (scene-based) path. The
         // bare-engine path feeds Babylon Lite's sprite renderer, which applies its own
         // V-orientation, so it keeps `loadTexture2D`'s defaults (matching the Lite ports).
@@ -353,8 +362,8 @@ export class Texture extends BaseTexture {
     }
 
     /** @internal Upload-time vertical flip / mipmap flags, preserved across `clone`. */
-    private readonly _invertY: boolean;
-    private readonly _noMipmap: boolean;
+    private _invertY: boolean;
+    private _noMipmap: boolean;
 
     public override getClassName(): string {
         return "Texture";
@@ -366,7 +375,8 @@ export class Texture extends BaseTexture {
      * handle (tracked against the same scene so it is ready at build).
      */
     public clone(): Texture {
-        const c = new Texture(this.name, this._source, this._noMipmap, this._invertY, this.samplingMode);
+        const c = new Texture(this._url, this._source, this._noMipmap, this._invertY, this.samplingMode);
+        c.name = this.name;
         c.uScale = this.uScale;
         c.vScale = this.vScale;
         c.uOffset = this.uOffset;
@@ -374,6 +384,42 @@ export class Texture extends BaseTexture {
         c.hasAlpha = this.hasAlpha;
         c.coordinatesIndex = this.coordinatesIndex;
         return c;
+    }
+
+    /**
+     * Babylon.js `Texture.replaceImage` — reuse another ready URL texture's Lite
+     * handle without reloading it. Wrapper UV state remains local; loading state
+     * follows the source so later clones resolve the same image.
+     */
+    public replaceImage(source: Texture): boolean {
+        if (source === this) {
+            return true;
+        }
+        if (
+            this.constructor !== Texture ||
+            source.constructor !== Texture ||
+            !this._scene ||
+            !this._lite ||
+            !source._lite ||
+            this._engine !== source._engine ||
+            this._invertY !== source._invertY
+        ) {
+            return false;
+        }
+        const nameFollowedUrl = this.name === this._url;
+        this._lite = source._lite;
+        this._url = source._url;
+        if (nameFollowedUrl) {
+            this.name = source._url;
+        }
+        this._noMipmap = source._noMipmap;
+        this.samplingMode = source.samplingMode;
+        for (const material of this._scene.materials) {
+            if (material.getActiveTextures().includes(this)) {
+                material._refreshInScene();
+            }
+        }
+        return true;
     }
 
     public override whenReadyAsync(): Promise<void> {

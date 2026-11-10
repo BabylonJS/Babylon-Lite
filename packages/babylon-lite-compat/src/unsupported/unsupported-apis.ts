@@ -21,7 +21,7 @@ import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
-import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
+import type { AbstractMesh, Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
 import type { AnimationGroup } from "../animations/animation.js";
 import type { Bone } from "../bones/skeleton.js";
@@ -43,6 +43,8 @@ const GAUSSIAN_POINT_SPLATTING_UNSUPPORTED =
     "Lite exposes Gaussian Point Splatting through a scene-integrated high-level handle. Babylon.js's standalone renderer and blit-material classes expose manual accumulation/depth buffers and pass-level GPU control, which cannot be adapted without exposing raw GPU resources forbidden by Lite's public API.";
 const SHADER_MATERIAL_UNSUPPORTED =
     "Lite accepts standalone WGSL, but Babylon.js ShaderMaterial sources rely on the Effect shader-store/preprocessor dialect (attribute/varying declarations and injected VertexInputs/FragmentInputs); adapting it requires a shader preprocessing subsystem.";
+const SUBMESH_INDIRECT_DRAW_UNSUPPORTED =
+    "Lite can bind one indexed-indirect source to an entire mesh, but Babylon.js binds application-owned draw arguments per submesh and render-pass id. Supporting that requires changing Lite's existing material renderable and pass-recording hot paths, so it cannot be added as an independent tree-shakeable adapter.";
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
     "Babylon Lite's flow-graph runtime does not expose Babylon.js FlowGraph blocks, connections, or contexts. Validation requires a stable cross-model graph adapter and block registry design.";
@@ -393,6 +395,27 @@ export class RootMotionController {
 export class MultiMaterial {
     public constructor() {
         unsupported("MultiMaterial", "Babylon Lite uses one material per renderable. Split the mesh geometry by material into separate meshes instead.");
+    }
+}
+
+/** Babylon.js `SubMesh`; pass-specific indirect drawing requires Lite renderer integration. */
+export class SubMesh {
+    public constructor(
+        _materialIndex: number,
+        _verticesStart: number,
+        _verticesCount: number,
+        _indexStart: number,
+        _indexCount: number,
+        _mesh: AbstractMesh,
+        _renderingMesh?: Mesh,
+        _createBoundingBox?: boolean,
+        _addToMesh?: boolean
+    ) {
+        unsupported("SubMesh", SUBMESH_INDIRECT_DRAW_UNSUPPORTED);
+    }
+
+    public setIndirectDrawBuffer(_buffer: unknown | null, _byteOffset: number, _renderPassId: number): void {
+        unsupported("SubMesh.setIndirectDrawBuffer", SUBMESH_INDIRECT_DRAW_UNSUPPORTED);
     }
 }
 
