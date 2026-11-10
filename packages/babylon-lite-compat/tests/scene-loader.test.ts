@@ -33,6 +33,7 @@ import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "bab
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight } from "../src/lights/lights";
 import { AssetContainer } from "../src/loading/scene-loader";
+import { PBRMaterial } from "../src/materials/materials";
 import { Vector3 } from "../src/math/vector";
 import { Observable } from "../src/misc/observable";
 import type { AbstractMesh } from "../src/meshes/meshes";
@@ -164,12 +165,39 @@ describe("AssetContainer.addAllToScene", () => {
         const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, scene);
 
         const originals = container.meshes;
+        const sourceMaterial = originals[1]!.material;
+        expect(sourceMaterial).toBeInstanceOf(PBRMaterial);
+        if (!(sourceMaterial instanceof PBRMaterial)) {
+            throw new Error("Expected a loaded PBR material wrapper.");
+        }
+        sourceMaterial.roughness = 0.42;
+        expect(sourceMaterial._lite.roughnessFactor).toBe(0.42);
         expect(scene.meshes).toEqual([]);
 
         const result = container.instantiateModelsToScene((name) => `${name} clone`, false, { doNotInstantiate: true });
 
         expect(scene.meshes).toEqual(expect.arrayContaining(result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes)));
         expect(scene.meshes.some((candidate) => originals.includes(candidate as never))).toBe(false);
+    });
+
+    it("instantiates into the adopted scene instead of the load-time destination", () => {
+        const material = createPbrMaterial();
+        const mesh = { name: "Cube", children: [], parent: null, _gpu: {}, material };
+        const root = { name: "__root__", children: [mesh], parent: null };
+        mesh.parent = root as never;
+        const loadScene = new Scene(new NullEngine());
+        const adoptedScene = new Scene(new NullEngine());
+        const container = new AssetContainer({ entities: [root] } as unknown as LiteAssetContainer, undefined, undefined, loadScene);
+
+        expect(container.meshes[1]!.getScene()).toBe(loadScene);
+        expect(loadScene.meshes).toEqual([]);
+
+        container.addAllToScene(adoptedScene);
+        const result = container.instantiateModelsToScene(undefined, false, { doNotInstantiate: true });
+        const clones = result.rootNodes[0]!.getChildMeshes().concat(result.rootNodes);
+
+        expect(adoptedScene.meshes).toEqual(expect.arrayContaining(clones));
+        expect(loadScene.meshes).toEqual([]);
     });
 
     it("registers the canonical loaded wrappers in scene.meshes", () => {

@@ -99,7 +99,8 @@ export class AssetContainer {
         if (this._disposed) {
             return [...this._meshRegistry.values()];
         }
-        return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
+        const scene = this._scene ?? this._destinationScene;
+        return collectLoadedMeshes(this._lite, this._meshRegistry, scene, this._scene !== undefined);
     }
 
     public get skeletons(): Skeleton[] {
@@ -116,7 +117,7 @@ export class AssetContainer {
         cloneMaterials = false,
         options?: { doNotInstantiate?: boolean }
     ): { rootNodes: TransformNode[]; skeletons: Skeleton[]; animationGroups: AnimationGroup[] } {
-        const scene = this._destinationScene ?? this._scene;
+        const scene = this._scene ?? this._destinationScene;
         if (!scene) {
             throw new Error("AssetContainer.instantiateModelsToScene requires a Scene.");
         }

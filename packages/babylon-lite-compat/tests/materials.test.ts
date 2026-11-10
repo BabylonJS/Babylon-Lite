@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import * as lite from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
 import { Material, StandardMaterial, PBRMaterial, PBRMetallicRoughnessMaterial, PBRSpecularGlossinessMaterial } from "../src/materials/materials";
 import { NodeMaterial } from "../src/materials/node-material";
 import { Color3 } from "../src/math/color";
-import type { Scene } from "../src/scene/scene";
+import { Mesh } from "../src/meshes/meshes";
+import { Scene } from "../src/scene/scene";
 import { BaseTexture, CubeTexture } from "../src/textures/textures";
 
 class TestTexture extends BaseTexture {
@@ -283,6 +285,25 @@ describe("Material.clone", () => {
         await parsePromise!;
         expect(clone._lite).toBe(cloneLite);
         expect(mesh.material).toBe(cloneLite);
+    });
+
+    it("keeps an assigned NodeMaterial facade when deferred compilation replaces its Lite handle", async () => {
+        const sourceLite = { id: "source" };
+        const cloneLite = { id: "clone" };
+        vi.spyOn(lite, "parseNodeMaterialFromSnippet").mockResolvedValueOnce(cloneLite as never);
+        const scene = new Scene(new NullEngine());
+        const source = new NodeMaterial("src", scene, { foo: "bar" });
+        source._lite = sourceLite as never;
+        const clone = source.clone("clone");
+        const mesh = Mesh._fromLite({ name: "mesh", children: [], _gpu: {}, material: sourceLite } as never, undefined, scene);
+
+        mesh.material = clone;
+        expect(mesh.material).toBe(clone);
+
+        await clone._parse({} as never);
+
+        expect(mesh._lite.material).toBe(cloneLite);
+        expect(mesh.material).toBe(clone);
     });
 
     it("NodeMaterial parse does not overwrite a mesh reassigned before compilation finishes", async () => {

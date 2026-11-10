@@ -385,6 +385,7 @@ export class TransformNode extends Node {
     private readonly _nativeRotationValues: [number, number, number, number];
     private _isSyncingRotationFromNative = false;
     private _sceneDisposeObserver?: (scene: Scene) => void;
+    private _loadedSceneRegistered = false;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -394,18 +395,23 @@ export class TransformNode extends Node {
     public _container?: LiteAssetContainer;
 
     /**
-     * @internal Bind a loader-produced wrapper to the scene the container was added
-     * to. The loader already inserted the underlying Lite node (via
-     * `addToScene(container)`), so this only wires the compat-side scene reference
-     * and lists the wrapper in `scene.meshes` — it never re-inserts into Lite.
+     * @internal Bind a loader-produced wrapper to its owning scene. Detached
+     * containers retain scene-aware material adaptation without registry membership;
+     * adoption later lists the wrapper in `scene.meshes`. The underlying Lite node is
+     * never re-inserted here.
      */
-    public _bindLoadedScene(scene: Scene): void {
-        if (this._scene === scene) {
-            return;
+    public _bindLoadedScene(scene: Scene, register = true): boolean {
+        if (this._scene !== scene) {
+            this._scene = scene;
+            this._loadedSceneRegistered = false;
+            this._bindRotationSceneDisposal(scene);
         }
-        this._scene = scene;
-        scene._registerMesh(this, this._node);
-        this._bindRotationSceneDisposal(scene);
+        if (register && !this._loadedSceneRegistered) {
+            scene._registerMesh(this, this._node);
+            this._loadedSceneRegistered = true;
+            return true;
+        }
+        return false;
     }
 
     /** @internal Link an already-parented Lite node without mutating its Lite hierarchy. */
@@ -736,9 +742,13 @@ export class AbstractMesh extends TransformNode {
     public get material(): CompatMaterial | null {
         const liteMaterial = this._lite.material;
         if (this._scene && liteMaterial && (this._liteOnlyMaterial || (!!this._wrappedLiteMaterial && liteMaterial !== this._wrappedLiteMaterial))) {
-            const loaded = this._scene._wrapLoadedMaterial(this._lite.material);
-            this._material = loaded as CompatMaterial | null;
-            this._liteOnlyMaterial = !loaded;
+            if (this._material?._lite === liteMaterial) {
+                this._liteOnlyMaterial = false;
+            } else {
+                const loaded = this._scene._wrapLoadedMaterial(liteMaterial);
+                this._material = loaded as CompatMaterial | null;
+                this._liteOnlyMaterial = !loaded;
+            }
             this._wrappedLiteMaterial = liteMaterial;
         }
         return this._material;
@@ -1205,20 +1215,22 @@ export class Mesh extends AbstractMesh {
      * adopts the existing Lite node. Used by the loader to give
      * `AssetContainer.meshes` real, stable-identity mesh handles.
      */
-    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene): Mesh {
+    public static _fromLite(lite: LiteMesh, container?: LiteAssetContainer, scene?: Scene, register = true): Mesh {
         const mesh = new Mesh(lite.name ?? "", lite);
         mesh._container = container;
         mesh._liteOnlyMaterial = !!lite.material;
         mesh._visible = lite.visible !== false;
         if (scene) {
-            mesh._bindLoadedScene(scene);
+            mesh._bindLoadedScene(scene, register);
         }
         return mesh;
     }
 
     /** @internal Bind a loaded mesh and its discovered morph manager to the owning scene. */
-    public override _bindLoadedScene(scene: Scene): void {
-        super._bindLoadedScene(scene);
+    public override _bindLoadedScene(scene: Scene, register = true): boolean {
+        if (!super._bindLoadedScene(scene, register)) {
+            return false;
+        }
         for (const manager of this._ownedMorphTargetManagers) {
             scene._retainMorphTargetManagerOwnership(manager);
         }
@@ -1227,6 +1239,7 @@ export class Mesh extends AbstractMesh {
         } else if (this._morphTargetManager) {
             scene._registerMorphTargetManager(this, this._morphTargetManager);
         }
+        return true;
     }
 
     /** @internal Wrap and link a complete Lite hierarchy, registering every wrapper. */
@@ -1235,20 +1248,21 @@ export class Mesh extends AbstractMesh {
         container?: LiteAssetContainer,
         scene?: Scene,
         registry: Map<unknown, Mesh> = new Map(),
-        parent: TransformNode | null = null
+        parent: TransformNode | null = null,
+        register = true
     ): Mesh {
         let wrapper = registry.get(lite) as Mesh | undefined;
         if (!wrapper) {
-            wrapper = Mesh._fromLite(lite, container, scene);
+            wrapper = Mesh._fromLite(lite, container, scene, register);
             registry.set(lite, wrapper);
         } else if (scene) {
-            wrapper._bindLoadedScene(scene);
+            wrapper._bindLoadedScene(scene, register);
         }
         wrapper._adoptLoadedParent(parent);
         const children = (lite as unknown as { children?: LiteMesh[] }).children;
         if (children) {
             for (const child of children) {
-                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper);
+                Mesh._fromLiteHierarchy(child, container, scene, registry, wrapper, register);
             }
         }
         return wrapper;
