@@ -17,6 +17,10 @@
 >   (`pnpm test:unit:gl`). There is no in-package `test/` folder.
 > - **Lab:** `lab/gl/` (WebGL experience), selected by the lab experience toggle.
 > - **Docs:** this core design and focused optional-module documents in this directory, including `01-alpha-to-coverage.md` and `02-text.md`.
+> - **Native backend:** the package also ships a Babylon Native backend under the
+>   `./native` sub-entry (`src/native/`, `src/index.native.ts`). It exposes the
+>   IDENTICAL renderer API but drives `_native` command streams instead of WebGL.
+>   See `docs/gl/architecture/03-native-backend.md`.
 
 ---
 

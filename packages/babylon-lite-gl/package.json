@@ -27,8 +27,16 @@
     "sideEffects": false,
     "exports": {
         ".": {
+            "babylon-native": {
+                "import": "./src/index.native.ts",
+                "types": "./src/index.native.ts"
+            },
             "import": "./src/index.ts",
             "types": "./src/index.ts"
+        },
+        "./native": {
+            "import": "./src/index.native.ts",
+            "types": "./src/index.native.ts"
         }
     },
     "files": [
@@ -43,8 +51,16 @@
         "types": "./dist/index.d.ts",
         "exports": {
             ".": {
+                "babylon-native": {
+                    "import": "./dist/index.native.js",
+                    "types": "./dist/index.native.d.ts"
+                },
                 "import": "./dist/index.js",
                 "types": "./dist/index.d.ts"
+            },
+            "./native": {
+                "import": "./dist/index.native.js",
+                "types": "./dist/index.native.d.ts"
             }
         }
     },

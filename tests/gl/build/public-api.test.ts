@@ -49,8 +49,9 @@ describe("babylon-lite-gl build output", () => {
             expect(existsSync(resolve(DIST, file)), `missing dist/${file}`).toBe(true);
         }
 
-        // The emitted manifest is the scoped npm name exposing EXACTLY one public
-        // export — the barrel. The former sub-entries must NOT be published anymore.
+        // The emitted manifest is the scoped npm name exposing the public barrel
+        // (".") plus the native backend sub-entry ("./native"). The former
+        // per-feature sub-entries must NOT be published anymore.
         const pkg = JSON.parse(readFileSync(resolve(DIST, "package.json"), "utf-8")) as { name?: string; exports?: Record<string, unknown>; dependencies?: Record<string, string> };
         expect(pkg.name).toBe("@babylonjs/lite-gl");
 
@@ -59,7 +60,15 @@ describe("babylon-lite-gl build output", () => {
         const sourceDependencies = (JSON.parse(readFileSync(resolve(PACKAGE_DIR, "package.json"), "utf-8")) as { dependencies?: Record<string, string> }).dependencies;
         expect(sourceDependencies?.["text-shaper"]).toBeDefined();
         expect(pkg.dependencies).toEqual(sourceDependencies);
-        expect(Object.keys(pkg.exports ?? {})).toEqual(["."]);
+        expect(Object.keys(pkg.exports ?? {}).sort()).toEqual([".", "./native"]);
+        expect(pkg.exports?.["."]).toMatchObject({
+            "babylon-native": {
+                import: "./index.native.js",
+                types: "./index.native.d.ts",
+            },
+            import: "./index.js",
+            types: "./index.d.ts",
+        });
         for (const subpath of REMOVED_SUBPATHS) {
             expect(pkg.exports?.[subpath], `exports["${subpath}"] must no longer be published`).toBeUndefined();
         }
@@ -229,5 +238,32 @@ describe("babylon-lite-gl build output", () => {
         expect(existsSync(typesTarget), `exports["."] types -> ${barrel!.types} missing on disk`).toBe(true);
         const resolved = (await import(pathToFileURL(importTarget).href)) as Record<string, unknown>;
         expect(typeof resolved.createGLEngine, `exports["."] should expose createGLEngine`).toBe("function");
+
+        // ── The "./native" sub-entry (Babylon Native backend) resolves + exposes
+        // the identical renderer surface, a native-specific engine factory, AND the
+        // WebGL-named lifecycle bridges (createGLEngine/disposeGLEngine/resizeGLEngine)
+        // so WebGL-barrel consumers build against it with no shim. ──
+        const nativeEntry = distPkg.exports["./native"];
+        expect(nativeEntry?.import, `exports["./native"].import missing`).toBeDefined();
+        expect(nativeEntry?.types, `exports["./native"].types missing`).toBeDefined();
+        const nativeImport = resolve(DIST, nativeEntry!.import!);
+        const nativeTypes = resolve(DIST, nativeEntry!.types!);
+        expect(existsSync(nativeImport), `exports["./native"] import -> ${nativeEntry!.import} missing on disk`).toBe(true);
+        expect(existsSync(nativeTypes), `exports["./native"] types -> ${nativeEntry!.types} missing on disk`).toBe(true);
+        const nativeMod = (await import(pathToFileURL(nativeImport).href)) as Record<string, unknown>;
+        for (const name of [
+            "createNativeGLEngine",
+            "disposeNativeGLEngine",
+            "createGLEngine",
+            "disposeGLEngine",
+            "resizeGLEngine",
+            "createEffectWrapper",
+            "drawEffect",
+            "createSpriteRenderer",
+            "renderSprites",
+            "clearEngine",
+        ]) {
+            expect(typeof nativeMod[name], `native barrel export ${name}`).toBe("function");
+        }
     }, 300_000);
 });

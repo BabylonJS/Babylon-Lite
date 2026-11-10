@@ -74,7 +74,12 @@ const manifest = {
     sideEffects: false,
     ...(runtimeDependencies ? { dependencies: runtimeDependencies } : {}),
     exports: {
-        ".": { import: "./index.js", types: "./index.d.ts" },
+        ".": {
+            "babylon-native": { import: "./index.native.js", types: "./index.native.d.ts" },
+            import: "./index.js",
+            types: "./index.d.ts",
+        },
+        "./native": { import: "./index.native.js", types: "./index.native.d.ts" },
     },
     ...(provenance ? { babylonLiteRelease: provenance } : {}),
 };
