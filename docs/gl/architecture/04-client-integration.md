@@ -109,8 +109,8 @@ export function drawInto(engine: GLEngineContext, prepared: Awaited<ReturnType<t
 
 Features Babylon Native cannot back keep their names and signatures but are
 gated by capability flags; check them before using the feature in shared code:
-`engine.caps.texture3D`, `alphaToCoverage`, `separateStencil`, `textRendering`
-(all `false` on Native) and `gpuFrameTime`. `readRenderTargetPixels` /
+`engine.caps.alphaToCoverage`, `separateStencil`, `textRendering` (all `false`
+on Native), plus `texture3D` and `gpuFrameTime` (host-dependent). `readRenderTargetPixels` /
 `readRenderTargetPixelsToBuffer` return a `Promise` on Native, so shared code
 should `await` their result (awaiting a WebGL return value is harmless).
 `getRenderingCanvas` throws on Native; use `getRenderWidth` / `getRenderHeight`.

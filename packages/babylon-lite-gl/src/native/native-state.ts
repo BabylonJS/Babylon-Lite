@@ -81,12 +81,16 @@ export interface NativeGLState {
     /** True when a deferred-state setter ran since the last flush. */
     statesDirty: boolean;
     /** DESIRED native blend preset (`_native.Engine.ALPHA_*`), or `-1` unset.
-     *  Native (bgfx) only exposes preset blend modes via `COMMAND_SETBLENDMODE`,
-     *  not the separate src/dst/equation funcs the WebGL `rs` slots carry, so the
-     *  native blend module tracks a single preset here instead. */
+     *  Native (bgfx) only exposes preset blend factors via `COMMAND_SETBLENDMODE`,
+     *  not the separate src/dst funcs the WebGL `rs` slots carry, so the native
+     *  blend module tracks a single preset here instead. */
     blendModeDesired: number;
     /** ACTUAL applied native blend preset, or `-1` unset. */
     blendModeActual: number;
+    /** DESIRED native blend equation (`_native.Engine.ALPHA_EQUATION_*`), or `-1` unset. */
+    blendEquationDesired: number;
+    /** ACTUAL applied native blend equation, or `-1` unknown. */
+    blendEquationActual: number;
     /** @internal Blend reconciler. */
     _flushBlend?: (engine: GLEngineContext) => void;
     /** @internal Depth + cull reconciler. */
@@ -178,6 +182,8 @@ export function createNativeGLState(maxTextureUnits: number): NativeGLState {
         statesDirty: false,
         blendModeDesired: -1,
         blendModeActual: -1,
+        blendEquationDesired: -1,
+        blendEquationActual: -1,
         scissorEnabled: -1,
         scissorX: 0,
         scissorY: 0,
@@ -210,6 +216,8 @@ export function resetNativeGLStateCache(state: NativeGLState): void {
     state.statesDirty = false;
     state.blendModeDesired = -1;
     state.blendModeActual = -1;
+    state.blendEquationDesired = -1;
+    state.blendEquationActual = -1;
     state.scissorEnabled = -1;
     state.scissorX = 0;
     state.scissorY = 0;

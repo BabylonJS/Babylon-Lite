@@ -101,7 +101,7 @@ export interface GLEngineCaps {
     readonly textureHalfFloatLinearFiltering: boolean;
     /** NPOT textures are core on native. */
     readonly needPOTTextures: boolean;
-    /** NATIVE-ONLY: 3D textures (`texture-3d`) — always `false` on Babylon Native. */
+    /** NATIVE-ONLY: 3D textures (`texture-3d`) — `true` when the host exposes `loadRawTexture3D`. */
     readonly texture3D: boolean;
     /** NATIVE-ONLY: alpha-to-coverage — always `false` on Babylon Native. */
     readonly alphaToCoverage: boolean;
@@ -215,7 +215,7 @@ export function createNativeGLEngine(options?: GLEngineOptions): GLEngineContext
         textureHalfFloatRender: true,
         textureHalfFloatLinearFiltering: true,
         needPOTTextures: false,
-        texture3D: false,
+        texture3D: typeof engine.loadRawTexture3D === "function",
         alphaToCoverage: false,
         separateStencil: false,
         gpuFrameTime: typeof engine.populateFrameStats === "function",

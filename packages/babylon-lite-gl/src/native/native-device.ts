@@ -370,7 +370,9 @@ export function dCopyTexture(engine: GLEngineContext, source: NativeTexture, des
  *  this resolves with the pixel `ArrayBuffer` — there is no synchronous native
  *  equivalent of `gl.readPixels`. Pass a preallocated `buffer`
  *  (+`bufferOffset`/`bufferLength`) to reuse storage, or `null` to have the host
- *  allocate. Mirrors ThinNativeEngine's `_readTexturePixels`. */
+ *  allocate. Mirrors ThinNativeEngine's `_readTexturePixels`: hosts with
+ *  `readTexture2` resolve float / half-float sources as RGBA32F
+ *  (`16 * width * height` bytes); everything else resolves RGBA8. */
 export function dReadTexture(
     engine: GLEngineContext,
     texture: NativeTexture,
@@ -383,12 +385,32 @@ export function dReadTexture(
     bufferOffset: number,
     bufferLength: number
 ): Promise<ArrayBuffer> {
-    return engine._engine.readTexture(texture, mipLevel, x, y, width, height, buffer, bufferOffset, bufferLength);
+    const host = engine._engine;
+    return (host.readTexture2 ?? host.readTexture).call(host, texture, mipLevel, x, y, width, height, buffer, bufferOffset, bufferLength);
+}
+
+/** Upload raw RGBA 3D texel data (no mips, no Y flip). Requires a host with
+ *  `loadRawTexture3D` (the caller feature-detects it). */
+export function dLoadRawTexture3D(engine: GLEngineContext, texture: NativeTexture, data: ArrayBufferView, width: number, height: number, depth: number, format: number): void {
+    engine._engine.loadRawTexture3D!(texture, data, width, height, depth, format, false, false);
+}
+
+/** `COMMAND_GENERATEMIPMAPS` — rebuild a render-target texture's mip chain from
+ *  level 0. Requires a host exposing the command (the caller feature-detects it)
+ *  and a texture allocated with mip storage. */
+export function dGenerateMipMaps(engine: GLEngineContext, texture: NativeTexture): void {
+    const e = engine._encoder;
+    e.startEncodingCommand(_native.Engine.COMMAND_GENERATEMIPMAPS!);
+    e.encodeCommandArgAsNativeData(texture);
+    e.finishEncodingCommand();
 }
 
 /* ─────────────────────────────  framebuffers  ─────────────────────────────── */
 
-/** Create a framebuffer wrapping `texture` (+ optional depth/stencil). */
+/** Create a framebuffer wrapping `texture` (+ optional depth/stencil). Mip
+ *  levels are never generated implicitly at resolve (`autoGenerateMips=false`,
+ *  ignored by older hosts): like WebGL, a render target's chain is only rebuilt
+ *  by an explicit `generateRenderTargetMipMaps`. */
 export function dCreateFramebuffer(
     engine: GLEngineContext,
     texture: NativeTexture | null,
@@ -397,7 +419,7 @@ export function dCreateFramebuffer(
     generateStencil: boolean,
     generateDepth: boolean
 ): NativeFramebuffer {
-    return engine._engine.createFrameBuffer(texture, width, height, generateStencil, generateDepth, 1);
+    return engine._engine.createFrameBuffer(texture, width, height, generateStencil, generateDepth, 1, 0, 0, false);
 }
 
 /** `COMMAND_BINDFRAMEBUFFER`. */
@@ -458,6 +480,15 @@ export function dSetBlendMode(engine: GLEngineContext, nativeAlphaMode: number):
     e.finishEncodingCommand();
 }
 
+/** `COMMAND_SETBLENDEQUATION` with a native `ALPHA_EQUATION_*` value (both
+ *  channels). Only call on hosts that expose the command. */
+export function dSetBlendEquation(engine: GLEngineContext, nativeEquation: number): void {
+    const e = engine._encoder;
+    e.startEncodingCommand(_native.Engine.COMMAND_SETBLENDEQUATION!);
+    e.encodeCommandArgAsUInt32(nativeEquation);
+    e.finishEncodingCommand();
+}
+
 /** `COMMAND_SETDEPTHTEST` — encodes the compare func, or `DEPTH_TEST_ALWAYS`
  *  when depth testing is disabled (native conflates the two). */
 export function dSetDepthTest(engine: GLEngineContext, depthTest: number): void {
@@ -497,16 +528,22 @@ export function dSetCull(engine: GLEngineContext, enabled: boolean, cullBack: bo
 }
 
 /** `COMMAND_SETSTENCIL` (mask, op-fail, op-zfail, op-zpass, func, ref). Values
- *  are native `STENCIL_*` enums (mapped by the caller). */
-export function dSetStencil(engine: GLEngineContext, mask: number, opFail: number, opZFail: number, opZPass: number, func: number, ref: number): void {
+ *  are native `STENCIL_*` enums (mapped by the caller). Hosts exposing
+ *  `COMMAND_SETSTENCIL2` also receive the comparison (read) mask; older hosts
+ *  always compare with 0xFF. */
+export function dSetStencil(engine: GLEngineContext, mask: number, opFail: number, opZFail: number, opZPass: number, func: number, ref: number, funcMask: number): void {
     const e = engine._encoder;
-    e.startEncodingCommand(_native.Engine.COMMAND_SETSTENCIL);
+    const setStencil2 = _native.Engine.COMMAND_SETSTENCIL2;
+    e.startEncodingCommand(setStencil2 ?? _native.Engine.COMMAND_SETSTENCIL);
     e.encodeCommandArgAsUInt32(mask);
     e.encodeCommandArgAsUInt32(opFail);
     e.encodeCommandArgAsUInt32(opZFail);
     e.encodeCommandArgAsUInt32(opZPass);
     e.encodeCommandArgAsUInt32(func);
     e.encodeCommandArgAsUInt32(ref);
+    if (setStencil2 !== undefined) {
+        e.encodeCommandArgAsUInt32(funcMask & 0xff);
+    }
     e.finishEncodingCommand();
 }
 

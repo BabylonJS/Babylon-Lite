@@ -164,8 +164,29 @@ export interface INativeEngine {
         bufferOffset: number,
         bufferLength: number
     ): Promise<ArrayBuffer>;
+    /** {@link readTexture} that preserves float sources: resolves RGBA32F
+     *  (`16 * width * height` bytes) for float / half-float textures, RGBA8
+     *  otherwise. Absent on older hosts. */
+    readTexture2?(
+        texture: NativeTexture,
+        mipLevel: number,
+        x: number,
+        y: number,
+        width: number,
+        height: number,
+        buffer: ArrayBuffer | null,
+        bufferOffset: number,
+        bufferLength: number,
+        faceIndex?: number
+    ): Promise<ArrayBuffer>;
+    /** Upload raw 3D texel data (allocates the volume). The host throws when
+     *  `generateMips` or `invertY` is true. Absent on older hosts. */
+    loadRawTexture3D?(texture: NativeTexture, data: ArrayBufferView, width: number, height: number, depth: number, format: number, generateMips: boolean, invertY: boolean): void;
 
-    /** Create a framebuffer wrapping `texture` (+ optional depth/stencil). */
+    /** Create a framebuffer wrapping `texture` (+ optional depth/stencil).
+     *  `mip` and `autoGenerateMips` (default `true`: the host rebuilds a
+     *  mip-capable attachment's chain when the framebuffer resolves) are
+     *  ignored by older hosts. */
     createFrameBuffer(
         texture: NativeTexture | null,
         width: number,
@@ -173,7 +194,9 @@ export interface INativeEngine {
         generateStencilBuffer: boolean,
         generateDepthBuffer: boolean,
         samples: number,
-        layer?: number
+        layer?: number,
+        mip?: number,
+        autoGenerateMips?: boolean
     ): NativeFramebuffer;
 
     /** Current backbuffer width in physical pixels. */
@@ -273,6 +296,37 @@ export interface INativeEngineConstructor {
     readonly ALPHA_COMBINE: number;
     /** Premultiplied alpha. */
     readonly ALPHA_PREMULTIPLIED: number;
+    /** `(ZERO, ONE_MINUS_SRC_COLOR, ONE, ONE)`. */
+    readonly ALPHA_SUBTRACT: number;
+    /** `(DST_COLOR, ZERO, ONE, ONE)`. */
+    readonly ALPHA_MULTIPLY: number;
+    /** `(SRC_ALPHA, ONE_MINUS_SRC_COLOR, ONE, ONE)`. */
+    readonly ALPHA_MAXIMIZED: number;
+    /** `(ONE, ONE, ZERO, ONE)`. */
+    readonly ALPHA_ONEONE: number;
+    /** `(ONE, ONE, ONE, ONE)`. Absent on older hosts. */
+    readonly ALPHA_ONEONE_ONEONE?: number;
+    /** `(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ONE_MINUS_SRC_ALPHA)`. Absent on older hosts. */
+    readonly ALPHA_LAYER_ACCUMULATE?: number;
+    /** `(ONE, ONE_MINUS_SRC_ALPHA, ONE, ONE_MINUS_SRC_ALPHA)`. */
+    readonly ALPHA_PREMULTIPLIED_PORTERDUFF: number;
+    /** `(ONE, ONE_MINUS_SRC_COLOR, ONE, ONE_MINUS_SRC_ALPHA)`. */
+    readonly ALPHA_SCREENMODE: number;
+
+    // Blend equations, used by SETBLENDEQUATION (values match Babylon
+    // Constants.ALPHA_EQUATION_*). Absent on older hosts.
+    /** src + dst. */
+    readonly ALPHA_EQUATION_ADD?: number;
+    /** src - dst. */
+    readonly ALPHA_EQUATION_SUBTRACT?: number;
+    /** dst - src. */
+    readonly ALPHA_EQUATION_REVERSE_SUBTRACT?: number;
+    /** max(src, dst). */
+    readonly ALPHA_EQUATION_MAX?: number;
+    /** min(src, dst). */
+    readonly ALPHA_EQUATION_MIN?: number;
+    /** MIN for RGB, ADD for alpha. */
+    readonly ALPHA_EQUATION_DARKEN?: number;
 
     // Texture formats used by initializeTexture / render targets.
     /** 8-bit RGBA. */
@@ -360,6 +414,9 @@ export interface INativeEngineConstructor {
     /** Native command tag COMMAND_SETCOLORWRITE. */ readonly COMMAND_SETCOLORWRITE: NativeData;
     /** Native command tag COMMAND_SETBLENDMODE. */ readonly COMMAND_SETBLENDMODE: NativeData;
     /** Native command tag COMMAND_SETSTENCIL. */ readonly COMMAND_SETSTENCIL: NativeData;
+    /** COMMAND_SETSTENCIL + trailing func (read) mask. Absent on older hosts. */ readonly COMMAND_SETSTENCIL2?: NativeData;
+    /** Global blend equation (`ALPHA_EQUATION_*`). Absent on older hosts. */ readonly COMMAND_SETBLENDEQUATION?: NativeData;
+    /** Explicit mip generation for a render-target texture with mip storage. Absent on older hosts. */ readonly COMMAND_GENERATEMIPMAPS?: NativeData;
     /** Native command tag COMMAND_SETVIEWPORT. */ readonly COMMAND_SETVIEWPORT: NativeData;
     /** Native command tag COMMAND_SETSCISSOR. */ readonly COMMAND_SETSCISSOR: NativeData;
     /** Native command tag COMMAND_BINDFRAMEBUFFER. */ readonly COMMAND_BINDFRAMEBUFFER: NativeData;

@@ -17,25 +17,28 @@
  * 1. Depth/stencil is baked into the framebuffer; `generateRenderTargetStencil`
  *    rebuilds the framebuffer with a packed D24S8 attachment.
  * 2. No completeness check — `createFrameBuffer` succeeds or the host throws.
- * 3. Readbacks are ASYNCHRONOUS (`Promise`) and the host always reads RGBA8:
- *    float / half-float targets read back with 8-bit precision, clamped to
- *    [0, 1], converted to the WebGL element type.
- * 4. `generateRenderTargetMipMaps` is a no-op (targets are allocated without
- *    a mip chain; there is no on-demand mip generation for render targets).
+ * 3. Readbacks are ASYNCHRONOUS (`Promise`). Hosts with `readTexture2` read
+ *    float / half-float targets at full float precision; older hosts read RGBA8
+ *    (8-bit precision, clamped to [0, 1]) converted to the WebGL element type.
+ * 4. `generateRenderTargetMipMaps` needs a host with `COMMAND_GENERATEMIPMAPS`
+ *    (the first call re-allocates the owned color texture with a mip chain); it
+ *    is a no-op on older hosts and for a caller-supplied color texture.
  * 5. `readRenderTargetPixelsToBuffer` writes into a CPU `ArrayBuffer` /
  *    `ArrayBufferView` (Native has no pixel-pack buffers).
  */
 import type { GLTexture } from "./texture.js";
-import { makeTexture } from "./texture.js";
+import { finishTextureUpload, makeTexture, replaceTextureHandle } from "./texture.js";
 import type { GLEngineContext } from "./native-context.js";
 import type { NativeFramebuffer, NativeTexture } from "./native-types.js";
 import type { GLReadPixelsOptions, GLReadPixelsRegionOptions, GLReadPixelsToBufferOptions } from "../render-target.js";
 import {
     dBindFramebuffer,
+    dCopyTexture,
     dCreateFramebuffer,
     dCreateTexture,
     dDeleteFramebuffer,
     dDeleteTexture,
+    dGenerateMipMaps,
     dInitializeTexture,
     dReadTexture,
     dSetTextureSampling,
@@ -108,6 +111,9 @@ interface ResolvedRTConfig {
     hasStencil: boolean;
     /** True when the RT owns (creates / restores / deletes) its color texture. */
     ownsColorTexture: boolean;
+    /** True once the owned color texture carries a mip chain (set by the first
+     *  `generateRenderTargetMipMaps`; kept across resize / restore). */
+    hasMips: boolean;
 }
 
 /**
@@ -248,16 +254,47 @@ function bindFramebufferAndViewport(engine: GLEngineContext, rt: GLRenderTarget 
 }
 
 /**
- * Regenerate a render target's color mip chain (≙ WebGL `generateRenderTargetMipMaps`).
+ * Regenerate a render target's color mip chain from its (freshly rendered)
+ * level 0 (≙ WebGL `generateRenderTargetMipMaps`) — a manual opt-in, called
+ * after rendering into the target.
  *
- * NATIVE: a documented **no-op** — native render-target textures are allocated
- * without a mip chain and Babylon Native exposes no on-demand mip generation
- * for render targets.
+ * NATIVE: render-target textures are allocated without a mip chain, so the
+ * first call re-allocates the owned color texture with one (copying level 0,
+ * keeping the {@link GLTexture} identity) before `COMMAND_GENERATEMIPMAPS`. A
+ * documented **no-op** on hosts without that command and for a caller-supplied
+ * color texture. Also a no-op for a disposed target or a lost/disposed engine.
  *
  * @param rt - The render target.
  */
 export function generateRenderTargetMipMaps(rt: GLRenderTarget): void {
-    void rt;
+    const engine = rt._engine;
+    const c = rt._config;
+    if (engine._isLost || engine._disposed || rt._disposed || rt._framebuffer === null || !c.ownsColorTexture || _native.Engine.COMMAND_GENERATEMIPMAPS === undefined) {
+        return;
+    }
+    if (!c.hasMips) {
+        const tex = rt.texture;
+        const handle = dCreateTexture(engine);
+        dInitializeTexture(engine, handle, rt.width, rt.height, true, c.nativeFormat, true);
+        dCopyTexture(engine, tex.handle, handle);
+        c.hasMips = true;
+        // Drop the framebuffer before its attachment, then rebuild it around the
+        // mip-capable texture (rebinding it if it was the live target).
+        const s = engine._state;
+        const wasBound = s.boundFramebuffer === rt._framebuffer;
+        if (wasBound) {
+            dUnbindFramebuffer(engine, rt._framebuffer);
+            s.boundFramebuffer = null;
+        }
+        dDeleteFramebuffer(engine, rt._framebuffer);
+        replaceTextureHandle(engine, tex, handle);
+        finishTextureUpload(engine, tex);
+        rt._framebuffer = dCreateFramebuffer(engine, handle, rt.width, rt.height, c.hasStencil, c.hasDepth || c.hasStencil);
+        if (wasBound) {
+            bindRenderTarget(rt);
+        }
+    }
+    dGenerateMipMaps(engine, rt.texture.handle);
 }
 
 /**
@@ -307,11 +344,13 @@ export function resizeRenderTarget(rt: GLRenderTarget, width: number, height: nu
  *
  * NATIVE DIVERGENCE — **ASYNCHRONOUS**: Babylon Native has no synchronous
  * readback, so this resolves a `Promise` (≙ `ThinNativeEngine._readTexturePixels`).
- * Pending draw commands are submitted first so the read sees them. The host
- * always reads RGBA8, so float / half-float targets resolve with 8-bit precision
- * clamped to [0, 1] (converted to `Float32Array` / half-float `Uint16Array`).
- * `format` `gl.RG` / `gl.RED` pack 2 / 1 channels per texel tightly. Row order
- * and the `y` origin follow the host's texture memory layout.
+ * Pending draw commands are submitted first so the read sees them. Float /
+ * half-float targets keep full precision on hosts with `readTexture2`; older
+ * hosts read RGBA8, so they resolve with 8-bit precision clamped to [0, 1]
+ * (converted to `Float32Array` / half-float `Uint16Array`). `format`
+ * `gl.RG` / `gl.RED` pack 2 / 1 channels per texel tightly. Current hosts
+ * return rows bottom-up with `y` measured from the bottom, as WebGL; older
+ * hosts follow the texture memory layout instead.
  *
  * @param rt - The render target to read from.
  * @param options - See {@link GLReadPixelsOptions}. Default: the whole target,
@@ -326,7 +365,7 @@ export async function readRenderTargetPixels(rt: GLRenderTarget, options?: GLRea
     const channels = channelCount(opts.format ?? RGBA);
     const type = rt._config.type;
     const into = opts.into;
-    const rgba = await readRgba8(rt, opts, width, height);
+    const rgba = await readRgba(rt, opts, width, height);
     if (rgba === null) {
         return into ?? new Uint8Array(0);
     }
@@ -344,7 +383,7 @@ export async function readRenderTargetPixels(rt: GLRenderTarget, options?: GLRea
  * `buffer` must be a CPU `ArrayBuffer` or `ArrayBufferView` (whose `byteOffset`
  * is honoured), the copy is ASYNCHRONOUS (the returned promise resolves once the
  * bytes are written) and texels are stored in the target's type with the same
- * RGBA8 precision caveat as {@link readRenderTargetPixels}. A `WebGLBuffer`
+ * precision caveat as {@link readRenderTargetPixels}. A `WebGLBuffer`
  * throws.
  *
  * @param rt - The render target to read from.
@@ -386,7 +425,7 @@ export async function readRenderTargetPixelsToBuffer(
     if (start + elements * bytesPerChannel > target.byteLength) {
         throw new Error("lite-gl: readRenderTargetPixelsToBuffer destination is too small");
     }
-    const rgba = await readRgba8(rt, opts, width, height);
+    const rgba = await readRgba(rt, opts, width, height);
     if (rgba === null) {
         return;
     }
@@ -471,9 +510,10 @@ function buildRT(engine: GLEngineContext, width: number, height: number, options
         hasDepth: options.generateDepthBuffer ?? false,
         hasStencil: false,
         ownsColorTexture: byo === undefined,
+        hasMips: false,
     };
     // Owned attachment: allocated / restored / deleted by this target, never by
-    // the engine texture registry. Render-target textures carry no mip chain.
+    // the engine texture registry. No mip chain until generateRenderTargetMipMaps.
     const texture = byo ?? makeTexture(engine, null as unknown as NativeTexture, width, height, false, options);
     if (byo === undefined) {
         texture._deleteGpu = () => {};
@@ -554,7 +594,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         const tex = rt.texture;
         const handle = dCreateTexture(engine);
         tex.handle = handle;
-        dInitializeTexture(engine, handle, rt.width, rt.height, false, c.nativeFormat, true);
+        dInitializeTexture(engine, handle, rt.width, rt.height, c.hasMips, c.nativeFormat, true);
         dSetTextureSampling(engine, handle, tex._filter);
         dSetTextureWrap(engine, handle, tex._wrapU, tex._wrapV, tex._wrapU);
         tex.width = rt.width;
@@ -580,61 +620,84 @@ function channelCount(format: number): number {
     throw new Error(`lite-gl: unsupported read format 0x${format.toString(16)}`);
 }
 
-/** Submit pending commands and read the region as RGBA8 bytes; `null` when the
- *  engine / target cannot be read. */
-async function readRgba8(rt: GLRenderTarget, region: GLReadPixelsRegionOptions, width: number, height: number): Promise<Uint8Array | null> {
+/** Submit pending commands and read the region as RGBA texels — `Float32Array`
+ *  when the host preserved a float source (`readTexture2` → RGBA32F), else RGBA8
+ *  bytes; `null` when the engine / target cannot be read. */
+async function readRgba(rt: GLRenderTarget, region: GLReadPixelsRegionOptions, width: number, height: number): Promise<Uint8Array | Float32Array | null> {
     const engine = rt._engine;
     if (engine._isLost || engine._disposed || rt._disposed || rt._framebuffer === null) {
         return null;
     }
     engine._encoder.submitPending();
     const raw = await dReadTexture(engine, rt.texture.handle, 0, region.x ?? 0, region.y ?? 0, width, height, null, 0, 0);
-    return new Uint8Array(raw);
+    return raw.byteLength === width * height * 16 ? new Float32Array(raw) : new Uint8Array(raw);
 }
 
-/** Write `count` RGBA8 texels into `out` as `channels` channels of `type`. */
-function writeTexels(rgba: Uint8Array, out: ArrayBufferView, start: number, channels: number, type: number, count: number): void {
-    if (type === FLOAT) {
-        const dst = out as Float32Array;
+/** Write `count` RGBA texels (RGBA8 bytes or RGBA32F floats) into `out` as
+ *  `channels` channels of `type`. Float → byte clamps to [0, 1] and rounds. */
+function writeTexels(src: Uint8Array | Float32Array, out: ArrayBufferView, start: number, channels: number, type: number, count: number): void {
+    const isFloat = src instanceof Float32Array;
+    if (type === FLOAT || type === HALF_FLOAT) {
+        const half = type === HALF_FLOAT;
+        const dst = out as Float32Array | Uint16Array;
         for (let i = 0, o = start; i < count; i++) {
             for (let c = 0; c < channels; c++) {
-                dst[o++] = rgba[i * 4 + c]! / 255;
-            }
-        }
-        return;
-    }
-    if (type === HALF_FLOAT) {
-        const dst = out as Uint16Array;
-        for (let i = 0, o = start; i < count; i++) {
-            for (let c = 0; c < channels; c++) {
-                dst[o++] = unitByteToHalf(rgba[i * 4 + c]!);
+                const v = isFloat ? src[i * 4 + c]! : src[i * 4 + c]! / 255;
+                dst[o++] = half ? floatToHalf(v) : v;
             }
         }
         return;
     }
     const dst = out instanceof Uint8Array ? out : new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
-    if (channels === 4) {
-        dst.set(rgba.subarray(0, count * 4), start);
+    if (!isFloat && channels === 4) {
+        dst.set(src.subarray(0, count * 4), start);
         return;
     }
     for (let i = 0, o = start; i < count; i++) {
         for (let c = 0; c < channels; c++) {
-            dst[o++] = rgba[i * 4 + c]!;
+            const v = src[i * 4 + c]!;
+            dst[o++] = isFloat ? Math.round(Math.min(Math.max(v, 0), 1) * 255) : v;
         }
     }
 }
 
-/** IEEE half-float bits for `byte / 255` (exact for 0 and 1). */
-function unitByteToHalf(byte: number): number {
-    if (byte === 0) {
-        return 0;
+const f32Scratch = new Float32Array(1);
+const u32Scratch = new Uint32Array(f32Scratch.buffer);
+
+/** IEEE half-float bits for `v` (round to nearest even; ±Inf / NaN preserved). */
+function floatToHalf(v: number): number {
+    f32Scratch[0] = v;
+    const x = u32Scratch[0]!;
+    const sign = (x >>> 16) & 0x8000;
+    const exp = (x >>> 23) & 0xff;
+    let mant = x & 0x7fffff;
+    if (exp === 0xff) {
+        return sign | 0x7c00 | (mant !== 0 ? 0x200 : 0);
     }
-    const v = byte / 255;
-    // v in (0, 1]: normal halves cover [2^-14, 1]; 1/255 ≈ 2^-7.99 is normal.
-    const exp = Math.floor(Math.log2(v));
-    const mantissa = Math.round((v / Math.pow(2, exp) - 1) * 1024);
-    if (mantissa === 1024) {
-        return ((exp + 16) << 10) & 0x7fff;
+    const e = exp - 112;
+    if (e >= 0x1f) {
+        return sign | 0x7c00;
     }
-    return ((exp + 15) << 10) | mantissa;
+    if (e <= 0) {
+        // Subnormal half (or zero).
+        if (e < -10) {
+            return sign;
+        }
+        mant |= 0x800000;
+        const shift = 14 - e;
+        const rem = mant & ((1 << shift) - 1);
+        const halfway = 1 << (shift - 1);
+        let h = mant >>> shift;
+        if (rem > halfway || (rem === halfway && (h & 1) !== 0)) {
+            h++;
+        }
+        return sign | h;
+    }
+    let h = (e << 10) | (mant >>> 13);
+    const rem = mant & 0x1fff;
+    // A carry out of the mantissa correctly bumps the exponent (up to Inf).
+    if (rem > 0x1000 || (rem === 0x1000 && (h & 1) !== 0)) {
+        h++;
+    }
+    return sign | h;
 }

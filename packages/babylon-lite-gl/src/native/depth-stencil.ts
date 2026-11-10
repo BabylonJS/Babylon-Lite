@@ -12,8 +12,9 @@
  *  - `COMMAND_SETCOLORWRITE` is all-channels; a partial WebGL color mask maps to
  *    "write enabled" when ANY channel is enabled.
  *  - Native has ONE stencil op set (no two-sided stencil, `caps.separateStencil`
- *    false) and a fixed 0xFF read mask (`funcMask` is ignored); see
- *    {@link setStencilOpSeparate}.
+ *    false); see {@link setStencilOpSeparate}. The comparison mask (`funcMask`)
+ *    is honoured on hosts exposing `COMMAND_SETSTENCIL2`; older hosts compare
+ *    with a fixed 0xFF.
  */
 import type { GLEngineContext } from "./native-context.js";
 import type { GLRenderTarget } from "./render-target.js";
@@ -30,6 +31,7 @@ import {
     RS_DEPTH_TEST,
     RS_DESIRED,
     RS_STENCIL_FUNC_FUNC,
+    RS_STENCIL_FUNC_MASK,
     RS_STENCIL_FUNC_REF,
     RS_STENCIL_MASK,
     RS_STENCIL_OP_FAIL,
@@ -93,7 +95,8 @@ export function setCullState(engine: GLEngineContext, enabled: boolean, face?: G
 /**
  * Record desired stencil state (deferred) — mirrors the WebGL `setStencilState`.
  * Ops apply to both faces (re-unifying any {@link setStencilOpSeparate} split).
- * NATIVE: `funcMask` is ignored (the host read mask is fixed at 0xFF).
+ * NATIVE: `funcMask` (low 8 bits) needs a host exposing `COMMAND_SETSTENCIL2`;
+ * older hosts compare with a fixed 0xFF.
  * @param engine - The engine.
  * @param state - Fields to change; omitted fields keep their desired value.
  */
@@ -114,6 +117,9 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     }
     if (state.ref !== undefined) {
         rs[RS_STENCIL_FUNC_REF + RS_DESIRED] = state.ref;
+    }
+    if (state.funcMask !== undefined) {
+        rs[RS_STENCIL_FUNC_MASK + RS_DESIRED] = state.funcMask;
     }
     setFrontOps(rs, state);
     if (s._stencilBackOps !== undefined) {
@@ -302,6 +308,7 @@ function flushStencil(engine: GLEngineContext): void {
     const mask = rs[RS_STENCIL_MASK + RS_DESIRED]!;
     const func = rs[RS_STENCIL_FUNC_FUNC + RS_DESIRED]!;
     const ref = rs[RS_STENCIL_FUNC_REF + RS_DESIRED]!;
+    const funcMask = rs[RS_STENCIL_FUNC_MASK + RS_DESIRED]!;
     const opFail = rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!;
     const opZFail = rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!;
     const opZPass = rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!;
@@ -310,6 +317,7 @@ function flushStencil(engine: GLEngineContext): void {
         mask !== rs[RS_STENCIL_MASK] ||
         func !== rs[RS_STENCIL_FUNC_FUNC] ||
         ref !== rs[RS_STENCIL_FUNC_REF] ||
+        funcMask !== rs[RS_STENCIL_FUNC_MASK] ||
         opFail !== rs[RS_STENCIL_OP_FAIL] ||
         opZFail !== rs[RS_STENCIL_OP_ZFAIL] ||
         opZPass !== rs[RS_STENCIL_OP_ZPASS];
@@ -320,11 +328,12 @@ function flushStencil(engine: GLEngineContext): void {
     rs[RS_STENCIL_MASK] = mask;
     rs[RS_STENCIL_FUNC_FUNC] = func;
     rs[RS_STENCIL_FUNC_REF] = ref;
+    rs[RS_STENCIL_FUNC_MASK] = funcMask;
     rs[RS_STENCIL_OP_FAIL] = opFail;
     rs[RS_STENCIL_OP_ZFAIL] = opZFail;
     rs[RS_STENCIL_OP_ZPASS] = opZPass;
     if (dTest === 1) {
-        dSetStencil(engine, mask & 0xff, nativeStencilOpFail(opFail), nativeStencilOpZFail(opZFail), nativeStencilOpZPass(opZPass), nativeStencilFunc(func), ref);
+        dSetStencil(engine, mask & 0xff, nativeStencilOpFail(opFail), nativeStencilOpZFail(opZFail), nativeStencilOpZPass(opZPass), nativeStencilFunc(func), ref, funcMask);
     } else {
         // Disabled: KEEP ops + ALWAYS func (matches ThinNativeEngine.setStencilBuffer(false)).
         dSetStencil(
@@ -334,7 +343,8 @@ function flushStencil(engine: GLEngineContext): void {
             _native.Engine.STENCIL_OP_FAIL_Z_KEEP,
             _native.Engine.STENCIL_OP_PASS_Z_KEEP,
             _native.Engine.STENCIL_TEST_ALWAYS,
-            0
+            0,
+            0xff
         );
     }
 }

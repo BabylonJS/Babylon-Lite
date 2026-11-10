@@ -39,6 +39,9 @@ export interface MockNative {
     readTextureCalls: unknown[][];
     /** Byte pattern `readTexture` fills its RGBA8 result with (default: byte index & 0xff). */
     readPattern: (byteIndex: number) => number;
+    /** Float pattern `readTexture2` fills its RGBA32F result with for float
+     *  sources (`host: "current"` only; default: element index / 4). */
+    readFloatPattern: (elementIndex: number) => number;
     /** GPU time `populateFrameStats` reports (`undefined` → 0 ns). */
     frameStats?: { gpuTimeNs?: number };
     /** Trigger the last requestAnimationFrame callback. */
@@ -78,8 +81,20 @@ function isMockRawNativeStream(value: unknown): value is MockRawNativeStream {
     return typeof v.writeBuffer === "function" && typeof v.__requestFlush === "function";
 }
 
+/** Options for {@link createMockNative}. */
+export interface MockNativeOptions {
+    /** `"legacy"` (default) models an older Babylon Native host. `"current"`
+     *  models current Babylon Native master, which adds `COMMAND_SETSTENCIL2`,
+     *  `COMMAND_SETBLENDEQUATION`, `COMMAND_GENERATEMIPMAPS`, the
+     *  `ALPHA_ONEONE_ONEONE` / `ALPHA_LAYER_ACCUMULATE` presets, the
+     *  `ALPHA_EQUATION_*` values, `readTexture2` (RGBA32F for float sources) and
+     *  `loadRawTexture3D`. */
+    host?: "legacy" | "current";
+}
+
 /** Build the mock. Call {@link MockNative.install} before creating a native engine. */
-export function createMockNative(): MockNative {
+export function createMockNative(options: MockNativeOptions = {}): MockNative {
+    const current = options.host === "current";
     const calls: NativeCall[] = [];
     const streamWords: number[] = [];
     const streamFloats: number[] = [];
@@ -89,6 +104,7 @@ export function createMockNative(): MockNative {
     const deletedTextures: number[] = [];
     const readTextureCalls: unknown[][] = [];
     const textureSizes = new Map<number, { w: number; h: number }>();
+    const textureFormats = new Map<number, number>();
     const rafCallbacks: (() => void)[] = [];
     // Stored so a test can simulate a bgfx device-restore edge.
     let renderResetCb: (() => void) | null = null;
@@ -137,6 +153,9 @@ export function createMockNative(): MockNative {
         "COMMAND_DRAWINDEXEDINSTANCED",
         "COMMAND_CLEAR",
     ];
+    if (current) {
+        commandNames.push("COMMAND_SETSTENCIL2", "COMMAND_SETBLENDEQUATION", "COMMAND_GENERATEMIPMAPS");
+    }
     const tagValues: Record<string, number> = {};
     const engineStatics: Record<string, unknown> = {
         PROTOCOL_VERSION: 9,
@@ -162,6 +181,12 @@ export function createMockNative(): MockNative {
         ALPHA_ADD: 1,
         ALPHA_COMBINE: 2,
         ALPHA_PREMULTIPLIED: 7,
+        ALPHA_SUBTRACT: 3,
+        ALPHA_MULTIPLY: 4,
+        ALPHA_MAXIMIZED: 5,
+        ALPHA_ONEONE: 6,
+        ALPHA_PREMULTIPLIED_PORTERDUFF: 8,
+        ALPHA_SCREENMODE: 10,
         TEXTURE_FORMAT_RGBA8: 30,
         TEXTURE_FORMAT_RGBA32F: 31,
         TEXTURE_FORMAT_RGBA16F: 32,
@@ -208,6 +233,19 @@ export function createMockNative(): MockNative {
         STENCIL_OP_PASS_Z_DECR: 84,
         STENCIL_OP_PASS_Z_INVERT: 85,
     };
+    if (current) {
+        Object.assign(engineStatics, {
+            ALPHA_ONEONE_ONEONE: 11,
+            ALPHA_LAYER_ACCUMULATE: 17,
+            ALPHA_EQUATION_ADD: 0,
+            ALPHA_EQUATION_SUBTRACT: 1,
+            ALPHA_EQUATION_REVERSE_SUBTRACT: 2,
+            ALPHA_EQUATION_MAX: 3,
+            ALPHA_EQUATION_MIN: 4,
+            ALPHA_EQUATION_DARKEN: 5,
+        });
+    }
+    const floatFormats = new Set([31, 32, 36, 37, 38, 39]);
     let tagSeq = 1000;
     for (const name of commandNames) {
         const value = tagSeq++;
@@ -280,6 +318,7 @@ export function createMockNative(): MockNative {
             initializeTexture: (...a: unknown[]) => {
                 rec("initializeTexture", ...a);
                 textureSizes.set((a[0] as Uint32Array)[0]!, { w: a[1] as number, h: a[2] as number });
+                textureFormats.set((a[0] as Uint32Array)[0]!, a[4] as number);
             },
             loadTexture: (...a: unknown[]) => {
                 rec("loadTexture", ...a);
@@ -316,6 +355,30 @@ export function createMockNative(): MockNative {
                 }
                 return Promise.resolve(out.buffer);
             },
+            ...(current
+                ? {
+                      // Host contract: RGBA32F for float sources, RGBA8 otherwise.
+                      readTexture2: (...a: unknown[]) => {
+                          rec("readTexture2", ...a);
+                          readTextureCalls.push(a);
+                          const w = a[4] as number;
+                          const h = a[5] as number;
+                          if (floatFormats.has(textureFormats.get((a[0] as Uint32Array)[0]!) ?? -1)) {
+                              const out = new Float32Array(w * h * 4);
+                              for (let i = 0; i < out.length; i++) {
+                                  out[i] = mockApi.readFloatPattern(i);
+                              }
+                              return Promise.resolve(out.buffer);
+                          }
+                          const out = new Uint8Array(w * h * 4);
+                          for (let i = 0; i < out.length; i++) {
+                              out[i] = mockApi.readPattern(i);
+                          }
+                          return Promise.resolve(out.buffer);
+                      },
+                      loadRawTexture3D: (...a: unknown[]) => rec("loadRawTexture3D", ...a),
+                  }
+                : {}),
             createImageBitmap: (data: ArrayBuffer) => {
                 rec("createImageBitmap", data);
                 return { data: new Uint8Array([10, 20, 30, 128, 40, 50, 60, 255, 70, 80, 90, 0, 1, 2, 3, 64]), width: 2, height: 2, format: engineStatics.TEXTURE_FORMAT_RGBA8 };
@@ -402,6 +465,7 @@ export function createMockNative(): MockNative {
         deletedTextures,
         readTextureCalls,
         readPattern: (i) => i & 0xff,
+        readFloatPattern: (i) => i / 4,
         install(): void {
             previous = (globalThis as { _native?: unknown })._native;
             (globalThis as { _native?: unknown })._native = native;

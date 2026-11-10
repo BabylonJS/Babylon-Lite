@@ -6,6 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockNative, type MockNative } from "./_native-mock";
 import {
+    GLBlendEquation,
+    GLBlendMode,
     GLSamplingMode,
     beginFrame,
     bindRenderTarget,
@@ -24,9 +26,12 @@ import {
     createTextureFromSource,
     disposeEffect,
     disposeTexture,
+    disableBlend,
     disposeTexture3D,
     endFrame,
+    generateRenderTargetMipMaps,
     generateRenderTargetStencil,
+    generateTexture3DMipMaps,
     generateTextureMipMaps,
     getAlphaToCoverage,
     getCurrentSampleCount,
@@ -40,6 +45,8 @@ import {
     readRenderTargetPixelsToBuffer,
     restoreDefaultFramebuffer,
     setAlphaToCoverage,
+    setBlendMode,
+    setBlendState,
     setDepthState,
     setEffectTexture3D,
     setGLEngineSize,
@@ -57,7 +64,6 @@ import {
     type GLEffect,
     type GLEngineContext,
     type GLTextData,
-    type GLTexture3D,
 } from "../../../packages/babylon-lite-gl/src/index.native";
 import { createNativeGLEngine, disposeNativeGLEngine } from "../../../packages/babylon-lite-gl/src/native/native-context";
 
@@ -73,6 +79,10 @@ const GL_INCR = 0x1e02;
 const GL_RED = 0x1903;
 const GL_RG = 0x8227;
 const GL_FLOAT = 0x1406;
+const GL_HALF_FLOAT = 0x140b;
+const GL_ONE = 1;
+const GL_SRC_ALPHA = 0x0302;
+const GL_ONE_MINUS_SRC_ALPHA = 0x0303;
 const GL_LINEAR = 0x2601;
 const GL_LINEAR_MIPMAP_LINEAR = 0x2703;
 
@@ -350,21 +360,35 @@ describe("native engine-wide functions", () => {
 
 describe("native declared divergences", () => {
     it("advertises the unsupported features through caps flags", () => {
-        expect(engine.caps.texture3D).toBe(false);
         expect(engine.caps.alphaToCoverage).toBe(false);
         expect(engine.caps.separateStencil).toBe(false);
         expect(engine.caps.textRendering).toBe(false);
     });
 
-    it("3D textures: creating / binding / sampling throw; unbind, dispose and null sampler are no-ops", () => {
-        const fake = {} as GLTexture3D;
-        expect(() => createTexture3DFromPixels(engine, new Uint8Array(8), 2, 2, 2)).toThrow("createTexture3DFromPixels is not supported on Babylon Native");
-        expect(() => bindTexture3D(fake, 0)).toThrow("bindTexture3D is not supported on Babylon Native");
-        const effect = samplerEffect(engine);
-        expect(() => setEffectTexture3D(effect, "s0", fake)).toThrow("not supported on Babylon Native");
-        expect(() => setEffectTexture3D(effect, "s0", null)).not.toThrow();
+    it("hosts without loadRawTexture3D report no 3D support and refuse to create volumes", () => {
+        expect(engine.caps.texture3D).toBe(false);
+        expect(() => createTexture3DFromPixels(engine, new Uint8Array(32), 2, 2, 2)).toThrow("needs a Babylon Native host with loadRawTexture3D");
+        expect(() => setEffectTexture3D(samplerEffect(engine), "s0", null)).not.toThrow();
         expect(() => unbindTexture3D(engine, 0)).not.toThrow();
-        expect(() => disposeTexture3D(fake)).not.toThrow();
+    });
+
+    it("hosts without the newer commands keep the legacy blend / stencil / mip behavior", async () => {
+        setBlendState(engine, { srcRGB: GL_ONE, dstRGB: GL_ONE, srcAlpha: GL_ONE, dstAlpha: GL_ONE, equationRGB: GLBlendEquation.MAX });
+        setStencilState(engine, { test: true, func: GL_ALWAYS, ref: 1, funcMask: 0x0f });
+        clearEngine(engine, { stencil: true });
+        // No ONEONE_ONEONE preset: nearest by RGB factors; equation dropped.
+        expect(lastCommandArgs("COMMAND_SETBLENDMODE", 1, false)).toEqual([_native.Engine.ALPHA_ONEONE]);
+        expect(lastCommandArgs("COMMAND_SETSTENCIL", 7, false)[6]).not.toBe(0x0f);
+
+        const rt = createRenderTarget(engine, 4, 4);
+        const handle = rt.texture.handle;
+        const textures = mock.count("createTexture");
+        generateRenderTargetMipMaps(rt);
+        expect(rt.texture.handle).toBe(handle);
+        expect(mock.count("createTexture")).toBe(textures);
+
+        await readRenderTargetPixels(rt);
+        expect(mock.count("readTexture")).toBe(1);
     });
 
     it("alpha-to-coverage: enabling throws, disabling no-ops, queries are neutral", () => {
@@ -422,5 +446,111 @@ describe("native mip-aware sampling preset", () => {
         expect(tex._filter).not.toBe(plain);
         const mipped = createRawTexture(engine, new Uint8Array(4), 1, 1, { minFilter: GL_LINEAR_MIPMAP_LINEAR, magFilter: GL_LINEAR });
         expect(mipped._filter).toBe(tex._filter);
+    });
+});
+
+describe("current Babylon Native host features", () => {
+    beforeEach(() => {
+        disposeNativeGLEngine(engine);
+        mock.uninstall();
+        mock = createMockNative({ host: "current" });
+        mock.install();
+        engine = createNativeGLEngine();
+    });
+
+    it("maps blend factors to the exact host preset and emits the equation only when it changes", () => {
+        const E = _native.Engine;
+        const equations = (): number[] => {
+            const tag = mock.tag("COMMAND_SETBLENDEQUATION");
+            return mock.streamWords.flatMap((w, i) => (w === tag ? [mock.streamWords[i + 1]!] : []));
+        };
+        setBlendState(engine, { srcRGB: GL_ONE, dstRGB: GL_ONE, srcAlpha: GL_ONE, dstAlpha: GL_ONE, equationRGB: GLBlendEquation.MAX, equationAlpha: GLBlendEquation.MAX });
+        clearEngine(engine, {});
+        expect(lastCommandArgs("COMMAND_SETBLENDMODE", 1, false)).toEqual([E.ALPHA_ONEONE_ONEONE]);
+        expect(equations()).toEqual([E.ALPHA_EQUATION_MAX]);
+
+        setBlendState(engine, { srcRGB: GL_SRC_ALPHA, dstRGB: GL_ONE_MINUS_SRC_ALPHA, srcAlpha: GL_ONE, dstAlpha: GL_ONE_MINUS_SRC_ALPHA, equationRGB: GLBlendEquation.MIN });
+        clearEngine(engine, {});
+        expect(lastCommandArgs("COMMAND_SETBLENDMODE", 1, false)).toEqual([E.ALPHA_LAYER_ACCUMULATE]);
+        // MIN RGB + ADD alpha is the host's DARKEN equation.
+        expect(equations()).toEqual([E.ALPHA_EQUATION_MAX, E.ALPHA_EQUATION_DARKEN]);
+
+        // Presets blend with ADD; disabling keeps the equation, so re-enabling with
+        // the same one re-emits nothing.
+        setBlendMode(engine, GLBlendMode.ALPHA);
+        clearEngine(engine, {});
+        disableBlend(engine);
+        clearEngine(engine, {});
+        setBlendMode(engine, GLBlendMode.ADD);
+        clearEngine(engine, {});
+        expect(lastCommandArgs("COMMAND_SETBLENDMODE", 1, false)).toEqual([E.ALPHA_ADD]);
+        expect(equations()).toEqual([E.ALPHA_EQUATION_MAX, E.ALPHA_EQUATION_DARKEN, E.ALPHA_EQUATION_ADD]);
+    });
+
+    it("sends the stencil func mask through COMMAND_SETSTENCIL2", () => {
+        setStencilState(engine, { test: true, func: GL_ALWAYS, ref: 1, funcMask: 0x0f });
+        clearEngine(engine, { stencil: true });
+        expect(lastCommandArgs("COMMAND_SETSTENCIL2", 7, false)[6]).toBe(0x0f);
+        expect(commandCount("COMMAND_SETSTENCIL")).toBe(0);
+    });
+
+    it("generateRenderTargetMipMaps re-allocates the color texture with mips once, then regenerates", () => {
+        const rt = createRenderTarget(engine, 4, 4);
+        bindRenderTarget(rt);
+        const tex = rt.texture;
+        const oldHandle = tex.handle;
+        generateRenderTargetMipMaps(rt);
+        expect(tex.handle).not.toBe(oldHandle);
+        expect(mock.deletedTextures).toContain((oldHandle as unknown as Uint32Array)[0]);
+        expect(mock.calls.filter((c) => c.name === "initializeTexture").at(-1)!.args[3]).toBe(true);
+        expect(commandCount("COMMAND_COPYTEXTURE")).toBe(1);
+        expect(engine._state.boundFramebuffer).toBe(rt._framebuffer);
+        expect(commandCount("COMMAND_GENERATEMIPMAPS")).toBe(1);
+
+        const framebuffers = mock.count("createFrameBuffer");
+        generateRenderTargetMipMaps(rt);
+        expect(mock.count("createFrameBuffer")).toBe(framebuffers);
+        expect(commandCount("COMMAND_COPYTEXTURE")).toBe(1);
+        expect(commandCount("COMMAND_GENERATEMIPMAPS")).toBe(2);
+    });
+
+    it("reads float targets at full precision through readTexture2", async () => {
+        const float = createFloatRenderTarget(engine, 1, 1, { type: GL_FLOAT });
+        expect(Array.from((await readRenderTargetPixels(float)) as Float32Array)).toEqual([0, 0.25, 0.5, 0.75]);
+        mock.readFloatPattern = (i) => [0, 0.25, 65536, -2][i]!;
+        const half = createFloatRenderTarget(engine, 1, 1, { type: GL_HALF_FLOAT });
+        // 65536 overflows half precision to +Inf.
+        expect(Array.from((await readRenderTargetPixels(half)) as Uint16Array)).toEqual([0, 0x3400, 0x7c00, 0xc000]);
+        expect(mock.count("readTexture2")).toBe(2);
+        expect(mock.count("readTexture")).toBe(0);
+    });
+
+    it("creates, binds and disposes 3D textures through loadRawTexture3D", () => {
+        expect(engine.caps.texture3D).toBe(true);
+        const data = new Uint8Array(32);
+        const volume = createTexture3DFromPixels(engine, data, 2, 2, 2);
+        expect(mock.calls.find((c) => c.name === "loadRawTexture3D")!.args.slice(1)).toEqual([data, 2, 2, 2, _native.Engine.TEXTURE_FORMAT_RGBA8, false, false]);
+        expect(() => createTexture3DFromPixels(engine, data, 2, 2, 2, { srgb: true })).toThrow("sRGB 3D textures");
+        expect(() => generateTexture3DMipMaps(volume)).toThrow("no 3D mip chains");
+
+        const effect = samplerEffect(engine);
+        mock.fireProgramReady();
+        useEffect(effect);
+        setEffectTexture3D(effect, "s0", volume);
+        expect(engine._state.boundTextures[0]).toBe(volume.handle);
+
+        // Clearing the 3D binding leaves a 2D texture on another unit alone.
+        const flat = createRawTexture(engine, new Uint8Array(4), 1, 1);
+        bindTexture(flat, 1);
+        unbindTexture3D(engine, 1);
+        expect(engine._state.boundTextures[1]).toBe(flat.handle);
+        bindTexture3D(volume, 1);
+        unbindTexture3D(engine, 1);
+        expect(engine._state.boundTextures[1]).toBeNull();
+
+        const handle = (volume.handle as unknown as Uint32Array)[0];
+        disposeTexture3D(volume);
+        expect(engine._state.boundTextures[0]).toBeNull();
+        expect(mock.deletedTextures).toContain(handle);
     });
 });
