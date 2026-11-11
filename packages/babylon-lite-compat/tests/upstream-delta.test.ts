@@ -11,7 +11,7 @@ import {
 } from "../src/meshes/gaussian-splatting-gpu-sorter";
 import { Constants } from "../src/misc/engine-constants";
 import { ChannelMask, DivideTexturesAsync, TextureColorSpace } from "../src/textures/texture-processing";
-import { _IsHtmlInCanvasPolyfillInstalled } from "../src/textures/html-in-canvas";
+import { _IsHtmlInCanvasPolyfillInstalled } from "../src/unsupported/unsupported-apis";
 import { Color4 } from "../src/math/color";
 
 describe("Babylon.js upstream delta surfaces", () => {

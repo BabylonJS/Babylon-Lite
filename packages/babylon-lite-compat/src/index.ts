@@ -381,6 +381,10 @@ export {
     UploadHtmlElementToTexture,
     ComputeOverlayCssTransform,
     GetElementPixelFromUv,
+    IsHtmlInCanvasSupportedNatively,
+    _IsHtmlInCanvasPolyfillInstalled,
+    InstallHtmlInCanvasPolyfill,
+    UninstallHtmlInCanvasPolyfill,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -436,8 +440,6 @@ export {
     WebGPURenderPassCommandStreamMaxDrawsPerBatch,
     SubMesh,
 } from "./unsupported/unsupported-apis.js";
-export { IsHtmlInCanvasSupportedNatively, _IsHtmlInCanvasPolyfillInstalled, InstallHtmlInCanvasPolyfill, UninstallHtmlInCanvasPolyfill } from "./textures/html-in-canvas.js";
-export type { IHtmlInCanvasPolyfillModule, IInstallHtmlInCanvasPolyfillOptions } from "./textures/html-in-canvas.js";
 export type { IKTX2EncoderOptions, KTX2EncoderUsage, WebGPURenderPassCommandStreamDisableReason } from "./unsupported/unsupported-apis.js";
 export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
@@ -446,6 +448,8 @@ export * as GLTF1 from "./loading/gltf1.js";
 export type {
     IHtmlInteractionManagerOptions,
     IHtmlRaycastInteractionManagerOptions,
+    IHtmlInCanvasPolyfillModule,
+    IInstallHtmlInCanvasPolyfillOptions,
     DitheredTileFadeSupportedMaterial,
     DitheredTileFadeMesh,
     IDitheredTileFadeBounds,
