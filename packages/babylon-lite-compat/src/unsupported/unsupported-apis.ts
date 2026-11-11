@@ -1268,9 +1268,18 @@ export function GetElementPixelFromUv(): never {
     return unsupported("GetElementPixelFromUv", "HTML overlay raycast interaction is not supported by Babylon Lite.");
 }
 
-/** Babylon.js `IsHtmlInCanvasSupportedNatively` — the HTML-in-canvas feature is unsupported by the compat layer. */
+/**
+ * Babylon.js `IsHtmlInCanvasSupportedNatively`.
+ *
+ * The legacy polyfill uses a positional upload signature that Lite's existing
+ * HTML texture module cannot consume without adding feature branches to a
+ * module already included by HTML-texture users.
+ */
 export function IsHtmlInCanvasSupportedNatively(): never {
-    return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
+    return unsupported(
+        "IsHtmlInCanvasSupportedNatively",
+        "Supporting the legacy HTML-in-Canvas polyfill requires changing Lite's existing HTML texture upload path, which would add code to current HTML-texture bundles."
+    );
 }
 
 /** Babylon.js internal polyfill-state query. Compat never installs the unsupported polyfill. */
@@ -1278,14 +1287,26 @@ export function _IsHtmlInCanvasPolyfillInstalled(): boolean {
     return false;
 }
 
-/** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+/**
+ * Babylon.js `InstallHtmlInCanvasPolyfill`.
+ *
+ * The installed polyfill would redirect Lite to an incompatible positional
+ * upload API, so exposing the installer without changing Lite's hot path would
+ * break otherwise-working HTML textures.
+ */
 export function InstallHtmlInCanvasPolyfill(): never {
-    return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+    return unsupported(
+        "InstallHtmlInCanvasPolyfill",
+        "The legacy polyfill's positional upload API requires changes inside Lite's existing HTML texture module, so it cannot be added as a zero-impact compat-only capability."
+    );
 }
 
-/** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
+/** Babylon.js `UninstallHtmlInCanvasPolyfill`; paired with the structurally blocked installer. */
 export function UninstallHtmlInCanvasPolyfill(): never {
-    return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
+    return unsupported(
+        "UninstallHtmlInCanvasPolyfill",
+        "The matching installer is unavailable because the legacy polyfill requires changes inside Lite's existing HTML texture upload path."
+    );
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────
