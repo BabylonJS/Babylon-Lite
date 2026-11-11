@@ -19,7 +19,13 @@ const swiftShaderArgs =
 
 export default defineConfig({
     testDir: "../tests/lite/integration",
-    testMatch: ["gaussian-point-reprojection.spec.ts", "gaussian-point-sampling.spec.ts", "parallax-occlusion.spec.ts", "ssao-depth-validity.spec.ts"],
+    testMatch: [
+        "gaussian-point-reprojection.spec.ts",
+        "gaussian-point-sampling.spec.ts",
+        "parallax-occlusion.spec.ts",
+        "ssao-depth-validity.spec.ts",
+        "texture-pixel-readback.spec.ts",
+    ],
     timeout: 90_000,
     retries: isCI ? 1 : 0,
     workers: 1,
