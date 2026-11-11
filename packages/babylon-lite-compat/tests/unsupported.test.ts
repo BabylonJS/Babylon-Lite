@@ -41,9 +41,6 @@ import {
     UploadHtmlElementToTexture,
     ComputeOverlayCssTransform,
     GetElementPixelFromUv,
-    IsHtmlInCanvasSupportedNatively,
-    InstallHtmlInCanvasPolyfill,
-    UninstallHtmlInCanvasPolyfill,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -382,9 +379,6 @@ describe("HTML-texture function stubs throw on call", () => {
         ["UploadHtmlElementToTexture", () => UploadHtmlElementToTexture()],
         ["ComputeOverlayCssTransform", () => ComputeOverlayCssTransform()],
         ["GetElementPixelFromUv", () => GetElementPixelFromUv()],
-        ["IsHtmlInCanvasSupportedNatively", () => IsHtmlInCanvasSupportedNatively()],
-        ["InstallHtmlInCanvasPolyfill", () => InstallHtmlInCanvasPolyfill()],
-        ["UninstallHtmlInCanvasPolyfill", () => UninstallHtmlInCanvasPolyfill()],
     ];
 
     it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {

@@ -1222,16 +1222,6 @@ export interface IHtmlRaycastInteractionManagerOptions {
     [key: string]: unknown;
 }
 
-/** Module shape of an HTML-in-canvas polyfill (shape-only stub). */
-export interface IHtmlInCanvasPolyfillModule {
-    [key: string]: unknown;
-}
-
-/** Options accepted by `InstallHtmlInCanvasPolyfill` (shape-only stub). */
-export interface IInstallHtmlInCanvasPolyfillOptions {
-    [key: string]: unknown;
-}
-
 export class HtmlInteractionManager {
     public constructor() {
         unsupported("HtmlInteractionManager", "HTML overlay interaction is not part of Babylon Lite's WebGPU renderer.");
@@ -1266,26 +1256,6 @@ export function ComputeOverlayCssTransform(): never {
 /** Babylon.js `GetElementPixelFromUv` — HTML overlay raycast interaction is unsupported by the compat layer. */
 export function GetElementPixelFromUv(): never {
     return unsupported("GetElementPixelFromUv", "HTML overlay raycast interaction is not supported by Babylon Lite.");
-}
-
-/** Babylon.js `IsHtmlInCanvasSupportedNatively` — the HTML-in-canvas feature is unsupported by the compat layer. */
-export function IsHtmlInCanvasSupportedNatively(): never {
-    return unsupported("IsHtmlInCanvasSupportedNatively", "The HTML-in-canvas feature is not supported by Babylon Lite.");
-}
-
-/** Babylon.js internal polyfill-state query. Compat never installs the unsupported polyfill. */
-export function _IsHtmlInCanvasPolyfillInstalled(): boolean {
-    return false;
-}
-
-/** Babylon.js `InstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
-export function InstallHtmlInCanvasPolyfill(): never {
-    return unsupported("InstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
-}
-
-/** Babylon.js `UninstallHtmlInCanvasPolyfill` — the HTML-in-canvas polyfill is unsupported by the compat layer. */
-export function UninstallHtmlInCanvasPolyfill(): never {
-    return unsupported("UninstallHtmlInCanvasPolyfill", "The HTML-in-canvas polyfill is not supported by Babylon Lite.");
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────

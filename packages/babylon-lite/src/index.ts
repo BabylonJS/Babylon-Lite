@@ -471,6 +471,13 @@ export { createExternalTexture, isExternalTextureReady } from "./texture/externa
 export type { ExternalTexture } from "./texture/external-texture.js";
 export { createHtmlTexture, updateHtmlTexture, requestHtmlTextureUpdate, disposeHtmlTexture, isHtmlInCanvasSupported, whenHtmlTextureReady } from "./texture/html-texture.js";
 export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture.js";
+export {
+    isHtmlInCanvasPolyfillInstalled,
+    isHtmlInCanvasSupportedNatively,
+    installHtmlInCanvasPolyfill,
+    uninstallHtmlInCanvasPolyfill,
+} from "./texture/html-in-canvas-support.js";
+export type { HtmlInCanvasPolyfillModule, HtmlInCanvasPolyfillOptions } from "./texture/html-in-canvas-support.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
