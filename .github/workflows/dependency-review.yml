@@ -47,34 +47,37 @@ jobs:
                       echo "::warning title=Dependency review::Base/head commit SHAs are unavailable; lower-severity report skipped."
                       exit 0
                   fi
-                  if ! changes="$(gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}")"; then
+                  # --paginate follows Link headers, as dependency-review-action does;
+                  # jq -s merges the per-page arrays.
+                  if ! changes="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}")"; then
                       echo "::warning title=Dependency review::Could not fetch the dependency comparison; lower-severity report skipped."
                       exit 0
                   fi
-                  if ! findings="$(jq -r '
-                      def escape: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
-                      .[] | select(.change_type == "added") | . as $change
-                      | (.vulnerabilities // [])[]
-                      | select(.severity == "low" or .severity == "moderate")
-                      | "::warning title=Dependency review (non-blocking)::" + ("\(.severity): \($change.name)@\($change.version) in \($change.manifest) (\($change.scope // "unknown") scope) - \(.advisory_ghsa_id) \(.advisory_summary) \(.advisory_url)" | escape)
+                  if ! advisories="$(jq -c -s '
+                      [ add // [] | .[] | select(.change_type == "added") | . as $change
+                        | (.vulnerabilities // [])[]
+                        | select(.severity == "low" or .severity == "moderate")
+                        | {severity, ghsa: .advisory_ghsa_id, summary: .advisory_summary, url: .advisory_url,
+                           name: $change.name, version: $change.version, manifest: $change.manifest,
+                           scope: ($change.scope // "unknown")} ]
                   ' <<< "$changes")"; then
                       echo "::warning title=Dependency review::Could not parse the dependency comparison; lower-severity report skipped."
                       exit 0
                   fi
-                  if [[ -z "$findings" ]]; then
+                  if [[ "$advisories" == "[]" ]]; then
                       echo "No added low or moderate severity advisories."
                       exit 0
                   fi
-                  echo "$findings"
+                  jq -r '
+                      def escape: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+                      .[] | "::warning title=Dependency review (non-blocking)::" + ("\(.severity): \(.name)@\(.version) in \(.manifest) (\(.scope) scope) - \(.ghsa) \(.summary) \(.url)" | escape)
+                  ' <<< "$advisories"
                   {
                       echo "### Non-blocking low/moderate advisories"
                       echo
                       echo "These added dependencies have advisories below the blocking threshold (high):"
                       echo
                       jq -r '
-                          .[] | select(.change_type == "added") | . as $change
-                          | (.vulnerabilities // [])[]
-                          | select(.severity == "low" or .severity == "moderate")
-                          | "- \(.severity): `\($change.name)@\($change.version)` in `\($change.manifest)` ([\(.advisory_ghsa_id)](\(.advisory_url)))" | gsub("[\r\n]"; " ")
-                      ' <<< "$changes"
+                          .[] | "- \(.severity): `\(.name)@\(.version)` in `\(.manifest)` ([\(.ghsa)](\(.url)))" | gsub("[\r\n]"; " ")
+                      ' <<< "$advisories"
                   } >> "$GITHUB_STEP_SUMMARY"
