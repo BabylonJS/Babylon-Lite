@@ -97,7 +97,7 @@ const COVERAGE_GAMMA_HOOK: SpriteCoverageGammaHook = {
  * bytes. The gamma value is stored internally on the layer and is *only* settable through this
  * function — there is no create-time option and no public field, so a value can never be written
  * that the renderer would silently ignore. Call it before `createSpriteRenderer` /
- * `addDepthHostedSpriteLayer` so the layer's first pipeline is built with the gamma permutation;
+ * `addDepthHostedSpriteLayerToScene` so the layer's first pipeline is built with the gamma permutation;
  * calling it later is also safe — the renderer re-fetches the pipeline each frame and rebuilds it
  * with the gamma permutation on the next frame.
  *

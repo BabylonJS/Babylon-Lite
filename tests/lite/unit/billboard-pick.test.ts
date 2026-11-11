@@ -6,7 +6,7 @@ import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shar
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { packBillboardPickUbo } from "../../../packages/babylon-lite/src/picking/billboard-pick-pipeline";
 import { createAxisLockedBillboardSystem, createFacingBillboardSystem } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
-import { addAxisLockedBillboardSystem, addFacingBillboardSystem } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
+import { addBillboardSystemToScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
 
 function makeMockAtlas(): SpriteAtlas {
     const texture = {
@@ -69,22 +69,22 @@ describe("packBillboardPickUbo", () => {
 });
 
 describe("billboard scene pick registration", () => {
-    it("addFacingBillboardSystem registers a pick source", () => {
+    it("addBillboardSystemToScene registers a pick source for a facing system", () => {
         const scene = makeStubScene();
         const system = createFacingBillboardSystem(makeMockAtlas());
 
-        addFacingBillboardSystem(scene, system);
+        addBillboardSystemToScene(scene, system);
 
         expect(scene._pickSources).toHaveLength(1);
         // The deferred renderable builder is still queued (rendering path unchanged).
         expect(scene._deferredBuilders.length).toBe(1);
     });
 
-    it("addAxisLockedBillboardSystem registers a pick source", () => {
+    it("addBillboardSystemToScene registers a pick source for an axis-locked system", () => {
         const scene = makeStubScene();
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0]);
 
-        addAxisLockedBillboardSystem(scene, system);
+        addBillboardSystemToScene(scene, system);
 
         expect(scene._pickSources).toHaveLength(1);
     });
@@ -94,15 +94,15 @@ describe("billboard scene pick registration", () => {
         const a = createFacingBillboardSystem(makeMockAtlas());
         const b = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0]);
 
-        addFacingBillboardSystem(scene, a);
-        addAxisLockedBillboardSystem(scene, b);
+        addBillboardSystemToScene(scene, a);
+        addBillboardSystemToScene(scene, b);
 
         expect(scene._pickSources).toHaveLength(2);
     });
 
     it("disposing removes the system's pick source", () => {
         const scene = makeStubScene();
-        addFacingBillboardSystem(scene, createFacingBillboardSystem(makeMockAtlas()));
+        addBillboardSystemToScene(scene, createFacingBillboardSystem(makeMockAtlas()));
         expect(scene._pickSources).toHaveLength(1);
 
         // Running the registered disposers (as scene teardown / entity disposal does) must remove

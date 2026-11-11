@@ -41,9 +41,11 @@ describe("particle scene discovery", () => {
         expect(live).toEqual([first, second, third]);
         expect(live.every((system) => !isParticleSystemStarted(system))).toBe(true);
         expect(scene._beforeRender).toHaveLength(4);
-        // Two additional pick-source disposers, but only one enumeration disposer per scene.
-        expect(scene._disposables).toHaveLength(disposables + 2);
+        // Billboard pick sources are owned by the billboard collection; neither it nor enumeration adds a second disposer.
+        expect(scene._pickSources).toHaveLength(4);
+        expect(scene._disposables).toHaveLength(disposables);
         disposeScene(scene);
+        expect(scene._pickSources).toHaveLength(0);
         expect(live).toEqual([]);
         expect(getParticleSystems(scene)).toEqual([]);
     });

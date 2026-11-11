@@ -47,13 +47,13 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     visible: boolean;
     readonly order: number;
     readonly count: number;
+    /** How the system's quads orient toward the camera; fixed by the factory that created the system. */
+    readonly orientation: TOrientation;
+    /** Normalized world lock axis for axis-locked systems; `[0, 0, 0]` for facing systems. */
+    readonly axis: readonly [number, number, number];
 
-    /** @internal Orientation shader path for this system. */
-    readonly _orientation: TOrientation;
     /** @internal Depth/blend pipeline path for this system. */
     readonly _depthMode: BillboardDepthMode;
-    /** @internal Normalized lock axis for axis-locked systems; zero for facing. */
-    readonly _axis: readonly [number, number, number];
     /** @internal Capacity of the per-instance buffer in sprites. */
     _capacity: number;
     /** @internal Per-instance stride in floats. */
@@ -197,9 +197,9 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         visible: opts.visible ?? true,
         order: opts.order ?? (depthMode === "transparent" ? 200 : 100),
         count: 0,
-        _orientation: orientation,
+        orientation,
+        axis,
         _depthMode: depthMode,
-        _axis: axis,
         _capacity: capacity,
         _instanceFloatsPerSprite: BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
         _instanceStrideBytes: BILLBOARD_INSTANCE_STRIDE_BYTES,

@@ -30,6 +30,7 @@ import type { FgEventBus } from "../flow-graph/event-bus.js";
 import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
 import type { Material } from "../material/material.js";
 import type { SceneChangeState } from "./scene-change.js";
+import type { SceneRenderableCollection } from "./scene-renderable-collection.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
 import type { ParticleSystem } from "../particle/particle-system.js";
 import type { PhysicsWorld } from "../physics/havok.js";
@@ -226,6 +227,9 @@ export interface SceneContext extends RenderingContext {
     _physicsWorlds?: PhysicsWorld[];
     /** @internal Generic scene-membership subscribers. Allocated on first subscription. */
     _sceneChanges?: SceneChangeState;
+    /** @internal Custom-renderable collections (text, depth-hosted sprite layers, billboard systems), keyed by
+     *  family. Each is allocated by its family's first add or subscription; independent of generic membership. */
+    _renderableCollections?: Map<string, SceneRenderableCollection>;
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
     _deferredBuilders: (() => void | Promise<void>)[];
     /** @internal Mesh group registry — maps builder to its mesh list (internal bookkeeping). */

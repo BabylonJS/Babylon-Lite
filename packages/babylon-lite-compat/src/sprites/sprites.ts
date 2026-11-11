@@ -20,7 +20,7 @@ import {
     createFacingBillboardSystem,
     addBillboardSpriteIndex,
     updateBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     billboardBlendAlpha,
     billboardBlendAdditive,
     createSprite2DLayer,
@@ -95,7 +95,7 @@ export class SpriteManager {
                 sprite._applyTo(system);
             }
             this._lite = system;
-            addFacingBillboardSystem(scene._lite, system);
+            addBillboardSystemToScene(scene._lite, system);
         });
     }
 

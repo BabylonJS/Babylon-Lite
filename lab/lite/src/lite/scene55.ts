@@ -1,6 +1,6 @@
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     createEngine,
     createFacingBillboardSystem,
     createFreeCamera,
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
         frame: 8,
         color: [1, 1, 1, 0.58],
     });
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     await registerScene(scene);
     await startEngine(engine);

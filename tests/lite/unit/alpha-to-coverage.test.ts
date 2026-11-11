@@ -316,7 +316,7 @@ describe("WebGPU alpha-to-coverage", () => {
         const { engine } = makeEngine();
         const cache = createBillboardPipelineCache();
         const system = {
-            _orientation: "facing",
+            orientation: "facing",
             _depthMode: "cutout",
             blendMode: billboardBlendCutout,
         } as BillboardSpriteSystem;
@@ -345,7 +345,7 @@ describe("WebGPU alpha-to-coverage", () => {
         const standardSprite = getOrCreateSpritePipeline(engine, spriteCache, "rgba8unorm", 1, spriteBlendOpaque, true, true, "depth24plus", sceneLayout, layer, "less-equal");
 
         const billboardCache = createBillboardPipelineCache();
-        const system = { _orientation: "facing", _depthMode: "cutout", blendMode: billboardBlendCutout } as BillboardSpriteSystem;
+        const system = { orientation: "facing", _depthMode: "cutout", blendMode: billboardBlendCutout } as BillboardSpriteSystem;
         const reverseBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout);
         const standardBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout, "less-equal");
 

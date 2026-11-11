@@ -225,7 +225,7 @@ serialized value
     -> startParticleSystem / stopParticleSystem / animateParticleSystem
         -> billboard target:
                  createParticleBillboard + syncParticleBillboard
-                 -> addFacingBillboardSystem or registerNodeParticleSet
+                 -> addBillboardSystemToScene or registerNodeParticleSet
              or pure-2D target:
                  createParticleSprite2DBridge + syncParticleSprite2DBridge
                  -> addSpriteRendererLayer or registerNodeParticleSet2D
@@ -1591,7 +1591,7 @@ return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), bas
 
 Interpolating toward white before destination-color blending makes a zero-alpha texel leave the framebuffer unchanged. The Add pass uses the stock billboard fragment (`sampled * tint * opacityMul`).
 
-The internal particle-blend registrar configures the freshly created facing-billboard representation in place. Modes without `_particlePasses` delegate to `addFacingBillboardSystem`. Advanced modes attach the private Multiply shader, register picking, and register a deferred particle renderable builder entirely from the opt-in particle module.
+The internal particle-blend registrar configures the freshly created facing-billboard representation in place. Modes without `_particlePasses` delegate to `addBillboardSystemToScene`. Advanced modes attach the private Multiply shader and join the same scene billboard collection (membership, picking, removal, discovery) with a particle-owned deferred renderable builder, all from the opt-in particle module.
 
 The generic `buildBillboardRenderable(engine, system)` API and its ordinary scene registrar remain unchanged. The optional particle path attaches its static shader before calling that base builder. A single lazily created descriptor and per-device/orientation shader-module cache are shared by every particle system, so identical systems share shader modules and pipeline-cache keys.
 
@@ -1601,7 +1601,7 @@ Mode `3` uses the resulting normal billboard renderable unchanged. Mode `4` wrap
 
 Mode `4` draws the normal Multiply binding first. The primary draw leaves its instance and index buffers bound, so the wrapper then binds only the Add pipeline and Add bind group before issuing the second indexed draw over the same instances. It restores the primary Multiply pipeline so the render task's consecutive-pipeline cache remains correct. The draw reports two GPU draw calls when particles are visible and zero when the system is hidden or empty.
 
-`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addFacingBillboardSystem`. Enriched systems therefore resolve all five modes exactly from the current `system.blendMode`; ordinary builders retain the stock live-registration path and Add fallback.
+`registerNodeParticleSet` invokes each system's installed `_registerBillboard` callback, falling back to `addBillboardSystemToScene`. Enriched systems therefore resolve all five modes exactly from the current `system.blendMode`; ordinary builders retain the stock live-registration path and Add fallback.
 
 ### 10.2 Billboard synchronization
 
@@ -1628,7 +1628,7 @@ The billboard path uses the transient allocations above and the billboard subsys
 `registerNodeParticleSet(scene, set, options = {})` uses `autoStart = options.autoStart ?? true`. For each system, in `set.systems` order, it:
 
 1. Creates the particle billboard.
-2. Calls `(system._registerBillboard ?? addFacingBillboardSystem)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
+2. Calls `(system._registerBillboard ?? addBillboardSystemToScene)(scene, billboard)`. Only the explicit blend-mode builder installs the particle-blend registrar, and only for descriptors carrying `_particlePasses`.
 3. Calls `startParticleSystem` when auto-start is true.
 4. Appends one internal callback to `scene._beforeRender`.
 
