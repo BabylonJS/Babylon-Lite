@@ -4,6 +4,17 @@ import type { EngineContext } from "../engine/engine.js";
 import type { CubeTexture } from "./cube-texture.js";
 import type { Texture2D } from "./texture-2d.js";
 
+/**
+ * Readback strategy: render the selected texels into a temporary RGBA8 texture,
+ * then use the shared padded staging-buffer copy to return tightly packed bytes.
+ * Babylon.js WebGPUEngine instead copies the requested source region directly to
+ * a staging buffer in its source format (and may flush pending framebuffer work).
+ * This conversion pass intentionally trades an extra GPU pass for one consistent
+ * RGBA8 result across supported color formats and subresources, without requiring
+ * `COPY_SRC` on or mutating an existing Lite texture. It does not flush work the
+ * application has not submitted, so callers should read after frame submission.
+ */
+
 /** Allocation metadata for texture preview controls. Does not guarantee the texture is still live. */
 export interface TextureReadbackInfo {
     kind: "2d" | "cube" | "2d-array" | "3d";
