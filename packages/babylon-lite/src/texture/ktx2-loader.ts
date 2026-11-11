@@ -56,7 +56,40 @@ export interface Ktx2Decoder {
 interface Ktx2DecoderModule {
     KTX2Decoder: new () => Ktx2Decoder;
     MSCTranscoder: { UseFromWorkerThread: boolean };
-    WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean };
+    WASMMemoryManager: Ktx2WasmLoader;
+}
+
+/** The decoder's WASM fetcher. `LoadWASM` is absent on decoder builds that predate it. */
+interface Ktx2WasmLoader {
+    LoadBinariesFromCurrentThread: boolean;
+    LoadWASM?: (path: string) => Promise<ArrayBuffer>;
+}
+
+/** Attempts made by a transcoder WASM fetch before its failure is final. */
+const KTX2_WASM_LOAD_ATTEMPTS = 3;
+
+/** Retry a failed transcoder WASM fetch before the decoder sees it. Each transcoder caches the FIRST promise its
+ *  `LoadWASM` call returns, rejected or not, so a single network hiccup would otherwise fail every later KTX2
+ *  texture of the page. Idempotent: an already-wrapped loader is left alone. The decoding worker
+ *  (`_ktx2WorkerMain`) carries its own copy of this wrapper because its body cannot import. */
+function retryKtx2WasmLoads(loader: Ktx2WasmLoader): void {
+    const load = loader.LoadWASM;
+    if (typeof load !== "function" || (load as { _ktx2Retry?: true })._ktx2Retry) {
+        return;
+    }
+    const retrying = async (path: string): Promise<ArrayBuffer> => {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                return await load.call(loader, path);
+            } catch (error) {
+                if (attempt >= KTX2_WASM_LOAD_ATTEMPTS) {
+                    throw error;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+            }
+        }
+    };
+    loader.LoadWASM = Object.assign(retrying, { _ktx2Retry: true as const });
 }
 
 // Pin the default decoder to a published release with matching transcoder JS/WASM assets. Override via
@@ -132,6 +165,7 @@ export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
             }
             mod.MSCTranscoder.UseFromWorkerThread = false;
             mod.WASMMemoryManager.LoadBinariesFromCurrentThread = true;
+            retryKtx2WasmLoads(mod.WASMMemoryManager);
             // Redirect the decoder's WASM/JS module fetches to self-hosted copies, if configured. Each key
             // names a transcoder on the module (MSCTranscoder, ZSTDDecoder, LiteTranscoder_*); set props
             // that exist (JSModuleURL/WASMModuleURL) and ignore the rest, so it survives decoder updates.

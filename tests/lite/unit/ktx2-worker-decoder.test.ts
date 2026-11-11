@@ -32,6 +32,8 @@ interface FakeDecoderBehaviour {
     holdInit?: (index: number) => Promise<void> | undefined;
     /** Fail this worker through its real onerror handler before init is acknowledged. */
     failBeforeInit?: (index: number) => string | undefined;
+    /** The decoder's own WASM fetcher (`WASMMemoryManager.LoadWASM`). */
+    loadWasm?: (path: string) => Promise<ArrayBuffer>;
 }
 
 interface WorkerRecord {
@@ -100,7 +102,7 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
                         };
                         const module = {
                             MSCTranscoder: { UseFromWorkerThread: false, JSModuleURL: "", WasmModuleURL: "" },
-                            WASMMemoryManager: { LoadBinariesFromCurrentThread: false },
+                            WASMMemoryManager: { LoadBinariesFromCurrentThread: false, LoadWASM: behaviour.loadWasm },
                             ZSTDDecoder: { WasmModuleURL: "" },
                             KTX2Decoder: class {
                                 decode(data: Uint8Array): Promise<unknown> {
@@ -125,6 +127,7 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
                         realm.KTX2DECODER = module;
                     },
                     onmessage: null,
+                    setTimeout,
                 };
                 realm.self = realm;
                 runInNewContext(source, realm);
@@ -441,6 +444,71 @@ describe("enableKtx2WorkerDecoding", () => {
         const { loader, workers } = await freshModules();
         workers.enableKtx2WorkerDecoding();
         expect(await loader.loadKtx2Decoder()).toBe(mainThreadDecoder);
+    });
+});
+
+/** A WASM fetcher that fails its first `failures` calls with a network error, then answers. */
+function flakyWasmLoad(failures: number): { load: (path: string) => Promise<ArrayBuffer>; calls: string[] } {
+    const calls: string[] = [];
+    const load = (path: string): Promise<ArrayBuffer> => {
+        calls.push(path);
+        return calls.length <= failures ? Promise.reject(new TypeError("Failed to fetch")) : Promise.resolve(new ArrayBuffer(8));
+    };
+    return { load, calls };
+}
+
+describe("KTX2 transcoder WASM fetch retry", () => {
+    beforeEach(() => {
+        vi.stubGlobal("document", { baseURI: "https://game.example/app/index.html" });
+        vi.stubGlobal("navigator", { hardwareConcurrency: 8 });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    async function mainThreadLoader(load: (path: string) => Promise<ArrayBuffer>): Promise<{ LoadWASM: (path: string) => Promise<ArrayBuffer> }> {
+        const { loader } = await freshModules();
+        const memory = { LoadBinariesFromCurrentThread: false, LoadWASM: load };
+        vi.stubGlobal("KTX2DECODER", { KTX2Decoder: class {}, MSCTranscoder: { UseFromWorkerThread: true }, WASMMemoryManager: memory });
+        await loader.loadKtx2Decoder();
+        return memory;
+    }
+
+    it("retries a failed fetch on the main thread, so one network error does not poison every later texture", async () => {
+        const flaky = flakyWasmLoad(2);
+        const memory = await mainThreadLoader(flaky.load);
+        expect((await memory.LoadWASM("msc.wasm")).byteLength).toBe(8);
+        expect(flaky.calls).toEqual(["msc.wasm", "msc.wasm", "msc.wasm"]);
+    });
+
+    it("gives up on the main thread after three attempts with the decoder's own error", async () => {
+        const flaky = flakyWasmLoad(Infinity);
+        const memory = await mainThreadLoader(flaky.load);
+        await expect(memory.LoadWASM("msc.wasm")).rejects.toThrow("Failed to fetch");
+        expect(flaky.calls).toHaveLength(3);
+    });
+
+    it("retries a failed fetch inside a decoding worker", async () => {
+        const flaky = flakyWasmLoad(2);
+        const records = installFakeWorker({ loadWasm: flaky.load });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        await loader.loadKtx2Decoder();
+        const memory = records[0]!.module!.WASMMemoryManager as unknown as { LoadWASM: (path: string) => Promise<ArrayBuffer> };
+        expect((await memory.LoadWASM("msc.wasm")).byteLength).toBe(8);
+        expect(flaky.calls).toEqual(["msc.wasm", "msc.wasm", "msc.wasm"]);
+    });
+
+    it("gives up inside a decoding worker after three attempts with the decoder's own error", async () => {
+        const flaky = flakyWasmLoad(Infinity);
+        const records = installFakeWorker({ loadWasm: flaky.load });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        await loader.loadKtx2Decoder();
+        const memory = records[0]!.module!.WASMMemoryManager as unknown as { LoadWASM: (path: string) => Promise<ArrayBuffer> };
+        await expect(memory.LoadWASM("msc.wasm")).rejects.toThrow("Failed to fetch");
+        expect(flaky.calls).toHaveLength(3);
     });
 });
 
