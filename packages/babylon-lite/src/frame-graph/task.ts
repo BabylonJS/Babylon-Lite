@@ -23,8 +23,15 @@
  */
 
 import type { EngineContext } from "../engine/engine.js";
+import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Pass } from "./pass.js";
+
+/** @internal Current color attachment and optional presentation resolve target produced by a task. */
+export interface TaskOutputInfo {
+    colorTexture: RenderTarget;
+    resolveTexture?: RenderTarget;
+}
 
 /** Polymorphic interface that all frame-graph tasks implement: records `Pass` objects during `record()` and is executed once per frame. */
 export interface Task {
@@ -57,6 +64,9 @@ export interface Task {
 
     /** @internal Optional change-detection key for tasks that cache scene-UBO writes. */
     _sceneUboCacheKey?: unknown[];
+
+    /** @internal Current output attachment information for overlay composition. */
+    _getOutputInfo?(): TaskOutputInfo | undefined;
 
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
     execute?(): number;

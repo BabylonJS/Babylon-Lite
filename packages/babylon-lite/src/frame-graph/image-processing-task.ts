@@ -22,6 +22,12 @@ interface ImageProcessingState {
     params: GPUBuffer;
 }
 
+/** @internal */
+interface ImageProcessingTask extends Task {
+    /** @internal */
+    _source: ImageProcessingSource;
+}
+
 /**
  * Create a frame-graph task that applies the scene's image-processing settings
  * (exposure, contrast, tone mapping) to a color source and draws it to the swapchain.
@@ -32,14 +38,15 @@ interface ImageProcessingState {
  */
 export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): Task {
     let state: ImageProcessingState | null = null;
-    const task: Task = {
+    const task: ImageProcessingTask = {
         name: config.name ?? "image-processing",
         engine,
         scene,
         _passes: [],
+        _source: config.source,
         record(): void {
             disposeImageProcessingState(state);
-            state = createImageProcessingState(engine, config.source);
+            state = createImageProcessingState(engine, task._source);
         },
         execute(): number {
             if (!state) {

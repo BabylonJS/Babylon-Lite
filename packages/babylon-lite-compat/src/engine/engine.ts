@@ -45,6 +45,17 @@ import { Logger } from "../misc/misc-utils.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
+let lastCreatedEngine: AbstractEngine | null = null;
+
+/** @internal Last compat engine constructed in this realm, matching Babylon.js EngineStore support checks. */
+export function _getLastCreatedEngine(): AbstractEngine | null {
+    return lastCreatedEngine;
+}
+
+function setLastCreatedEngine(engine: AbstractEngine): void {
+    lastCreatedEngine = engine;
+}
+
 /** Babylon.js `AbstractEngineOptions` subset accepted by the compat engine. */
 export interface AbstractEngineOptions extends LiteEngineOptions {
     antialias?: boolean;
@@ -178,6 +189,7 @@ export abstract class AbstractEngine {
     private _sceneMutationPauseRevision = 0;
 
     public constructor(canvas: RenderCanvas, options?: WebGPUEngineOptions | boolean) {
+        setLastCreatedEngine(this);
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
@@ -478,6 +490,9 @@ export abstract class AbstractEngine {
         this._unsubscribeDeviceLost = null;
         if (this._initialized) {
             disposeEngine(this._lite);
+        }
+        if (lastCreatedEngine === this) {
+            lastCreatedEngine = null;
         }
     }
 

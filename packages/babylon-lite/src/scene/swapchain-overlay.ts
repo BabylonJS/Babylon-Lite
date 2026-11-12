@@ -1,5 +1,6 @@
 import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTaskBase as RenderTask } from "../frame-graph/render-task-base.js";
+import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "./scene-core.js";
 
 /** Find a scene's default render task that targets the surface swapchain — either
@@ -9,6 +10,17 @@ function getDefaultSwapchainTask(scene: SceneContext, surface: SurfaceContext): 
     for (const task of scene._frameGraph._tasks as Array<Partial<RenderTask> | undefined>) {
         if (task?._config && task._colorAttachment && (task._config.rt === surface.scRT || task._config.rst === surface.scRT)) {
             return task as RenderTask;
+        }
+    }
+}
+
+function getActiveSwapchainResolver(scene: SceneContext, surface: SurfaceContext): Task | undefined {
+    const tasks = scene._frameGraph._tasks;
+    for (let i = tasks.length - 1; i >= 0; i--) {
+        const task = tasks[i]!;
+        const output = task._getOutputInfo?.();
+        if (task.executionEnabled !== false && output?.resolveTexture === surface.scRT && (output.colorTexture._descriptor.samples ?? 1) > 1) {
+            return task;
         }
     }
 }
@@ -40,10 +52,10 @@ export function configureSwapchainOverlayScene(overlay: SceneContext): void {
                 while (root._overlayBase) {
                     root = root._overlayBase;
                 }
-                const rootTask = getDefaultSwapchainTask(root, surface);
+                const rootTask = getActiveSwapchainResolver(root, surface);
                 // A root that did not render this frame (disabled or paused), or that does not resolve into
                 // the swapchain (post-process/copy), has no colour the overlay can load and resolve.
-                const view = rootTask?.enabled !== false && rootTask?.executionEnabled !== false && rootTask?._config.rst === surface.scRT && rootTask._colorAttachment.view;
+                const view = rootTask?._getOutputInfo?.()?.colorTexture._colorView;
                 if (!view) {
                     const enabled = current.enabled;
                     current.enabled = false;

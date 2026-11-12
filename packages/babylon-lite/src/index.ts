@@ -191,6 +191,8 @@ export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-proce
 export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIlluminationPostProcessTaskConfig } from "./post-process/screen-space-global-illumination.js";
 export { createScreenSpaceAmbientOcclusionPostProcessTask } from "./post-process/screen-space-ambient-occlusion.js";
 export type { ScreenSpaceAmbientOcclusionPostProcessTask, ScreenSpaceAmbientOcclusionPostProcessTaskConfig } from "./post-process/screen-space-ambient-occlusion.js";
+export { attachSceneSsaoPipeline, createSceneSsaoPipeline, detachSceneSsaoPipeline, disposeSceneSsaoPipeline } from "./post-process/scene-ssao.js";
+export type { SceneSsaoPipeline, SceneSsaoPipelineOptions } from "./post-process/scene-ssao.js";
 export { createSsaoTask } from "./post-process/ssao.js";
 export type { SsaoTask, SsaoTaskConfig, SsaoQuality } from "./post-process/ssao.js";
 export { enablePbrSsao } from "./post-process/ssao/ssao-pbr.js";
