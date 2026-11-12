@@ -43,6 +43,7 @@ interface SceneSsaoPipelineState {
     _ownedTargets: RenderTarget[];
     _aoTask: ScreenSpaceAmbientOcclusionPostProcessTask | null;
     _gate: (() => void) | null;
+    _sceneDispose: (() => void) | null;
 }
 
 interface SceneWithSsao extends SceneContext {
@@ -81,6 +82,7 @@ export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engin
         _ownedTargets: [],
         _aoTask: null,
         _gate: null,
+        _sceneDispose: null,
     };
     (_pipelineStates ??= new WeakMap()).set(pipeline, state);
     return pipeline;
@@ -110,10 +112,12 @@ export function attachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
     try {
         createTasks(pipeline, state);
         state._gate = () => updateExecutionGate(pipeline, state);
-        state.scene._beforeRender.unshift(state._gate);
+        state.scene._beforeRender.push(state._gate);
+        registerSceneDisposal(pipeline, state);
         setAttached(pipeline, true);
         updateExecutionGate(pipeline, state);
     } catch (error) {
+        unregisterSceneDisposal(state);
         cleanupTasks(state);
         restoreDefaultTask(state);
         delete owningScene._sceneSsaoPipeline;
@@ -128,6 +132,7 @@ export function detachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
         return;
     }
     setAttached(pipeline, false);
+    unregisterSceneDisposal(state);
     removeGate(state);
     cleanupTasks(state);
     restoreDefaultTask(state);
@@ -239,6 +244,7 @@ function updateExecutionGate(pipeline: SceneSsaoPipeline, state: SceneSsaoPipeli
         task.executionEnabled = active;
     }
     if (state._aoTask) {
+        const resolutionScaleChanged = state._aoTask.resolutionScale !== pipeline.resolutionScale;
         state._aoTask.camera = pipeline.camera;
         state._aoTask.resolutionScale = pipeline.resolutionScale;
         state._aoTask.radius = pipeline.radius;
@@ -246,7 +252,40 @@ function updateExecutionGate(pipeline: SceneSsaoPipeline, state: SceneSsaoPipeli
         state._aoTask.base = pipeline.base;
         state._aoTask.fadeStart = pipeline.fadeEnd * 0.75;
         state._aoTask.fadeEnd = pipeline.fadeEnd;
+        if (resolutionScaleChanged && isRenderingContextRegistered(state.scene.surface, state.scene)) {
+            buildFrameGraphTask(state.scene._frameGraph, state._aoTask);
+        }
     }
+}
+
+function registerSceneDisposal(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState): void {
+    const dispose = (): void => {
+        setAttached(pipeline, false);
+        removeGate(state);
+        state._tasks.length = 0;
+        state._aoTask = null;
+        disposeOwnedTargets(state);
+        restoreDefaultTask(state);
+        const owningScene = state.scene as SceneWithSsao;
+        if (owningScene._sceneSsaoPipeline === pipeline) {
+            delete owningScene._sceneSsaoPipeline;
+        }
+        state._sceneDispose = null;
+        state._disposed = true;
+    };
+    state._sceneDispose = dispose;
+    state.scene._disposables.push(dispose);
+}
+
+function unregisterSceneDisposal(state: SceneSsaoPipelineState): void {
+    if (!state._sceneDispose) {
+        return;
+    }
+    const index = state.scene._disposables.indexOf(state._sceneDispose);
+    if (index !== -1) {
+        state.scene._disposables.splice(index, 1);
+    }
+    state._sceneDispose = null;
 }
 
 function removeGate(state: SceneSsaoPipelineState): void {
@@ -268,6 +307,10 @@ function cleanupTasks(state: SceneSsaoPipelineState): void {
     }
     state._tasks.length = 0;
     state._aoTask = null;
+    disposeOwnedTargets(state);
+}
+
+function disposeOwnedTargets(state: SceneSsaoPipelineState): void {
     for (const target of state._ownedTargets.splice(0)) {
         disposeRenderTarget(target);
     }

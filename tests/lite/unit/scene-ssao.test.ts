@@ -33,6 +33,7 @@ function makeFixture(msaaSamples: number) {
         surface,
         camera,
         _beforeRender: [],
+        _disposables: [],
         _frameGraph: { _tasks: tasks },
     } as unknown as SceneContext;
     return { engine, scene, camera, defaultTask, tasks, scRT };
@@ -60,6 +61,7 @@ describe("createSceneSsaoPipeline", () => {
         expect(tasks).toEqual([defaultTask]);
         expect(defaultTask.executionEnabled).toBe(true);
         expect(scene._beforeRender).toHaveLength(0);
+        expect(scene._disposables).toHaveLength(0);
     });
 
     it("creates MSAA color/depth resolve tasks and exposes the active resolver", () => {
@@ -80,16 +82,51 @@ describe("createSceneSsaoPipeline", () => {
     it("pauses the owned chain while another camera is active", () => {
         const { engine, scene, camera, defaultTask, tasks } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        const nextCamera = {} as Camera;
+        scene._beforeRender.push(() => {
+            scene.camera = nextCamera;
+        });
         attachSceneSsaoPipeline(pipeline);
 
-        scene.camera = {} as Camera;
-        scene._beforeRender[0]!(16);
+        for (const callback of scene._beforeRender) {
+            callback(16);
+        }
 
         expect(defaultTask.executionEnabled).toBe(true);
         expect(tasks.slice(1).every((task) => task.executionEnabled === false)).toBe(true);
 
-        pipeline.camera = scene.camera;
-        scene._beforeRender[0]!(16);
+        pipeline.camera = nextCamera;
+        for (const callback of scene._beforeRender) {
+            callback(16);
+        }
         expect(tasks[2]).toMatchObject({ camera: scene.camera, executionEnabled: true });
+    });
+
+    it("releases its scene-owned state when the scene is disposed", () => {
+        const { engine, scene, camera } = makeFixture(4);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+
+        expect(scene._disposables).toHaveLength(1);
+        scene._disposables[0]!();
+
+        expect(pipeline.attached).toBe(false);
+        expect(scene._beforeRender).toHaveLength(0);
+        expect(() => attachSceneSsaoPipeline(pipeline)).toThrow("has been disposed");
+    });
+
+    it("re-records the AO task when resolutionScale changes on a live scene", () => {
+        const { engine, scene, camera, tasks } = makeFixture(1);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+        const ao = tasks[2]!;
+        const record = vi.spyOn(ao, "record").mockImplementation(() => {});
+        scene.surface._renderingContexts.push(scene);
+
+        pipeline.resolutionScale = 0.75;
+        scene._beforeRender[0]!(16);
+
+        expect(record).toHaveBeenCalledOnce();
+        expect(ao).toMatchObject({ resolutionScale: 0.75 });
     });
 });

@@ -113,7 +113,7 @@ describe("configureSwapchainOverlayScene", () => {
         expect(overlayTask._colorAttachment.view).toBe(baseView);
     });
 
-    it("respects the app's live enabled gate at MSAA 4", () => {
+    it("uses a resolver whose task-specific enabled state still performs a resolve", () => {
         const swapchain = {} as SurfaceContext["scRT"];
         const baseTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
         const overlayTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
@@ -131,7 +131,7 @@ describe("configureSwapchainOverlayScene", () => {
         baseTask.enabled = false;
         overlayTask.enabled = true;
         overlay._record();
-        expect(seen).toEqual([true, false, true, false]);
+        expect(seen).toEqual([true, false, true, true]);
         expect(overlayTask.enabled).toBe(true);
     });
 

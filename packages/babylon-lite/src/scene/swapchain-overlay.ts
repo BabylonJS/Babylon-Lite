@@ -19,12 +19,7 @@ function getActiveSwapchainResolver(scene: SceneContext, surface: SurfaceContext
     for (let i = tasks.length - 1; i >= 0; i--) {
         const task = tasks[i]!;
         const output = task._getOutputInfo?.();
-        if (
-            task.executionEnabled !== false &&
-            (task as Partial<RenderTask>).enabled !== false &&
-            output?.resolveTexture === surface.scRT &&
-            (output.colorTexture._descriptor.samples ?? 1) > 1
-        ) {
+        if (task.executionEnabled !== false && output?.resolveTexture === surface.scRT && (output.colorTexture._descriptor.samples ?? 1) > 1) {
             return task;
         }
     }
