@@ -521,7 +521,14 @@ describe("screenSpaceRaymarchWGSL (shared library)", () => {
         expect(src).toContain("else if(coord.x>=dim.x-1)");
         expect(src).toContain("if(coord.y<=0)");
         expect(src).toContain("else if(coord.y>=dim.y-1)");
-        expect(src).toContain("if(n2<=1e-12){return vec3f(0.0,1.0,0.0);}");
+    });
+
+    it("uses angular degeneracy rather than world-space pixel area for depth normals", () => {
+        expect(src).toContain("let n=cross(pH,pV);");
+        expect(src).toContain("let n2=dot(n,n);");
+        expect(src).toContain("if(n2<=1e-12*dot(pH,pH)*dot(pV,pV)){return vec3f(0.0,1.0,0.0);}");
+        expect(src).toContain("return n*inverseSqrt(n2);");
+        expect(src).not.toContain("if(n2<=1e-12){");
     });
 
     it("contains the dual-surface intersection contract (behind both estimates + thickness slab)", () => {

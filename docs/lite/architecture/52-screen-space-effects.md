@@ -227,6 +227,8 @@ The default composition is `"multiply"`. The producer and temporal history store
 
 The source is a pure string factory. It performs no module-level allocation and has no side effects.
 
+Depth normals cross the screen-right and screen-down world-position derivatives `pH` and `pV` (with the operands swapped for right-handed scenes). The world-up fallback is reserved for angular degeneracy: `dot(n,n) <= 1e-12 * dot(pH,pH) * dot(pV,pV)`, where `n` is their cross product. This compares squared sine rather than absolute world-space pixel area, preserving valid planar normals as the camera approaches a surface or depth resolution increases; zero-length or collinear derivatives still take the fallback.
+
 ### Ambient-occlusion producer and blur
 
 The depth-horizon producer uses scene depth as both receiver and occluder data. It reconstructs the receiver position and closest-neighbour geometric normal, transforms both to view space, then samples `sliceCount` azimuthal directions. The world-space radius is converted independently along U and V to preserve its extent across aspect ratios. Each direction marches `stepCount` taps in both directions and keeps the largest normalized positive cosine between the receiver normal and a sample direction, weighted by `1 - (distance / radius)^2`. Spatially offset per-pixel hashes rotate the slices and jitter the taps. Both hashes share the same additive temporal phase, so their difference modulo one stays fixed for each pixel; they are not temporally independent. Taps closer than one depth texel to the receiver are skipped to avoid repeatedly sampling the center depth at distant radii.
@@ -455,6 +457,7 @@ Camera-only reprojection cannot preserve history for independently moving object
 - accumulation reset and phase restart follow the reset matrix above;
 - reprojection compares history against previous-camera view distance;
 - UV → world → UV round-trips with the documented top-left convention;
+- depth-normal shader contracts require a scale-relative angular degeneracy guard, not an absolute cross-product threshold that replaces valid close-camera normals with world-up;
 - public factories clamp invalid resolution, step, and temporal settings;
 - generated WGSL contains the scalar/color history layouts and the dual-surface/tangent-plane contracts;
 - Ambient-occlusion defaults, depth-only requirements, target alias rejection, disabled identity, depth-binding replacement, target resizing, and default multiply composition are covered by unit/mock lifecycle tests.
