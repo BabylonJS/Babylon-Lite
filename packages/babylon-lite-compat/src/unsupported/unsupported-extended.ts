@@ -205,15 +205,6 @@ export class FxaaPostProcess {
     }
 }
 
-export class SSAO2RenderingPipeline {
-    public constructor() {
-        unsupported(
-            "SSAO2RenderingPipeline",
-            "Lite's SSAO uses preset sampling, bounded intensity, temporal reconstruction, and optional half-resolution geometry; BJS exposes exact sample counts, unbounded totalStrength, and independent blur ratios. A faithful adapter needs a Lite-owned BJS-compatible SSAO configuration contract."
-        );
-    }
-}
-
 // FSR 1 (AMD FidelityFX Super Resolution) upscale + sharpen. Babylon Lite has no
 // PostProcessRenderPipeline subsystem and ships no FSR/EASU/RCAS post-process, so
 // there is nothing to forward to — the same structural blocker as the other rendering

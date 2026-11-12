@@ -1063,6 +1063,29 @@ describe("Mipmapped render target allocation", () => {
         expect(entries[1]!.resource).not.toBe(source._colorView);
         expect(entries[2]!.resource).not.toBe(extra._colorView);
     });
+
+    it("resolves a multisampled post-process output into a single-sample target", () => {
+        const { engine, encoder } = mockGpu();
+        const source = target(engine);
+        const output = createRenderTarget({ format: "rgba8unorm", samples: 4, size: engine });
+        const resolve = target(engine);
+        const task = createPostProcessTask(
+            {
+                sourceTexture: source,
+                targetTexture: output,
+                resolveTexture: resolve,
+                _shader: { fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}` },
+            },
+            engine
+        );
+
+        graphFor(task).execute();
+
+        const attachment = Array.from(encoder.beginRenderPass.mock.lastCall![0].colorAttachments)[0]!;
+        expect(attachment.view).toBe(output._colorView);
+        expect(attachment.resolveTarget).toBe(resolve._colorView);
+        expect(task._getOutputInfo?.()).toEqual({ colorTexture: output, resolveTexture: resolve });
+    });
 });
 
 describe("custom post-process public adapter", () => {

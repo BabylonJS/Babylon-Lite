@@ -7,10 +7,11 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/src/scene/swapchain-overlay";
 
 function makeSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView?: GPUTextureView): RenderTask {
-    const rt = msaaView ? { _colorView: msaaView } : swapchain;
+    const rt = msaaView ? { _colorView: msaaView, _descriptor: { samples: 4 } } : swapchain;
     return {
         _config: { name: "swapchain", rt, rst: msaaView ? swapchain : undefined, clr: true },
         _colorAttachment: { view: msaaView },
+        _getOutputInfo: () => ({ colorTexture: rt, resolveTexture: msaaView ? swapchain : undefined }),
     } as unknown as RenderTask;
 }
 
@@ -61,6 +62,7 @@ describe("configureSwapchainOverlayScene", () => {
             expect(overlayTask._colorAttachment.view).toBe(view);
             const replacement = {} as GPUTextureView;
             baseTask._colorAttachment.view = replacement;
+            baseTask._config.rt._colorView = replacement;
             overlay._record();
             expect(overlayTask._colorAttachment.view).toBe(replacement);
         }
@@ -176,6 +178,21 @@ describe("configureSwapchainOverlayScene", () => {
         expect(overlayTask.enabled).toBeUndefined();
         expect(overlayTask._config.clr).toBe(true);
         expect(overlayTask._colorAttachment.view).toBe(overlayView);
+    });
+
+    it("borrows the last enabled MSAA resolver instead of the disabled default task", () => {
+        const swapchain = {} as SurfaceContext["scRT"];
+        const defaultTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
+        defaultTask.executionEnabled = false;
+        const activeView = {} as GPUTextureView;
+        const activeTask = makeSwapchainTask(swapchain, activeView);
+        const overlayTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
+        const overlay = makeOverlay(makeSurface(swapchain, 4, []), overlayTask, makeBase([defaultTask, activeTask]));
+
+        configure(overlay);
+        overlay._record();
+
+        expect(overlayTask._colorAttachment.view).toBe(activeView);
     });
 
     it("composites a nested overlay chain into the root's MSAA attachment", () => {

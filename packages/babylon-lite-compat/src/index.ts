@@ -519,8 +519,10 @@ export {
     SpritePackedManager,
     VirtualJoystick,
     SceneOptimizer,
-    SSAO2RenderingPipeline,
 } from "./unsupported/unsupported-extended.js";
+export { SSAO2RenderingPipeline } from "./post-processes/ssao2-rendering-pipeline.js";
+export { PostProcessRenderPipelineManager } from "./post-processes/post-process-render-pipeline-manager.js";
+export type { PostProcessRenderPipeline } from "./post-processes/post-process-render-pipeline-manager.js";
 export { KHR_materials_scatter, RegisterKHR_materials_scatter } from "./loading/khr-materials-scatter.js";
 export type {
     EffectWrapperCustomShaderCodeProcessing,

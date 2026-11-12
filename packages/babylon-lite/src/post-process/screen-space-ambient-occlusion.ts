@@ -48,8 +48,12 @@ export interface ScreenSpaceAmbientOcclusionPostProcessTaskConfig {
     camera: Camera;
     /** Composite destination. `null`/omitted composites over `sourceTexture`; must differ from it. */
     targetTexture?: RenderTarget | null;
+    /** Optional single-sample resolve destination for a multisampled target. */
+    resolveTexture?: RenderTarget | null;
     resolutionScale?: number;
     intensity?: number;
+    /** Composition subtraction applied after intensity. */
+    base?: number;
     /** World-space search radius in scene units. */
     radius?: number;
     /** Minimum view-direction cosine considered an occluding horizon. */
@@ -71,11 +75,15 @@ export interface ScreenSpaceAmbientOcclusionPostProcessTask extends Task {
     readonly sourceTexture: RenderTarget;
     readonly depthTexture: RenderTarget;
     readonly targetTexture: RenderTarget | null;
+    resolveTexture: RenderTarget | null;
+    camera: Camera;
     outputTexture: RenderTarget;
     /** The resolved occlusion target (`rg16float`: occlusion amount in `.r`, view distance in `.g`). */
     readonly occlusionTexture: RenderTarget;
     enabled: boolean;
+    resolutionScale: number;
     intensity: number;
+    base: number;
     radius: number;
     bias: number;
     power: number;
@@ -244,7 +252,7 @@ const AO_COMPOSITE_UNIFORM_WGSL = wgsl`struct SsAoCompositeParams{intensity:f32,
 const AO_COMPOSITE_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f,uv:vec2f)->vec4f{
   if(ssAoComposite.enabled<0.5){return color;}
   let occlusion=textureSample(ssAoTexture,sourceSampler,uv).r;
-  let amount=clamp(occlusion*ssAoComposite.intensity,0.0,1.0);
+  let amount=clamp(occlusion*ssAoComposite.intensity-ssAoComposite.p0,0.0,1.0);
   return vec4f(color.rgb*(1.0-amount),color.a);
 }`;
 
@@ -261,9 +269,9 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
     scene?: SceneContext
 ): ScreenSpaceAmbientOcclusionPostProcessTask {
     const name = config.name ?? "screen-space-ambient-occlusion";
-    const camera = config.camera;
+    let activeCamera = config.camera;
     function assertFullscreenViewport(): void {
-        const viewport = camera.viewport;
+        const viewport = activeCamera.viewport;
         if (viewport && (viewport.x !== 0 || viewport.y !== 0 || viewport.width !== 1 || viewport.height !== 1)) {
             throw new Error(`ScreenSpaceAmbientOcclusionPostProcessTask "${name}": camera.viewport must be fullscreen (x=0, y=0, width=1, height=1).`);
         }
@@ -284,8 +292,8 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
 
     const clamped = clampScreenSpaceAmbientOcclusionConfig(config);
     const params = {
-        camera,
         enabled: true,
+        base: config.base ?? 0,
         composition: config.composition ?? "multiply",
         resetVersion: config.resetVersion ?? 0,
         ...clamped,
@@ -324,6 +332,7 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
                       sourceTexture: source,
                       sourceSamplingMode: "linear",
                       targetTexture: config.targetTexture ?? null,
+                      resolveTexture: config.resolveTexture ?? null,
                       _shader: {
                           extraTextureWGSL: AO_COMPOSITE_TEXTURE_WGSL,
                           extraTextures: [owner.stableTexture],
@@ -333,6 +342,7 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
                           writeUniforms(data) {
                               data[0] = task.intensity;
                               data[1] = task.enabled ? 1 : 0;
+                              data[2] = task.base;
                           },
                           fragmentWGSL: AO_COMPOSITE_FRAGMENT_WGSL,
                       },
@@ -448,10 +458,14 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
         sourceTexture: source,
         depthTexture: depthSource,
         targetTexture: config.targetTexture ?? null,
+        resolveTexture: config.resolveTexture ?? null,
+        camera: activeCamera,
         outputTexture: composite ? composite.outputTexture : owner.stableTexture,
         occlusionTexture: owner.stableTexture,
         enabled: true,
+        resolutionScale: params.resolutionScale,
         intensity: params.intensity,
+        base: params.base,
         radius: params.radius,
         bias: params.bias,
         power: params.power,
@@ -461,11 +475,13 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
         fadeEnd: params.fadeEnd,
         temporalWeight: params.temporalWeight,
         resetVersion: params.resetVersion,
+        _getOutputInfo: () => composite?._getOutputInfo?.(),
         record(): void {
+            activeCamera = task.camera;
             assertFullscreenViewport();
             ensurePipelines();
             const srcSize = resolveScreenSpaceSourceSize(depthSource);
-            const scaled = computeScreenSpaceScaledSize(srcSize.width, srcSize.height, params.resolutionScale);
+            const scaled = computeScreenSpaceScaledSize(srcSize.width, srcSize.height, CLAMP(task.resolutionScale, 0.25, 1));
             if (scaled.width !== width || scaled.height !== height) {
                 width = scaled.width;
                 height = scaled.height;
@@ -480,10 +496,14 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
             if (owner.record(width, height)) {
                 pendingReallocation = true;
             }
+            if (composite) {
+                composite.resolveTexture = task.resolveTexture;
+            }
             composite?.record();
             task.outputTexture = composite ? composite.outputTexture : owner.stableTexture;
         },
         execute(): number {
+            activeCamera = task.camera;
             assertFullscreenViewport();
             if (!task.enabled) {
                 if (lastEnabled) {
@@ -497,11 +517,11 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
                 return composite?.execute?.() ?? 0;
             }
 
-            const aspect = getEffectiveAspectRatio(params.camera, depthSource._width || 1, depthSource._height || 1);
-            const viewProj = getViewProjectionMatrix(params.camera, aspect);
+            const aspect = getEffectiveAspectRatio(task.camera, depthSource._width || 1, depthSource._height || 1);
+            const viewProj = getViewProjectionMatrix(task.camera, aspect);
             const invViewProj = invertMat4(viewProj);
-            const viewMatrix = getViewMatrix(params.camera);
-            const cameraKey = _cameraChangeKey(params.camera);
+            const viewMatrix = getViewMatrix(task.camera);
+            const cameraKey = _cameraChangeKey(task.camera);
             const cameraMoved = cameraKey !== lastCameraKey;
             lastCameraKey = cameraKey;
 

@@ -34,6 +34,8 @@ export interface PostProcessTaskSettings {
     sourceTexture: RenderTarget;
     sourceSamplingMode?: PostProcessSamplingMode;
     targetTexture?: RenderTarget | null;
+    /** Optional single-sample resolve destination when the output target is multisampled. */
+    resolveTexture?: RenderTarget | null;
     alphaMode?: PostProcessAlphaMode;
     viewport?: NormalizedViewport | null;
     /** Clear the target before drawing. Set false when several viewport passes share a target. */
@@ -50,6 +52,7 @@ export interface PostProcessTask extends Task, PostProcessTaskSettings {
     readonly name: string;
     sourceSamplingMode: PostProcessSamplingMode;
     targetTexture: RenderTarget | null;
+    resolveTexture: RenderTarget | null;
     alphaMode: PostProcessAlphaMode;
     viewport: NormalizedViewport | null;
     clear: boolean;
@@ -103,6 +106,7 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
         sourceTexture: source,
         sourceSamplingMode: config.sourceSamplingMode ?? "linear",
         targetTexture: config.targetTexture ?? null,
+        resolveTexture: config.resolveTexture ?? null,
         alphaMode: config.alphaMode ?? 0,
         viewport: config.viewport ?? null,
         clear: config.clear ?? true,
@@ -120,13 +124,18 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
         _uniformData: null,
         _renderPassDescriptor: { label: config.name ?? "post-process", colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
+        _getOutputInfo: () => ({ colorTexture: task.outputTexture, resolveTexture: task.resolveTexture ?? undefined }),
         record(): void {
             prepareOutputTarget(task);
             buildRenderTarget(task.outputTexture, engine);
+            if (task.resolveTexture) {
+                buildRenderTarget(task.resolveTexture, engine);
+                validateResolveTarget(task);
+            }
             createPostProcessGpuState(task, engine);
         },
         execute(): number {
-            applyColorAttachmentState(task._colorAttachment, task.outputTexture, task.clear);
+            applyColorAttachmentState(task._colorAttachment, task.outputTexture, task.resolveTexture, task.clear);
             const pass = engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
             applyViewport(pass, task.viewport, task.outputTexture);
             pass.setPipeline(task._pipeline!);
@@ -213,6 +222,23 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
         layout: bgl,
         entries,
     });
+}
+
+function validateResolveTarget(task: PostProcessTaskInternal): void {
+    const output = task.outputTexture;
+    const resolve = task.resolveTexture!;
+    if ((output._descriptor.samples ?? 1) < 2) {
+        throw new Error(`PostProcessTask "${task.name}": resolveTexture requires a multisampled outputTexture.`);
+    }
+    if ((resolve._descriptor.samples ?? 1) !== 1) {
+        throw new Error(`PostProcessTask "${task.name}": resolveTexture must be single-sample.`);
+    }
+    if (output._descriptor.format !== resolve._descriptor.format) {
+        throw new Error(`PostProcessTask "${task.name}": resolveTexture format must match outputTexture format.`);
+    }
+    if (output._width !== resolve._width || output._height !== resolve._height) {
+        throw new Error(`PostProcessTask "${task.name}": resolveTexture size must match outputTexture size.`);
+    }
 }
 
 function prepareOutputTarget(task: PostProcessTaskInternal): void {
@@ -320,12 +346,12 @@ function writePostProcessUniforms(task: PostProcessTaskInternal, engine: EngineC
     engine._device.queue.writeBuffer(task._uniformBuffer!, 0, task._uniformData as Float32Array<ArrayBuffer>);
 }
 
-function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, clear: boolean): void {
+function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, resolve: RenderTarget | null, clear: boolean): void {
     // Re-read each frame: a scRT output re-acquires its view per frame;
-    // offscreen targets keep a stable view. Post-process passes render to a single
-    // target with no MSAA resolve (the scRT is always single-sample).
+    // offscreen targets keep a stable view. Resolve targets may be the scRT, so
+    // their current view is also read immediately before every pass.
     att.view = rt._colorView!;
-    att.resolveTarget = undefined;
+    att.resolveTarget = resolve?._colorView ?? undefined;
     att.loadOp = clear ? "clear" : "load";
 }
 

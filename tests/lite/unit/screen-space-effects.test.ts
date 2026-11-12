@@ -1127,18 +1127,19 @@ describe("screen-space ambient-occlusion task lifecycle", () => {
         const source = makeSceneColorDepthRT(64, 64);
         const modules = vi.spyOn(engine._device, "createShaderModule");
         const writes = vi.spyOn(engine._device.queue, "writeBuffer");
-        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera }, engine);
+        const task = createScreenSpaceAmbientOcclusionPostProcessTask({ sourceTexture: source, camera, base: 0.25 }, engine);
         task.record();
         expect(task.outputTexture).not.toBe(task.occlusionTexture);
         expect(task.outputTexture).not.toBe(source);
         expect(task.execute!()).toBe(6);
         expect(modules.mock.calls.some(([descriptor]) => descriptor.code.includes("color.rgb*(1.0-amount)"))).toBe(true);
+        expect(modules.mock.calls.some(([descriptor]) => descriptor.code.includes("occlusion*ssAoComposite.intensity-ssAoComposite.p0"))).toBe(true);
 
         task.enabled = false;
         expect(task.execute!()).toBe(1);
         const uniformData = writes.mock.lastCall?.[2];
         expect(uniformData).toBeInstanceOf(Float32Array);
-        expect(Array.from(uniformData as Float32Array).slice(0, 2)).toEqual([1, 0]);
+        expect(Array.from(uniformData as Float32Array).slice(0, 3)).toEqual([1, 0, 0.25]);
         const passesBefore = capture.beginRenderPassCount;
         expect(task.execute!()).toBe(1);
         expect(capture.beginRenderPassCount).toBe(passesBefore + 1);

@@ -84,6 +84,7 @@ import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 import { Skeleton } from "../bones/skeleton.js";
 import { ParticleSystem } from "../particles/particle-system.js";
 import type { MorphTargetManager } from "../morph/morph.js";
+import { PostProcessRenderPipelineManager } from "../post-processes/post-process-render-pipeline-manager.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -264,6 +265,7 @@ export class Scene extends AbstractScene {
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
     private _imageProcessingConfiguration: ImageProcessingConfiguration | null = null;
+    private _postProcessRenderPipelineManager: PostProcessRenderPipelineManager | null = null;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -434,6 +436,11 @@ export class Scene extends AbstractScene {
 
     public getEngine(): WebGPUEngine {
         return this._engine;
+    }
+
+    public get postProcessRenderPipelineManager(): PostProcessRenderPipelineManager {
+        this._postProcessRenderPipelineManager ??= new PostProcessRenderPipelineManager();
+        return this._postProcessRenderPipelineManager;
     }
 
     /** Babylon.js `scene.getClassName()`. */
@@ -1470,6 +1477,9 @@ export class Scene extends AbstractScene {
         }
         if (this._blendManager) {
             runCleanup(() => clearAnimationManager(this._blendManager!));
+        }
+        if (this._postProcessRenderPipelineManager) {
+            runCleanup(() => this._postProcessRenderPipelineManager!.dispose());
         }
         this._runningAnimatables.length = 0;
         runCleanup(() => this._skeletons.splice(0));

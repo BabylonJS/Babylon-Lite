@@ -275,6 +275,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
+        _getOutputInfo: () => ({ colorTexture: config.rt, resolveTexture: config.rst }),
         _updateContext: updateContext,
         record(): void {
             if (task._disposed) {
