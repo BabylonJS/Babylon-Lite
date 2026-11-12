@@ -230,7 +230,32 @@ jobs:
                   exit 1
                 fi
 
-                node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
+                # Merge strictly: a 200 whose body is not a JSON array of version
+                # strings is corrupt, not empty. Fail rather than replace it, or the
+                # upload below would drop every older release from the selector.
+                node -e '
+                  const fs = require("fs");
+                  const [ver, currentPath, outPath] = process.argv.slice(1);
+                  let list;
+                  try {
+                    list = JSON.parse(fs.readFileSync(currentPath, "utf8"));
+                  } catch (err) {
+                    console.error(`Existing manifest is not valid JSON: ${err.message}`);
+                    process.exit(1);
+                  }
+                  if (!Array.isArray(list) || !list.every((v) => typeof v === "string")) {
+                    console.error("Existing manifest is not an array of version strings.");
+                    process.exit(1);
+                  }
+                  if (!list.includes(ver)) list.push(ver);
+                  const cmp = (a, b) => {
+                    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+                    for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+                    return 0;
+                  };
+                  list = list.filter((v) => !v.includes("-")).sort(cmp).reverse();
+                  fs.writeFileSync(outPath, JSON.stringify(list) + "\n");
+                ' "$VER" "$WORK/current.json" "$WORK/versions.json"
 
                 echo "Updated manifest:"; cat "$WORK/versions.json"
 
