@@ -21,7 +21,7 @@
 > scene so it draws on top; the HUD's GPU lifetime is tied to the scene
 > via `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`.
 > Depth-hosted `Sprite2DLayer`s (those with `depth: "test" | "test-write"`)
-> are added through `addDepthHostedSpriteLayer(scene, layer)`. That opt-in
+> are added through `addDepthHostedSpriteLayerToScene(scene, layer)`. That opt-in
 > sprite module function registers a deferred scene builder; because callers
 > explicitly import this function when they want scene-hosted sprites, its
 > static `sprite-renderable` import is limited to that opt-in graph. The
@@ -64,7 +64,7 @@ The module exposes **two** sprite families:
       go through `addToScene`.
     - **Depth-hosted sprites** that sort against 3D meshes
       (`depth: "test"` or `"test-write"`): added via
-      `addDepthHostedSpriteLayer(scene, layer)`. That opt-in function queues
+      `addDepthHostedSpriteLayerToScene(scene, layer)`. That opt-in function queues
       them into the existing renderable system so they
       participate in the 3D depth attachment.
 
@@ -122,7 +122,7 @@ for them.
   walks `engine._renderingContexts` once per frame. Pure-2D apps
   register one or more `SpriteRenderer`s; HUD-on-3D apps register a
   `SceneContext` followed by a separate `SpriteRenderer` for the HUD.
-  Depth-hosted Sprite2D layers go through `addDepthHostedSpriteLayer` and
+  Depth-hosted Sprite2D layers go through `addDepthHostedSpriteLayerToScene` and
   are drawn inside the scene's 3D pass via the existing renderable system. The
   engine has no notion of "2D vs 3D" — it just iterates registrations;
   scene contexts execute their frame graph, and sprite renderers open a
@@ -253,7 +253,7 @@ apps register a `SceneContext` first, construct a separate
 draws on top, and tie its disposal to the scene via
 `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`. Depth-hosted
 Sprite2D layers (`depth: "test" | "test-write"`) are added through
-`addDepthHostedSpriteLayer`, which registers a deferred builder through the
+`addDepthHostedSpriteLayerToScene`, which registers a deferred builder through the
 scene's generic optional-renderable hook. The hook inserts a generic renderable
 into the scene so it sorts and composites against 3D meshes inside the scene's
 3D pass.**
@@ -478,28 +478,26 @@ export function unregisterScene(scene: SceneContext): void;
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 ```
 
-The scene module exposes one generic optional-renderable hook. The sprite
-module uses it from `addDepthHostedSpriteLayer`; that opt-in helper statically
-imports the sprite-owned renderable builder because calling the helper is the
-explicit feature choice:
+Depth-hosted layers are a scene custom-renderable collection (see
+[01-scene.md § Custom-renderable collections](01-scene.md#custom-renderable-collections)),
+independent of `addToScene` / `onSceneChange`. The opt-in helpers statically
+import the sprite-owned renderable builder because calling them is the explicit
+feature choice:
 
 ```typescript
-import { buildSpriteRenderable } from "./sprite-renderable.js";
-
-export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLayer): void {
-    if (layer.depth === "none") {
-        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
-    }
-    addDeferredSceneRenderables(scene, (engine) => {
-        const built = buildSpriteRenderable(engine, layer);
-        return { renderables: [built.renderable], dispose: built.dispose };
-    });
-}
+// src/sprite/sprite-scene.ts
+export function addDepthHostedSpriteLayerToScene(scene: SceneContext, layer: Sprite2DLayer): void; // idempotent; throws for depth "none"
+export function removeDepthHostedSpriteLayerFromScene(scene: SceneContext, layer: Sprite2DLayer): boolean; // false when not a member
+export function getSceneDepthHostedSpriteLayers(scene: SceneContext): readonly Sprite2DLayer[]; // add-order snapshot
+export function onSceneDepthHostedSpriteLayersChanged(scene: SceneContext, listener: SceneRenderableChangeListener<Sprite2DLayer>): () => void;
 ```
 
 `buildSpriteRenderable` rejects `depth: "none"`, because scene renderables
-require a depth policy. `addDepthHostedSpriteLayer` performs the same check
-before queuing work. HUD layers use `SpriteRenderer` directly.
+require a depth policy. `addDepthHostedSpriteLayerToScene` performs the same check
+before queuing work. HUD layers use `SpriteRenderer` directly. Removal stops the
+layer's scene renderable drawing immediately and retires its scene-built GPU
+resources after in-flight frames; the layer itself (instance data, atlas) stays
+caller-owned and can be re-added.
 
 The existing `"billboard-sprite-system"` branch stays as today (with its
 own `_deferredBuild` hook); billboards are pushed into the existing
@@ -521,10 +519,10 @@ const scene = createSceneContext(engine);
 addToScene(scene, createDirectionalLight([0, -1, 0]));
 addToScene(scene, await loadGltf(engine, "world.glb"));
 const trees = createAxisLockedBillboardSystem(treeAtlas, [0, 1, 0]);
-addAxisLockedBillboardSystem(scene, trees);
+addBillboardSystemToScene(scene, trees);
 
 // Depth-hosted anchored labels: same Sprite2DLayer factory, depth:"test"
-// routes it through addDepthHostedSpriteLayer → sprite-renderable, drawn
+// routes it through addDepthHostedSpriteLayerToScene → sprite-renderable, drawn
 // inside the scene's 3D pass.
 const labels = createSprite2DLayer(labelAtlas, { depth: "test" });
 addAnchoredSprite2D(labels, {
@@ -532,7 +530,7 @@ addAnchoredSprite2D(labels, {
     sizePx: [128, 32],
     frame: "name-bg",
 });
-addDepthHostedSpriteLayer(scene, labels);
+addDepthHostedSpriteLayerToScene(scene, labels);
 
 await registerScene(scene);
 
@@ -558,7 +556,7 @@ Index API, with the per-layer instance layout fixed at creation. The
   or HUD); never goes through `addToScene`. The layer uses a 13-float /
   52-byte instance layout and the pure shader keeps clip-space Z constant.
 - `depth: "test" | "test-write"` → caller passes the layer to
-  `addDepthHostedSpriteLayer`, which statically imports the depth-hosted
+  `addDepthHostedSpriteLayerToScene`, which statically imports the depth-hosted
   renderable builder inside the opt-in scene integration module; layer is
   drawn inside the scene's 3D pass and sorts against meshes by per-instance
   Z. The layer uses the 14-float / 56-byte layout with slot [13] exposed to
@@ -669,9 +667,9 @@ export interface Sprite2DLayerOptions {
     pivot?: [number, number];
     /**
      * Depth participation:
-     *  - "none"        (default) → drawn by a `SpriteRenderer` registered on the engine. Pipeline has no depth attachment; the per-instance layout has no Z slot. HUD overlays must use this mode and live on a `SpriteRenderer` (not on `addDepthHostedSpriteLayer`).
-     *  - "test"                  → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "greater-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
-     *  - "test-write"            → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "greater-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
+     *  - "none"        (default) → drawn by a `SpriteRenderer` registered on the engine. Pipeline has no depth attachment; the per-instance layout has no Z slot. HUD overlays must use this mode and live on a `SpriteRenderer` (not on `addDepthHostedSpriteLayerToScene`).
+     *  - "test"                  → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayerToScene` with `depthCompare: "greater-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
+     *  - "test-write"            → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayerToScene` with `depthCompare: "greater-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
      *  Each value is a pipeline-cache key bit, baked at composition time. No runtime branch.
      *  Pure-2D engines (no scene) can only use `"none"` — they have no depth attachment.
      */
@@ -1142,7 +1140,7 @@ first calls `setSprite2DUvOffset`, every sprite gains two extra instance floats 
 that are added to the sampled UV in the vertex stage — enabling parallax / infinite-scroll
 backgrounds without re-uploading texture coordinates. The offset is set per sprite via
 `setSprite2DUvOffset(layer, index, uvOffset)`. Enable during setup before
-`addDepthHostedSpriteLayer` for depth-hosted layers; only the pure-2D SpriteRenderer
+`addDepthHostedSpriteLayerToScene` for depth-hosted layers; only the pure-2D SpriteRenderer
 supports late layout changes.
 
 Enabling the flag (1) widens the instance stride by two floats, (2) adds a
@@ -1275,10 +1273,10 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     visible: boolean;
     readonly order: number;
     readonly count: number;
+    readonly orientation: TOrientation; // fixed by the factory
+    readonly axis: readonly [number, number, number]; // normalized lock axis; [0, 0, 0] for facing
 
-    readonly _orientation: TOrientation;
     readonly _depthMode: BillboardDepthMode;
-    readonly _axis: readonly [number, number, number];
     _capacity: number;
     readonly _instanceFloatsPerSprite: number;
     readonly _instanceStrideBytes: number;
@@ -1329,8 +1327,10 @@ export function getBillboardSpriteHandleIndex(handle: BillboardSpriteHandle): nu
 export function isBillboardSpriteHandleAlive(handle: BillboardSpriteHandle): boolean;
 
 // src/sprite/billboard-scene.ts
-export function addFacingBillboardSystem(scene: SceneContext, system: FacingBillboardSpriteSystem): void;
-export function addAxisLockedBillboardSystem(scene: SceneContext, system: AxisLockedBillboardSpriteSystem): void;
+export function addBillboardSystemToScene(scene: SceneContext, system: BillboardSpriteSystem): void; // idempotent
+export function removeBillboardSystemFromScene(scene: SceneContext, system: BillboardSpriteSystem): boolean; // false when not a member
+export function getSceneBillboardSystems(scene: SceneContext): readonly BillboardSpriteSystem[]; // add-order snapshot
+export function onSceneBillboardSystemsChanged(scene: SceneContext, listener: SceneRenderableChangeListener<BillboardSpriteSystem>): () => void;
 ```
 
 `BillboardSpriteSystem.order` is construction-time state: the renderable copies
@@ -1355,18 +1355,21 @@ unflipped states distinctly; callers should avoid authoring collapsed UV
 ranges or pass explicit `flipX`/`flipY` through the full update helpers when
 recovering from such data.
 
-`addFacingBillboardSystem(scene, system)` and
-`addAxisLockedBillboardSystem(scene, system)` are the scene integration
-points. They queue a deferred renderable builder through
-`addDeferredSceneRenderables` so `scene-core` and `addToScene` stay
+`addBillboardSystemToScene(scene, system)` is the scene integration point for
+both orientations. It joins the scene's billboard custom-renderable collection
+(see [01-scene.md § Custom-renderable collections](01-scene.md#custom-renderable-collections)),
+registers the system's pick source, and queues a deferred renderable builder
+through `addDeferredSceneRenderables`, so `scene-core` and `addToScene` stay
 sprite-agnostic. The builder dynamically imports `billboard-renderable.ts`,
 which imports `billboard-pipeline.ts`, `getSceneBindGroupLayout`, and the WGSL
 composer. A scene that never queues a billboard system never runtime-fetches
-that chunk. The helper signatures use orientation-specific system types so
-normal TypeScript callers cannot pass an axis-locked system to the facing
-helper or vice versa.
+that chunk. `removeBillboardSystemFromScene` unregisters the pick source and
+stops drawing immediately, retiring the scene-built GPU resources after
+in-flight frames. Particle blend-pass billboards
+(`addFacingBillboardSystemWithParticleBlend`) join the same collection with a
+particle-owned builder, so discovery and removal cover them too.
 
-Internally, the shared renderable routes through `system._orientation` and
+Internally, the shared renderable routes through `system.orientation` and
 `system._depthMode`; the current public factories set `"facing"` or
 `"axis-locked"`, and each blend descriptor carries its own `_depthMode` —
 `"transparent"` for `alpha` / `premultiplied` / `additive`, and `"cutout"` for
@@ -1590,7 +1593,7 @@ The current system UBO is 32 bytes:
 
 The render pipeline uses the scene UBO at group 0 and the billboard UBO/atlas
 bind group at group 1, with pipeline keys including render target format,
-sample count, `_orientation`, blend mode, `_depthMode`, and depth format. The
+sample count, `orientation`, blend mode, `_depthMode`, and depth format. The
 shader module cache also keys by `_depthMode`: transparent shaders have no
 discard path, while cutout shaders sample texture alpha, discard below
 `billboards.axisAndCutoff.w`, and return the sampled color multiplied by tint and
@@ -1854,11 +1857,11 @@ loses one tick of animation in the captured image. All sprite families
 
 ### Sprite2DLayer per-`depth` Pipeline State
 
-| Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare   | Depth write | Instance layout / Z                  | Render order                                                |
-| -------------- | ------------------------------------------------------------------------------- | ----------------------- | --------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
-| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none            | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
-| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`     | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
-| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`      | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
+| Layer `depth`  | Drawn via                                                                              | Depth attachment        | Depth compare   | Depth write | Instance layout / Z                  | Render order                                                |
+| -------------- | -------------------------------------------------------------------------------------- | ----------------------- | --------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
+| `"none"`       | A `SpriteRenderer` registered on the engine                                            | none                    | none            | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
+| `"test"`       | `addDepthHostedSpriteLayerToScene` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`     | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
+| `"test-write"` | `addDepthHostedSpriteLayerToScene` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`      | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
 
 The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`, plus a `cs${customKey}` segment for custom-shader layers (contributed opaquely via `_getSpriteFxHook()?.pipelineKeyPart(layer)`) and a `:uv${uvKey}` segment for `uvScroll` layers. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.
@@ -1955,7 +1958,7 @@ wasted bytes for non-anchored sprites.
 
 The current billboard path uses a 64-byte per-instance vertex buffer
 and `@builtin(vertex_index)` for the four quad corners. The shared composer
-emits one of two basis functions from `system._orientation`; the rest of the
+emits one of two basis functions from `system.orientation`; the rest of the
 vertex shader is identical.
 
 #### Facing (spherical) basis
@@ -2032,11 +2035,11 @@ is baked into WGSL or entered into the pipeline cache key.
 | Family / variant                      | Drawn through                                                               | Render slot                                           | Per-instance ordering                                                           | Blend     | Depth write |
 | ------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------- | --------- | ----------- |
 | Sprite2DLayer `depth: "none"`         | a `SpriteRenderer` registered on the engine                                 | engine `_renderingContexts` (after the scene context) | logical order, or stable ascending Y staging when `enableSprite2DYSort` is used | per-blend | off         |
-| Sprite2DLayer `depth: "test"` blended | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`)        | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write                                     | per-blend | off         |
-| Sprite2DLayer `depth: "test"` cutout  | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`)        | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write                                     | none      | off         |
-| Sprite2DLayer `depth: "test-write"`   | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 100`)        | direct draw after cached opaque meshes                | consumed; per-instance depth test + write                                       | per-blend | on          |
-| Billboard blended                     | `addFacingBillboardSystem` / `addAxisLockedBillboardSystem` (`order = 200`) | scene transparent queue                               | CPU-sorted far-to-near staging upload                                           | per-blend | off         |
-| Billboard cutout                      | `addFacingBillboardSystem` / `addAxisLockedBillboardSystem` (`order = 100`) | direct draw after cached opaque meshes                | logical insertion order; GPU depth resolves                                     | none      | on          |
+| Sprite2DLayer `depth: "test"` blended | `addDepthHostedSpriteLayerToScene` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write                                     | per-blend | off         |
+| Sprite2DLayer `depth: "test"` cutout  | `addDepthHostedSpriteLayerToScene` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write                                     | none      | off         |
+| Sprite2DLayer `depth: "test-write"`   | `addDepthHostedSpriteLayerToScene` → `sprite-renderable.ts` (`order = 100`) | direct draw after cached opaque meshes                | consumed; per-instance depth test + write                                       | per-blend | on          |
+| Billboard blended                     | `addBillboardSystemToScene` (`order = 200`)                                 | scene transparent queue                               | CPU-sorted far-to-near staging upload                                           | per-blend | off         |
+| Billboard cutout                      | `addBillboardSystemToScene` (`order = 100`)                                 | direct draw after cached opaque meshes                | logical insertion order; GPU depth resolves                                     | none      | on          |
 
 Depth-hosted Sprite2D layers do **not** Y-sort sprites individually — each
 layer becomes one `Renderable` and the GPU's depth test resolves
@@ -2095,8 +2098,9 @@ occluded by a mesh or a nearer billboard loses the pick.
 
 Billboards plug into the picker through the generic `PickContributor` seam
 (`registerPickSource` / `scene._pickSources`) — the seam itself is documented in
-[18-picking.md](18-picking.md). `addFacingBillboardSystem` /
-`addAxisLockedBillboardSystem` register **one pick source per billboard system**
+[18-picking.md](18-picking.md). `addBillboardSystemToScene` registers
+**one pick source per billboard system** (unregistered by
+`removeBillboardSystemFromScene` or scene disposal)
 in `billboard-scene.ts`. A source is pure data + a dynamic-import thunk, so
 billboard _rendering_ pulls no pick code; only on the first pick does the picker
 import `billboard-pick-pipeline.ts`, build the contributor via
@@ -2168,30 +2172,32 @@ createSprite2DLayer(atlas, { depth })
         _version, _gpuVersion, _entityType: "sprite-2d-layer" }
 
 createAxisLockedBillboardSystem(atlas, axis, opts)
-  └─> { ..., _entityType: "billboard-sprite-system", _orientation: "axis-locked", _axis: normalized(axis), ... }
+  └─> { ..., _entityType: "billboard-sprite-system", orientation: "axis-locked", axis: normalized(axis), ... }
 ```
 
 ### Depth-Hosted Scene Admission
 
 Depth-hosted sprite admission lives in the sprite module as an opt-in
-`addDepthHostedSpriteLayer` helper. Scene core exposes only a generic
+`addDepthHostedSpriteLayerToScene` helper. Scene core exposes only a generic
 `addDeferredSceneRenderables` hook; `addToScene` remains sprite-agnostic.
 Renderable construction and depth-mode validation stay in `sprite-renderable.ts`:
 
 ```text
-addDepthHostedSpriteLayer(scene, layer)
+addDepthHostedSpriteLayerToScene(scene, layer)
   └─> rejects depth === "none"
+  └─> no-op when layer is already a member
+  └─> records membership, publishes "added" to subscribers
   └─> addDeferredSceneRenderables(scene, builder)
-  └─> call statically imported buildSpriteRenderable
         └─> buildSpriteRenderable(engine, layer)
-        └─> push renderable/disposable into the scene
+        └─> releases the build if the layer left (or left and re-joined) meanwhile;
+            otherwise pushes the renderable into the scene
 ```
 
 Pure-2D-only apps never call `addToScene` at all — they create a
 `SpriteRenderer` directly, register it on the engine, and own their
 layers without any scene. HUD-on-3D apps hand their HUD layers to a
 separate `SpriteRenderer` and register it on the engine after
-`registerScene`; depth-hosted layers go through `addDepthHostedSpriteLayer`.
+`registerScene`; depth-hosted layers go through `addDepthHostedSpriteLayerToScene`.
 
 ### Build (at `registerScene`)
 
@@ -2199,7 +2205,7 @@ separate `SpriteRenderer` and register it on the engine after
 calls the statically imported `buildSpriteRenderable`, builds the pipeline (cache-keyed),
 allocates the per-layer GPU instance buffer + UBO, and creates bind groups. The
 depth-hosted `Renderable` (one per Sprite2D layer added through
-`addDepthHostedSpriteLayer`) is pushed into `scene._renderables` with `order = 100`
+`addDepthHostedSpriteLayerToScene`) is pushed into `scene._renderables` with `order = 100`
 and `_direct = true` for `depth: "test-write"`, or `order = 200` for
 blended / `depth: "test"`, so the scene's existing renderable loop picks it up
 alongside opaque and transparent meshes.
@@ -2245,7 +2251,9 @@ renderables draws only meshes and billboards.
 ### Disposal
 
 `disposeScene(scene)` invokes every callback in `scene._disposables`,
-including the per-renderable GPU buffer / bind group / pipeline cleanups,
+including each custom-renderable collection's release of its members'
+scene-built GPU state and pick sources (silently, without "removed" events),
+the per-renderable GPU buffer / bind group / pipeline cleanups,
 the per-layer anchor hook removal, and the per-target depth/MSAA
 attachment releases (existing code; sprites add no new attachments).
 
@@ -2519,15 +2527,15 @@ Imports:
 
 - `Texture2D`, `loadTexture2D` from `../texture/texture-2d.js`
 - `EngineContext` from `../engine/engine.js`
-- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `SceneContext` from `../scene/scene-core.js`, type-only
-- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `addDeferredSceneRenderables` from `../scene/scene-core.js`
-- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `buildSpriteRenderable` from `./sprite-renderable.js`
-- (only in `billboard-scene.ts`, not in pure-2D bundles) `SceneContext` and `addDeferredSceneRenderables` from `../scene/scene-core.js`
+- (only in `sprite-scene.ts` integration code, not in pure-2D bundles) `SceneContext` from `../scene/scene-core.js`, type-only
+- (only in `sprite-scene.ts` / `billboard-scene.ts`, not in pure-2D bundles) the custom-renderable collection helpers from `../scene/scene-renderable-collection.js`
+- (only in `sprite-scene.ts` integration code, not in pure-2D bundles) `buildSpriteRenderable` from `./sprite-renderable.js`
+- (only in `billboard-scene.ts`, not in pure-2D bundles) `registerPickSource` from `../picking/pick-contributor.js`
 - (only in the dynamic billboard renderable chunk) `getViewMatrix`, `getSceneBindGroupLayout`, GPU buffer helpers, and the billboard pipeline module
 
 Lazy / dynamic-imported:
 
-- `billboard-renderable.ts` and `billboard-pipeline.ts` — pulled in by `addFacingBillboardSystem` / `addAxisLockedBillboardSystem` only when `registerScene` runs the queued billboard builder.
+- `billboard-renderable.ts` and `billboard-pipeline.ts` — pulled in by `addBillboardSystemToScene` only when `registerScene` runs the queued billboard builder.
 
 Depended on by:
 
@@ -2546,7 +2554,8 @@ NOT depended on:
 
 - `sprite-renderer.test.ts` — pure-2D renderer lifecycle, layer membership, pipeline cache, and depth-mode guardrails.
 - `sprite-2d-y-sort.test.ts` — opt-in creation and depth rejection; ascending draw order; persistent-serial ties; index and handle bias; Y/non-Y dirty behavior; add/capacity growth; swap-remove; clear without serial reuse; hidden sprites; invalid values; canonical instance/handle identity; canonical ordinary upload; sorted re-upload after buffer recovery; and topmost picking across Y-sorted layers.
-- `sprite-depth-hosted-routing.test.ts` — `addDepthHostedSpriteLayer(scene, layer)` routing, depth-stencil pipeline formats, upload sizes, bind-group compatibility, and disposal.
+- `sprite-depth-hosted-routing.test.ts` — `addDepthHostedSpriteLayerToScene(scene, layer)` routing, depth-stencil pipeline formats, upload sizes, bind-group compatibility, and disposal.
+- `scene-renderable-collection.test.ts` — depth-hosted layer, billboard, and text collection membership: idempotent add, remove result, add-order discovery, change events, removal/re-add before build, removal after build, pick-source unregistration, and scene disposal.
 - `billboard-sprite.test.ts` — compact billboard instance layout, scene helper routing, transparent CPU sorting, cutout depth-write pipeline state, and axis normalization.
 - `particle-sprite-2d.test.ts` — bridge ownership, exact packed layout writes, coordinate and blend mapping, transactional renderer attachment, and disposal lifecycle.
 - `render-pass-task.test.ts` — transparent binding updates run before transparent-bucket sorting, so billboard `_worldCenter` changes affect same-frame draw order.
@@ -2559,7 +2568,7 @@ because the projection math is the same):
 
 - **Scene 50/51-sprite-grid** — pure `Sprite2DLayer` driven by a `SpriteRenderer` registered on the engine; no `SceneContext` exists.
 - **Scene 52-hud-on-3d** — a 3D scene plus a separately-registered `SpriteRenderer` for the HUD layers.
-- **Scene 53-depth-hosted-sprites** — `Sprite2DLayer { depth: "test" | "test-write" }` added to the scene via `addDepthHostedSpriteLayer`.
+- **Scene 53-depth-hosted-sprites** — `Sprite2DLayer { depth: "test" | "test-write" }` added to the scene via `addDepthHostedSpriteLayerToScene`.
 - **Scene 54-facing-billboards** — facing billboard system, alpha blending, and depth test against opaque boxes.
 - **Scene 55-billboard-sorting** — transparent billboard CPU sorting before compact instance upload.
 - **Scene 56-axis-locked-billboards** — arbitrary-axis locked billboard basis math.
@@ -2622,7 +2631,7 @@ packages/babylon-lite/src/
 
     billboard-sprite.ts                          # BillboardSpriteSystem factories + Index API + 64-byte float-color instance storage
     billboard-sprite-handle.ts                   # Optional stable-id Billboard Handle API; lazy maps/hooks, no render code
-    billboard-scene.ts                           # addFacingBillboardSystem / addAxisLockedBillboardSystem; dynamically imports the renderable builder
+    billboard-scene.ts                           # add/remove/get/onChanged billboard collection; dynamically imports the renderable builder
     billboard-renderable.ts                      # Scene Renderable wrapper, transparent CPU sort, world-center maintenance, GPU resource lifetime
     billboard-pipeline.ts                        # Billboard WGSL composer, pipeline cache, UBO and instance upload helpers
 
@@ -2800,7 +2809,7 @@ Underscore-prefixed runtime bookkeeping such as RAF handles, active render-loop 
 const scene = createSceneContext(engine);
 const atlas = await loadSpriteAtlas(engine, "sprites.png", { gridSize: [32, 32] });
 const layer = createSprite2DLayer(atlas, { depth: "test" });
-addDepthHostedSpriteLayer(scene, layer);
+addDepthHostedSpriteLayerToScene(scene, layer);
 
 const animMgr = createSpriteAnimationManager();
 attachSpriteAnimationsToScene(scene, animMgr);
@@ -2838,7 +2847,7 @@ export { startEngine } from "./engine/engine.js";
 
 // ─── Scene ───────────────────────────────────────────────────────────
 // The existing scene API is unchanged. Depth-hosted Sprite2D layers use
-// `addDepthHostedSpriteLayer`; HUD overlays use `createSpriteRenderer` +
+// `addDepthHostedSpriteLayerToScene`; HUD overlays use `createSpriteRenderer` +
 // `registerSpriteRenderer`.
 // `onSceneDispose(scene, cb)` is the public hook for tying caller-owned
 // resources (typically a HUD `SpriteRenderer`) to the scene's lifetime.
@@ -2860,7 +2869,12 @@ export { loadSpriteAtlas, createGridSpriteAtlas } from "./sprite/shared/sprite-a
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
 export { createSprite2DLayer, addSprite2DIndex, updateSprite2DIndex, removeSprite2DIndex, clearSprite2DLayer, setSprite2DFrameIndex } from "./sprite/sprite-2d.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
-export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
+export {
+    addDepthHostedSpriteLayerToScene,
+    removeDepthHostedSpriteLayerFromScene,
+    getSceneDepthHostedSpriteLayers,
+    onSceneDepthHostedSpriteLayersChanged,
+} from "./sprite/sprite-scene.js";
 
 // Billboards.
 export {
@@ -2872,7 +2886,7 @@ export {
     clearBillboardSprites,
     setBillboardSpriteFrameIndex,
 } from "./sprite/billboard-sprite.js";
-export { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "./sprite/billboard-scene.js";
+export { addBillboardSystemToScene, removeBillboardSystemFromScene, getSceneBillboardSystems, onSceneBillboardSystemsChanged } from "./sprite/billboard-scene.js";
 export type {
     FacingBillboardSpriteSystem,
     AxisLockedBillboardSpriteSystem,

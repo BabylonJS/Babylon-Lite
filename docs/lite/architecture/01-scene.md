@@ -275,6 +275,50 @@ right to release a mesh's shared buffers is taken as a one-shot, revocable claim
 (`claimMeshGpuDisposal` / `consumeMeshGpuDisposal`), so a repeat removal, a re-add, or a `disposeScene`
 in between cannot free the same buffers twice.
 
+### Custom-renderable collections
+
+Text renderables, depth-hosted Sprite2D layers and billboard systems are not `SceneEntity` values and do not
+go through `addToScene` / `removeFromScene` / `onSceneChange`. Each family owns four public functions in its
+feature module, built on the internal `scene/scene-renderable-collection.ts` helpers:
+
+| Family                       | Add (idempotent)                   | Remove (`boolean`)                      | Discover (add-order snapshot)     | Observe                                 |
+| ---------------------------- | ---------------------------------- | --------------------------------------- | --------------------------------- | --------------------------------------- |
+| `TextRenderable`             | `addTextRenderableToScene`         | `removeTextRenderableFromScene`         | `getSceneTextRenderables`         | `onSceneTextRenderablesChanged`         |
+| Depth-hosted `Sprite2DLayer` | `addDepthHostedSpriteLayerToScene` | `removeDepthHostedSpriteLayerFromScene` | `getSceneDepthHostedSpriteLayers` | `onSceneDepthHostedSpriteLayersChanged` |
+| `BillboardSpriteSystem`      | `addBillboardSystemToScene`        | `removeBillboardSystemFromScene`        | `getSceneBillboardSystems`        | `onSceneBillboardSystemsChanged`        |
+
+Semantics shared by every family:
+
+- **Membership.** A collection is allocated lazily (by the family's first add or subscription) on
+  `scene._renderableCollections` (a `Map` keyed by family) as an insertion-ordered `Map` from member to its scene-side entry.
+  Adding a member again does nothing; removing returns `true` only when the member was present. A member
+  re-added after removal moves to the end of the discovery order.
+- **Build.** An add queues the member's render attachment on the scene's deferred builders, so it builds
+  with the scene's other deferred work (at `registerScene`, or the next registration when added later).
+  Feature registrations (the billboard pick source) are installed before the addition is published. Each add
+  creates a fresh entry; membership is rechecked when the attachment resolves, with no `await` before the
+  renderable is appended, so a build that finishes after its member was removed or re-added releases its GPU
+  state instead of drawing, and a remove→re-add before build draws once.
+- **Removal.** The built renderable is spliced from `_renderables` synchronously (bumping
+  `_renderableVersion`), feature registrations such as the billboard pick source are unregistered, and the
+  attachment's GPU state is detached now and released through `retireGpuResources` after in-flight frames.
+  The member object itself stays caller-owned and can be re-added.
+- **Events.** `onScene…Changed(scene, listener)` reports only committed membership changes
+  (`{ type: "added" | "removed", entity }`). The dispatcher is installed by the first subscription, so
+  scenes that never observe a family carry no dispatch code. Changes made by a listener are queued until
+  the current event reaches every listener; listener failures do not stop later listeners and are rethrown
+  (one error, or an `AggregateError`) to the mutating caller after the change commits. The returned
+  unsubscribe is idempotent. Observing a disposed scene throws.
+- **Disposal.** `disposeScene` releases every built member's GPU state immediately through the scene
+  disposable each attachment registers (removal drops it; a build landing after disposal is released by late
+  cleanup), and
+  publishes no removal events (matching `onSceneChange`). Collections are not separately torn down: a disposed
+  scene's getters return `[]` and its removes return `false`; its pick sources are cleared by `disposeScene`.
+
+A `TextRenderable` keeps one GPU record that its draw bindings capture, so it should be a member of one scene
+at a time: removing it from (or disposing) a scene releases that record even if another scene still draws
+the renderable. This matches the existing `disposeScene` behavior.
+
 ### Hidden State (accessed via `(scene as any)`)
 
 | Property       | Set by              | Type                  | Purpose                                   |
@@ -411,9 +455,11 @@ back-reference, so ownership cannot be recovered by mesh identity. Node material
 | `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred                                                       |
 | `scene272-runtime-mesh-swap`                 | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
 | `scene273-runtime-material-family`           | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped          |
+| `scene-renderable-collection.test.ts`        | Custom-renderable add/remove/get/onChanged semantics, remove/re-add before build, removal after build, scene disposal       |
 
 ## File Manifest
 
-| File                 | Size       | Purpose                                                              |
-| -------------------- | ---------- | -------------------------------------------------------------------- |
-| `src/scene/scene.ts` | ~150 lines | SceneContext interface, factory, entity routing, auto-framing camera |
+| File                                       | Size       | Purpose                                                                   |
+| ------------------------------------------ | ---------- | ------------------------------------------------------------------------- |
+| `src/scene/scene.ts`                       | ~150 lines | SceneContext interface, factory, entity routing, auto-framing camera      |
+| `src/scene/scene-renderable-collection.ts` | ~170 lines | Internal custom-renderable collections (membership, build attach, events) |

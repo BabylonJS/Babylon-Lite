@@ -10,7 +10,7 @@
 import type { BillboardSpriteHandle, EngineContext, FacingBillboardSpriteSystem, SceneContext } from "babylon-lite";
 import {
     addBillboardSprite,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     billboardBlendAlpha,
     createFacingBillboardSystem,
     loadSpriteAtlas,
@@ -59,7 +59,7 @@ export class DriftSmoke {
     static async create(engine: EngineContext, scene: SceneContext, url: string): Promise<DriftSmoke> {
         const atlas = await loadSpriteAtlas(engine, url, { gridSize: [256, 256], sampling: "linear" });
         const system = createFacingBillboardSystem(atlas, { capacity: CAPACITY, blendMode: billboardBlendAlpha });
-        addFacingBillboardSystem(scene, system);
+        addBillboardSystemToScene(scene, system);
         return new DriftSmoke(system);
     }
 

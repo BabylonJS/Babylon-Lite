@@ -1,23 +1,17 @@
 import type { SceneContext } from "../scene/scene-core.js";
-import { addDeferredSceneRenderables } from "../scene/scene-core.js";
-import { registerPickSource } from "../picking/pick-contributor.js";
-import { addFacingBillboardSystem } from "../sprite/billboard-scene.js";
+import { addBillboardSystemToScene } from "../sprite/billboard-scene.js";
 import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 import { attachParticleMultiplyShader, buildParticleBlendBillboardRenderable } from "./particle-billboard-renderable.js";
 import { createParticleBlend } from "./particle-blend.js";
 
-/** Add a facing billboard system using Babylon.js particle Multiply or MultiplyAdd rendering when requested. */
+/** Add a facing billboard system using Babylon.js particle Multiply or MultiplyAdd rendering when requested.
+ *  Either way the system joins the scene's billboard collection (`getSceneBillboardSystems`, `removeBillboardSystemFromScene`),
+ *  and re-adding it with `addBillboardSystemToScene` keeps its particle passes. */
 export function addFacingBillboardSystemWithParticleBlend(scene: SceneContext, billboard: FacingBillboardSpriteSystem, blendMode: number): void {
     (billboard as { blendMode: FacingBillboardSpriteSystem["blendMode"] }).blendMode = createParticleBlend(blendMode);
-    if (!billboard.blendMode._particlePasses) {
-        addFacingBillboardSystem(scene, billboard);
-        return;
+    if (billboard.blendMode._particlePasses) {
+        attachParticleMultiplyShader(billboard);
+        billboard._sceneBuilder = (engine, buildBase) => buildParticleBlendBillboardRenderable(engine, billboard, buildBase);
     }
-    attachParticleMultiplyShader(billboard);
-    scene._disposables.push(registerPickSource(scene, billboard, () => import("../picking/billboard-pick-pipeline.js")));
-    addDeferredSceneRenderables(scene, async (engine) => {
-        const { buildBillboardRenderable } = await import("../sprite/billboard-renderable.js");
-        const built = buildParticleBlendBillboardRenderable(engine, billboard, buildBillboardRenderable);
-        return { renderables: [built.renderable], dispose: built.dispose };
-    });
+    addBillboardSystemToScene(scene, billboard);
 }

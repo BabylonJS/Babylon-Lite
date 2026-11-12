@@ -15,10 +15,11 @@
  * with `camera: null` returns an empty `PickingInfo` immediately), so the serialization
  * logic is exercised without a WebGPU device.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createGpuPicker, pickAsync } from "../../../packages/babylon-lite/src/picking/gpu-picker";
+import type { PickContributor, PickSource } from "../../../packages/babylon-lite/src/picking/pick-contributor";
 
 /** A scene that makes `pickImpl` return an empty pick immediately (no camera, no device work). */
 function makeIdleScene(): SceneContext {
@@ -112,5 +113,26 @@ describe("gpu picker pick serialization", () => {
         await Promise.all(runs);
 
         expect(order).toEqual([10, 20, 30]);
+    });
+});
+
+describe("gpu picker contributor cache", () => {
+    it("disposes and evicts contributors whose pick source left the scene", async () => {
+        const kept = { entity: {}, load: vi.fn() } as unknown as PickSource;
+        const removed = { entity: {}, load: vi.fn() } as unknown as PickSource;
+        const scene = { ...makeIdleScene(), _pickSources: [kept] } as unknown as SceneContext;
+        const picker = createGpuPicker(scene);
+        const keptContributor = { draw: vi.fn(), resolve: vi.fn(), dispose: vi.fn() };
+        const removedContributor = { draw: vi.fn(), resolve: vi.fn(), dispose: vi.fn() };
+        picker._contributors = new Map<PickSource, PickContributor>([
+            [kept, keptContributor],
+            [removed, removedContributor],
+        ]);
+
+        await pickAsync(picker, 0, 0);
+
+        expect(removedContributor.dispose).toHaveBeenCalledOnce();
+        expect(keptContributor.dispose).not.toHaveBeenCalled();
+        expect([...picker._contributors.keys()]).toEqual([kept]);
     });
 });

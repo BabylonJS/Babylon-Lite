@@ -4,7 +4,7 @@
 // LocalVariable. Graph normalization must preserve the exact frozen rendered state.
 
 import {
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     animateParticleSystem,
     buildNodeParticleSet,
     createArcRotateCamera,
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
 
     const billboard = createParticleBillboard(system);
     syncParticleBillboard(system, billboard);
-    addFacingBillboardSystem(scene, billboard);
+    addBillboardSystemToScene(scene, billboard);
 
     await registerScene(scene);
     await startEngine(engine);

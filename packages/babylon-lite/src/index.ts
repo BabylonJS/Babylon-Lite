@@ -68,6 +68,7 @@ export {
 export { createOverlayScene } from "./scene/overlay-scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
+export type { SceneRenderableChangeEvent, SceneRenderableChangeListener } from "./scene/scene-renderable-collection.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
 export { setEnvironmentRotation, setEnvironmentLightingRotation, setEnvironmentSkyboxRotation } from "./scene/set-environment-rotation.js";
@@ -1183,9 +1184,15 @@ export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
 export { pickSprite2D } from "./sprite/picking/pick-sprite-2d.js";
 export type { BillboardPickInfo } from "./sprite/picking/pick-billboard.js";
 export { pickBillboardSprite } from "./sprite/picking/pick-billboard.js";
-export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
+export {
+    addDepthHostedSpriteLayerToScene,
+    removeDepthHostedSpriteLayerFromScene,
+    getSceneDepthHostedSpriteLayers,
+    onSceneDepthHostedSpriteLayersChanged,
+} from "./sprite/sprite-scene.js";
 // ─── World-space billboards ────────────────────────────────────────
 export type {
+    BillboardSpriteSystem,
     FacingBillboardSpriteSystem,
     AxisLockedBillboardSpriteSystem,
     BillboardSpriteSystemOptions,
@@ -1217,7 +1224,7 @@ export {
     getBillboardSpriteHandleIndex,
     isBillboardSpriteHandleAlive,
 } from "./sprite/billboard-sprite-handle.js";
-export { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "./sprite/billboard-scene.js";
+export { addBillboardSystemToScene, removeBillboardSystemFromScene, getSceneBillboardSystems, onSceneBillboardSystemsChanged } from "./sprite/billboard-scene.js";
 // ─── Sprite Animation (Optional) ─────────────────────────────────────
 export type {
     SpriteAnimationBinding,
@@ -1294,7 +1301,14 @@ export { createTextData, updateTextData, disposeTextData } from "./text/text-dat
 export type { DefaultTextData } from "./text/default-text-data.js";
 export { createDefaultTextData, updateDefaultTextData, disposeDefaultTextData } from "./text/default-text-data.js";
 export type { TextRenderableOptions, TextRenderable } from "./text/text-renderable.js";
-export { createTextRenderable, disposeTextRenderable, addTextRenderable } from "./text/text-renderable.js";
+export {
+    createTextRenderable,
+    disposeTextRenderable,
+    addTextRenderableToScene,
+    removeTextRenderableFromScene,
+    getSceneTextRenderables,
+    onSceneTextRenderablesChanged,
+} from "./text/text-renderable.js";
 export type { TextLayer, TextLayerOptions, TextRenderer, TextRendererOptions } from "./text/text-renderer.js";
 export {
     createTextLayer,

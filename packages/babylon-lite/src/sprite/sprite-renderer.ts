@@ -72,7 +72,7 @@ export interface SpriteRendererOptions {
  *      *after* `registerScene` so it draws on top.
  *
  * Scene 52 demonstrates pattern (2). For depth-hosted sprites that should
- * sort against 3D meshes, use `addDepthHostedSpriteLayer(scene, layer)` with
+ * sort against 3D meshes, use `addDepthHostedSpriteLayerToScene(scene, layer)` with
  * a depth-enabled `Sprite2DLayer` instead — that route is fully owned by the scene.
  */
 export interface SpriteRenderer extends RenderingContext {

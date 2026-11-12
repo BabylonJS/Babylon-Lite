@@ -2,7 +2,7 @@
 //
 // Showcases TWO things at once, both new in PR3:
 //   1. Sprites participating in the scene's depth attachment via
-//      `addDepthHostedSpriteLayer(scene, layer)` + `depth: "test-write"` — they can occlude /
+//      `addDepthHostedSpriteLayerToScene(scene, layer)` + `depth: "test-write"` — they can occlude /
 //      be occluded by 3D meshes.
 //   2. Per-instance Z (slot [13] of the per-instance vertex buffer) —
 //      multiple sprites in the SAME layer at DIFFERENT depths.
@@ -27,7 +27,7 @@
 // sprites overlap each other, the lower-z sprite wins.
 
 import {
-    addDepthHostedSpriteLayer,
+    addDepthHostedSpriteLayerToScene,
     addSprite2DIndex,
     addToScene,
     createArcRotateCamera,
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
         lastLayoutHeight = canvas.height;
         updatePerInstanceZSprites(sprites, spriteIndices, canvas);
     });
-    addDepthHostedSpriteLayer(scene, sprites);
+    addDepthHostedSpriteLayerToScene(scene, sprites);
 
     await registerScene(scene);
     await startEngine(engine);

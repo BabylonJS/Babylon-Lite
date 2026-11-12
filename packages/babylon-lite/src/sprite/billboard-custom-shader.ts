@@ -147,7 +147,7 @@ const BILLBOARD_FX_HOOK: BillboardFxHook = {
         return system._customShader?._key ?? "";
     },
     shaderModule(engine, system) {
-        return system._customShader?._getShaderModule(engine, system._orientation, system._depthMode) ?? null;
+        return system._customShader?._getShaderModule(engine, system.orientation, system._depthMode) ?? null;
     },
     layoutEntries(system, startBinding) {
         return system._customShader?._layoutEntries(startBinding) ?? null;

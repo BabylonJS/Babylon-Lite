@@ -201,7 +201,7 @@ function getGroup1Bgl(engine: EngineContext, cache: BillboardPickCache, isCutout
 
 function getPickPipeline(engine: EngineContext, system: BillboardSpriteSystem, detailed: boolean): GPURenderPipeline {
     const cache = getCache(engine);
-    const orientation = system._orientation;
+    const orientation = system.orientation;
     const isCutout = system._depthMode === "cutout";
     const key = `${orientation}|${isCutout ? 1 : 0}|${detailed ? "detailed" : "basic"}`;
     const cached = cache.pipelines.get(key);
@@ -340,7 +340,7 @@ export function drawBillboardForPicking(
 
     // Per-pick UBO: camera basis + axis + baseId + alpha cutoff (cutout only).
     const cutoff = system._depthMode === "cutout" ? system.alphaCutoff : 0;
-    packBillboardPickUbo(view, baseId, cutoff, system._axis, res.uboF32, res.uboU32);
+    packBillboardPickUbo(view, baseId, cutoff, system.axis, res.uboF32, res.uboU32);
     device.queue.writeBuffer(res.ubo, 0, res.uboScratch, 0, BILLBOARD_PICK_UBO_BYTES);
 
     pass.setPipeline(getPickPipeline(engine, system, detailed));

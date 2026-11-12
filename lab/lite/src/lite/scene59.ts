@@ -1,6 +1,6 @@
 import {
     addBillboardSprite,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     attachSpriteAnimationsToScene,
     createBox,
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     playBillboardSpriteAnimation(manager, mainRunner, PLAYER_SPRITE_INFO.runStartFrame, PLAYER_SPRITE_INFO.runEndFrame, true, PLAYER_SPRITE_INFO.delayMs);
     playBillboardSpriteAnimation(manager, reverseRunner, PLAYER_SPRITE_INFO.runEndFrame, PLAYER_SPRITE_INFO.runStartFrame, true, PLAYER_SPRITE_INFO.delayMs);
     playBillboardSpriteAnimation(manager, finishRunner, 0, 6, false, PLAYER_SPRITE_INFO.delayMs, { removeWhenFinished: true });
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {

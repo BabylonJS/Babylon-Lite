@@ -12,7 +12,7 @@ vi.mock("babylon-lite", async (importActual) => {
         animateParticleSystem: vi.fn(),
         createParticleBillboard: vi.fn(() => ({ billboard: true })),
         syncParticleBillboard: vi.fn(),
-        addFacingBillboardSystem: vi.fn(),
+        addBillboardSystemToScene: vi.fn(),
     };
 });
 
@@ -25,7 +25,7 @@ import {
     animateParticleSystem,
     createParticleBillboard,
     syncParticleBillboard,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
 } from "babylon-lite";
 import type { NodeParticleSet as LiteNodeParticleSet } from "babylon-lite";
 
@@ -43,7 +43,7 @@ const startMock = vi.mocked(startParticleSystem);
 const animateMock = vi.mocked(animateParticleSystem);
 const createBillboardMock = vi.mocked(createParticleBillboard);
 const syncBillboardMock = vi.mocked(syncParticleBillboard);
-const addBillboardMock = vi.mocked(addFacingBillboardSystem);
+const addBillboardMock = vi.mocked(addBillboardSystemToScene);
 
 /** Minimal GPU-free stand-ins for the Lite engine/scene contexts a build needs. */
 function makeScene(): { scene: Scene; liteScene: object; liteEngine: object; deferred: Array<() => void> } {

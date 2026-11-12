@@ -21,7 +21,7 @@
 
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     billboardBlendCutout,
     createArcRotateCamera,
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
         frame: 2,
         rotation: -0.12,
     });
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     await registerScene(scene);
     await startEngine(engine);

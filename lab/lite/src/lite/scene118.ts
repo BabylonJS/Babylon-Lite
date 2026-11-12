@@ -6,7 +6,7 @@
 import type { EngineContext, Mesh, Vec3Tuple } from "babylon-lite";
 import {
     addBillboardSpriteIndex,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
     addToScene,
     createArcRotateCamera,
     createBox,
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     addBillboardSpriteIndex(billboards, { position: [-2, 0.5, 0], sizeWorld: [1.5, 1.5], frame: 8, color: [1, 1, 1, 0.95] });
     const targetIndex = addBillboardSpriteIndex(billboards, { position: TARGET_ANCHOR, sizeWorld: [1.8, 1.8], frame: 13, color: [1, 1, 1, 0.95] });
     addBillboardSpriteIndex(billboards, { position: [2, -0.5, 0], sizeWorld: [1.5, 1.5], frame: 18, color: [1, 1, 1, 0.95] });
-    addFacingBillboardSystem(scene, billboards);
+    addBillboardSystemToScene(scene, billboards);
 
     const marker = createMarker(engine);
     addToScene(scene, marker);

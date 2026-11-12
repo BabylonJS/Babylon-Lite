@@ -2,7 +2,7 @@
  * Sprite depth-hosted routing tests (PR 3).
  *
  * Verifies that adding a `Sprite2DLayer` with `depth: "test"` or
- * `"test-write"` to a `SceneContext` via `addDepthHostedSpriteLayer`:
+ * `"test-write"` to a `SceneContext` via `addDepthHostedSpriteLayerToScene`:
  *   - registers a deferred builder (no eager GPU work),
  *   - lands the produced `Renderable` in `scene._renderables` with the right
  *     transparency/order metadata for frame-graph bucketing,
@@ -21,7 +21,7 @@ G.GPUColorWrite ??= { ALL: 0xf };
 G.GPUTextureUsage ??= { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4 };
 
 import { DEPTH_INSTANCE_STRIDE_BYTES, addSprite2DIndex, createSprite2DLayer } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
-import { addDepthHostedSpriteLayer } from "../../../packages/babylon-lite/src/sprite/sprite-scene";
+import { addDepthHostedSpriteLayerToScene } from "../../../packages/babylon-lite/src/sprite/sprite-scene";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { LAYER_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
@@ -117,12 +117,12 @@ function makeDrawPassMock(): GPURenderPassEncoder {
     } as unknown as GPURenderPassEncoder;
 }
 
-describe("addDepthHostedSpriteLayer", () => {
+describe("addDepthHostedSpriteLayerToScene", () => {
     it("rejects depth: 'none' layers before registering scene work", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "none" });
-        expect(() => addDepthHostedSpriteLayer(scene, layer)).toThrow(/depth/);
+        expect(() => addDepthHostedSpriteLayerToScene(scene, layer)).toThrow(/depth/);
         expect(scene._deferredBuilders.length).toBe(0);
     });
 
@@ -132,7 +132,7 @@ describe("addDepthHostedSpriteLayer", () => {
         const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn> };
         device.createBuffer.mockClear();
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test" });
-        addDepthHostedSpriteLayer(scene, layer);
+        addDepthHostedSpriteLayerToScene(scene, layer);
         expect(scene._deferredBuilders.length).toBe(1);
         // No buffers/pipelines created until registerScene runs the builder.
         expect(device.createBuffer).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe("addDepthHostedSpriteLayer", () => {
     it("routes depth: 'test' into a transparent frame-graph renderable after registerScene", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        addDepthHostedSpriteLayer(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test" }));
+        addDepthHostedSpriteLayerToScene(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test" }));
         await registerScene(scene);
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(true);
@@ -153,7 +153,7 @@ describe("addDepthHostedSpriteLayer", () => {
     it("routes depth: 'test-write' into a direct-draw depth-writing renderable after registerScene", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        addDepthHostedSpriteLayer(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
+        addDepthHostedSpriteLayerToScene(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
         await registerScene(scene);
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(false);
@@ -165,7 +165,7 @@ describe("addDepthHostedSpriteLayer", () => {
     it("uses the render target depth-stencil format for depth-hosted sprite pipelines", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        addDepthHostedSpriteLayer(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
+        addDepthHostedSpriteLayerToScene(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
         await registerScene(scene);
 
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
@@ -199,7 +199,7 @@ describe("addDepthHostedSpriteLayer", () => {
         const scene = createSceneContext(engine);
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write", capacity: 1 });
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], z: 0.75 });
-        addDepthHostedSpriteLayer(scene, layer);
+        addDepthHostedSpriteLayerToScene(scene, layer);
         await registerScene(scene);
 
         const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
@@ -218,7 +218,7 @@ describe("addDepthHostedSpriteLayer", () => {
         const scene = createSceneContext(engine);
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write" });
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32] });
-        addDepthHostedSpriteLayer(scene, layer);
+        addDepthHostedSpriteLayerToScene(scene, layer);
         await registerScene(scene);
 
         const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
@@ -240,7 +240,7 @@ describe("addDepthHostedSpriteLayer", () => {
         const scene = createSceneContext(engine);
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write" });
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32] });
-        addDepthHostedSpriteLayer(scene, layer);
+        addDepthHostedSpriteLayerToScene(scene, layer);
         await registerScene(scene);
 
         const device = engine._device as unknown as { createBindGroup: ReturnType<typeof vi.fn> };
@@ -265,7 +265,7 @@ describe("addDepthHostedSpriteLayer", () => {
     it("disposeScene runs the depth-hosted sprite disposable", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        addDepthHostedSpriteLayer(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
+        addDepthHostedSpriteLayerToScene(scene, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
         await registerScene(scene);
         const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn> };
         const buffersBefore = device.createBuffer.mock.results.length;

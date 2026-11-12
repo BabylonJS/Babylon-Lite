@@ -246,6 +246,14 @@ function createPickDiscardBindGroup(engine: EngineContext, layout: GPUBindGroupL
  *  concurrent calls on the same picker so their shared 1×1 staging buffers never race. */
 async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
+    // Release contributors whose source left the scene (e.g. a removed billboard). Picks are serialized and each
+    // awaits its readback, so no submitted pick still uses them.
+    picker._contributors?.forEach((contributor, source) => {
+        if (!scene._pickSources.includes(source)) {
+            contributor.dispose?.();
+            picker._contributors!.delete(source);
+        }
+    });
     const pickFilter = options?.filter ?? null;
     const pickDiscard = options?.discard ?? null;
     const ignored = options?.ignore;

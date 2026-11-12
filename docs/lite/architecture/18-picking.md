@@ -296,8 +296,8 @@ The picker draws meshes itself (Phase 1, ids `1..M`), then iterates
 `pick-contributor.ts`) — with no knowledge of any specific entity type. Each
 _optional_ pickable entity registers one source when it is added to the scene: a
 Gaussian-splatting mesh (`attachGaussianSplattingMesh`, one id per mesh) and a
-billboard sprite system (`addFacingBillboardSystem` /
-`addAxisLockedBillboardSystem`, `system.count` ids). A source is pure data plus a
+billboard sprite system (`addBillboardSystemToScene`, `system.count` ids;
+unregistered by `removeBillboardSystemFromScene`). A source is pure data plus a
 dynamic-`import()` thunk — no pick behaviour is bound at registration. On the first
 pick the picker `load()`s each source's pipeline, calls its
 `createPickContributor(entity)` to build the handler, and caches the result in

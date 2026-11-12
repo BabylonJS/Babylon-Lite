@@ -12,7 +12,7 @@
  * objects), which the standalone functions `startParticleSystem` /
  * `animateParticleSystem` / `stopParticleSystem` drive, and
  * `createParticleBillboard` / `syncParticleBillboard` /
- * `addFacingBillboardSystem` render as camera-facing billboards. So the compat
+ * `addBillboardSystemToScene` render as camera-facing billboards. So the compat
  * wrapper's **runtime subset** (`start` / `animate` / `stop` / `updateSpeed` /
  * `particleTexture` / `preWarmStepOffset`) forwards to those Lite functions,
  * while the imperative constructor throws — there is no Lite graph to author.
@@ -29,7 +29,7 @@ import {
     isParticleSystemStarted,
     createParticleBillboard,
     syncParticleBillboard,
-    addFacingBillboardSystem,
+    addBillboardSystemToScene,
 } from "babylon-lite";
 import type { ParticleSystem as LiteParticleSystem, Texture2D } from "babylon-lite";
 
@@ -227,7 +227,7 @@ export class ParticleSystem {
             }
             const billboard = createParticleBillboard(lite);
             syncParticleBillboard(lite, billboard);
-            addFacingBillboardSystem(scene._lite, billboard);
+            addBillboardSystemToScene(scene._lite, billboard);
         });
     }
 }
