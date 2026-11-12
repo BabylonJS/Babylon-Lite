@@ -132,6 +132,26 @@ describe("scene custom-renderable collections", () => {
         disposeScene(scene);
     });
 
+    it("leaves another scene's GPU record alone when a member moved there before its first scene built", async () => {
+        const first = createScene();
+        const second = createScene();
+        const text = createText("a");
+        addTextRenderableToScene(first, text);
+        removeTextRenderableFromScene(first, text);
+        addTextRenderableToScene(second, text);
+        await runDeferredBuilders(second);
+        const gpu = giveTextGpu(text);
+
+        await runDeferredBuilders(first);
+
+        expect(first._renderables).toEqual([]);
+        expect(second._renderables).toEqual([text]);
+        expect(text._gpu).toBe(gpu);
+        expect(gpu._textU.destroy).not.toHaveBeenCalled();
+        disposeScene(first);
+        disposeScene(second);
+    });
+
     it("never draws a member removed at any point while its attachment resolves", async () => {
         for (let ticks = 0; ticks < 8; ticks++) {
             const scene = createScene();

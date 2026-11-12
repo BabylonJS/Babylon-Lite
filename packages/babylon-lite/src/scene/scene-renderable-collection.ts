@@ -71,9 +71,13 @@ export function _addSceneRenderable(
     }
     const entry: SceneRenderableEntry = { _unregister: register?.() };
     members.set(entity, entry);
-    // Membership is rechecked and the renderable appended with no `await` between them, so a removal can never
-    // race a draw-list append.
+    // A member removed before its scene builds never attaches, so its detach cannot release GPU state that a scene
+    // it moved to now owns. After the attach resolves, membership is rechecked and the renderable appended with no
+    // `await` between them, so a removal can never race a draw-list append.
     scene._deferredBuilders.push(async () => {
+        if (members.get(entity) !== entry) {
+            return;
+        }
         const attachment = await attach(scene.surface.engine);
         if (members.get(entity) !== entry) {
             attachment._detach?.()();
