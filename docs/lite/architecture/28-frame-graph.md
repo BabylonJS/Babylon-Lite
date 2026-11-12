@@ -35,7 +35,7 @@ export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, addMeshesToTask, removeMeshFromTask, removeMeshesFromTask } from "./frame-graph/render-task.js";
 export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
@@ -754,6 +754,29 @@ A render task can be explicitly populated with:
 addMeshToTask(task, mesh);
 addMeshToTask(task, mesh, { material: overrideMaterialOrView });
 ```
+
+For large editor selections, use the root-exported batch APIs:
+
+```typescript
+addMeshesToTask(task: RenderTask, meshes: readonly Mesh[], opts?: { material?: Material }): void;
+removeMeshesFromTask(task: RenderTask, meshes: readonly object[]): void;
+```
+
+Batch addition preserves input order and skips meshes without a material unless an override is
+provided. Before recording it only queues requests; on a live task it builds one candidate generation
+and binds once, not once per mesh. If building or binding fails, the live generation and the original
+pending queue remain unchanged: none of that batch is retained for retry. This differs from a failed
+single addition, which retains its request for retry. Refresh-enabled tasks also roll back newly
+tracked meshes and refresh dirtiness; their batch hook deduplicates tracked meshes just like single
+adds, while override requests retain duplicates. Task-specific population strategies supply a matching
+batch hook so refresh and material-view semantics are preserved.
+
+Batch removal uses a membership set and stable in-place compaction of the pending, renderable, and
+three binding lists. It retires removed owned resources and binding batches, then selects/releases
+the update-batch state once and invalidates bundles only if an active entry was removed. Source-list
+removal hooks still run in input order; refresh tracking has its own set-based batch removal hook.
+Repeated or absent meshes are harmless. Empty arrays do nothing (without enabling population), and
+both batch APIs reject disposed tasks.
 
 **Breaking API migration:** replace `task.addMesh(mesh, options)` with
 `addMeshToTask(task, mesh, options)`, imported from `@babylonjs/lite`. The constructor and

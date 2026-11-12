@@ -113,7 +113,7 @@ export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, addMeshesToTask, removeMeshFromTask, removeMeshesFromTask } from "./frame-graph/render-task.js";
 export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
 export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";

@@ -178,8 +178,12 @@ export interface RenderTask extends Task {
     _updateContext: MutableDrawUpdateContext;
     /** @internal Optional explicit mesh-population strategy, installed by addMeshToTask. */
     _addMesh?(mesh: Mesh, opts?: { material?: Material }): void;
+    /** @internal Atomic batch population strategy paired with _addMesh. */
+    _addMeshes?(meshes: readonly Mesh[], opts?: { material?: Material }): void;
     /** @internal Optional refresh source-list removal hook. */
     _removeMesh?(mesh: object): void;
+    /** @internal Optional set-based refresh source-list removal hook. */
+    _removeMeshes?(meshes: readonly object[], members: ReadonlySet<object>): void;
     /** @internal */
     _pendingMeshes?: TaskMeshRequest[];
 }
@@ -327,30 +331,47 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
 
 /** Remove a mesh from this task's renderable + binding lists. Idempotent. */
 export function _removeMeshFromRenderTask(task: RenderTaskBase, mesh: object): void {
+    _removeMeshesFromRenderTask(task, [mesh]);
+}
+
+/** @internal Evict a mesh set with one scan of each active list and one batch-state selection. */
+export function _removeMeshesFromRenderTask(task: RenderTaskBase, meshes: readonly object[], members = new Set(meshes)): void {
     // Not a renderable-bearing task (e.g. a post/effect task that also carries `_config`): nothing to
     // remove. Guard keeps callers that scan all frame-graph tasks (removeFromScene) shape-safe.
     if (!task._renderables) {
         return;
     }
-    task._removeMesh?.(mesh);
-    let removed = false;
-    for (let i = task._renderables.length - 1; i >= 0; i--) {
-        if (task._renderables[i]!.mesh === mesh) {
-            task._retireRenderable?.(task.engine, task._renderables[i]!);
-            task._renderables.splice(i, 1);
-            removed = true;
+    if (task._removeMeshes) {
+        task._removeMeshes(meshes, members);
+    } else {
+        for (const mesh of meshes) {
+            task._removeMesh?.(mesh);
         }
     }
+    let removed = false;
+    let kept = 0;
+    for (const renderable of task._renderables) {
+        if (renderable.mesh && members.has(renderable.mesh)) {
+            task._retireRenderable?.(task.engine, renderable);
+            removed = true;
+        } else {
+            task._renderables[kept++] = renderable;
+        }
+    }
+    task._renderables.length = kept;
     for (const arr of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
-        for (let i = arr.length - 1; i >= 0; i--) {
-            if (arr[i]!.renderable.mesh === mesh) {
+        kept = 0;
+        for (const binding of arr) {
+            if (binding.renderable.mesh && members.has(binding.renderable.mesh)) {
                 if (drawBindingLifecycle) {
-                    drawBindingLifecycle._retire([[arr[i]!]]);
+                    drawBindingLifecycle._retire([[binding]]);
                 }
-                arr.splice(i, 1);
                 removed = true;
+            } else {
+                arr[kept++] = binding;
             }
         }
+        arr.length = kept;
     }
     if (removed) {
         const previous = task._batchState;

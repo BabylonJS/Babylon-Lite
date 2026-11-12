@@ -4,7 +4,14 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { enableRenderTaskMeshRefresh } from "../../../packages/babylon-lite/src/frame-graph/render-task-mesh-refresh";
-import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import {
+    addMeshToTask,
+    addMeshesToTask,
+    createRenderTask,
+    removeMeshFromTask,
+    removeMeshesFromTask,
+    type RenderTask,
+} from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { DrawUpdateBatch, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
@@ -188,6 +195,58 @@ function overrideMaterial() {
 }
 
 describe("render task mesh refresh", () => {
+    it("batches tracked meshes and removals without duplicate tracking or repeated bindings", () => {
+        const f = createTransactionFixture();
+        removeMeshesFromTask(f.task, f.meshes);
+        f.task.record();
+        const bind = vi.spyOn(f.untracked, "bind");
+        addMeshesToTask(f.task, [f.meshes[0]!, {} as Mesh, f.meshes[1]!, f.meshes[0]!]);
+        expect(bind).toHaveBeenCalledOnce();
+        expect(f.task._renderables.map((r) => r.mesh)).toEqual([f.untracked.mesh, ...f.meshes]);
+        const state = f.task._batchState!;
+        const select = vi.spyOn(state, "_select");
+        removeMeshesFromTask(f.task, [f.meshes[0]!, f.meshes[1]!, f.meshes[0]!]);
+        expect(select).toHaveBeenCalledOnce();
+        expect(f.task._renderables).toEqual([f.untracked]);
+        f.scene._renderableVersion++;
+        f.task.execute!();
+        expect(f.task._renderables).toEqual([f.untracked]);
+        f.task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
+    it.each(["tracked", "override"] as const)("rolls back failed %s batches, including refresh tracking and dirtiness", (kind) => {
+        const f = createTransactionFixture();
+        removeMeshesFromTask(f.task, f.meshes);
+        f.task.record();
+        const previous = currentGeneration(f.task);
+        const pending = f.task._pendingMeshes!;
+        const bind = vi.spyOn(f.untracked, "bind");
+        const override = overrideMaterial();
+        if (kind === "tracked") {
+            f.fail("bind");
+        } else {
+            override.fail("bind");
+        }
+        expect(() => addMeshesToTask(f.task, f.meshes, kind === "override" ? { material: override.material } : undefined)).toThrow(/binding failed/);
+        expect(currentGeneration(f.task)).toEqual(previous);
+        expect(f.task._pendingMeshes).toBe(pending);
+        expect(pending).toHaveLength(0);
+        bind.mockClear();
+        f.task.execute!();
+        expect(bind).not.toHaveBeenCalled();
+        f.scene._renderableVersion++;
+        f.task.execute!();
+        expect(f.task._renderables).toEqual([f.untracked]);
+        f.fail();
+        override.fail();
+        addMeshesToTask(f.task, f.meshes, kind === "override" ? { material: override.material } : undefined);
+        expect(bind).toHaveBeenCalledOnce();
+        expect(f.task._renderables.map((r) => r.mesh)).toEqual([f.untracked.mesh, ...f.meshes]);
+        f.task.dispose();
+        disposeGpuResourceRetirements(f.engine);
+    });
+
     it.each([
         ["tracked", false],
         ["override", false],
