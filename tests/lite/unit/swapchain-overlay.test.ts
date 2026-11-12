@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
-import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { createRenderTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/src/scene/swapchain-overlay";
 
@@ -15,6 +15,14 @@ function makeSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView?: GPUText
     } as unknown as RenderTask;
     task._getOutputInfo = () => (task.enabled === false ? undefined : { colorTexture: rt, resolveTexture: msaaView ? swapchain : undefined });
     return task;
+}
+
+function makeProductionSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView: GPUTextureView): RenderTask {
+    const engine = { _device: { createBuffer: vi.fn(() => ({ destroy: vi.fn() })) } } as unknown as EngineContext;
+    const scene = { _renderables: [], _renderableVersion: 0 } as unknown as SceneContext;
+    const rt = createRenderTarget({ format: "bgra8unorm", samples: 4, size: { width: 16, height: 16 } });
+    rt._colorView = msaaView;
+    return createRenderTask({ name: "swapchain", rt, rst: swapchain, autoMirror: false }, engine, scene);
 }
 
 function makeSurface(swapchain: SurfaceContext["scRT"], samples: number, contexts: unknown[]): SurfaceContext {
@@ -117,7 +125,7 @@ describe("configureSwapchainOverlayScene", () => {
 
     it("skips a disabled render-task resolver", () => {
         const swapchain = {} as SurfaceContext["scRT"];
-        const baseTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
+        const baseTask = makeProductionSwapchainTask(swapchain, {} as GPUTextureView);
         const overlayTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
         const overlay = makeOverlay(makeSurface(swapchain, 4, []), overlayTask, makeBase([baseTask]));
         const record = configure(overlay);
@@ -131,6 +139,8 @@ describe("configureSwapchainOverlayScene", () => {
         expect(seen).toEqual([true, false, true]);
 
         baseTask.enabled = false;
+        expect(baseTask.execute?.()).toBe(0);
+        expect(baseTask._getOutputInfo?.()).toBeUndefined();
         overlayTask.enabled = true;
         overlay._record();
         expect(seen).toEqual([true, false, true, false]);

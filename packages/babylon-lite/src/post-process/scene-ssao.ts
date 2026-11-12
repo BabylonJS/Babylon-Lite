@@ -2,7 +2,7 @@ import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import { isRenderingContextRegistered } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { addTaskAfter, removeTask } from "../frame-graph/frame-graph-actions.js";
 import { buildFrameGraphTask, getFrameGraphTasks } from "../frame-graph/frame-graph.js";
 import { createDepthResolveTask } from "../frame-graph/depth-resolve-task.js";
@@ -268,10 +268,7 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
         anchor = task;
     }
     if (isRenderingContextRegistered(surface, scene)) {
-        buildRenderTarget(source, engine);
-        if (!multisampled) {
-            render._colorAttachment.view = source._colorView!;
-        }
+        buildFrameGraphTask(scene._frameGraph, render);
         for (const task of state._tasks) {
             buildFrameGraphTask(scene._frameGraph, task);
         }
@@ -371,9 +368,11 @@ function restoreDefaultTask(state: SceneSsaoPipelineState): void {
     if (state._defaultTask && state._baseRt) {
         state._defaultTask._config.rt = state._baseRt;
         state._defaultTask._config.rst = state._baseRst;
-        state._defaultTask._colorAttachment.view = state._baseRt._colorView!;
     }
     state.scene._outputTexture = state._priorOutputTexture;
+    if (state._defaultTask && isRenderingContextRegistered(state.scene.surface, state.scene)) {
+        buildFrameGraphTask(state.scene._frameGraph, state._defaultTask);
+    }
     rebuildTransmissionImageProcessing(state);
     state._baseRt = null;
     state._baseRst = undefined;

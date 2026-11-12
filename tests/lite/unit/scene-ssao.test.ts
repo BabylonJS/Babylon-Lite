@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { buildRenderTarget, createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
 import { enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import type { ImageProcessingSource } from "../../../packages/babylon-lite/src/frame-graph/image-processing-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
@@ -25,6 +26,7 @@ function makeFixture(msaaSamples: number) {
     };
     const engine = {
         ...surface,
+        format: surface.format,
         _device: {
             createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
             createTexture: vi.fn(createTexture),
@@ -38,6 +40,7 @@ function makeFixture(msaaSamples: number) {
         },
     } as unknown as EngineContext;
     const camera = { viewport: null } as unknown as Camera;
+    const frameGraph = createFrameGraph(engine);
     const sceneTarget =
         msaaSamples > 1 ? createRenderTarget({ lbl: "scene", format: "bgra8unorm", dFormat: "depth24plus-stencil8", samples: msaaSamples, size: { width: 64, height: 64 } }) : scRT;
     const sceneDepth = msaaSamples > 1 ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: { width: 64, height: 64 } });
@@ -58,19 +61,36 @@ function makeFixture(msaaSamples: number) {
         execute: vi.fn(() => 0),
         dispose: vi.fn(),
     } as unknown as RenderTask;
-    const tasks = [defaultTask];
+    const defaultRecord = vi.fn(() => {
+        buildRenderTarget(defaultTask._config.rt, engine);
+        if (defaultTask._config.rst) {
+            buildRenderTarget(defaultTask._config.rst, engine);
+        }
+        if (defaultTask._config.depth) {
+            buildRenderTarget(defaultTask._config.depth, engine);
+        }
+        defaultTask._colorAttachment.view = defaultTask._config.rt._colorView!;
+    });
+    defaultTask.record = defaultRecord;
+    const tasks = frameGraph._tasks;
+    tasks.push(defaultTask);
     const scene = {
         surface,
         camera,
         _beforeRender: [],
         _disposables: [],
-        _frameGraph: { _tasks: tasks },
+        _frameGraph: frameGraph,
         meshes: [],
         imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
         clearColor: { r: 0, g: 0, b: 0, a: 1 },
     } as unknown as SceneContext;
     (defaultTask as unknown as { scene: SceneContext }).scene = scene;
-    return { engine, scene, camera, defaultTask, tasks, scRT };
+    return { engine, scene, camera, defaultTask, defaultRecord, tasks, scRT };
+}
+
+function buildRegisteredScene(scene: SceneContext): void {
+    scene.surface._renderingContexts.push(scene);
+    scene._frameGraph.build();
 }
 
 describe("createSceneSsaoPipeline", () => {
@@ -216,19 +236,38 @@ describe("createSceneSsaoPipeline", () => {
         expect((imageProcessing._source as () => unknown)()).toBe(scene._outputTexture);
     });
 
-    it("re-records transmission image processing when a live SSAO pipeline attaches and detaches", () => {
-        const { engine, scene, camera, tasks } = makeFixture(1);
+    it.each([1, 4])("rebuilds live transmission producers and consumers when SSAO attaches second at %ix MSAA", (samples) => {
+        const { engine, scene, camera, defaultTask, defaultRecord } = makeFixture(samples);
         enableSceneTransmission(scene, engine);
-        const imageProcessing = tasks.at(-1)!;
-        const record = vi.spyOn(imageProcessing, "record").mockImplementation(() => {});
-        scene.surface._renderingContexts.push(scene);
+        buildRegisteredScene(scene);
         const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        const builtBeforeAttach = defaultRecord.mock.calls.length;
 
+        expect(() => attachSceneSsaoPipeline(pipeline)).not.toThrow();
+        expect(defaultRecord).toHaveBeenCalledTimes(builtBeforeAttach + 1);
+        expect(defaultTask._config.rt._colorTexture).not.toBeNull();
+        expect(scene._outputTexture?._colorTexture).not.toBeNull();
+
+        expect(() => detachSceneSsaoPipeline(pipeline)).not.toThrow();
+        expect(defaultRecord).toHaveBeenCalledTimes(builtBeforeAttach + 2);
+        expect(defaultTask._config.rt._colorTexture).not.toBeNull();
+    });
+
+    it.each([1, 4])("rebuilds live transmission producers and consumers when SSAO attaches first at %ix MSAA", (samples) => {
+        const { engine, scene, camera, defaultTask, defaultRecord } = makeFixture(samples);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
         attachSceneSsaoPipeline(pipeline);
-        expect(record).toHaveBeenCalledOnce();
+        buildRegisteredScene(scene);
+        const builtBeforeTransmission = defaultRecord.mock.calls.length;
 
-        detachSceneSsaoPipeline(pipeline);
-        expect(record).toHaveBeenCalledTimes(2);
+        expect(() => enableSceneTransmission(scene, engine)).not.toThrow();
+        expect(defaultRecord).toHaveBeenCalledTimes(builtBeforeTransmission + 2);
+        expect(defaultTask._config.rt._colorTexture).not.toBeNull();
+        expect(scene._outputTexture?._colorTexture).not.toBeNull();
+
+        expect(() => detachSceneSsaoPipeline(pipeline)).not.toThrow();
+        expect(defaultRecord).toHaveBeenCalledTimes(builtBeforeTransmission + 3);
+        expect(defaultTask._config.rt._colorTexture).not.toBeNull();
     });
 
     it("releases a displaced task-owned transmission target on scene disposal", () => {
