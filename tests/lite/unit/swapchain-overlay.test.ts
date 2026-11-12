@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/src/scene/swapchain-overlay";
 
 function makeSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView?: GPUTextureView): RenderTask {
-    const rt = msaaView ? { _colorView: msaaView, _descriptor: { samples: 4 } } : swapchain;
+    const rt = msaaView ? ({ _colorView: msaaView, _descriptor: { samples: 4 } } as unknown as RenderTarget) : swapchain;
     const task = {
         _config: { name: "swapchain", rt, rst: msaaView ? swapchain : undefined, clr: true },
         _colorAttachment: { view: msaaView },

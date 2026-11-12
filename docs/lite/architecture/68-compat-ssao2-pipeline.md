@@ -61,9 +61,9 @@ The controller locates the scene's default render task by finding the render tas
 6. `scene-output-msaa`: surface-relative MSAA color target `M2`.
 7. Native SSAO reads `C` and `D`, composites into `M2`, and resolves `M2` into `scRT`.
 
-The default render task retains ownership of `M1`. The controller owns `C`, `D`, and `M2`. The controller never disposes the default scene task, its original targets, or `scRT`.
+The default render task retains ownership of `M1`. The controller owns `C`, `D`, and `M2`. On detach, the controller restores `M1` to its owner and never disposes it. During scene teardown, after the frame graph has disposed the retargeted task, the scene-lifetime cleanup disposes the displaced task-owned `M1`; eager shared targets such as `scRT` remain externally owned.
 
-When native PBR transmission is enabled, transmission brackets its scene-output mutation with the optional `_outputPipelineChange` seam. SSAO restores the render task before transmission retargets it, then rebuilds its chain around the resulting linear HDR target. Its composite writes a single-sample HDR output exposed through `scene._outputTexture`; the trailing transmission image-processing task resolves that getter and remains the final swapchain writer. This supports either attachment order at 1x and 4x MSAA.
+When native PBR transmission is enabled, transmission brackets its scene-output mutation with the optional `_outputPipelineChange` seam. SSAO restores the render task before transmission retargets it, then rebuilds its chain around the resulting linear HDR target. Its composite writes a single-sample HDR output exposed through `scene._outputTexture`; the trailing transmission image-processing task resolves that getter and remains the final swapchain writer. On a registered scene, changing or restoring `_outputTexture` immediately re-records that trailing task so its bind group never retains the prior target. This supports either attachment order at 1x and 4x MSAA, including live attach and detach.
 
 Tasks are inserted immediately after the default task in producer order. When the scene is already registered, each inserted task is built individually with `buildFrameGraphTask`; existing tasks are not rebuilt. Surface-relative descriptors preserve target identity across resize while their GPU allocations are rebuilt by existing render-target logic.
 

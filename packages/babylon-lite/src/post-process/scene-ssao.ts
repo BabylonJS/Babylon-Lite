@@ -272,6 +272,7 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
         for (const task of state._tasks) {
             buildFrameGraphTask(scene._frameGraph, task);
         }
+        rebuildTransmissionImageProcessing(state);
     }
 }
 
@@ -303,8 +304,10 @@ function registerSceneDisposal(pipeline: SceneSsaoPipeline, state: SceneSsaoPipe
         removeGate(state);
         state._tasks.length = 0;
         state._aoTask = null;
-        disposeOwnedTargets(state);
+        const displacedBaseRt = state._defaultTask?._ownsTargets ? state._baseRt : null;
         restoreDefaultTask(state);
+        disposeOwnedTargets(state);
+        disposeRenderTarget(displacedBaseRt);
         const owningScene = state.scene as SceneWithSsao;
         if (owningScene._sceneSsaoPipeline === pipeline) {
             delete owningScene._sceneSsaoPipeline;
@@ -363,7 +366,18 @@ function restoreDefaultTask(state: SceneSsaoPipelineState): void {
         state._defaultTask._colorAttachment.view = state._baseRt._colorView!;
     }
     state.scene._outputTexture = state._priorOutputTexture;
+    rebuildTransmissionImageProcessing(state);
     state._baseRt = null;
     state._baseRst = undefined;
     state._priorOutputTexture = undefined;
+}
+
+function rebuildTransmissionImageProcessing(state: SceneSsaoPipelineState): void {
+    if (!isRenderingContextRegistered(state.scene.surface, state.scene)) {
+        return;
+    }
+    const task = getFrameGraphTasks(state.scene._frameGraph).find((candidate) => candidate.name === "transmission-image-processing");
+    if (task) {
+        buildFrameGraphTask(state.scene._frameGraph, task);
+    }
 }

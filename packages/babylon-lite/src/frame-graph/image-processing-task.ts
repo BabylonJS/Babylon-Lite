@@ -23,7 +23,7 @@ interface ImageProcessingState {
 }
 
 /** @internal */
-export interface ImageProcessingTask extends Task {
+interface ImageProcessingTask extends Task {
     /** @internal */
     _source: ImageProcessingSource;
 }
@@ -36,7 +36,7 @@ export interface ImageProcessingTask extends Task {
  * @param scene - The scene whose `imageProcessing` settings drive the effect.
  * @returns The task to add to the frame graph.
  */
-export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): ImageProcessingTask {
+export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): Task {
     let state: ImageProcessingState | null = null;
     const task: ImageProcessingTask = {
         name: config.name ?? "image-processing",

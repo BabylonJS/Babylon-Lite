@@ -6,16 +6,35 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
-import type { ImageProcessingTask } from "../../../packages/babylon-lite/src/frame-graph/image-processing-task";
+import type { ImageProcessingSource } from "../../../packages/babylon-lite/src/frame-graph/image-processing-task";
+import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { attachSceneSsaoPipeline, createSceneSsaoPipeline, detachSceneSsaoPipeline, disposeSceneSsaoPipeline } from "../../../packages/babylon-lite/src/post-process/scene-ssao";
 
 function makeFixture(msaaSamples: number) {
     const scRT = createRenderTarget({ lbl: "swapchain", format: "bgra8unorm", samples: 1, size: { width: 64, height: 64 } });
-    const surface = { msaaSamples, format: "bgra8unorm", scRT, _renderingContexts: [] };
+    const surface = { canvas: { width: 64, height: 64 }, msaaSamples, format: "bgra8unorm", scRT, _renderingContexts: [] };
+    const createTexture = (descriptor: GPUTextureDescriptor): GPUTexture => {
+        const texture = {
+            descriptor,
+            format: descriptor.format,
+            sampleCount: descriptor.sampleCount ?? 1,
+            createView: vi.fn(() => ({ texture }) as unknown as GPUTextureView),
+            destroy: vi.fn(),
+        };
+        return texture as unknown as GPUTexture;
+    };
     const engine = {
         ...surface,
         _device: {
             createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
+            createTexture: vi.fn(createTexture),
+            createBindGroupLayout: vi.fn((descriptor) => descriptor),
+            createBindGroup: vi.fn((descriptor) => descriptor),
+            createPipelineLayout: vi.fn((descriptor) => descriptor),
+            createRenderPipeline: vi.fn((descriptor) => descriptor),
+            createShaderModule: vi.fn((descriptor) => descriptor),
+            createSampler: vi.fn((descriptor) => descriptor),
+            queue: { writeBuffer: vi.fn() },
         },
     } as unknown as EngineContext;
     const camera = { viewport: null } as unknown as Camera;
@@ -32,6 +51,7 @@ function makeFixture(msaaSamples: number) {
         _colorAttachment: {},
         _renderables: [],
         _targetSignature: { _sampleCount: msaaSamples },
+        _ownsTargets: true,
         _ob: [],
         _lastVersion: -1,
         record: vi.fn(),
@@ -49,7 +69,7 @@ function makeFixture(msaaSamples: number) {
         imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
         clearColor: { r: 0, g: 0, b: 0, a: 1 },
     } as unknown as SceneContext;
-    defaultTask.scene = scene;
+    (defaultTask as unknown as { scene: SceneContext }).scene = scene;
     return { engine, scene, camera, defaultTask, tasks, scRT };
 }
 
@@ -156,8 +176,9 @@ describe("createSceneSsaoPipeline", () => {
         );
         expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
         expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
-        expect((tasks.at(-1) as ImageProcessingTask)._source).toBeTypeOf("function");
-        expect(((tasks.at(-1) as ImageProcessingTask)._source as () => unknown)()).toBe(scene._outputTexture);
+        const imageProcessing = tasks.at(-1) as unknown as Task & { _source: ImageProcessingSource };
+        expect(imageProcessing._source).toBeTypeOf("function");
+        expect((imageProcessing._source as () => unknown)()).toBe(scene._outputTexture);
     });
 
     it.each([1, 4])("composes with transmission when SSAO attaches second at %ix MSAA", (samples) => {
@@ -172,6 +193,37 @@ describe("createSceneSsaoPipeline", () => {
         );
         expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
         expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
-        expect(((tasks.at(-1) as ImageProcessingTask)._source as () => unknown)()).toBe(scene._outputTexture);
+        const imageProcessing = tasks.at(-1) as unknown as Task & { _source: ImageProcessingSource };
+        expect((imageProcessing._source as () => unknown)()).toBe(scene._outputTexture);
+    });
+
+    it("re-records transmission image processing when a live SSAO pipeline attaches and detaches", () => {
+        const { engine, scene, camera, tasks } = makeFixture(1);
+        enableSceneTransmission(scene, engine);
+        const imageProcessing = tasks.at(-1)!;
+        const record = vi.spyOn(imageProcessing, "record").mockImplementation(() => {});
+        scene.surface._renderingContexts.push(scene);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+
+        attachSceneSsaoPipeline(pipeline);
+        expect(record).toHaveBeenCalledOnce();
+
+        detachSceneSsaoPipeline(pipeline);
+        expect(record).toHaveBeenCalledTimes(2);
+    });
+
+    it("releases a displaced task-owned transmission target on scene disposal", () => {
+        const { engine, scene, camera, defaultTask } = makeFixture(1);
+        enableSceneTransmission(scene, engine);
+        const transmissionTarget = defaultTask._config.rt;
+        const destroy = vi.fn();
+        transmissionTarget._colorTexture = { destroy } as unknown as GPUTexture;
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+
+        scene._disposables[0]!();
+
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(transmissionTarget._colorTexture).toBeNull();
     });
 });
