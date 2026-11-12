@@ -307,8 +307,10 @@ Semantics shared by every family:
   the current event reaches every listener; listener failures do not stop later listeners and are rethrown
   (one error, or an `AggregateError`) to the mutating caller after the change commits. The returned
   unsubscribe is idempotent. Observing a disposed scene throws.
-- **Disposal.** `disposeScene` releases every member's GPU state and registrations immediately, clears the
-  collection and its subscribers, and publishes no removal events (matching `onSceneChange`).
+- **Disposal.** `disposeScene` releases every built member's GPU state immediately through the deferred-build
+  `dispose` each attachment registers (a build landing after disposal is released by late cleanup), and
+  publishes no removal events (matching `onSceneChange`). Collections are not separately torn down: a disposed
+  scene's getters return `[]` and its removes return `false`; its pick sources are cleared by `disposeScene`.
 
 A `TextRenderable` keeps one GPU record that its draw bindings capture, so it should be a member of one scene
 at a time: removing it from (or disposing) a scene releases that record even if another scene still draws

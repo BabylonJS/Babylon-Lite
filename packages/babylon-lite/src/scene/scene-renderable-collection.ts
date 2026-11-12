@@ -31,7 +31,8 @@ export interface SceneRenderableEntry {
 }
 
 /** @internal One family's members in add order, plus its subscribers. Allocated by the family's first add or
- *  subscription; dropped (members released, subscribers cleared silently) when the scene is disposed. */
+ *  subscription. Scene disposal releases built members through the scene's deferred-build disposal and publishes
+ *  nothing; a disposed scene reports no members and rejects removal. */
 export interface SceneRenderableCollection {
     /** @internal */
     readonly _members: Map<object, SceneRenderableEntry>;
@@ -45,24 +46,9 @@ function getCollection(scene: SceneContext, family: string): SceneRenderableColl
     const collections = (scene._renderableCollections ??= new Map());
     let collection = collections.get(family);
     if (!collection) {
-        const created: SceneRenderableCollection = (collection = { _members: new Map() });
-        collections.set(family, created);
-        scene._disposables.push(() => {
-            for (const entry of created._members.values()) {
-                leave(entry)?.();
-            }
-            created._members.clear();
-            created._listeners?.clear();
-            collections.delete(family);
-        });
+        collections.set(family, (collection = { _members: new Map() }));
     }
     return collection;
-}
-
-/** Tear down a departing member's registration and detach its built GPU state, returning the release. */
-function leave(entry: SceneRenderableEntry): (() => void) | undefined {
-    entry._unregister?.();
-    return entry._attachment?._detach?.();
 }
 
 /** @internal Add `entity` to its family's collection and schedule its render attachment with the scene's other
@@ -88,7 +74,15 @@ export function _addSceneRenderable(
             return { renderables: [] };
         }
         entry._attachment = attachment;
-        return { renderables: [attachment._renderable] };
+        return {
+            renderables: [attachment._renderable],
+            // Scene disposal releases only a still-current member; removal already retired the others.
+            dispose: () => {
+                if (members.get(entity) === entry) {
+                    attachment._detach?.()();
+                }
+            },
+        };
     });
     collection._publish?.({ type: "added", entity });
     return entry;
@@ -97,7 +91,8 @@ export function _addSceneRenderable(
 /** @internal Remove `entity` from its family's collection. Its built renderable stops drawing immediately and its
  *  GPU state is released after in-flight frames. Returns whether `entity` was a member. */
 export function _removeSceneRenderable(scene: SceneContext, family: string, entity: object): boolean {
-    const collection = scene._renderableCollections?.get(family);
+    // A disposed scene already released its members.
+    const collection = scene._z ? undefined : scene._renderableCollections?.get(family);
     const entry = collection?._members.get(entity);
     if (!entry) {
         return false;
@@ -109,7 +104,8 @@ export function _removeSceneRenderable(scene: SceneContext, family: string, enti
         scene._renderables.splice(index, 1);
         scene._renderableVersion++;
     }
-    const release = leave(entry);
+    entry._unregister?.();
+    const release = entry._attachment?._detach?.();
     if (release) {
         retireGpuResources(scene.surface.engine, release);
     }
@@ -119,7 +115,7 @@ export function _removeSceneRenderable(scene: SceneContext, family: string, enti
 
 /** @internal Snapshot of a family's members, in add order. */
 export function _getSceneRenderables<T extends object>(scene: SceneContext, family: string): readonly T[] {
-    const members = scene._renderableCollections?.get(family)?._members;
+    const members = scene._z ? undefined : scene._renderableCollections?.get(family)?._members;
     return (members ? [...members.keys()] : []) as T[];
 }
 
@@ -127,7 +123,7 @@ export function _getSceneRenderables<T extends object>(scene: SceneContext, fami
  *
  *  A change made by a listener is published after the current change reaches every listener. Listener failures do
  *  not prevent later listeners from running; they are rethrown to the mutating caller once dispatch completes.
- *  Scene disposal drops subscribers without publishing removals. The returned callback removes only this
+ *  Scene disposal publishes no removals. The returned callback removes only this
  *  registration and is idempotent. */
 export function _observeSceneRenderables<T extends object>(scene: SceneContext, family: string, listener: SceneRenderableChangeListener<T>): () => void {
     if (scene._z) {

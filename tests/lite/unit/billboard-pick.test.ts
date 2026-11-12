@@ -6,7 +6,7 @@ import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shar
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { packBillboardPickUbo } from "../../../packages/babylon-lite/src/picking/billboard-pick-pipeline";
 import { createAxisLockedBillboardSystem, createFacingBillboardSystem } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
-import { addBillboardSystemToScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
+import { addBillboardSystemToScene, removeBillboardSystemFromScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
 
 function makeMockAtlas(): SpriteAtlas {
     const texture = {
@@ -100,16 +100,14 @@ describe("billboard scene pick registration", () => {
         expect(scene._pickSources).toHaveLength(2);
     });
 
-    it("disposing removes the system's pick source", () => {
+    it("removing the system removes its pick source", () => {
         const scene = makeStubScene();
-        addBillboardSystemToScene(scene, createFacingBillboardSystem(makeMockAtlas()));
+        const system = createFacingBillboardSystem(makeMockAtlas());
+        addBillboardSystemToScene(scene, system);
         expect(scene._pickSources).toHaveLength(1);
 
-        // Running the registered disposers (as scene teardown / entity disposal does) must remove
-        // the pick source so a disposed system is never drawn by the picker.
-        for (const dispose of scene._disposables) {
-            dispose();
-        }
+        // A removed system must never be drawn by the picker. (Scene disposal clears every pick source itself.)
+        expect(removeBillboardSystemFromScene(scene, system)).toBe(true);
 
         expect(scene._pickSources).toHaveLength(0);
     });
