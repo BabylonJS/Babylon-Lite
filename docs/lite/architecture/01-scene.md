@@ -293,10 +293,12 @@ Semantics shared by every family:
   `scene._renderableCollections` (a `Map` keyed by family) as an insertion-ordered `Map` from member to its scene-side entry.
   Adding a member again does nothing; removing returns `true` only when the member was present. A member
   re-added after removal moves to the end of the discovery order.
-- **Build.** An add queues the member's render attachment with `addDeferredSceneRenderables`, so it builds
+- **Build.** An add queues the member's render attachment on the scene's deferred builders, so it builds
   with the scene's other deferred work (at `registerScene`, or the next registration when added later).
-  Each add creates a fresh entry; a build that finishes after its member was removed, re-added, or its
-  scene disposed releases its GPU state instead of drawing, so a remove→re-add before build draws once.
+  Feature registrations (the billboard pick source) are installed before the addition is published. Each add
+  creates a fresh entry; membership is rechecked when the attachment resolves, with no `await` before the
+  renderable is appended, so a build that finishes after its member was removed or re-added releases its GPU
+  state instead of drawing, and a remove→re-add before build draws once.
 - **Removal.** The built renderable is spliced from `_renderables` synchronously (bumping
   `_renderableVersion`), feature registrations such as the billboard pick source are unregistered, and the
   attachment's GPU state is detached now and released through `retireGpuResources` after in-flight frames.
@@ -307,8 +309,9 @@ Semantics shared by every family:
   the current event reaches every listener; listener failures do not stop later listeners and are rethrown
   (one error, or an `AggregateError`) to the mutating caller after the change commits. The returned
   unsubscribe is idempotent. Observing a disposed scene throws.
-- **Disposal.** `disposeScene` releases every built member's GPU state immediately through the deferred-build
-  `dispose` each attachment registers (a build landing after disposal is released by late cleanup), and
+- **Disposal.** `disposeScene` releases every built member's GPU state immediately through the scene
+  disposable each attachment registers (removal drops it; a build landing after disposal is released by late
+  cleanup), and
   publishes no removal events (matching `onSceneChange`). Collections are not separately torn down: a disposed
   scene's getters return `[]` and its removes return `false`; its pick sources are cleared by `disposeScene`.
 

@@ -13,16 +13,19 @@ export type BillboardRenderableBuilder = (engine: EngineContext, buildBase: type
 /** @internal Add a billboard system to the scene's billboard collection, building its renderable with `build`.
  *  Lets feature variants (particle blend passes) share billboard membership, picking, removal and discovery. */
 export function _addBillboardSystemToScene(scene: SceneContext, system: BillboardSpriteSystem, build: BillboardRenderableBuilder): void {
-    const entry = _addSceneRenderable(scene, "billboard", system, async (engine) => {
-        const { buildBillboardRenderable } = await import("./billboard-renderable.js");
-        const built = build(engine, buildBillboardRenderable);
-        return { _renderable: built.renderable, _detach: () => built.dispose };
-    });
-    if (entry) {
+    _addSceneRenderable(
+        scene,
+        "billboard",
+        system,
+        async (engine) => {
+            const { buildBillboardRenderable } = await import("./billboard-renderable.js");
+            const built = build(engine, buildBillboardRenderable);
+            return { _renderable: built.renderable, _detach: () => built.dispose };
+        },
         // Pickability is pure data plus a dynamic-import thunk, so rendering pulls no pick-pipeline bytes; the
         // picker builds the contributor on the first pick.
-        entry._unregister = registerPickSource(scene, system, () => import("../picking/billboard-pick-pipeline.js"));
-    }
+        () => registerPickSource(scene, system, () => import("../picking/billboard-pick-pipeline.js"))
+    );
 }
 
 /**

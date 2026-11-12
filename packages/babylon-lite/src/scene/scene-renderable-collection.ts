@@ -1,4 +1,3 @@
-import { addDeferredSceneRenderables } from "./scene-core.js";
 import type { SceneContext } from "./scene-core.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Renderable } from "../render/renderable.js";
@@ -28,6 +27,8 @@ export interface SceneRenderableEntry {
     _attachment?: SceneRenderableAttachment;
     /** @internal Feature registration torn down synchronously when the member leaves (e.g. its pick source). */
     _unregister?: () => void;
+    /** @internal Scene-disposal release of the built attachment; removal drops it after retiring the attachment. */
+    _dispose?: () => void;
 }
 
 /** @internal One family's members in add order, plus its subscribers. Allocated by the family's first add or
@@ -52,40 +53,37 @@ function getCollection(scene: SceneContext, family: string): SceneRenderableColl
 }
 
 /** @internal Add `entity` to its family's collection and schedule its render attachment with the scene's other
- *  deferred render work. Returns the new entry, or `undefined` when `entity` is already a member. An attachment
- *  whose member was removed (or removed and re-added) before it finished building is released, not drawn. */
+ *  deferred render work. `register` installs feature registrations (e.g. a pick source) before the addition is
+ *  published; its result runs when the member leaves. Does nothing when `entity` is already a member. An
+ *  attachment whose member was removed (or removed and re-added) before it finished building is released, not
+ *  drawn. */
 export function _addSceneRenderable(
     scene: SceneContext,
     family: string,
     entity: object,
-    attach: (engine: EngineContext) => SceneRenderableAttachment | Promise<SceneRenderableAttachment>
-): SceneRenderableEntry | undefined {
+    attach: (engine: EngineContext) => SceneRenderableAttachment | Promise<SceneRenderableAttachment>,
+    register?: () => () => void
+): void {
     const collection = getCollection(scene, family);
     const members = collection._members;
     if (members.has(entity)) {
-        return undefined;
+        return;
     }
-    const entry: SceneRenderableEntry = {};
+    const entry: SceneRenderableEntry = { _unregister: register?.() };
     members.set(entity, entry);
-    addDeferredSceneRenderables(scene, async (engine) => {
-        const attachment = await attach(engine);
+    // Membership is rechecked and the renderable appended with no `await` between them, so a removal can never
+    // race a draw-list append.
+    scene._deferredBuilders.push(async () => {
+        const attachment = await attach(scene.surface.engine);
         if (members.get(entity) !== entry) {
             attachment._detach?.()();
-            return { renderables: [] };
+            return;
         }
         entry._attachment = attachment;
-        return {
-            renderables: [attachment._renderable],
-            // Scene disposal releases only a still-current member; removal already retired the others.
-            dispose: () => {
-                if (members.get(entity) === entry) {
-                    attachment._detach?.()();
-                }
-            },
-        };
+        scene._renderables.push(attachment._renderable);
+        scene._disposables.push((entry._dispose = () => attachment._detach?.()()));
     });
     collection._publish?.({ type: "added", entity });
-    return entry;
 }
 
 /** @internal Remove `entity` from its family's collection. Its built renderable stops drawing immediately and its
@@ -103,6 +101,10 @@ export function _removeSceneRenderable(scene: SceneContext, family: string, enti
     if (index >= 0) {
         scene._renderables.splice(index, 1);
         scene._renderableVersion++;
+    }
+    const disposeIndex = entry._dispose ? scene._disposables.indexOf(entry._dispose) : -1;
+    if (disposeIndex >= 0) {
+        scene._disposables.splice(disposeIndex, 1);
     }
     entry._unregister?.();
     const release = entry._attachment?._detach?.();

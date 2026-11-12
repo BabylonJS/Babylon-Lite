@@ -11,7 +11,12 @@ import {
     removeTextRenderableFromScene,
 } from "../../../packages/babylon-lite/src/text/text-renderable";
 import type { TextRenderable } from "../../../packages/babylon-lite/src/text/text-renderable";
-import { addBillboardSystemToScene, getSceneBillboardSystems, removeBillboardSystemFromScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
+import {
+    addBillboardSystemToScene,
+    getSceneBillboardSystems,
+    onSceneBillboardSystemsChanged,
+    removeBillboardSystemFromScene,
+} from "../../../packages/babylon-lite/src/sprite/billboard-scene";
 import type { BillboardSpriteSystem } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
 import { addDepthHostedSpriteLayerToScene, getSceneDepthHostedSpriteLayers } from "../../../packages/babylon-lite/src/sprite/sprite-scene";
 import type { Sprite2DLayer } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
@@ -127,6 +132,37 @@ describe("scene custom-renderable collections", () => {
         disposeScene(scene);
     });
 
+    it("never draws a member removed at any point while its attachment resolves", async () => {
+        for (let ticks = 0; ticks < 8; ticks++) {
+            const scene = createScene();
+            const text = createText("a");
+            addTextRenderableToScene(scene, text);
+            const building = scene._deferredBuilders.splice(0).map((build) => build());
+            for (let i = 0; i < ticks; i++) {
+                await Promise.resolve();
+            }
+            removeTextRenderableFromScene(scene, text);
+            await Promise.all(building);
+
+            expect(scene._renderables, `removed after ${ticks} microtasks`).toEqual([]);
+            disposeScene(scene);
+        }
+    });
+
+    it("drops a removed member's disposal hook so add/remove cycles do not accumulate", async () => {
+        const scene = createScene();
+        const text = createText("a");
+        const baseline = scene._disposables.length;
+        for (let i = 0; i < 3; i++) {
+            addTextRenderableToScene(scene, text);
+            await runDeferredBuilders(scene);
+            expect(scene._disposables).toHaveLength(baseline + 1);
+            removeTextRenderableFromScene(scene, text);
+            expect(scene._disposables).toHaveLength(baseline);
+        }
+        disposeScene(scene);
+    });
+
     it("stops drawing a built member at once and releases its GPU record after in-flight frames", async () => {
         const scene = createScene();
         const text = createText("a");
@@ -211,6 +247,25 @@ describe("scene custom-renderable collections", () => {
         expect(built.dispose).not.toHaveBeenCalled();
         runRetirements(scene);
         expect(built.dispose).toHaveBeenCalledOnce();
+        expect(getSceneBillboardSystems(scene)).toEqual([]);
+        disposeScene(scene);
+    });
+
+    it("registers a billboard's pick source before publishing its addition", () => {
+        const scene = createScene();
+        const system = { count: 0 } as unknown as BillboardSpriteSystem;
+        const pickSourcesSeen: number[] = [];
+        onSceneBillboardSystemsChanged(scene, (event) => {
+            pickSourcesSeen.push(scene._pickSources.length);
+            if (event.type === "added") {
+                removeBillboardSystemFromScene(scene, system);
+            }
+        });
+
+        addBillboardSystemToScene(scene, system);
+
+        expect(pickSourcesSeen).toEqual([1, 0]);
+        expect(scene._pickSources).toHaveLength(0);
         expect(getSceneBillboardSystems(scene)).toEqual([]);
         disposeScene(scene);
     });
