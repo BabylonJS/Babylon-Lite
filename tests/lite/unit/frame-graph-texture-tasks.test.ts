@@ -1086,6 +1086,25 @@ describe("Mipmapped render target allocation", () => {
         expect(attachment.resolveTarget).toBe(resolve._colorView);
         expect(task._getOutputInfo?.()).toEqual({ colorTexture: output, resolveTexture: resolve });
     });
+
+    it("rejects a resolve destination that aliases a sampled input before allocation", () => {
+        const { engine } = mockGpu();
+        const source = target(engine);
+        const output = createRenderTarget({ format: "rgba8unorm", samples: 4, size: engine });
+        const resolve = createRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
+        const task = createPostProcessTask(
+            {
+                sourceTexture: source,
+                targetTexture: output,
+                resolveTexture: resolve,
+                _shader: { fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}`, extraTextures: [resolve] },
+            },
+            engine
+        );
+
+        expect(() => task.record()).toThrow(/resolveTexture must differ from sampled input textures/);
+        expect(resolve._colorTexture).toBeNull();
+    });
 });
 
 describe("custom post-process public adapter", () => {

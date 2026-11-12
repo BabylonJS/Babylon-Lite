@@ -5,6 +5,8 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
+import type { ImageProcessingTask } from "../../../packages/babylon-lite/src/frame-graph/image-processing-task";
 import { attachSceneSsaoPipeline, createSceneSsaoPipeline, detachSceneSsaoPipeline, disposeSceneSsaoPipeline } from "../../../packages/babylon-lite/src/post-process/scene-ssao";
 
 function makeFixture(msaaSamples: number) {
@@ -17,15 +19,23 @@ function makeFixture(msaaSamples: number) {
         },
     } as unknown as EngineContext;
     const camera = { viewport: null } as unknown as Camera;
+    const sceneTarget =
+        msaaSamples > 1 ? createRenderTarget({ lbl: "scene", format: "bgra8unorm", dFormat: "depth24plus-stencil8", samples: msaaSamples, size: { width: 64, height: 64 } }) : scRT;
+    const sceneDepth = msaaSamples > 1 ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: { width: 64, height: 64 } });
     const defaultTask = {
         name: "scene",
         engine,
         scene: null,
         executionEnabled: true,
         _passes: [],
-        _config: { name: "scene", rt: scRT, clr: true },
+        _config: { name: "scene", rt: sceneTarget, rst: msaaSamples > 1 ? scRT : undefined, depth: sceneDepth, clr: true },
         _colorAttachment: {},
+        _renderables: [],
+        _targetSignature: { _sampleCount: msaaSamples },
+        _ob: [],
+        _lastVersion: -1,
         record: vi.fn(),
+        execute: vi.fn(() => 0),
         dispose: vi.fn(),
     } as unknown as RenderTask;
     const tasks = [defaultTask];
@@ -35,27 +45,31 @@ function makeFixture(msaaSamples: number) {
         _beforeRender: [],
         _disposables: [],
         _frameGraph: { _tasks: tasks },
+        meshes: [],
+        imageProcessing: { exposure: 1, contrast: 1, toneMappingEnabled: false },
+        clearColor: { r: 0, g: 0, b: 0, a: 1 },
     } as unknown as SceneContext;
+    defaultTask.scene = scene;
     return { engine, scene, camera, defaultTask, tasks, scRT };
 }
 
 describe("createSceneSsaoPipeline", () => {
-    it("attaches a single-sample replacement chain and restores the default task", () => {
+    it("attaches a single-sample composite chain and restores the default task", () => {
         const { engine, scene, camera, defaultTask, tasks } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({ name: "ssao", radius: 3, intensity: 2, base: 0.25, fadeEnd: 40 }, engine, scene, camera);
 
         attachSceneSsaoPipeline(pipeline);
 
-        expect(tasks.map((task) => task.name)).toEqual(["scene", "ssao-scene", "ssao"]);
-        expect(defaultTask.executionEnabled).toBe(false);
-        expect(tasks[2]).toMatchObject({ radius: 3, intensity: 2, base: 0.25, fadeStart: 30, fadeEnd: 40, executionEnabled: true });
+        expect(tasks.map((task) => task.name)).toEqual(["scene", "ssao"]);
+        expect(defaultTask._config.rt).not.toBe(scene.surface.scRT);
+        expect(tasks[1]).toMatchObject({ radius: 3, intensity: 2, base: 0.25, fadeStart: 30, fadeEnd: 40, executionEnabled: true });
 
         pipeline.radius = 4;
         pipeline.intensity = 1.5;
         pipeline.base = 0.5;
         pipeline.fadeEnd = 20;
         scene._beforeRender[0]!(16);
-        expect(tasks[2]).toMatchObject({ radius: 4, intensity: 1.5, base: 0.5, fadeStart: 15, fadeEnd: 20 });
+        expect(tasks[1]).toMatchObject({ radius: 4, intensity: 1.5, base: 0.5, fadeStart: 15, fadeEnd: 20 });
 
         detachSceneSsaoPipeline(pipeline);
         expect(tasks).toEqual([defaultTask]);
@@ -70,8 +84,8 @@ describe("createSceneSsaoPipeline", () => {
 
         attachSceneSsaoPipeline(pipeline);
 
-        expect(tasks.map((task) => task.name)).toEqual(["scene", "ssao-scene", "ssao-depth-resolve", "ssao"]);
-        const output = tasks[3]!._getOutputInfo?.();
+        expect(tasks.map((task) => task.name)).toEqual(["scene", "ssao-depth-resolve", "ssao"]);
+        const output = tasks[2]!._getOutputInfo?.();
         expect(output?.resolveTexture).toBe(scRT);
         expect(output?.colorTexture._descriptor.samples).toBe(4);
 
@@ -93,13 +107,13 @@ describe("createSceneSsaoPipeline", () => {
         }
 
         expect(defaultTask.executionEnabled).toBe(true);
-        expect(tasks.slice(1).every((task) => task.executionEnabled === false)).toBe(true);
+        expect(tasks[1]).toMatchObject({ enabled: false, executionEnabled: true });
 
         pipeline.camera = nextCamera;
         for (const callback of scene._beforeRender) {
             callback(16);
         }
-        expect(tasks[2]).toMatchObject({ camera: scene.camera, executionEnabled: true });
+        expect(tasks[1]).toMatchObject({ camera: scene.camera, enabled: true, executionEnabled: true });
     });
 
     it("releases its scene-owned state when the scene is disposed", () => {
@@ -119,7 +133,7 @@ describe("createSceneSsaoPipeline", () => {
         const { engine, scene, camera, tasks } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
         attachSceneSsaoPipeline(pipeline);
-        const ao = tasks[2]!;
+        const ao = tasks[1]!;
         const record = vi.spyOn(ao, "record").mockImplementation(() => {});
         scene.surface._renderingContexts.push(scene);
 
@@ -128,5 +142,36 @@ describe("createSceneSsaoPipeline", () => {
 
         expect(record).toHaveBeenCalledOnce();
         expect(ao).toMatchObject({ resolutionScale: 0.75 });
+    });
+
+    it.each([1, 4])("composes with transmission when SSAO attaches first at %ix MSAA", (samples) => {
+        const { engine, scene, camera, tasks, defaultTask } = makeFixture(samples);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+
+        enableSceneTransmission(scene, engine);
+
+        expect(tasks.map((task) => task.name)).toEqual(
+            samples > 1 ? ["scene", "scene-ssao-depth-resolve", "scene-ssao", "transmission-image-processing"] : ["scene", "scene-ssao", "transmission-image-processing"]
+        );
+        expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
+        expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
+        expect((tasks.at(-1) as ImageProcessingTask)._source).toBeTypeOf("function");
+        expect(((tasks.at(-1) as ImageProcessingTask)._source as () => unknown)()).toBe(scene._outputTexture);
+    });
+
+    it.each([1, 4])("composes with transmission when SSAO attaches second at %ix MSAA", (samples) => {
+        const { engine, scene, camera, tasks, defaultTask } = makeFixture(samples);
+        enableSceneTransmission(scene, engine);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+
+        attachSceneSsaoPipeline(pipeline);
+
+        expect(tasks.map((task) => task.name)).toEqual(
+            samples > 1 ? ["scene", "scene-ssao-depth-resolve", "scene-ssao", "transmission-image-processing"] : ["scene", "scene-ssao", "transmission-image-processing"]
+        );
+        expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
+        expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
+        expect(((tasks.at(-1) as ImageProcessingTask)._source as () => unknown)()).toBe(scene._outputTexture);
     });
 });

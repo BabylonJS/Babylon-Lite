@@ -129,6 +129,7 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
             prepareOutputTarget(task);
             buildRenderTarget(task.outputTexture, engine);
             if (task.resolveTexture) {
+                validateResolveTargetAliases(task);
                 buildRenderTarget(task.resolveTexture, engine);
                 validateResolveTarget(task);
             }
@@ -222,6 +223,13 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
         layout: bgl,
         entries,
     });
+}
+
+function validateResolveTargetAliases(task: PostProcessTaskInternal): void {
+    const resolve = task.resolveTexture!;
+    if (resolve === task.sourceTexture || task._shader.extraTextures?.includes(resolve)) {
+        throw new Error(`PostProcessTask "${task.name}": resolveTexture must differ from sampled input textures.`);
+    }
 }
 
 function validateResolveTarget(task: PostProcessTaskInternal): void {

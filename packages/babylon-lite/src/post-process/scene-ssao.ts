@@ -2,11 +2,11 @@ import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import { isRenderingContextRegistered } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { addTaskAfter, removeTask } from "../frame-graph/frame-graph-actions.js";
 import { buildFrameGraphTask, getFrameGraphTasks } from "../frame-graph/frame-graph.js";
 import { createDepthResolveTask } from "../frame-graph/depth-resolve-task.js";
-import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import type { RenderTask } from "../frame-graph/render-task.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createScreenSpaceAmbientOcclusionPostProcessTask, type ScreenSpaceAmbientOcclusionPostProcessTask } from "./screen-space-ambient-occlusion.js";
@@ -38,7 +38,9 @@ interface SceneSsaoPipelineState {
     scene: SceneContext;
     _disposed: boolean;
     _defaultTask: RenderTask | null;
-    _defaultExecutionEnabled: boolean | undefined;
+    _baseRt: RenderTarget | null;
+    _baseRst: RenderTarget | undefined;
+    _priorOutputTexture: RenderTarget | undefined;
     _tasks: Task[];
     _ownedTargets: RenderTarget[];
     _aoTask: ScreenSpaceAmbientOcclusionPostProcessTask | null;
@@ -77,7 +79,9 @@ export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engin
         scene,
         _disposed: false,
         _defaultTask: null,
-        _defaultExecutionEnabled: undefined,
+        _baseRt: null,
+        _baseRst: undefined,
+        _priorOutputTexture: undefined,
         _tasks: [],
         _ownedTargets: [],
         _aoTask: null,
@@ -107,10 +111,18 @@ export function attachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
     pipeline.camera = camera;
     const defaultTask = findDefaultTask(state.scene);
     state._defaultTask = defaultTask;
-    state._defaultExecutionEnabled = defaultTask.executionEnabled;
     owningScene._sceneSsaoPipeline = pipeline;
     try {
         createTasks(pipeline, state);
+        state.scene._outputPipelineChange = (ready) => {
+            if (ready) {
+                state._defaultTask = findDefaultTask(state.scene);
+                createTasks(pipeline, state);
+                updateExecutionGate(pipeline, state);
+            } else {
+                cleanupTasks(state);
+            }
+        };
         state._gate = () => updateExecutionGate(pipeline, state);
         state.scene._beforeRender.push(state._gate);
         registerSceneDisposal(pipeline, state);
@@ -118,8 +130,8 @@ export function attachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
         updateExecutionGate(pipeline, state);
     } catch (error) {
         unregisterSceneDisposal(state);
+        delete state.scene._outputPipelineChange;
         cleanupTasks(state);
-        restoreDefaultTask(state);
         delete owningScene._sceneSsaoPipeline;
         throw error;
     }
@@ -133,9 +145,9 @@ export function detachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
     }
     setAttached(pipeline, false);
     unregisterSceneDisposal(state);
+    delete state.scene._outputPipelineChange;
     removeGate(state);
     cleanupTasks(state);
-    restoreDefaultTask(state);
     const owningScene = state.scene as SceneWithSsao;
     if (owningScene._sceneSsaoPipeline === pipeline) {
         delete owningScene._sceneSsaoPipeline;
@@ -157,10 +169,22 @@ function setAttached(pipeline: SceneSsaoPipeline, attached: boolean): void {
 }
 
 function findDefaultTask(scene: SceneContext): RenderTask {
-    const task = getFrameGraphTasks(scene._frameGraph).find((candidate) => {
-        const renderTask = candidate as Partial<RenderTask>;
-        return renderTask._config?.rt === scene.surface.scRT || renderTask._config?.rst === scene.surface.scRT;
-    });
+    const tasks = getFrameGraphTasks(scene._frameGraph);
+    const transmissionIndex = tasks.findIndex((task) => task.name === "transmission-image-processing");
+    let task: Task | undefined;
+    if (transmissionIndex !== -1) {
+        for (let i = transmissionIndex - 1; i >= 0; i--) {
+            if ("_renderables" in tasks[i]!) {
+                task = tasks[i];
+                break;
+            }
+        }
+    } else {
+        task = tasks.find((candidate) => {
+            const renderTask = candidate as Partial<RenderTask>;
+            return !!renderTask._config && "_renderables" in candidate && (renderTask._config.rt === scene.surface.scRT || renderTask._config.rst === scene.surface.scRT);
+        });
+    }
     if (!task) {
         throw new Error("SceneSsaoPipeline requires a scene with a default swapchain render task.");
     }
@@ -171,36 +195,48 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
     const scene = state.scene;
     const engine = state.engine;
     const surface = scene.surface;
-    const multisampled = surface.msaaSamples > 1;
+    const render = state._defaultTask!;
+    const config = render._config;
+    const baseRt = config.rt;
+    const multisampled = (baseRt._descriptor.samples ?? 1) > 1;
+    const transmission = getFrameGraphTasks(scene._frameGraph).some((task) => task.name === "transmission-image-processing");
+    state._baseRt = baseRt;
+    state._baseRst = config.rst;
+    state._priorOutputTexture = scene._outputTexture;
     const source = createRenderTarget({
         lbl: `${pipeline.name}-source`,
-        format: surface.format,
-        dFormat: multisampled ? undefined : "depth24plus-stencil8",
+        format: baseRt._descriptor.format ?? surface.format,
         samples: 1,
         size: surface,
     });
-    const renderTarget = multisampled
-        ? createRenderTarget({
-              lbl: `${pipeline.name}-source-msaa`,
-              format: surface.format,
-              dFormat: "depth24plus-stencil8",
-              samples: surface.msaaSamples,
-              size: surface,
-          })
-        : source;
-    const render = createRenderTask({ name: `${pipeline.name}-scene`, rt: renderTarget, rst: multisampled ? source : undefined, clr: true }, engine, scene);
-    state._tasks.push(render);
+    state._ownedTargets.push(source);
+    if (multisampled) {
+        config.rst = source;
+    } else {
+        config.rt = source;
+    }
 
-    let depth = source;
+    let depth = config.depth ?? baseRt;
     if (multisampled) {
         depth = createRenderTarget({ lbl: `${pipeline.name}-depth`, dFormat: "depth24plus-stencil8", samples: 1, size: surface });
         state._ownedTargets.push(depth);
-        state._tasks.push(createDepthResolveTask({ name: `${pipeline.name}-depth-resolve`, sourceTexture: renderTarget, targetTexture: depth }, engine, scene));
+        state._tasks.push(createDepthResolveTask({ name: `${pipeline.name}-depth-resolve`, sourceTexture: baseRt, targetTexture: depth }, engine, scene));
     }
 
-    const output = multisampled ? createRenderTarget({ lbl: `${pipeline.name}-output-msaa`, format: surface.format, samples: surface.msaaSamples, size: surface }) : surface.scRT;
-    if (multisampled) {
+    const output =
+        transmission || multisampled
+            ? createRenderTarget({
+                  lbl: `${pipeline.name}-output${multisampled && !transmission ? "-msaa" : ""}`,
+                  format: baseRt._descriptor.format ?? surface.format,
+                  samples: multisampled && !transmission ? surface.msaaSamples : 1,
+                  size: surface,
+              })
+            : surface.scRT;
+    if (output !== surface.scRT) {
         state._ownedTargets.push(output);
+    }
+    if (transmission) {
+        scene._outputTexture = output;
     }
     const ao = createScreenSpaceAmbientOcclusionPostProcessTask(
         {
@@ -208,7 +244,7 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
             sourceTexture: source,
             depthTexture: depth,
             targetTexture: output,
-            resolveTexture: multisampled ? surface.scRT : null,
+            resolveTexture: multisampled && !transmission ? surface.scRT : null,
             camera: pipeline.camera,
             resolutionScale: pipeline.resolutionScale,
             radius: pipeline.radius,
@@ -223,12 +259,16 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
     state._aoTask = ao;
     state._tasks.push(ao);
 
-    let anchor: Task = state._defaultTask!;
+    let anchor: Task = render;
     for (const task of state._tasks) {
         addTaskAfter(scene, task, anchor);
         anchor = task;
     }
     if (isRenderingContextRegistered(surface, scene)) {
+        buildRenderTarget(source, engine);
+        if (!multisampled) {
+            render._colorAttachment.view = source._colorView!;
+        }
         for (const task of state._tasks) {
             buildFrameGraphTask(scene._frameGraph, task);
         }
@@ -237,13 +277,11 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
 
 function updateExecutionGate(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState): void {
     const active = pipeline.attached && state.scene.camera === pipeline.camera;
-    if (state._defaultTask) {
-        state._defaultTask.executionEnabled = active ? false : state._defaultExecutionEnabled;
-    }
     for (const task of state._tasks) {
-        task.executionEnabled = active;
+        task.executionEnabled = true;
     }
     if (state._aoTask) {
+        state._aoTask.enabled = active;
         const resolutionScaleChanged = state._aoTask.resolutionScale !== pipeline.resolutionScale;
         state._aoTask.camera = pipeline.camera;
         state._aoTask.resolutionScale = pipeline.resolutionScale;
@@ -261,6 +299,7 @@ function updateExecutionGate(pipeline: SceneSsaoPipeline, state: SceneSsaoPipeli
 function registerSceneDisposal(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState): void {
     const dispose = (): void => {
         setAttached(pipeline, false);
+        delete state.scene._outputPipelineChange;
         removeGate(state);
         state._tasks.length = 0;
         state._aoTask = null;
@@ -307,6 +346,7 @@ function cleanupTasks(state: SceneSsaoPipelineState): void {
     }
     state._tasks.length = 0;
     state._aoTask = null;
+    restoreDefaultTask(state);
     disposeOwnedTargets(state);
 }
 
@@ -317,9 +357,13 @@ function disposeOwnedTargets(state: SceneSsaoPipelineState): void {
 }
 
 function restoreDefaultTask(state: SceneSsaoPipelineState): void {
-    if (state._defaultTask) {
-        state._defaultTask.executionEnabled = state._defaultExecutionEnabled;
+    if (state._defaultTask && state._baseRt) {
+        state._defaultTask._config.rt = state._baseRt;
+        state._defaultTask._config.rst = state._baseRst;
+        state._defaultTask._colorAttachment.view = state._baseRt._colorView!;
     }
-    state._defaultTask = null;
-    state._defaultExecutionEnabled = undefined;
+    state.scene._outputTexture = state._priorOutputTexture;
+    state._baseRt = null;
+    state._baseRst = undefined;
+    state._priorOutputTexture = undefined;
 }

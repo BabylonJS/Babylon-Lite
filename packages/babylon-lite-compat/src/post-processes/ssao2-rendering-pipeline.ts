@@ -55,7 +55,6 @@ export class SSAO2RenderingPipeline {
         this._textureType = textureType;
         this._resolutionScale = typeof ratio === "number" ? ratio : (ratio.ssaoRatio ?? 1);
         this.isSupported = !scene.getEngine()._headless;
-        scene.postProcessRenderPipelineManager.addPipeline(this);
         if (scene.getEngine()._headless) {
             Logger.Error("SSAO2RenderingPipeline is not supported by the headless engine.");
             return;
@@ -72,6 +71,7 @@ export class SSAO2RenderingPipeline {
         if (cameras?.length) {
             this._attachCameras(cameras);
         }
+        scene.postProcessRenderPipelineManager.addPipeline(this);
     }
 
     public get radius(): number {

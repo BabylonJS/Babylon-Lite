@@ -8,11 +8,12 @@ import { configureSwapchainOverlayScene } from "../../../packages/babylon-lite/s
 
 function makeSwapchainTask(swapchain: SurfaceContext["scRT"], msaaView?: GPUTextureView): RenderTask {
     const rt = msaaView ? { _colorView: msaaView, _descriptor: { samples: 4 } } : swapchain;
-    return {
+    const task = {
         _config: { name: "swapchain", rt, rst: msaaView ? swapchain : undefined, clr: true },
         _colorAttachment: { view: msaaView },
-        _getOutputInfo: () => ({ colorTexture: rt, resolveTexture: msaaView ? swapchain : undefined }),
     } as unknown as RenderTask;
+    task._getOutputInfo = () => (task.enabled === false ? undefined : { colorTexture: rt, resolveTexture: msaaView ? swapchain : undefined });
+    return task;
 }
 
 function makeSurface(swapchain: SurfaceContext["scRT"], samples: number, contexts: unknown[]): SurfaceContext {
@@ -113,7 +114,7 @@ describe("configureSwapchainOverlayScene", () => {
         expect(overlayTask._colorAttachment.view).toBe(baseView);
     });
 
-    it("uses a resolver whose task-specific enabled state still performs a resolve", () => {
+    it("skips a disabled render-task resolver", () => {
         const swapchain = {} as SurfaceContext["scRT"];
         const baseTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
         const overlayTask = makeSwapchainTask(swapchain, {} as GPUTextureView);
@@ -131,7 +132,7 @@ describe("configureSwapchainOverlayScene", () => {
         baseTask.enabled = false;
         overlayTask.enabled = true;
         overlay._record();
-        expect(seen).toEqual([true, false, true, true]);
+        expect(seen).toEqual([true, false, true, false]);
         expect(overlayTask.enabled).toBe(true);
     });
 

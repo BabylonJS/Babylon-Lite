@@ -128,4 +128,27 @@ describe("SSAO2RenderingPipeline", () => {
         expect(pipeline.isSupported).toBe(false);
         expect(scene.postProcessRenderPipelineManager.supportedPipelines).toEqual([]);
     });
+
+    it("does not publish a pipeline when constructor attachment fails", () => {
+        const scene = makeScene();
+        const camera = { _lite: {} } as Camera;
+        attach.mockImplementationOnce(() => {
+            throw new Error("attachment failed");
+        });
+
+        expect(() => new SSAO2RenderingPipeline("ssao", scene, 1, [camera])).toThrow("attachment failed");
+        expect(scene.postProcessRenderPipelineManager.supportedPipelines).toEqual([]);
+    });
+
+    it("keeps an existing same-name pipeline registered when replacement attachment fails", () => {
+        const scene = makeScene();
+        const camera = { _lite: {} } as Camera;
+        const original = new SSAO2RenderingPipeline("ssao", scene, 1);
+        attach.mockImplementationOnce(() => {
+            throw new Error("already attached");
+        });
+
+        expect(() => new SSAO2RenderingPipeline("ssao", scene, 1, [camera])).toThrow("already attached");
+        expect(scene.postProcessRenderPipelineManager.supportedPipelines).toEqual([original]);
+    });
 });

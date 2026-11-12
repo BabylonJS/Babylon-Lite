@@ -33,6 +33,7 @@ import type { SceneChangeState } from "./scene-change.js";
 import type { SceneLightingExtension } from "../light/lighting-extension.js";
 import type { ParticleSystem } from "../particle/particle-system.js";
 import type { PhysicsWorld } from "../physics/havok.js";
+import type { RenderTarget } from "../engine/render-target.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -165,6 +166,10 @@ export interface SceneContext extends RenderingContext {
     /** @internal Optional material-owned lighting contribution, installed by an explicit enabler. */
     _lighting?: SceneLightingExtension;
     imageProcessing: ImageProcessingConfig;
+    /** @internal Optional final linear scene output consumed by trailing image processing. */
+    _outputTexture?: RenderTarget;
+    /** @internal Optional feature-owned hook around changes to the scene output pipeline. */
+    _outputPipelineChange?: (ready: boolean) => void;
 
     /** All meshes added to the scene (standard + PBR). */
     meshes: Mesh[];

@@ -108,16 +108,23 @@ export function _t(scene: SceneContext, engine: EngineContext): readonly [commit
 }
 
 function enableSceneTransmissionTasks(scene: SceneContext, engine: EngineContext): void {
+    scene._outputPipelineChange?.(false);
     let lastRenderTask: RenderTaskBase | null = null;
-    for (const task of scene._frameGraph._tasks) {
-        if ("_renderables" in task) {
-            const renderTask = task as RenderTaskBase;
-            enableTransmission(renderTask, engine);
-            lastRenderTask = renderTask;
+    try {
+        for (const task of scene._frameGraph._tasks) {
+            if ("_renderables" in task) {
+                const renderTask = task as RenderTaskBase;
+                enableTransmission(renderTask, engine);
+                lastRenderTask = renderTask;
+            }
         }
-    }
-    if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
-        scene._frameGraph._tasks.push(createImageProcessingTask({ name: "transmission-image-processing", source: lastRenderTask._config.rt }, engine, scene));
+        if (lastRenderTask && !scene._frameGraph._tasks.some((task) => task.name === "transmission-image-processing")) {
+            scene._frameGraph._tasks.push(
+                createImageProcessingTask({ name: "transmission-image-processing", source: () => scene._outputTexture ?? lastRenderTask!._config.rt }, engine, scene)
+            );
+        }
+    } finally {
+        scene._outputPipelineChange?.(true);
     }
 }
 
