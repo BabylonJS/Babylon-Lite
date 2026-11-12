@@ -18,7 +18,7 @@ import {
     setBillboardSpriteFrameIndex,
     updateBillboardSpriteIndex,
 } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
-import { addBillboardSystemToScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
+import { addBillboardSystemToScene, removeBillboardSystemFromScene } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
 import { billboardBlendAdditive, billboardBlendCutout, billboardBlendPremultiplied } from "../../../packages/babylon-lite/src/sprite/billboard-blend";
 import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../../packages/babylon-lite/src/sprite/billboard-custom-shader";
@@ -632,6 +632,28 @@ describe("addFacingBillboardSystemWithParticleBlend", () => {
         const addPipeline = device.createRenderPipeline.mock.results[1]!.value as GPURenderPipeline;
         expect(pass.setPipeline).toHaveBeenNthCalledWith(1, addPipeline);
         expect(pass.setPipeline).toHaveBeenNthCalledWith(2, multiplyPipeline);
+    });
+
+    it("keeps the MultiplyAdd Add pass when re-added through addBillboardSystemToScene", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: createParticleBlend(4) });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
+        addFacingBillboardSystemWithParticleBlend(scene, system, 4);
+        await registerScene(scene);
+
+        removeBillboardSystemFromScene(scene, system);
+        addBillboardSystemToScene(scene, system);
+        for (const build of scene._deferredBuilders.splice(0)) {
+            await build();
+        }
+
+        expect(scene._renderables).toHaveLength(1);
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        device.createRenderPipeline.mockClear();
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+        expect(device.createRenderPipeline).toHaveBeenCalledTimes(2);
+        expect(binding.draw(makeDrawPassMock(), engine)).toBe(2);
     });
 
     it("shares one Multiply pipeline across systems", async () => {

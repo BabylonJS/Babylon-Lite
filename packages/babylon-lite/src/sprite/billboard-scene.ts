@@ -10,30 +10,25 @@ import { registerPickSource } from "../picking/pick-contributor.js";
 /** @internal Builds a billboard system's scene renderable from the lazily imported base builder. */
 export type BillboardRenderableBuilder = (engine: EngineContext, buildBase: typeof buildBillboardRenderable) => { renderable: Renderable; dispose: () => void };
 
-/** @internal Add a billboard system to the scene's billboard collection, building its renderable with `build`.
- *  Lets feature variants (particle blend passes) share billboard membership, picking, removal and discovery. */
-export function _addBillboardSystemToScene(scene: SceneContext, system: BillboardSpriteSystem, build: BillboardRenderableBuilder): void {
+/**
+ * Adds a billboard sprite system (camera-facing or axis-locked) to the scene so it is rendered each frame and
+ * pickable. Adding a member again does nothing.
+ */
+export function addBillboardSystemToScene(scene: SceneContext, system: BillboardSpriteSystem): void {
     _addSceneRenderable(
         scene,
         "billboard",
         system,
         async (engine) => {
             const { buildBillboardRenderable } = await import("./billboard-renderable.js");
-            const built = build(engine, buildBillboardRenderable);
+            // Feature variants (particle blend passes) keep their builder on the system, so a re-add rebuilds them.
+            const built = system._sceneBuilder ? system._sceneBuilder(engine, buildBillboardRenderable) : buildBillboardRenderable(engine, system);
             return { _renderable: built.renderable, _detach: () => built.dispose };
         },
         // Pickability is pure data plus a dynamic-import thunk, so rendering pulls no pick-pipeline bytes; the
         // picker builds the contributor on the first pick.
         () => registerPickSource(scene, system, () => import("../picking/billboard-pick-pipeline.js"))
     );
-}
-
-/**
- * Adds a billboard sprite system (camera-facing or axis-locked) to the scene so it is rendered each frame and
- * pickable. Adding a member again does nothing.
- */
-export function addBillboardSystemToScene(scene: SceneContext, system: BillboardSpriteSystem): void {
-    _addBillboardSystemToScene(scene, system, (engine, buildBase) => buildBase(engine, system));
 }
 
 /**

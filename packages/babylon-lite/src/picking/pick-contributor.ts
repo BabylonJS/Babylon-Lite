@@ -60,7 +60,8 @@ export interface PickContributor {
      *  attaching its payload to `info`. `info.pickedPoint` / `info.distance` are already set
      *  from the shared pick-depth readback. */
     resolve(info: PickingInfo, localId: number): void;
-    /** Free any GPU resources this contributor created (called by `disposePicker`). */
+    /** Free any GPU resources this contributor created (called by `disposePicker`, or by the next pick once its
+     *  source has been unregistered). */
     dispose?(): void;
 }
 

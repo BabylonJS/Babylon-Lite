@@ -8,6 +8,7 @@ import { F32, F64 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { BillboardCustomShader } from "./billboard-custom-shader.js";
+import type { BillboardRenderableBuilder } from "./billboard-scene.js";
 import type { BillboardBlendDescriptor } from "./billboard-blend.js";
 import { billboardBlendAlpha } from "./billboard-blend.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
@@ -85,6 +86,8 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _handleHooks?: BillboardIndexHandleHooks;
     /** @internal Optional custom fragment shader for this system. Absent on plain systems. */
     readonly _customShader?: BillboardCustomShader;
+    /** @internal Scene renderable builder for feature variants (particle blend passes); absent on plain systems. */
+    _sceneBuilder?: BillboardRenderableBuilder;
     /**
      * Per-system custom-shader params (`fx.params`); set via `setBillboardShaderParams`.
      * **Absent** on plain systems (only allocated for custom-shader systems, or lazily by the setter).
