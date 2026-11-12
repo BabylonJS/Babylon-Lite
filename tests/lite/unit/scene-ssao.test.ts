@@ -136,6 +136,25 @@ describe("createSceneSsaoPipeline", () => {
         expect(tasks[1]).toMatchObject({ camera: scene.camera, enabled: true, executionEnabled: true });
     });
 
+    it("skips MSAA depth resolve while another camera is active", () => {
+        const { engine, scene, camera, tasks } = makeFixture(4);
+        const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);
+        const nextCamera = {} as Camera;
+        attachSceneSsaoPipeline(pipeline);
+
+        scene.camera = nextCamera;
+        scene._beforeRender[0]!(16);
+
+        expect(tasks[1]).toMatchObject({ name: "scene-ssao-depth-resolve", executionEnabled: false });
+        expect(tasks[2]).toMatchObject({ enabled: false, executionEnabled: true });
+
+        scene.camera = camera;
+        scene._beforeRender[0]!(16);
+
+        expect(tasks[1]).toMatchObject({ executionEnabled: true });
+        expect(tasks[2]).toMatchObject({ enabled: true, executionEnabled: true });
+    });
+
     it("releases its scene-owned state when the scene is disposed", () => {
         const { engine, scene, camera } = makeFixture(4);
         const pipeline = createSceneSsaoPipeline({}, engine, scene, camera);

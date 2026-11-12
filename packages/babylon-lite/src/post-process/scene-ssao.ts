@@ -43,6 +43,7 @@ interface SceneSsaoPipelineState {
     _priorOutputTexture: RenderTarget | undefined;
     _tasks: Task[];
     _ownedTargets: RenderTarget[];
+    _depthResolveTask: Task | null;
     _aoTask: ScreenSpaceAmbientOcclusionPostProcessTask | null;
     _gate: (() => void) | null;
     _sceneDispose: (() => void) | null;
@@ -84,6 +85,7 @@ export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engin
         _priorOutputTexture: undefined,
         _tasks: [],
         _ownedTargets: [],
+        _depthResolveTask: null,
         _aoTask: null,
         _gate: null,
         _sceneDispose: null,
@@ -220,7 +222,8 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
     if (multisampled) {
         depth = createRenderTarget({ lbl: `${pipeline.name}-depth`, dFormat: "depth24plus-stencil8", samples: 1, size: surface });
         state._ownedTargets.push(depth);
-        state._tasks.push(createDepthResolveTask({ name: `${pipeline.name}-depth-resolve`, sourceTexture: baseRt, targetTexture: depth }, engine, scene));
+        state._depthResolveTask = createDepthResolveTask({ name: `${pipeline.name}-depth-resolve`, sourceTexture: baseRt, targetTexture: depth }, engine, scene);
+        state._tasks.push(state._depthResolveTask);
     }
 
     const output =
@@ -281,6 +284,9 @@ function updateExecutionGate(pipeline: SceneSsaoPipeline, state: SceneSsaoPipeli
     for (const task of state._tasks) {
         task.executionEnabled = true;
     }
+    if (state._depthResolveTask) {
+        state._depthResolveTask.executionEnabled = active;
+    }
     if (state._aoTask) {
         state._aoTask.enabled = active;
         const resolutionScaleChanged = state._aoTask.resolutionScale !== pipeline.resolutionScale;
@@ -303,6 +309,7 @@ function registerSceneDisposal(pipeline: SceneSsaoPipeline, state: SceneSsaoPipe
         delete state.scene._outputPipelineChange;
         removeGate(state);
         state._tasks.length = 0;
+        state._depthResolveTask = null;
         state._aoTask = null;
         const displacedBaseRt = state._defaultTask?._ownsTargets ? state._baseRt : null;
         restoreDefaultTask(state);
@@ -348,6 +355,7 @@ function cleanupTasks(state: SceneSsaoPipelineState): void {
         task.dispose();
     }
     state._tasks.length = 0;
+    state._depthResolveTask = null;
     state._aoTask = null;
     restoreDefaultTask(state);
     disposeOwnedTargets(state);

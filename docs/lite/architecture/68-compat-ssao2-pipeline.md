@@ -99,7 +99,7 @@ output = vec4(color.rgb * (1.0 - amount), color.a);
 
 - **Detached:** the default task retains its original color/resolve targets; no owned tasks or targets exist.
 - **Attached + camera active:** the retargeted default render, optional depth resolve, and enabled SSAO composite execute.
-- **Attached + camera inactive:** the render and resolve chain still executes, but SSAO uses its identity composite so the other camera's output is preserved without ambient occlusion.
+- **Attached + camera inactive:** the render and SSAO identity composite still execute so the other camera's color output is preserved, while the unused depth-resolve task is disabled.
 - **Detach:** remove owned tasks, dispose them in reverse consumer order, dispose controller-owned targets, restore the default task targets, and clear references.
 - **Reattach:** allocate a completely fresh task chain and temporal history.
 - **Failure:** rollback performs the same cleanup as detach and restores the captured default targets before rethrowing.
