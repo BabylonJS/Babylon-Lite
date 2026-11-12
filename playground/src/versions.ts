@@ -7,7 +7,7 @@
 // playground UI are always a matched pair. The version selector therefore doesn't
 // hot-swap an engine URL — it navigates between these snapshots (see main.ts). The
 // list of switchable fixed releases is the `/v/versions.json` manifest, written by
-// the npm-publish pipeline as versioned snapshots are deployed.
+// the playground release pipeline as versioned snapshots are deployed.
 //
 // The CDN (esm.sh, with an automatic jsDelivr fallback, selected by `./cdn`) is
 // used only to pin a *downloaded* project's import map to a public release.
@@ -49,7 +49,7 @@ export async function downloadEngineUrl(version: string): Promise<string> {
 /**
  * Fetch the fixed `@babylonjs/lite` versions that have a deployed playground
  * snapshot under `/v/<ver>/`, newest first. The manifest is written by the
- * npm-publish pipeline after each versioned snapshot deploys, so the selector
+ * playground release pipeline after each versioned snapshot deploys, so the selector
  * only ever offers versions the user can actually switch to. Returns an empty
  * list when the manifest is missing or unreachable, so the selector still offers
  * Nightly.

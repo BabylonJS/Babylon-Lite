@@ -1,0 +1,269 @@
+# =============================================================================
+# Azure Pipelines — Babylon Lite Versioned Playground Deploy (post-release)
+#
+# Deploys the immutable, per-version Lite Playground snapshot
+# (https://liteplayground.babylonjs.com/v/<version>/) for a stable
+# @babylonjs/lite release and records it in the shared deployed-versions
+# manifest (/v/versions.json) that populates the playground's version selector.
+#
+# Releases are produced by the internal Azure DevOps release pipeline, which
+# publishes @babylonjs/lite, @babylonjs/lite-compat and @babylonjs/lite-gl to
+# npm and then creates the lightweight tag npm-lite-v<X.Y.Z> (plus a GitHub
+# release) on the exact released master commit. This pipeline runs when that
+# tag is pushed, builds the playground from source at the tagged commit with the
+# engine stamped as that exact version, and uploads it. It replaces the
+# versioned-playground steps of the retired azure-pipelines-npm-publish.yml.
+#
+# The pipeline never publishes to npm, pushes to git, or creates tags or
+# releases, and it is safe to rerun for the same version: the snapshot upload
+# overwrites the same /v/<version>/ path and the manifest update is idempotent.
+#
+# Triggers:
+#   - Stable Lite release tags: npm-lite-v<X.Y.Z>. GL tags (npm-lite-gl-v*) and
+#     prerelease tags (npm-lite-v<X.Y.Z>-<suffix>) are never deployed.
+#   - Manual run with the "version" parameter for reruns and backfills.
+#
+# Variable groups:
+#   - BabylonJS-Deployment (DEPLOYMENT_SERVER, DEPLOY_TOKEN, DEPLOY_ENDPOINT_UPLOAD,
+#     DEPLOY_ENDPOINT_PURGE)
+#   - BabylonJS-CI-Infrastructure (TOOLS_STORAGE_ACCOUNT, CDN_PROFILE_TOOLS)
+# =============================================================================
+
+# Tags only: excluding every branch disables branch CI while the tag filter
+# still applies. "npm-lite-v*" cannot match a GL tag ("npm-lite-gl-v*"); the GL
+# exclude is kept only to make that explicit. "*-*" rejects prerelease tags.
+trigger:
+    branches:
+        exclude:
+            - "*"
+    tags:
+        include:
+            - "npm-lite-v*"
+        exclude:
+            - "npm-lite-gl-v*"
+            - "npm-lite-v*-*"
+
+pr: none
+
+parameters:
+    - name: version
+      displayName: "Stable @babylonjs/lite version to deploy (for example 1.40.0). Leave as 'fromTag' for tag-triggered runs."
+      type: string
+      default: fromTag
+
+variables:
+    - group: BabylonJS-Deployment
+    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
+    # liteplayground.babylonjs.com, so versioned playground snapshots serve
+    # same-origin as nightly (required by the client-side deploy coordinator) —
+    # and CDN_PROFILE_TOOLS for the post-deploy purge.
+    - group: BabylonJS-CI-Infrastructure
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: PLAYGROUND_ORIGIN
+      value: "https://liteplayground.babylonjs.com"
+
+pool:
+    vmImage: ubuntu-latest
+
+jobs:
+    - job: DeployVersionedPlayground
+      displayName: "Deploy versioned Lite Playground"
+      timeoutInMinutes: 90
+      steps:
+          # Full history + tags: the release tag is verified against master and
+          # checked out explicitly below, so manual runs queued on master still
+          # build the tagged commit.
+          - checkout: self
+            clean: true
+            fetchDepth: 0
+            fetchTags: true
+            persistCredentials: false
+
+          - script: |
+                set -euo pipefail
+
+                version="$(echo "${PARAM_VERSION}" | xargs)"
+                if [[ -z "$version" || "$version" == "fromTag" ]]; then
+                    if [[ "$SOURCE_BRANCH" != refs/tags/npm-lite-v* ]]; then
+                        echo "##vso[task.logissue type=error]No version parameter was provided and the run was not triggered by an npm-lite-v* tag (source: ${SOURCE_BRANCH})."
+                        exit 1
+                    fi
+                    version="${SOURCE_BRANCH#refs/tags/npm-lite-v}"
+                fi
+
+                if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    echo "##vso[task.logissue type=error]'${version}' is not a stable X.Y.Z version. Prerelease versions are not deployed to the playground."
+                    exit 1
+                fi
+
+                echo "Deploying versioned Lite Playground for @babylonjs/lite ${version}"
+                echo "##vso[task.setvariable variable=LITE_VERSION]${version}"
+                echo "##vso[build.updatebuildnumber]${version}-$(Build.BuildId)"
+            displayName: "Resolve release version"
+            env:
+                PARAM_VERSION: ${{ parameters.version }}
+                SOURCE_BRANCH: $(Build.SourceBranch)
+
+          - script: |
+                set -euo pipefail
+
+                tag="npm-lite-v${LITE_VERSION}"
+                git fetch --force --tags origin "+refs/heads/master:refs/remotes/origin/master"
+
+                if ! commit=$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}"); then
+                    echo "##vso[task.logissue type=error]Tag ${tag} does not exist in BabylonJS/Babylon-Lite."
+                    exit 1
+                fi
+                if ! git merge-base --is-ancestor "$commit" origin/master; then
+                    echo "##vso[task.logissue type=error]Tag ${tag} (${commit}) is not reachable from origin/master."
+                    exit 1
+                fi
+
+                git checkout --force --detach "$commit"
+                if [[ "$(git rev-parse HEAD)" != "$commit" ]]; then
+                    echo "##vso[task.logissue type=error]Failed to check out ${tag} (${commit})."
+                    exit 1
+                fi
+                echo "Building ${tag} -> ${commit} (on master)"
+            displayName: "Verify release tag is on master and check it out"
+
+          - task: UseNode@1
+            inputs:
+                version: $(NODE_VERSION)
+
+          - script: |
+                corepack enable
+                corepack prepare pnpm@$(PNPM_VERSION) --activate
+            displayName: "Enable pnpm via corepack"
+
+          - script: pnpm install --frozen-lockfile
+            displayName: "Install dependencies"
+
+          # Same build the retired npm-publish pipeline ran: the self-hosted engine
+          # is stamped with the exact release (PACKAGE_VERSION, no -nightly suffix)
+          # and PLAYGROUND_BASE matches the public sub-path so assets, the runner,
+          # the engine, and SPA snippet routes resolve under it.
+          - script: pnpm build:playground
+            displayName: "Build versioned playground"
+            env:
+                PACKAGE_VERSION: $(LITE_VERSION)
+                PLAYGROUND_BASE: /v/$(LITE_VERSION)/
+
+          - script: |
+                set -euo pipefail
+
+                DIST_DIR="$(System.DefaultWorkingDirectory)/playground/dist"
+                for file in index.html engine/dev/index.js; do
+                    if [[ ! -s "$DIST_DIR/$file" ]]; then
+                        echo "##vso[task.logissue type=error]Playground build output is missing or empty: $file"
+                        exit 1
+                    fi
+                done
+                if ! grep -q -F "/v/${LITE_VERSION}/" "$DIST_DIR/index.html"; then
+                    echo "##vso[task.logissue type=error]index.html is not built for base /v/${LITE_VERSION}/."
+                    exit 1
+                fi
+                # VERSION is defined in a code-split engine chunk, not the entry file.
+                if ! grep -r -q -F "\"${LITE_VERSION}\"" "$DIST_DIR/engine/dev"; then
+                    echo "##vso[task.logissue type=error]The playground engine is not stamped with version ${LITE_VERSION}."
+                    exit 1
+                fi
+                echo "Playground build output is valid for ${LITE_VERSION}"
+            displayName: "Validate playground build output"
+
+          # Uploaded inline rather than via config/templates/upload-static-site.yml:
+          # that template is continueOnError and does not pass --fail-with-body, so
+          # a failed release deploy would still report success.
+          - script: |
+                set -euo pipefail
+
+                DIST_DIR="$(System.DefaultWorkingDirectory)/playground/dist"
+                ZIP_PATH="$(Build.ArtifactStagingDirectory)/lite-playground-v$(LITE_VERSION).zip"
+
+                mkdir -p "$(Build.ArtifactStagingDirectory)"
+                rm -f "$ZIP_PATH"
+                (cd "$DIST_DIR" && zip -r -q "$ZIP_PATH" .)
+
+                curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                  -H "Content-Type: multipart/form-data" \
+                  -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                  -F "path=litePlayground/v/$(LITE_VERSION)" \
+                  -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                  -F "zip=@$ZIP_PATH"
+            displayName: "Upload versioned playground"
+
+          # Record this release in the deployed-versions manifest the playground
+          # reads to populate its version selector (only versions with a live
+          # /v/<ver>/ snapshot are offered). The manifest lives at the origin root
+          # (/v/versions.json), shared by every snapshot. Read-modify-write: fetch
+          # the current list, add this version, dedupe + sort newest first, then
+          # re-upload just that file to the /v path. The deploy server overlays at
+          # the given path, so sibling /v/<ver>/ snapshots are left intact. Finally
+          # purge the CDN so the manifest (a .json, otherwise cached at the CDN
+          # default TTL) and any rerun's snapshot files show up promptly.
+          - script: |
+                set -euo pipefail
+
+                VER="$(LITE_VERSION)"
+                MANIFEST_URL="$(PLAYGROUND_ORIGIN)/v/versions.json"
+                WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
+                rm -rf "$WORK"
+                mkdir -p "$WORK"
+
+                # Fetch the current manifest, distinguishing "not there yet" from a
+                # transient failure. A 404 is the first-run empty case; any other
+                # non-200 (5xx, network error) must NOT be treated as empty, or we'd
+                # overwrite the manifest with just this version and drop older
+                # still-deployed releases from the selector. Fail instead; the run
+                # is safe to rerun once the origin is healthy.
+                HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
+                if [ "$HTTP_CODE" = "404" ]; then
+                  echo "No existing manifest (404); starting a new list."
+                  echo '[]' > "$WORK/current.json"
+                elif [ "$HTTP_CODE" != "200" ]; then
+                  echo "##vso[task.logissue type=error]Manifest fetch failed (HTTP $HTTP_CODE); not updating it to avoid clobbering existing versions. Rerun this pipeline for ${VER}."
+                  exit 1
+                fi
+
+                node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
+
+                echo "Updated manifest:"; cat "$WORK/versions.json"
+
+                (cd "$WORK" && zip -j -q versions.zip versions.json)
+
+                curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                  -H "Content-Type: multipart/form-data" \
+                  -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                  -F "path=litePlayground/v" \
+                  -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
+                  -F "zip=@$WORK/versions.zip"
+
+                curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=lite-playground&profileName=$(CDN_PROFILE_TOOLS)" --fail-with-body -i -X POST \
+                  -H "Authorization: Bearer $(DEPLOY_TOKEN)"
+            displayName: "Update deployed-versions manifest"
+
+          - script: |
+                set -euo pipefail
+
+                url="$(PLAYGROUND_ORIGIN)/v/$(LITE_VERSION)/index.html"
+                deadline=$((SECONDS + 600))
+                while true; do
+                    status=$(curl --connect-timeout 10 --max-time 60 --silent --show-error \
+                        --output /dev/null --write-out "%{http_code}" "$url") || status="000"
+                    if [[ "$status" == "200" ]]; then
+                        echo "Versioned playground is live: $(PLAYGROUND_ORIGIN)/v/$(LITE_VERSION)/"
+                        break
+                    fi
+                    if (( SECONDS >= deadline )); then
+                        echo "##vso[task.logissue type=error]${url} did not return HTTP 200 within 10 minutes (last: HTTP ${status})."
+                        exit 1
+                    fi
+                    echo "Waiting for ${url} (HTTP ${status})"
+                    sleep 30
+                done
+            displayName: "Verify versioned playground is served"

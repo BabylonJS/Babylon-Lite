@@ -1,29 +1,22 @@
-# Azure Pipelines — Babylon Lite GL npm Publish
+# Azure Pipelines — Babylon Lite GL npm Publish (RETIRED)
+#
+# RETIRED: this pipeline is no longer the source of @babylonjs/lite-gl releases
+# and has no automatic triggers (no CI trigger, no PR trigger, no schedule).
+# The internal Azure DevOps release pipeline now publishes @babylonjs/lite-gl to
+# npm and creates the npm-lite-gl-v<X.Y.Z> tag; leaving the weekly schedule or
+# the config/release-gl.json path trigger enabled here would double-publish.
+# config/release-gl.json no longer triggers anything.
+#
+# Kept only as a manual emergency fallback. Do not run it alongside the internal
+# release.
 #
 # Publishes the built @babylonjs/lite-gl package to npm. NPM_TOKEN is provided
-# by the NPM_Publish variable group.
-#
-# Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
-# Pushes to master that change config/release-gl.json read the release type from
-# that file, so repeated patch releases can be requested by bumping its nonce.
+# by the NPM_Publish variable group. Manual runs can choose patch, minor, major,
+# or auto.
 
-trigger:
-    branches:
-        include:
-            - master
-    paths:
-        include:
-            - config/release-gl.json
+trigger: none
 
 pr: none
-
-schedules:
-    - cron: "0 8 * * 1"
-      displayName: "Weekly npm publish (lite-gl)"
-      branches:
-          include:
-              - master
-      always: true
 
 parameters:
     - name: releaseType

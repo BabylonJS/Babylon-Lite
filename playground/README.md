@@ -429,8 +429,19 @@ The playground deploys to its own subdomain, **liteplayground.babylonjs.com**, v
 `pnpm build:playground`, zips `playground/dist`, and POSTs it to the Babylon
 deployment server, then purges the CDN. The pipeline checks out full history
 (`fetchDepth: 0`) so the engine build can resolve the latest `npm-lite-v*` tag for
-nightly version stamping. Re-running on each master push keeps nightly current;
-chaining it after the npm-publish pipeline keeps it tracking the latest release.
+nightly version stamping. Re-running on each master push keeps nightly current,
+and a newly pushed release tag is picked up by the next master deploy.
+
+Each stable release also gets an immutable snapshot at
+`https://liteplayground.babylonjs.com/v/<version>/`, deployed by
+`azure-pipelines-playground-release.yml`. The internal release pipeline publishes
+`@babylonjs/lite` to npm and then tags the released master commit as
+`npm-lite-v<version>`; that tag triggers the playground release pipeline, which
+builds the playground from the tagged commit with `PACKAGE_VERSION=<version>` and
+`PLAYGROUND_BASE=/v/<version>/`, uploads it to `litePlayground/v/<version>`, adds
+the version to the shared `/v/versions.json` manifest read by the version
+selector, and purges the CDN. It can also be run manually with a `version`
+parameter to redeploy or backfill a release; reruns are safe.
 
 The deploy targets the tools storage account (`TOOLS_STORAGE_ACCOUNT`, from the
 `BabylonJS-CI-Infrastructure` variable group) under the `litePlayground` path. The

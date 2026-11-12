@@ -7,8 +7,13 @@
 # The self-hosted engine bundle is stamped with the latest published version as
 # `<version>-nightly` (see playground/vite.engine.config.ts), resolved from the
 # newest `npm-lite-v*` git tag — so `fetchDepth: 0` below is required to make the
-# tags available. Re-running on each master push (and ideally chained after the
-# npm-publish pipeline) keeps nightly tracking the latest release.
+# tags available. Re-running on each master push keeps nightly tracking the
+# latest release; a release tag pushed after the last master deploy is picked up
+# by the next master push (or a manual run of this pipeline).
+#
+# Immutable per-release snapshots (`/v/<version>/`) and the `/v/versions.json`
+# manifest are deployed separately by azure-pipelines-playground-release.yml,
+# triggered by the `npm-lite-v<X.Y.Z>` tag the internal release pipeline creates.
 #
 # Deployment targets the tools storage account (TOOLS_STORAGE_ACCOUNT, from the
 # BabylonJS-CI-Infrastructure variable group) under the `litePlayground` path. The

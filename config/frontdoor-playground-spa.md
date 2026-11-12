@@ -2,11 +2,11 @@
 
 The playground is served as a single origin with three shapes:
 
-| Shape            | URL                                             | Built by                        |
-| ---------------- | ----------------------------------------------- | ------------------------------- |
-| Nightly (master) | `https://liteplayground.babylonjs.com/`         | `azure-pipelines-playground.yml`|
-| Per-PR snapshot  | `https://liteplayground.babylonjs.com/pr/<N>/`  | `azure-pipelines.yml`           |
-| Per-version      | `https://liteplayground.babylonjs.com/v/<ver>/` | `azure-pipelines-npm-publish.yml`|
+| Shape            | URL                                             | Built by                                 |
+| ---------------- | ----------------------------------------------- | ---------------------------------------- |
+| Nightly (master) | `https://liteplayground.babylonjs.com/`         | `azure-pipelines-playground.yml`         |
+| Per-PR snapshot  | `https://liteplayground.babylonjs.com/pr/<N>/`  | `azure-pipelines.yml`                    |
+| Per-version      | `https://liteplayground.babylonjs.com/v/<ver>/` | `azure-pipelines-playground-release.yml` |
 
 Each is an immutable, independently built static site. The app is a History-API
 SPA, so a deep link or hard refresh (e.g. `/pr/387/snippet/XKIIYQ/v/3`) requests a
