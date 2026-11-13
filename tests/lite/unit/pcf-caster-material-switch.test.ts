@@ -4,7 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTask, RenderTaskConfig } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Material, MaterialView } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { SceneContext, SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import type { PcfTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
@@ -14,7 +14,7 @@ const created = vi.hoisted(() => ({ tasks: 0 }));
 vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../../packages/babylon-lite/src/shadow/shadow-base")>()),
     createShadowCamera: () => ({}),
-    createShadowRenderTarget: () => ({}),
+    createShadowRenderTarget: (sg: ShadowGenerator) => ({ _depthTexture: sg._depthTexture, _width: sg._config._mapSize }),
 }));
 
 // A PCF task without a GPU target. Its record runs the real task transaction: it resolves each queued caster through the
@@ -80,7 +80,8 @@ function material(name: string, buildGroup: MeshGroupBuilder): Material {
 
 /** Complete a group's first build in the scene: its rebuild turns a (mesh, view) pair into a packet. */
 function build(scene: SceneContext, buildGroup: MeshGroupBuilder): void {
-    const rebuild = (_scene: SceneContext, mesh: Mesh, view?: Material) => {
+    const rebuild = (_scene: SceneContext, mesh: Mesh, view?: Material, resources?: MeshRebuildResources) => {
+        resources?._lifetimeDisposers.push(vi.fn());
         const packet = { mesh, _lastMaterial: view, order: 0, bind: () => ({ renderable: packet }) };
         return packet as unknown as Renderable;
     };
@@ -101,7 +102,7 @@ function casts(state: PcfTaskState): [Mesh, Material][] {
     const task = state._task;
     const recorded = task._renderables.map((packet) => [packet.mesh!, packet._lastMaterial as MaterialView] as const);
     const queued = (task._pendingMeshes ?? []).map(({ mesh, material: view }) => [mesh as Mesh, view as MaterialView] as const);
-    return [...recorded, ...queued].map(([mesh, view]) => [mesh, view.source]);
+    return [...recorded, ...queued].sort(([a], [b]) => state._casterMeshes.indexOf(a) - state._casterMeshes.indexOf(b)).map(([mesh, view]) => [mesh, view.source]);
 }
 
 /** A PCF generator in a scene whose frames drain material swaps and then run the real shadow task. */
@@ -109,6 +110,8 @@ async function setup() {
     const lite = await importLite();
     const engine = {} as EngineContext;
     const sg = {
+        _config: { _mapSize: 64 },
+        _depthTexture: {},
         _preloadShadowTask: lite.preloadPcfShadowTaskState,
         _renderShadowMap: vi.fn(() => 0),
     } as unknown as ShadowGenerator;
@@ -170,7 +173,7 @@ async function loaded(sg: ShadowGenerator): Promise<void> {
 }
 
 describe("a registered PCF caster whose own renderable is rebuilt", () => {
-    it("rebuilds the task, whose packet may reference the per-mesh resources the rebuild retired", async () => {
+    it("requeues its packet, which may reference the per-mesh resources the rebuild retired", async () => {
         const { lite, shaders, caster, register, frame, state } = await setup();
         const shared = material("shared", shaders);
         const mesh = caster(shared);
@@ -183,11 +186,11 @@ describe("a registered PCF caster whose own renderable is rebuilt", () => {
         lite.markMeshRenderableDirty(mesh);
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(created.tasks).toBe(tasks + 1);
+        expect(state()).toBe(first);
+        expect(created.tasks).toBe(tasks);
         expect(casts(state())).toEqual([[mesh, shared]]);
         frame();
-        expect(created.tasks).toBe(tasks + 1);
+        expect(created.tasks).toBe(tasks);
     });
 });
 
@@ -208,7 +211,7 @@ describe("a registered PCF caster that casts through a PBR override", () => {
         return { ...ctx, override, mesh, other, first: ctx.state(), tasks: created.tasks };
     }
 
-    it("rebuilds the task when a mesh that casts no shadow rebuilds the override with new render features", async () => {
+    it("requeues the caster when a mesh that casts no shadow rebuilds the override with new render features", async () => {
         const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
 
         // An alpha-test or culling change of the override: its features are recomputed and only the meshes that draw it are
@@ -217,14 +220,14 @@ describe("a registered PCF caster that casts through a PBR override", () => {
         lite.markMeshRenderableDirty(other);
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(created.tasks).toBe(tasks + 1);
+        expect(state()).toBe(first);
+        expect(created.tasks).toBe(tasks);
         expect(casts(state())).toEqual([[mesh, override]]);
         frame();
-        expect(created.tasks).toBe(tasks + 1);
+        expect(created.tasks).toBe(tasks);
     });
 
-    it("keeps the task while the override's features are dropped, and rebuilds it once they are recomputed", async () => {
+    it("keeps the packet while the override's features are dropped, and requeues it once they are recomputed", async () => {
         const { lite, frame, state, override, mesh, other, first, tasks } = await overrideShared();
 
         // A pending rebuild dropped the features: a view built now would read none of them.
@@ -235,15 +238,15 @@ describe("a registered PCF caster that casts through a PBR override", () => {
         override._renderFeatures = { features: 2 };
         lite.markMeshRenderableDirty(other);
         frame();
-        expect(created.tasks).toBe(tasks + 1);
+        expect(created.tasks).toBe(tasks);
         expect(casts(state())).toEqual([[mesh, override]]);
         frame();
-        expect(created.tasks).toBe(tasks + 1);
+        expect(created.tasks).toBe(tasks);
     });
 });
 
 describe("a registered PCF caster whose material changes with the caster set unchanged", () => {
-    it("rebuilds the task through the new material when its view can be built", async () => {
+    it("requeues the caster through the new material when its view can be built", async () => {
         const { shaders, caster, register, frame, state } = await setup();
         const mesh = caster(material("before", shaders));
         await register([mesh]);
@@ -254,7 +257,7 @@ describe("a registered PCF caster whose material changes with the caster set unc
         frame();
 
         expect(casts(state())).toEqual([[mesh, after]]);
-        // The rebuild snapshotted the new material, so a later frame builds no other task.
+        // The reconcile snapshotted the new material, so later frames leave it alone.
         const tasks = created.tasks;
         frame();
         expect(created.tasks).toBe(tasks);
@@ -338,7 +341,7 @@ describe("a registered PCF caster whose material changes with the caster set unc
         const held = state();
         const tasks = created.tasks;
         expect(casts(held)).toEqual([]);
-        // The task it cast into before retires behind the frame fence; it may reference resources of the old material.
+        // Its old packet retires behind the frame fence; it may reference resources of the old material.
         expect(fence()).toBe(1);
 
         expect(frame).not.toThrow();
@@ -351,7 +354,7 @@ describe("a registered PCF caster whose material changes with the caster set unc
         frame();
 
         expect(casts(state())).toEqual([[mesh, next]]);
-        expect(created.tasks).toBe(tasks + 1);
+        expect(created.tasks).toBe(tasks);
     });
 
     it("rejoins through its previous view when a change that was held is reverted", async () => {
@@ -374,7 +377,7 @@ describe("a registered PCF caster whose material changes with the caster set unc
 });
 
 describe("caster-set changes while a PCF caster is held", () => {
-    it("keeps a held caster out of the task built for a re-supplied set, and casts the other members", async () => {
+    it("keeps a held caster out of the existing task for a re-supplied set, and casts the other members", async () => {
         const { scene, shaders, caster, register, frame, state } = await setup();
         const before = material("before", group("node"));
         build(scene, before._buildGroup);
@@ -409,13 +412,13 @@ describe("caster-set changes while a PCF caster is held", () => {
         frame();
         building.material = material("next", group("node"));
         frame();
-        expect(state()._held).toEqual(new Set([building]));
+        expect(state()._casterSnapshots.get(building)).toBeNull();
 
         await register([kept]);
         frame();
 
         expect(casts(state())).toEqual([[kept, kept.material]]);
-        expect(state()._held).toBeUndefined();
+        expect(state()._casterSnapshots.has(building)).toBe(false);
     });
 
     it("holds a caster that switched to another family while the registration preload was importing", async () => {

@@ -21,6 +21,7 @@ import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identit
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -427,45 +428,6 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         state._recordedVersion = -1;
     }
     return drop;
-}
-
-/** @internal Remove every mesh in `drop` from one task with one pass over each of its lists, instead of one
- *  `removeMeshFromTask` scan and draw-batch re-selection per removed mesh. Like `_removeMeshFromRenderTask`, it
- *  re-selects the batches and invalidates the bundle only when something was removed. The task's `_removeMesh`
- *  hook is deliberately not called: CSM cascade tasks are internal and never wrapped by
- *  `enableRenderTaskMeshRefresh`. */
-export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undefined>): void {
-    let removed = false;
-    // Compact `list` in place, keeping the entries whose mesh is not dropped.
-    const prune = <T>(list: T[], meshOf: (entry: T) => Mesh | undefined, onDrop?: (entry: T) => void): void => {
-        let kept = 0;
-        for (const entry of list) {
-            if (drop.has(meshOf(entry))) {
-                onDrop?.(entry);
-                removed = true;
-            } else {
-                list[kept++] = entry;
-            }
-        }
-        list.length = kept;
-    };
-    prune(task._pendingMeshes ?? [], (request) => request.mesh);
-    // Fenced: a frame that is still in flight may reference the dropped packet.
-    prune(
-        task._renderables,
-        (renderable) => renderable.mesh,
-        (renderable) => task._retireRenderable?.(task.engine, renderable)
-    );
-    for (const bindings of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
-        prune(bindings, (binding) => binding.renderable.mesh);
-    }
-    if (removed) {
-        const previous = task._batchState;
-        task._batchState = previous?._select([task._opaqueBindings, task._directBindings, task._transparentBindings]);
-        previous?._release(task.engine, [task._batchState]);
-        task._ob.length = 0;
-        task._lastVersion = -1;
-    }
 }
 
 /** Render every cascade layer for this frame, recomputing splits/matrices from the active camera. */
