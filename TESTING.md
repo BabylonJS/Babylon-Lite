@@ -354,7 +354,9 @@ Manually queued feature-branch runs retain their existing behavior.
 
 ### Required Pipeline Variable Groups
 
-The npm publish pipelines use `NPM_Publish` for the npm authentication secret:
+The retired, manual-only npm publish fallback pipelines use `NPM_Publish` for
+the npm authentication secret (releases are published by the internal Azure
+DevOps release pipeline):
 
 - `NPM_TOKEN`
 
@@ -365,11 +367,13 @@ credentials:
 - `BROWSERSTACK_ACCESS_KEY`
 
 It uses `BabylonJS-Deployment` for deployment server credentials used when
-uploading failed Playwright HTML reports:
+uploading failed Playwright HTML reports and playground snapshots:
 
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
 - `DEPLOY_ENDPOINT_UPLOAD`
+- `DEPLOY_ENDPOINT_PURGE` — CDN purge after the nightly and per-version
+  (`azure-pipelines-playground-release.yml`) playground deploys
 
 It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
 that uploads target:
@@ -381,7 +385,8 @@ that uploads target:
 
 This third group is easy to miss. It was **omitted from this list until the
 bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml`,
-`azure-pipelines-playground.yml` and `azure-pipelines-npm-publish.yml` had all
+`azure-pipelines-playground.yml` and the npm publish pipeline (whose versioned
+playground deploy now lives in `azure-pipelines-playground-release.yml`) had all
 three been importing it all along. A pipeline that needs a storage account and
 declares only the first two groups will not fail at parse time — see the trap
 described below.
