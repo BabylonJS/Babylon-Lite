@@ -95,10 +95,8 @@ describe("shadow caster dirty tracking", () => {
             _lastFoVersion: -1,
             _shadowUboData: new Float32Array(24),
             _casterMeshes: [mesh],
-            _casterMaterials: [mesh.material],
-            _casterMatGens: [0],
-            _casterMeshGens: [undefined],
-            _casterMatFeatures: [undefined],
+            _casterSnapshots: new Map([[mesh, { _material: mesh.material, _terminal: mesh.material, _renderableGen: mesh._renderableGen }]]),
+            _materialSnapshots: new Map([[mesh.material, { _view: undefined, _generation: 0, _features: undefined }]]),
             _scene: { camera: null } as unknown as SceneContext,
         } satisfies PcfTaskState;
         const light = { lightType: "directional", worldMatrixVersion: 1, _lightVersion: 1 };
