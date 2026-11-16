@@ -16,6 +16,7 @@ import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
 import type { getThinInstanceWorldBounds } from "./thin-instance-shadow-bounds.js";
+import { setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
 let thinInstanceWorldBounds: typeof getThinInstanceWorldBounds | undefined;
 const IDENTITY_WORLD = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -25,6 +26,15 @@ export async function preloadDirectionalShadowBounds(casterMeshes: readonly Mesh
     if (!thinInstanceWorldBounds && casterMeshes.some((mesh) => mesh.thinInstances)) {
         thinInstanceWorldBounds = (await import("./thin-instance-shadow-bounds.js")).getThinInstanceWorldBounds;
     }
+}
+
+/** Reuse the task's preload gate when an existing caster becomes thin-instanced. */
+export function prepareDirectionalShadowBounds(generator: ShadowGenerator, casterMeshes: readonly Mesh[]): boolean {
+    if (!thinInstanceWorldBounds && casterMeshes.some((mesh) => mesh.thinInstances)) {
+        setShadowTaskCasterMeshes(generator, casterMeshes);
+        return false;
+    }
+    return true;
 }
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.

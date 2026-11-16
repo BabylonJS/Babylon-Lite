@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstanceCount, setThinInstanceMatrix, setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
@@ -24,6 +26,26 @@ function instances(...transforms: Mat4[]) {
     }
     setThinInstances(mesh, matrices, transforms.length);
     return mesh;
+}
+
+function engineStub(): EngineContext {
+    const resource = () => ({});
+    return {
+        _device: {
+            queue: { writeBuffer: vi.fn() },
+            createBuffer: resource,
+            createTexture: () => ({ createView: resource }),
+            createSampler: resource,
+            createShaderModule: resource,
+            createBindGroupLayout: resource,
+            createPipelineLayout: resource,
+            createRenderPipeline: resource,
+            createBindGroup: resource,
+        },
+        _currentEncoder: {
+            beginRenderPass: () => ({ setPipeline: vi.fn(), setBindGroup: vi.fn(), draw: vi.fn(), end: vi.fn() }),
+        },
+    } as unknown as EngineContext;
 }
 
 describe("directional thin-instance shadow bounds", () => {
@@ -128,20 +150,7 @@ describe("directional thin-instance shadow bounds", () => {
 
     it.each(["pcf", "esm"])("preloads instance bounds through the %s generator's task hook", async (kind) => {
         vi.resetModules();
-        const resource = () => ({});
-        const engine = {
-            _device: {
-                queue: { writeBuffer: vi.fn() },
-                createBuffer: resource,
-                createTexture: () => ({ createView: resource }),
-                createSampler: resource,
-                createShaderModule: resource,
-                createBindGroupLayout: resource,
-                createPipelineLayout: resource,
-                createRenderPipeline: resource,
-                createBindGroup: resource,
-            },
-        } as unknown as EngineContext;
+        const engine = engineStub();
         const factory =
             kind === "pcf"
                 ? (await import("../../../packages/babylon-lite/src/shadow/pcf-directional-shadow-generator")).createPcfDirectionalShadowGenerator
@@ -154,5 +163,64 @@ describe("directional thin-instance shadow bounds", () => {
 
         const { computeDirectionalLightMatrix: fit } = await import("../../../packages/babylon-lite/src/shadow/shadow-base");
         expect(2 / fit(light, [mesh], 1, 100)._viewProj[0]!).toBeCloseTo(1.2);
+    });
+
+    it.each([
+        ["pcf", "set"],
+        ["pcf", "add"],
+        ["esm", "set"],
+        ["esm", "add"],
+    ])("defers %s fitting when an ordinary registered caster gains instances via %s", async (kind, conversion) => {
+        vi.resetModules();
+        const engine = engineStub();
+        const factory =
+            kind === "pcf"
+                ? (await import("../../../packages/babylon-lite/src/shadow/pcf-directional-shadow-generator")).createPcfDirectionalShadowGenerator
+                : (await import("../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator")).createEsmDirectionalShadowGenerator;
+        const { createShadowTask } = await import("../../../packages/babylon-lite/src/frame-graph/shadow-task");
+        const { setShadowTaskCasterMeshes } = await import("../../../packages/babylon-lite/src/frame-graph/shadow-inputs");
+        const { createShadowCamera } = await import("../../../packages/babylon-lite/src/shadow/shadow-base");
+        const { addThinInstance } = await import("../../../packages/babylon-lite/src/mesh/thin-instance");
+        const generator = factory(engine, createDirectionalLight([0, 0, 1]));
+        const mesh = caster();
+        const casters = [mesh];
+        const scene = { lights: [{ shadowGenerator: generator }], _renderableVersion: 1 } as unknown as SceneContext;
+        const execute = vi.fn(() => 1);
+        const state = {
+            _task: { record: vi.fn(), execute, dispose: vi.fn() },
+            _camera: createShadowCamera(generator),
+            _casterMeshes: casters,
+            _scene: scene,
+            _lastCasterVersion: -1,
+            _lastLightVersion: -1,
+            _lastFoVersion: -1,
+            _shadowUboData: new Float32Array(24),
+        };
+        generator._ensureShadowTaskState = () => state as unknown as ShadowTaskInternalState;
+        const task = createShadowTask(engine, scene);
+        setShadowTaskCasterMeshes(generator, casters);
+        await task._preload!();
+        task.record();
+        expect(task.execute?.()).toBe(kind === "pcf" ? 1 : 3);
+        const previousCasterVersion = state._lastCasterVersion;
+        expect(2 / generator._lightMatrix[0]!).toBeCloseTo(120);
+        execute.mockClear();
+
+        if (conversion === "set") {
+            setThinInstances(mesh, new Float32Array(matrix(0.01)), 1);
+        } else {
+            addThinInstance(mesh, matrix(0.01));
+        }
+        expect(task.execute?.()).toBe(0);
+        expect(generator._preloadPending).toBe(casters);
+        expect(state._lastCasterVersion).toBe(previousCasterVersion);
+        expect(2 / generator._lightMatrix[0]!).toBeCloseTo(120);
+        expect(execute).not.toHaveBeenCalled();
+        expect(task.execute?.()).toBe(0);
+
+        await vi.waitFor(() => expect(generator._preloadPending).toBeUndefined());
+        expect(task.execute?.()).toBe(kind === "pcf" ? 1 : 3);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(2 / generator._lightMatrix[0]!).toBeCloseTo(1.2);
     });
 });

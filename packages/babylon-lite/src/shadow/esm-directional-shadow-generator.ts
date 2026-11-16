@@ -21,6 +21,7 @@ import {
     casterVersionSum,
     computeDirectionalLightMatrix,
     preloadDirectionalShadowBounds,
+    prepareDirectionalShadowBounds,
     createSharedShadowUBO,
     createShadowCamera,
     createShadowParamsUBO,
@@ -322,6 +323,9 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
         return 0;
     }
 
+    if (!prepareDirectionalShadowBounds(sg, casterMeshes)) {
+        return 0;
+    }
     const matrix = computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
     if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
         packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);

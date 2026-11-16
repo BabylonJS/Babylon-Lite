@@ -341,7 +341,7 @@ export function renderPcfShadowMap(
     engine: EngineContext,
     sg: ShadowGenerator,
     state: PcfTaskState,
-    computeLightMatrix: (casterMeshes: readonly Mesh[], offX: number, offY: number, offZ: number) => PcfLightMatrix
+    computeLightMatrix: (casterMeshes: readonly Mesh[], offX: number, offY: number, offZ: number) => PcfLightMatrix | null
 ): number {
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
@@ -360,6 +360,9 @@ export function renderPcfShadowMap(
     }
 
     const matrix = computeLightMatrix(casterMeshes, offX, offY, offZ);
+    if (!matrix) {
+        return 0;
+    }
     const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion || foChanged;
     if (matrixChanged) {
         packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
