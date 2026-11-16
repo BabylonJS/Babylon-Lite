@@ -2,13 +2,14 @@ import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { PBR_HAS_ALPHA_BLEND, PBR2_HAS_REFRACTION, PBR2_NO_COLOR_OUTPUT, PBR2_ESM_SHADOW_OUTPUT } from "../pbr/pbr-flag-bits.js";
-import { _allocatePbrPluginIndex, _getActivePbrPluginExt, _getPbrPluginFragment, _registerPbrPluginFragment, _setActivePbrPluginExt } from "./pbr-plugin-registry.js";
+import { _allocatePbrPluginIndex, _getActivePbrPluginExt, _getPbrPluginFragment, _setActivePbrPluginExt } from "./pbr-plugin-registry.js";
 import { pbrPluginExt } from "./pbr-plugin-bridge.js";
 import { installPbrPluginDecorator } from "./pbr-plugin-decorator.js";
 import { bindPluginTextures, collectPluginTextures } from "./plugin-bridge-shared.js";
+import type { ShaderFragment } from "../../shader/fragment-types.js";
 
-interface PluginPass {
-    other: number;
+interface PluginPass extends ShaderFragment {
+    other: ShaderFragment;
     names: readonly string[];
 }
 
@@ -54,7 +55,7 @@ export function enablePbrPluginPasses(): void {
                     return result;
                 }
                 const full = pbr._pi!;
-                const signature = `${full}:${plugins.map((plugin) => Number(!!plugin._pbrIblOnly)).join("")}`;
+                const signature = `${full}:${plugins.map((plugin) => (plugin._pbrIblOnly ? 1 : 0)).join("")}`;
                 let index = variants.get(signature);
                 if (index === undefined) {
                     // Reuse the active bridge's signature machinery, including vertex-resource plugins.
@@ -62,8 +63,13 @@ export function enablePbrPluginPasses(): void {
                     filtered.plugins = [...selectPbrPlugins(plugins, false)];
                     extension.detect!(filtered);
                     index = _allocatePbrPluginIndex();
-                    _registerPbrPluginFragment(index, _getPbrPluginFragment(full)!);
-                    metadata.set(index, { other: filtered._pi!, names: plugins.map((plugin) => plugin.name) });
+                    const id = `plugin-${index}`;
+                    metadata.set(index, {
+                        ..._getPbrPluginFragment(full),
+                        _id: id,
+                        other: { ..._getPbrPluginFragment(filtered._pi!), _id: id },
+                        names: plugins.map((plugin) => plugin.name),
+                    });
                     variants.set(signature, index);
                 }
                 pbr._pi = index;
@@ -71,11 +77,7 @@ export function enablePbrPluginPasses(): void {
             },
             frag(context) {
                 const pass = metadata.get(context._pi ?? 0);
-                return pass && !isPbrIblColorPass(context._features, context._features2, context._hasIbl)
-                    ? pass.other
-                        ? extension.frag!({ ...context, _pi: pass.other })
-                        : null
-                    : extension.frag!(context);
+                return pass ? (isPbrIblColorPass(context._features, context._features2, context._hasIbl) ? pass : pass.other) : extension.frag!(context);
             },
             bind(context, entries, binding) {
                 const plugins = (context._material as PbrMaterialProps)._preparedPlugins;

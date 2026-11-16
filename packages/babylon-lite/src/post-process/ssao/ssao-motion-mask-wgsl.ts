@@ -1,5 +1,6 @@
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
-import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL } from "./ssao-wgsl.js";
+import { SSAO_PARAMS_WGSL, ssaoParamsWGSL, ssaoDepthBindingWGSL } from "./ssao-wgsl.js";
+import { _orthoProjector } from "../../camera/camera.js";
 import { SSAO_TEMPORAL_PARAMS_WGSL } from "./ssao-xegtao-wgsl.js";
 
 /**
@@ -66,7 +67,7 @@ if(all(cellLower<=upper)&&all(cellUpper>=lower)){return true;}
 
 /** @internal Conservative camera-relative material motion; one dispatch fills every level. */
 export function ssaoMotionMaskWGSL(kind: "depth" | "float"): WgslSource {
-    return wgsl`${SSAO_PARAMS_WGSL}
+    return wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var velocity:texture_2d<f32>;
 ${SSAO_TEMPORAL_PARAMS_WGSL}
@@ -87,7 +88,7 @@ let cameraUv=vec2f(clip.x/clip.w*0.5+0.5,0.5-clip.y/clip.w*0.5);
 let oldUv=uv+supplied.xy*vec2f(1,-1);
 // Half the transport's static thresholds, so a skipped tile can never hold a caster it would move.
 if(!(length((oldUv-cameraUv)*vec2f(ao.size))<0.025+length(supplied.xy*vec2f(ao.size))*t.tolerance.y*0.5)||
-(t.control.w!=0.0&&abs(supplied.z-clip.w)>max(1e-4,abs(clip.w)*t.tolerance.x))){atomicOr(&moved,1u);}
+(t.control.w!=0.0&&abs(supplied.z-${_orthoProjector ? "aoClipDepth(clip)" : "clip.w"})>max(1e-4,abs(${_orthoProjector ? "aoClipDepth(clip)" : "clip.w"})*t.tolerance.x))){atomicOr(&moved,1u);}
 }}
 workgroupBarrier();
 if(local==0u&&atomicLoad(&moved)!=0u){

@@ -1,5 +1,5 @@
 import type { Camera } from "../camera/camera.js";
-import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix } from "../camera/camera.js";
+import { _orthoProjector, getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createRenderTarget } from "../engine/render-target.js";
@@ -166,7 +166,13 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
             }
             return gpu;
         }
-        if (!task._gpu || task._gpu.device !== engine._device || task._gpu.width !== depth._width || task._gpu.height !== depth._height) {
+        if (
+            !task._gpu ||
+            task._gpu.device !== engine._device ||
+            task._gpu.width !== depth._width ||
+            task._gpu.height !== depth._height ||
+            (_orthoProjector && task.camera.ortho && !task._gpu.orthographicProjection)
+        ) {
             if (task._gpu) {
                 disposeSsaoGpu(task._gpu);
             }
@@ -210,20 +216,37 @@ export function createSsaoTask(config: SsaoTaskConfig, engine: EngineContext, sc
             validateSsaoSettings(task.radius, task.intensity, task.quality);
             const camera = task.camera;
             const viewport = camera.viewport;
-            if (camera.ortho || (viewport && (viewport.x !== 0 || viewport.y !== 0 || viewport.width !== 1 || viewport.height !== 1))) {
-                throw new Error("SSAO currently supports perspective cameras with a full-target viewport.");
+            if ((!_orthoProjector && camera.ortho) || (viewport && (viewport.x !== 0 || viewport.y !== 0 || viewport.width !== 1 || viewport.height !== 1))) {
+                throw new Error("SSAO currently supports enabled camera projections with a full-target viewport.");
             }
             if (!Number.isFinite(camera.nearPlane) || !Number.isFinite(camera.farPlane) || camera.nearPlane <= 0 || camera.farPlane <= camera.nearPlane) {
                 throw new Error("SSAO camera clip planes must be finite, positive, and ordered.");
             }
-            if (!Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= Math.PI) {
+            if (!(_orthoProjector && camera.ortho) && (!Number.isFinite(camera.fov) || camera.fov <= 0 || camera.fov >= Math.PI)) {
                 throw new Error("SSAO camera FOV must be finite and in (0, pi).");
             }
             const projection = getProjectionMatrix(camera, getEffectiveAspectRatio(camera, depth._width, depth._height));
+            if (
+                _orthoProjector &&
+                camera.ortho &&
+                (!Number.isFinite(projection[0]) ||
+                    projection[0]! <= 0 ||
+                    !Number.isFinite(projection[5]) ||
+                    projection[5]! <= 0 ||
+                    !Number.isFinite(projection[12]) ||
+                    !Number.isFinite(projection[13]))
+            ) {
+                throw new Error("SSAO requires finite, ordered camera projection bounds.");
+            }
             params.depthMultiply = -projection[14]!;
             params.depthAdd = projection[10]!;
             params.tanX = 1 / projection[0]!;
             params.tanY = 1 / projection[5]!;
+            if (_orthoProjector) {
+                params.orthographic = !!camera.ortho;
+                params.offsetX = camera.ortho ? -projection[12]! * params.tanX : 0;
+                params.offsetY = camera.ortho ? -projection[13]! * params.tanY : 0;
+            }
             params.radius = task.radius;
             params.intensity = task.intensity;
             params.view = getViewMatrix(camera);

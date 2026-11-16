@@ -1,5 +1,6 @@
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
-import { SSAO_PARAMS_WGSL, ssaoDepthBindingWGSL, ssaoDepthNormalWGSL } from "./ssao-wgsl.js";
+import { SSAO_PARAMS_WGSL, ssaoParamsWGSL, ssaoDepthBindingWGSL, ssaoDepthNormalWGSL } from "./ssao-wgsl.js";
+import { _orthoProjector } from "../../camera/camera.js";
 
 /** @internal Shared tap compatibility; `other` and `n` are unit view-space normals. */
 function ssaoUpsampleCompatibilityWGSL(): WgslSource {
@@ -11,9 +12,9 @@ if(agreement<0.9){
 if(cosine<=-0.9){return 0.0;}
 let epsilon=max(1e-4,point.z*1e-5);
 if(dot(delta,n)<-epsilon||dot(delta,other)>epsilon){return 0.0;}
-let view=normalize(-point);
+let view=${_orthoProjector ? "aoViewDirection(point)" : "normalize(-point)"};
 let incidence=max(0.1,min(abs(dot(n,view)),abs(dot(other,view))));
-let footprint=2.5*point.z*max(abs(ao.pixelViewSize.x),abs(ao.pixelViewSize.y))/incidence;
+let footprint=2.5*${_orthoProjector ? "aoViewScale(point.z)" : "point.z"}*max(abs(ao.pixelViewSize.x),abs(ao.pixelViewSize.y))/incidence;
 let limit=min(ao.radius*0.25,footprint);
 return select(0.0,1.0,dot(delta,delta)<=limit*limit);
 }
@@ -29,7 +30,7 @@ return clamp(1.0-abs(dot(delta,n))/allowance,0.0,1.0)*(a4*a4);
  * evaluates its 6x6 tap footprint once in workgroup memory instead of four times per pixel.
  */
 export function ssaoHalfUpsampleWGSL(sourceNormals: boolean): WgslSource {
-    return wgsl`${SSAO_PARAMS_WGSL}
+    return wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 ${ssaoDepthBindingWGSL("depth", 1)}
 @group(0) @binding(2) var normalInput:texture_2d<f32>;
 @group(0) @binding(3) var sparseVisibility:texture_2d<f32>;

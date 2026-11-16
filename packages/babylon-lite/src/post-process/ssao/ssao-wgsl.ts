@@ -1,18 +1,49 @@
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { _orthoProjector } from "../../camera/camera.js";
 
 /** @internal Explicit 176-byte layout; the first 96 bytes follow the pinned XeGTAO oracle. */
-export const SSAO_PARAMS_WGSL = wgsl`struct AoParams {
+const AO_PARAMETERS = wgsl`struct AoParams {
 size:vec2u,invSize:vec2f,depthUnpack:vec2f,tanHalfFov:vec2f,
 ndcMul:vec2f,ndcAdd:vec2f,pixelViewSize:vec2f,radius:f32,falloff:f32,
 radiusMultiplier:f32,padding:f32,finalPower:f32,blurBeta:f32,
 samplePower:f32,thinCompensation:f32,mipOffset:f32,phase:u32,
 extra:vec4f,view:mat4x4f
 }
-@group(0) @binding(0) var<uniform> ao:AoParams;
-fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*z,z);}
+@group(0) @binding(0) var<uniform> ao:AoParams;`;
+
+export const SSAO_PARAMS_WGSL = wgsl`${AO_PARAMETERS}fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*z,z);}
 fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
-fn dZ(d:f32)->f32{return ao.depthUnpack.x/(ao.depthUnpack.y-d);}
-`;
+fn dZ(d:f32)->f32{return ao.depthUnpack.x/(ao.depthUnpack.y-d);}`;
+
+let cachedParameters: WgslSource | undefined;
+
+/** @internal Generate after camera setup so projection support remains tree-shakable. */
+export function ssaoParamsWGSL(): WgslSource {
+    if (!cachedParameters) {
+        cachedParameters = wgsl`${AO_PARAMETERS}
+fn aoViewScale(z:f32)->f32{return select(z,1.0,ao.extra.x!=0.0);}
+fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*aoViewScale(z),z);}
+fn aoViewDirection(p:vec3f)->vec3f{return select(normalize(-p),vec3f(0,0,-1),ao.extra.x!=0.0);}
+fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
+fn dZ(d:f32)->f32{
+if(ao.extra.x!=0.0){return (d+ao.depthUnpack.x)/ao.depthUnpack.y;}
+return ao.depthUnpack.x/(ao.depthUnpack.y-d);
+}
+fn dZ4(d:vec4f)->vec4f{
+if(ao.extra.x!=0.0){return (d+ao.depthUnpack.x)/ao.depthUnpack.y;}
+return ao.depthUnpack.x/(vec4f(ao.depthUnpack.y)-d);
+}
+fn deviceDepth(z:f32)->f32{
+if(ao.extra.x!=0.0){return z*ao.depthUnpack.y-ao.depthUnpack.x;}
+return ao.depthUnpack.y-ao.depthUnpack.x/z;
+}
+fn aoClipDepth(clip:vec4f)->f32{
+if(ao.extra.x!=0.0){return dZ(clip.z/clip.w);}
+return clip.w;
+}`;
+    }
+    return cachedParameters;
+}
 
 /**
  * Raw depth always has the AoParams size, so clamping to it avoids a texture-size query ahead of
@@ -25,7 +56,7 @@ fn aoRawDepth(p:vec2i)->f32{return textureLoad(rawDepth,aoClamp(p,ao.size),0)${k
 
 /** @internal No filterable-float32 feature is required. */
 export function ssaoDepthCopyWGSL(kind: "depth" | "float"): WgslSource {
-    return wgsl`${SSAO_PARAMS_WGSL}
+    return wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var outDepth:texture_storage_2d<r32float,write>;
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
@@ -38,7 +69,7 @@ textureStore(outDepth,vec2i(id.xy),vec4f(z,0,0,0));
 
 /** @internal Weighted depth filtering, distinct from the engine's min/max Hi-Z. */
 export function ssaoDepthReduceWGSL(): WgslSource {
-    return wgsl`${SSAO_PARAMS_WGSL}
+    return wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 @group(0) @binding(1) var previous:texture_2d<f32>;
 @group(0) @binding(2) var outDepth:texture_storage_2d<r32float,write>;
 @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
@@ -68,7 +99,7 @@ textureStore(outDepth,vec2i(id.xy),vec4f(sum/weights,0,0,0));
 }
 /** @internal Shared estimator bindings and signed-normal reconstruction. */
 function ssaoEstimatorBindingsWGSL(kind: "depth" | "float"): WgslSource {
-    return wgsl`${SSAO_PARAMS_WGSL}
+    return wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 override SLICE_COUNT:u32=3u;
 override STEP_COUNT:u32=3u;
 ${ssaoDepthBindingWGSL(kind, 1)}
@@ -105,7 +136,7 @@ let l=aoClamp(p+vec2i(-1,0),ao.size);let r=aoClamp(p+vec2i(1,0),ao.size);
 let t=aoClamp(p+vec2i(0,-1),ao.size);let b=aoClamp(p+vec2i(0,1),ao.size);
 let depth=vec4f(${depthFunction}(l),${depthFunction}(r),${depthFunction}(t),${depthFunction}(b));
 let centerZ=clamp(dZ(centerDepth),0.0,65504.0);
-let z=clamp(ao.depthUnpack.x/(vec4f(ao.depthUnpack.y)-depth),vec4f(0),vec4f(65504));
+let z=clamp(${_orthoProjector ? "dZ4(depth)" : "ao.depthUnpack.x/(vec4f(ao.depthUnpack.y)-depth)"},vec4f(0),vec4f(65504));
 var left=p.x==i32(ao.size.x)-1||(p.x>0&&abs(z.x-centerZ)<abs(z.y-centerZ));
 var top=p.y==i32(ao.size.y)-1||(p.y>0&&abs(z.z-centerZ)<abs(z.w-centerZ));
 var errorX=vec2f(1);var errorY=vec2f(1);var secondX=vec2f(0);var secondY=vec2f(0);
@@ -168,9 +199,9 @@ let oxA=vec4f(-1,-1,0,1);let oyA=vec4f(0,-1,-1,-1);let oxB=vec4f(1,1,0,-1);let o
 let oxC=vec4f(-2,2,0,0);let oyC=vec4f(0,0,-2,2);
 let limit=roundoff*2.0;
 var best=5u;var found=false;var chosenDepth=vec2f(0);var chosenOffsets=vec4f(0);
-let initial=cross(horizontal,vertical);let plane=dot(initial,center);
+let initial=cross(horizontal,vertical);let plane=${_orthoProjector ? "select(dot(initial,center),initial.z,ao.extra.x!=0.0)" : "dot(initial,center)"};
 if(abs(plane)>1e-20){
-let gradient=-ao.depthUnpack.x/plane*initial.xy*ao.ndcMul*ao.invSize;
+let gradient=${_orthoProjector ? "select(-ao.depthUnpack.x,-ao.depthUnpack.y,ao.extra.x!=0.0)" : "-ao.depthUnpack.x"}/plane*initial.xy*ao.ndcMul*ao.invSize;
 best=max(best,aoPlaneSupport(gradient,centerDepth,limit,ringA,ringB,seconds,oxA,oyA,oxB,oyB,oxC,oyC));
 }
 for(var candidate=0u;candidate<16u;candidate++){
@@ -185,7 +216,7 @@ let support=aoPlaneSupport(gradient,centerDepth,limit,ringA,ringB,seconds,oxA,oy
 if(support>best){best=support;found=true;chosenDepth=vec2f(si,sj);chosenOffsets=vec4f(a,b);}
 }
 if(found){
-let zs=clamp(ao.depthUnpack.x/(vec2f(ao.depthUnpack.y)-chosenDepth),vec2f(0),vec2f(65504));
+let zs=clamp(${_orthoProjector ? "vec2f(dZ(chosenDepth.x),dZ(chosenDepth.y))" : "ao.depthUnpack.x/(vec2f(ao.depthUnpack.y)-chosenDepth)"},vec2f(0),vec2f(65504));
 horizontal=aoPosition((vec2f(p)+chosenOffsets.xy+0.5)*ao.invSize,zs.x)-center;
 vertical=aoPosition((vec2f(p)+chosenOffsets.zw+0.5)*ao.invSize,zs.y)-center;
 }
@@ -253,9 +284,9 @@ if(raw==0.0){
 textureStore(working,outputPixel,vec4u(170u,0,0,0));return;
 }
 let uv=(vec2f(p)+0.5)*ao.invSize;
-let z=viewZ*0.99999;
+let z=${_orthoProjector ? "select(viewZ*0.99999,viewZ-0.00001,ao.extra.x!=0.0)" : "viewZ*0.99999"};
 let origin=aoPosition(uv,z);
-let view=normalize(-origin);
+let view=${_orthoProjector ? "aoViewDirection(origin)" : "normalize(-origin)"};
 let normal=aoNormalOf(p,suppliedNormal);
 let index=hilbert(vec2u(p))+288u*(ao.phase%64u);
 let noise=fract(0.5+f32(index)*vec2f(0.75487766624669276005,0.5698402909980532659114));
@@ -263,7 +294,7 @@ let radius=ao.radius*ao.radiusMultiplier;
 let falloff=ao.falloff*radius;
 let falloffMul=-1.0/falloff;
 let falloffAdd=radius*(1.0-ao.falloff)/falloff+1.0;
-let screenRadius=radius/(z*ao.pixelViewSize.x);
+let screenRadius=radius/(${_orthoProjector ? "aoViewScale(z)" : "z"}*ao.pixelViewSize.x);
 let minimumStep=1.3/screenRadius;
 var visibility=clamp((10.0-screenRadius)/100.0,0.0,1.0)*0.5;
 for(var slice=0u;slice<SLICE_COUNT;slice++){
@@ -324,7 +355,7 @@ return bitcast<f32>((bits+4095u+((bits>>13u)&1u))&0xffffe000u);
 
 /** @internal Edge-aware spatial filtering preserves native eight-bit packing semantics. */
 export function ssaoResolveWGSL(kind: "depth" | "float"): WgslSource {
-    const bindings = wgsl`${SSAO_PARAMS_WGSL}
+    const bindings = wgsl`${_orthoProjector ? ssaoParamsWGSL() : SSAO_PARAMS_WGSL}
 ${ssaoDepthBindingWGSL(kind, 1)}
 @group(0) @binding(2) var working:texture_2d<u32>;
 @group(0) @binding(4) var result:texture_storage_2d<rgba16float,write>;

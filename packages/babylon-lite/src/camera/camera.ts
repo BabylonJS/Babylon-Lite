@@ -148,11 +148,11 @@ export function getViewMatrix(camera: Camera): Mat4 {
     return v as unknown as Mat4;
 }
 
-/** Orthographic projection writer, installed only by `enableOrthographicCamera`. Module-local with a
- *  single exported setter: when `enableOrthographicCamera` is absent from the bundle the setter
+/** @internal Orthographic projection writer, installed only by `enableOrthographicCamera`.
+ *  When `enableOrthographicCamera` is absent from the bundle the setter
  *  tree-shakes, the bundler proves this is always null, and the orthographic branch below folds away —
  *  perspective-only scenes stay byte-identical. */
-let _orthoProjector: ((camera: Camera, aspectRatio: number, out: Mat4Storage) => void) | null = null;
+export let _orthoProjector: ((camera: Camera, aspectRatio: number, out: Mat4Storage) => void) | null = null;
 
 /** @internal Install orthographic projection support (called by `enableOrthographicCamera`). */
 export function _installOrthographicProjector(write: (camera: Camera, aspectRatio: number, out: Mat4Storage) => void): void {

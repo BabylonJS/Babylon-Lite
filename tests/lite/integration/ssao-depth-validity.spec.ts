@@ -5,8 +5,11 @@ import type * as TemporalGpu from "../../../packages/babylon-lite/src/post-proce
 import type * as TemporalWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";
 import type * as MotionMask from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";
 import type * as HalfWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";
+import type * as SsaoWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-wgsl.js";
+import type * as Orthographic from "../../../packages/babylon-lite/src/camera/orthographic.js";
+import type * as FreeCamera from "../../../packages/babylon-lite/src/camera/free-camera.js";
 
-type TestApi = typeof SsaoGpu & typeof TemporalGpu & typeof TemporalWgsl & typeof MotionMask & typeof HalfWgsl;
+type TestApi = typeof SsaoGpu & typeof TemporalGpu & typeof TemporalWgsl & typeof MotionMask & typeof HalfWgsl & typeof SsaoWgsl & typeof Orthographic & typeof FreeCamera;
 let script: string;
 
 test.beforeAll(async () => {
@@ -18,6 +21,9 @@ test.beforeAll(async () => {
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";',
+                'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-wgsl.js";',
+                'export * from "./packages/babylon-lite/src/camera/orthographic.js";',
+                'export * from "./packages/babylon-lite/src/camera/free-camera.js";',
             ].join("\n"),
             resolveDir: process.cwd(),
         },
@@ -27,6 +33,155 @@ test.beforeAll(async () => {
         write: false,
     });
     script = bundle.outputFiles[0]!.text;
+});
+
+test("SSAO orthographic reconstruction, estimator and temporal history use view depth", async ({ page }) => {
+    await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
+    await page.addScriptTag({ content: script });
+    const result = await page.evaluate(async () => {
+        const api = (window as unknown as { ssaoDepthTest: TestApi }).ssaoDepthTest;
+        api.enableOrthographicCamera(api.createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }), { halfHeight: 2 });
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw new Error("WebGPU adapter unavailable");
+        }
+        const device = await adapter.requestDevice();
+        const errors: string[] = [];
+        device.addEventListener("uncapturederror", (event) => errors.push(event.error.message));
+        device.pushErrorScope("validation");
+        const width = 16;
+        const near = 0.1;
+        const far = 200;
+        const depthScale = -1 / (far - near);
+        const depthOffset = far / (far - near);
+        const raw = device.createTexture({ size: [width, width], format: "r32float", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+        const depths = new Float32Array(width * width);
+        const expected = new Float32Array(width * width * 3);
+        for (let y = 0; y < width; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = y * width + x;
+                const px = ((x + 0.5) / width) * 8 - 2;
+                const py = 1 - ((y + 0.5) / width) * 4;
+                const z = 3 + px * 0.1 + py * 0.2;
+                expected.set([px, py, z], i * 3);
+                depths[i] = depthScale * z + depthOffset;
+            }
+        }
+        device.queue.writeTexture({ texture: raw }, depths, { bytesPerRow: width * 4 }, [width, width]);
+        const owner = api.createSsaoGpu(device, width, width, "float", false);
+        api.bindSsaoGpuSources(owner, raw.createView(), null);
+        api.writeSsaoGpuParameters(owner, {
+            depthMultiply: -depthOffset,
+            depthAdd: depthScale,
+            tanX: 4,
+            tanY: 2,
+            orthographic: true,
+            offsetX: 2,
+            offsetY: -1,
+            radius: 0.5,
+            intensity: 1,
+        });
+        const size = width * width * 3 * 16;
+        const probe = device.createBuffer({ size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+        const readback = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const module = device.createShaderModule({
+            code: `${api.ssaoParamsWGSL()}
+${api.ssaoDepthBindingWGSL("float", 1)}
+@group(0) @binding(2) var normalInput:texture_2d<f32>;
+@group(0) @binding(3) var<storage,read_write> result:array<vec4f>;
+${api.ssaoNormalWGSL()}
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+let p=vec2i(id.xy);let d=aoRawDepth(p);let z=dZ(d);let i=(id.y*ao.size.x+id.x)*3u;
+result[i]=vec4f(aoPosition((vec2f(p)+0.5)*ao.invSize,z),1);
+result[i+1u]=vec4f(aoNormal(p),1);
+result[i+2u]=vec4f(deviceDepth(z),aoViewScale(z),aoClipDepth(vec4f(0,0,d,1)),1);
+}`,
+        });
+        const pipeline = device.createComputePipeline({
+            layout: "auto",
+            compute: { module, entryPoint: "main", constants: { PROVIDED_NORMALS: 0, WORLD_NORMALS: 0 } },
+        });
+        const layout = pipeline.getBindGroupLayout(0);
+        const group = device.createBindGroup({
+            layout,
+            entries: [
+                { binding: 0, resource: { buffer: owner.uniform } },
+                { binding: 1, resource: raw.createView() },
+                { binding: 2, resource: owner.dummyNormalView },
+                { binding: 3, resource: { buffer: probe } },
+            ],
+        });
+        let encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, group);
+        pass.dispatchWorkgroups(2, 2);
+        pass.end();
+        encoder.copyBufferToBuffer(probe, 0, readback, 0, size);
+        device.queue.submit([encoder.finish()]);
+        await readback.mapAsync(GPUMapMode.READ);
+        const values = new Float32Array(readback.getMappedRange().slice(0));
+        readback.unmap();
+        let positionError = 0;
+        let normalError = 0;
+        let depthError = 0;
+        let scaleError = 0;
+        const normalLength = Math.hypot(0.1, 0.2, 1);
+        const normal = [0.1 / normalLength, 0.2 / normalLength, -1 / normalLength];
+        for (let i = 0; i < width * width; i++) {
+            for (let c = 0; c < 3; c++) {
+                positionError = Math.max(positionError, Math.abs(values[i * 12 + c]! - expected[i * 3 + c]!));
+                normalError = Math.max(normalError, Math.abs(values[i * 12 + 4 + c]! - normal[c]!));
+            }
+            depthError = Math.max(depthError, Math.abs(values[i * 12 + 8]! - depths[i]!), Math.abs(values[i * 12 + 10]! - expected[i * 3 + 2]!));
+            scaleError = Math.max(scaleError, Math.abs(values[i * 12 + 9]! - 1));
+        }
+
+        const state = api.createXegtaoTemporalGpu(owner, null);
+        owner.resolveGroup = state.scratchResolve;
+        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const projection = new Float32Array([0.25, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, depthScale, 0, -0.5, 0.5, depthOffset, 1]);
+        const inverse = new Float32Array([4, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1 / depthScale, 0, 2, -1, far, 1]);
+        state.data.set(identity, 0);
+        state.data.set(identity, 16);
+        state.data.set(projection, 32);
+        state.data[49] = 16;
+        state.data.set(inverse, 52);
+        state.data.set(inverse, 68);
+        state.data.set([0, 0, 1 / depthScale, far], 88);
+        state.data.set([0, 0, 0, 1], 92);
+        for (let frame = 0; frame < 2; frame++) {
+            state.data[48] = frame === 0 ? 1 : 0;
+            encoder = device.createCommandEncoder();
+            api.executeSsaoGpu(owner, encoder);
+            api.executeXegtaoTemporalGpu(state, encoder);
+            device.queue.submit([encoder.finish()]);
+        }
+        encoder = device.createCommandEncoder();
+        encoder.copyTextureToBuffer({ texture: state.counts[state.index]!, origin: [8, 8] }, { buffer: readback, bytesPerRow: 256 }, [1, 1]);
+        device.queue.submit([encoder.finish()]);
+        await readback.mapAsync(GPUMapMode.READ);
+        const countBits = new Uint16Array(readback.getMappedRange().slice(0))[0]!;
+        readback.unmap();
+        await device.queue.onSubmittedWorkDone();
+        const validation = await device.popErrorScope();
+        if (validation) {
+            errors.push(validation.message);
+        }
+        api.disposeXegtaoTemporalGpu(state);
+        api.disposeSsaoGpu(owner);
+        probe.destroy();
+        readback.destroy();
+        raw.destroy();
+        device.destroy();
+        return { positionError, normalError, depthError, scaleError, countBits, errors };
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.positionError).toBeLessThan(3e-5);
+    expect(result.normalError).toBeLessThan(1e-4);
+    expect(result.depthError).toBeLessThan(3e-5);
+    expect(result.scaleError).toBe(0);
+    expect(result.countBits).toBe(0x4000); // Two accumulated samples, encoded as f16.
 });
 
 for (const kind of ["depth", "float"] as const) {

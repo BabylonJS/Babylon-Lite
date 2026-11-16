@@ -1,6 +1,7 @@
 import { BU, SS, TU } from "../../engine/gpu-flags.js";
 import { ssaoDepthCopyWGSL, ssaoDepthReduceWGSL, ssaoResolveWGSL, ssaoXeEstimatorWGSL } from "./ssao-wgsl.js";
 import type { Mat4 } from "../../math/types.js";
+import { _orthoProjector } from "../../camera/camera.js";
 
 /** Fixed spatial sampling presets, independent of temporal history and resolution. */
 export type SsaoQuality = "low" | "medium" | "high" | "ultra";
@@ -32,6 +33,7 @@ export interface SsaoGpu {
     kind: "depth" | "float";
     providedNormals: boolean;
     worldNormals: boolean;
+    orthographicProjection?: boolean;
     /** Mip 0 of `depth` is written by an input adapter; skip the linearizing copy. */
     depthPrepared?: boolean;
     /** Source half-span supplied by an optional working-resolution adapter. */
@@ -73,6 +75,9 @@ export interface SsaoGpuParameters {
     depthAdd: number;
     tanX: number;
     tanY: number;
+    orthographic?: boolean;
+    offsetX?: number;
+    offsetY?: number;
     radius: number;
     intensity: number;
     view?: Mat4;
@@ -161,6 +166,9 @@ export function createSsaoGpu(device: GPUDevice, width: number, height: number, 
         resolveGroup: null,
         disposed: false,
     };
+    if (_orthoProjector) {
+        gpu.orthographicProjection = true;
+    }
     for (let mip = 1; mip < mips; mip++) {
         gpu.reductions.push({
             width: Math.max(1, width >> mip),
@@ -195,6 +203,11 @@ export function writeSsaoGpuParameters(gpu: Pick<SsaoGpu, "device" | "width" | "
     data[9] = params.tanY * -2;
     data[10] = -params.tanX;
     data[11] = params.tanY;
+    if (_orthoProjector) {
+        data[10] = data[10]! + (params.offsetX ?? 0);
+        data[11] = data[11]! + (params.offsetY ?? 0);
+        data[24] = params.orthographic ? 1 : 0;
+    }
     data[12] = data[8]! * data[2]!;
     data[13] = data[9]! * data[3]!;
     data[14] = params.radius;

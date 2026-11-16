@@ -3199,5 +3199,15 @@
         "note": "Direct BJS visibility parity covers programmatic Standard/PBR. Explicit OPAQUE/MASK fading, full-strength shadows and alpha-to-coverage plus blend use separately labelled normalized Lite-policy oracle regions.",
         "tags": ["std", "pbr", "procedural", "shadow"],
         "skipPerf": true
+    },
+    {
+        "id": 355,
+        "slug": "scene355-ssao-orthographic",
+        "name": "Scene 355 - Screen-Space Ambient Occlusion (Orthographic Kitchen)",
+        "maxMad": 7,
+        "maxRawKB": 180,
+        "description": "The same Diligent Kitchen, lighting, Half-resolution XeGTAO settings and deterministic history as scene 348, using an orthographic camera. Compared against the matching orthographic Babylon.js SSAO2 reference.",
+        "tags": ["pbr", "ssao", "post-process", "ibl", "gltf", "frame-graph", "temporal", "orthographic"],
+        "skipPerf": true
     }
 ]

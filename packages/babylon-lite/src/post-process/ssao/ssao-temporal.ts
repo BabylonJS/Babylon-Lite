@@ -2,7 +2,7 @@ import type { RenderTarget } from "../../engine/render-target.js";
 import type { SsaoTask } from "../ssao.js";
 import type { XegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
 import { bindXegtaoTemporalGpu, createXegtaoTemporalGpu, disposeXegtaoTemporalGpu, executeXegtaoTemporalGpu } from "./ssao-xegtao-gpu.js";
-import { getEffectiveAspectRatio, getViewProjectionMatrix } from "../../camera/camera.js";
+import { _orthoProjector, getEffectiveAspectRatio, getViewProjectionMatrix } from "../../camera/camera.js";
 import { createIdentityMat4 } from "../../math/create-identity-mat4.js";
 import { invertMat4ToRefOrIdentity } from "../../math/invert-mat4-to-ref-or-identity.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
@@ -105,8 +105,11 @@ export function initializeSsaoTemporal(task: SsaoTask, options: SsaoTemporalOpti
         intensity = 0,
         tanX = 0,
         tanY = 0,
+        offsetX = 0,
+        offsetY = 0,
         near = 0,
         far = 0;
+    let orthographic = false;
     let quality = task.quality;
     let viewChanged = true;
     let disposed = false;
@@ -162,6 +165,7 @@ export function initializeSsaoTemporal(task: SsaoTask, options: SsaoTemporalOpti
                 quality !== task.quality ||
                 tanX !== params.tanX ||
                 tanY !== params.tanY ||
+                (_orthoProjector && (orthographic !== !!params.orthographic || offsetX !== (params.offsetX ?? 0) || offsetY !== (params.offsetY ?? 0))) ||
                 near !== task.camera.nearPlane ||
                 far !== task.camera.farPlane
             ) {
@@ -174,6 +178,11 @@ export function initializeSsaoTemporal(task: SsaoTask, options: SsaoTemporalOpti
             quality = task.quality;
             tanX = params.tanX;
             tanY = params.tanY;
+            if (_orthoProjector) {
+                orthographic = !!params.orthographic;
+                offsetX = params.offsetX ?? 0;
+                offsetY = params.offsetY ?? 0;
+            }
             near = task.camera.nearPlane;
             far = task.camera.farPlane;
             const view = params.view!;
@@ -216,11 +225,11 @@ export function initializeSsaoTemporal(task: SsaoTask, options: SsaoTemporalOpti
             // Half-float velocity rounds to 2^-11 relative; tolerate twice that before calling a pixel moving.
             data[84] = halfVelocity ? 2 ** -10 : 1e-5;
             data[85] = halfVelocity ? 2 ** -10 : 0;
-            // Row 3 of previousVP * inverse(VP), and row 3 of inverse(VP), in double precision.
+            // Previous view Z (not clip W: orthographic W is constant), and inverse homogeneous W.
             for (let column = 0; column < 4; column++) {
                 let w = 0;
                 for (let k = 0; k < 4; k++) {
-                    w += previousProjection[k * 4 + 3]! * inverseProjection[column * 4 + k]!;
+                    w += (_orthoProjector ? previousView[k * 4 + 2]! : previousProjection[k * 4 + 3]!) * inverseProjection[column * 4 + k]!;
                 }
                 data[88 + column] = w;
                 data[92 + column] = inverseProjection[column * 4 + 3]!;
