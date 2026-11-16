@@ -40,9 +40,9 @@
         "vite-plugin-dts": "^5.1.2"
     },
     "dependencies": {
-        "@recast-navigation/core": "0.44.0",
-        "@recast-navigation/generators": "0.44.0",
-        "@recast-navigation/wasm": "0.44.0",
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
         "manifold-3d": "3.5.4",
         "mathcat": "0.0.12",
         "navcat": "0.4.1",

@@ -45,9 +45,9 @@
     },
     "sideEffects": false,
     "dependencies": {
-        "@recast-navigation/core": "0.44.0",
-        "@recast-navigation/generators": "0.44.0",
-        "@recast-navigation/wasm": "0.44.0",
+        "@recast-navigation/core": "0.43.1",
+        "@recast-navigation/generators": "0.43.1",
+        "@recast-navigation/wasm": "0.43.1",
         "babylon-lite": "workspace:*"
     },
     "devDependencies": {

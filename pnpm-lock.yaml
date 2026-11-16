@@ -150,14 +150,14 @@ importers:
         specifier: ^9.35.0
         version: 9.35.0(@babylonjs/core@9.35.0)
       '@recast-navigation/core':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/generators':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/wasm':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@vitejs/plugin-basic-ssl':
         specifier: ^2.3.0
         version: 2.3.0(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -180,14 +180,14 @@ importers:
   packages/babylon-lite:
     dependencies:
       '@recast-navigation/core':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/generators':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/wasm':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       manifold-3d:
         specifier: 3.5.4
         version: 3.5.4(@gltf-transform/core@4.3.0)(@gltf-transform/extensions@4.3.0)(@gltf-transform/functions@4.3.0(@types/node@26.6.6))(esbuild-wasm@0.28.2)
@@ -226,14 +226,14 @@ importers:
   packages/babylon-lite-compat:
     dependencies:
       '@recast-navigation/core':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/generators':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       '@recast-navigation/wasm':
-        specifier: 0.44.0
-        version: 0.44.0
+        specifier: 0.43.1
+        version: 0.43.1
       babylon-lite:
         specifier: workspace:*
         version: link:../babylon-lite
@@ -948,14 +948,14 @@ packages:
     resolution: {integrity: sha512-//0sR/cow/s4ICQaYoAobOl4aU8cjU6x/V24V7XkKotb9+O+3zySIYp146vpaobYHnxa4pZX8NkV54Z5AwbDKA==}
     engines: {node: '>=12'}
 
-  '@recast-navigation/core@0.44.0':
-    resolution: {integrity: sha512-N4YO9JBXrGFf3LkrhXmABa7pEwLHvq/gq6o7pLKKu5A4JAp+A5y/9424ps3cVpO1m7ibh3zlXmeewTut9LeXQw==}
+  '@recast-navigation/core@0.43.1':
+    resolution: {integrity: sha512-4igfPgnoV90O92sDSIA0xHa6tanh3z/udlgGmD0SqGQ6PKV4JS2l9jWO8YnxfZuXP/NV52H4c5FU6pSdZc9WDA==}
 
-  '@recast-navigation/generators@0.44.0':
-    resolution: {integrity: sha512-i2N/sCfuq7IJcSuMmHuX2Uer6oonr9PzFZTrPpwS/e2t+ZpVLHb3DHFY9evKrL2X8diO7sDUDBOpTfW/4Nwucw==}
+  '@recast-navigation/generators@0.43.1':
+    resolution: {integrity: sha512-w7r6k/A93wWxuSN+Lg+PmlsUVXq06r5bqXmBglolxqDt2O/Y776BIhYtb6P2P6pbYqDWORu9NCZZJzfY4FNpaA==}
 
-  '@recast-navigation/wasm@0.44.0':
-    resolution: {integrity: sha512-VNv7xv50cFCdsGd2LdQWZqtLcWXB7nyi4Ilq9t5GMn3GEfCmJEbbeZWSXX5Mgdc4yj71QueTv15V7hPDAQ9gaw==}
+  '@recast-navigation/wasm@0.43.1':
+    resolution: {integrity: sha512-XFL6PhO8JodwXUHBSAkfaLUdUEweIkJsdP3HTmtJvMs5fkqEWxWJmBskZlACHJepv55NAriqWxOtuLlG3t7+Hg==}
 
   '@rolldown/binding-android-arm-eabi@1.2.18':
     resolution: {integrity: sha512-ubTG+4KlidvioxjOFdsdEa2F6JVGZb8m2ByJUqQ7fYzUeT1cEn194POcsQ10PKH4p//q0YQn4SB3YpSuzcA1Yg==}
@@ -4740,16 +4740,16 @@ snapshots:
       '@pnpm/network.ca-file': 1.0.2
       config-chain: 1.1.13
 
-  '@recast-navigation/core@0.44.0':
+  '@recast-navigation/core@0.43.1':
     dependencies:
-      '@recast-navigation/wasm': 0.44.0
+      '@recast-navigation/wasm': 0.43.1
 
-  '@recast-navigation/generators@0.44.0':
+  '@recast-navigation/generators@0.43.1':
     dependencies:
-      '@recast-navigation/core': 0.44.0
-      '@recast-navigation/wasm': 0.44.0
+      '@recast-navigation/core': 0.43.1
+      '@recast-navigation/wasm': 0.43.1
 
-  '@recast-navigation/wasm@0.44.0': {}
+  '@recast-navigation/wasm@0.43.1': {}
 
   '@rolldown/binding-android-arm-eabi@1.2.18':
     optional: true
