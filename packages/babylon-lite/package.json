@@ -44,7 +44,7 @@
         "@recast-navigation/generators": "0.44.0",
         "@recast-navigation/wasm": "0.44.0",
         "manifold-3d": "3.5.4",
-        "mathcat": "0.0.14",
+        "mathcat": "0.0.12",
         "navcat": "0.4.1",
         "text-shaper": "^0.1.28"
     }

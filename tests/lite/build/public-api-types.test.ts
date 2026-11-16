@@ -2004,10 +2004,11 @@ void complete;
 
     it("ships both bundled MIT license texts", () => {
         const notice = readFileSync(resolve(BUILD_DIR, "NOTICE.txt"), "utf8");
-        for (const [name, version] of [
-            ["navcat", "0.4.1"],
-            ["mathcat", "0.0.14"],
-        ]) {
+        const { dependencies } = JSON.parse(readFileSync(SOURCE_PACKAGE_JSON_PATH, "utf8")) as {
+            dependencies: Record<string, string>;
+        };
+        for (const name of ["navcat", "mathcat"]) {
+            const version = dependencies[name];
             const start = notice.indexOf(`${name} ${version}`);
             expect(start).toBeGreaterThanOrEqual(0);
             expect(notice.slice(start)).toContain("Copyright © 2025 Isaac Mason");
