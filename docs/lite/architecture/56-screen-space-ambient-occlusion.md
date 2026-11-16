@@ -31,6 +31,18 @@ device depth. Temporal static-depth coefficients use row 2 of
 for an orthographic camera). Projection mode, scale and off-center changes
 invalidate history before reusing reprojection state.
 
+Explicit orthographic bounds need not match the target aspect ratio.
+`aoProjectedRadius(radius,z)` returns
+`radius / (aoViewScale(z) * abs(ao.pixelViewSize))` on both axes.
+Estimator slices retain their view-space direction `(cos(phi),sin(phi),0)`;
+their pixel offset is `(cos(phi),-sin(phi)) * projectedRadius`, and their
+minimum step is `1.3 / length(pixelOffset)`. The small-footprint visibility
+bias uses the maximum projected axis. Transport likewise searches an ellipse,
+using the maximum projected axis as its conservative motion-pruning bound
+and returned physical-radius bound. Its 256-pixel search cap scales both
+axes uniformly, preserving the ellipse's aspect ratio. Projection scales
+are computed once per receiver, outside the sampling loops.
+
 Orthographic code is retained only when `enableOrthographicCamera` is imported.
 Consumers read the camera module's existing nullable `_orthoProjector` seam,
 so perspective-only builds eliminate orthographic CPU

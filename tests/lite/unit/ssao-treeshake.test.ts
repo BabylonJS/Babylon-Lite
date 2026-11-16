@@ -31,6 +31,7 @@ globalThis.usedExport=[createSsaoTask${orthographic ? ",enableOrthographicCamera
             .map((chunk) => (chunk.type === "chunk" ? chunk.code : ""))
             .join("\n");
         expect(code.includes("fn aoViewScale")).toBe(orthographic);
+        expect(code.includes("fn aoProjectedRadius")).toBe(orthographic);
         expect(code.includes("fn deviceDepth")).toBe(orthographic);
         expect(code.includes("SSAO requires finite, ordered camera projection bounds.")).toBe(orthographic);
     });

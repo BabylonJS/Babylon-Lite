@@ -220,16 +220,22 @@ previousReceiver=previousWorld(receiverOldUv,oldDepth);
 }
 let receiverShift=receiver-previousReceiver;
 let physicalRadius=ao.radius*ao.radiusMultiplier;
-let physicalProjected=physicalRadius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*${_orthoProjector ? "aoViewScale(dZ(depth))" : "dZ(depth)"});
+${
+    _orthoProjector
+        ? wgsl`let physicalAxes=aoProjectedRadius(physicalRadius,dZ(depth));
+let physicalProjected=max(physicalAxes.x,physicalAxes.y);
+let projectionScale=physicalAxes/physicalProjected;`
+        : wgsl`let physicalProjected=physicalRadius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth));`
+}
 let vacated=currentVisibility>=0.999;
 let radius=physicalRadius*select(1.0,2.0,vacated);
-let projected=min(radius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*${_orthoProjector ? "aoViewScale(dZ(depth))" : "dZ(depth)"}),256.0);
+let projected=min(${_orthoProjector ? "physicalProjected*select(1.0,2.0,vacated)" : "radius*f32(ao.size.y)/(2.0*ao.tanHalfFov.y*dZ(depth))"},256.0);
 ${beforeSearch}
 var displacement=vec3f(0);var total=0.0;var staticWeight=0.0;
 for(var ring=1;ring<=3;ring++){
 let ringRadius=projected*f32(ring)/3.0;
 for(var direction=0;direction<12;direction++){
-let angle=f32(direction)*0.5235987755982988;let offset=ringRadius*vec2f(cos(angle),sin(angle));
+let angle=f32(direction)*0.5235987755982988;let offset=ringRadius*vec2f(cos(angle),sin(angle))${_orthoProjector ? "*projectionScale" : ""};
 let q=aoClamp(vec2i(pixel.xy+offset),ao.size);let sampledDepth=aoRawDepth(q);
 if(sampledDepth<=0.0){continue;}
 let sampleUv=(vec2f(q)+0.5)*ao.invSize;let position=world(sampleUv,sampledDepth);

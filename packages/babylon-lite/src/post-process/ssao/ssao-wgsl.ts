@@ -22,6 +22,7 @@ export function ssaoParamsWGSL(): WgslSource {
     if (!cachedParameters) {
         cachedParameters = wgsl`${AO_PARAMETERS}
 fn aoViewScale(z:f32)->f32{return select(z,1.0,ao.extra.x!=0.0);}
+fn aoProjectedRadius(radius:f32,z:f32)->vec2f{return radius/(aoViewScale(z)*abs(ao.pixelViewSize));}
 fn aoPosition(uv:vec2f,z:f32)->vec3f{return vec3f((ao.ndcMul*uv+ao.ndcAdd)*aoViewScale(z),z);}
 fn aoViewDirection(p:vec3f)->vec3f{return select(normalize(-p),vec3f(0,0,-1),ao.extra.x!=0.0);}
 fn aoClamp(p:vec2i,dims:vec2u)->vec2i{return clamp(p,vec2i(0),vec2i(dims)-1);}
@@ -294,8 +295,13 @@ let radius=ao.radius*ao.radiusMultiplier;
 let falloff=ao.falloff*radius;
 let falloffMul=-1.0/falloff;
 let falloffAdd=radius*(1.0-ao.falloff)/falloff+1.0;
-let screenRadius=radius/(${_orthoProjector ? "aoViewScale(z)" : "z"}*ao.pixelViewSize.x);
-let minimumStep=1.3/screenRadius;
+${
+    _orthoProjector
+        ? wgsl`let projectedRadius=aoProjectedRadius(radius,z);
+let screenRadius=max(projectedRadius.x,projectedRadius.y);`
+        : wgsl`let screenRadius=radius/(z*ao.pixelViewSize.x);
+let minimumStep=1.3/screenRadius;`
+}
 var visibility=clamp((10.0-screenRadius)/100.0,0.0,1.0)*0.5;
 for(var slice=0u;slice<SLICE_COUNT;slice++){
 let phi=(f32(slice)+noise.x)/f32(SLICE_COUNT)*PI;
@@ -308,7 +314,12 @@ let cosine=clamp(dot(projected,view)/max(projectedLength,1e-20),0.0,1.0);
 let angle=sign(dot(ortho,projected))*xeAcos(cosine);
 let low=vec2f(cos(angle+HALF_PI),cos(angle-HALF_PI));
 var horizon=low;
-let omega=vec2f(direction.x,-direction.y)*screenRadius;
+let omega=vec2f(direction.x,-direction.y)*${
+        _orthoProjector
+            ? wgsl`projectedRadius;
+let minimumStep=1.3/length(omega)`
+            : "screenRadius"
+    };
 for(var step=0u;step<STEP_COUNT;step++){
 let jitter=fract(noise.y+f32(slice+step*SLICE_COUNT)*0.6180339887498948482);
 let stepFraction=(f32(step)+jitter)/f32(STEP_COUNT);

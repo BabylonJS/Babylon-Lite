@@ -4,12 +4,21 @@ import type * as SsaoGpu from "../../../packages/babylon-lite/src/post-process/s
 import type * as TemporalGpu from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";
 import type * as TemporalWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";
 import type * as MotionMask from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";
+import type * as MotionPruning from "../../../packages/babylon-lite/src/post-process/ssao/ssao-motion-pruning.js";
 import type * as HalfWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";
 import type * as SsaoWgsl from "../../../packages/babylon-lite/src/post-process/ssao/ssao-wgsl.js";
 import type * as Orthographic from "../../../packages/babylon-lite/src/camera/orthographic.js";
 import type * as FreeCamera from "../../../packages/babylon-lite/src/camera/free-camera.js";
 
-type TestApi = typeof SsaoGpu & typeof TemporalGpu & typeof TemporalWgsl & typeof MotionMask & typeof HalfWgsl & typeof SsaoWgsl & typeof Orthographic & typeof FreeCamera;
+type TestApi = typeof SsaoGpu &
+    typeof TemporalGpu &
+    typeof TemporalWgsl &
+    typeof MotionMask &
+    typeof MotionPruning &
+    typeof HalfWgsl &
+    typeof SsaoWgsl &
+    typeof Orthographic &
+    typeof FreeCamera;
 let script: string;
 
 test.beforeAll(async () => {
@@ -20,6 +29,7 @@ test.beforeAll(async () => {
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-xegtao-gpu.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-xegtao-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-motion-mask-wgsl.js";',
+                'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-motion-pruning.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-half-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/post-process/ssao/ssao-wgsl.js";',
                 'export * from "./packages/babylon-lite/src/camera/orthographic.js";',
@@ -33,6 +43,13 @@ test.beforeAll(async () => {
         write: false,
     });
     script = bundle.outputFiles[0]!.text;
+});
+
+test.beforeEach(async ({ page }) => {
+    // Keep the numerical GPU fixture independent of the lab's HMR and gallery navigation.
+    await page.route(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`, (route) =>
+        route.fulfill({ contentType: "text/html", body: "<!doctype html><title>SSAO numerical GPU tests</title>" })
+    );
 });
 
 test("SSAO orthographic reconstruction, estimator and temporal history use view depth", async ({ page }) => {
@@ -145,7 +162,7 @@ result[i+2u]=vec4f(deviceDepth(z),aoViewScale(z),aoClipDepth(vec4f(0,0,d,1)),1);
         state.data.set(identity, 0);
         state.data.set(identity, 16);
         state.data.set(projection, 32);
-        state.data[49] = 16;
+        state.data[49] = 2;
         state.data.set(inverse, 52);
         state.data.set(inverse, 68);
         state.data.set([0, 0, 1 / depthScale, far], 88);
@@ -183,6 +200,141 @@ result[i+2u]=vec4f(deviceDepth(z),aoViewScale(z),aoClipDepth(vec4f(0,0,d,1)),1);
     expect(result.scaleError).toBe(0);
     expect(result.countBits).toBe(0x4000); // Two accumulated samples, encoded as f16.
 });
+
+for (const axis of [0, 1] as const) {
+    test(`SSAO searches unequal orthographic pixel scales along axis ${axis}`, async ({ page }) => {
+        await page.goto(`http://localhost:${process.env.LAB_TEST_PORT ?? 5179}/`);
+        await page.addScriptTag({ content: script });
+        const result = await page.evaluate(async (axis) => {
+            const api = (window as unknown as { ssaoDepthTest: TestApi }).ssaoDepthTest;
+            api.enableOrthographicCamera(api.createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }), { halfHeight: 2 });
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                throw new Error("WebGPU adapter unavailable");
+            }
+            const device = await adapter.requestDevice();
+            const errors: string[] = [];
+            device.addEventListener("uncapturederror", (event) => errors.push(event.error.message));
+            device.pushErrorScope("validation");
+            const width = 64;
+            const pixel = 24;
+            const tanX = axis === 0 ? 8 : 16;
+            const tanY = axis === 0 ? 16 : 8;
+            const texture = (format: GPUTextureFormat): GPUTexture =>
+                device.createTexture({ size: [width, width], format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+            const raw = texture("r32float");
+            const normals = texture("rgba32float");
+            const velocity = texture("rgba32float");
+            const depths = new Float32Array(width * width);
+            const normalData = new Float32Array(width * width * 4);
+            const velocityData = new Float32Array(width * width * 4);
+            for (let i = 0; i < width * width; i++) {
+                normalData[i * 4 + 2] = -1;
+            }
+            device.queue.writeTexture({ texture: normals }, normalData, { bytesPerRow: width * 16 }, [width, width]);
+            const owner = api.createSsaoGpu(device, width, width, "float", true);
+            api.bindSsaoGpuSources(owner, raw.createView(), normals.createView());
+            const parameters = { depthMultiply: -1, depthAdd: -0.1, tanX, tanY, orthographic: true, offsetX: 2, offsetY: -1, radius: 4 / 1.457, intensity: 1 };
+            const readback = device.createBuffer({ size: 8 * 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+            // The narrow strip is inside the world-space radius, but beyond an X-only vertical search.
+            for (let y = 0; y < width; y++) {
+                for (let x = 0; x < width; x++) {
+                    depths[y * width + x] = (axis === 0 ? x : y) === pixel + 11 ? 0.6 : 0.5;
+                }
+            }
+            device.queue.writeTexture({ texture: raw }, depths, { bytesPerRow: width * 4 }, [width, width]);
+            for (let phase = 0; phase < 8; phase++) {
+                api.writeSsaoGpuParameters(owner, { ...parameters, phase });
+                owner.data[22] = 32; // Isolate actual search reach from depth-mip footprint expansion.
+                device.queue.writeBuffer(owner.uniform, 0, owner.data);
+                const encoder = device.createCommandEncoder();
+                api.executeSsaoGpu(owner, encoder);
+                encoder.copyTextureToBuffer({ texture: owner.working!, origin: [pixel, pixel] }, { buffer: readback, offset: phase * 256, bytesPerRow: 256 }, [1, 1]);
+                device.queue.submit([encoder.finish()]);
+            }
+            await readback.mapAsync(GPUMapMode.READ);
+            const packed = new Uint32Array(readback.getMappedRange().slice(0));
+            const visibility = Math.min(...Array.from({ length: 8 }, (_, phase) => ((packed[phase * 64]! & 255) / 255) * 1.5));
+            readback.unmap();
+
+            // A vacated receiver needs a moving caster outside the smaller axis's search/pruning bound.
+            for (let y = 0; y < width; y++) {
+                for (let x = 0; x < width; x++) {
+                    const i = y * width + x;
+                    const caster = (axis === 0 ? x : y) === pixel + 16;
+                    depths[i] = caster ? 0.55 : 0.5;
+                    velocityData[i * 4 + 2] = caster ? 4.5 : 5;
+                    if (caster) {
+                        velocityData[i * 4 + axis] = 0.25 / width;
+                    }
+                }
+            }
+            device.queue.writeTexture({ texture: raw }, depths, { bytesPerRow: width * 4 }, [width, width]);
+            device.queue.writeTexture({ texture: velocity }, velocityData, { bytesPerRow: width * 16 }, [width, width]);
+            api.writeSsaoGpuParameters(owner, { ...parameters, radius: 3 / 1.457 });
+            const velocityView = velocity.createView();
+            const state = api.createXegtaoTemporalGpu(owner, velocityView, true, true);
+            const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+            const projection = new Float32Array([1 / tanX, 0, 0, 0, 0, 1 / tanY, 0, 0, 0, 0, -0.1, 0, -2 / tanX, 1 / tanY, 1, 1]);
+            const inverse = new Float32Array([tanX, 0, 0, 0, 0, tanY, 0, 0, 0, 0, -10, 0, 2, -1, 10, 1]);
+            state.data.set(identity, 0);
+            state.data.set(identity, 16);
+            state.data.set(projection, 32);
+            state.data.set([0, 2, 0, 1], 48);
+            state.data.set(inverse, 52);
+            state.data.set(inverse, 68);
+            state.data.set([0, 0, -10, 10], 88);
+            state.data.set([0, 0, 0, 1], 92);
+            for (const pruned of [false, true]) {
+                if (pruned) {
+                    state.transportExtension = api.createSsaoMotionPruningGpu(state);
+                    api.bindXegtaoTemporalGpu(state, velocityView);
+                }
+                state.index = 0;
+                const encoder = device.createCommandEncoder();
+                for (const [target, value] of [
+                    [state.scratch, 1],
+                    [state.history[0], 0.5],
+                ] as const) {
+                    const pass = encoder.beginRenderPass({
+                        colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [value, 0, 0, 0] }],
+                    });
+                    pass.end();
+                }
+                api.executeXegtaoTemporalGpu(state, encoder);
+                encoder.copyTextureToBuffer({ texture: state.transport!, origin: [pixel, pixel] }, { buffer: readback, offset: pruned ? 256 : 0, bytesPerRow: 256 }, [1, 1]);
+                device.queue.submit([encoder.finish()]);
+            }
+            await readback.mapAsync(GPUMapMode.READ);
+            const transport = new Float32Array(readback.getMappedRange().slice(0));
+            const unpruned = Array.from(transport.slice(0, 4));
+            const pruned = Array.from(transport.slice(64, 68));
+            readback.unmap();
+            await device.queue.onSubmittedWorkDone();
+            const validation = await device.popErrorScope();
+            if (validation) {
+                errors.push(validation.message);
+            }
+            api.disposeXegtaoTemporalGpu(state);
+            api.disposeSsaoGpu(owner);
+            readback.destroy();
+            raw.destroy();
+            normals.destroy();
+            velocity.destroy();
+            device.destroy();
+            return { visibility, unpruned, pruned, errors };
+        }, axis);
+        expect(result.errors).toEqual([]);
+        expect(result.visibility).toBeLessThan(0.999);
+        const uv = 24.5 / 64;
+        for (const transport of [result.unpruned, result.pruned]) {
+            expect(transport[0]).toBeCloseTo(uv + (axis === 0 ? 0.25 / 64 : 0), 5);
+            expect(transport[1]).toBeCloseTo(uv - (axis === 1 ? 0.25 / 64 : 0), 5);
+            expect(transport[2]).toBeCloseTo(0.5, 5);
+            expect(transport[3]).toBeCloseTo(12, 4);
+        }
+    });
+}
 
 for (const kind of ["depth", "float"] as const) {
     test(`SSAO preserves small positive reverse-Z depths (${kind})`, async ({ page }) => {
