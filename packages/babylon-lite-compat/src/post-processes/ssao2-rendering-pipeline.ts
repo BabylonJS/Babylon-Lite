@@ -1,4 +1,5 @@
 import { attachSceneSsaoPipeline, createSceneSsaoPipeline, detachSceneSsaoPipeline, disposeSceneSsaoPipeline, type SceneSsaoPipeline } from "babylon-lite";
+import type { OverlaySceneOptions } from "babylon-lite";
 
 import type { Camera } from "../cameras/cameras.js";
 import type { AbstractEngine } from "../engine/engine.js";
@@ -47,7 +48,16 @@ export class SSAO2RenderingPipeline {
     private readonly _warned = new Set<string>();
     public readonly cameras: Camera[] = [];
 
-    public constructor(name: string, scene: Scene, ratio: Ratio, cameras?: Camera[], forceGeometryBuffer: boolean | object = false, textureType = 0) {
+    /** `targets` is a Lite extension for explicit composition; GPU target references are not serialized. */
+    public constructor(
+        name: string,
+        scene: Scene,
+        ratio: Ratio,
+        cameras?: Camera[],
+        forceGeometryBuffer: boolean | object = false,
+        textureType = 0,
+        private readonly _targets?: OverlaySceneOptions
+    ) {
         this._name = name;
         this._scene = scene;
         this._ratio = ratio;
@@ -320,6 +330,8 @@ export class SSAO2RenderingPipeline {
                 intensity: this._totalStrength,
                 base: this._base,
                 fadeEnd: this._maxZ,
+                targetTexture: this._targets?.rt,
+                resolveTexture: this._targets?.rst,
             },
             this._scene.getEngine()._lite,
             this._scene._lite,

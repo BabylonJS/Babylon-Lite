@@ -1639,12 +1639,19 @@ void [current, ready];
                 `import { createOverlayScene, createUtilityLayer, type EngineContext, type SceneContext, type UtilityLayer } from "./index.js";
 declare const engine: EngineContext;
 declare const scene: SceneContext;
-const layer: UtilityLayer = createUtilityLayer(scene);
-const overlay: SceneContext = createOverlayScene(scene);
-createUtilityLayer(overlay);
+const layer: UtilityLayer = createUtilityLayer(scene, { rt: engine.scRT });
+const overlay: SceneContext = createOverlayScene(scene, { rt: engine.scRT });
+createUtilityLayer(overlay, { rt: engine.scRT });
+if (scene.defaultRenderTask) {
+    createUtilityLayer(scene, scene.defaultRenderTask.config);
+}
+// @ts-expect-error Color destinations are explicit, not discovered.
+createOverlayScene(scene);
+// @ts-expect-error Utility layers also require an explicit destination.
+createUtilityLayer(scene);
 // @ts-expect-error Overlay scenes derive their surface from the base scene.
 createOverlayScene(engine);
-createUtilityLayer(scene, { addDefaultLight: false, lightIntensity: 0.5 });
+createUtilityLayer(scene, { rt: engine.scRT, addDefaultLight: false, lightIntensity: 0.5 });
 // @ts-expect-error The utility layer derives its engine from the main scene.
 createUtilityLayer(engine, scene);
 void layer;

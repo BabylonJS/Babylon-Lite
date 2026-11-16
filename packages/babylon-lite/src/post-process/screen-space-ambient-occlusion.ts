@@ -475,7 +475,6 @@ export function createScreenSpaceAmbientOcclusionPostProcessTask(
         fadeEnd: params.fadeEnd,
         temporalWeight: params.temporalWeight,
         resetVersion: params.resetVersion,
-        _getOutputInfo: () => composite?._getOutputInfo?.(),
         record(): void {
             activeCamera = task.camera;
             assertFullscreenViewport();

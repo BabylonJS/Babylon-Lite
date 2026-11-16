@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const liteMocks = vi.hoisted(() => ({
+    createUtilityLayer: vi.fn(() => ({ scene: {} })),
     attachPositionGizmoToNode: vi.fn(),
     attachRotationGizmoToNode: vi.fn(),
     attachScaleGizmoToNode: vi.fn(),
@@ -32,7 +33,18 @@ vi.mock("babylon-lite", async (importOriginal) => ({
 }));
 
 import type { PickingInfo as LitePickingInfo, PointerDragEndEvent, PointerDragMoveEvent, PointerDragStartEvent } from "babylon-lite";
-import { AxisDragGizmo, PlaneDragGizmo, PlaneRotationGizmo, AxisScaleGizmo, PositionGizmo, RotationGizmo, ScaleGizmo } from "../src/gizmos/gizmos";
+import {
+    AxisDragGizmo,
+    PlaneDragGizmo,
+    PlaneRotationGizmo,
+    AxisScaleGizmo,
+    PositionGizmo,
+    RotationGizmo,
+    ScaleGizmo,
+    UtilityLayerRenderer as CompatUtilityLayerRenderer,
+    GizmoManager,
+} from "../src/gizmos/gizmos";
+import type { OverlaySceneOptions } from "babylon-lite";
 import type { DragEvent, DragStartEndEvent, UtilityLayerRenderer } from "../src/index";
 import { PointerEventTypes, PointerInfo, Ray, Vector3 } from "../src/index";
 import { NullEngine } from "../src/engine/engine";
@@ -43,6 +55,20 @@ import { HemisphericLight, PointLight } from "../src/lights/lights";
 import { LiteCompatError } from "../src/error";
 
 type FakeDrag = { drag: { enabled: boolean } };
+
+it("requires explicit utility-layer destinations instead of discovering a scene attachment", () => {
+    const engine = { _lite: {}, _registerLateWork: vi.fn() };
+    const scene = { _lite: {}, getEngine: () => engine } as unknown as Scene;
+    const targets = { rt: {} } as OverlaySceneOptions;
+    new CompatUtilityLayerRenderer(scene, targets);
+    expect(liteMocks.createUtilityLayer).toHaveBeenLastCalledWith(scene._lite, targets);
+    new GizmoManager(scene, targets);
+    expect(liteMocks.createUtilityLayer).toHaveBeenLastCalledWith(scene._lite, targets);
+    expect(() => {
+        // @ts-expect-error The native destination is required, including in compat.
+        new CompatUtilityLayerRenderer(scene);
+    }).toThrow("explicit color targets");
+});
 
 function fakeLite(): FakeDrag {
     return { drag: { enabled: true } };

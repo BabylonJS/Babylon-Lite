@@ -1,6 +1,6 @@
 # Module: Compat SSAO2 Scene Pipeline
 
-> Package paths: `packages/babylon-lite/src/post-process/scene-ssao.ts`, `packages/babylon-lite/src/post-process/screen-space-ambient-occlusion.ts`, `packages/babylon-lite/src/frame-graph/post-process-task.ts`, `packages/babylon-lite/src/scene/swapchain-overlay.ts`
+> Package paths: `packages/babylon-lite/src/post-process/scene-ssao.ts`, `packages/babylon-lite/src/post-process/screen-space-ambient-occlusion.ts`, `packages/babylon-lite/src/frame-graph/post-process-task.ts`
 
 ## Purpose
 
@@ -18,6 +18,8 @@ export interface SceneSsaoPipelineOptions {
     intensity?: number;
     base?: number;
     fadeEnd?: number;
+    targetTexture?: RenderTarget;
+    resolveTexture?: RenderTarget;
 }
 
 export interface SceneSsaoPipeline {
@@ -71,18 +73,25 @@ Tasks are inserted immediately after the default task in producer order. When th
 
 `PostProcessTask.resolveTexture` is valid only when `outputTexture` is multisampled and `resolveTexture` is single-sample. It must not alias the primary or extra sampled inputs; this is checked before the resolve destination is rebuilt. Formats and physical dimensions must match. The render pass binds `outputTexture._colorView` as `view` and the current `resolveTexture._colorView` as `resolveTarget`. Swapchain views are reread during every execution.
 
-Every task that can provide an MSAA presentation source exposes an internal output descriptor:
+### Explicit overlay output (breaking change)
+
+The native controller accepts optional caller-owned `targetTexture` and `resolveTexture` destinations. A resolve requires a target; the target must differ from a multisampled scene producer because rebuilding an aliased target would invalidate its depth/resolve consumers. Supplied targets are built by the composite but never disposed by pipeline detach. Defaults retain the standalone SSAO presentation path.
+
+To add gizmos, allocate the final MSAA color target, pass it as `targetTexture`, and pass the same target as `rt` to `createUtilityLayer` or `createOverlayScene`. Supply the screen as the corresponding resolve destination. Later composites must continue that explicit color chain. No task output accessor or active-resolver search is used. If a chain changes targets or sample count, recreate/rewire its overlay consumers explicitly.
+
+**Explicit SSAO destinations cannot be combined with automatic scene transmission.** In that mode the trailing image-processing task, not the AO composite, produces final display color. Reusing the explicit AO destination as final display color could create a swapchain feedback loop or let an overlay overwrite processed color with linear color. Attaching explicit-output SSAO to an automatic-transmission scene throws before changing the graph. Enabling automatic transmission after explicit-output SSAO also throws before retiring its resources; the transmission transaction restores material flags. Use an explicitly wired linear/image-processing chain instead. The existing standalone SSAO/transmission integration without explicit destinations is unchanged.
+
+Compat `UtilityLayerRenderer(scene, targets)` and `GizmoManager(scene, targets)` also require explicit native `{ rt, rst? }` destinations (breaking change). They never infer a target from the scene or a pipeline. The compat SSAO constructor accepts the same destinations as its optional seventh argument, a Lite-specific extension. Target references are not serialized; callers must supply them again when recreating the pipeline. Automatic utility-layer retargeting on SSAO attach/detach is not supported; recreate layers when the output chain changes. Babylon.js compatibility is best-effort, not a reason to add task scans or swapchain copies.
 
 ```ts
-interface TaskOutputInfo {
-    colorTexture: RenderTarget;
-    resolveTexture?: RenderTarget;
-}
+const rt = engine.msaaSamples > 1 ? createRenderTarget({ format: engine.format, samples: engine.msaaSamples, size: engine }) : engine.scRT;
+const targets = { rt, rst: engine.msaaSamples > 1 ? engine.scRT : undefined };
+const ao = createSceneSsaoPipeline({ targetTexture: rt, resolveTexture: targets.rst }, engine, scene, camera);
+attachSceneSsaoPipeline(ao);
+const utility = createUtilityLayer(scene, targets);
+// Add gizmos, register the scene and utility layer normally.
+// Detaching AO requires rewiring/recreating the utility layer against its new producer.
 ```
-
-The top-level SSAO task forwards the descriptor from its internal composite because the internal composite is not registered in the frame graph.
-
-The swapchain overlay selects the last enabled and execution-enabled task whose current output descriptor resolves into `scRT`, and borrows that task's current MSAA color view. Disabled tasks and single-sample swapchain writers are not eligible. Non-MSAA overlay behavior is unchanged.
 
 ## Shader Logic
 
@@ -125,12 +134,12 @@ Estimator-specific Babylon.js controls without a native semantic (`samples`, `ep
 
 - Existing render task, depth-resolve task, render targets, frame-graph insertion/removal, and native screen-space ambient occlusion.
 - No module imports this feature except the compat wrapper. The root barrel re-export is tree-shaken for all non-compat consumers.
-- The general case where a later single-sample custom composite writes `scRT` after the active MSAA resolver remains outside this module: resolving the overlay's MSAA attachment afterward would overwrite that later writer. Supporting arbitrary ordering requires a separate composition policy.
+- The general case where a later single-sample custom composite writes `scRT` after the active MSAA resolver remains outside this module: resolving the overlay's MSAA attachment afterward would overwrite that later writer. Callers must wire overlays to the final target; there is no implicit compatibility fallback.
 
 ## Test Specification
 
 - Post-process resolve validation: sampled-input alias rejection before allocation, sample count, format, dimensions, and live swapchain resolve view.
-- SSAO composition: `base` appears in the uniform contract and top-level output information forwards the internal composite output.
+- SSAO composition: `base` appears in the uniform contract; explicit caller-owned color/resolve targets survive detach.
 - Overlay selection: last active MSAA resolver wins; disabled/execution-disabled/single-sample tasks are ignored.
 - Scene pipeline: no-MSAA and MSAA task topology, producer order, default-target capture/restore, camera gate changes, transmission composition in both attachment orders, registered-scene incremental build, rollback, detach/reattach fresh resources, and idempotent disposal.
 - Compat: stable lazy manager identity, transactional constructor registration, add/attach/detach/dispose forwarding, Babylon.js defaults and property mappings, warning-once unsupported settings, and inert headless construction.
@@ -141,6 +150,6 @@ Estimator-specific Babylon.js controls without a native semantic (`samples`, `ep
 - `packages/babylon-lite/src/post-process/screen-space-ambient-occlusion.ts` — `base` and resolve forwarding.
 - `packages/babylon-lite/src/frame-graph/post-process-task.ts` — generic MSAA output resolve support and output descriptor.
 - `packages/babylon-lite/src/frame-graph/task.ts` — internal task output descriptor type.
-- `packages/babylon-lite/src/scene/swapchain-overlay.ts` — active resolver selection.
+- `packages/babylon-lite/src/scene/overlay-scene.ts` — explicit borrowed color/resolve targets and independent depth.
 - `packages/babylon-lite-compat/src/post-processes/post-process-render-pipeline-manager.ts` — Babylon-shaped registry and camera forwarding.
 - `packages/babylon-lite-compat/src/post-processes/ssao2-rendering-pipeline.ts` — Babylon-shaped SSAO2 adapter.

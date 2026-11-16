@@ -117,9 +117,14 @@ function resolveDirectRenderTargetSize(descriptor: Pick<RenderTargetDescriptor, 
 
 /** @internal Construct a render target whose size is known not to use a scaled surface descriptor. */
 export function _createDirectRenderTarget(descriptor: DirectRenderTargetDescriptor): RenderTarget {
+    return _createRenderTargetState(descriptor);
+}
+
+/** @internal Allocate target state, optionally reusing another attachment's size resolver. */
+export function _createRenderTargetState(descriptor: RenderTargetDescriptor, resolveSize = resolveDirectRenderTargetSize): RenderTarget {
     return {
         _descriptor: descriptor,
-        _resolveSize: resolveDirectRenderTargetSize,
+        _resolveSize: resolveSize,
         _colorTexture: null,
         _colorView: null,
         _depthTexture: null,
@@ -131,7 +136,7 @@ export function _createDirectRenderTarget(descriptor: DirectRenderTargetDescript
 
 /** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
 export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
-    const rt = _createDirectRenderTarget(descriptor as DirectRenderTargetDescriptor);
+    const rt = _createRenderTargetState(descriptor);
     if ("surface" in descriptor.size) {
         _resolveRenderTargetSize(descriptor);
         rt._resolveSize = _resolveRenderTargetSize;

@@ -359,6 +359,8 @@ async function buildEditor(
     onExitToMenu: () => Promise<void>
 ): Promise<RunningMode> {
     const scene = createSceneContext(engine);
+    const { rt, rst } = scene.defaultRenderTask!.config;
+    const targets = { rt, rst };
     scene.clearColor = SPACE_CLEAR_COLOR;
     const world = worlds.primary;
     addWorldToScene(scene, world);
@@ -373,7 +375,7 @@ async function buildEditor(
     // The editor mutates the session's one spline source, so every world's track — including the
     // split-screen pane built later — follows the edit and keeps it for the modes that come next,
     // exactly like the playground's single global track.
-    const editor: TrackEditor = await createTrackEditor(engine, scene, canvas, worlds.track, hud, input);
+    const editor: TrackEditor = await createTrackEditor(engine, scene, canvas, worlds.track, hud, input, targets);
     hud.onResetTrack(() => editor.resetToDefault());
 
     let disposed = false;
