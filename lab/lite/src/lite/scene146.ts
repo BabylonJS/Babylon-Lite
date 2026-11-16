@@ -24,7 +24,7 @@ import {
     startEngine,
 } from "babylon-lite";
 
-const SPONZA_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/Sponza/glTF/Sponza.gltf";
+const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/f0920f5b32d172a30efe3f9257e965918831e6ea/Models/Sponza/glTF/Sponza.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

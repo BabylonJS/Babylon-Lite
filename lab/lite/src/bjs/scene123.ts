@@ -9,7 +9,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
-const SPLAT_URL = "https://cdn.jsdelivr.net/gh/CedricGuillemet/dump@master/hornedlizard/hornedlizard.spz";
+const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/5644ca43efc962e619e861019f72c6a64d3b2246/hornedlizard/hornedlizard.spz";
 
 (async function () {
     const __initStart = performance.now();
