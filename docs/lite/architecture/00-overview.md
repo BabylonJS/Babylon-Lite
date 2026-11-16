@@ -13,6 +13,18 @@
 > Gaussian splats, ShaderMaterial, GridMaterial, device-loss recovery, Havok Physics V2, and Recast V2 navigation).
 > Detailed per-module specs are in the companion docs listed below.
 
+## Mandatory PR acceptance rule: explicit frame-graph outputs
+
+**Every frame-graph task that renders into a texture MUST receive its output destination as an explicit input parameter. A task MUST NEVER guess where to render. This is a blocking architecture requirement, not a recommendation.**
+
+**The symmetric output contract is equally mandatory: every rendering task MUST explicitly expose the texture(s) it actually rendered into as outputs.** An output may be the same texture as an input or a different texture, as explicitly wired and permitted by the GPU operation. Consumers must never have to guess which texture contains the result.
+
+The scene/pipeline assembly code selects and supplies the color, depth and resolve destinations used by its tasks. Tasks must not infer them from the current scene, global state, registration order, task names, a "last active resolver", or an implicit fallback to the swapchain. This applies equally to native tasks, post-processing, overlays and compatibility adapters.
+
+**Reject any PR that introduces or changes task/input/output wiring in violation of either rule, even if its screenshots or tests pass.** Babylon.js compatibility, convenience, and existing implicit APIs are not exemptions. Existing violations are migration debt, not precedents to copy.
+
+The binding contract, examples and review checklist are in [Frame Graph: explicit output destinations](28-frame-graph.md#mandatory-explicit-output-destinations-pr-acceptance-gate).
+
 ## Architecture Document Index
 
 Pages are ordered by how commonly Babylon Lite users reach for them — start with the scene, camera, and lights, then load and surface a model (loaders, background, materials), animate it, and finally the deeper rendering internals and tooling.

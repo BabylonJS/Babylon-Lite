@@ -10,6 +10,7 @@ import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph
 import { enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import type { ImageProcessingSource } from "../../../packages/babylon-lite/src/frame-graph/image-processing-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { attachSceneSsaoPipeline, createSceneSsaoPipeline, detachSceneSsaoPipeline, disposeSceneSsaoPipeline } from "../../../packages/babylon-lite/src/post-process/scene-ssao";
 
 function makeFixture(msaaSamples: number) {
@@ -95,6 +96,51 @@ function buildRegisteredScene(scene: SceneContext): void {
 }
 
 describe("createSceneSsaoPipeline", () => {
+    it.each([1, 4])("rejects explicit SSAO output after automatic transmission without mutating its chain at %ix", (samples) => {
+        const { engine, scene, camera, defaultTask, defaultRecord, tasks, scRT } = makeFixture(samples);
+        enableSceneTransmission(scene, engine);
+        buildRegisteredScene(scene);
+        const before = tasks.slice();
+        const rt = defaultTask._config.rt;
+        const texture = rt._colorTexture;
+        const recorded = defaultRecord.mock.calls.length;
+        const output = samples === 1 ? scRT : createRenderTarget({ format: engine.format, samples, size: scene.surface });
+        const pipeline = createSceneSsaoPipeline({ targetTexture: output }, engine, scene, camera);
+        expect(() => attachSceneSsaoPipeline(pipeline)).toThrow("automatic scene transmission");
+        expect(tasks).toEqual(before);
+        expect(defaultTask._config.rt).toBe(rt);
+        expect(defaultTask._config.rt._colorTexture).toBe(texture);
+        expect(defaultRecord).toHaveBeenCalledTimes(recorded);
+        expect(scene._outputTexture).toBeUndefined();
+        expect(scene._outputPipelineChange).toBeUndefined();
+        expect(pipeline.attached).toBe(false);
+    });
+
+    it.each([1, 4])("rejects automatic transmission before retiring explicit SSAO resources at %ix", (samples) => {
+        const { engine, scene, camera, defaultTask, tasks, scRT } = makeFixture(samples);
+        const output = samples === 1 ? scRT : createRenderTarget({ format: engine.format, samples, size: scene.surface });
+        const pipeline = createSceneSsaoPipeline({ targetTexture: output }, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+        buildRegisteredScene(scene);
+        const before = tasks.slice();
+        const { rt, rst } = defaultTask._config;
+        const source = (samples > 1 ? rst! : rt)._colorTexture!;
+        const destroy = vi.spyOn(source, "destroy");
+        const material = { _linearImageProcessing: false, _renderFeatures: {} };
+        const features = material._renderFeatures;
+        scene.meshes.push({ material } as unknown as Mesh);
+
+        expect(() => enableSceneTransmission(scene, engine)).toThrow("automatic scene transmission");
+
+        expect(tasks).toEqual(before);
+        expect(defaultTask._config.rt).toBe(rt);
+        expect(defaultTask._config.rst).toBe(rst);
+        expect(destroy).not.toHaveBeenCalled();
+        expect(pipeline.attached).toBe(true);
+        expect(material._linearImageProcessing).toBe(false);
+        expect(material._renderFeatures).toBe(features);
+    });
+
     it("accepts an explicit single-sample swapchain output", () => {
         const { engine, scene, camera, tasks, scRT } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({ targetTexture: scRT }, engine, scene, camera);

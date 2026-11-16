@@ -53,9 +53,8 @@ import { drawBindingLifecycle } from "../render/draw-binding-lifecycle.js";
 /** Configuration for `createRenderTask`: render target, clear state, optional camera override, and transmission settings. */
 export interface RenderTaskConfig {
     name: string;
-    /** TODO: rt should not live in this config long-term. Until texture
-     *  management is virtualized, callers must provide the concrete target; once
-     *  virtualized, the task should create/manage its own render target. */
+    /** Explicit primary render destination, also published through the returned task's config.rt.
+     *  Future virtual resource handles must remain explicit inputs, never task-selected destinations. */
     rt: RenderTarget;
     /** Optional single-sample resolve target. When `rt` is multisampled
      *  (`sampleCount > 1`), the color attachment resolves into this target's
@@ -114,7 +113,8 @@ export interface RenderTaskConfig {
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
 export interface RenderTask extends Task {
     readonly name: string;
-    /** Live render-target and pass configuration. Target layout changes require rebuilding dependent tasks. */
+    /** Live configuration and output binding: rt is the primary output, rst its optional resolve, and depth a separate depth output.
+     *  Target layout changes require rebuilding dependent tasks. */
     readonly config: RenderTaskConfig;
     /** App-driven execute gate, default true. When false the pass is skipped entirely — no
      *  attachment load, no MSAA resolve, no draws. The owner that KNOWS the task's content toggles

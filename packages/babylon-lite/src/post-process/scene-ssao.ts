@@ -121,6 +121,9 @@ export function attachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
     if (owningScene._sceneSsaoPipeline && owningScene._sceneSsaoPipeline !== pipeline) {
         throw new Error("Only one scene SSAO pipeline can be attached at a time.");
     }
+    if (getFrameGraphTasks(state.scene._frameGraph).some((task) => task.name === "transmission-image-processing")) {
+        assertAutomaticTransmissionCompatible(state);
+    }
     pipeline.camera = camera;
     const defaultTask = findDefaultTask(state.scene);
     state._defaultTask = defaultTask;
@@ -133,6 +136,7 @@ export function attachSceneSsaoPipeline(pipeline: SceneSsaoPipeline, camera = pi
                 createTasks(pipeline, state);
                 updateExecutionGate(pipeline, state);
             } else {
+                assertAutomaticTransmissionCompatible(state);
                 cleanupTasks(state);
             }
         };
@@ -202,6 +206,12 @@ function findDefaultTask(scene: SceneContext): RenderTask {
         throw new Error("SceneSsaoPipeline requires a scene with a default swapchain render task.");
     }
     return task as RenderTask;
+}
+
+function assertAutomaticTransmissionCompatible(state: SceneSsaoPipelineState): void {
+    if (state._targetTexture) {
+        throw new Error("SceneSsaoPipeline explicit output targets cannot be combined with automatic scene transmission. Use an explicit linear composition chain.");
+    }
 }
 
 function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState): void {

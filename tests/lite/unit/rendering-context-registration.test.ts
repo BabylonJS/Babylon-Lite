@@ -27,6 +27,8 @@ import { createRenderTarget, buildRenderTarget } from "../../../packages/babylon
 import { enableRenderTaskTransmission, executePassWithTransmission, type RenderTaskTransmissionState } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable";
+import { createTextureRenderTarget } from "../../../packages/babylon-lite/src/texture/texture-render-target";
+import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -44,12 +46,22 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
         createBuffer: (descriptor: GPUBufferDescriptor) => ({ descriptor, destroy: () => undefined }) as unknown as GPUBuffer,
         createBindGroup: (descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup,
         createRenderBundleEncoder: () => ({ setBindGroup: vi.fn(), finish: () => ({}) }),
-        createTexture: (descriptor: GPUTextureDescriptor) =>
-            ({
+        createTexture: (descriptor: GPUTextureDescriptor) => {
+            const size = descriptor.size as GPUExtent3DDict;
+            return {
                 descriptor,
+                width: size.width,
+                height: size.height ?? 1,
+                depthOrArrayLayers: size.depthOrArrayLayers ?? 1,
+                mipLevelCount: descriptor.mipLevelCount ?? 1,
+                sampleCount: descriptor.sampleCount ?? 1,
+                dimension: descriptor.dimension ?? "2d",
+                format: descriptor.format,
+                usage: descriptor.usage,
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
-            }) as unknown as GPUTexture,
+            } as unknown as GPUTexture;
+        },
         queue: {
             writeBuffer: () => undefined,
         },
@@ -204,6 +216,29 @@ describe("registerScene / unregisterScene", () => {
         expect([depth._width, depth._height]).toEqual([500, 350]);
     });
 
+    it("rebuilds overlay depth after a texture facade replaces its target size descriptor", async () => {
+        const engine = makeMockEngine(1);
+        const main = createSceneContext(engine);
+        const gpu = engine._device.createTexture({ format: engine.format, size: { width: 64, height: 64 }, usage: 16 });
+        const texture: Texture2D = { texture: gpu, view: gpu.createView(), sampler: {} as GPUSampler, width: 64, height: 64, invertY: false };
+        const rt = createTextureRenderTarget(engine, texture);
+        const overlay = createOverlayScene(main, { rt });
+        await registerScene(overlay);
+        const task = overlay.defaultRenderTask!;
+        expect([task.config.depth!._width, task.config.depth!._height]).toEqual([64, 64]);
+        const originalSize = rt._descriptor.size;
+
+        texture.texture = engine._device.createTexture({ format: engine.format, size: { width: 128, height: 96 }, usage: 16 });
+        texture.width = 128;
+        texture.height = 96;
+        overlay._resize!();
+
+        expect(rt._descriptor.size).not.toBe(originalSize);
+        expect([task.config.depth!._width, task.config.depth!._height]).toEqual([128, 96]);
+        expect(task._updateContext).toMatchObject({ targetWidth: 128, targetHeight: 96 });
+        expect(task._colorAttachment.view).toBe(rt._colorView);
+    });
+
     it.each([1, 4])("loads an explicitly supplied final color instead of the base attachment at %ix", async (samples) => {
         const engine = makeMockEngine(4);
         const main = createSceneContext(engine);
@@ -263,10 +298,13 @@ describe("registerScene / unregisterScene", () => {
     it("clears overlay depth on the first transmission segment and loads it on resumed segments", async () => {
         const engine = makeMockEngine();
         const main = createSceneContext(engine);
-        const overlay = createOverlayScene(main, targets(main));
+        const rt = createRenderTarget({ format: engine.format, samples: 4, size: engine });
+        buildRenderTarget(rt, engine);
+        const overlay = createOverlayScene(main, { rt, rst: engine.scRT });
         await registerScene(main);
         await registerScene(overlay);
         const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        const bundle = vi.spyOn(engine._device, "createRenderBundleEncoder");
         const depthLoads: GPULoadOp[] = [];
         const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), setPipeline: vi.fn(), end: vi.fn() };
         engine._currentEncoder = {
@@ -280,14 +318,15 @@ describe("registerScene / unregisterScene", () => {
             _copyCount: 1,
             _copies: 0,
             _generateMipmaps: false,
-            _sourceTexture: targets(main).rt._colorTexture,
+            _sourceTexture: rt._colorTexture,
             texture: { texture: {}, width: 1, height: 1 },
         } as RenderTaskTransmissionState;
         task._transparentBindings = [{ renderable: { _transmissive: true }, pipeline: {}, draw: () => 1 } as unknown as DrawBinding];
         task._executeWithTransmission = (samples) => executePassWithTransmission(task, engine, state, samples);
         task.execute!();
         expect(depthLoads).toEqual(["clear", "load"]);
-        expect(task._colorAttachment.view).toBe(targets(main).rt._colorView);
+        expect(task._colorAttachment.view).toBe(rt._colorView);
+        expect(bundle).toHaveBeenLastCalledWith(expect.objectContaining({ depthStencilFormat: "depth24plus-stencil8", sampleCount: 4 }));
     });
 
     it("does not discover or disable tasks when the base producer is replaced or paused", async () => {

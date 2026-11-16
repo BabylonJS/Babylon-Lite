@@ -85,8 +85,7 @@ let blitDevice: GPUDevice | null = null;
 
 /** Enable scene-color transmission for every render task currently registered in a scene. PBR materials are marked for linear transmission, and a trailing image-processing task is appended when needed. */
 export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
-    markPbrMaterialsLinear(scene);
-    enableSceneTransmissionTasks(scene, engine);
+    _t(scene, engine)[0]();
 }
 
 /** @internal Prepare linear PBR flags, then commit transmission only after renderable construction succeeds. */
@@ -96,14 +95,22 @@ export function _t(scene: SceneContext, engine: EngineContext): readonly [commit
         return mat ? [[mat, mat._linearImageProcessing, mat._renderFeatures] as const] : [];
     });
     markPbrMaterialsLinear(scene);
+    const rollback = (): void => {
+        for (const [mat, linear, features] of states) {
+            mat._linearImageProcessing = linear;
+            mat._renderFeatures = features;
+        }
+    };
     return [
-        () => enableSceneTransmissionTasks(scene, engine),
         () => {
-            for (const [mat, linear, features] of states) {
-                mat._linearImageProcessing = linear;
-                mat._renderFeatures = features;
+            try {
+                enableSceneTransmissionTasks(scene, engine);
+            } catch (error) {
+                rollback();
+                throw error;
             }
         },
+        rollback,
     ];
 }
 
@@ -600,7 +607,7 @@ function drawBaseTask(task: RenderTaskBase, pass: GPURenderPassEncoder): number 
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.format ? [desc.format] : [],
-            depthStencilFormat: desc.dFormat,
+            depthStencilFormat: task._targetSignature._depthStencilFormat,
             sampleCount: desc.samples ?? 1,
         });
         be.setBindGroup(0, task._sceneBG!);

@@ -20,6 +20,46 @@ The first implementation is intentionally small:
 
 This gives Babylon Lite enough structure for offscreen RTT passes, per-pass cameras, and per-pass material overrides while keeping scheduling explicit, data-oriented, and tree-shakable. If Lite ever gets a node render graph, that higher-level authoring layer may be a DAG, but the executable frame graph remains an ordered list of tasks.
 
+## Mandatory explicit output destinations (PR acceptance gate)
+
+**A rendering frame-graph task MUST receive every output texture/attachment it writes as an explicit input parameter. Output selection MUST NOT be guessed inside the task. This rule is mandatory for PR acceptance.**
+
+The contract applies to scene rendering, fullscreen/post-process passes, overlays, depth rendering, copy/resolve destinations and composite tasks, in both native and compat code. Use typed resource parameters such as `RenderTarget` in the task's creation or explicit binding configuration; do not expose raw GPU handles to user code. Required destinations must not be optional parameters whose omission makes the task select an output for itself.
+
+**The graph/pipeline assembly code owns output selection and producer-consumer wiring.** It may allocate intermediate targets or explicitly choose the surface swapchain, but must pass the selected destinations into the tasks. A composite must likewise pass explicit destinations to its child tasks. Allocating private implementation resources does not authorize a task to infer its externally consumed output.
+
+In particular, tasks MUST NOT:
+
+- Search a scene, frame graph or rendering-context registry for a destination or the "last active resolver".
+- Infer a destination from task names, insertion/registration order, the current camera/scene, or global state.
+- Fall back to `engine.scRT`, another task's historical attachment, or a guessed default when an output is missing.
+- Silently redirect rendering to preserve Babylon.js compatibility, including through a callback that merely hides the same destination-discovery heuristic.
+
+Reading the current GPU view of the **explicitly supplied resource** after resize/device recovery is valid; selecting a different resource is not. If the composition chain changes, its owner must explicitly rewire/recreate consumers and coordinate execution gates. Output ownership, load/clear behavior and resolve semantics must remain explicit too.
+
+For example, `createRenderTask({ name: "overlay", rt: finalColor, rst: screen, ... }, engine, scene)` has explicit output wiring. Replacing `finalColor` with an internal `findLastResolver(scene)` lookup, or treating a missing `rt` as "use the screen", violates the contract even when it happens to produce the expected image.
+
+### Symmetric explicit result contract (equally mandatory)
+
+**Every rendering task MUST also provide an explicit output parameter/field identifying the texture(s) it actually rendered into. An explicit input destination alone is not sufficient.** A downstream task must be able to consume the producer's declared output directly, without searching a graph, inspecting private passes, or assuming that the input texture still contains the final result.
+
+Distinguish source inputs from rendering destinations: a task may read `inputTexture`, receive an explicit destination such as `targetTexture`, and publish the produced texture as `outputTexture` (names are illustrative, not a new common wrapper API). The published output must identify the actual destination used. It may alias a source input when the GPU operation permits in-place work, or be a different texture for an explicitly wired out-of-place/ping-pong pass. This does not authorize sampling a texture while it is simultaneously bound as a render attachment.
+
+For multiple attachments or an MSAA resolve, expose the corresponding outputs explicitly and distinguish the multisample color from its resolved result. Never publish an earlier intermediate, a historical attachment, or a requested target that the task silently stopped using.
+
+Publish typed resource handles on the factory's returned task/result or through an explicit output binding. Keep them current when resource identity changes, and let the composition owner rewire dependents explicitly. This contract does not require per-frame result-object allocations or changing the draw-count return value of `Task.execute()`.
+
+For `RenderTask`, the returned task's public `config` is also its explicit live output binding: `config.rt` identifies the primary rendered target, `config.rst` its optional resolved result, and `config.depth` an optional separate depth output. These are the canonical destinations consumed by pass encoding, not an independently cached copy of the input arguments. Post-process tasks expose their actual result through `outputTexture` and their declared resolve output. Reusing an existing typed output binding is valid; adding another wrapper or an output-discovery callback is not required.
+
+### Blocking review checklist
+
+1. Can the reviewer identify every rendering destination from the supplied task parameters, without reconstructing a runtime search or implicit default?
+2. Does the task explicitly publish the texture(s) it actually produced so downstream tasks can consume them directly, including both in-place and out-of-place cases?
+3. Are color/depth/resolve outputs distinguished and the targets passed to child tasks explicitly wired by their owner?
+4. Do output changes require explicit rewiring rather than discovery, stale output handles, or a silent fallback?
+
+**If any answer is no, request changes: the PR MUST NOT be approved or merged until the output contract is corrected.** Passing tests, screenshot parity, compatibility requirements and small bundle size do not override this gate. Existing implicit-output APIs are migration debt; their presence does not make the pattern acceptable. Documenting this requirement does not assert that every historical API has already been migrated.
+
 ## Public API Surface
 
 ```typescript

@@ -100,7 +100,9 @@ export function createOverlayScene(baseScene: SceneContext, options: OverlayScen
             depthCompare: desc.depthCompare,
             depthClearValue: desc.depthClearValue,
             samples: desc.samples,
-            size: rt === baseScene.surface.scRT ? baseScene.surface : desc.size,
+            get size() {
+                return rt === baseScene.surface.scRT ? baseScene.surface : desc.size;
+            },
         },
         rt._resolveSize
     );
