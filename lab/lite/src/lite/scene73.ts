@@ -83,8 +83,10 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const left = createSceneContext(engine);
+    const { rt, rst } = left.defaultRenderTask!.config;
+    const targets = { rt, rst };
     // The right viewport composites over the left scene; a second ordinary scene would clear the whole canvas.
-    const right = createOverlayScene(left);
+    const right = createOverlayScene(left, targets);
     left.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
     left.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });

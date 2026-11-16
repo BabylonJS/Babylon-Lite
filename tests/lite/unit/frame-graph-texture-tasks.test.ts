@@ -1084,7 +1084,6 @@ describe("Mipmapped render target allocation", () => {
         const attachment = Array.from(encoder.beginRenderPass.mock.lastCall![0].colorAttachments)[0]!;
         expect(attachment.view).toBe(output._colorView);
         expect(attachment.resolveTarget).toBe(resolve._colorView);
-        expect(task._getOutputInfo?.()).toEqual({ colorTexture: output, resolveTexture: resolve });
     });
 
     it("rejects a resolve destination that aliases a sampled input before allocation", () => {

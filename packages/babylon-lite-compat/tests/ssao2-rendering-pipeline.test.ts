@@ -30,6 +30,7 @@ import { PostProcessRenderPipelineManager } from "../src/post-processes/post-pro
 import { SSAO2RenderingPipeline } from "../src/post-processes/ssao2-rendering-pipeline";
 import { Scene } from "../src/scene/scene";
 import type { Camera } from "../src/cameras/cameras";
+import type { RenderTarget } from "babylon-lite";
 
 function makeScene(headless = false) {
     const manager = new PostProcessRenderPipelineManager();
@@ -44,6 +45,19 @@ function makeScene(headless = false) {
 describe("SSAO2RenderingPipeline", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+    });
+
+    it("forwards explicit Lite destinations for sharing the final color with utility layers", () => {
+        const scene = makeScene();
+        const camera = { _lite: {} } as Camera;
+        const targets = { rt: {} as RenderTarget, rst: {} as RenderTarget };
+        new SSAO2RenderingPipeline("ssao", scene, 1, [camera], false, 0, targets);
+        expect(createSceneSsaoPipeline).toHaveBeenCalledWith(
+            expect.objectContaining({ targetTexture: targets.rt, resolveTexture: targets.rst }),
+            scene.getEngine()._lite,
+            scene._lite,
+            camera._lite
+        );
     });
 
     it("registers, attaches, and forwards supported settings to the native pipeline", () => {

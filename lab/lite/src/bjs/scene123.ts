@@ -9,8 +9,8 @@ import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
 
-// Use the original payload directly; jsDelivr intermittently stalls this SPZ asset.
-const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/hornedlizard/hornedlizard.spz";
+// Same SPZ bytes, pinned outside jsDelivr's failing branch URL.
+const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/509ba0beb77e241a55a54154d119749eb58ed960/hornedlizard/hornedlizard.spz";
 
 (async function () {
     const __initStart = performance.now();

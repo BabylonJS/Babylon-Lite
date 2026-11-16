@@ -24,8 +24,8 @@ import {
     startEngine,
 } from "babylon-lite";
 
-// Archived Khronos source, byte-identical to the glTF-Sample-Assets copy.
-const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/Sponza/glTF/Sponza.gltf";
+// Pin the unchanged model and texture set to avoid inconsistent CDN cache entries.
+const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/5bad5aaa0bbb5d0f9cdc934e626f27d0df1e79b8/Models/Sponza/glTF/Sponza.gltf";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
