@@ -28,7 +28,8 @@ import "@babylonjs/core/Engines/WebGPU/Extensions/engine.debugging";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import "@babylonjs/core/Engines/WebGPU/Extensions/engine.multiRender";
 
-const SPONZA_URL = "https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/Sponza/glTF/";
+// Archived Khronos source, byte-identical to the glTF-Sample-Assets copy.
+const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/Sponza/glTF/";
 
 (async function () {
     const __initStart = performance.now();
