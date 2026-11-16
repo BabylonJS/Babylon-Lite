@@ -15,15 +15,15 @@
 
 ## Mandatory PR acceptance rule: explicit frame-graph outputs
 
-**Every frame-graph task that renders into a texture MUST receive its output destination as an explicit input parameter. A task MUST NEVER guess where to render. This is a blocking architecture requirement, not a recommendation.**
+**Every rendering frame-graph task MUST explicitly expose the texture(s) it actually rendered into as outputs. This is a blocking architecture requirement, not a recommendation.** An output may be the same texture as an input or a different texture, as permitted by the GPU operation. Consumers must never have to guess which texture contains the result.
 
-**The symmetric output contract is equally mandatory: every rendering task MUST explicitly expose the texture(s) it actually rendered into as outputs.** An output may be the same texture as an input or a different texture, as explicitly wired and permitted by the GPU operation. Consumers must never have to guess which texture contains the result.
+**Providing the destination texture as an input is NOT universally required.** A task may accept caller-provided targets or allocate and own its output textures. `GeometryRendererTask`, which allocates its G-buffer attachments and publishes them through typed outputs, is a valid example of task-owned allocation.
 
-The scene/pipeline assembly code selects and supplies the color, depth and resolve destinations used by its tasks. Tasks must not infer them from the current scene, global state, registration order, task names, a "last active resolver", or an implicit fallback to the swapchain. This applies equally to native tasks, post-processing, overlays and compatibility adapters.
+Whichever allocation model is used, ownership and output selection must follow the documented task contract. Caller-provided destinations must be honored. Searching other tasks or registration order for a guessed destination is not a substitute for explicit output publication. This applies equally to native tasks, post-processing, overlays and compatibility adapters.
 
-**Reject any PR that introduces or changes task/input/output wiring in violation of either rule, even if its screenshots or tests pass.** Babylon.js compatibility, convenience, and existing implicit APIs are not exemptions. Existing violations are migration debt, not precedents to copy.
+**Reject any PR that introduces or changes task/output wiring without explicitly publishing the actual produced textures, even if its screenshots or tests pass.** Babylon.js compatibility and convenience are not exemptions. Existing missing output contracts are migration debt, not precedents to copy; self-allocation is not a violation. Migration of remaining existing tasks belongs in a separate PR.
 
-The binding contract, examples and review checklist are in [Frame Graph: explicit output destinations](28-frame-graph.md#mandatory-explicit-output-destinations-pr-acceptance-gate).
+The binding contract, examples and review checklist are in [Frame Graph: explicit output textures](28-frame-graph.md#mandatory-explicit-output-textures-pr-acceptance-gate).
 
 ## Architecture Document Index
 
