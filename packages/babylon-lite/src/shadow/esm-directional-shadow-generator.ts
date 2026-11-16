@@ -20,6 +20,7 @@ import { addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph
 import {
     casterVersionSum,
     computeDirectionalLightMatrix,
+    preloadDirectionalShadowBounds,
     createSharedShadowUBO,
     createShadowCamera,
     createShadowParamsUBO,
@@ -131,7 +132,7 @@ export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskRes
 }
 
 async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
-    const loads: Promise<void>[] = [];
+    const loads: Promise<void>[] = [preloadDirectionalShadowBounds(casterMeshes)];
     let needsStandard = false;
     let needsPbr = false;
     let needsNode = false;

@@ -314,7 +314,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
         | -dot(r,P) -dot(u,P) -dot(dir,P) 1 |
     ```
     Where `P = light.worldMatrix[12..14]`
-5. Transform all 8 corners of each caster's local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` → compute X/Y bounds in light space
+5. Transform all 8 corners of each ordinary caster's geometry-local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` to compute X/Y bounds in light space. For thin instances, first union the prototype corners transformed by `worldMatrix × instanceMatrix` into a world AABB, then transform that box through `view`. Do not include an uninstanced prototype or parked (zero linear transform) instances. Clamp the active count to the matrix slab length; an empty instance set contributes nothing.
 6. Expand bounds by 10% (`shadowOrthoScale = 0.1`): `lMinX -= (lMaxX - lMinX) * 0.1` etc.
 7. Z bounds from `orthoMinZ`/`orthoMaxZ` (camera near/far)
 8. Build orthographic projection (column-major, WebGPU z=[0,1]):
@@ -329,7 +329,11 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
     ```
 9. Multiply: `viewProj = proj * view` (standard 4×4 multiply)
 
-ESM owns its task-facing directional matrix helper as internal `_computeDirectionalLightMatrix()` in `shadow/esm-directional-shadow-generator.ts`. PCF owns the same orthographic helper as internal `_computeDirectionalLightMatrix()` in `shadow/pcf-directional-shadow-generator.ts` so directional shadow generator math remains with the relevant directional resource setup without becoming public API.
+Directional ESM and PCF share `computeDirectionalLightMatrix()` in `shadow/shadow-base.ts`. Their asynchronous caster preload calls `preloadDirectionalShadowBounds(casterMeshes)`, which imports `shadow/thin-instance-shadow-bounds.ts` only when a thin-instanced caster is present. CSM imports that same helper directly instead of maintaining a separate implementation.
+
+`getThinInstanceWorldBounds(mesh)` returns a cached `{ min: [x,y,z], max: [x,y,z] }` world AABB, or `null` when no active instance contributes. Its lazy `WeakMap<Mesh, ...>` cache is keyed by the instance version, matrix array identity, active count, mesh world-matrix version, and all six geometry-bound coordinates. Stable entries reuse their output storage; light/camera-only refits do not rescan instances. This CPU-only cache holds no device resources. Floating-origin subtraction happens after world-bound computation, exactly once, in the shared directional fit.
+
+`Mesh.boundMin`/`boundMax` always enclose the prototype geometry before either transform, including when a consumer supplies conservative custom bounds for deformation. They must not be replaced with an aggregate instance box: precise picking, culling and physics need the prototype box. Shadow fitting derives aggregate bounds without mutating these fields. No additional public bounding-box fields or projection settings are required.
 
 #### Spot PCF: `_computeSpotLightMatrix` (perspective)
 

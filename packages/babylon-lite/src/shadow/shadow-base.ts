@@ -14,6 +14,17 @@ import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
+import type { getThinInstanceWorldBounds } from "./thin-instance-shadow-bounds.js";
+
+let thinInstanceWorldBounds: typeof getThinInstanceWorldBounds | undefined;
+const IDENTITY_WORLD = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+/** Load instance-bound computation only for directional tasks with instanced casters. */
+export async function preloadDirectionalShadowBounds(casterMeshes: readonly Mesh[]): Promise<void> {
+    if (!thinInstanceWorldBounds && casterMeshes.some((mesh) => mesh.thinInstances)) {
+        thinInstanceWorldBounds = (await import("./thin-instance-shadow-bounds.js")).getThinInstanceWorldBounds;
+    }
+}
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
@@ -99,9 +110,21 @@ export function computeDirectionalLightMatrix(
     let minY = Infinity;
     let maxY = -Infinity;
     for (const mesh of casterMeshes) {
-        const world = mesh.worldMatrix;
-        const boundMin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
-        const boundMax = mesh.boundMax ?? [0.5, 0.5, 0.5];
+        let world: ArrayLike<number> = mesh.worldMatrix;
+        let boundMin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
+        let boundMax = mesh.boundMax ?? [0.5, 0.5, 0.5];
+        if (mesh.thinInstances) {
+            if (!thinInstanceWorldBounds) {
+                throw new Error("Thin-instance shadow bounds must be preloaded before directional fitting");
+            }
+            const bounds = thinInstanceWorldBounds(mesh);
+            if (!bounds) {
+                continue;
+            }
+            world = IDENTITY_WORLD;
+            boundMin = bounds.min;
+            boundMax = bounds.max;
+        }
         for (let corner = 0; corner < 8; corner++) {
             const localX = corner & 1 ? boundMax[0] : boundMin[0];
             const localY = corner & 2 ? boundMax[1] : boundMin[1];
