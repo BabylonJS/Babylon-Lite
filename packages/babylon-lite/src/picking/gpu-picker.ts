@@ -19,12 +19,12 @@ import { createUniformBuffer } from "../resource/uniform-buffer.js";
 export type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
-const _pickVP = new F32(20);
+const _pickVP = /* @__PURE__ */ new F32(20);
 const PICK_MESH_UBO_BYTES = 80;
-const _uboScratch = new ArrayBuffer(PICK_MESH_UBO_BYTES);
-const _uboF32 = new F32(_uboScratch);
-const _uboU32 = new U32(_uboScratch);
-const _uboView = new U8(_uboScratch);
+const _uboScratch = /* @__PURE__ */ new ArrayBuffer(PICK_MESH_UBO_BYTES);
+const _uboF32 = /* @__PURE__ */ new F32(_uboScratch);
+const _uboU32 = /* @__PURE__ */ new U32(_uboScratch);
+const _uboView = /* @__PURE__ */ new U8(_uboScratch);
 
 /** GPU-based picker — pure state. Use pickAsync() and disposePicker() standalone functions. */
 export interface GpuPicker {

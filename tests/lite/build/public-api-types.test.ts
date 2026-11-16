@@ -2006,7 +2006,7 @@ void complete;
         const notice = readFileSync(resolve(BUILD_DIR, "NOTICE.txt"), "utf8");
         for (const [name, version] of [
             ["navcat", "0.4.1"],
-            ["mathcat", "0.0.12"],
+            ["mathcat", "0.0.14"],
         ]) {
             const start = notice.indexOf(`${name} ${version}`);
             expect(start).toBeGreaterThanOrEqual(0);

@@ -9,10 +9,10 @@ import type { PickDiscardRule, PickIgnore } from "./gpu-picker.js";
 import * as pipelines from "./picking-advanced-pipeline.js";
 
 const UBO_BYTES = 80;
-const _scratch = new ArrayBuffer(UBO_BYTES);
-const _f32 = new F32(_scratch);
-const _u32 = new U32(_scratch);
-const _view = new U8(_scratch);
+const _scratch = /* @__PURE__ */ new ArrayBuffer(UBO_BYTES);
+const _f32 = /* @__PURE__ */ new F32(_scratch);
+const _u32 = /* @__PURE__ */ new U32(_scratch);
+const _view = /* @__PURE__ */ new U8(_scratch);
 
 export interface AdvancedCandidate {
     readonly mesh: Mesh;

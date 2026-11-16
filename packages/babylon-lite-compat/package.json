@@ -45,15 +45,15 @@
     },
     "sideEffects": false,
     "dependencies": {
-        "@recast-navigation/core": "0.43.1",
-        "@recast-navigation/generators": "0.43.1",
-        "@recast-navigation/wasm": "0.43.1",
+        "@recast-navigation/core": "0.44.0",
+        "@recast-navigation/generators": "0.44.0",
+        "@recast-navigation/wasm": "0.44.0",
         "babylon-lite": "workspace:*"
     },
     "devDependencies": {
         "@webgpu/types": "^0.1.74",
         "typescript": "^6.0.3",
-        "vite": "^8.3.5",
+        "vite": "^8.3.7",
         "vite-plugin-dts": "^5.1.2"
     }
 }

@@ -13,8 +13,8 @@ import type { SceneContext } from "../scene/scene-core.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
  *  Avoids allocating a Uint32Array view on every fillLightsData call. */
-const _countU32 = new U32(1);
-const _countF32 = new F32(_countU32.buffer);
+const _countU32 = /* @__PURE__ */ new U32(1);
+const _countF32 = /* @__PURE__ */ new F32(_countU32.buffer);
 
 /** @internal
  * Total byte size of the lights UBO (header + MAX_LIGHTS entries).

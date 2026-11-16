@@ -36,15 +36,15 @@
         "@types/webxr": "^0.5.24",
         "@webgpu/types": "^0.1.74",
         "typescript": "^6.0.3",
-        "vite": "^8.3.5",
+        "vite": "^8.3.7",
         "vite-plugin-dts": "^5.1.2"
     },
     "dependencies": {
-        "@recast-navigation/core": "0.43.1",
-        "@recast-navigation/generators": "0.43.1",
-        "@recast-navigation/wasm": "0.43.1",
+        "@recast-navigation/core": "0.44.0",
+        "@recast-navigation/generators": "0.44.0",
+        "@recast-navigation/wasm": "0.44.0",
         "manifold-3d": "3.5.4",
-        "mathcat": "0.0.12",
+        "mathcat": "0.0.14",
         "navcat": "0.4.1",
         "text-shaper": "^0.1.28"
     }
