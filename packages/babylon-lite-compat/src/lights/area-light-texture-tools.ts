@@ -5,9 +5,10 @@ import { ShaderLanguage } from "../misc/engine-constants.js";
 import { BaseTexture } from "../textures/textures.js";
 
 class ProcessedAreaLightTexture extends BaseTexture {
-    public constructor(texture: NonNullable<BaseTexture["_lite"]>) {
+    public constructor(texture: NonNullable<BaseTexture["_lite"]>, engine: AbstractEngine) {
         super();
         this._lite = texture;
+        this._readbackEngine = engine._lite;
     }
 
     public whenReadyAsync(): Promise<void> {
@@ -51,7 +52,7 @@ export class AreaLightTextureTools {
         const processed = await processAreaLightTexture(this._engine._lite, source._lite);
         this._shaderLanguage = ShaderLanguage.WGSL;
         this._ready = true;
-        return new ProcessedAreaLightTexture(processed);
+        return new ProcessedAreaLightTexture(processed, this._engine);
     }
 
     public dispose(): void {
