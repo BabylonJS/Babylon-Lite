@@ -114,6 +114,8 @@ export interface RenderTaskConfig {
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
 export interface RenderTask extends Task {
     readonly name: string;
+    /** Live render-target and pass configuration. Target layout changes require rebuilding dependent tasks. */
+    readonly config: RenderTaskConfig;
     /** App-driven execute gate, default true. When false the pass is skipped entirely — no
      *  attachment load, no MSAA resolve, no draws. The owner that KNOWS the task's content toggles
      *  this (e.g. when its last mesh hides); the engine never scans bindings to decide. Disabling a
@@ -268,6 +270,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
     const task: RenderTaskBase = {
         ...createBindingGeneration([], -1),
         name: config.name,
+        config,
         _config: config,
         _ownsTargets: !config.sharedRt,
         engine: engine,
@@ -279,7 +282,6 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
-        _getOutputInfo: () => (task.enabled === false ? undefined : { colorTexture: config.rt, resolveTexture: config.rst }),
         _updateContext: updateContext,
         record(): void {
             if (task._disposed) {
@@ -460,8 +462,9 @@ export function _buildBindings(
     }
     if (record) {
         buildRenderPassDescriptor(task, rt);
-        task._updateContext.targetWidth = rt._width;
-        task._updateContext.targetHeight = rt._height;
+        const dimensions = config.depth ?? rt;
+        task._updateContext.targetWidth = dimensions._width;
+        task._updateContext.targetHeight = dimensions._height;
     }
     if (publish) {
         if (drawBindingLifecycle) {
@@ -480,7 +483,7 @@ function buildRenderPassDescriptor(task: RenderTaskBase, rt: RenderTarget): void
     // End-of-pass MSAA resolve into a caller-supplied single-sample target.
     // executePass wires the resolve target immediately before every pass so
     // swapchain targets pick up their current per-frame view.
-    task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
+    task._renderPassDescriptor.colorAttachments = rt._descriptor.format ? [att] : [];
 
     const depthSrc = config.depth ?? rt;
     const depthView = depthSrc._depthView;
@@ -551,14 +554,8 @@ function executePass(task: RenderTaskBase, eng: EngineContext, targetSignature: 
     const cfg = task._config;
     if (cfg.rt._colorView) {
         // This scene's surface scRT color view is re-acquired every frame, so re-read it
-        // here. Checking the bound surface (not the engine's primary scRT) is required for
-        // auxiliary createSurface scenes. Offscreen color views are stable between rebuilds
-        // — leaving att.view untouched preserves an external override (swapchain-overlay
-        // shares the base scene's MSAA color view). The resolve target (rst) is re-read each
-        // frame so an `rst === scRT` picks up its fresh per-frame view.
-        if (cfg.rt === sc.surface.scRT) {
-            att.view = cfg.rt._colorView;
-        }
+        // here. Borrowed targets also acquire new views when their producer rebuilds.
+        att.view = cfg.rt._colorView;
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
         att.clearValue = cfg.clrColor ?? sc.clearColor;
         att.loadOp = cfg.clr ? "clear" : "load";

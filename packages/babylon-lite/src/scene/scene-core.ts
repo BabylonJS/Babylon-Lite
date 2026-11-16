@@ -19,6 +19,7 @@ import type { EnvironmentRecoverySource } from "../loader-env/environment-recove
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
+import type { RenderTask } from "../frame-graph/render-task-base.js";
 import { _createDirectRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/scene-lights-ubo.js";
@@ -151,6 +152,8 @@ export function _setSceneDisposeHook(hook: (scene: SceneContext, cleanup: () => 
 
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
+    /** Factory-created default producer, absent when defaultRenderTask is false. */
+    readonly defaultRenderTask?: RenderTask;
     /** @internal */
     readonly _kind: "scene";
     /** Optional display name for tooling and diagnostics. */
@@ -435,7 +438,9 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
             ? _createDirectRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
         const depth = msaa ? undefined : _createDirectRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
-        _appendTask(fg, _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
+        const task = _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx);
+        Object.assign(ctx, { defaultRenderTask: task });
+        _appendTask(fg, task);
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;

@@ -231,6 +231,9 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
 
 function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
+    if (cfg.sharedRt) {
+        throw new Error("Transmission cannot retarget borrowed color attachments. Use linear: false and supply an explicit linear composition chain.");
+    }
     const oldDesc = cfg.rt._descriptor;
     const oldSize = oldDesc.size;
     const surface = task.scene.surface;
@@ -546,7 +549,8 @@ function canUpdateTransmission(state: RenderTaskTransmissionState): boolean {
 
 function beginTaskPass(task: RenderTaskBase, resolveTarget: GPUTextureView | null, sampleCount: number, load: boolean): GPURenderPassEncoder {
     const att = task._colorAttachment;
-    const depthLoadOp = load || !task._config.clr ? "load" : "clear";
+    const config = task._config;
+    const depthLoadOp = load || (config.depth ? config.depth._eager : config.depthClear === false) ? "load" : "clear";
     if (load) {
         att.loadOp = "load";
     }

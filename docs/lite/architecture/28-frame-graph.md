@@ -480,6 +480,14 @@ wrappers preserve the target receiver when forwarding attachment release.
 and builds its cached `GPURenderPassDescriptor`; `_passes` remains empty. Per frame, `execute()` runs
 UBO/light/binding updates, patches live clear/resolve views, opens the render pass, draws, and ends it.
 
+`task.config` is the public live `RenderTaskConfig` object, identical to the internal `_config`.
+Changing clear state affects the next execution; changing target layout requires recreating the task
+and dependent pipelines. `scene.defaultRenderTask` provides the factory-created default producer by
+identity, including the task installed by `createOverlayScene`; it is absent for a scene created with
+`defaultRenderTask: false` until a factory installs such a task. An overlay receives explicit color
+and resolve targets, not a discovered "last resolver". Borrowed attachments use their current views
+at execution, while overlay-owned depth retains independent clear and disposal semantics.
+
 ```typescript
 export interface RenderTaskConfig {
     name: string;

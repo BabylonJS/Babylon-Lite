@@ -32,21 +32,27 @@ export function getRenderingContextKind(context: RenderingContext): string;
 export interface SceneContext extends RenderingContext {
     /** Optional display name for tooling and diagnostics. */
     name?: string;
+    /** Factory-created default producer; custom graphs retain their own task handles. */
+    readonly defaultRenderTask?: RenderTask;
 }
 
 /** Create a scene that composites over a base scene on the same surface. */
-export function createOverlayScene(baseScene: SceneContext): SceneContext;
+export interface OverlaySceneOptions {
+    rt: RenderTarget;
+    rst?: RenderTarget;
+}
+export function createOverlayScene(baseScene: SceneContext, options: OverlaySceneOptions): SceneContext;
 
 /** A utility scene and the scene it composites onto. */
 export interface UtilityLayer {
     readonly scene: SceneContext;
     readonly mainScene: SceneContext;
 }
-export interface UtilityLayerOptions {
+export interface UtilityLayerOptions extends OverlaySceneOptions {
     addDefaultLight?: boolean;
     lightIntensity?: number;
 }
-export function createUtilityLayer(mainScene: SceneContext, options?: UtilityLayerOptions): UtilityLayer;
+export function createUtilityLayer(mainScene: SceneContext, options: UtilityLayerOptions): UtilityLayer;
 export function registerUtilityLayer(utility: UtilityLayer): Promise<void>;
 export function disposeUtilityLayer(utility: UtilityLayer): void;
 
@@ -198,9 +204,7 @@ See [Device Context](device-context.md) for the full ownership and recovery spec
 
 `moveRenderingContext(surface, context, index)` moves an already registered context to its final integer position `index` (clamped to the registry bounds) and returns `false` without changing anything for an unregistered context. Non-integer indices throw `RangeError` before the registry is changed. It locates the context by identity, removes it, and inserts it into the same live registry array at the clamped position; moving an already-correct context also returns `true`. Contexts render in list order. Its standalone `rendering-context-order.ts` module imports the surface and context types only, allowing the operation to tree-shake from applications that never use it.
 
-Every ordinary `SceneContext` clears its target, so registering a second ordinary scene on a surface appends it to the registry and it clears whatever earlier contexts drew, even when its camera viewport covers only part of the surface (a clear load operation affects the whole attachment). Composition over another scene is explicit: create the second scene with `createOverlayScene(baseScene)`, which is how side-by-side viewports (for example scene73) share one surface. This is a breaking change from earlier releases, in which a scene registered after any other context guessed the last registered context as its base and loaded instead of clearing. That guess picked the wrong base when a text renderer or another non-scene context was registered last, so a later utility layer cleared the whole swapchain.
-
-`createOverlayScene(baseScene)` creates an opt-in overlay scene on the base scene's surface with a transparent clear color and records the base as the overlay's internal `_overlayBase`. It has its own camera, lights, and depth buffer and does not follow the base camera; it is registered with the ordinary `registerScene`, in either order relative to its base, and every registration regroups the overlay immediately after its base. A utility layer is an overlay scene with utility defaults: `createUtilityLayer(mainScene, options?)` calls `createOverlayScene(mainScene)`, names the scene `"UtilityLayer"`, follows the main scene's camera, and optionally adds the default light. The surface supplies the engine, so callers of the previous `createUtilityLayer(engine, mainScene, options?)` signature must drop the engine argument. `registerScene` configures the overlay against the main scene rather than against whichever context was registered last. `registerUtilityLayer` uses `moveRenderingContext` to group the layer immediately after its main scene and existing sibling overlays, preserving their registration order and leaving unrelated contexts in their existing relative order. With `msaaSamples === 1` the overlay loads the swapchain; with MSAA it renders into the main task's current MSAA color attachment and resolves it again. The grouping therefore puts later contexts such as text renderers after the layers, so their pixels are not overwritten by an overlay resolve.
+Every ordinary scene clears its configured target. To composite another scene, call `createOverlayScene(baseScene, { rt, rst? })` with the explicit final color destination. The base supplies the surface and registration ordering only. `createUtilityLayer(mainScene, { rt, rst?, addDefaultLight?, lightIntensity? })` uses the same contract, follows the main camera and optionally adds its default light. Siblings and nested overlays must receive the intended color targets explicitly. Their order remains depth-first, with siblings in registration order and later text contexts on top.
 
 An overlay scene (including a utility layer) whose base scene is not registered on the surface (not yet registered, unregistered, or disposed) stays registered but skips its `_update` and `_record` work. When its base scene is registered again, scene registration moves it back before its associated overlays and groups those overlays after it. Explicitly moving contexts afterward can change this order, so callers using `moveRenderingContext` must preserve the overlay grouping.
 
@@ -208,17 +212,25 @@ Overlay scenes may themselves host overlay scenes or utility layers. Their group
 
 Scene registration has one optional, module-level seam: `_installOverlaySceneRegistration(registered)` in `scene/scene-core.ts`. `createOverlayScene` installs it; `scene/overlay-scene.ts` owns the installed function, the inactive-base wrapper, descendant discovery, and explicit grouping. Apps that never import `createOverlayScene` tree-shake the installer, so the minifier removes the seam call entirely and single-scene or multi-surface apps carry no overlay code. Registration calls the installed function only after a new context is successfully inserted, including on the shadow-support registration path. The installed function resolves the topmost root of the overlay tree; while that root is unregistered nothing moves, so siblings registered meanwhile keep their registration order. Otherwise it moves the root before any earlier explicit descendant and recursively moves each direct child and its subtree after the root in their existing relative order. Once installed, the seam applies to every engine in the app; on a surface without overlays its grouping is a no-op. No sorting or registry search is added to the per-frame render loop.
 
-The swapchain configurator (`scene/swapchain-overlay.ts`) reads the overlay's fixed `_overlayBase`; it never guesses a base from the context registry. It wraps the overlay's `_record`, so composition runs after every before-render callback and never competes with app callbacks that gate the task. Each record re-resolves the overlay's first swapchain-targeting render task, so a task added after creation or registration, or one that replaces the previous presentation task, is configured on its next frame; a replaced task gets back its original clear state and its own color view. Single-sample tasks disable color clearing, so the overlay loads the swapchain. MSAA tasks composite into the root scene of the overlay chain: while the root's presentation task is disabled, paused with `executionEnabled === false`, or does not resolve into the swapchain (post-process or copy output), the overlay task is disabled for that record only and its `enabled` value is restored afterward, so an app's `task.enabled` gate is never overwritten; otherwise the overlay shares the root's live attachment and loads and resolves it. The inactive-base wrapper wraps the composition wrapper and skips it while any scene in the base chain is unregistered, so an absent base's attachment is never referenced. The root task's attachment is re-read every frame, so a resized or rebuilt base attachment is picked up automatically.
+#### Explicit attachment contract (breaking change)
+
+`createOverlayScene(baseScene, { rt, rst? })` requires the destination color target, and optionally its single-sample resolve target. `createUtilityLayer(mainScene, options)` requires the same fields in `UtilityLayerOptions`. The base scene determines surface, ordering and registration lifetime only, never color-resource selection.
+
+The overlay is created without a default task, then installs one automatic scene-render task with `rt`, `rst`, `sharedRt: true`, and `clr: false`. It owns a separate depth/stencil target matching the color target's size, sample count and depth convention; depth is cleared even when color is loaded. It neither allocates nor disposes the borrowed color/resolve targets. Their producer must initialize them before the overlay executes; registration may occur in either order. Execution reads their live views, including after resize, without scanning tasks or overriding an attachment view.
+
+`scene.defaultRenderTask` exposes the factory-created producer by identity (undefined with `defaultRenderTask: false`). Every render task exposes its existing live configuration as `task.config`; the internal `_config` aliases the same object. Ordinary scenes can therefore pass `scene.defaultRenderTask.config` directly to an overlay without duplicating target creation or searching the graph. This is the default producer's configuration, not an automatically selected final post-process output. Custom producers continue to use `createSceneContext(surface, { defaultRenderTask: false })` and `addTask(scene, createRenderTask({ name: "scene", rt, rst, depth? }, engine, scene))`. Replacing a task, changing its format/sample count, or changing the output of a post-process chain requires explicit consumer rewiring/recreation; the overlay never discovers replacements and never infers task enablement. Callers must gate consumers together with disabled producers. Unregistered ancestors still suspend the overlay scene.
+
+The private overlay depth target reuses its color target's size resolver through the shared render-target state factory. This preserves scaled/custom sizing without pulling scaled-size interpretation into ordinary overlay bundles. For `surface.scRT`, whose descriptor size is a placeholder, depth uses the live surface size instead. Draw-update dimensions come from the task-owned depth target when available, so overlays registered before their producer have valid dimensions without per-frame dimension synchronization.
+
+For post-processing, calculate AO and blur in single-sample textures, then write the final composite into the explicit MSAA color target used by overlays. Resolve to the screen after composition. Any later effect must write that same authoritative color chain, not modify only `scRT` before an older MSAA image is resolved over it. There is no swapchain readback, initialization shader, implicit color copy, or new WGSL. Single-sample overlays may target `scRT` directly regardless of the surface's default sample count.
+
+Transmission on a borrowed target must use `enableRenderTaskTransmission(task, engine, { linear: false })` and an explicitly configured linear/tone-mapping chain. Automatic linear-offscreen retargeting rejects borrowed targets rather than replacing their color destination. Segmented transmission clears the overlay's private depth on the first segment and loads it on resumed segments, independently of color load.
+
+Migration: allocate the intended color target, pass it to `createRenderTask`, and pass `{ rt, rst }` to every sibling/nested overlay sharing it. A depth-bearing producer target can be borrowed safely: overlays always use their own separate depth. A replacement overlay task must itself specify `clr: false` and borrowed target ownership.
 
 #### Module: overlay scene
 
-- **Purpose and API:** `createOverlayScene(baseScene)` is the public opt-in. `moveSwapchainOverlaysAfterBase` (internal) regroups a scene's overlay tree and is shared with `registerUtilityLayer`. `configureSwapchainOverlayScene(overlay)` (internal) configures composition.
-- **State and lifecycle:** Each overlay stores only `_overlayBase` plus its record wrapper's closure (the configured task and its original clear state). No module-level state is allocated apart from the installed seam. Disposing an overlay releases its wrapper with the rest of the scene; disposing a base leaves its overlays registered but inactive.
-- **Rendering:** Single-sample tasks load the swapchain. Multisample tasks use the base scene's current multisample color view, then resolve into the swapchain. Existing per-scene depth handling is unchanged; this module adds no shader or pipeline configuration.
-- **Dependencies:** Scene and surface types, the scene-core seam, and the rendering-context move helper. The configurator is imported statically by `overlay-scene.ts` only.
-- **Tests and files:** `tests/lite/unit/rendering-context-registration.test.ts`, `tests/lite/unit/swapchain-overlay.test.ts`, and `tests/lite/integration/utility-layer-overlay.spec.ts`; implementation `packages/babylon-lite/src/scene/overlay-scene.ts` and `swapchain-overlay.ts`.
-
-`tests/lite/unit/swapchain-overlay.test.ts` and `rendering-context-registration.test.ts` cover the explicit base when text or later scenes are registered last, late MSAA attachments, app `enabled` gates set in before-render callbacks, paused base tasks, replaced presentation tasks, post-process bases (including through a nested overlay chain), overlay and utility ordering, sibling order when nested overlays register before their root, absent ancestors, re-registration, disposal, overlapping registration, and ordinary scenes that clear instead of compositing. `tests/lite/integration/utility-layer-overlay.spec.ts` checks actual WebGPU pixels for overlay scenes, nested utility layers, text composition, and a later ordinary scene clearing the surface at sample counts 1 and 4, including utility-first registration.
+The implementation is `scene/overlay-scene.ts`; the previous `swapchain-overlay.ts` discovery module is removed. Registration grouping and absent-ancestor suspension remain opt-in. The overlay task borrows color and resolve targets, owns its independent depth, and uses the ordinary render-task execution path. Focused registration/attachment tests cover explicit post-process output, independent depth, single-sample output on an MSAA surface, live view replacement, borrowed ownership and API validation. Browser integration coverage retains nested layers and text ordering at 1x and 4x MSAA.
 
 ### Render Targets
 

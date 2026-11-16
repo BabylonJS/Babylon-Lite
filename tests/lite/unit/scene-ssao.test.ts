@@ -1,3 +1,4 @@
+import type { ScreenSpaceAmbientOcclusionPostProcessTask } from "../../../packages/babylon-lite/src/post-process/screen-space-ambient-occlusion";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildRenderTarget, createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -94,6 +95,40 @@ function buildRegisteredScene(scene: SceneContext): void {
 }
 
 describe("createSceneSsaoPipeline", () => {
+    it("accepts an explicit single-sample swapchain output", () => {
+        const { engine, scene, camera, tasks, scRT } = makeFixture(1);
+        const pipeline = createSceneSsaoPipeline({ targetTexture: scRT }, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+        expect((tasks[1] as ScreenSpaceAmbientOcclusionPostProcessTask).outputTexture).toBe(scRT);
+        detachSceneSsaoPipeline(pipeline);
+    });
+
+    it("uses a caller-owned final MSAA target without disposing it on detach", () => {
+        const { engine, scene, camera, tasks, scRT } = makeFixture(4);
+        const output = createRenderTarget({ format: "bgra8unorm", samples: 4, size: scene.surface });
+        const pipeline = createSceneSsaoPipeline({ targetTexture: output, resolveTexture: scRT }, engine, scene, camera);
+        attachSceneSsaoPipeline(pipeline);
+        const ao = tasks[2] as ScreenSpaceAmbientOcclusionPostProcessTask;
+        expect(ao.outputTexture).toBe(output);
+        expect(ao.resolveTexture).toBe(scRT);
+        buildRegisteredScene(scene);
+        const texture = output._colorTexture!;
+        const destroy = vi.spyOn(texture, "destroy");
+        detachSceneSsaoPipeline(pipeline);
+        expect(destroy).not.toHaveBeenCalled();
+        expect(output._colorTexture).toBe(texture);
+    });
+
+    it("rejects a resolve without a target and rolls back an aliased producer target", () => {
+        const { engine, scene, camera, defaultTask, tasks, scRT } = makeFixture(4);
+        expect(() => createSceneSsaoPipeline({ resolveTexture: scRT }, engine, scene, camera)).toThrow("explicit targetTexture");
+        const rt = defaultTask._config.rt;
+        const pipeline = createSceneSsaoPipeline({ targetTexture: rt }, engine, scene, camera);
+        expect(() => attachSceneSsaoPipeline(pipeline)).toThrow("differ from the scene render target");
+        expect(tasks).toEqual([defaultTask]);
+        expect(defaultTask._config.rt).toBe(rt);
+    });
+
     it("attaches a single-sample composite chain and restores the default task", () => {
         const { engine, scene, camera, defaultTask, tasks } = makeFixture(1);
         const pipeline = createSceneSsaoPipeline({ name: "ssao", radius: 3, intensity: 2, base: 0.25, fadeEnd: 40 }, engine, scene, camera);
@@ -118,16 +153,16 @@ describe("createSceneSsaoPipeline", () => {
         expect(scene._disposables).toHaveLength(0);
     });
 
-    it("creates MSAA color/depth resolve tasks and exposes the active resolver", () => {
+    it("creates MSAA color/depth resolve tasks", () => {
         const { engine, scene, camera, tasks, scRT } = makeFixture(4);
         const pipeline = createSceneSsaoPipeline({ name: "ssao" }, engine, scene, camera);
 
         attachSceneSsaoPipeline(pipeline);
 
         expect(tasks.map((task) => task.name)).toEqual(["scene", "ssao-depth-resolve", "ssao"]);
-        const output = tasks[2]!._getOutputInfo?.();
+        const output = tasks[2] as ScreenSpaceAmbientOcclusionPostProcessTask;
         expect(output?.resolveTexture).toBe(scRT);
-        expect(output?.colorTexture._descriptor.samples).toBe(4);
+        expect(output.outputTexture._descriptor.samples).toBe(4);
 
         disposeSceneSsaoPipeline(pipeline);
         expect(tasks.map((task) => task.name)).toEqual(["scene"]);
@@ -214,7 +249,7 @@ describe("createSceneSsaoPipeline", () => {
             samples > 1 ? ["scene", "scene-ssao-depth-resolve", "scene-ssao", "transmission-image-processing"] : ["scene", "scene-ssao", "transmission-image-processing"]
         );
         expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
-        expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
+        expect(scene._outputTexture).toBe((tasks[samples > 1 ? 2 : 1] as ScreenSpaceAmbientOcclusionPostProcessTask).outputTexture);
         const imageProcessing = tasks.at(-1) as unknown as Task & { _source: ImageProcessingSource };
         expect(imageProcessing._source).toBeTypeOf("function");
         expect((imageProcessing._source as () => unknown)()).toBe(scene._outputTexture);
@@ -231,7 +266,7 @@ describe("createSceneSsaoPipeline", () => {
             samples > 1 ? ["scene", "scene-ssao-depth-resolve", "scene-ssao", "transmission-image-processing"] : ["scene", "scene-ssao", "transmission-image-processing"]
         );
         expect(defaultTask._config.rt._descriptor.format).toBe("rgba16float");
-        expect(scene._outputTexture).toBe(tasks[samples > 1 ? 2 : 1]!._getOutputInfo?.()?.colorTexture);
+        expect(scene._outputTexture).toBe((tasks[samples > 1 ? 2 : 1] as ScreenSpaceAmbientOcclusionPostProcessTask).outputTexture);
         const imageProcessing = tasks.at(-1) as unknown as Task & { _source: ImageProcessingSource };
         expect((imageProcessing._source as () => unknown)()).toBe(scene._outputTexture);
     });

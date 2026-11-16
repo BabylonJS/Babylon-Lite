@@ -12,7 +12,7 @@ import {
 import { moveRenderingContext } from "../../../packages/babylon-lite/src/engine/rendering-context-order";
 import { createEffectRenderer, createEffectWrapper } from "../../../packages/babylon-lite/src/effect/effect-renderer";
 import { createFrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
-import { addTask, addTaskAtStart, removeTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
+import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { addToScene, createSceneContext, disposeScene, onBeforeRender, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -23,6 +23,10 @@ import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lit
 import { createUtilityLayer, disposeUtilityLayer, registerUtilityLayer } from "../../../packages/babylon-lite/src/gizmo/utility-layer";
 import { createOverlayScene } from "../../../packages/babylon-lite/src/scene/overlay-scene";
 import type { RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
+import { createRenderTarget, buildRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { enableRenderTaskTransmission, executePassWithTransmission, type RenderTaskTransmissionState } from "../../../packages/babylon-lite/src/frame-graph/transmission";
+import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import type { DrawBinding } from "../../../packages/babylon-lite/src/render/renderable";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -39,6 +43,7 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
         createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout,
         createBuffer: (descriptor: GPUBufferDescriptor) => ({ descriptor, destroy: () => undefined }) as unknown as GPUBuffer,
         createBindGroup: (descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup,
+        createRenderBundleEncoder: () => ({ setBindGroup: vi.fn(), finish: () => ({}) }),
         createTexture: (descriptor: GPUTextureDescriptor) =>
             ({
                 descriptor,
@@ -51,7 +56,7 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
     } as unknown as GPUDevice;
 
     const eng = {
-        canvas: {} as HTMLCanvasElement,
+        canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples,
         drawCallCount: 0,
         useHighPrecisionMatrix: false,
@@ -90,6 +95,10 @@ function drawOverlay(scene: SceneContext): void {
     scene._record();
 }
 
+function targets(scene: SceneContext) {
+    return scene.defaultRenderTask!.config;
+}
+
 function makeRenderingContext(): RenderingContext {
     return {
         _kind: "test",
@@ -108,7 +117,7 @@ describe("rendering context registration helpers", () => {
     it("returns a stable live view with public context kinds and scene names", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        const utility = createUtilityLayer(scene, { addDefaultLight: false });
+        const utility = createUtilityLayer(scene, { ...targets(scene), addDefaultLight: false });
         const frameGraph = createFrameGraphContext(engine);
         const effect = createEffectRenderer(
             engine,
@@ -158,6 +167,166 @@ describe("rendering context registration helpers", () => {
 });
 
 describe("registerScene / unregisterScene", () => {
+    it("exposes the default producer's live configuration without graph discovery", async () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const task = main.defaultRenderTask!;
+        task.config.clr = false;
+        await registerScene(main);
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), end: vi.fn() };
+        engine._currentEncoder = { beginRenderPass: vi.fn(() => pass) } as unknown as GPUCommandEncoder;
+        task.execute!();
+        expect(task._colorAttachment.loadOp).toBe("load");
+        expect(createSceneContext(engine, { defaultRenderTask: false }).defaultRenderTask).toBeUndefined();
+    });
+
+    it("sizes private depth from a swapchain's live surface, not its placeholder descriptor", async () => {
+        const engine = makeMockEngine(1);
+        engine.scRT._descriptor.size = { width: 0, height: 0 };
+        const main = createSceneContext(engine);
+        const overlay = createOverlayScene(main, { rt: engine.scRT });
+        await registerScene(overlay);
+        const depth = targets(overlay).depth!;
+        expect([depth._width, depth._height]).toEqual([800, 600]);
+    });
+
+    it("reuses scaled target sizing for independent overlay depth, including resize", async () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const rt = createRenderTarget({ format: engine.format, samples: 4, size: { surface: engine, scale: 0.5 } });
+        const overlay = createOverlayScene(main, { rt });
+        await registerScene(overlay);
+        const depth = targets(overlay).depth!;
+        expect([depth._width, depth._height]).toEqual([400, 300]);
+        engine.canvas.width = 1000;
+        engine.canvas.height = 700;
+        overlay._resize!();
+        expect([depth._width, depth._height]).toEqual([500, 350]);
+    });
+
+    it.each([1, 4])("loads an explicitly supplied final color instead of the base attachment at %ix", async (samples) => {
+        const engine = makeMockEngine(4);
+        const main = createSceneContext(engine);
+        const finalColor = createRenderTarget({ format: "rgba16float", samples, size: { width: 80, height: 60 } });
+        const resolve = samples > 1 ? createRenderTarget({ format: "rgba16float", samples: 1, size: { width: 80, height: 60 } }) : undefined;
+        buildRenderTarget(finalColor, engine);
+        if (resolve) {
+            buildRenderTarget(resolve, engine);
+        }
+        const overlay = createOverlayScene(main, { rt: finalColor, rst: resolve });
+        await registerScene(main);
+        await registerScene(overlay);
+        const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), end: vi.fn() };
+        const beginRenderPass = vi.fn(() => pass);
+        engine._currentEncoder = { beginRenderPass } as unknown as GPUCommandEncoder;
+
+        task.execute!();
+
+        expect(task._targetSignature._colorFormat).toBe("rgba16float");
+        expect(task._targetSignature._sampleCount).toBe(samples);
+        expect(task._colorAttachment).toMatchObject({ view: finalColor._colorView, resolveTarget: resolve?._colorView, loadOp: "load" });
+        expect(task._renderPassDescriptor.depthStencilAttachment?.depthLoadOp).toBe("clear");
+        expect(task._config.depth).not.toBe(finalColor);
+        expect(task._config.depth?._descriptor.samples).toBe(samples);
+        expect(task._updateContext).toMatchObject({ targetWidth: 80, targetHeight: 60 });
+        expect(beginRenderPass).toHaveBeenCalledOnce();
+        const oldView = finalColor._colorView;
+        buildRenderTarget(finalColor, engine);
+        task.execute!();
+        expect(task._colorAttachment.view).toBe(finalColor._colorView);
+        expect(task._colorAttachment.view).not.toBe(oldView);
+
+        const texture = finalColor._colorTexture!;
+        const destroy = vi.spyOn(texture, "destroy");
+        const destroyDepth = vi.spyOn(task._config.depth!._depthTexture!, "destroy");
+        disposeScene(overlay);
+        expect(destroy).not.toHaveBeenCalled();
+        expect(destroyDepth).toHaveBeenCalledOnce();
+        expect(finalColor._colorTexture).toBe(texture);
+    });
+
+    it("keeps a color attachment when an overlay is built before its explicit producer", async () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const overlay = createOverlayScene(main, targets(main));
+        await registerScene(overlay);
+        const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        expect(Array.from(task._renderPassDescriptor.colorAttachments)).toEqual([task._colorAttachment]);
+        await registerScene(main);
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), end: vi.fn() };
+        engine._currentEncoder = { beginRenderPass: vi.fn(() => pass) } as unknown as GPUCommandEncoder;
+        task.execute!();
+        expect(task._colorAttachment.view).toBe(targets(main).rt._colorView);
+    });
+
+    it("clears overlay depth on the first transmission segment and loads it on resumed segments", async () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const overlay = createOverlayScene(main, targets(main));
+        await registerScene(main);
+        await registerScene(overlay);
+        const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        const depthLoads: GPULoadOp[] = [];
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), setPipeline: vi.fn(), end: vi.fn() };
+        engine._currentEncoder = {
+            beginRenderPass: (descriptor: GPURenderPassDescriptor) => {
+                depthLoads.push(descriptor.depthStencilAttachment!.depthLoadOp!);
+                return pass;
+            },
+            copyTextureToTexture: vi.fn(),
+        } as unknown as GPUCommandEncoder;
+        const state = {
+            _copyCount: 1,
+            _copies: 0,
+            _generateMipmaps: false,
+            _sourceTexture: targets(main).rt._colorTexture,
+            texture: { texture: {}, width: 1, height: 1 },
+        } as RenderTaskTransmissionState;
+        task._transparentBindings = [{ renderable: { _transmissive: true }, pipeline: {}, draw: () => 1 } as unknown as DrawBinding];
+        task._executeWithTransmission = (samples) => executePassWithTransmission(task, engine, state, samples);
+        task.execute!();
+        expect(depthLoads).toEqual(["clear", "load"]);
+        expect(task._colorAttachment.view).toBe(targets(main).rt._colorView);
+    });
+
+    it("does not discover or disable tasks when the base producer is replaced or paused", async () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const selected = targets(main);
+        const overlay = createOverlayScene(main, selected);
+        await registerScene(main);
+        await registerScene(overlay);
+        main._frameGraph._tasks[0]!.executionEnabled = false;
+        const task = overlay._frameGraph._tasks[0] as RenderTaskBase;
+        const replacement = createRenderTask({ name: "replacement", rt: engine.scRT }, engine, main);
+        main._frameGraph._tasks = [replacement];
+        drawOverlay(overlay);
+        expect(task._config.rt).toBe(selected.rt);
+        expect(task.enabled).toBeUndefined();
+    });
+
+    it("rejects automatic transmission retargeting of borrowed overlay attachments", () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const selected = targets(main);
+        const overlay = createOverlayScene(main, selected);
+        const task = overlay._frameGraph._tasks[0] as RenderTask;
+        expect(() => enableRenderTaskTransmission(task, engine)).toThrow("cannot retarget borrowed color attachments");
+        expect(task._config.rt).toBe(selected.rt);
+        expect(task._config.rst).toBe(selected.rst);
+    });
+
+    it("rejects depth-only color targets and incompatible resolves at the API boundary", () => {
+        const engine = makeMockEngine();
+        const main = createSceneContext(engine);
+        const depth = createRenderTarget({ samples: 4, dFormat: "depth32float", size: engine });
+        expect(() => createOverlayScene(main, { rt: depth })).toThrow("color render target");
+        expect(() => createOverlayScene(main, { rt: engine.scRT, rst: engine.scRT })).toThrow("resolve target");
+        const rt = targets(main).rt;
+        expect(() => createOverlayScene(main, { rt, rst: rt })).toThrow("resolve target");
+    });
+
     it("does not duplicate a scene rendering context", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
@@ -176,7 +345,7 @@ describe("registerScene / unregisterScene", () => {
     it.each([1, 4])("does not reconfigure an overlay scene when registrations overlap at MSAA %i", async (samples) => {
         const engine = makeMockEngine(samples);
         const first = createSceneContext(engine);
-        const second = createOverlayScene(first);
+        const second = createOverlayScene(first, targets(first));
         await registerScene(first);
         let finish!: () => void;
         const pending = new Promise<void>((resolve) => (finish = resolve));
@@ -231,7 +400,7 @@ describe("registerScene / unregisterScene", () => {
     it("orders an overlay scene registered with shadow support before intervening text", async () => {
         const engine = makeMockEngine();
         const main = createSceneContext(engine);
-        const overlay = createOverlayScene(main);
+        const overlay = createOverlayScene(main, targets(main));
         const text = { ...makeRenderingContext(), _kind: "text-renderer" };
         const shadow = {
             name: "shadow",
@@ -256,7 +425,7 @@ describe("registerScene / unregisterScene", () => {
     it.each([1, 4])("does not accumulate overlay callbacks or cleanup when re-registering at MSAA %i", async (samples) => {
         const engine = makeMockEngine(samples);
         const first = createSceneContext(engine);
-        const second = createOverlayScene(first);
+        const second = createOverlayScene(first, targets(first));
         await registerScene(first);
         await registerScene(second);
         const cleanupCount = second._disposables.length;
@@ -271,41 +440,6 @@ describe("registerScene / unregisterScene", () => {
         expect(second._disposables).toHaveLength(0);
         expect(second._beforeRender).toHaveLength(0);
         disposeScene(first);
-    });
-
-    it.each([1, 4])("configures an overlay swapchain task replaced while unregistered at MSAA %i", async (samples) => {
-        const engine = makeMockEngine(samples);
-        const main = createSceneContext(engine);
-        const overlay = createOverlayScene(main);
-        await registerScene(main);
-        await registerScene(overlay);
-        const original = overlay._frameGraph._tasks[0] as RenderTaskBase;
-        drawOverlay(overlay);
-        if (samples > 1) {
-            expect(original._colorAttachment.view).toBe((main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view);
-        }
-
-        unregisterScene(overlay);
-        removeTask(overlay, original);
-        const { rt, rst, depth } = original._config;
-        const replacement = createRenderTask({ name: "scene", rt, rst, depth }, engine, overlay) as unknown as RenderTaskBase;
-        addTask(overlay, replacement as unknown as Task);
-        await registerScene(overlay);
-        drawOverlay(overlay);
-
-        const mainView = (main._frameGraph._tasks[0] as RenderTaskBase)._colorAttachment.view;
-        expect(replacement._config.clr).toBe(false);
-        expect(replacement.enabled).toBeUndefined();
-        expect(original._config.clr).toBe(true);
-        expect(original.enabled).toBeUndefined();
-        if (samples > 1) {
-            expect(replacement._colorAttachment.view).toBe(mainView);
-            expect(original._colorAttachment.view).toBe(original._config.rt._colorView);
-            expect(original._colorAttachment.view).not.toBe(mainView);
-        }
-        expect(overlay._beforeRender).toHaveLength(0);
-        disposeScene(overlay);
-        disposeScene(main);
     });
 
     describe("utility layer registration", () => {
@@ -338,8 +472,8 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("orders multiple layers after their main scene and before text at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const first = createUtilityLayer(main, { addDefaultLight: false });
-            const second = createUtilityLayer(main, { addDefaultLight: false });
+            const first = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
+            const second = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
             await registerScene(main);
             registerRenderingContext(engine, text);
@@ -371,9 +505,9 @@ describe("registerScene / unregisterScene", () => {
             const engine = makeMockEngine();
             const a = createSceneContext(engine);
             const b = createSceneContext(engine);
-            const a1 = createUtilityLayer(a, { addDefaultLight: false });
-            const a2 = createUtilityLayer(a, { addDefaultLight: false });
-            const b1 = createUtilityLayer(b, { addDefaultLight: false });
+            const a1 = createUtilityLayer(a, { ...targets(a), addDefaultLight: false });
+            const a2 = createUtilityLayer(a, { ...targets(a), addDefaultLight: false });
+            const b1 = createUtilityLayer(b, { ...targets(b), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
             await registerScene(a);
             await registerScene(b);
@@ -397,9 +531,9 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("keeps nested layers with their parent and suspends the entire absent-main chain at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const parent = createUtilityLayer(main, { addDefaultLight: false });
-            const nested = createUtilityLayer(parent.scene, { addDefaultLight: false });
-            const sibling = createUtilityLayer(main, { addDefaultLight: false });
+            const parent = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
+            const nested = createUtilityLayer(parent.scene, { ...targets(parent.scene), addDefaultLight: false });
+            const sibling = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
             const callback = vi.fn();
             const execute = vi.spyOn(nested.scene._frameGraph, "execute").mockReturnValue(3);
@@ -437,10 +571,10 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("preserves sibling order when nested layers register before their absent root at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const root = createSceneContext(engine);
-            const p1 = createOverlayScene(root);
-            const p2 = createOverlayScene(root);
-            const c1 = createUtilityLayer(p1, { addDefaultLight: false });
-            const c2 = createUtilityLayer(p1, { addDefaultLight: false });
+            const p1 = createOverlayScene(root, targets(root));
+            const p2 = createOverlayScene(root, targets(root));
+            const c1 = createUtilityLayer(p1, { ...targets(p1), addDefaultLight: false });
+            const c2 = createUtilityLayer(p1, { ...targets(p1), addDefaultLight: false });
 
             await registerUtilityLayer(c1);
             await registerScene(p2);
@@ -456,9 +590,9 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("restores child-first registration without using a descendant as the root base at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const parent = createUtilityLayer(main, { addDefaultLight: false });
-            const nested = createUtilityLayer(parent.scene, { addDefaultLight: false });
-            const sibling = createUtilityLayer(main, { addDefaultLight: false });
+            const parent = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
+            const nested = createUtilityLayer(parent.scene, { ...targets(parent.scene), addDefaultLight: false });
+            const sibling = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
             const contexts = [main, sibling.scene, parent.scene, nested.scene, text];
 
@@ -479,9 +613,9 @@ describe("registerScene / unregisterScene", () => {
             const main = createSceneContext(engine);
             const camera = { kind: "test-camera" } as unknown as SceneContext["camera"];
             main.camera = camera;
-            const first = createOverlayScene(main);
-            const second = createOverlayScene(main);
-            const utility = createUtilityLayer(first, { addDefaultLight: false });
+            const first = createOverlayScene(main, targets(main));
+            const second = createOverlayScene(main, targets(main));
+            const utility = createUtilityLayer(first, { ...targets(first), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
 
             expect(first.surface).toBe(engine);
@@ -499,7 +633,7 @@ describe("registerScene / unregisterScene", () => {
                 drawOverlay(overlay);
                 expect(defaultTask(overlay)._config.clr).toBe(false);
                 if (samples > 1) {
-                    expect(defaultTask(overlay)._colorAttachment.view).toBe(defaultTask(main)._colorAttachment.view);
+                    expect(defaultTask(overlay)._config.rt).toBe(defaultTask(main)._config.rt);
                 }
             }
             expect(defaultTask(main)._config.clr).toBe(true);
@@ -515,7 +649,7 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("does not accumulate overlay callbacks when a layer is re-registered at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             await registerScene(main);
             await registerUtilityLayer(utility);
             const callbackCount = utility.scene._beforeRender.length;
@@ -530,36 +664,10 @@ describe("registerScene / unregisterScene", () => {
             expect(defaultTask(utility.scene)._config.clr).toBe(false);
         });
 
-        it("skips only the frames recorded while its MSAA attachment is unavailable", async () => {
-            const engine = makeMockEngine();
-            const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
-            await registerScene(main);
-            await registerUtilityLayer(utility);
-            const task = defaultTask(main);
-            const overlayTask = defaultTask(utility.scene);
-            const seen: Array<boolean | undefined> = [];
-            vi.spyOn(utility.scene._frameGraph, "execute").mockImplementation(() => (seen.push(overlayTask.enabled), 0));
-            const resolveTarget = task._config.rst;
-            task._config.rst = undefined;
-            utility.scene._update();
-            utility.scene._record();
-            expect(seen).toEqual([false]);
-            expect(overlayTask.enabled).not.toBe(false);
-
-            unregisterScene(utility.scene);
-            await registerUtilityLayer(utility);
-            task._config.rst = resolveTarget;
-            utility.scene._update();
-            utility.scene._record();
-            expect(seen).toEqual([false, undefined]);
-            expect(overlayTask._config.clr).toBe(false);
-        });
-
         it.each([1, 4])("respects an app's before-render enabled gate on the overlay task at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const overlay = createOverlayScene(main);
+            const overlay = createOverlayScene(main, targets(main));
             await registerScene(main);
             await registerScene(overlay);
             const task = defaultTask(overlay);
@@ -582,34 +690,12 @@ describe("registerScene / unregisterScene", () => {
             }
         });
 
-        it("skips an MSAA overlay while its base scene's task execution is paused", async () => {
-            const engine = makeMockEngine(4);
-            const main = createSceneContext(engine);
-            const overlay = createOverlayScene(main);
-            await registerScene(main);
-            await registerScene(overlay);
-            const baseTask = defaultTask(main);
-            const task = defaultTask(overlay);
-            const seen: Array<boolean | undefined> = [];
-            vi.spyOn(overlay._frameGraph, "execute").mockImplementation(() => (seen.push(task.enabled), 0));
-
-            for (const paused of [false, true, false]) {
-                baseTask.executionEnabled = !paused;
-                overlay._update();
-                overlay._record();
-            }
-
-            expect(seen).toEqual([undefined, false, undefined]);
-            expect(task.enabled).toBeUndefined();
-            expect(task._colorAttachment.view).toBe(baseTask._colorAttachment.view);
-        });
-
         it("orders the layer on its main scene's surface", async () => {
             const engine = makeMockEngine();
             const surface = makeMockEngine();
             Object.assign(surface, { engine });
             const main = createSceneContext(surface);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const text = { ...makeRenderingContext(), _kind: "text-renderer" };
             await registerScene(main);
             registerRenderingContext(surface, text);
@@ -623,7 +709,7 @@ describe("registerScene / unregisterScene", () => {
         it.each([1, 4])("stays inert while its main scene is not registered at MSAA %i", async (samples) => {
             const engine = makeMockEngine(samples);
             const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const callback = vi.fn();
             const execute = vi.spyOn(utility.scene._frameGraph, "execute").mockReturnValue(3);
             utility.scene._beforeRender.push(callback);
@@ -673,7 +759,7 @@ describe("registerScene / unregisterScene", () => {
         it("restores overlay ordering when a main scene registers with shadow support", async () => {
             const engine = makeMockEngine();
             const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             const shadow = {
                 name: "shadow",
                 engine,
@@ -691,7 +777,7 @@ describe("registerScene / unregisterScene", () => {
         it("does not revive a layer disposed during asynchronous registration", async () => {
             const engine = makeMockEngine();
             const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             await registerScene(main);
             let finish!: () => void;
             const pending = new Promise<void>((resolve) => (finish = resolve));
@@ -707,7 +793,7 @@ describe("registerScene / unregisterScene", () => {
         it.each([false, true])("does not duplicate callbacks when layer registrations overlap, utility-first=%s", async (utilityFirst) => {
             const engine = makeMockEngine();
             const main = createSceneContext(engine);
-            const utility = createUtilityLayer(main, { addDefaultLight: false });
+            const utility = createUtilityLayer(main, { ...targets(main), addDefaultLight: false });
             if (!utilityFirst) {
                 await registerScene(main);
             }

@@ -19,6 +19,10 @@ export interface SceneSsaoPipelineOptions {
     intensity?: number;
     base?: number;
     fadeEnd?: number;
+    /** Caller-owned final color target, for explicit post-process/overlay composition. */
+    targetTexture?: RenderTarget;
+    /** Optional single-sample resolve destination for a multisample targetTexture. */
+    resolveTexture?: RenderTarget;
 }
 
 /** Native scene-output ambient-occlusion controller used by API adapters. */
@@ -47,6 +51,8 @@ interface SceneSsaoPipelineState {
     _aoTask: ScreenSpaceAmbientOcclusionPostProcessTask | null;
     _gate: (() => void) | null;
     _sceneDispose: (() => void) | null;
+    _targetTexture?: RenderTarget;
+    _resolveTexture?: RenderTarget;
 }
 
 interface SceneWithSsao extends SceneContext {
@@ -65,6 +71,9 @@ function pipelineState(pipeline: SceneSsaoPipeline): SceneSsaoPipelineState {
 
 /** Create an initially detached native scene-output SSAO pipeline. */
 export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engine: EngineContext, scene: SceneContext, camera: Camera): SceneSsaoPipeline {
+    if (options.resolveTexture && !options.targetTexture) {
+        throw new Error("SceneSsaoPipeline resolveTexture requires an explicit targetTexture.");
+    }
     const pipeline: SceneSsaoPipeline = {
         name: options.name ?? "scene-ssao",
         camera,
@@ -89,6 +98,8 @@ export function createSceneSsaoPipeline(options: SceneSsaoPipelineOptions, engin
         _aoTask: null,
         _gate: null,
         _sceneDispose: null,
+        _targetTexture: options.targetTexture,
+        _resolveTexture: options.resolveTexture,
     };
     (_pipelineStates ??= new WeakMap()).set(pipeline, state);
     return pipeline;
@@ -200,6 +211,9 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
     const render = state._defaultTask!;
     const config = render._config;
     const baseRt = config.rt;
+    if (state._targetTexture === baseRt && baseRt._descriptor.samples > 1) {
+        throw new Error("SceneSsaoPipeline targetTexture must differ from the scene render target.");
+    }
     const multisampled = (baseRt._descriptor.samples ?? 1) > 1;
     const transmission = getFrameGraphTasks(scene._frameGraph).some((task) => task.name === "transmission-image-processing");
     state._baseRt = baseRt;
@@ -227,15 +241,16 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
     }
 
     const output =
-        transmission || multisampled
+        state._targetTexture ??
+        (transmission || multisampled
             ? createRenderTarget({
                   lbl: `${pipeline.name}-output${multisampled && !transmission ? "-msaa" : ""}`,
                   format: baseRt._descriptor.format ?? surface.format,
                   samples: multisampled && !transmission ? surface.msaaSamples : 1,
                   size: surface,
               })
-            : surface.scRT;
-    if (output !== surface.scRT) {
+            : surface.scRT);
+    if (output !== surface.scRT && !state._targetTexture) {
         state._ownedTargets.push(output);
     }
     if (transmission) {
@@ -247,7 +262,7 @@ function createTasks(pipeline: SceneSsaoPipeline, state: SceneSsaoPipelineState)
             sourceTexture: source,
             depthTexture: depth,
             targetTexture: output,
-            resolveTexture: multisampled && !transmission ? surface.scRT : null,
+            resolveTexture: state._targetTexture ? (state._resolveTexture ?? null) : multisampled && !transmission ? surface.scRT : null,
             camera: pipeline.camera,
             resolutionScale: pipeline.resolutionScale,
             radius: pipeline.radius,
