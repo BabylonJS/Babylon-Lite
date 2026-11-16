@@ -197,6 +197,18 @@ export class Color4 {
         return [this.r, this.g, this.b, this.a];
     }
 
+    public toHexString(returnAsColor3 = false): string {
+        const intR = Math.round(Math.min(Math.max(this.r, 0), 1) * 255);
+        const intG = Math.round(Math.min(Math.max(this.g, 0), 1) * 255);
+        const intB = Math.round(Math.min(Math.max(this.b, 0), 1) * 255);
+        const rgb = "#" + toHex(intR) + toHex(intG) + toHex(intB);
+        if (returnAsColor3) {
+            return rgb;
+        }
+        const intA = Math.round(Math.min(Math.max(this.a, 0), 1) * 255);
+        return rgb + toHex(intA);
+    }
+
     public static FromArray(array: ArrayLike<number>, offset = 0): Color4 {
         return new Color4(array[offset] ?? 0, array[offset + 1] ?? 0, array[offset + 2] ?? 0, array[offset + 3] ?? 1);
     }
