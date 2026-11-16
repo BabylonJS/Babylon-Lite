@@ -48,6 +48,7 @@ import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { ensureSceneLightState, refreshSceneLightsUBO } from "../render/scene-lights-ubo.js";
 import type { Task } from "./task.js";
+import type { createTransmissionDepthGrab } from "./transmission-depth-grab.js";
 import { drawBindingLifecycle } from "../render/draw-binding-lifecycle.js";
 
 /** Configuration for `createRenderTask`: render target, clear state, optional camera override, and transmission settings. */
@@ -174,6 +175,8 @@ export interface RenderTask extends Task {
      *  renderables. Present only when the task was configured with `transmission`. Returns the number of draw calls issued. */
     /** @internal */
     _executeWithTransmission?(sampleCount: number): number;
+    /** @internal Installed per task by the lazy depth-grab preload. */
+    _createTransmissionDepthGrab?: typeof createTransmissionDepthGrab;
     /** @internal */
     _targetSignature: RenderTargetSignature;
     /** @internal Pass dimensions and camera shared with binding updates. */

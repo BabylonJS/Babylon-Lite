@@ -228,6 +228,10 @@ For post-processing, calculate AO and blur in single-sample textures, then write
 
 Transmission on a borrowed target must use `enableRenderTaskTransmission(task, engine, { linear: false })` and an explicitly configured linear/tone-mapping chain. Automatic linear-offscreen retargeting rejects borrowed targets rather than replacing their color destination. Segmented transmission clears the overlay's private depth on the first segment and loads it on resumed segments, independently of color load.
 
+Transmission source bindings are refreshed from the declared color and effective depth targets immediately before a grab when their GPU textures change. This supports an overlay recorded before its borrowed color producer is built, without rebinding unchanged sources or doing source-refresh work on frames with no grab. `grabDepth: true` snapshots `config.depth ?? config.rt`, matching the actual pass attachment rather than the borrowed color target's possibly unrelated depth.
+
+Depth-grab source tracking, publication and resource lifetime belong entirely to the lazily imported depth-grab module. The opt-in task preload supplies its factory; each recording creates a private depth controller from the declared depth target. Transmission invokes optional synchronize/record/dispose hooks without retaining depth-grab interpretation or a module-level registration side effect. Color blit sizing reads the source target directly when rebuilding its binding, rather than duplicating target dimensions in cached state.
+
 Migration: allocate the intended color target, pass it to `createRenderTask`, and pass `{ rt, rst }` to every sibling/nested overlay sharing it. A depth-bearing producer target can be borrowed safely: overlays always use their own separate depth. A replacement overlay task must itself specify `clr: false` and borrowed target ownership.
 
 #### Module: overlay scene

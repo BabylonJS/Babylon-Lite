@@ -128,7 +128,7 @@ describe("createSceneSsaoPipeline", () => {
         const destroy = vi.spyOn(source, "destroy");
         const material = { _linearImageProcessing: false, _renderFeatures: {} };
         const features = material._renderFeatures;
-        scene.meshes.push({ material } as unknown as Mesh);
+        scene.meshes.push({ material } as unknown as Mesh, { material } as unknown as Mesh);
 
         expect(() => enableSceneTransmission(scene, engine)).toThrow("automatic scene transmission");
 

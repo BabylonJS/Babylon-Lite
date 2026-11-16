@@ -46,6 +46,10 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
         createBuffer: (descriptor: GPUBufferDescriptor) => ({ descriptor, destroy: () => undefined }) as unknown as GPUBuffer,
         createBindGroup: (descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup,
         createRenderBundleEncoder: () => ({ setBindGroup: vi.fn(), finish: () => ({}) }),
+        createSampler: () => ({}) as GPUSampler,
+        createShaderModule: (descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule,
+        createPipelineLayout: (descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout,
+        createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline,
         createTexture: (descriptor: GPUTextureDescriptor) => {
             const size = descriptor.size as GPUExtent3DDict;
             return {
@@ -58,7 +62,7 @@ function makeMockEngine(msaaSamples = 4): EngineContext {
                 dimension: descriptor.dimension ?? "2d",
                 format: descriptor.format,
                 usage: descriptor.usage,
-                createView: () => ({}) as GPUTextureView,
+                createView: vi.fn(() => ({}) as GPUTextureView),
                 destroy: () => undefined,
             } as unknown as GPUTexture;
         },
@@ -327,6 +331,73 @@ describe("registerScene / unregisterScene", () => {
         expect(depthLoads).toEqual(["clear", "load"]);
         expect(task._colorAttachment.view).toBe(rt._colorView);
         expect(bundle).toHaveBeenLastCalledWith(expect.objectContaining({ depthStencilFormat: "depth24plus-stencil8", sampleCount: 4 }));
+    });
+
+    it("refreshes a late and subsequently replaced borrowed color source through the transmission enabler", async () => {
+        const engine = makeMockEngine(4);
+        const main = createSceneContext(engine);
+        const overlay = createOverlayScene(main, targets(main));
+        const task = overlay.defaultRenderTask!;
+        const grab = enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        await registerScene(overlay);
+        expect(task.config.rt._colorTexture).toBeNull();
+        await registerScene(main);
+        const source = task.config.rt._colorTexture!;
+        vi.mocked(source.createView).mockClear();
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), setPipeline: vi.fn(), draw: vi.fn(), end: vi.fn() };
+        engine._currentEncoder = { beginRenderPass: vi.fn(() => pass) } as unknown as GPUCommandEncoder;
+        task._transparentBindings = [{ renderable: { _transmissive: true }, pipeline: {}, draw: () => 1 } as unknown as DrawBinding];
+        const output = grab.texture;
+
+        expect(() => task.execute!()).not.toThrow();
+        expect(source.createView).toHaveBeenCalledOnce();
+        expect(() => task.execute!()).not.toThrow();
+        expect(source.createView).toHaveBeenCalledOnce();
+
+        buildRenderTarget(task.config.rt, engine);
+        const replacement = task.config.rt._colorTexture!;
+        vi.mocked(replacement.createView).mockClear();
+        expect(() => task.execute!()).not.toThrow();
+        expect(replacement.createView).toHaveBeenCalledOnce();
+        expect(grab.texture).toBe(output);
+    });
+
+    it.each([1, 4])("grabs the overlay's private depth through the real transmission enabler at %ix", async (samples) => {
+        const engine = makeMockEngine(samples);
+        const main = createSceneContext(engine);
+        const rt = createRenderTarget({
+            format: engine.format,
+            dFormat: samples > 1 ? "depth24plus-stencil8" : undefined,
+            samples,
+            size: { width: 80, height: 60 },
+        });
+        buildRenderTarget(rt, engine);
+        const overlay = createOverlayScene(main, { rt });
+        const task = overlay.defaultRenderTask!;
+        enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        const grab = enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false, grabDepth: true });
+        await registerScene(main);
+        await registerScene(overlay);
+        const depth = task.config.depth!._depthTexture!;
+        const pass = { setBindGroup: vi.fn(), executeBundles: vi.fn(), setPipeline: vi.fn(), draw: vi.fn(), end: vi.fn() };
+        engine._currentEncoder = { beginRenderPass: vi.fn(() => pass) } as unknown as GPUCommandEncoder;
+        task._transparentBindings = [{ renderable: { _transmissive: true }, pipeline: {}, draw: () => 1 } as unknown as DrawBinding];
+
+        expect(grab.depthTexture).not.toBeNull();
+        expect(grab.depthTexture).toMatchObject({ width: 80, height: 60 });
+        expect(depth.createView).toHaveBeenCalledWith({ aspect: "depth-only" });
+        if (rt._depthTexture) {
+            expect(rt._depthTexture.createView).not.toHaveBeenCalledWith({ aspect: "depth-only" });
+        }
+        expect(() => task.execute!()).not.toThrow();
+        expect(pass.draw).toHaveBeenCalledWith(3);
+        const snapshot = grab.depthTexture;
+        buildRenderTarget(rt, engine);
+        expect(() => task.execute!()).not.toThrow();
+        expect(grab.depthTexture).toBe(snapshot);
+        enableRenderTaskTransmission(task, engine, { linear: false, grabDepth: false });
+        task.record();
+        expect(grab.depthTexture).toBeNull();
     });
 
     it("does not discover or disable tasks when the base producer is replaced or paused", async () => {
