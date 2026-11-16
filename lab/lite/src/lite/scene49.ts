@@ -103,6 +103,8 @@ async function main(): Promise<void> {
     const captureMode = new URLSearchParams(location.search).has("capture");
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
+    const { rt, rst } = scene.defaultRenderTask!.config;
+    const targets = { rt, rst };
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 14, { x: 1.2, y: 0, z: 0 });
     scene.camera = camera;
@@ -217,7 +219,7 @@ async function main(): Promise<void> {
 
     // Interactive rotation gizmo — created lazily on first cylinder click so the static
     // capture frame contains no gizmo. Both cylinders are attachable.
-    const utilityLayer = createUtilityLayer(scene);
+    const utilityLayer = createUtilityLayer(scene, targets);
     await registerUtilityLayer(utilityLayer);
     const picker = createGpuPicker(scene);
     let rotationGizmo: RotationGizmo | null = null;

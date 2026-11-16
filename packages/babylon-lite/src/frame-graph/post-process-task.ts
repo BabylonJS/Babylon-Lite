@@ -124,7 +124,6 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
         _uniformData: null,
         _renderPassDescriptor: { label: config.name ?? "post-process", colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _getOutputInfo: () => ({ colorTexture: task.outputTexture, resolveTexture: task.resolveTexture ?? undefined }),
         record(): void {
             prepareOutputTarget(task);
             buildRenderTarget(task.outputTexture, engine);

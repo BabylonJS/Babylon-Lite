@@ -37,6 +37,8 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const scene = createSceneContext(engine);
+    const { rt, rst } = scene.defaultRenderTask!.config;
+    const targets = { rt, rst };
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 14, { x: 0, y: 1, z: 0 });
@@ -96,7 +98,7 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
 
-    const utilityLayer = createUtilityLayer(scene);
+    const utilityLayer = createUtilityLayer(scene, targets);
     const bbox = createBoundingBoxGizmo(engine, utilityLayer, { color: [1, 1, 0.4] });
     attachBoundingBoxGizmoToNode(bbox, root);
 

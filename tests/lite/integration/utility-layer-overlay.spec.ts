@@ -30,11 +30,13 @@ for (const samples of [1, 4] as const) {
                     const gpuErrors: string[] = [];
                     engine._device.addEventListener("uncapturederror", (event) => gpuErrors.push(event.error.message));
                     const main = lite.createSceneContext(engine);
+                    const { rt, rst } = main.defaultRenderTask!.config;
+                    const targets = { rt, rst };
                     main.clearColor = { r: 0.2, g: 0.3, b: 0.4, a: 1 };
                     main.camera = lite.createFreeCamera({ x: 0, y: 0, z: -8 }, { x: 0, y: 0, z: 0 });
-                    const first = lite.createUtilityLayer(main, { addDefaultLight: false });
-                    const nested = lite.createUtilityLayer(first.scene, { addDefaultLight: false });
-                    const second = lite.createUtilityLayer(main, { addDefaultLight: false });
+                    const first = lite.createUtilityLayer(main, { ...targets, addDefaultLight: false });
+                    const nested = lite.createUtilityLayer(first.scene, { ...targets, addDefaultLight: false });
+                    const second = lite.createUtilityLayer(main, { ...targets, addDefaultLight: false });
                     const box = (scene: Lite.SceneContext, x: number, color: [number, number, number], size: number): Lite.Mesh => {
                         const mesh = lite.createBox(engine, size);
                         mesh.position.set(x, 0, 0);
@@ -187,9 +189,11 @@ for (const samples of [1, 4] as const) {
                 const gpuErrors: string[] = [];
                 engine._device.addEventListener("uncapturederror", (event) => gpuErrors.push(event.error.message));
                 const main = lite.createSceneContext(engine);
+                const { rt, rst } = main.defaultRenderTask!.config;
+                const targets = { rt, rst };
                 main.clearColor = { r: 0.2, g: 0.3, b: 0.4, a: 1 };
                 main.camera = lite.createFreeCamera({ x: 0, y: 0, z: -8 }, { x: 0, y: 0, z: 0 });
-                const overlay = lite.createOverlayScene(main);
+                const overlay = lite.createOverlayScene(main, targets);
                 // A camera looking from behind mirrors x, proving the overlay does not follow the base camera.
                 overlay.camera = lite.createFreeCamera({ x: 0, y: 0, z: 8 }, { x: 0, y: 0, z: 0 });
                 const box = (scene: Lite.SceneContext, x: number, color: [number, number, number], size: number): void => {
