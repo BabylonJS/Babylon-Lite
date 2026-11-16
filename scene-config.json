@@ -3204,6 +3204,7 @@
         "id": 355,
         "slug": "scene355-ssao-orthographic",
         "name": "Scene 355 - Screen-Space Ambient Occlusion (Orthographic Kitchen)",
+        "thumbnailUrl": "https://raw.githubusercontent.com/BabylonJS/Assets/009e86c5c2e354d6b335718d6acc5026c615bc5e/textures/lite/scene355.jpg",
         "maxMad": 7,
         "maxRawKB": 180,
         "description": "The same Diligent Kitchen, lighting, Half-resolution XeGTAO settings and deterministic history as scene 348, using an orthographic camera. Compared against the matching orthographic Babylon.js SSAO2 reference.",

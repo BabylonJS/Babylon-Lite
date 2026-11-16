@@ -1231,6 +1231,11 @@ commit URL through `thumbnailUrl` in `demos-config.json`. The standalone gallery
 lab Demos tab, and `/pages/` development preview HTML-escape this optional override
 and preserve their existing local JPG paths for demos without one. New gallery
 images belong in Assets, not in Lite's visual regression baseline locations.
+Scene 355 likewise uses an immutable Assets JPEG through `thumbnailUrl` in
+`scene-config.json`. The shared scene-card renderer uses this escaped override
+across the source, bundle, performance and compatibility grids; scenes without
+an override retain their experience-relative local JPG path. Its parity-reference
+PNG remains separate and unchanged.
 The **Direct light** toggle adds a directional light to demonstrate that AO
 does not attenuate direct illumination. Its runtime intensity changes use
 `setLightIntensity` so the shared light UBO is invalidated. It has no visible
