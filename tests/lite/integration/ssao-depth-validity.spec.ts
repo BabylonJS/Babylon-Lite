@@ -234,7 +234,10 @@ for (const axis of [0, 1] as const) {
             device.queue.writeTexture({ texture: normals }, normalData, { bytesPerRow: width * 16 }, [width, width]);
             const owner = api.createSsaoGpu(device, width, width, "float", true);
             api.bindSsaoGpuSources(owner, raw.createView(), normals.createView());
-            const parameters = { depthMultiply: -1, depthAdd: -0.1, tanX, tanY, orthographic: true, offsetX: 2, offsetY: -1, radius: 4 / 1.457, intensity: 1 };
+            const parameters = { depthMultiply: -1, depthAdd: -0.1, tanX, tanY, orthographic: true, offsetX: 2, offsetY: -1, radius: 4, intensity: 1 };
+            api.writeSsaoGpuParameters(owner, parameters);
+            const radiusMultiplier = owner.data[16]!;
+            parameters.radius /= radiusMultiplier;
             const readback = device.createBuffer({ size: 8 * 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
             // The narrow strip is inside the world-space radius, but beyond an X-only vertical search.
             for (let y = 0; y < width; y++) {
@@ -271,7 +274,7 @@ for (const axis of [0, 1] as const) {
             }
             device.queue.writeTexture({ texture: raw }, depths, { bytesPerRow: width * 4 }, [width, width]);
             device.queue.writeTexture({ texture: velocity }, velocityData, { bytesPerRow: width * 16 }, [width, width]);
-            api.writeSsaoGpuParameters(owner, { ...parameters, radius: 3 / 1.457 });
+            api.writeSsaoGpuParameters(owner, { ...parameters, radius: 3 / radiusMultiplier });
             const velocityView = velocity.createView();
             const state = api.createXegtaoTemporalGpu(owner, velocityView, true, true);
             const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
