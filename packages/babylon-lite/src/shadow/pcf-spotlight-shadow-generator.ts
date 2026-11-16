@@ -20,7 +20,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { SpotLight } from "../light/spot-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
-import { buildLightViewMatrix, createSharedShadowUBO, createShadowParamsUBO, multiply4x4 } from "./shadow-base.js";
+import { getShadowLightView, createSharedShadowUBO, createShadowParamsUBO, multiply4x4 } from "./shadow-base.js";
 import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap, type PcfLightMatrix, type PcfTaskState } from "./pcf-shadow-task-hooks.js";
 
 /** Configuration for a spot-light PCF shadow generator: map size, depth bias, darkness, and projection near/far planes. */
@@ -42,12 +42,7 @@ export interface PcfSpotlightShadowGeneratorConfig {
  *  (offset subtracted from the spot position) so the returned view/viewProj match the
  *  eye-relative mesh world matrices used by both the caster pass and the receiver shader. */
 export function _computeSpotLightMatrix(light: SpotLight, near: number, far: number, offX = 0, offY = 0, offZ = 0): PcfLightMatrix {
-    const world = light.worldMatrix;
-    const direction = light.direction;
-    const dx = world[0]! * direction.x + world[4]! * direction.y + world[8]! * direction.z;
-    const dy = world[1]! * direction.x + world[5]! * direction.y + world[9]! * direction.z;
-    const dz = world[2]! * direction.x + world[6]! * direction.y + world[10]! * direction.z;
-    const view = buildLightViewMatrix(dx, dy, dz, world[12]! - offX, world[13]! - offY, world[14]! - offZ);
+    const view = getShadowLightView(light, offX, offY, offZ);
     const f = 1.0 / Math.tan(light.angle * 0.5);
     const proj = new F32(16);
     proj[0] = f;

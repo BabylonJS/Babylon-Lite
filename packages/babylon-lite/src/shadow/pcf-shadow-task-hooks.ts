@@ -10,10 +10,9 @@ import type { SpotLight } from "../light/spot-light.js";
 import { _enableTaskMeshPopulation, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
-import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
+import { _preloadRegisteredShadowCasters } from "../frame-graph/shadow-inputs.js";
 import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 export interface PcfLightMatrix {
@@ -80,8 +79,7 @@ let createPbrNoColorMaterialView: PbrNoColorFactory;
 let createNodeNoColorMaterialView: NodeNoColorFactory;
 let createShaderNoColorMaterialView: ShaderNoColorFactory;
 
-export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
-    const loads: Promise<void>[] = [];
+export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[], loads: Promise<void>[] = []): Promise<void> {
     let needsStandard = false;
     let needsPbr = false;
     let needsNode = false;
@@ -276,10 +274,7 @@ export function holdShadowCaster(scene: SceneContext, sg: ShadowGenerator, mater
     if (!hasNoColorViewFactory(terminal)) {
         // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One
         // preload covers every family of the set, and it parks the generator synchronously, so later casters skip it.
-        const registered = _getShadowTaskCasterMeshes(sg);
-        if (registered && !sg._preloadPending) {
-            setShadowTaskCasterMeshes(sg, registered);
-        }
+        _preloadRegisteredShadowCasters(sg);
         return true;
     }
     return terminal === material && !resolveMeshRebuild(scene, terminal._buildGroup);
@@ -365,7 +360,7 @@ export function renderPcfShadowMap(
     }
     const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion || foChanged;
     if (matrixChanged) {
-        packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
+        sg._lightMatrix.set(matrix._viewProj);
         sg._version++;
         writeShadowUboFields(state._shadowUboData, sg);
         engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._shadowUboData as Float32Array<ArrayBuffer>);

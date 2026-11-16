@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { MorphTargetData } from "../../../packages/babylon-lite/src/animation/types";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstanceCount, setThinInstanceMatrix, setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { computeDirectionalLightMatrix, preloadDirectionalShadowBounds } from "../../../packages/babylon-lite/src/shadow/shadow-base";
-import { getThinInstanceWorldBounds } from "../../../packages/babylon-lite/src/shadow/thin-instance-shadow-bounds";
+import { getDirectionalShadowCaster, getShadowCasterWorldBounds, getThinInstanceWorldBounds } from "../../../packages/babylon-lite/src/shadow/thin-instance-shadow-bounds";
 
 function matrix(scale = 1, x = 0): Mat4 {
     return new Float32Array([scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, x, 0, 0, 1]) as unknown as Mat4;
@@ -48,7 +50,117 @@ function engineStub(): EngineContext {
     } as unknown as EngineContext;
 }
 
+function transformPoint(transform: ArrayLike<number>, point: number[]): number[] {
+    return [0, 1, 2].map((axis) => transform[axis]! * point[0]! + transform[4 + axis]! * point[1]! + transform[8 + axis]! * point[2]! + transform[12 + axis]!);
+}
+
+function boxCorners(mesh: Mesh): number[][] {
+    return Array.from({ length: 8 }, (_, corner) => [0, 1, 2].map((axis) => (corner & (1 << axis) ? mesh.boundMax![axis]! : mesh.boundMin![axis]!)));
+}
+
+function extrema(points: number[][]): { min: number[]; max: number[] } {
+    return {
+        min: [0, 1, 2].map((axis) => Math.min(...points.map((point) => point[axis]!))),
+        max: [0, 1, 2].map((axis) => Math.max(...points.map((point) => point[axis]!))),
+    };
+}
+
 describe("directional thin-instance shadow bounds", () => {
+    it("preserves ESM blur tap selection across kernel quantization boundaries", async () => {
+        const { createEsmDirectionalShadowGenerator } = await import("../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator");
+        const engine = engineStub();
+        const shader = vi.spyOn(engine._device, "createShaderModule");
+        for (const requested of [1, 2, 3, 3.5, 4, 5, 6, 7, 7.5, 8, 63, 64, 65, 67, 68]) {
+            const rounded = Math.round(Math.max(requested, 1));
+            const candidates = [rounded, rounded - 1, rounded + 1, rounded - 2, rounded + 2];
+            const expectedKernel = Math.max(
+                candidates.find((candidate) => candidate > 0 && candidate % 4 === 1)!,
+                3
+            );
+            createEsmDirectionalShadowGenerator(engine, createDirectionalLight([0, 0, 1]), { blurKernel: requested });
+            const code = shader.mock.calls.at(-1)![0].code;
+            const offsets = code.match(/OFFSETS=array<f32,(\d+)>/);
+            expect(offsets).not.toBeNull();
+            expect(Number(offsets![1])).toBe(Math.ceil(expectedKernel / 2));
+        }
+    });
+
+    it("maps the configured near and far planes to the full WebGPU depth range", () => {
+        const near = 3;
+        const far = 53;
+        const light = createDirectionalLight([0, 0, 1]);
+        light.position.z = 7;
+        const fit = computeDirectionalLightMatrix(light, [caster()], near, far);
+        expect(transformPoint(fit._viewProj, [0, 0, light.position.z + near])[2]).toBeCloseTo(0);
+        expect(transformPoint(fit._viewProj, [0, 0, light.position.z + far])[2]).toBeCloseTo(1);
+    });
+
+    it("caches ordinary caster bounds for camera-only refits and observes geometry and world changes", () => {
+        const mesh = caster();
+        mesh.position.x = 7;
+        const first = getShadowCasterWorldBounds(mesh)!;
+        const expected = extrema(boxCorners(mesh).map((point) => transformPoint(mesh.worldMatrix, point)));
+        expect(first.min).toEqual(expected.min);
+        expect(first.max).toEqual(expected.max);
+        const world = vi.spyOn(mesh, "worldMatrix", "get");
+        expect(getShadowCasterWorldBounds(mesh)).toBe(first);
+        expect(world).not.toHaveBeenCalled();
+        mesh.position.x++;
+        expect(getShadowCasterWorldBounds(mesh)!.min[0]).toBe(expected.min[0]! + 1);
+        mesh.boundMin![0] -= 2;
+        expect(getShadowCasterWorldBounds(mesh)!.min[0]).toBe(expected.min[0]! - 1);
+        world.mockRestore();
+    });
+
+    it("reuses lazy fit adapters without changing the source bounds or wrapping ordinary casters", () => {
+        const plain = caster();
+        expect(getDirectionalShadowCaster(plain)).toBe(plain);
+        const mesh = instances(matrix(0.01));
+        const adapter = getDirectionalShadowCaster(mesh)!;
+        expect(getDirectionalShadowCaster(mesh)).toBe(adapter);
+        expect(adapter.boundMin).toBe(getThinInstanceWorldBounds(mesh)!.min);
+        setThinInstanceMatrix(mesh, 0, matrix(0.01, 2));
+        expect(getDirectionalShadowCaster(mesh)).toBe(adapter);
+        expect(adapter.boundMin![0]).toBeCloseTo(1.5);
+        expect(mesh.boundMin).not.toBe(adapter.boundMin);
+    });
+
+    it("matches the eight-corner projection for mirrored, rotated and sheared mesh transforms", () => {
+        const mesh = caster();
+        mesh.boundMin = [-2, -1, -0.5];
+        mesh.boundMax = [1, 3, 2];
+        mesh.position.set(7, -3, 4);
+        mesh.rotation.set(0.7, -0.4, 0.3);
+        mesh.scaling.set(-2, 0.5, 1.5);
+        mesh.parent = initMeshTransform({}, 3, -4, 5, 0.3, 0.2, 0.1, 2, -1, 0.7);
+        const light = createDirectionalLight([0.3, -0.9, 0.1]);
+        const fit = computeDirectionalLightMatrix(light, [mesh], 1, 100);
+        const projected = extrema(boxCorners(mesh).map((point) => transformPoint(fit._viewProj, transformPoint(mesh.worldMatrix, point))));
+        const control = caster();
+        const controlFit = computeDirectionalLightMatrix(light, [control], 1, 100);
+        const expected = extrema(boxCorners(control).map((point) => transformPoint(controlFit._viewProj, point)));
+        for (let axis = 0; axis < 2; axis++) {
+            expect(projected.min[axis]).toBeCloseTo(expected.min[axis]!, 5);
+            expect(projected.max[axis]).toBeCloseTo(expected.max[axis]!, 5);
+        }
+    });
+
+    it("matches transformed corners for off-center instance geometry under signed parent transforms", () => {
+        const instance = matrix(-0.2, 3);
+        const mesh = instances(instance);
+        mesh.boundMin = [-2, -1, -0.5];
+        mesh.boundMax = [1, 3, 2];
+        mesh.rotation.set(0.7, -0.4, 0.3);
+        mesh.scaling.set(-2, 0.5, 1.5);
+        mesh.parent = initMeshTransform({}, 3, -4, 5, 0.3, 0.2, 0.1, 2, -1, 0.7);
+        const expected = extrema(boxCorners(mesh).map((point) => transformPoint(mesh.worldMatrix, transformPoint(instance, point))));
+        const actual = getThinInstanceWorldBounds(mesh)!;
+        for (let axis = 0; axis < 3; axis++) {
+            expect(actual.min[axis]).toBeCloseTo(expected.min[axis]!, 10);
+            expect(actual.max[axis]).toBeCloseTo(expected.max[axis]!, 10);
+        }
+    });
+
     it("fits scaled and translated instances without overwriting the picking bounds", async () => {
         const mesh = instances(matrix(0.01), matrix(0.01, 2));
         const min = mesh.boundMin;
@@ -166,11 +278,15 @@ describe("directional thin-instance shadow bounds", () => {
     });
 
     it.each([
-        ["pcf", "set"],
-        ["pcf", "add"],
-        ["esm", "set"],
-        ["esm", "add"],
-    ])("defers %s fitting when an ordinary registered caster gains instances via %s", async (kind, conversion) => {
+        ["pcf", "set", false],
+        ["pcf", "add", false],
+        ["esm", "set", false],
+        ["esm", "add", false],
+        ["pcf", "set", true],
+        ["pcf", "add", true],
+        ["esm", "set", true],
+        ["esm", "add", true],
+    ])("defers %s fitting when a registered caster gains instances via %s (morph: %s)", async (kind, conversion, morph) => {
         vi.resetModules();
         const engine = engineStub();
         const factory =
@@ -178,25 +294,41 @@ describe("directional thin-instance shadow bounds", () => {
                 ? (await import("../../../packages/babylon-lite/src/shadow/pcf-directional-shadow-generator")).createPcfDirectionalShadowGenerator
                 : (await import("../../../packages/babylon-lite/src/shadow/esm-directional-shadow-generator")).createEsmDirectionalShadowGenerator;
         const { createShadowTask } = await import("../../../packages/babylon-lite/src/frame-graph/shadow-task");
-        const { setShadowTaskCasterMeshes } = await import("../../../packages/babylon-lite/src/frame-graph/shadow-inputs");
-        const { createShadowCamera } = await import("../../../packages/babylon-lite/src/shadow/shadow-base");
+        const { setShadowTaskCasterMeshes, _getShadowTaskCasterMeshes } = await import("../../../packages/babylon-lite/src/frame-graph/shadow-inputs");
+        const { createShadowCamera, createSharedShadowUBO } = await import("../../../packages/babylon-lite/src/shadow/shadow-base");
         const { addThinInstance } = await import("../../../packages/babylon-lite/src/mesh/thin-instance");
         const generator = factory(engine, createDirectionalLight([0, 0, 1]));
         const mesh = caster();
+        const displacement = morph ? 200 : 0;
+        if (morph) {
+            mesh.morphTargets = {
+                count: 1,
+                weights: new Float32Array([1]),
+                targets: [{ positions: new Float32Array([displacement, 0, 0]), normals: null }],
+            } as unknown as MorphTargetData;
+        }
         const casters = [mesh];
         const scene = { lights: [{ shadowGenerator: generator }], _renderableVersion: 1 } as unknown as SceneContext;
         const execute = vi.fn(() => 1);
         const state = {
             _task: { record: vi.fn(), execute, dispose: vi.fn() },
             _camera: createShadowCamera(generator),
-            _casterMeshes: casters,
+            _casterMeshes: casters as readonly (typeof mesh)[],
             _scene: scene,
             _lastCasterVersion: -1,
             _lastLightVersion: -1,
             _lastFoVersion: -1,
-            _shadowUboData: new Float32Array(24),
+            _shadowUboData: createSharedShadowUBO(engine, generator._lightMatrix, generator._depthValues, generator._shadowsInfo).data,
         };
-        generator._ensureShadowTaskState = () => state as unknown as ShadowTaskInternalState;
+        generator._ensureShadowTaskState = (_engine, _scene, meshes) => {
+            state._casterMeshes = meshes;
+            generator._shadowTaskState = state as unknown as ShadowTaskInternalState;
+            return generator._shadowTaskState;
+        };
+        if (morph) {
+            const { enableMorphTargetShadows } = await import("../../../packages/babylon-lite/src/shadow/enable-morph-target-shadows");
+            enableMorphTargetShadows(generator);
+        }
         const task = createShadowTask(engine, scene);
         setShadowTaskCasterMeshes(generator, casters);
         await task._preload!();
@@ -222,5 +354,8 @@ describe("directional thin-instance shadow bounds", () => {
         expect(task.execute?.()).toBe(kind === "pcf" ? 1 : 3);
         expect(execute).toHaveBeenCalledOnce();
         expect(2 / generator._lightMatrix[0]!).toBeCloseTo(1.2);
+        expect(generator._lightMatrix[0]! * displacement * 0.01 + generator._lightMatrix[12]!).toBeCloseTo(0);
+        expect(_getShadowTaskCasterMeshes(generator)).toBe(casters);
+        expect(state._casterMeshes).toBe(casters);
     });
 });

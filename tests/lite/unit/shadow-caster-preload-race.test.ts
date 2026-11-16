@@ -44,6 +44,17 @@ async function settle(): Promise<void> {
 }
 
 describe("shadow caster preload race", () => {
+    it("awaits the supplied preparation batch along with material-family imports", async () => {
+        const preparation = gate();
+        const ready = vi.fn();
+        const preload = preloadPcfShadowTaskState([], [preparation.promise]).then(ready);
+        await settle();
+        expect(ready).not.toHaveBeenCalled();
+        preparation.release();
+        await preload;
+        expect(ready).toHaveBeenCalledOnce();
+    });
+
     it("keeps a generator out of the frame until its runtime caster preload resolves", async () => {
         const preload = gate();
         const { sg } = makeGenerator(() => preload.promise);

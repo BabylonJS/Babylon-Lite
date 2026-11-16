@@ -21,7 +21,7 @@ import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identit
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, holdShadowCaster, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { getThinInstanceWorldBounds } from "./thin-instance-shadow-bounds.js";
+import { getShadowCasterWorldBounds } from "./thin-instance-shadow-bounds.js";
 import { _dropTaskMeshes } from "./shadow-task-meshes.js";
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
@@ -512,8 +512,6 @@ const FRUSTUM_NDC: ReadonlyArray<readonly [number, number, number]> = [
     [1, -1, 0],
     [-1, -1, 0],
 ];
-const DEFAULT_BOUND_MIN = [-0.5, -0.5, -0.5] as const;
-const DEFAULT_BOUND_MAX = [0.5, 0.5, 0.5] as const;
 
 /** @internal Build a light-space view matrix into caller-owned storage. */
 export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): void {
@@ -813,35 +811,14 @@ function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascad
         maxY = -Infinity,
         maxZ = -Infinity;
     for (const mesh of casterMeshes) {
-        const ti = mesh.thinInstances;
-        if (ti) {
-            const bounds = getThinInstanceWorldBounds(mesh);
-            if (bounds) {
-                minX = Math.min(minX, bounds.min[0]);
-                minY = Math.min(minY, bounds.min[1]);
-                minZ = Math.min(minZ, bounds.min[2]);
-                maxX = Math.max(maxX, bounds.max[0]);
-                maxY = Math.max(maxY, bounds.max[1]);
-                maxZ = Math.max(maxZ, bounds.max[2]);
-            }
-            continue;
-        }
-        const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin ?? DEFAULT_BOUND_MIN;
-        const bmax = mesh.boundMax ?? DEFAULT_BOUND_MAX;
-        for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmax[0]! : bmin[0]!;
-            const ly = k & 2 ? bmax[1]! : bmin[1]!;
-            const lz = k & 4 ? bmax[2]! : bmin[2]!;
-            const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]!;
-            const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]!;
-            const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]!;
-            minX = Math.min(minX, wx);
-            minY = Math.min(minY, wy);
-            minZ = Math.min(minZ, wz);
-            maxX = Math.max(maxX, wx);
-            maxY = Math.max(maxY, wy);
-            maxZ = Math.max(maxZ, wz);
+        const bounds = getShadowCasterWorldBounds(mesh);
+        if (bounds) {
+            minX = Math.min(minX, bounds.min[0]);
+            minY = Math.min(minY, bounds.min[1]);
+            minZ = Math.min(minZ, bounds.min[2]);
+            maxX = Math.max(maxX, bounds.max[0]);
+            maxY = Math.max(maxY, bounds.max[1]);
+            maxZ = Math.max(maxZ, bounds.max[2]);
         }
     }
     if (!Number.isFinite(minX)) {

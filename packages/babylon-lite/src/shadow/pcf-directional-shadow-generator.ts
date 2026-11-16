@@ -87,9 +87,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _config,
         _version: 0,
     };
-    sg._preloadShadowTask = async (casterMeshes) => {
-        await Promise.all([preloadPcfShadowTaskState(casterMeshes), preloadDirectionalShadowBounds(casterMeshes)]);
-    };
+    sg._preloadShadowTask = (casterMeshes) => preloadPcfShadowTaskState(casterMeshes, [preloadDirectionalShadowBounds(casterMeshes)]);
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);
         sg._shadowTaskState = state;

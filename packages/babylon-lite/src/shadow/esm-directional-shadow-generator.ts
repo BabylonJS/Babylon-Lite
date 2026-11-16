@@ -31,7 +31,6 @@ import {
 } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
-import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { wgsl } from "../shader/wgsl.js";
 
 export interface EsmLightMatrix {
@@ -171,12 +170,8 @@ async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise
 
 function nearestBestKernel(idealKernel: number): number {
     const v = Math.round(Math.max(idealKernel, 1));
-    for (const k of [v, v - 1, v + 1, v - 2, v + 2]) {
-        if (k % 2 !== 0 && Math.floor(k / 2) % 2 === 0 && k > 0) {
-            return Math.max(k, 3);
-        }
-    }
-    return Math.max(v, 3);
+    // Paired-tap kernels are 4k+1; equidistant candidates prefer the smaller kernel.
+    return Math.max(Math.floor(v / 4) * 4 + 1, 3);
 }
 
 function gaussianWeight(x: number): number {
@@ -327,8 +322,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
         return 0;
     }
     const matrix = computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!, offX, offY, offZ);
-    if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
-        packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
+    if (updateShadowMatrix(sg._lightMatrix, matrix._viewProj)) {
         sg._version++;
         writeShadowUboFields(resources._shadowUboData, sg);
         engine._device.queue.writeBuffer(sg._shadowUBO, 0, resources._shadowUboData as Float32Array<ArrayBuffer>);
@@ -386,9 +380,10 @@ function getEsmShadowView(material: Material, cache: Map<Material, MaterialView>
     return view!;
 }
 
-function shadowMatrixChanged(a: Float32Array, b: Float32Array): boolean {
+function updateShadowMatrix(a: Float32Array, b: Float32Array): boolean {
     for (let i = 0; i < 16; i++) {
         if (a[i] !== b[i]) {
+            a.set(b);
             return true;
         }
     }
