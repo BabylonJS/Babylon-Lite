@@ -15,6 +15,8 @@ const liteMocks = vi.hoisted(() => ({
     updateHtmlTexture: vi.fn(),
     disposeHtmlTexture: vi.fn(),
     whenHtmlTextureReady: vi.fn(),
+    getTextureReadbackInfo: vi.fn(),
+    readTexturePixelsRGBA8: vi.fn(),
 }));
 
 vi.mock("babylon-lite", () => liteMocks);
@@ -53,6 +55,56 @@ beforeEach(() => {
     for (const mock of Object.values(liteMocks)) {
         mock.mockReset();
     }
+});
+
+describe("BaseTexture.readPixels", () => {
+    class ReadableTexture extends BaseTexture {
+        public constructor(engine: EngineContext, texture: object) {
+            super();
+            this._readbackEngine = engine;
+            this._lite = texture as never;
+        }
+
+        public whenReadyAsync(): Promise<void> {
+            return Promise.resolve();
+        }
+    }
+
+    it("forwards mip/layer selection and copies a rectangular region into the caller buffer", async () => {
+        const engine = {} as EngineContext;
+        const handle = {};
+        const texture = new ReadableTexture(engine, handle);
+        liteMocks.getTextureReadbackInfo.mockReturnValue({ kind: "2d-array", width: 3, height: 2, depthOrArrayLayers: 4, mipLevelCount: 2 });
+        liteMocks.readTexturePixelsRGBA8.mockResolvedValue({
+            pixels: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]),
+            width: 3,
+            height: 2,
+        });
+        const backing = new ArrayBuffer(6);
+        const buffer = new Float32Array(backing, 4, 0);
+
+        const result = await texture.readPixels(2, 1, buffer, true, false, 1, 0, 1, 2);
+
+        expect(liteMocks.readTexturePixelsRGBA8).toHaveBeenCalledWith(engine, handle, { mipLevel: 1, layer: 2 });
+        expect(result).toEqual(new Uint8Array([5, 6, 7, 8, 17, 18]));
+    });
+
+    it("rejects a crop that overruns the selected mip instead of silently truncating it", async () => {
+        const texture = new ReadableTexture({} as EngineContext, {});
+        liteMocks.getTextureReadbackInfo.mockReturnValue({ kind: "2d", width: 3, height: 2, depthOrArrayLayers: 1, mipLevelCount: 1 });
+        liteMocks.readTexturePixelsRGBA8.mockResolvedValue({ pixels: new Uint8Array(24), width: 3, height: 2 });
+
+        await expect(texture.readPixels(0, 0, null, true, false, 1, 0, 3, 1)).rejects.toThrow(/exceeds 3x2/);
+    });
+
+    it("returns null until a GPU texture and owning engine are available", () => {
+        class PendingTexture extends BaseTexture {
+            public whenReadyAsync(): Promise<void> {
+                return Promise.resolve();
+            }
+        }
+        expect(new PendingTexture().readPixels()).toBeNull();
+    });
 });
 
 /**

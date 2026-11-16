@@ -22,6 +22,8 @@ import {
     updateHtmlTexture,
     disposeHtmlTexture,
     whenHtmlTextureReady,
+    getTextureReadbackInfo,
+    readTexturePixelsRGBA8,
 } from "babylon-lite";
 import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D, HtmlTexture2D } from "babylon-lite";
 
@@ -97,6 +99,8 @@ export abstract class BaseTexture {
     }
     /** @internal The underlying Lite texture handle. Undefined until the async load resolves. */
     public _lite: Texture2D | undefined;
+    /** @internal Engine used by the optional GPU readback adapter. */
+    protected _readbackEngine: EngineContext | undefined;
 
     /** @internal One-shot listeners fired when the GPU handle first resolves (see {@link _onReady}). */
     private _readyListeners: Array<() => void> | undefined;
@@ -152,6 +156,50 @@ export abstract class BaseTexture {
 
     public abstract whenReadyAsync(): Promise<void>;
 
+    public readPixels(
+        faceIndex = 0,
+        level = 0,
+        buffer: ArrayBufferView | null = null,
+        _flushRenderer = true,
+        _noDataConversion = false,
+        x = 0,
+        y = 0,
+        width = Number.MAX_VALUE,
+        height = Number.MAX_VALUE
+    ): Promise<ArrayBufferView> | null {
+        const texture = this._lite;
+        const engine = this._readbackEngine;
+        if (!texture || !engine) {
+            return null;
+        }
+        const info = getTextureReadbackInfo(texture);
+        const selection = info.kind === "cube" ? { face: faceIndex } : info.kind === "2d-array" ? { layer: faceIndex } : {};
+        return readTexturePixelsRGBA8(engine, texture, { mipLevel: level, ...selection }).then((result) => {
+            if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= result.width || y >= result.height) {
+                throw new RangeError(`BaseTexture.readPixels: origin (${x}, ${y}) is outside ${result.width}x${result.height}`);
+            }
+            const readWidth = Math.min(result.width, width);
+            const readHeight = Math.min(result.height, height);
+            if (x + readWidth > result.width || y + readHeight > result.height) {
+                throw new RangeError(`BaseTexture.readPixels: region (${x}, ${y}, ${readWidth}, ${readHeight}) exceeds ${result.width}x${result.height}`);
+            }
+            const rowBytes = readWidth * 4;
+            const pixels = x === 0 && y === 0 && readWidth === result.width && readHeight === result.height ? result.pixels : new Uint8Array(rowBytes * readHeight);
+            if (pixels !== result.pixels) {
+                for (let row = 0; row < readHeight; row++) {
+                    const start = ((y + row) * result.width + x) * 4;
+                    pixels.set(result.pixels.subarray(start, start + rowBytes), row * rowBytes);
+                }
+            }
+            if (buffer) {
+                const data = new Uint8Array(buffer.buffer);
+                data.set(pixels.subarray(0, Math.min(data.byteLength, pixels.byteLength)));
+                return data;
+            }
+            return pixels;
+        });
+    }
+
     public dispose(): void {
         this._levelListeners = undefined;
         // Lite texture lifetimes are managed by the GPU resource pool; explicit
@@ -188,6 +236,7 @@ export class HtmlTexture extends BaseTexture {
         this.name = name;
         this.element = element;
         this._engine = options.scene?.getEngine() ?? options.engine ?? null;
+        this._readbackEngine = this._engine?._lite;
         this.host = (this._engine?.getRenderingCanvas() as HTMLElement | null | undefined) ?? null;
         if (!this._engine || !element) {
             this._ready = Promise.reject(new Error("HtmlTexture requires an engine and HTML element."));
@@ -331,6 +380,7 @@ export class Texture extends BaseTexture {
         const engineWrapper = scene ? undefined : (sceneOrEngine as { _lite: import("babylon-lite").EngineContext; _registerStartupWork?: (w: () => Promise<void>) => void });
         const engine = scene ? scene.getEngine()._lite : engineWrapper!._lite;
         this._engine = engine;
+        this._readbackEngine = engine;
         // Honour `invertY` / `noMipmap` only on the material (scene-based) path. The
         // bare-engine path feeds Babylon Lite's sprite renderer, which applies its own
         // V-orientation, so it keeps `loadTexture2D`'s defaults (matching the Lite ports).
@@ -472,7 +522,8 @@ export class RawTexture extends BaseTexture {
     public constructor(data: Uint8Array, width: number, height: number, scene: Scene) {
         super();
         this._scene = scene;
-        this._lite = createTexture2DFromPixels(scene.getEngine()._lite, data, width, height);
+        this._readbackEngine = scene.getEngine()._lite;
+        this._lite = createTexture2DFromPixels(this._readbackEngine, data, width, height);
     }
 
     public override getClassName(): string {
@@ -532,8 +583,9 @@ export class RawTexture3D extends BaseTexture {
             );
         }
         this._scene = scene;
+        this._readbackEngine = scene.getEngine()._lite;
         const bytes = toRgbaBytes(data, width, height, depth);
-        this._lite = createTexture3DFromPixels(scene.getEngine()._lite, bytes, width, height, depth) as Texture3D;
+        this._lite = createTexture3DFromPixels(this._readbackEngine, bytes, width, height, depth) as Texture3D;
     }
 
     public override getClassName(): string {
@@ -609,6 +661,7 @@ export class DynamicTexture extends BaseTexture {
         super();
         this.name = name;
         this._scene = scene;
+        this._readbackEngine = scene.getEngine()._lite;
         this._width = options.width;
         this._height = options.height;
         this._canvas = document.createElement("canvas");
@@ -621,7 +674,7 @@ export class DynamicTexture extends BaseTexture {
         this._context = ctx;
         // Allocate the GPU texture up front (blank until the first draw+update),
         // matching Babylon.js where the texture exists immediately after construction.
-        this._dyn = createDynamicTexture(scene.getEngine()._lite, options.width, options.height);
+        this._dyn = createDynamicTexture(this._readbackEngine, options.width, options.height);
         this._lite = this._dyn;
     }
 

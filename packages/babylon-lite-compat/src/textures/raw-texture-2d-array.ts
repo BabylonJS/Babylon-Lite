@@ -72,6 +72,7 @@ export class RawTexture2DArray extends BaseTexture {
         super();
         this._sceneRef = scene;
         const engine = scene.getEngine()._lite;
+        this._readbackEngine = engine;
         const tex =
             data === null
                 ? createTexture2DArray(engine, width, height, depth, { mipMaps: generateMipMaps })
@@ -139,6 +140,7 @@ export class RawTexture2DArray extends BaseTexture {
         tex._sceneRef = scene;
         tex._liteArray = liteArray;
         tex._lite = liteArray;
+        tex._readbackEngine = scene.getEngine()._lite;
         return tex;
     }
 
